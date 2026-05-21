@@ -12,6 +12,9 @@ public:
 
     // Generate a window of the given size and type
     static std::vector<float> generate(int size, Type type, float param = 0.0f) {
+        if (size <= 0) return {};
+        if (size == 1) return {1.0f};
+
         std::vector<float> w(size);
         for (int i = 0; i < size; ++i) {
             float n = static_cast<float>(i);

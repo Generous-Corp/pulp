@@ -195,9 +195,9 @@ public:
     /// @param width  Number of time columns (scroll history depth).
     /// @param height Number of frequency rows (typically num_bins or display height).
     void configure(int width, int height) {
-        width_ = width;
-        height_ = height;
-        pixels_.resize(width * height);
+        width_ = std::max(0, width);
+        height_ = std::max(0, height);
+        pixels_.resize(static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_));
         write_col_ = 0;
         frames_written_ = 0;
     }
@@ -208,6 +208,8 @@ public:
     void push_column(const float* magnitudes_db, int num_bins,
                      const ColorMapper& mapper,
                      float min_db = -80.0f, float max_db = 0.0f) {
+        if (width_ <= 0 || height_ <= 0) return;
+
         float range = max_db - min_db;
         if (range <= 0) range = 1.0f;
 
@@ -218,7 +220,10 @@ public:
                 ? std::clamp(row * num_bins / height_, 0, num_bins - 1)
                 : 0;
 
-            float normalized = (magnitudes_db[bin] - min_db) / range;
+            float magnitude_db = magnitudes_db != nullptr && num_bins > 0
+                ? magnitudes_db[bin]
+                : min_db;
+            float normalized = (magnitude_db - min_db) / range;
             pixels_[row * width_ + write_col_] = mapper.map(normalized);
         }
 

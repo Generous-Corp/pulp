@@ -953,6 +953,42 @@ TEST_CASE("SpectrogramBuffer scrolls columns and maps dB ranges",
     REQUIRE(buffer.pixels()[0].r > 200);
 }
 
+TEST_CASE("SpectrogramBuffer clamps dimensions and tolerates missing magnitudes",
+          "[signal][spectrogram][issue-645]") {
+    SpectrogramBuffer buffer;
+    ColorMapper mapper(ColorRamp::grayscale);
+
+    buffer.configure(-3, 2);
+    REQUIRE(buffer.width() == 0);
+    REQUIRE(buffer.height() == 2);
+    buffer.push_column(nullptr, 0, mapper);
+    REQUIRE(buffer.frames_written() == 0);
+    REQUIRE(buffer.write_column() == 0);
+
+    buffer.configure(2, -4);
+    REQUIRE(buffer.width() == 2);
+    REQUIRE(buffer.height() == 0);
+    buffer.push_column(nullptr, 0, mapper);
+    REQUIRE(buffer.frames_written() == 0);
+    REQUIRE(buffer.write_column() == 0);
+
+    buffer.configure(2, 3);
+    buffer.push_column(nullptr, 3, mapper);
+    REQUIRE(buffer.frames_written() == 1);
+    REQUIRE(buffer.write_column() == 1);
+    REQUIRE(buffer.pixels()[0].r == 0);
+    REQUIRE(buffer.pixels()[2].r == 0);
+    REQUIRE(buffer.pixels()[4].r == 0);
+
+    const float single_bin[] = {0.0f};
+    buffer.push_column(single_bin, 1, mapper, -80.0f, 0.0f);
+    REQUIRE(buffer.frames_written() == 2);
+    REQUIRE(buffer.write_column() == 0);
+    REQUIRE(buffer.pixels()[1].r == 255);
+    REQUIRE(buffer.pixels()[3].r == 255);
+    REQUIRE(buffer.pixels()[5].r == 255);
+}
+
 TEST_CASE("STFT emits frames converts dB and resets state",
           "[signal][stft][codecov]") {
     StftConfig config;

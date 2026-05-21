@@ -149,6 +149,16 @@ public:
     /// channels: array of channel pointers. num_samples: samples per channel.
     void process(const float* const* channels, int num_channels, int num_samples) {
         num_channels = std::clamp(num_channels, 0, num_channels_);
+        if (channels == nullptr || num_samples <= 0) return;
+
+        for (int ch = 0; ch < num_channels; ++ch) {
+            if (channels[ch] == nullptr) {
+                clear_inactive_channel_accumulators(ch, num_channels);
+                if (ch < 2) reset_correlation_accumulators();
+                num_channels = ch;
+                break;
+            }
+        }
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {
@@ -208,6 +218,27 @@ public:
     }
 
 private:
+    void clear_channel_accumulators(int ch) {
+        block_peak_[ch] = 0.0f;
+        block_sum_sq_[ch] = 0.0;
+        block_clipped_[ch] = false;
+        lufs_sum_sq_[ch] = 0.0;
+        snapshot_.channels[ch] = {};
+    }
+
+    void clear_inactive_channel_accumulators(int first_channel, int limit) {
+        limit = std::clamp(limit, 0, kMaxMeterChannels);
+        for (int ch = first_channel; ch < limit; ++ch)
+            clear_channel_accumulators(ch);
+    }
+
+    void reset_correlation_accumulators() {
+        correlation_sum_xy_ = 0.0;
+        correlation_sum_xx_ = 0.0;
+        correlation_sum_yy_ = 0.0;
+        correlation_samples_ = 0;
+    }
+
     void emit_snapshot(int num_channels) {
         snapshot_.num_channels = num_channels;
 
@@ -266,10 +297,7 @@ private:
         // Reset correlation accumulators periodically (every ~100ms)
         int corr_window = static_cast<int>(sample_rate_ * 0.1f);
         if (correlation_samples_ >= corr_window) {
-            correlation_sum_xy_ = 0.0;
-            correlation_sum_xx_ = 0.0;
-            correlation_sum_yy_ = 0.0;
-            correlation_samples_ = 0;
+            reset_correlation_accumulators();
         }
 
         block_samples_ = 0;

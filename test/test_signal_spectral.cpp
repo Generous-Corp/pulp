@@ -57,6 +57,29 @@ TEST_CASE("WindowFunction covers hamming flat-top and kaiser branches", "[signal
     REQUIRE_THAT(shaped[2], WithinAbs(1.0f, 1e-5f));
 }
 
+TEST_CASE("WindowFunction handles empty and singleton windows",
+          "[signal][window][issue-645]") {
+    for (auto type : {
+             WindowFunction::Type::rectangular,
+             WindowFunction::Type::hann,
+             WindowFunction::Type::hamming,
+             WindowFunction::Type::blackman,
+             WindowFunction::Type::flat_top,
+             WindowFunction::Type::kaiser,
+         }) {
+        REQUIRE(WindowFunction::generate(0, type).empty());
+        REQUIRE(WindowFunction::generate(-4, type).empty());
+
+        auto single = WindowFunction::generate(1, type, 8.0f);
+        REQUIRE(single.size() == 1);
+        REQUIRE_THAT(single[0], WithinAbs(1.0f, 1e-6f));
+
+        float sample[] = {0.25f};
+        WindowFunction::apply(sample, single);
+        REQUIRE_THAT(sample[0], WithinAbs(0.25f, 1e-6f));
+    }
+}
+
 // ── FFT ──────────────────────────────────────────────────────────────────────
 
 TEST_CASE("FFT forward/inverse round-trip", "[signal][fft]") {
