@@ -46,17 +46,17 @@
     self.view.backgroundColor = [UIColor blackColor];
     self.preferredContentSize = CGSizeMake(400, 300);
 
+    if (pulp::format::detail::editor_launch_blocked_by_environment()) {
+        pulp::runtime::log_info("AU iOS editor: disabled in headless/CI/test environment");
+        return;
+    }
+
     pulp::format::Processor *processor = nil;
     pulp::state::StateStore *store = nil;
     if ([self.audioUnit respondsToSelector:@selector(pulpProcessor)] &&
         [self.audioUnit respondsToSelector:@selector(pulpStore)]) {
         processor = [self.audioUnit pulpProcessor];
         store = [self.audioUnit pulpStore];
-    }
-
-    if (processor && store && pulp::format::detail::editor_launch_blocked_by_environment()) {
-        pulp::runtime::log_info("AU iOS editor: disabled in headless/CI/test environment");
-        return;
     }
 
     pulp::view::View *root = nullptr;
