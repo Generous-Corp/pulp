@@ -136,6 +136,11 @@ source came from `--url`, relative asset references resolve against that source
 URL; the manifest keeps the authored value in `original_uri` and stores the
 resolved fetch target in `source_url`.
 
+Phase 1 does not auto-load a previous manifest to detect remote drift. Callers
+that need drift detection should pass the prior manifest's hash back through
+`--asset-hash`; cache hits still verify that expected hash and emit
+`asset-hash-mismatch` on disagreement.
+
 External files and URLs keep distinct manifest entries even when their bytes
 match, so diagnostics and provenance remain tied to the authored resource.
 Data URIs are recorded with their decoded content hash so duplicated inline

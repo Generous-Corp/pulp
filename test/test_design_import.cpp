@@ -739,6 +739,55 @@ TEST_CASE("DesignIR asset manifest fetches network assets through cache and veri
     REQUIRE(cached_mismatch.assets[0].content_hash == fetched.content_hash);
     REQUIRE(has_diagnostic(cached_mismatch.assets[0], "asset-hash-mismatch"));
 }
+
+TEST_CASE("DesignIR asset manifest reports network fetch failures and timeouts",
+          "[view][import][assets][network]") {
+    TempDir tmp("pulp-design-ir-network-diagnostics");
+    const auto bin = tmp.path / "bin";
+    const auto curl = bin / "curl";
+    fs::create_directories(bin);
+    write_text(curl,
+               "#!/bin/sh\n"
+               "url=''\n"
+               "while [ \"$#\" -gt 0 ]; do\n"
+               "  case \"$1\" in\n"
+               "    http://*|https://*) url=\"$1\" ;;\n"
+               "  esac\n"
+               "  shift\n"
+               "done\n"
+               "case \"$url\" in\n"
+               "  *slow*) sleep 5 ;;\n"
+               "  *) printf 'fetch failed for %s\\n' \"$url\" >&2; exit 28 ;;\n"
+               "esac\n");
+    fs::permissions(curl,
+                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::add);
+
+    auto old_path = read_env_var("PATH").value_or("");
+    ScopedEnvVar path_override("PATH", bin.string() + ":" + old_path);
+
+    DesignIrAssetOptions options;
+    options.allow_network_fetch = true;
+    options.cache_directory = tmp.path / "asset-cache";
+    options.network_timeout_ms = 5000;
+
+    DesignIR failed_ir;
+    failed_ir.root.type = "frame";
+    failed_ir.root.name = "FetchFail";
+    failed_ir.root.style.background_image = "url(https://example.test/fail.svg)";
+    auto failed = collect_design_ir_assets(failed_ir, options);
+    REQUIRE(failed.assets.size() == 1);
+    REQUIRE(has_diagnostic(failed.assets[0], "asset-fetch-failed"));
+
+    options.network_timeout_ms = 100;
+    DesignIR timeout_ir;
+    timeout_ir.root.type = "frame";
+    timeout_ir.root.name = "FetchTimeout";
+    timeout_ir.root.style.background_image = "url(https://example.test/slow.svg)";
+    auto timed_out = collect_design_ir_assets(timeout_ir, options);
+    REQUIRE(timed_out.assets.size() == 1);
+    REQUIRE(has_diagnostic(timed_out.assets[0], "asset-fetch-timeout"));
+}
 #endif
 
 // pulp #709 / #468 — Claude Design imports are manually-exported HTML
