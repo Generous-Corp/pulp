@@ -145,3 +145,65 @@ TEST_CASE("design-import benchmark emits live and baked-native lane JSON",
         fs::remove(out);
     }
 }
+
+TEST_CASE("design-import benchmark CLI rejects invalid arguments before running fixtures",
+          "[design-import][benchmark]") {
+    set_no_launch_env();
+    const auto bin = bench_binary();
+    REQUIRE(fs::exists(bin));
+
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"--lane=nope"},
+             {"--idle-ms=abc"},
+             {"--interactive-ms", "abc"},
+             {"--target-fps=1x"},
+             {"--output"},
+         }) {
+        auto r = exec(bin.string(), args, /*timeout_ms=*/10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("usage: pulp-design-import-bench") != std::string::npos);
+        REQUIRE(r.stdout_output.empty());
+    }
+}
+
+TEST_CASE("design-import benchmark help exits successfully without stderr",
+          "[design-import][benchmark]") {
+    set_no_launch_env();
+    const auto bin = bench_binary();
+    REQUIRE(fs::exists(bin));
+
+    auto r = exec(bin.string(), {"--help"}, /*timeout_ms=*/10000);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("usage: pulp-design-import-bench") != std::string::npos);
+    REQUIRE(r.stderr_output.empty());
+}
+
+TEST_CASE("design-import benchmark writes stdout JSON and clamps nonpositive timing",
+          "[design-import][benchmark]") {
+    set_no_launch_env();
+    const auto bin = bench_binary();
+    REQUIRE(fs::exists(bin));
+
+    auto r = exec(bin.string(),
+                  {
+                      "--lane=baked-native",
+                      "--idle-ms=-10",
+                      "--interactive-ms=-20",
+                      "--target-fps=0",
+                  },
+                  /*timeout_ms=*/30000);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE(r.stdout_output.find("\"lane\": \"baked-native\"") != std::string::npos);
+    REQUIRE(contains_key(r.stdout_output, "startup"));
+    REQUIRE(contains_key(r.stdout_output, "idle"));
+    REQUIRE(contains_key(r.stdout_output, "interactive"));
+    REQUIRE(extract_number(r.stdout_output, "target_fps") == 1.0);
+    REQUIRE(extract_number(r.stdout_output, "duration_ms") == 0.0);
+    REQUIRE(extract_number(r.stdout_output, "samples") == 0.0);
+}
