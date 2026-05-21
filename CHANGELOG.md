@@ -8,6 +8,20 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01804"></a>
+## [0.180.4] - 2026-05-20
+
+- ci: fix Codex P1s on coverage matrix encoding + watchdog scope ([#2561](https://github.com/danielraffel/pulp/pull/2561))
+- feat(inspect): add selection-mode toggle (FOLLOWS_MOUSE / FOLLOWS_FOCUS) ([#2556](https://github.com/danielraffel/pulp/pull/2556))
+- refactor(inspect): split inspector_overlay.cpp by concern (P10-2) ([#2555](https://github.com/danielraffel/pulp/pull/2555))
+- refactor(scripts): split version_bump_check.py by function cluster (P9-NEW) ([#2552](https://github.com/danielraffel/pulp/pull/2552))
+- test(harness): lint visual-harness Dockerfile against canonical Skia pin (P9-4) ([#2550](https://github.com/danielraffel/pulp/pull/2550))
+- feat(render): add Skia .skp frame capture (inspector Phase 6.4) ([#2548](https://github.com/danielraffel/pulp/pull/2548))
+- refactor(test): split test_inspector.cpp by concern into four sibling TUs ([#2545](https://github.com/danielraffel/pulp/pull/2545))
+- refactor(view): split window_host_mac geometry helpers into sibling TU (R2-5) ([#2529](https://github.com/danielraffel/pulp/pull/2529))
+- test(coverage): cover phase3 runtime audio edges ([#2519](https://github.com/danielraffel/pulp/pull/2519))
+- ci: fix resolve-provider busy-probe over-counting (M1 runners starved during deep queues) ([#2557](https://github.com/danielraffel/pulp/pull/2557))
+
 <a id="v01800"></a>
 ## [0.180.0] - 2026-05-20
 
@@ -2367,6 +2381,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.180.4]: https://github.com/danielraffel/pulp/releases/tag/v0.180.4
 [0.180.0]: https://github.com/danielraffel/pulp/releases/tag/v0.180.0
 [0.179.0]: https://github.com/danielraffel/pulp/releases/tag/v0.179.0
 [0.178.2]: https://github.com/danielraffel/pulp/releases/tag/v0.178.2
