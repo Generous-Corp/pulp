@@ -65,11 +65,12 @@ set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/import-runtime.js
 )
 set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp)
+set(PULP_JS_EMBEDDED_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp)
 
 # pulp #1382 — embed_js.cmake's `string(SUBSTRING)` chunker operates on
 # BYTES, so a 12000-byte chunk boundary that lands inside a UTF-8
 # multi-byte codepoint splits the codepoint mid-sequence. The result
-# is a generated header with invalid UTF-8 at chunk boundaries; MSVC
+# is a generated file with invalid UTF-8 at chunk boundaries; MSVC
 # then mis-parses the trailing `)__JS__"` delimiter, walks past it
 # into the next R"__JS__()__JS__" header, and reports C2026 ("string
 # too big") on the runaway literal. Used to be a non-issue when the
@@ -82,47 +83,60 @@ set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.
 # Switch to that.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# P8-5 (#2641) — split the embedded preludes into an extern-linked TU so a
+# JS-prelude edit no longer recompiles the 9.7k-line widget_bridge.cpp.
+#
+# * The DECLARATION header is generated here at *configure* time from the
+#   prelude file list, written only-if-changed. Its content depends only on
+#   the file *names* (not their contents), so editing a .js prelude never
+#   bumps its mtime — and thus never recompiles widget_bridge.cpp, which
+#   includes only this header. (Mirrors tools/cmake/PulpEmbedData.cmake.)
+# * The DEFINITION .cpp is generated at *build* time by embed_js.py and
+#   compiled as its own translation unit; a .js edit rebuilds only this .cpp
+#   + relink.
+#
+# The var-name derivation (stem with '-' -> '_') MUST match embed_js.py.
+set(_pulp_prelude_decls
+    "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\nnamespace pulp::view::preludes {\n\n")
+foreach(_prelude ${PULP_JS_PRELUDES})
+    get_filename_component(_prelude_stem "${_prelude}" NAME_WE)
+    string(REPLACE "-" "_" _prelude_var "${_prelude_stem}")
+    string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\n")
+endforeach()
+string(APPEND _pulp_prelude_decls "\n}  // namespace pulp::view::preludes\n")
+
+set(_pulp_existing_decls "")
+if(EXISTS "${PULP_JS_EMBEDDED_HEADER}")
+    file(READ "${PULP_JS_EMBEDDED_HEADER}" _pulp_existing_decls)
+endif()
+if(NOT "${_pulp_existing_decls}" STREQUAL "${_pulp_prelude_decls}")
+    file(WRITE "${PULP_JS_EMBEDDED_HEADER}" "${_pulp_prelude_decls}")
+endif()
+
 add_custom_command(
-    OUTPUT ${PULP_JS_EMBEDDED_HEADER}
+    OUTPUT ${PULP_JS_EMBEDDED_SOURCE}
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py
-        ${PULP_JS_EMBEDDED_HEADER}
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element-events.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-gpu.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-layout.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-paint.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-typography.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-transform.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-misc.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-gpu-mock.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-scheduler.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/import-runtime.js
+        ${PULP_JS_EMBEDDED_SOURCE}
+        ${PULP_JS_PRELUDES}
     DEPENDS
         ${PULP_JS_PRELUDES}
         ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py
-    COMMENT "Embedding JS preludes into C++ header (UTF-8-safe Python chunker)"
+    COMMENT "Embedding JS preludes into C++ source (UTF-8-safe Python chunker)"
+    VERBATIM
 )
-add_custom_target(pulp-view-js-preludes DEPENDS ${PULP_JS_EMBEDDED_HEADER})
+
+# The generated .cpp is a real pulp-view source: CMake wires the
+# custom-command dependency automatically, so no separate aggregator target
+# is needed. widget_bridge.cpp includes only the (stable) declaration header.
+target_sources(pulp-view PRIVATE ${PULP_JS_EMBEDDED_SOURCE})
 
 target_include_directories(pulp-view
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
-        ${CMAKE_CURRENT_BINARY_DIR}  # For generated web_compat_preludes_gen.hpp
+        ${CMAKE_CURRENT_BINARY_DIR}  # For generated web_compat_preludes_gen.{hpp,cpp}
 )
 
 # ── JS engine backend selection ──────────────────────────────────────────────
@@ -361,8 +375,6 @@ target_include_directories(pulp-view PUBLIC
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
-
-add_dependencies(pulp-view pulp-view-js-preludes)
 
 target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::host)
 # pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +
