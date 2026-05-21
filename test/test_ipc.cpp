@@ -5,19 +5,36 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace pulp::events;
 using namespace pulp::runtime;
 
 namespace {
 
+uint16_t socket_port_seed() {
+    const auto now = static_cast<uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+#ifdef _WIN32
+    const auto pid = static_cast<uint64_t>(_getpid());
+#else
+    const auto pid = static_cast<uint64_t>(getpid());
+#endif
+    return static_cast<uint16_t>((now + (pid * 131u)) % 20000u);
+}
+
 std::optional<uint16_t> start_socket_server_on_loopback(InterprocessConnectionServer& server) {
-    const auto seed = static_cast<uint16_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count() % 20000);
+    const auto seed = socket_port_seed();
     for (uint16_t i = 0; i < 200; ++i) {
         const uint16_t port = static_cast<uint16_t>(20000 + ((seed + i) % 20000));
         if (server.start("127.0.0.1:" + std::to_string(port), IpcTransport::Socket)) {
@@ -28,8 +45,7 @@ std::optional<uint16_t> start_socket_server_on_loopback(InterprocessConnectionSe
 }
 
 std::optional<uint16_t> start_socket_server_on_any_interface(InterprocessConnectionServer& server) {
-    const auto seed = static_cast<uint16_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count() % 20000);
+    const auto seed = socket_port_seed();
     for (uint16_t i = 0; i < 200; ++i) {
         const uint16_t port = static_cast<uint16_t>(20000 + ((seed + i) % 20000));
         if (server.start(std::to_string(port), IpcTransport::Socket)) {
