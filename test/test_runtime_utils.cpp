@@ -28,6 +28,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iterator>
+#include <memory>
 #include <thread>
 
 #if !defined(_WIN32)
@@ -183,6 +184,23 @@ TEST_CASE("HighResolutionTimer self-stop remains joinable for destruction",
     }
 
     REQUIRE(stop_returned.load(std::memory_order_acquire));
+}
+
+TEST_CASE("HighResolutionTimer self-stop supports callback-owned destruction",
+          "[runtime][timer][coverage][phase3-followup]") {
+    std::atomic<bool> destroyed{false};
+    auto timer = std::make_unique<HighResolutionTimer>();
+
+    timer->start(std::chrono::microseconds(100), [&] {
+        timer->stop();
+        timer.reset();
+        destroyed.store(true, std::memory_order_release);
+    });
+
+    REQUIRE(wait_for_predicate([&] {
+        return destroyed.load(std::memory_order_acquire);
+    }, std::chrono::seconds(2)));
+    REQUIRE(timer == nullptr);
 }
 
 // ── Identity ────────────────────────────────────────────────────────────

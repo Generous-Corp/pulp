@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <thread>
 #include <chrono>
 
@@ -29,9 +30,11 @@ public:
     HighResolutionTimer& operator=(const HighResolutionTimer&) = delete;
 
 private:
+    struct TimerState;
+
     std::atomic<bool> running_{false};
     std::thread thread_;
-    std::function<void()> callback_;
+    std::shared_ptr<TimerState> state_;
 };
 
 }  // namespace pulp::runtime
