@@ -119,10 +119,60 @@ class EvidenceCheckTests(unittest.TestCase):
         results = [_make_result(entry, Status.PASS)]
         updated = check_evidence(self.repo_root, results, self._compat(past))
         self.assertEqual(updated[0].status, Status.SUPPORTED_NO_EVIDENCE)
+        self.assertIn("test/nonexistent.cpp", updated[0].detail or "")
+        self.assertIn("not found", updated[0].detail or "")
+
+    def test_supported_with_valid_and_dangling_tests_stays_pass_and_warns(self) -> None:
+        test_path = self.repo_root / "test/test_good.cpp"
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.write_text('TEST_CASE("good evidence", "[tag]") {}\n')
+        entry = _make_entry(
+            name="css/mixedEvidence",
+            tests=[
+                "test/test_good.cpp [tag]",
+                "test/test_good.cpp [missing-tag]",
+            ],
+        )
+        results = [_make_result(entry, Status.PASS)]
+        with self.assertLogs("pulp.harness.verifier", level="WARNING") as logs:
+            updated = check_evidence(self.repo_root, results, self._compat())
+        self.assertEqual(updated[0].status, Status.PASS)
+        log_text = "\n".join(logs.output)
+        self.assertIn("dangling test reference", log_text)
+        self.assertIn("missing-tag", log_text)
+
+    def test_supported_with_all_dangling_tests_during_grace_stays_pass_and_warns(self) -> None:
+        future = (date.today() + timedelta(days=30)).isoformat()
+        entry = _make_entry(
+            name="css/graceDangling",
+            tests=["test/missing.cpp [tag]", "test/also_missing.cpp [tag]"],
+        )
+        results = [_make_result(entry, Status.PASS)]
+        with self.assertLogs("pulp.harness.verifier", level="WARNING") as logs:
+            updated = check_evidence(self.repo_root, results, self._compat(future))
+        self.assertEqual(updated[0].status, Status.PASS)
+        log_text = "\n".join(logs.output)
+        self.assertIn("grace period until", log_text)
+        self.assertIn("test/missing.cpp", log_text)
+        self.assertIn("test/also_missing.cpp", log_text)
 
     def test_partial_without_tests_not_affected(self) -> None:
         past = (date.today() - timedelta(days=1)).isoformat()
         entry = _make_entry(name="css/partial", status="partial", tests=[])
+        results = [_make_result(entry, Status.DIVERGE)]
+        updated = check_evidence(self.repo_root, results, self._compat(past))
+        self.assertEqual(updated[0].status, Status.DIVERGE)
+
+    def test_unsupported_entry_with_pass_status_not_affected(self) -> None:
+        past = (date.today() - timedelta(days=1)).isoformat()
+        entry = _make_entry(name="css/notSupported", status="unsupported", tests=[])
+        results = [_make_result(entry, Status.PASS)]
+        updated = check_evidence(self.repo_root, results, self._compat(past))
+        self.assertEqual(updated[0].status, Status.PASS)
+
+    def test_supported_entry_with_non_pass_result_not_affected(self) -> None:
+        past = (date.today() - timedelta(days=1)).isoformat()
+        entry = _make_entry(name="css/diverge", status="supported", tests=[])
         results = [_make_result(entry, Status.DIVERGE)]
         updated = check_evidence(self.repo_root, results, self._compat(past))
         self.assertEqual(updated[0].status, Status.DIVERGE)

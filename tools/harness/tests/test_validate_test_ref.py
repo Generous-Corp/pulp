@@ -47,6 +47,10 @@ TEST_CASE("multi-line "
 TEST_CASE("name only no tags") {
     REQUIRE(true);
 }
+
+TEST_CASE("spaced tag evidence", "[ spaced-tag ][trimmed]") {
+    REQUIRE(true);
+}
 '''
 
 
@@ -78,6 +82,9 @@ class ValidateTestRefTests(unittest.TestCase):
         # Multi-line name should be joined.
         self.assertIn("multi-line name across two literals", names)
         self.assertIn("name only no tags", names)
+        self.assertIn("spaced tag evidence", names)
+        self.assertIn("spaced-tag", tags)
+        self.assertIn("trimmed", tags)
 
     # ── Bracketed [tag] form ───────────────────────────────────────────
     def test_bracket_tag_present(self) -> None:
@@ -105,6 +112,12 @@ class ValidateTestRefTests(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertIn("does-not-exist", reason)
+
+    def test_bracket_tags_trim_catalog_whitespace(self) -> None:
+        ok, reason = _validate_test_ref(
+            self.repo, "test/sample.cpp [ spaced-tag ][ trimmed ]"
+        )
+        self.assertTrue(ok, msg=reason)
 
     # ── path::"quoted name" form ───────────────────────────────────────
     def test_quoted_name_form_present(self) -> None:
@@ -141,6 +154,14 @@ class ValidateTestRefTests(unittest.TestCase):
         )
         self.assertTrue(ok, msg=reason)
 
+    def test_malformed_quoted_name_rejected_as_literal_name(self) -> None:
+        ok, reason = _validate_test_ref(
+            self.repo,
+            'test/sample.cpp::"first test name',
+        )
+        self.assertFalse(ok)
+        self.assertIn('"first test name', reason)
+
     # ── Typed prefixes ─────────────────────────────────────────────────
     def test_unit_prefix_with_real_path_accepted(self) -> None:
         # Body looks like a path AND ends in .cpp → existence-checked.
@@ -162,10 +183,34 @@ class ValidateTestRefTests(unittest.TestCase):
         ok, _ = _validate_test_ref(self.repo, "semantic:yoga/foo")
         self.assertTrue(ok)
 
+    def test_typed_prefix_fixture_with_slash_and_unknown_extension_accepted(self) -> None:
+        # A slash alone is not enough to treat a typed ref as a file path.
+        ok, _ = _validate_test_ref(self.repo, "semantic:yoga/aspect-ratio.fixture")
+        self.assertTrue(ok)
+
     def test_visual_prefix_with_real_path_accepted(self) -> None:
         # Path-form body checked, even for visual:.
         ok, _ = _validate_test_ref(self.repo, "visual:test/sample.cpp")
         self.assertTrue(ok)
+
+    def test_dom_prefix_with_real_tsx_path_accepted(self) -> None:
+        (self.repo / "packages" / "pulp-react").mkdir(parents=True)
+        (self.repo / "packages" / "pulp-react" / "prop-applier.test.tsx").write_text(
+            "test('prop applier', () => {});\n"
+        )
+        ok, reason = _validate_test_ref(
+            self.repo,
+            "dom:packages/pulp-react/prop-applier.test.tsx",
+        )
+        self.assertTrue(ok, msg=reason)
+
+    def test_behavior_prefix_with_missing_spec_js_path_rejected(self) -> None:
+        ok, reason = _validate_test_ref(
+            self.repo,
+            "behavior:packages/pulp-react/prop-applier.spec.js",
+        )
+        self.assertFalse(ok)
+        self.assertIn("does not exist", reason)
 
     def test_cannot_validate_prefix_always_accepted(self) -> None:
         """`cannot-validate:` documents intentional un-verifiability —

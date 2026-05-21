@@ -35,6 +35,11 @@ from tools.harness.verifier import (  # noqa: E402
 )
 
 
+def expected_rn_entry_count() -> int:
+    bucket = load_compat(REPO_ROOT).get("rn") or {}
+    return sum(1 for payload in bucket.values() if isinstance(payload, dict))
+
+
 class RnAdapterClassifyTest(unittest.TestCase):
     """Classify each catalog status family on known-good and known-bad fixtures."""
 
@@ -169,11 +174,14 @@ class RnAdapterClassifyTest(unittest.TestCase):
         self.assertEqual(result.status, Status.OOS)
         self.assertFalse(result.drifts)
 
-    def test_ios_only_prop_is_OOS(self):
-        """shadowColor is iOS-only in RN; cross-platform pulp surface = OOS."""
+    def test_synthetic_ios_only_prop_is_OOS(self):
+        """A platformOnly oracle entry is OOS before mapsTo heuristics run."""
+        self.adapter._oracle["properties"]["legacyIOSOnly"] = {
+            "platformOnly": "ios",
+        }
         e = CatalogEntry(
             surface="rn",
-            name="rn/shadowColor",
+            name="rn/legacyIOSOnly",
             status="missing",
             maps_to="no branch -- would route to setShadow / setBoxShadow",
         )
@@ -181,11 +189,13 @@ class RnAdapterClassifyTest(unittest.TestCase):
         self.assertEqual(result.status, Status.OOS, msg=result.detail)
         self.assertIn("ios-only", result.detail.lower())
 
-    def test_android_only_prop_is_OOS(self):
-        """textAlignVertical is Android-only in RN."""
+    def test_synthetic_android_only_prop_is_OOS(self):
+        self.adapter._oracle["properties"]["legacyAndroidOnly"] = {
+            "platformOnly": "android",
+        }
         e = CatalogEntry(
             surface="rn",
-            name="rn/textAlignVertical",
+            name="rn/legacyAndroidOnly",
             status="missing",
             maps_to="no branch",
         )
@@ -221,6 +231,37 @@ class RnAdapterClassifyTest(unittest.TestCase):
         result = self.adapter.run(e)
         # Should be PASS (color kind, no unsupported listed)
         self.assertEqual(result.status, Status.PASS, msg=result.detail)
+
+    def test_ported_shadow_longhand_is_cross_platform_PASS(self):
+        """shadowColor started as RN iOS legacy, but Pulp now wires it
+        through the cross-platform box-shadow slot."""
+        e = CatalogEntry(
+            surface="rn",
+            name="rn/shadowColor",
+            status="supported",
+            maps_to="prop-applier.ts -> setShadowColor(id, color)",
+            supported_values=["color"],
+            unsupported_values=[],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+        self.assertFalse(result.drifts, msg=result.detail)
+
+    def test_ported_android_text_align_vertical_is_PASS(self):
+        e = CatalogEntry(
+            surface="rn",
+            name="rn/textAlignVertical",
+            status="supported",
+            maps_to="prop-applier.ts -> setVerticalAlign(id, value)",
+            supported_values=["auto", "top", "bottom", "center"],
+            unsupported_values=[],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+        self.assertEqual(
+            set(result.matched_supported),
+            {"auto", "top", "bottom", "center"},
+        )
 
     def test_prop_applier_quoted_alias_is_recognized(self):
         """flexDirection's mapsTo references "prop-applier 'direction' -> ...";
@@ -259,17 +300,65 @@ class RnAdapterClassifyTest(unittest.TestCase):
         self.assertIn("setMadeUpFn", result.detail)
 
 
+class RnAdapterSourceScanTest(unittest.TestCase):
+    """Regression tests for the split prop-applier source scan."""
+
+    def test_extracts_cases_from_joined_domain_modules(self):
+        src = """
+        switch (key) {
+            case 'opacity': return true;
+        }
+        // second module in the joined source
+        switch (key) {
+            case 'flexDirection': return true;
+            case 'fontStyle': return true;
+        }
+        """
+        self.assertEqual(
+            RnAdapter._extract_prop_applier_cases(src),
+            {"opacity", "flexDirection", "fontStyle"},
+        )
+
+    def test_extract_cases_handles_empty_source(self):
+        self.assertEqual(RnAdapter._extract_prop_applier_cases(""), set())
+
+    def test_real_adapter_sees_split_layout_paint_and_typography_cases(self):
+        adapter = RnAdapter(REPO_ROOT)
+        for prop in ("flexDirection", "opacity", "fontStyle", "shadowColor"):
+            with self.subTest(prop=prop):
+                self.assertIn(prop, adapter._prop_applier_cases)
+
+    def test_does_not_expose_marker_is_unimplemented(self):
+        self.assertTrue(
+            RnAdapter._maps_to_marks_unimpl(
+                "@pulp/react does not expose alignContent on FlexProps"
+            )
+        )
+
+    def test_bridge_function_parser_extracts_all_setters(self):
+        self.assertEqual(
+            RnAdapter._bridge_fns_in_maps_to(
+                "setOpacity(id, n); then setFontStyle(id, value)"
+            ),
+            ["setOpacity", "setFontStyle"],
+        )
+
+
 class VerifierEndToEndTest(unittest.TestCase):
     """Full pipeline — compat.json -> all 120 rn entries -> coverage report."""
 
     def test_collects_all_120_rn_entries(self):
         compat = load_compat(REPO_ROOT)
         entries = collect_entries(compat, "rn")
-        self.assertEqual(len(entries), 120, "compat.json rn/ must have 120 entries")
+        self.assertEqual(
+            len(entries),
+            expected_rn_entry_count(),
+            "compat.json rn/ count should be derived from the current catalog",
+        )
 
     def test_runs_rn_surface_end_to_end(self):
         results = run_surface(REPO_ROOT, "rn")
-        self.assertEqual(len(results), 120)
+        self.assertEqual(len(results), expected_rn_entry_count())
         for r in results:
             self.assertIsInstance(r.status, Status)
 
@@ -282,16 +371,19 @@ class VerifierEndToEndTest(unittest.TestCase):
             r = adapter.run(e)
             self.assertIsInstance(r.status, Status, msg=e.name)
 
-    def test_coverage_distribution_is_nonzero(self):
-        """Sanity: with the catalog as-is, we have at least some PASS, some
-        DIVERGE, some NOT-IMPL, and some OOS."""
+    def test_current_catalog_classifies_without_drift(self):
+        """Synthetic tests cover DIVERGE / NOT-IMPL / OOS. The live RN
+        catalog now tracks a fully-supported surface, so the end-to-end
+        classification should be all PASS and no drift."""
         results = run_surface(REPO_ROOT, "rn")
         statuses = [r.status for r in results]
         counts = StatusCounts.from_results(statuses)
-        self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
-        self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
-        self.assertGreater(counts.not_impl, 0, "expected at least 1 NOT-IMPL")
-        self.assertGreater(counts.oos, 0, "expected at least 1 OOS (iOS/Android only props)")
+        self.assertEqual(counts.total, expected_rn_entry_count())
+        self.assertEqual(counts.pass_, counts.total)
+        self.assertEqual(counts.diverge, 0)
+        self.assertEqual(counts.not_impl, 0)
+        self.assertEqual(counts.oos, 0)
+        self.assertEqual(sum(1 for r in results if r.drifts), 0)
 
     def test_json_output_contains_all_entries(self):
         results = run_surface(REPO_ROOT, "rn")
@@ -299,7 +391,10 @@ class VerifierEndToEndTest(unittest.TestCase):
 
         payload = render_json({"rn": results}, sha="test")
         self.assertIn("rn", payload["surfaces"])
-        self.assertEqual(payload["surfaces"]["rn"]["total"], 120)
+        self.assertEqual(
+            payload["surfaces"]["rn"]["total"],
+            expected_rn_entry_count(),
+        )
         self.assertEqual(
             payload["surfaces"]["rn"]["total"],
             len(payload["surfaces"]["rn"]["results"]),
@@ -327,7 +422,10 @@ class VerifierCliTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["surfaces"]["rn"]["total"], 120)
+        self.assertEqual(
+            payload["surfaces"]["rn"]["total"],
+            expected_rn_entry_count(),
+        )
 
 
 if __name__ == "__main__":

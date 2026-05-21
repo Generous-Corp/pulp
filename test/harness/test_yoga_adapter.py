@@ -36,6 +36,23 @@ from tools.harness.verifier import (  # noqa: E402
 )
 
 
+def expected_yoga_entry_count() -> int:
+    bucket = load_compat(REPO_ROOT).get("yoga") or {}
+    return sum(1 for payload in bucket.values() if isinstance(payload, dict))
+
+
+def yoga_oracle_properties() -> set[str]:
+    oracle_path = (
+        REPO_ROOT
+        / "tools"
+        / "harness"
+        / "oracles"
+        / "yoga"
+        / "yoga-supported.json"
+    )
+    return set(json.loads(oracle_path.read_text())["properties"])
+
+
 class YogaAdapterClassifyTest(unittest.TestCase):
     """Classify each catalog status family on known-good and known-bad fixtures."""
 
@@ -319,16 +336,29 @@ class YogaAdapterEnumNormalizeTest(unittest.TestCase):
 
 
 class VerifierEndToEndTest(unittest.TestCase):
-    """Full pipeline — compat.json -> all 53 yoga entries -> coverage report."""
+    """Full pipeline — compat.json -> the current Yoga catalog -> report."""
 
-    def test_collects_all_53_yoga_entries(self):
+    def test_collects_every_current_yoga_entry(self):
         compat = load_compat(REPO_ROOT)
         entries = collect_entries(compat, "yoga")
-        self.assertEqual(len(entries), 53, "compat.json yoga/ must have 53 entries")
+        self.assertEqual(
+            len(entries),
+            expected_yoga_entry_count(),
+            "compat.json yoga/ count should be derived from the current catalog",
+        )
+
+    def test_current_yoga_entries_exist_in_oracle(self):
+        oracle_props = yoga_oracle_properties()
+        missing = [
+            e.short_name
+            for e in collect_entries(load_compat(REPO_ROOT), "yoga")
+            if e.short_name not in oracle_props
+        ]
+        self.assertEqual(missing, [])
 
     def test_runs_yoga_surface_end_to_end(self):
         results = run_surface(REPO_ROOT, "yoga")
-        self.assertEqual(len(results), 53)
+        self.assertEqual(len(results), expected_yoga_entry_count())
         # Every result must have a Status enum (no exceptions / Nones)
         for r in results:
             self.assertIsInstance(r.status, Status)
@@ -342,15 +372,18 @@ class VerifierEndToEndTest(unittest.TestCase):
             r = adapter.run(e)
             self.assertIsInstance(r.status, Status, msg=e.name)
 
-    def test_coverage_distribution_is_nonzero(self):
-        """Sanity: with the catalog as-is, we have at least some PASS, some
-        DIVERGE, and some NOT-IMPL. Otherwise the harness is broken."""
+    def test_current_catalog_classifies_without_drift(self):
+        """Synthetic tests cover DIVERGE / NOT-IMPL. The live Yoga catalog
+        currently tracks a fully-supported surface, so the end-to-end check
+        should be all PASS and no drift."""
         results = run_surface(REPO_ROOT, "yoga")
         statuses = [r.status for r in results]
         counts = StatusCounts.from_results(statuses)
-        self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
-        self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
-        self.assertGreater(counts.not_impl, 0, "expected at least 1 NOT-IMPL")
+        self.assertEqual(counts.total, expected_yoga_entry_count())
+        self.assertEqual(counts.pass_, counts.total)
+        self.assertEqual(counts.diverge, 0)
+        self.assertEqual(counts.not_impl, 0)
+        self.assertEqual(sum(1 for r in results if r.drifts), 0)
 
     def test_json_output_contains_all_entries(self):
         results = run_surface(REPO_ROOT, "yoga")
@@ -359,7 +392,10 @@ class VerifierEndToEndTest(unittest.TestCase):
 
         payload = render_json({"yoga": results}, sha="test")
         self.assertIn("yoga", payload["surfaces"])
-        self.assertEqual(payload["surfaces"]["yoga"]["total"], 53)
+        self.assertEqual(
+            payload["surfaces"]["yoga"]["total"],
+            expected_yoga_entry_count(),
+        )
         self.assertEqual(payload["surfaces"]["yoga"]["total"],
                          len(payload["surfaces"]["yoga"]["results"]))
 
@@ -386,7 +422,10 @@ class VerifierCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         # stdout must be parseable JSON
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["surfaces"]["yoga"]["total"], 53)
+        self.assertEqual(
+            payload["surfaces"]["yoga"]["total"],
+            expected_yoga_entry_count(),
+        )
 
     def test_unknown_surface_errors_cleanly(self):
         env = os.environ.copy()

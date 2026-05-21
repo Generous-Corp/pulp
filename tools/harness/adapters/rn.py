@@ -7,10 +7,10 @@ Classifies each `rn/*` entry in compat.json against three layers of evidence:
    third-party extension markers (react-native-svg), and Pulp extensions.
 2. The catalog payload (`mapsTo`, `supportedValues`, `unsupportedValues`,
    `notes`) — what the catalog claims pulp does today.
-3. The bridge surface — `packages/pulp-react/src/prop-applier.ts` switch
+3. The bridge surface — `packages/pulp-react/src/prop-applier*.ts` switch
    cases (the JSX-prop-to-bridge-setter router) plus the actual bridge
-   function registration list embedded in the oracle. We grep prop-applier
-   once at adapter init for cheap presence checks.
+   function registration list embedded in the oracle. We grep the split
+   prop-applier modules once at adapter init for cheap presence checks.
 
 The verdict is PASS / DIVERGE / NO-OP / NOT-IMPL / OOS — see
 `tools/harness/status.py` for the full taxonomy.
@@ -30,6 +30,7 @@ from .base import AdapterBase, CatalogEntry, Result, register_adapter
 NOT_IMPL_MARKERS = (
     "no branch",
     "no prop-applier case",
+    "does not expose",
     "no @pulp/react prop",
     "no shorthand prop in @pulp/react",
     "not surfaced in @pulp/react",
@@ -69,8 +70,21 @@ class RnAdapter(AdapterBase):
     def __init__(self, repo_root: Path):
         super().__init__(repo_root)
         self._oracle = self._load_oracle()
-        self._prop_applier_text = self._read(
-            "packages/pulp-react/src/prop-applier.ts"
+        # P5-NEW-A split the former monolithic prop-applier switch into a
+        # thin dispatcher plus per-domain modules. Concatenate all of them
+        # before extracting `case 'X':` arms so the RN harness sees the live
+        # JSX bridge surface instead of only the handful of type-dispatched
+        # cases that remain in prop-applier.ts.
+        self._prop_applier_text = "\n".join(
+            self._read(rel)
+            for rel in (
+                "packages/pulp-react/src/prop-applier.ts",
+                "packages/pulp-react/src/prop-applier-layout.ts",
+                "packages/pulp-react/src/prop-applier-paint.ts",
+                "packages/pulp-react/src/prop-applier-typography.ts",
+                "packages/pulp-react/src/prop-applier-transform.ts",
+                "packages/pulp-react/src/prop-applier-events.ts",
+            )
         )
         self._prop_applier_cases = self._extract_prop_applier_cases(
             self._prop_applier_text
