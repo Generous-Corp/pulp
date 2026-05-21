@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01830"></a>
+## [0.183.0] - 2026-05-20
+
+- fix(host): complete custom node registry behavior ([#2572](https://github.com/danielraffel/pulp/pull/2572))
+
 <a id="v01820"></a>
 ## [0.182.0] - 2026-05-20
 
@@ -2395,6 +2400,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.183.0]: https://github.com/danielraffel/pulp/releases/tag/v0.183.0
 [0.182.0]: https://github.com/danielraffel/pulp/releases/tag/v0.182.0
 [0.181.0]: https://github.com/danielraffel/pulp/releases/tag/v0.181.0
 [0.180.4]: https://github.com/danielraffel/pulp/releases/tag/v0.180.4
