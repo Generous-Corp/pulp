@@ -932,11 +932,11 @@ jobs:
     # emulator/device smoke remain in android.yml.
     name: Coverage report (Android, Kotlin)
     needs: [resolve-runners, classify]
-    # Skip-safe (docs/planning-only) PRs can't move the Kotlin coverage
-    # number either, so gate this lane on the same classifier output as the
-    # native coverage matrix.
-    # follow-up: a finer android-path gate would skip this on C++-only PRs too
-    if: needs.classify.outputs.native_build_required == 'true'
+    # PR coverage is macOS-only; Linux / Windows / Android coverage is
+    # supplied by the nightly cross-platform lane. Keep this Kotlin upload
+    # for canonical main/manual runs only so PRs do not allocate an Android
+    # coverage runner after the native matrix has already been narrowed.
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true'
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:

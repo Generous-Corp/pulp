@@ -247,6 +247,17 @@ class CodecovYamlStructure(unittest.TestCase):
                     f"{flag_name} upload flag must not be path-scoped",
                 )
 
+    def test_notify_count_matches_pr_coverage_upload_contract(self):
+        # Ordinary PR coverage is macOS-only. Android Kotlin and other
+        # cross-platform uploads run on main/manual/nightly lanes, so the
+        # Codecov bot must not wait for a second PR upload that never comes.
+        self.assertEqual(self.doc["codecov"]["notify"]["after_n_builds"], 1)
+        coverage = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true'",
+            coverage,
+        )
+
     def test_pulp_react_main_upload_is_centralized_in_coverage_workflow(self):
         coverage = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
         react = PULP_REACT_WORKFLOW.read_text(encoding="utf-8")

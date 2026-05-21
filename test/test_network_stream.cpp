@@ -57,6 +57,21 @@ struct HttpServerRunner {
     std::thread thread;
 };
 
+bool wait_until_http_ready(int port, std::chrono::milliseconds timeout = 10s) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        httplib::Client client("127.0.0.1", port);
+        client.set_connection_timeout(0, 200000);
+        client.set_read_timeout(0, 200000);
+        if (auto response = client.Get("/__ready");
+            response && response->status == 204) {
+            return true;
+        }
+        std::this_thread::sleep_for(10ms);
+    }
+    return false;
+}
+
 // Pick an ephemeral port and return the bound listener + its actual port.
 std::optional<std::uint16_t> try_bind_loopback(Socket& server, std::uint16_t port) {
     if (!server.bind("127.0.0.1", port)) return std::nullopt;
@@ -880,6 +895,9 @@ TEST_CASE("HttpStream factories and refetch reset closed state to request result
 TEST_CASE("HttpStream reads successful GET responses in chunks",
           "[network_stream][http][coverage][phase3]") {
     httplib::Server server;
+    server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 204;
+    });
     server.Get("/body", [](const httplib::Request&, httplib::Response& response) {
         response.set_header("X-Pulp-Stream", "ok");
         response.set_content("chunked-body", "text/plain");
@@ -889,9 +907,11 @@ TEST_CASE("HttpStream reads successful GET responses in chunks",
     REQUIRE(port > 0);
     HttpServerRunner runner(server);
     REQUIRE(runner.wait_until_running());
+    REQUIRE(wait_until_http_ready(port));
 
     auto stream = HttpStream::get("http://127.0.0.1:" + std::to_string(port) + "/body", 2);
     REQUIRE(stream);
+    INFO(stream->transport_error());
     REQUIRE(stream->status_code() == 200);
     REQUIRE(stream->headers().at("X-Pulp-Stream") == "ok");
     REQUIRE(stream->is_open());
@@ -919,6 +939,9 @@ TEST_CASE("HttpStream reads successful GET responses in chunks",
 TEST_CASE("HttpStream POST factory exposes successful response bodies",
           "[network_stream][http][coverage][phase3]") {
     httplib::Server server;
+    server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 204;
+    });
     server.Post("/echo", [](const httplib::Request& request, httplib::Response& response) {
         response.set_header("X-Pulp-Method", request.method);
         response.set_content(request.body, "text/plain");
@@ -928,12 +951,14 @@ TEST_CASE("HttpStream POST factory exposes successful response bodies",
     REQUIRE(port > 0);
     HttpServerRunner runner(server);
     REQUIRE(runner.wait_until_running());
+    REQUIRE(wait_until_http_ready(port));
 
     auto stream = HttpStream::post("http://127.0.0.1:" + std::to_string(port) + "/echo",
                                    "payload=42",
                                    "text/plain",
                                    2);
     REQUIRE(stream);
+    INFO(stream->transport_error());
     REQUIRE(stream->status_code() == 200);
     REQUIRE(stream->headers().at("X-Pulp-Method") == "POST");
     REQUIRE(stream->is_open());
