@@ -30,6 +30,12 @@
 #include <unistd.h>
 #endif
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace pulp::runtime;
 
 namespace {
@@ -732,6 +738,22 @@ TEST_CASE("run_process captures stderr separately",
     REQUIRE(result->stderr_output.find("bad-news") != std::string::npos);
 }
 
+TEST_CASE("run_process captures stdout and stderr from one child",
+          "[runtime][child_process][coverage][phase3]") {
+#ifdef _WIN32
+    auto result = run_process("powershell",
+        {"-NoProfile", "-Command",
+         "Write-Output 'out-line'; [Console]::Error.WriteLine('err-line'); exit 3"});
+#else
+    auto result = run_process("/bin/sh",
+        {"-c", "printf out-line; printf err-line >&2; exit 3"});
+#endif
+    REQUIRE(result.has_value());
+    REQUIRE(result->exit_code == 3);
+    REQUIRE(result->stdout_output.find("out-line") != std::string::npos);
+    REQUIRE(result->stderr_output.find("err-line") != std::string::npos);
+}
+
 TEST_CASE("run_process honors working directory and preserves spaced arguments",
           "[runtime][child_process][coverage][phase3]") {
     const auto dir = std::filesystem::temp_directory_path()
@@ -824,6 +846,17 @@ TEST_CASE("launch_process reports failed starts and missing pids",
     SUCCEED("Android reports exec failures via child exit status, not launch failure");
 #endif
     REQUIRE_FALSE(is_process_running(99999999));
+}
+
+TEST_CASE("is_process_running recognizes the current process",
+          "[runtime][child_process][coverage][phase3]") {
+#ifdef _WIN32
+    const int pid = _getpid();
+#else
+    const int pid = static_cast<int>(getpid());
+#endif
+    REQUIRE(pid > 0);
+    REQUIRE(is_process_running(pid));
 }
 
 // ── Base64 ──────────────────────────────────────────────────────────────
@@ -1298,6 +1331,17 @@ TEST_CASE("Expression evaluator treats chained powers as right associative",
     auto negative_exponent = evaluate("4 ^ 1 ^ -1");
     REQUIRE(negative_exponent.has_value());
     REQUIRE(*negative_exponent == Catch::Approx(4.0));
+}
+
+TEST_CASE("Expression evaluator handles unary plus and division by zero",
+          "[runtime][expression][coverage][phase3]") {
+    auto positive = evaluate(" \t +e + +2 ");
+    REQUIRE(positive.has_value());
+    REQUIRE(*positive == Catch::Approx(4.718281828459045));
+
+    auto divided = evaluate("10 / (3 - 3)");
+    REQUIRE(divided.has_value());
+    REQUIRE(*divided == Catch::Approx(0.0));
 }
 
 // ── HTTP URL parsing ───────────────────────────────────────────────────

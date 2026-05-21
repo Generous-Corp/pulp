@@ -8,6 +8,40 @@
 
 using namespace pulp::runtime;
 
+namespace {
+
+class BinaryOnlyMessageChannel final : public MessageChannel {
+public:
+    bool send(const std::uint8_t* data, std::size_t size) override {
+        payload.assign(data, data + size);
+        return accepted;
+    }
+    void on_message(MessageCallback) override {}
+    void on_closed(ChannelClosedCallback) override {}
+    void on_error(ChannelErrorCallback) override {}
+    void close() override { open = false; }
+    bool is_open() const override { return open; }
+
+    std::vector<std::uint8_t> payload;
+    bool accepted = true;
+    bool open = true;
+};
+
+} // namespace
+
+TEST_CASE("MessageChannel default text send uses binary send",
+          "[runtime][message_channel][coverage][phase3]") {
+    BinaryOnlyMessageChannel channel;
+    MessageChannel& base = channel;
+
+    REQUIRE(base.send(std::string_view("plain-text")));
+    REQUIRE(channel.payload == std::vector<std::uint8_t>(
+                                   {'p', 'l', 'a', 'i', 'n', '-', 't', 'e', 'x', 't'}));
+
+    channel.accepted = false;
+    REQUIRE_FALSE(base.send(std::string_view("rejected")));
+}
+
 TEST_CASE("MemoryMessageChannel delivers binary payloads synchronously",
           "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();

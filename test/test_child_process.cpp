@@ -259,6 +259,38 @@ TEST_CASE("output capture respects max byte limits",
     REQUIRE(r.stderr_output == "123");
 }
 
+TEST_CASE("zero max output bytes drains without capturing lines",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> stdout_lines;
+    std::vector<std::string> stderr_lines;
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.max_output_bytes = 0;
+    opts.on_stdout_line = [&](std::string_view line) {
+        stdout_lines.emplace_back(line);
+    };
+    opts.on_stderr_line = [&](std::string_view line) {
+        stderr_lines.emplace_back(line);
+    };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd",
+        {"/c", "echo out-line& echo err-line 1>&2"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh",
+        {"-c", "printf 'out-line\\n'; printf 'err-line\\n' >&2"},
+        opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.empty());
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE(stdout_lines.empty());
+    REQUIRE(stderr_lines.empty());
+}
+
 TEST_CASE("stderr line callback fires independently",
           "[child_process][edge][issue-640]") {
     std::vector<std::string> stdout_lines;
@@ -312,6 +344,75 @@ TEST_CASE("line callback buffers partial stdout without trailing newline",
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output == "partial");
     REQUIRE(stdout_lines.empty());
+}
+
+TEST_CASE("line callback buffers partial stderr without trailing newline",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> stderr_lines;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.on_stderr_line = [&](std::string_view line) {
+        stderr_lines.emplace_back(line);
+    };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd",
+        {"/c", "<nul set /p dummy=partialerr 1>&2"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh", {"-c", "printf partialerr >&2"}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output == "partialerr");
+    REQUIRE(stderr_lines.empty());
+}
+
+TEST_CASE("move assignment transfers a running child process",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=moved & exit /b 0"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf moved"}));
+#endif
+
+    ChildProcess moved;
+    moved = std::move(cp);
+
+    auto r = moved.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+#ifdef _WIN32
+    REQUIRE(r.stdout_output.find("moved") != std::string::npos);
+#else
+    REQUIRE(r.stdout_output == "moved");
+#endif
+}
+
+TEST_CASE("move constructor transfers a running child process",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=move-ctor & exit /b 0"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf move-ctor"}));
+#endif
+
+    ChildProcess moved(std::move(cp));
+
+    auto r = moved.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+#ifdef _WIN32
+    REQUIRE(r.stdout_output.find("move-ctor") != std::string::npos);
+#else
+    REQUIRE(r.stdout_output == "move-ctor");
+#endif
 }
 
 TEST_CASE("wait is idempotent after process completion",

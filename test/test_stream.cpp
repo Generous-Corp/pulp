@@ -924,6 +924,56 @@ TEST_CASE("NamedPipe POSIX FIFO round-trips bytes and unlinks on close",
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("PipeStream forwards reads and writes over a connected POSIX FIFO",
+          "[stream][pipe][coverage][phase3]") {
+    auto path = make_temp_path("pulp_pipe_stream_roundtrip");
+    std::filesystem::remove(path);
+
+    auto server = std::make_unique<NamedPipe>();
+    REQUIRE(server->create_server(path.string()));
+
+    auto client = std::make_unique<NamedPipe>();
+    REQUIRE(client->connect_client(path.string()));
+
+    PipeStream server_stream(std::move(server));
+    PipeStream client_stream(std::move(client));
+    REQUIRE(server_stream.is_open());
+    REQUIRE(client_stream.is_open());
+    REQUIRE(server_stream.pipe() != nullptr);
+
+    std::uint8_t zero = 0;
+    REQUIRE(server_stream.write(&zero, 0).ok());
+    REQUIRE(client_stream.read(&zero, 0).ok());
+
+    const std::uint8_t outbound[] = {'p', 'i', 'p', 'e'};
+    auto wrote = server_stream.write(outbound, sizeof(outbound));
+    REQUIRE(wrote.ok());
+    REQUIRE(wrote.bytes == sizeof(outbound));
+
+    std::array<std::uint8_t, sizeof(outbound)> inbound{};
+    auto read = client_stream.read(inbound.data(), inbound.size());
+    REQUIRE(read.ok());
+    REQUIRE(read.bytes == inbound.size());
+    REQUIRE(std::memcmp(inbound.data(), outbound, inbound.size()) == 0);
+
+    const std::uint8_t reply[] = {'o', 'k'};
+    REQUIRE(client_stream.write(reply, sizeof(reply)).bytes == sizeof(reply));
+
+    std::array<std::uint8_t, sizeof(reply)> reply_in{};
+    auto reply_read = server_stream.read(reply_in.data(), reply_in.size());
+    REQUIRE(reply_read.ok());
+    REQUIRE(reply_read.bytes == reply_in.size());
+    REQUIRE(std::memcmp(reply_in.data(), reply, reply_in.size()) == 0);
+
+    client_stream.close();
+    REQUIRE_FALSE(client_stream.is_open());
+    REQUIRE(server_stream.is_open());
+
+    server_stream.close();
+    REQUIRE_FALSE(server_stream.is_open());
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 TEST_CASE("NamedPipe POSIX move transfers FIFO cleanup ownership",
           "[stream][named_pipe][issue-641]") {
     auto first = make_temp_path("pulp_named_pipe_move_first");

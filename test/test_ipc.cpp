@@ -27,6 +27,18 @@ std::optional<uint16_t> start_socket_server_on_loopback(InterprocessConnectionSe
     return std::nullopt;
 }
 
+std::optional<uint16_t> start_socket_server_on_any_interface(InterprocessConnectionServer& server) {
+    const auto seed = static_cast<uint16_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count() % 20000);
+    for (uint16_t i = 0; i < 200; ++i) {
+        const uint16_t port = static_cast<uint16_t>(20000 + ((seed + i) % 20000));
+        if (server.start(std::to_string(port), IpcTransport::Socket)) {
+            return port;
+        }
+    }
+    return std::nullopt;
+}
+
 struct CapturingServer : InterprocessConnectionServer {
     void client_connected(std::unique_ptr<InterprocessConnection> conn) override {
         conn->on_message = [this](const void*, size_t size) {
@@ -161,6 +173,21 @@ TEST_CASE("IPC socket server stops while waiting for a client",
     REQUIRE(port.has_value());
     REQUIRE(server.is_running());
 
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket server default callback owns accepted clients",
+          "[events][ipc][socket][codecov][phase3]") {
+    InterprocessConnectionServer server;
+    auto port = start_socket_server_on_any_interface(server);
+    REQUIRE(port.has_value());
+    REQUIRE(server.is_running());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+
+    client.disconnect();
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }

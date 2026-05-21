@@ -231,6 +231,33 @@ TEST_CASE("AsyncStream cancel drains pending writes with Closed", "[async_stream
     REQUIRE(last_err.load() == StreamError::Closed);
 }
 
+TEST_CASE("AsyncStream write on pre-closed stream completes without queuing",
+          "[async_stream][coverage][phase3]") {
+    auto backing = std::make_unique<TestStream>();
+    backing->close();
+
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    AsyncStream stream(std::move(backing), opts);
+
+    std::atomic<int> completions{0};
+    std::atomic<std::size_t> bytes{99};
+    std::atomic<StreamError> error{StreamError::Ok};
+
+    const std::uint8_t payload[] = {'c', 'l', 'o', 's', 'e', 'd'};
+    REQUIRE(stream.write_async(payload, sizeof(payload),
+                               [&](std::size_t n, StreamError err) {
+                                   bytes.store(n);
+                                   error.store(err);
+                                   completions.fetch_add(1);
+                               }));
+
+    REQUIRE(wait_until([&] { return completions.load() == 1; }));
+    REQUIRE(bytes.load() == 0);
+    REQUIRE(error.load() == StreamError::Closed);
+    REQUIRE(stream.pending_write_bytes() == 0);
+}
+
 TEST_CASE("AsyncStream cancel drains queue even before worker starts", "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     AsyncStream::Options opts;

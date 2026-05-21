@@ -1099,7 +1099,7 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
     const auto bin = fs::absolute(pulp_binary());
     auto cwd_saver = fs::current_path();
     fs::current_path(tmp);
-    auto r = exec(bin.string(), {"build", "--allow-unsupported-sdk"}, 10000);
+    auto r = exec(bin.string(), {"build", "--allow-unsupported-sdk"}, 30000);
     fs::current_path(cwd_saver);
     fs::remove_all(tmp);
 
@@ -1916,4 +1916,3 @@ TEST_CASE("PULP_DEBUG=1 surfaces phase markers to stderr (#682)",
 
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
 }
-

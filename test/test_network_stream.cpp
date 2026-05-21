@@ -10,6 +10,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <thread>
@@ -102,6 +104,19 @@ std::optional<std::uint16_t> try_bind_udp(Socket& socket,
         if (socket.bind(address, port)) return port;
     }
     return std::nullopt;
+}
+
+std::string receive_http_headers(Socket& socket) {
+    std::string request;
+    std::array<std::uint8_t, 256> buffer{};
+    while (request.size() < 16 * 1024) {
+        const int received = socket.receive(buffer.data(), buffer.size());
+        if (received <= 0) break;
+        request.append(reinterpret_cast<const char*>(buffer.data()),
+                       static_cast<std::size_t>(received));
+        if (request.find("\r\n\r\n") != std::string::npos) break;
+    }
+    return request;
 }
 
 }  // namespace
@@ -820,6 +835,193 @@ TEST_CASE("HttpStream status_code is 0 before fetch",
           "[network_stream][http][state]") {
     HttpStream stream;
     REQUIRE(stream.status_code() == 0);
+}
+
+TEST_CASE("HttpStream reads a successful local response body in chunks",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> served{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 512> request{};
+        accepted->receive(request.data(), request.size());
+        const std::string response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 5\r\n"
+            "X-Pulp-Test: yes\r\n"
+            "\r\n"
+            "hello";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+        served.store(true);
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto stream = HttpStream::get("http://127.0.0.1:" + std::to_string(*port) + "/ok", 2);
+    REQUIRE(stream);
+    REQUIRE(stream->status_code() == 200);
+    REQUIRE(stream->transport_error().empty());
+    REQUIRE(stream->headers().find("X-Pulp-Test") != stream->headers().end());
+    REQUIRE(stream->is_open());
+
+    std::array<std::uint8_t, 8> buffer{};
+    auto first = stream->read(buffer.data(), 2);
+    REQUIRE(first.ok());
+    REQUIRE(first.bytes == 2);
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), first.bytes) == "he");
+    REQUIRE(stream->is_open());
+
+    auto second = stream->read(buffer.data(), 8);
+    REQUIRE(second.ok());
+    REQUIRE(second.bytes == 3);
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), second.bytes) == "llo");
+    REQUIRE(stream->eof());
+    REQUIRE_FALSE(stream->is_open());
+
+    auto eof = stream->read(buffer.data(), buffer.size());
+    REQUIRE_FALSE(eof.ok());
+    REQUIRE(eof.closed());
+
+    join_server.join();
+    REQUIRE(served.load());
+}
+
+TEST_CASE("http_get defaults missing URL path to slash",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> saw_root_path{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        const auto request_text = receive_http_headers(*accepted);
+        saw_root_path.store(request_text.find("GET /") != std::string::npos);
+
+        const std::string response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 4\r\n"
+            "\r\n"
+            "root";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    const auto response = http_get("http://127.0.0.1:" + std::to_string(*port), 2);
+    REQUIRE(response.status_code == 200);
+    REQUIRE(response.body == "root");
+
+    join_server.join();
+    REQUIRE(saw_root_path.load());
+}
+
+TEST_CASE("HttpStream post factory reads a successful local response",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> saw_post{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        const auto request_text = receive_http_headers(*accepted);
+        saw_post.store(request_text.find("POST /submit") != std::string::npos &&
+                       request_text.find("application/json") != std::string::npos);
+        const std::string response =
+            "HTTP/1.1 201 Created\r\n"
+            "Content-Length: 6\r\n"
+            "\r\n"
+            "stored";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto stream = HttpStream::post("http://127.0.0.1:" + std::to_string(*port) + "/submit",
+                                   R"({"ok":true})", "application/json", 2);
+    REQUIRE(stream);
+    REQUIRE(stream->status_code() == 201);
+    REQUIRE(stream->transport_error().empty());
+
+    std::array<std::uint8_t, 8> buffer{};
+    auto read = stream->read(buffer.data(), buffer.size());
+    REQUIRE(read.ok());
+    REQUIRE(read.bytes == 6);
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), read.bytes) == "stored");
+    REQUIRE(stream->eof());
+
+    join_server.join();
+    REQUIRE(saw_post.load());
+}
+
+TEST_CASE("http_download writes a successful local response to disk",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 512> request{};
+        accepted->receive(request.data(), request.size());
+        const std::string response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 10\r\n"
+            "\r\n"
+            "downloaded";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    const auto output_path = std::filesystem::temp_directory_path() /
+        ("pulp-http-download-" + std::to_string(*port) + ".bin");
+    std::filesystem::remove(output_path);
+
+    REQUIRE(http_download("http://127.0.0.1:" + std::to_string(*port) + "/artifact",
+                          output_path.string(), 2));
+    REQUIRE(std::filesystem::exists(output_path));
+
+    std::ifstream file(output_path, std::ios::binary);
+    const std::string contents((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+    file.close();
+    REQUIRE(contents == "downloaded");
+    std::filesystem::remove(output_path);
+
+    join_server.join();
 }
 
 TEST_CASE("HttpStream default state supports zero reads and idempotent close",
