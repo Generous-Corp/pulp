@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01951"></a>
+## [0.195.1] - 2026-05-21
+
+- refactor(local-ci): extract cloud provider integration into cloud.py (R2-1, #2645) ([#2675](https://github.com/danielraffel/pulp/pull/2675))
+- test(format): cover plugin state migration edges ([#2674](https://github.com/danielraffel/pulp/pull/2674))
+- test(osc): cover lifecycle and pattern edges ([#2673](https://github.com/danielraffel/pulp/pull/2673))
+
 <a id="v01941"></a>
 ## [0.194.1] - 2026-05-21
 
@@ -2524,6 +2531,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.195.1]: https://github.com/danielraffel/pulp/releases/tag/v0.195.1
 [0.194.1]: https://github.com/danielraffel/pulp/releases/tag/v0.194.1
 [0.194.0]: https://github.com/danielraffel/pulp/releases/tag/v0.194.0
 [0.193.1]: https://github.com/danielraffel/pulp/releases/tag/v0.193.1
