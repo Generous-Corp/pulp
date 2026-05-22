@@ -2603,16 +2603,20 @@ TEST_CASE("InspectorOverlay P2: body-drag moves via absolute + 3 atomic tweaks",
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == child_ptr);
 
-    // Press on the BODY (not a handle) to start the move.
+    // Press on the BODY (not a handle) to start the move. P2c: the DEFAULT
+    // body-drag is now reflow-aware; ⌘-drag is the ABSOLUTE FLOAT escape
+    // hatch this test exercises, so hold Cmd on the press + drag.
     MouseEvent press;
     press.position = {before.x + 20, before.y + 20};
     press.is_down = true;
+    press.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(press));
 
     // Drag +50 / +30.
     MouseEvent drag;
     drag.position = {press.position.x + 50, press.position.y + 30};
     drag.is_down = false;
+    drag.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(drag));
 
     // Converted to absolute.
@@ -2674,14 +2678,17 @@ TEST_CASE("InspectorOverlay P2: conversion seeds origin so there is no jump",
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == child_ptr);
 
-    // Start a move and immediately "drag" by zero (move event at the press
-    // position) — this exercises the seed without any delta.
+    // Start a ⌘-move (absolute float) and immediately "drag" by zero (move
+    // event at the press position) — this exercises the seed without any
+    // delta. P2c: absolute float is the ⌘-drag path.
     MouseEvent press;
     press.position = {before.x + 5, before.y + 5};
     press.is_down = true;
+    press.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(press));
     MouseEvent zero_drag = press;
     zero_drag.is_down = false;
+    zero_drag.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(zero_drag));
 
     root.layout_children();
@@ -2721,13 +2728,17 @@ TEST_CASE("InspectorOverlay P2: moving a child reflows its in-flow sibling",
     overlay.set_dragging_enabled(true);
     overlay.set_selected_view(a_ptr);
 
+    // P2c: absolute float (the path that pulls a OUT of flow) is the
+    // ⌘-drag escape hatch — hold Cmd so the sibling reflows.
     MouseEvent press;
     press.position = {a_ptr->bounds().x + 10, a_ptr->bounds().y + 10};
     press.is_down = true;
+    press.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(press));
     MouseEvent drag;
     drag.position = {press.position.x + 200, press.position.y + 60};
     drag.is_down = false;
+    drag.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(drag));
 
     root.layout_children();
@@ -2761,16 +2772,20 @@ TEST_CASE("InspectorOverlay P2: move is refused for a grid child",
     overlay.set_dragging_enabled(true);
     overlay.set_selected_view(cell_ptr);
 
-    // Body-press on the grid child: refused.
+    // ⌘-body-press on the grid child: absolute-float refused (grid children
+    // ignore position/top/left). P2c: only the float path is grid-guarded;
+    // plain reflow drag-out is allowed, so the refusal test holds Cmd.
     MouseEvent press;
     press.position = {40, 40};
     press.is_down = true;
+    press.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(press));  // consumed (so not a select)
 
     // A subsequent move event must NOT reposition or emit tweaks.
     MouseEvent drag;
     drag.position = {200, 200};
     drag.is_down = false;
+    drag.modifiers = kModCmd;
     overlay.handle_mouse_event(drag);
 
     REQUIRE(cell_ptr->position() != View::Position::absolute);
@@ -2836,9 +2851,12 @@ TEST_CASE("InspectorOverlay P2: a nested element can be moved",
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == nested_ptr);
 
+    // P2c: absolute float via ⌘-drag.
     MouseEvent press; press.position = {45, 38}; press.is_down = true;
+    press.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(press));
     MouseEvent drag; drag.position = {65, 58}; drag.is_down = false;
+    drag.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(drag));
 
     REQUIRE(nested_ptr->position() == View::Position::absolute);
@@ -2889,6 +2907,7 @@ TEST_CASE("InspectorOverlay P2: drag delta is in logical space under viewport sc
     MouseEvent press;
     press.position = to_logical(press_screen.x, press_screen.y);
     press.is_down = true;
+    press.modifiers = kModCmd;  // P2c: absolute float via ⌘-drag
     REQUIRE(overlay.handle_mouse_event(press));
 
     // Drag +100 SCREEN px in x, +60 SCREEN px in y → at scale 2.0 that is
@@ -2897,6 +2916,7 @@ TEST_CASE("InspectorOverlay P2: drag delta is in logical space under viewport sc
     MouseEvent drag;
     drag.position = to_logical(drag_screen.x, drag_screen.y);
     drag.is_down = false;
+    drag.modifiers = kModCmd;
     REQUIRE(overlay.handle_mouse_event(drag));
 
     auto left = store.lookup("anchor-scale", "layout.left");
@@ -3144,26 +3164,30 @@ TEST_CASE("InspectorOverlay P2a: move gesture undo reverts all 3 tweaks atomical
     overlay.handle_mouse_event(click);
     REQUIRE(overlay.selected_view() == child_ptr);
 
+    // P2c: absolute float (3 tweaks) is the ⌘-drag path.
     MouseEvent press;
     press.position = {before.x + 20, before.y + 20};
     press.is_down = true;
+    press.modifiers = kModCmd;
     overlay.handle_mouse_event(press);
 
     MouseEvent drag;
     drag.position = {press.position.x + 50, press.position.y + 30};
     drag.is_down = false;
+    drag.modifiers = kModCmd;
     overlay.handle_mouse_event(drag);
 
     MouseEvent release;
     release.position = {500, 350};
     release.is_down = true;
+    release.modifiers = kModCmd;
     overlay.handle_mouse_event(release);
 
     // After commit: converted to absolute, 3 tweaks, one undo entry.
     REQUIRE(child_ptr->position() == View::Position::absolute);
     REQUIRE(store.count() == 3);
     REQUIRE(history.undo_count() == 1);
-    REQUIRE(history.undo_description() == "move");
+    REQUIRE(history.undo_description() == "move-float");
 
     // ONE undo reverts ALL THREE move tweaks atomically AND restores the
     // pre-move View position.
@@ -3342,4 +3366,291 @@ TEST_CASE("InspectorOverlay P2a: tweak-panel delete is undoable",
     auto restored = store.lookup("figma:0:a", "layout.padding");
     REQUIRE(restored.has_value());
     REQUIRE(restored->getInt32() == 12);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// P2c — WYSIWYG "Figma feel" pivot
+//
+// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md § Refinement 2.
+//   - Reflow-aware MOVE is the DEFAULT body-drag (reorder among siblings /
+//     reparent into a container); ⌘-drag is the absolute-float escape hatch
+//     (covered by the P2 tests above, now Cmd-gated).
+//   - Proportional RESIZE via Shift + handle-drag (scales content).
+//   - Selection comes ONLY from the canvas; the floating window reflects.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Reflow reorder: a plain (no-modifier) body-drag of a flex child past a
+// sibling's midpoint rewrites flex().order so the dragged child re-sequences,
+// WITHOUT converting to absolute. Asserts the resolved child order changed and
+// the gesture is undoable.
+TEST_CASE("InspectorOverlay P2c: reflow drag reorders flex siblings via order",
+          "[inspect][overlay][p2c][reflow][move][issue-wysiwyg-p2c]") {
+    View root;
+    root.set_bounds({0, 0, 600, 200});
+    root.flex().direction = FlexDirection::row;
+
+    auto a = std::make_unique<View>();
+    a->set_anchor_id("anchor-a");
+    a->flex().preferred_width = 100;
+    a->flex().preferred_height = 50;
+    auto* a_ptr = a.get();
+    root.add_child(std::move(a));
+
+    auto b = std::make_unique<View>();
+    b->set_anchor_id("anchor-b");
+    b->flex().preferred_width = 100;
+    b->flex().preferred_height = 50;
+    auto* b_ptr = b.get();
+    root.add_child(std::move(b));
+
+    auto c = std::make_unique<View>();
+    c->set_anchor_id("anchor-c");
+    c->flex().preferred_width = 100;
+    c->flex().preferred_height = 50;
+    auto* c_ptr = c.get();
+    root.add_child(std::move(c));
+    root.layout_children();
+
+    // Initial visual x-order: a < b < c.
+    REQUIRE(a_ptr->bounds().x < b_ptr->bounds().x);
+    REQUIRE(b_ptr->bounds().x < c_ptr->bounds().x);
+
+    TweakStore store;
+    pulp::state::EditHistory history;
+    history.set_coalesce(false);
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_edit_history(&history);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(a_ptr);
+
+    const int a_order_before = a_ptr->flex().order;
+
+    // PLAIN body-press on a (no Cmd) → reflow-aware move.
+    MouseEvent press;
+    press.position = {a_ptr->bounds().x + 10, a_ptr->bounds().y + 10};
+    press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    // Drag the cursor past c's midpoint (far right) so a should drop last.
+    MouseEvent drag;
+    drag.position = {c_ptr->bounds().x + c_ptr->bounds().width - 5,
+                     c_ptr->bounds().y + 10};
+    drag.is_down = false;
+    REQUIRE(overlay.handle_mouse_event(drag));
+
+    // a stays in flow (NOT converted to absolute) — reflow, not float.
+    REQUIRE(a_ptr->position() != View::Position::absolute);
+
+    // Release commits the reorder.
+    MouseEvent release;
+    release.position = drag.position;
+    release.is_down = true;
+    overlay.handle_mouse_event(release);
+
+    root.layout_children();
+    // a's order changed AND it now sorts to the end (largest order).
+    REQUIRE(a_ptr->flex().order != a_order_before);
+    REQUIRE(a_ptr->flex().order > b_ptr->flex().order);
+    REQUIRE(a_ptr->flex().order > c_ptr->flex().order);
+    // Visually a is now last in the row.
+    REQUIRE(a_ptr->bounds().x > b_ptr->bounds().x);
+    REQUIRE(a_ptr->bounds().x > c_ptr->bounds().x);
+
+    // One undoable unit; undo restores the original order.
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(history.undo_description() == "move-reflow");
+    REQUIRE(history.undo());
+    REQUIRE(a_ptr->flex().order == a_order_before);
+    root.layout_children();
+    REQUIRE(a_ptr->bounds().x < b_ptr->bounds().x);
+}
+
+// Reflow reparent: a plain body-drag of a node whose cursor ends INSIDE a
+// different container reparents the node into that container, and undo
+// restores the original parent.
+TEST_CASE("InspectorOverlay P2c: reflow drag reparents a node into another "
+          "container, undo restores parent",
+          "[inspect][overlay][p2c][reflow][reparent][move][issue-wysiwyg-p2c]") {
+    View root;
+    root.set_bounds({0, 0, 600, 300});
+    root.flex().direction = FlexDirection::row;
+
+    // Two side-by-side flex containers.
+    auto left = std::make_unique<View>();
+    left->set_anchor_id("anchor-left");
+    left->flex().direction = FlexDirection::column;
+    left->flex().preferred_width = 300;
+    left->flex().preferred_height = 300;
+    auto* left_ptr = left.get();
+
+    auto moving = std::make_unique<View>();
+    moving->set_anchor_id("anchor-moving");
+    moving->flex().preferred_width = 80;
+    moving->flex().preferred_height = 40;
+    auto* moving_ptr = moving.get();
+    left->add_child(std::move(moving));
+    root.add_child(std::move(left));
+
+    auto right = std::make_unique<View>();
+    right->set_anchor_id("anchor-right");
+    right->flex().direction = FlexDirection::column;
+    right->flex().preferred_width = 300;
+    right->flex().preferred_height = 300;
+    auto* right_ptr = right.get();
+    root.add_child(std::move(right));
+    root.layout_children();
+
+    REQUIRE(moving_ptr->parent() == left_ptr);
+
+    TweakStore store;
+    pulp::state::EditHistory history;
+    history.set_coalesce(false);
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_edit_history(&history);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(moving_ptr);
+
+    // Plain body-press on the moving node.
+    const Rect mb = moving_ptr->bounds();  // parent-space, but left is at x=0
+    MouseEvent press;
+    press.position = {mb.x + 10, mb.y + 10};
+    press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    // Drag the cursor into the RIGHT container's interior (it's empty, so the
+    // drop resolves as drop-inside the right container).
+    const Rect rb = right_ptr->bounds();
+    MouseEvent drag;
+    drag.position = {rb.x + rb.width * 0.5f, rb.y + rb.height * 0.5f};
+    drag.is_down = false;
+    REQUIRE(overlay.handle_mouse_event(drag));
+
+    MouseEvent release;
+    release.position = drag.position;
+    release.is_down = true;
+    overlay.handle_mouse_event(release);
+
+    // Reparented into the right container.
+    REQUIRE(moving_ptr->parent() == right_ptr);
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(history.undo_description() == "move-reflow");
+
+    // Undo restores the original parent.
+    REQUIRE(history.undo());
+    REQUIRE(moving_ptr->parent() == left_ptr);
+
+    // Redo reparents again.
+    REQUIRE(history.redo());
+    REQUIRE(moving_ptr->parent() == right_ptr);
+}
+
+// Proportional resize: Shift + corner-handle drag SCALES the container's
+// content (View::set_scale) rather than just stretching the box, and the
+// scale is undoable.
+TEST_CASE("InspectorOverlay P2c: Shift + handle drag scales content proportionally",
+          "[inspect][overlay][p2c][resize][proportional][issue-wysiwyg-p2c]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("anchor-scale");
+    child->set_bounds({10, 10, 80, 40});
+    child->flex().preferred_width = 80;
+    child->flex().preferred_height = 40;
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    REQUIRE(child_ptr->scale() == 1.0f);
+
+    TweakStore store;
+    pulp::state::EditHistory history;
+    history.set_coalesce(false);
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_edit_history(&history);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(child_ptr);
+
+    // SHIFT + press on the SE handle (corner at 90,50).
+    MouseEvent press;
+    press.position = {90, 50};
+    press.is_down = true;
+    press.modifiers = kModShift;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    // Drag the SE corner out by +80/+40 (doubles the box) with Shift held.
+    MouseEvent drag;
+    drag.position = {170, 90};
+    drag.is_down = false;
+    drag.modifiers = kModShift;
+    REQUIRE(overlay.handle_mouse_event(drag));
+
+    // The content scale grew (proportional), not just the box.
+    REQUIRE(child_ptr->scale() > 1.0f);
+    // A transform.scale tweak landed.
+    REQUIRE(store.lookup("anchor-scale", "transform.scale").has_value());
+
+    MouseEvent release;
+    release.position = {300, 300};
+    release.is_down = true;
+    overlay.handle_mouse_event(release);
+
+    const float scaled = child_ptr->scale();
+    REQUIRE(scaled > 1.0f);
+    REQUIRE(history.undo_count() == 1);
+
+    // Undo restores the original scale (1.0).
+    REQUIRE(history.undo());
+    REQUIRE(child_ptr->scale() == Catch::Approx(1.0f));
+
+    // Redo re-applies the proportional scale.
+    REQUIRE(history.redo());
+    REQUIRE(child_ptr->scale() == Catch::Approx(scaled));
+}
+
+// Selection comes ONLY from the canvas: in the floating window's read-only
+// mode a tree-row "click" (firing the tree's on_select) shows the node's
+// properties but does NOT change the shared selection and does NOT fire
+// on_view_selected. reflect_selection() is the one-way mirror that never
+// loops back.
+TEST_CASE("InspectorOverlay P2c: tree click in read-only window does not drive "
+          "selection",
+          "[inspect][window][p2c][decouple][issue-wysiwyg-p2c]") {
+    View inspected_root;
+    inspected_root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_id("decouple-child");
+    auto* child_ptr = child.get();
+    inspected_root.add_child(std::move(child));
+
+    InspectorWindow window(inspected_root);
+    window.set_selection_readonly(true);
+    REQUIRE(window.selection_readonly());
+
+    bool callback_fired = false;
+    window.on_view_selected = [&](View*) { callback_fired = true; };
+
+    // Find the tree and the child's node.
+    auto* tabs = dynamic_cast<TabPanel*>(window.child_at(0));
+    REQUIRE(tabs != nullptr);
+    auto* tree = first_view_of_type<TreeView>(*tabs->child_at(0));
+    REQUIRE(tree != nullptr);
+    auto* node = tree->find_node_by_user_data(child_ptr);
+    REQUIRE(node != nullptr);
+
+    // Simulate a tree-row click by firing on_select (the path the TreeView
+    // invokes on a real click). In read-only mode this must NOT fire
+    // on_view_selected.
+    REQUIRE(tree->on_select);
+    tree->on_select(*node);
+    REQUIRE_FALSE(callback_fired);
+
+    // reflect_selection (the one-way canvas → window mirror) also never fires
+    // the callback.
+    window.reflect_selection(child_ptr);
+    REQUIRE_FALSE(callback_fired);
 }

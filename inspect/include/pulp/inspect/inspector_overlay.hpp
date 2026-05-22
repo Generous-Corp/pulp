@@ -699,6 +699,8 @@ private:
         DimensionUnit top_unit = DimensionUnit::px;
         bool has_left = false;
         bool has_top = false;
+        // P2c — content scale (proportional resize via View::set_scale()).
+        float scale = 1.0f;
         // Resolved bounds at capture (so undo restores the local paint box
         // before Yoga's next layout pass overwrites it).
         Rect bounds{};
@@ -795,6 +797,18 @@ private:
     float drag_start_pref_w_ = 0.0f; // flex().preferred_width snapshot
     float drag_start_pref_h_ = 0.0f; // flex().preferred_height snapshot
 
+    // ── P2c — proportional (Shift) resize ───────────────────────────
+    //
+    // (planning/2026-05-21 § R2.3.) Plain corner-drag resizes the box
+    // (children reflow). Shift + corner-drag SCALES the container's
+    // CONTENT proportionally — a uniform View::set_scale() on the
+    // selected view tied to the box delta, so the panel keeps its
+    // internal proportions instead of just stretching the box. We track
+    // whether the active resize is proportional and the content scale at
+    // gesture start so undo restores it exactly.
+    bool resize_proportional_ = false;   // Shift held when this resize began
+    float drag_start_scale_ = 1.0f;      // selected_->scale() at gesture start
+
     // Returns the corner whose 8px handle hit-rectangle contains `pos`,
     // for the currently-selected view (root coords). Returns
     // DragCorner::none if no handle is hit or no view selected.
@@ -821,6 +835,59 @@ private:
     Point move_start_pos_{};              // mouse pos when move began (root coords)
     float move_seed_left_ = 0.0f;         // seeded left at conversion (no delta)
     float move_seed_top_ = 0.0f;          // seeded top at conversion (no delta)
+
+    // ── P2c — reflow-aware move (Figma feel) ────────────────────────
+    //
+    // (planning/2026-05-21 § Refinement 2.) The DEFAULT body-drag is now
+    // REFLOW-AWARE, not free-absolute: during the drag we resolve a drop
+    // target (an insertion point between flex siblings, or a container to
+    // drop INTO) and on release we reorder via flex().order and/or
+    // reparent via remove_child/add_child, then the tree reflows. The
+    // free-absolute float (position:absolute + left/top) is the explicit
+    // ⌘-drag escape hatch.
+    //
+    // move_float_ is true for a ⌘-drag (absolute float). When false, the
+    // gesture is reflow-aware and the drop-target fields below describe
+    // where a release would land.
+    bool move_float_ = false;
+
+    // The container the cursor is currently over for a reflow drop, and
+    // the insertion index among that container's children (0..count).
+    // When drop_inside_ is true the element reparents INTO drop_target_
+    // (appended / inserted at drop_index_); when false it reorders among
+    // drop_target_'s existing children at drop_index_. null target = no
+    // valid drop resolved this tick (release is a no-op reflow).
+    View* drop_target_ = nullptr;
+    int drop_index_ = 0;
+    bool drop_inside_ = false;
+    // Geometry of the drop affordance in root coords, computed each move
+    // tick for paint(): an insertion LINE (zero-area rect along an edge)
+    // when reordering, or a container HIGHLIGHT rect when dropping inside.
+    Rect drop_indicator_{};
+    bool drop_indicator_is_line_ = false;
+
+    // Resolve the drop target for the current cursor position during a
+    // reflow move. Walks the tree for the deepest flex container under
+    // the cursor (excluding the dragged subtree), picks an insertion gap
+    // among its children by the cursor's main-axis position, and fills
+    // drop_target_ / drop_index_ / drop_inside_ / drop_indicator_*.
+    void resolve_drop_target(Point pos);
+    // Commit the resolved reflow drop: reorder (rewrite flex().order) or
+    // reparent (remove_child + add_child at drop_index_). Returns true if
+    // the tree actually changed. Normalizes sibling order on success.
+    bool commit_reflow_drop(View* dragged);
+    // True if `ancestor` is `v` or an ancestor of `v` — guards against
+    // dropping a node into its own subtree.
+    static bool is_self_or_ancestor(const View* ancestor, const View* v);
+
+    // Structural primitive: detach `v` from its current parent and insert
+    // it into `new_parent` at child index `index` (clamped). When the view
+    // is already a child of new_parent the index is honored (reorder by
+    // insertion position). No-op when v / new_parent is null. Used by the
+    // reflow commit and by undo/redo to round-trip a reparent. Updates
+    // selected_ to keep pointing at the moved view (its address is stable —
+    // ownership transfers via unique_ptr, the View itself is not copied).
+    void reparent_view(View* v, View* new_parent, int index);
 
     // True if `pos` (root coords) is inside the selected view's body but
     // NOT on a resize handle — the body-drag trigger for a move.
@@ -898,6 +965,11 @@ private:
 
     // ── Paint helpers ───────────────────────────────────────────────
     void paint_highlight(Canvas& canvas);
+    // P2c — paint the reflow-move drop affordance: a blue insertion line
+    // between siblings (reorder) or a translucent container highlight
+    // (drop-inside). No-op when no reflow move is in progress / no drop
+    // target resolved.
+    void paint_drop_indicator(Canvas& canvas);
     void paint_distance_lines(Canvas& canvas);
     void paint_box_model(Canvas& canvas, const View* v);
     void paint_panel(Canvas& canvas);

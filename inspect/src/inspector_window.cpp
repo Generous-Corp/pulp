@@ -206,7 +206,17 @@ std::unique_ptr<View> InspectorWindow::build_elements_tab() {
     tree->set_background_color(kBgPanel);
     tree->on_select = [this](TreeNode& node) {
         if (node.user_data) {
-            selected_view_ = static_cast<View*>(node.user_data);
+            View* picked = static_cast<View*>(node.user_data);
+            // WYSIWYG decoupling: in read-only mode a tree click only
+            // shows that node's properties — it must NOT change the shared
+            // selection or fire on_view_selected, so the in-canvas overlay
+            // stays the single selection source (maintainer: "we don't
+            // want to select items in the inspector ever").
+            if (selection_readonly_) {
+                show_properties_for(picked);
+                return;
+            }
+            selected_view_ = picked;
             show_properties_for(selected_view_);
             if (on_view_selected) on_view_selected(selected_view_);
         }
@@ -569,6 +579,13 @@ void InspectorWindow::populate_tree_from_view(TreeNode& parent, View* view) {
 void InspectorWindow::select_view(View* view) {
     show_properties_for(view);
     if (on_view_selected) on_view_selected(view);
+}
+
+void InspectorWindow::reflect_selection(View* view) {
+    // One-way mirror from the canvas: track + display the node read-only,
+    // never fire on_view_selected (no feedback loop into the canvas).
+    selected_view_ = view;
+    show_properties_for(view);
 }
 
 void InspectorWindow::show_properties_for(View* view) {

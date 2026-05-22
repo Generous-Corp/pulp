@@ -265,6 +265,7 @@ InspectorOverlay::snapshot_layout(const View* v) const {
     s.top_unit = v->top_unit();
     s.has_left = v->has_left();
     s.has_top = v->has_top();
+    s.scale = v->scale();
     s.bounds = v->bounds();
     return s;
 }
@@ -285,6 +286,8 @@ void InspectorOverlay::restore_layout(View* v, const LayoutSnapshot& s) const {
     v->set_position(s.position);
     v->set_left(s.left, s.left_unit);
     v->set_top(s.top, s.top_unit);
+    // P2c — restore proportional-resize content scale.
+    v->set_scale(s.scale);
     v->set_bounds(s.bounds);
     v->invalidate_layout();
 }
@@ -531,6 +534,200 @@ void InspectorOverlay::seed_move_origin(const View* v) {
                     - child_margin_left;
     move_seed_top_ = child_root.y - block_root.y - block_border_top
                    - child_margin_top;
+}
+
+// ── P2c — reflow-aware move (drop-target resolution + commit) ───────────────
+
+bool InspectorOverlay::is_self_or_ancestor(const View* ancestor,
+                                           const View* v) {
+    for (const View* cur = v; cur; cur = cur->parent())
+        if (cur == ancestor) return true;
+    return false;
+}
+
+void InspectorOverlay::reparent_view(View* v, View* new_parent, int index) {
+    if (!v || !new_parent) return;
+    View* old_parent = v->parent();
+    if (old_parent == new_parent) {
+        // Same-parent reorder is expressed via flex().order by the caller;
+        // the children_ vector index isn't load-bearing for visual order
+        // (layout sorts by order). Nothing structural to do here.
+        return;
+    }
+    std::unique_ptr<View> owned;
+    if (old_parent) {
+        owned = old_parent->remove_child(v);
+    }
+    if (!owned) {
+        // v had no parent (or removal failed) — can't reparent safely.
+        return;
+    }
+    new_parent->add_child(std::move(owned));
+    // add_child appends; visual position within new_parent is controlled by
+    // flex().order, which the caller sets. `index` is advisory for future
+    // exact-index insertion (View has no insert-at-index API today).
+    (void)index;
+    if (old_parent) old_parent->invalidate_layout();
+    new_parent->invalidate_layout();
+}
+
+void InspectorOverlay::resolve_drop_target(Point pos) {
+    drop_target_ = nullptr;
+    drop_index_ = 0;
+    drop_inside_ = false;
+    drop_indicator_ = {};
+    drop_indicator_is_line_ = false;
+    if (!selected_) return;
+
+    // Find the deepest flex CONTAINER under the cursor that is NOT inside the
+    // dragged subtree and is NOT a grid. A "container" must have at least one
+    // child OR be a node the cursor is directly over with room to drop into;
+    // a childless LEAF that happens to be under the cursor is treated as a
+    // sibling — we drop NEXT TO it (its parent becomes the container), not
+    // INTO it. This makes "drag a over c" a reorder within their shared
+    // parent, while "drag a into an empty panel" reparents.
+    std::function<View*(View*)> deepest_container = [&](View* v) -> View* {
+        if (!v) return nullptr;
+        const Rect r = view_bounds_in_root(v);
+        const bool inside = pos.x >= r.x && pos.x <= r.x + r.width &&
+                            pos.y >= r.y && pos.y <= r.y + r.height;
+        if (!inside) return nullptr;
+        // Recurse into children first for the deepest hit.
+        for (size_t i = 0; i < v->child_count(); ++i) {
+            if (View* hit = deepest_container(v->child_at(i))) return hit;
+        }
+        // v itself qualifies as a container only if it's not the dragged
+        // subtree and not a grid. A childless leaf qualifies ONLY as a
+        // drop-inside target when it isn't a sibling of the dragged node
+        // (i.e. dropping into a different empty container). If v is a leaf
+        // that shares the dragged node's parent, it's a sibling → don't
+        // descend onto it; let the parent be the reorder container.
+        if (is_self_or_ancestor(selected_, v)) return nullptr;
+        if (v->layout_mode() == LayoutMode::grid) return nullptr;
+        const bool is_sibling = (v->parent() == selected_->parent());
+        if (v->child_count() == 0 && is_sibling) return nullptr;
+        return v;
+    };
+
+    View* container = deepest_container(&root_);
+    if (!container) return;
+
+    // The dragged element's current parent — used to distinguish a same-
+    // parent REORDER from a cross-parent REPARENT (drop INSIDE).
+    View* dragged_parent = selected_->parent();
+    drop_target_ = container;
+    drop_inside_ = (container != dragged_parent);
+
+    // Resolve an insertion index among the container's *visible* children
+    // (excluding the dragged element itself) by the cursor's main-axis
+    // position. We use the flex main axis: row/row-reverse → x, else y.
+    const bool horizontal =
+        container->flex().direction == FlexDirection::row ||
+        container->flex().direction == FlexDirection::row_reverse;
+
+    struct Slot { View* child; float mid; Rect bounds; };
+    std::vector<Slot> slots;
+    for (size_t i = 0; i < container->child_count(); ++i) {
+        View* c = container->child_at(i);
+        if (c == selected_) continue;  // ignore the dragged node
+        if (!c->visible()) continue;
+        Rect b = view_bounds_in_root(c);
+        float mid = horizontal ? (b.x + b.width * 0.5f)
+                               : (b.y + b.height * 0.5f);
+        slots.push_back({c, mid, b});
+    }
+
+    // Index = count of siblings whose midpoint is before the cursor.
+    int idx = 0;
+    const float cursor_main = horizontal ? pos.x : pos.y;
+    for (const auto& s : slots) {
+        if (cursor_main > s.mid) idx++;
+    }
+    drop_index_ = idx;
+
+    // Build the paint affordance:
+    //  - REORDER (same parent, has siblings): blue insertion LINE at the gap.
+    //  - DROP-INSIDE (different parent) OR empty container: container HIGHLIGHT.
+    const Rect cr = view_bounds_in_root(container);
+    if (!drop_inside_ && !slots.empty()) {
+        // Insertion line between siblings idx-1 and idx.
+        drop_indicator_is_line_ = true;
+        if (horizontal) {
+            float line_x;
+            if (idx <= 0) line_x = slots.front().bounds.x;
+            else if (idx >= static_cast<int>(slots.size()))
+                line_x = slots.back().bounds.x + slots.back().bounds.width;
+            else line_x = slots[idx].bounds.x;
+            drop_indicator_ = {line_x - 1.0f, cr.y, 2.0f, cr.height};
+        } else {
+            float line_y;
+            if (idx <= 0) line_y = slots.front().bounds.y;
+            else if (idx >= static_cast<int>(slots.size()))
+                line_y = slots.back().bounds.y + slots.back().bounds.height;
+            else line_y = slots[idx].bounds.y;
+            drop_indicator_ = {cr.x, line_y - 1.0f, cr.width, 2.0f};
+        }
+    } else {
+        // Container highlight (drop-inside / empty container).
+        drop_indicator_is_line_ = false;
+        drop_indicator_ = cr;
+    }
+}
+
+bool InspectorOverlay::commit_reflow_drop(View* dragged) {
+    if (!dragged || !drop_target_) return false;
+    View* target = drop_target_;
+    View* old_parent = dragged->parent();
+
+    // Guard: never drop a node into its own subtree.
+    if (is_self_or_ancestor(dragged, target)) return false;
+
+    bool changed = false;
+    if (target != old_parent) {
+        // REPARENT (drop INSIDE another container) — structural edit.
+        reparent_view(dragged, target, drop_index_);
+        changed = true;
+    }
+
+    // (Re)assign flex().order across the target's children so the dragged
+    // node lands at drop_index_. We rebuild a clean 0..N-1 order sequence
+    // (normalize) with the dragged node inserted at drop_index_, preserving
+    // the relative order of the others.
+    std::vector<View*> others;
+    for (size_t i = 0; i < target->child_count(); ++i) {
+        View* c = target->child_at(i);
+        if (c == dragged) continue;
+        if (!c->visible()) continue;
+        others.push_back(c);
+    }
+    // stable order: sort others by their current flex().order to preserve
+    // the visual sequence the user sees.
+    std::stable_sort(others.begin(), others.end(),
+        [](View* a, View* b) { return a->flex().order < b->flex().order; });
+
+    int insert_at = std::clamp(drop_index_, 0,
+                               static_cast<int>(others.size()));
+    int next_order = 0;
+    int assigned = 0;
+    for (int i = 0; i <= static_cast<int>(others.size()); ++i) {
+        if (i == insert_at) {
+            int new_order = next_order++;
+            if (dragged->flex().order != new_order) {
+                dragged->flex().order = new_order;
+                changed = true;
+            }
+            assigned++;
+        }
+        if (i < static_cast<int>(others.size())) {
+            others[i]->flex().order = next_order++;
+        }
+    }
+    (void)assigned;
+
+    target->invalidate_layout();
+    if (old_parent && old_parent != target) old_parent->invalidate_layout();
+    dragged->invalidate_layout();
+    return changed;
 }
 
 bool InspectorOverlay::select_parent() {
@@ -830,7 +1027,8 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 std::vector<PriorTweak> before_tweaks = resize_before_tweaks_;
                 LayoutSnapshot after = snapshot_layout(tgt);
                 std::vector<PriorTweak> after_tweaks =
-                    snapshot_tweaks(anchor, {"layout.width", "layout.height"});
+                    snapshot_tweaks(anchor, {"layout.width", "layout.height",
+                                             "transform.scale"});
                 auto* self = this;
                 edit_history_->perform(
                     [self, tgt, anchor, after, after_tweaks]() {
@@ -865,8 +1063,53 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             new_w = std::max(4.0f, new_w);
             new_h = std::max(4.0f, new_h);
 
-            // Mutate Yoga inputs (NOT View::set_bounds — Yoga
-            // overwrites resolved bounds on next layout pass).
+            if (resize_proportional_) {
+                // P2c — PROPORTIONAL resize (Shift). Instead of stretching
+                // the box, SCALE the container's content uniformly so the
+                // panel keeps its internal proportions. The scale factor is
+                // the box-size ratio along the larger-magnitude axis,
+                // anchored at the gesture-start scale. The box itself still
+                // grows (preferred_*) so the scaled content has room; the
+                // uniform set_scale() keeps children's relative layout. We
+                // pick the ratio from whichever axis the start box was
+                // larger in, so a corner drag scales coherently.
+                const float w0 = std::max(1.0f, drag_start_bounds_.width);
+                const float h0 = std::max(1.0f, drag_start_bounds_.height);
+                const float ratio_w = new_w / w0;
+                const float ratio_h = new_h / h0;
+                // Uniform scale: average the two axis ratios so a diagonal
+                // drag scales smoothly, then clamp to a sane range.
+                float ratio = 0.5f * (ratio_w + ratio_h);
+                float new_scale = std::clamp(drag_start_scale_ * ratio,
+                                             0.1f, 10.0f);
+                selected_->set_scale(new_scale);
+                // Grow the box to match so the scaled content isn't clipped.
+                auto& f = selected_->flex();
+                f.preferred_width = new_w;
+                f.preferred_height = new_h;
+                f.dim_width = {new_w, DimensionUnit::px};
+                f.dim_height = {new_h, DimensionUnit::px};
+                auto b = selected_->bounds();
+                b.width = new_w;
+                b.height = new_h;
+                selected_->set_bounds(b);
+                selected_->invalidate_layout();
+
+                // Emit the box-size + scale tweaks every tick (overwrite).
+                emit_tweak_for_selection(
+                    "layout.width", choc::value::createFloat32(new_w),
+                    "inspector-drag-handle");
+                emit_tweak_for_selection(
+                    "layout.height", choc::value::createFloat32(new_h),
+                    "inspector-drag-handle");
+                emit_tweak_for_selection(
+                    "transform.scale", choc::value::createFloat32(new_scale),
+                    "inspector-drag-handle");
+                return true;
+            }
+
+            // Plain box resize: mutate Yoga inputs (NOT View::set_bounds —
+            // Yoga overwrites resolved bounds on next layout pass).
             // preferred_* are the input fields Yoga reads;
             // dim_* keeps the px-unit metadata.
             auto& f = selected_->flex();
@@ -907,6 +1150,10 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             drag_start_bounds_ = view_bounds_in_root(selected_);
             drag_start_pref_w_ = selected_->flex().preferred_width;
             drag_start_pref_h_ = selected_->flex().preferred_height;
+            // P2c — Shift at press chooses PROPORTIONAL resize (scale the
+            // container's content) over plain box resize (reflow children).
+            resize_proportional_ = event.isShiftDown();
+            drag_start_scale_ = selected_->scale();
             // P2a: capture the pre-resize View inputs + prior tweak values
             // so the commit (release) can push ONE undoable EditHistory
             // entry. No-op cost when edit_history_ is null — the captures
@@ -915,7 +1162,8 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             resize_before_layout_ = snapshot_layout(selected_);
             resize_before_tweaks_ =
                 snapshot_tweaks(resize_anchor_, {"layout.width",
-                                                 "layout.height"});
+                                                 "layout.height",
+                                                 "transform.scale"});
             return true;  // consume the press; subsequent moves are ours
         }
     }
@@ -928,41 +1176,94 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // this branch even if the cursor briefly enters the panel.
     if (move_active_ && selected_) {
         if (event.is_down) {
-            // Release: end the move. Don't consume — let the click fall
-            // through to normal selection so the user can re-target.
+            // Release: end the move.
             move_active_ = false;
 
-            // P2a: commit the completed move as ONE undoable unit. Like
-            // the resize commit, the live view + the three move tweaks are
-            // already at their final state, so snapshot the AFTER-state for
-            // an idempotent do_fn and pair it with the BEFORE-state from
-            // gesture start. One undo reverts all three move tweaks
-            // atomically (restore_tweaks restores/removes each in turn).
-            if (edit_history_ && selected_) {
+            if (move_float_) {
+                // ── ⌘-drag: ABSOLUTE FLOAT (escape hatch) ──────────────
+                // The live view + the three move tweaks are already at
+                // their final state from the last move tick. Commit ONE
+                // undoable unit: AFTER-state do_fn vs BEFORE-state undo_fn.
+                if (edit_history_ && selected_) {
+                    View* tgt = selected_;
+                    const std::string anchor = move_anchor_;
+                    LayoutSnapshot before = move_before_layout_;
+                    std::vector<PriorTweak> before_tweaks = move_before_tweaks_;
+                    LayoutSnapshot after = snapshot_layout(tgt);
+                    std::vector<PriorTweak> after_tweaks = snapshot_tweaks(
+                        anchor,
+                        {"layout.position", "layout.left", "layout.top"});
+                    auto* self = this;
+                    edit_history_->perform(
+                        [self, tgt, anchor, after, after_tweaks]() {
+                            self->restore_layout(tgt, after);
+                            self->restore_tweaks(anchor, after_tweaks,
+                                                 "inspector-drag-move");
+                        },
+                        [self, tgt, anchor, before, before_tweaks]() {
+                            self->restore_layout(tgt, before);
+                            self->restore_tweaks(anchor, before_tweaks,
+                                                 "inspector-undo");
+                        },
+                        "move-float");
+                }
+            } else {
+                // ── plain drag: REFLOW-AWARE (reorder / reparent) ──────
+                // Commit the resolved drop. This is a STRUCTURAL/order edit
+                // (the tree changes or flex().order rewrites), so the undo
+                // entry must restore the original parent + child index +
+                // order, not a style tweak. We capture the tree state on
+                // both sides so undo/redo round-trips.
                 View* tgt = selected_;
-                const std::string anchor = move_anchor_;
-                LayoutSnapshot before = move_before_layout_;
-                std::vector<PriorTweak> before_tweaks = move_before_tweaks_;
-                LayoutSnapshot after = snapshot_layout(tgt);
-                std::vector<PriorTweak> after_tweaks = snapshot_tweaks(
-                    anchor,
-                    {"layout.position", "layout.left", "layout.top"});
-                auto* self = this;
-                edit_history_->perform(
-                    [self, tgt, anchor, after, after_tweaks]() {
-                        self->restore_layout(tgt, after);
-                        self->restore_tweaks(anchor, after_tweaks,
-                                             "inspector-drag-move");
-                    },
-                    [self, tgt, anchor, before, before_tweaks]() {
-                        self->restore_layout(tgt, before);
-                        self->restore_tweaks(anchor, before_tweaks,
-                                             "inspector-undo");
-                    },
-                    "move");
+                View* before_parent = tgt->parent();
+                int before_index = -1;
+                int before_order = tgt->flex().order;
+                if (before_parent) {
+                    for (size_t i = 0; i < before_parent->child_count(); ++i)
+                        if (before_parent->child_at(i) == tgt) {
+                            before_index = static_cast<int>(i);
+                            break;
+                        }
+                }
+                bool changed = commit_reflow_drop(tgt);
+                if (changed && edit_history_ && before_parent) {
+                    View* after_parent = tgt->parent();
+                    int after_index = -1;
+                    int after_order = tgt->flex().order;
+                    if (after_parent) {
+                        for (size_t i = 0; i < after_parent->child_count(); ++i)
+                            if (after_parent->child_at(i) == tgt) {
+                                after_index = static_cast<int>(i);
+                                break;
+                            }
+                    }
+                    auto* self = this;
+                    // do_fn re-applies the AFTER tree state; undo_fn restores
+                    // BEFORE. reparent_to is the structural primitive (no-op
+                    // when parent unchanged), order is rewritten directly.
+                    edit_history_->perform(
+                        [self, tgt, after_parent, after_index, after_order]() {
+                            self->reparent_view(tgt, after_parent, after_index);
+                            tgt->flex().order = after_order;
+                            if (after_parent) after_parent->invalidate_layout();
+                            tgt->invalidate_layout();
+                        },
+                        [self, tgt, before_parent, before_index, before_order]() {
+                            self->reparent_view(tgt, before_parent,
+                                                before_index);
+                            tgt->flex().order = before_order;
+                            if (before_parent) before_parent->invalidate_layout();
+                            tgt->invalidate_layout();
+                        },
+                        "move-reflow");
+                }
             }
+            // Clear drop affordance after a completed gesture.
+            drop_target_ = nullptr;
+            drop_indicator_ = {};
             // fall through to the normal handlers below
-        } else {
+        } else if (move_float_) {
+            // ── ⌘-drag move tick: absolute float ──────────────────────
             float dx = pos.x - move_start_pos_.x;
             float dy = pos.y - move_start_pos_.y;
             float new_left = move_seed_left_ + dx;
@@ -974,12 +1275,6 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             selected_->set_position(View::Position::absolute);
             selected_->set_left(new_left);
             selected_->set_top(new_top);
-            // Update bounds locally so paint_highlight + hit-test see the
-            // new origin before the next layout pass. bounds() is in the
-            // parent's coordinate space, so offset by the containing
-            // block's origin within the parent is unnecessary here for a
-            // first-cut visual nudge; the authoritative position comes
-            // from Yoga next layout pass.
             auto b = selected_->bounds();
             b.x = new_left;
             b.y = new_top;
@@ -1002,6 +1297,15 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                                                  "inspector-drag-move");
             }
             return true;  // consume the move event
+        } else {
+            // ── plain move tick: REFLOW-AWARE drop-target resolution ───
+            // We don't mutate the layout while dragging — instead we resolve
+            // a drop target and update the paint affordance (insertion line /
+            // container highlight). The actual reorder/reparent happens on
+            // release (commit_reflow_drop). This keeps the dragged element
+            // visually in place and the rest of the tree stable until commit.
+            resolve_drop_target(pos);
+            return true;  // consume the move event
         }
     }
 
@@ -1012,15 +1316,26 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // affordance instead of a silently-broken drag.
     if (event.is_down && active_drag_ == DragCorner::none && !move_active_ &&
         selected_ && hit_test_body(pos)) {
-        if (selected_parent_is_grid()) {
-            // Grid guard: refuse the move. Record the refusal so paint()
-            // can surface a clear "can't move grid child" affordance, and
+        // P2c — the modifier picks the move MODE:
+        //   plain drag  → REFLOW-AWARE (reorder among siblings / reparent)
+        //   ⌘-drag      → ABSOLUTE FLOAT (position:absolute + left/top)
+        // The grid guard only applies to the float path: a grid child can't
+        // take absolute insets. Reflow (reorder/reparent) is fine for a grid
+        // child being dragged OUT into a flex container, but reordering a
+        // grid cell in place is ignored by layout_grid — so we still refuse a
+        // reflow whose drop target is the same grid parent (handled at commit
+        // by resolve_drop_target excluding grid containers as drop targets).
+        move_float_ = event.isCmdDown();
+        if (move_float_ && selected_parent_is_grid()) {
+            // Grid guard (float only): refuse. Record the refusal so paint()
+            // can surface a clear "can't float grid child" affordance, and
             // log once so a dev sees why the drag did nothing.
             if (!move_refused_grid_) {
                 pulp::runtime::log_warn(
-                    "inspector: move refused - selected view's parent is a "
-                    "grid container; grid children ignore position/top/left "
-                    "(move a flex child or reposition the grid cell instead)");
+                    "inspector: absolute-float refused - selected view's "
+                    "parent is a grid container; grid children ignore "
+                    "position/top/left (drag without Cmd to reflow it into a "
+                    "flex container instead)");
             }
             move_refused_grid_ = true;
             return true;  // consume so the press isn't misread as a select
@@ -1028,16 +1343,20 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         move_refused_grid_ = false;
         move_active_ = true;
         move_start_pos_ = pos;
+        drop_target_ = nullptr;
+        drop_indicator_ = {};
         // P2a: capture pre-move View inputs (position + insets + bounds)
         // and prior values of the three move tweaks BEFORE seed_move_origin
         // / the first move tick converts the node to absolute, so undo can
-        // restore the original layout + tweak state exactly.
+        // restore the original layout + tweak state exactly. (Only the float
+        // path mutates these; the reflow path uses its own parent/index/order
+        // capture at release.)
         move_anchor_ = selected_->anchor_id();
         move_before_layout_ = snapshot_layout(selected_);
         move_before_tweaks_ = snapshot_tweaks(
             move_anchor_,
             {"layout.position", "layout.left", "layout.top"});
-        seed_move_origin(selected_);
+        if (move_float_) seed_move_origin(selected_);
         return true;  // consume the press; subsequent moves are ours
     }
     move_refused_grid_ = false;
@@ -1277,6 +1596,7 @@ void InspectorOverlay::paint(Canvas& canvas) {
     // in-canvas overlay here is the bare manipulation layer.
     if (manipulate_only_) {
         paint_highlight(canvas);
+        paint_drop_indicator(canvas);
         return;
     }
 
@@ -1285,6 +1605,7 @@ void InspectorOverlay::paint(Canvas& canvas) {
     // the host forgot to call refresh_drift() explicitly.
     if (!drift_refreshed_once_) refresh_drift();
     paint_highlight(canvas);
+    paint_drop_indicator(canvas);
     paint_distance_lines(canvas);
     if (selected_) paint_box_model(canvas, selected_);
     paint_panel(canvas);
@@ -1437,6 +1758,27 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
             canvas.set_fill_color(Color::rgba(1, 1, 1, 1));
             canvas.fill_text(msg, r.x + 5, r.y - 7);
         }
+    }
+}
+
+void InspectorOverlay::paint_drop_indicator(Canvas& canvas) {
+    // Only while a reflow (non-float) move is dragging with a resolved drop.
+    if (!move_active_ || move_float_ || !drop_target_) return;
+    if (drop_indicator_.width <= 0 && drop_indicator_.height <= 0) return;
+
+    const Rect& d = drop_indicator_;
+    if (drop_indicator_is_line_) {
+        // Blue insertion line between siblings (reorder).
+        canvas.set_fill_color(Color::rgba(0.16f, 0.5f, 1.0f, 1.0f));
+        canvas.fill_rect(d.x, d.y, std::max(2.0f, d.width),
+                         std::max(2.0f, d.height));
+    } else {
+        // Translucent blue container highlight (drop-inside).
+        canvas.set_fill_color(Color::rgba(0.16f, 0.5f, 1.0f, 0.18f));
+        canvas.fill_rect(d.x, d.y, d.width, d.height);
+        canvas.set_stroke_color(Color::rgba(0.16f, 0.5f, 1.0f, 0.95f));
+        canvas.set_line_width(2.0f);
+        canvas.stroke_rect(d.x, d.y, d.width, d.height);
     }
 }
 
