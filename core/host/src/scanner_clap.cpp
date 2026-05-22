@@ -38,6 +38,13 @@ std::string resolve_clap_binary(const std::string& path) {
 
 }  // namespace
 
+uint32_t cap_clap_plugin_count(uint32_t count) noexcept {
+    // No real CLAP bundle exposes thousands of plugins; clamp an untrusted
+    // count so a malformed factory can't drive an absurd allocation (#2703).
+    constexpr uint32_t kMaxClapPluginsPerBundle = 1024;
+    return count > kMaxClapPluginsPerBundle ? kMaxClapPluginsPerBundle : count;
+}
+
 // Filename-only fallback used when descriptor enumeration fails for
 // any reason (missing entry, init failure, exception thrown across
 // the dlopen boundary). The user sees the bundle in scan output but
@@ -171,6 +178,14 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         runtime::log_warn("CLAP scan: get_plugin_count threw unknown exception for '{}' (#812 guard)",
                           path);
     } // LCOV_EXCL_STOP
+    // A malformed bundle can RETURN (not throw) an absurd count; reserve(count)
+    // would then throw bad_alloc/length_error outside the per-bundle fallback
+    // and abort the whole scan (#2703). Cap it before use.
+    if (uint32_t capped = cap_clap_plugin_count(count); capped != count) {
+        runtime::log_warn("CLAP scan: '{}' reported {} plugins; capping at {} (#2703 guard)",
+                          path, count, capped);
+        count = capped;
+    }
     results.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
         const clap_plugin_descriptor_t* desc = nullptr;

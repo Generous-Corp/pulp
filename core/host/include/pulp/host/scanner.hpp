@@ -125,4 +125,9 @@ private:
 #endif
 };
 
+// Clamp an untrusted CLAP plugin count — a malformed bundle's factory can
+// return an absurd value that would make reserve()/iteration throw and abort
+// the whole scan (#2703). Exposed for testing.
+uint32_t cap_clap_plugin_count(uint32_t count) noexcept;
+
 } // namespace pulp::host

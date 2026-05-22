@@ -117,6 +117,21 @@ TEST_CASE("PluginScanner scan runs without crash", "[host][scanner]") {
 // Pin: scan a malformed `.clap` bundle and assert (a) it doesn't crash
 // and (b) the filename-fallback path produces a single PluginInfo so
 // users see SOMETHING in the catalog instead of a silent drop.
+TEST_CASE("cap_clap_plugin_count clamps an untrusted bundle count (issue-2703)",
+          "[host][scanner][issue-2703]") {
+    using pulp::host::cap_clap_plugin_count;
+    // Sane counts pass through unchanged.
+    REQUIRE(cap_clap_plugin_count(0) == 0);
+    REQUIRE(cap_clap_plugin_count(1) == 1);
+    REQUIRE(cap_clap_plugin_count(64) == 64);
+    REQUIRE(cap_clap_plugin_count(1024) == 1024);
+    // An absurd count from a malformed factory is clamped before it can drive
+    // an allocation that would throw and abort the whole scan.
+    REQUIRE(cap_clap_plugin_count(1025) == 1024);
+    REQUIRE(cap_clap_plugin_count(1000000) == 1024);
+    REQUIRE(cap_clap_plugin_count(0xFFFFFFFFu) == 1024);
+}
+
 TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail path)",
           "[host][scanner][issue-1862][coverage]") {
     namespace fs = std::filesystem;
