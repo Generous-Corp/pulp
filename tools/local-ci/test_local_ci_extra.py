@@ -29,6 +29,8 @@ def load_module():
 class LocalCiPureHelperTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
+        # R2-1 (#2645): cloud helpers moved to cloud.py — patch the cloud module.
+        self.cloud = importlib.import_module("cloud")
         self.tmpdir = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmpdir.name)
 
@@ -352,7 +354,7 @@ class LocalCiPureHelperTests(unittest.TestCase):
                 }
             }
         }
-        billing = self.mod.resolve_billing_settings(config)
+        billing = self.cloud.resolve_billing_settings(config)
         self.assertEqual(billing["currency"], "EUR")
         self.assertEqual(billing["billing_period_start_day"], 15)
         self.assertTrue(billing["enable_provider_reported_totals"])
@@ -361,22 +363,22 @@ class LocalCiPureHelperTests(unittest.TestCase):
         self.assertEqual(billing["namespace_machine_shape_rates_per_hour"][0]["virtual_cpu"], 4)
 
         with self.assertRaisesRegex(ValueError, "between 1 and 28"):
-            self.mod.resolve_billing_settings({"telemetry": {"billing": {"billing_period_start_day": 29}}})
+            self.cloud.resolve_billing_settings({"telemetry": {"billing": {"billing_period_start_day": 29}}})
         with self.assertRaisesRegex(ValueError, "must be true or false"):
-            self.mod.resolve_billing_settings({"telemetry": {"billing": {"enable_provider_reported_totals": "yes"}}})
+            self.cloud.resolve_billing_settings({"telemetry": {"billing": {"enable_provider_reported_totals": "yes"}}})
 
-        start, end = self.mod.billing_period_window(
+        start, end = self.cloud.billing_period_window(
             15,
             now_dt=datetime(2026, 1, 10, tzinfo=timezone.utc),
         )
         self.assertEqual((start.year, start.month, start.day), (2025, 12, 15))
         self.assertEqual((end.year, end.month, end.day), (2026, 1, 15))
-        self.assertEqual(self.mod.iter_year_months(start, datetime(2026, 2, 15, tzinfo=timezone.utc)), [(2025, 12), (2026, 1), (2026, 2)])
-        self.assertEqual(self.mod.parse_iso_date("2026-04-30").isoformat(), "2026-04-30")
-        self.assertIsNone(self.mod.parse_iso_date("bad"))
-        self.assertEqual(self.mod.infer_job_os("docs-check", "lint"), "linux")
-        self.assertEqual(self.mod.infer_job_os("build", "mac (arm64)"), "macos")
-        self.assertEqual(self.mod.infer_job_os("build", "unknown"), "")
+        self.assertEqual(self.cloud.iter_year_months(start, datetime(2026, 2, 15, tzinfo=timezone.utc)), [(2025, 12), (2026, 1), (2026, 2)])
+        self.assertEqual(self.cloud.parse_iso_date("2026-04-30").isoformat(), "2026-04-30")
+        self.assertIsNone(self.cloud.parse_iso_date("bad"))
+        self.assertEqual(self.cloud.infer_job_os("docs-check", "lint"), "linux")
+        self.assertEqual(self.cloud.infer_job_os("build", "mac (arm64)"), "macos")
+        self.assertEqual(self.cloud.infer_job_os("build", "unknown"), "")
 
         namespace_record = {
             "provider_resolved": "namespace",
@@ -388,12 +390,12 @@ class LocalCiPureHelperTests(unittest.TestCase):
                 ]
             },
         }
-        namespace_cost = self.mod.estimate_cloud_record_cost(namespace_record, config)
+        namespace_cost = self.cloud.estimate_cloud_record_cost(namespace_record, config)
         self.assertEqual(namespace_cost["status"], "estimated")
         self.assertEqual(namespace_cost["currency"], "EUR")
         self.assertEqual(namespace_cost["estimated_total"], 3.0)
         self.assertEqual(
-            self.mod.estimate_namespace_cost({"provider_metadata": {}, "usage_summary": {}}, billing)["status"],
+            self.cloud.estimate_namespace_cost({"provider_metadata": {}, "usage_summary": {}}, billing)["status"],
             "unavailable",
         )
 
@@ -406,16 +408,16 @@ class LocalCiPureHelperTests(unittest.TestCase):
                 {"name": "Unknown", "started_at": "bad", "completed_at": "2026-04-30T00:02:30Z"},
             ],
         }
-        github_cost = self.mod.estimate_cloud_record_cost(github_record, config)
+        github_cost = self.cloud.estimate_cloud_record_cost(github_record, config)
         self.assertEqual(github_cost["status"], "estimated")
         self.assertEqual(github_cost["estimated_total"], 0.05)
         self.assertEqual(
-            self.mod.estimate_cloud_record_cost({"provider_resolved": "other"}, config)["reason"],
+            self.cloud.estimate_cloud_record_cost({"provider_resolved": "other"}, config)["reason"],
             "no estimator for provider 'other'",
         )
 
     def test_cloud_record_formatting_timing_and_namespace_usage_edges(self) -> None:
-        normalized = self.mod.normalize_cloud_record(
+        normalized = self.cloud.normalize_cloud_record(
             {
                 "dispatch_id": "abc123",
                 "dispatch_fields": "bad",
@@ -434,36 +436,36 @@ class LocalCiPureHelperTests(unittest.TestCase):
             {"dispatch_id": "abc222", "run_id": 42, "updated_at": "2026-04-30T01:00:00+00:00"},
             {"dispatch_id": "xyz999", "run_id": 99, "matched_at": "2026-04-30T02:00:00+00:00"},
         ]
-        self.assertEqual(self.mod.find_cloud_record(records, "latest")["dispatch_id"], "abc111")
+        self.assertEqual(self.cloud.find_cloud_record(records, "latest")["dispatch_id"], "abc111")
         with self.assertRaisesRegex(ValueError, "ambiguous"):
-            self.mod.find_cloud_record(records, "abc")
+            self.cloud.find_cloud_record(records, "abc")
         with self.assertRaisesRegex(ValueError, "matched multiple"):
-            self.mod.find_cloud_record(records, "42")
-        self.assertEqual(self.mod.cloud_record_sort_key(records[1])[0], "2026-04-30T01:00:00+00:00")
+            self.cloud.find_cloud_record(records, "42")
+        self.assertEqual(self.cloud.cloud_record_sort_key(records[1])[0], "2026-04-30T01:00:00+00:00")
 
-        self.assertEqual(self.mod.summarize_runner_selector('"macos-large"'), "macos-large")
-        self.assertEqual(self.mod.summarize_runner_selector('["linux", "arm64"]'), "linux,arm64")
-        self.assertEqual(self.mod.summarize_runner_selector('{"bad": true}'), '{"bad": true}')
-        self.assertEqual(self.mod.summarize_runner_selector("{bad"), "{bad")
-        self.assertEqual(self.mod.normalize_github_timestamp("0001-01-01T00:00:00Z"), "")
-        self.assertEqual(self.mod.duration_between("2026-04-30T00:00:03Z", "2026-04-30T00:00:01Z"), 0.0)
-        self.assertIsNone(self.mod.duration_between("bad", "2026-04-30T00:00:01Z"))
-        self.assertEqual(self.mod.format_duration_secs(3661), "1h01m01s")
-        self.assertEqual(self.mod.format_duration_secs(61), "1m01s")
-        self.assertEqual(self.mod.format_duration_secs(1.25), "1.2s")
-        self.assertEqual(self.mod.format_duration_secs(-1), "")
-        self.assertEqual(self.mod.format_duration_secs("bad"), "")
-        self.assertEqual(self.mod.format_memory_megabytes(2048), "2 GB")
-        self.assertEqual(self.mod.format_memory_megabytes("bad"), "")
-        self.assertEqual(self.mod.render_selector_value('"runner"'), "runner")
-        self.assertEqual(self.mod.parse_rate_value("1.25"), 1.25)
-        self.assertIsNone(self.mod.parse_rate_value(-1))
-        self.assertIsNone(self.mod.parse_optional_bool("", "flag"))
-        self.assertTrue(self.mod.parse_optional_bool(True, "flag"))
+        self.assertEqual(self.cloud.summarize_runner_selector('"macos-large"'), "macos-large")
+        self.assertEqual(self.cloud.summarize_runner_selector('["linux", "arm64"]'), "linux,arm64")
+        self.assertEqual(self.cloud.summarize_runner_selector('{"bad": true}'), '{"bad": true}')
+        self.assertEqual(self.cloud.summarize_runner_selector("{bad"), "{bad")
+        self.assertEqual(self.cloud.normalize_github_timestamp("0001-01-01T00:00:00Z"), "")
+        self.assertEqual(self.cloud.duration_between("2026-04-30T00:00:03Z", "2026-04-30T00:00:01Z"), 0.0)
+        self.assertIsNone(self.cloud.duration_between("bad", "2026-04-30T00:00:01Z"))
+        self.assertEqual(self.cloud.format_duration_secs(3661), "1h01m01s")
+        self.assertEqual(self.cloud.format_duration_secs(61), "1m01s")
+        self.assertEqual(self.cloud.format_duration_secs(1.25), "1.2s")
+        self.assertEqual(self.cloud.format_duration_secs(-1), "")
+        self.assertEqual(self.cloud.format_duration_secs("bad"), "")
+        self.assertEqual(self.cloud.format_memory_megabytes(2048), "2 GB")
+        self.assertEqual(self.cloud.format_memory_megabytes("bad"), "")
+        self.assertEqual(self.cloud.render_selector_value('"runner"'), "runner")
+        self.assertEqual(self.cloud.parse_rate_value("1.25"), 1.25)
+        self.assertIsNone(self.cloud.parse_rate_value(-1))
+        self.assertIsNone(self.cloud.parse_optional_bool("", "flag"))
+        self.assertTrue(self.cloud.parse_optional_bool(True, "flag"))
         with self.assertRaisesRegex(ValueError, "must be true or false"):
-            self.mod.parse_optional_bool("true", "flag")
+            self.cloud.parse_optional_bool("true", "flag")
 
-        timing = self.mod.summarize_cloud_timing(
+        timing = self.cloud.summarize_cloud_timing(
             {
                 "createdAt": "2026-04-30T00:00:00Z",
                 "updatedAt": "2026-04-30T00:02:00Z",
@@ -480,7 +482,7 @@ class LocalCiPureHelperTests(unittest.TestCase):
         self.assertEqual(timing["queue_delay_secs"], 60.0)
         self.assertEqual(timing["duration_secs"], 120.0)
 
-        instance = self.mod.normalize_namespace_instance(
+        instance = self.cloud.normalize_namespace_instance(
             {
                 "cluster_id": "cluster",
                 "created": "2026-04-30T00:00:00Z",
@@ -491,14 +493,14 @@ class LocalCiPureHelperTests(unittest.TestCase):
             }
         )
         self.assertEqual(instance["duration_secs"], 3600.0)
-        usage = self.mod.summarize_namespace_usage([instance, dict(instance, duration_secs=1800.0)])
+        usage = self.cloud.summarize_namespace_usage([instance, dict(instance, duration_secs=1800.0)])
         self.assertEqual(usage["instances_count"], 2)
         self.assertEqual(usage["provider_runtime_secs"], 5400.0)
         self.assertEqual(usage["machine_shapes"][0]["count"], 2)
 
         with mock.patch.object(self.mod, "nsc_logged_in", return_value=False):
             self.assertEqual(
-                self.mod.enrich_cloud_record_provider_metadata({"provider_resolved": "github-hosted", "run_id": 123})["usage_summary"],
+                self.cloud.enrich_cloud_record_provider_metadata({"provider_resolved": "github-hosted", "run_id": 123})["usage_summary"],
                 {},
             )
 

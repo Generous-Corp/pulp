@@ -99,6 +99,11 @@ class LocalCiTests(unittest.TestCase):
         os.environ["PULP_LOCAL_CI_HOME"] = str(self.state_dir)
         os.environ["PULP_LOCAL_CI_CONFIG"] = str(self.config_path)
         self.mod = load_module()
+        # R2-1 (#2645): the cloud helpers (gh_*/nsc_*/cmd_cloud_*/billing) moved
+        # to cloud.py. local_ci re-exports them, but cmd_cloud_* resolve their
+        # helper calls in the cloud namespace, so monkeypatches must target the
+        # cloud module — not the re-exported local_ci attribute.
+        self.cloud = importlib.import_module("cloud")
 
     def tearDown(self):
         if self.prev_home is None:
@@ -210,7 +215,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(older_stored["superseded_by"], newer_job["id"])
         self.assertEqual(newer_stored["status"], "pending")
 
-        result = self.mod.load_result(Path(older_stored["result_file"]))
+        result = self.cloud.load_result(Path(older_stored["result_file"]))
         self.assertEqual(result["overall"], "superseded")
         self.assertEqual(result["superseded_by"], newer_job["id"])
 
@@ -265,7 +270,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIsNotNone(stored)
         self.assertEqual(stored["status"], "completed")
         self.assertEqual(stored["overall"], "canceled")
-        result = self.mod.load_result(Path(stored["result_file"]))
+        result = self.cloud.load_result(Path(stored["result_file"]))
         self.assertEqual(result["overall"], "canceled")
         self.assertEqual(result["canceled_reason"], "operator_canceled")
 
@@ -6142,7 +6147,7 @@ class LocalCiTests(unittest.TestCase):
             )
         )
 
-        result = self.mod.load_result(result_path)
+        result = self.cloud.load_result(result_path)
         self.assertEqual(result["provenance"]["execution_kind"], "direct")
         self.assertEqual(result["provenance"]["direct_backend"], "local-ci")
 
@@ -6172,7 +6177,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(record["provenance"]["runner_selector"], "mac-arm64")
 
     def test_format_ci_comment_includes_execution_summary(self):
-        comment = self.mod.format_ci_comment(
+        comment = self.cloud.format_ci_comment(
             {
                 "job_id": "job123",
                 "branch": "feature/comment",
@@ -6186,7 +6191,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("Execution: `direct via local-ci`", comment)
 
     def test_cloud_record_round_trip_and_lookup(self):
-        first = self.mod.normalize_cloud_record(
+        first = self.cloud.normalize_cloud_record(
             {
                 "dispatch_id": "abc123def456",
                 "workflow_key": "docs-check",
@@ -6197,7 +6202,7 @@ class LocalCiTests(unittest.TestCase):
                 "updated_at": "2026-04-04T12:01:00+00:00",
             }
         )
-        second = self.mod.normalize_cloud_record(
+        second = self.cloud.normalize_cloud_record(
             {
                 "dispatch_id": "fed654cba321",
                 "workflow_key": "build",
@@ -6211,17 +6216,17 @@ class LocalCiTests(unittest.TestCase):
             }
         )
 
-        self.mod.save_cloud_record(first)
-        self.mod.save_cloud_record(second)
+        self.cloud.save_cloud_record(first)
+        self.cloud.save_cloud_record(second)
 
-        records = self.mod.list_cloud_records()
+        records = self.cloud.list_cloud_records()
         self.assertEqual(records[0]["dispatch_id"], "fed654cba321")
-        self.assertEqual(self.mod.find_cloud_record(records, "latest")["dispatch_id"], "fed654cba321")
-        self.assertEqual(self.mod.find_cloud_record(records, "abc123")["dispatch_id"], "abc123def456")
-        self.assertEqual(self.mod.find_cloud_record(records, "12345")["dispatch_id"], "fed654cba321")
+        self.assertEqual(self.cloud.find_cloud_record(records, "latest")["dispatch_id"], "fed654cba321")
+        self.assertEqual(self.cloud.find_cloud_record(records, "abc123")["dispatch_id"], "abc123def456")
+        self.assertEqual(self.cloud.find_cloud_record(records, "12345")["dispatch_id"], "fed654cba321")
 
     def test_update_cloud_record_from_run_derives_timing(self):
-        record = self.mod.normalize_cloud_record(
+        record = self.cloud.normalize_cloud_record(
             {
                 "dispatch_id": "abc123def456",
                 "workflow_key": "docs-check",
@@ -6258,7 +6263,7 @@ class LocalCiTests(unittest.TestCase):
             ],
         }
 
-        updated = self.mod.update_cloud_record_from_run(record, snapshot, provider_resolved="namespace")
+        updated = self.cloud.update_cloud_record_from_run(record, snapshot, provider_resolved="namespace")
 
         self.assertEqual(updated["started_at"], "2026-04-04T12:00:06+00:00")
         self.assertEqual(updated["completed_at"], "2026-04-04T12:00:30+00:00")
@@ -6266,7 +6271,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(updated["duration_secs"], 24.0)
 
     def test_update_cloud_record_from_run_clears_completed_at_when_still_running(self):
-        record = self.mod.normalize_cloud_record(
+        record = self.cloud.normalize_cloud_record(
             {
                 "dispatch_id": "abc123def456",
                 "workflow_key": "build",
@@ -6309,13 +6314,13 @@ class LocalCiTests(unittest.TestCase):
             ],
         }
 
-        updated = self.mod.update_cloud_record_from_run(record, snapshot, provider_resolved="namespace")
+        updated = self.cloud.update_cloud_record_from_run(record, snapshot, provider_resolved="namespace")
 
         self.assertEqual(updated["completed_at"], "")
         self.assertEqual(updated["duration_secs"], 10.0)
 
     def test_cloud_record_summary_includes_duration(self):
-        summary = self.mod.cloud_record_summary(
+        summary = self.cloud.cloud_record_summary(
             {
                 "dispatch_id": "abc123def456",
                 "workflow_key": "docs-check",
@@ -6330,7 +6335,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("duration=1m24s", summary)
 
     def test_summarize_cloud_timing_uses_latest_step_timestamp_for_in_progress_run(self):
-        timing = self.mod.summarize_cloud_timing(
+        timing = self.cloud.summarize_cloud_timing(
             {
                 "status": "in_progress",
                 "createdAt": "2026-04-04T12:00:05+00:00",
@@ -6389,7 +6394,7 @@ class LocalCiTests(unittest.TestCase):
             self.mod.normalize_runs_on_json('{"label": "ubuntu"}', setting_name="runs-on")
 
     def test_cloud_record_lookup_and_summary_helpers_cover_edge_statuses(self):
-        normalized = self.mod.normalize_cloud_record(
+        normalized = self.cloud.normalize_cloud_record(
             {
                 "dispatch_fields": [],
                 "jobs": {},
@@ -6409,12 +6414,12 @@ class LocalCiTests(unittest.TestCase):
             {"dispatch_id": "abc222", "run_id": 42},
             {"dispatch_id": "def333", "run_id": 99},
         ]
-        self.assertIsNone(self.mod.find_cloud_record([], None))
-        self.assertIsNone(self.mod.find_cloud_record(records, "missing"))
+        self.assertIsNone(self.cloud.find_cloud_record([], None))
+        self.assertIsNone(self.cloud.find_cloud_record(records, "missing"))
         with self.assertRaisesRegex(ValueError, "ambiguous"):
-            self.mod.find_cloud_record(records, "abc")
+            self.cloud.find_cloud_record(records, "abc")
         with self.assertRaisesRegex(ValueError, "matched multiple"):
-            self.mod.find_cloud_record(records, "42")
+            self.cloud.find_cloud_record(records, "42")
 
         config = {
             "telemetry": {
@@ -6431,7 +6436,7 @@ class LocalCiTests(unittest.TestCase):
                 }
             }
         }
-        summary = self.mod.cloud_record_summary(
+        summary = self.cloud.cloud_record_summary(
             {
                 "dispatch_id": "sum123",
                 "workflow_key": "build",
@@ -6464,12 +6469,12 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("provider_time=1h00m00s", summary)
         self.assertIn("cost=est $2.50", summary)
 
-        self.assertEqual(self.mod.summarize_runner_selector("{not-json"), "{not-json")
-        self.assertEqual(self.mod.summarize_runner_selector("123"), "123")
-        self.assertEqual(self.mod.normalize_github_timestamp("0001-01-01T00:00:00Z"), "")
-        self.assertIsNone(self.mod.duration_between("bad", "2026-04-04T12:00:00+00:00"))
+        self.assertEqual(self.cloud.summarize_runner_selector("{not-json"), "{not-json")
+        self.assertEqual(self.cloud.summarize_runner_selector("123"), "123")
+        self.assertEqual(self.cloud.normalize_github_timestamp("0001-01-01T00:00:00Z"), "")
+        self.assertIsNone(self.cloud.duration_between("bad", "2026-04-04T12:00:00+00:00"))
         self.assertEqual(
-            self.mod.duration_between(
+            self.cloud.duration_between(
                 "2026-04-04T12:00:10+00:00",
                 "2026-04-04T12:00:05+00:00",
             ),
@@ -6477,22 +6482,22 @@ class LocalCiTests(unittest.TestCase):
         )
 
     def test_billing_estimation_and_report_helpers_cover_fallbacks(self):
-        self.assertEqual(self.mod.format_duration_secs(None), "")
-        self.assertEqual(self.mod.format_duration_secs("bad"), "")
-        self.assertEqual(self.mod.format_duration_secs(-1), "")
-        self.assertEqual(self.mod.format_duration_secs(1.25), "1.2s")
-        self.assertEqual(self.mod.format_duration_secs(3661), "1h01m01s")
+        self.assertEqual(self.cloud.format_duration_secs(None), "")
+        self.assertEqual(self.cloud.format_duration_secs("bad"), "")
+        self.assertEqual(self.cloud.format_duration_secs(-1), "")
+        self.assertEqual(self.cloud.format_duration_secs(1.25), "1.2s")
+        self.assertEqual(self.cloud.format_duration_secs(3661), "1h01m01s")
 
-        self.assertEqual(self.mod.format_memory_megabytes("bad"), "")
-        self.assertEqual(self.mod.format_memory_megabytes(0), "")
-        self.assertEqual(self.mod.format_memory_megabytes(1536), "1.5 GB")
-        self.assertEqual(self.mod.render_selector_value('"macos"'), "macos")
-        self.assertIsNone(self.mod.parse_rate_value("-1"))
-        self.assertIsNone(self.mod.parse_rate_value("bad"))
-        self.assertTrue(self.mod.parse_optional_bool(True, "enabled"))
-        self.assertIsNone(self.mod.parse_optional_bool("", "enabled"))
+        self.assertEqual(self.cloud.format_memory_megabytes("bad"), "")
+        self.assertEqual(self.cloud.format_memory_megabytes(0), "")
+        self.assertEqual(self.cloud.format_memory_megabytes(1536), "1.5 GB")
+        self.assertEqual(self.cloud.render_selector_value('"macos"'), "macos")
+        self.assertIsNone(self.cloud.parse_rate_value("-1"))
+        self.assertIsNone(self.cloud.parse_rate_value("bad"))
+        self.assertTrue(self.cloud.parse_optional_bool(True, "enabled"))
+        self.assertIsNone(self.cloud.parse_optional_bool("", "enabled"))
         with self.assertRaisesRegex(ValueError, "must be true or false"):
-            self.mod.parse_optional_bool("yes", "enabled")
+            self.cloud.parse_optional_bool("yes", "enabled")
 
         config = {
             "telemetry": {
@@ -6524,7 +6529,7 @@ class LocalCiTests(unittest.TestCase):
                 }
             }
         }
-        billing = self.mod.resolve_billing_settings(config)
+        billing = self.cloud.resolve_billing_settings(config)
         self.assertEqual(billing["currency"], "EUR")
         self.assertEqual(billing["billing_period_start_day"], 15)
         self.assertTrue(billing["enable_provider_reported_totals"])
@@ -6543,36 +6548,36 @@ class LocalCiTests(unittest.TestCase):
             ],
         )
         with self.assertRaisesRegex(ValueError, "must be between 1 and 28"):
-            self.mod.resolve_billing_settings(
+            self.cloud.resolve_billing_settings(
                 {"telemetry": {"billing": {"billing_period_start_day": 31}}}
             )
         with self.assertRaisesRegex(ValueError, "must be true or false"):
-            self.mod.resolve_billing_settings(
+            self.cloud.resolve_billing_settings(
                 {"telemetry": {"billing": {"enable_provider_reported_totals": "yes"}}}
             )
 
-        period_start, period_end = self.mod.billing_period_window(
+        period_start, period_end = self.cloud.billing_period_window(
             15, now_dt=datetime(2026, 1, 10, tzinfo=timezone.utc)
         )
         self.assertEqual(period_start.isoformat(), "2025-12-15T00:00:00+00:00")
         self.assertEqual(period_end.isoformat(), "2026-01-15T00:00:00+00:00")
         self.assertEqual(
-            self.mod.iter_year_months(
+            self.cloud.iter_year_months(
                 datetime(2025, 12, 15, tzinfo=timezone.utc),
                 datetime(2026, 2, 15, tzinfo=timezone.utc),
             ),
             [(2025, 12), (2026, 1), (2026, 2)],
         )
-        self.assertIsNone(self.mod.parse_iso_date(""))
-        self.assertIsNone(self.mod.parse_iso_date("2026-99-99"))
-        self.assertEqual(self.mod.parse_iso_date("2026-04-04").isoformat(), "2026-04-04")
-        self.assertEqual(self.mod.infer_job_os("build", "Windows (x64)"), "windows")
-        self.assertEqual(self.mod.infer_job_os("build", "macOS (ARM64)"), "macos")
-        self.assertEqual(self.mod.infer_job_os("build", "Ubuntu tests"), "linux")
-        self.assertEqual(self.mod.infer_job_os("docs-check", "Validate docs"), "linux")
-        self.assertEqual(self.mod.infer_job_os("build", "Resolve provider"), "")
+        self.assertIsNone(self.cloud.parse_iso_date(""))
+        self.assertIsNone(self.cloud.parse_iso_date("2026-99-99"))
+        self.assertEqual(self.cloud.parse_iso_date("2026-04-04").isoformat(), "2026-04-04")
+        self.assertEqual(self.cloud.infer_job_os("build", "Windows (x64)"), "windows")
+        self.assertEqual(self.cloud.infer_job_os("build", "macOS (ARM64)"), "macos")
+        self.assertEqual(self.cloud.infer_job_os("build", "Ubuntu tests"), "linux")
+        self.assertEqual(self.cloud.infer_job_os("docs-check", "Validate docs"), "linux")
+        self.assertEqual(self.cloud.infer_job_os("build", "Resolve provider"), "")
 
-        github_cost = self.mod.estimate_github_hosted_cost(
+        github_cost = self.cloud.estimate_github_hosted_cost(
             {
                 "workflow_key": "build",
                 "jobs": [
@@ -6590,7 +6595,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(github_cost["status"], "estimated")
         self.assertAlmostEqual(github_cost["estimated_total"], 0.04)
 
-        namespace_cost = self.mod.estimate_namespace_cost(
+        namespace_cost = self.cloud.estimate_namespace_cost(
             {
                 "usage_summary": {
                     "machine_shapes": [
@@ -6609,23 +6614,23 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(namespace_cost["status"], "estimated")
         self.assertAlmostEqual(namespace_cost["estimated_total"], 1.0)
         self.assertEqual(
-            self.mod.estimate_cloud_record_cost({"provider_requested": "other"}, config)["reason"],
+            self.cloud.estimate_cloud_record_cost({"provider_requested": "other"}, config)["reason"],
             "no estimator for provider 'other'",
         )
-        self.assertEqual(self.mod.format_currency_amount(3.5, "eur"), "EUR 3.50")
+        self.assertEqual(self.cloud.format_currency_amount(3.5, "eur"), "EUR 3.50")
 
         buf = io.StringIO()
         with redirect_stdout(buf):
-            self.mod.print_github_repo_billing_summary(
+            self.cloud.print_github_repo_billing_summary(
                 {"status": "unavailable", "reason": "missing scope"}, indent=""
             )
-            self.mod.print_cloud_field_detail(
+            self.cloud.print_cloud_field_detail(
                 "runner_selector_json", '["self-hosted", "linux"]', "config", indent=""
             )
-            self.mod.print_cloud_field_detail(
+            self.cloud.print_cloud_field_detail(
                 "plain", "", indent="", unset_note="missing"
             )
-            self.mod.print_namespace_usage_summary(
+            self.cloud.print_namespace_usage_summary(
                 {
                     "usage_summary": {
                         "instances_count": 1,
@@ -6646,7 +6651,7 @@ class LocalCiTests(unittest.TestCase):
                     },
                 }
             )
-            self.mod.print_billing_period_summary(
+            self.cloud.print_billing_period_summary(
                 {"status": "unavailable", "reason": "no rates"}, indent=""
             )
 
@@ -6662,7 +6667,7 @@ class LocalCiTests(unittest.TestCase):
     def test_cmd_cloud_workflows_lists_supported_providers(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
-            exit_code = self.mod.cmd_cloud_workflows(SimpleNamespace())
+            exit_code = self.cloud.cmd_cloud_workflows(SimpleNamespace())
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -6673,20 +6678,20 @@ class LocalCiTests(unittest.TestCase):
     def test_cmd_cloud_status_reports_empty_state_cleanly(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
-            exit_code = self.mod.cmd_cloud_status(SimpleNamespace(identifier=None, refresh=False, limit=5))
+            exit_code = self.cloud.cmd_cloud_status(SimpleNamespace(identifier=None, refresh=False, limit=5))
 
         self.assertEqual(exit_code, 0)
         self.assertIn("No tracked cloud runs yet.", buf.getvalue())
 
     def test_cmd_cloud_namespace_doctor_reports_missing_cli(self):
-        original_version = self.mod.nsc_version
-        self.mod.nsc_version = lambda: None
+        original_version = self.cloud.nsc_version
+        self.cloud.nsc_version = lambda: None
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_namespace_doctor(SimpleNamespace())
+                exit_code = self.cloud.cmd_cloud_namespace_doctor(SimpleNamespace())
         finally:
-            self.mod.nsc_version = original_version
+            self.cloud.nsc_version = original_version
 
         self.assertEqual(exit_code, 1)
         output = buf.getvalue()
@@ -6694,12 +6699,12 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("nsc login", output)
 
     def test_cmd_cloud_namespace_doctor_reports_ready_workspace(self):
-        original_version = self.mod.nsc_version
-        original_logged_in = self.mod.nsc_logged_in
-        original_workspace_info = self.mod.nsc_workspace_info
-        self.mod.nsc_version = lambda: "v0.0.493"
-        self.mod.nsc_logged_in = lambda: True
-        self.mod.nsc_workspace_info = lambda: {
+        original_version = self.cloud.nsc_version
+        original_logged_in = self.cloud.nsc_logged_in
+        original_workspace_info = self.cloud.nsc_workspace_info
+        self.cloud.nsc_version = lambda: "v0.0.493"
+        self.cloud.nsc_logged_in = lambda: True
+        self.cloud.nsc_workspace_info = lambda: {
             "Name": "Personal",
             "Tenant ID": "tenant_123",
             "Registry URL": "nscr.io/example",
@@ -6707,11 +6712,11 @@ class LocalCiTests(unittest.TestCase):
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_namespace_doctor(SimpleNamespace())
+                exit_code = self.cloud.cmd_cloud_namespace_doctor(SimpleNamespace())
         finally:
-            self.mod.nsc_version = original_version
-            self.mod.nsc_logged_in = original_logged_in
-            self.mod.nsc_workspace_info = original_workspace_info
+            self.cloud.nsc_version = original_version
+            self.cloud.nsc_logged_in = original_logged_in
+            self.cloud.nsc_workspace_info = original_workspace_info
 
         self.assertEqual(exit_code, 0)
         output = buf.getvalue()
@@ -6722,29 +6727,29 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("Registry URL: nscr.io/example", output)
 
     def test_cmd_cloud_namespace_setup_invokes_login_then_reports_ready(self):
-        original_available = self.mod.nsc_available
-        original_logged_in = self.mod.nsc_logged_in
-        original_run = self.mod.nsc_run
-        original_version = self.mod.nsc_version
-        original_workspace_info = self.mod.nsc_workspace_info
+        original_available = self.cloud.nsc_available
+        original_logged_in = self.cloud.nsc_logged_in
+        original_run = self.cloud.nsc_run
+        original_version = self.cloud.nsc_version
+        original_workspace_info = self.cloud.nsc_workspace_info
 
         login_checks = iter([False, True])
         calls = []
-        self.mod.nsc_available = lambda: True
-        self.mod.nsc_logged_in = lambda: next(login_checks)
-        self.mod.nsc_run = lambda args, capture_output=True: calls.append((tuple(args), capture_output)) or SimpleNamespace(returncode=0)
-        self.mod.nsc_version = lambda: "v0.0.493"
-        self.mod.nsc_workspace_info = lambda: {"Name": "Personal"}
+        self.cloud.nsc_available = lambda: True
+        self.cloud.nsc_logged_in = lambda: next(login_checks)
+        self.cloud.nsc_run = lambda args, capture_output=True: calls.append((tuple(args), capture_output)) or SimpleNamespace(returncode=0)
+        self.cloud.nsc_version = lambda: "v0.0.493"
+        self.cloud.nsc_workspace_info = lambda: {"Name": "Personal"}
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_namespace_setup(SimpleNamespace())
+                exit_code = self.cloud.cmd_cloud_namespace_setup(SimpleNamespace())
         finally:
-            self.mod.nsc_available = original_available
-            self.mod.nsc_logged_in = original_logged_in
-            self.mod.nsc_run = original_run
-            self.mod.nsc_version = original_version
-            self.mod.nsc_workspace_info = original_workspace_info
+            self.cloud.nsc_available = original_available
+            self.cloud.nsc_logged_in = original_logged_in
+            self.cloud.nsc_run = original_run
+            self.cloud.nsc_version = original_version
+            self.cloud.nsc_workspace_info = original_workspace_info
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(calls, [(("login",), False)])
@@ -6753,12 +6758,12 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("Workspace: Personal", output)
 
     def test_cmd_cloud_run_rejects_unsupported_provider(self):
-        original_gh_available = self.mod.gh_available
-        self.mod.gh_available = lambda: True
+        original_gh_available = self.cloud.gh_available
+        self.cloud.gh_available = lambda: True
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="validate",
                         branch="feature/cloud",
@@ -6771,27 +6776,27 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
+            self.cloud.gh_available = original_gh_available
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 1)
         self.assertIn("does not support provider", output)
 
     def test_cmd_cloud_run_build_namespace_dispatches_selector_fields(self):
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_now_iso = self.mod.now_iso
-        original_repo_variables = self.mod.gh_repo_variables
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_now_iso = self.cloud.now_iso
+        original_repo_variables = self.cloud.gh_repo_variables
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
-        self.mod.gh_repo_variables = lambda repository: {}
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_repo_variables = lambda repository: {}
         dispatched = {}
-        self.mod.gh_workflow_dispatch = (
+        self.cloud.gh_workflow_dispatch = (
             lambda repository, workflow_file, ref, fields: dispatched.update(
                 {
                     "repository": repository,
@@ -6801,12 +6806,12 @@ class LocalCiTests(unittest.TestCase):
                 }
             )
         )
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="build",
                         branch="feature/cloud",
@@ -6819,13 +6824,13 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.now_iso = original_now_iso
-            self.mod.gh_repo_variables = original_repo_variables
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.now_iso = original_now_iso
+            self.cloud.gh_repo_variables = original_repo_variables
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -6836,7 +6841,7 @@ class LocalCiTests(unittest.TestCase):
                 "windows_runner_selector_json": "\"namespace-profile-default\"",
             },
         )
-        records = self.mod.list_cloud_records()
+        records = self.cloud.list_cloud_records()
         self.assertEqual(records[0]["dispatch_fields"]["linux_runner_selector_json"], "\"namespace-profile-default\"")
         self.assertEqual(records[0]["dispatch_fields"]["windows_runner_selector_json"], "\"namespace-profile-default\"")
 
@@ -6846,23 +6851,23 @@ class LocalCiTests(unittest.TestCase):
         del config["github_actions"]["workflows"]["build"]["providers"]["namespace"]["windows_runner_selector_json"]
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_now_iso = self.mod.now_iso
-        original_repo_variables = self.mod.gh_repo_variables
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_now_iso = self.cloud.now_iso
+        original_repo_variables = self.cloud.gh_repo_variables
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
-        self.mod.gh_repo_variables = lambda repository: {
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_repo_variables = lambda repository: {
             "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON": "\"namespace-profile-linux-repo\"",
             "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON": "\"namespace-profile-windows-repo\"",
         }
         dispatched = {}
-        self.mod.gh_workflow_dispatch = (
+        self.cloud.gh_workflow_dispatch = (
             lambda repository, workflow_file, ref, fields: dispatched.update(
                 {
                     "repository": repository,
@@ -6872,12 +6877,12 @@ class LocalCiTests(unittest.TestCase):
                 }
             )
         )
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="build",
                         branch="feature/cloud",
@@ -6890,13 +6895,13 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.now_iso = original_now_iso
-            self.mod.gh_repo_variables = original_repo_variables
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.now_iso = original_now_iso
+            self.cloud.gh_repo_variables = original_repo_variables
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -6915,18 +6920,18 @@ class LocalCiTests(unittest.TestCase):
         ] = "\"namespace-profile-macos\""
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_now_iso = self.mod.now_iso
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_now_iso = self.cloud.now_iso
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
         dispatched = {}
-        self.mod.gh_workflow_dispatch = (
+        self.cloud.gh_workflow_dispatch = (
             lambda repository, workflow_file, ref, fields: dispatched.update(
                 {
                     "repository": repository,
@@ -6936,12 +6941,12 @@ class LocalCiTests(unittest.TestCase):
                 }
             )
         )
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="build",
                         branch="feature/cloud",
@@ -6954,12 +6959,12 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.now_iso = original_now_iso
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.now_iso = original_now_iso
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -6968,18 +6973,18 @@ class LocalCiTests(unittest.TestCase):
         )
 
     def test_cmd_cloud_run_build_cli_override_adds_one_off_macos_selector(self):
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_now_iso = self.mod.now_iso
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_now_iso = self.cloud.now_iso
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
         dispatched = {}
-        self.mod.gh_workflow_dispatch = (
+        self.cloud.gh_workflow_dispatch = (
             lambda repository, workflow_file, ref, fields: dispatched.update(
                 {
                     "repository": repository,
@@ -6989,12 +6994,12 @@ class LocalCiTests(unittest.TestCase):
                 }
             )
         )
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="build",
                         branch="feature/cloud",
@@ -7007,12 +7012,12 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.now_iso = original_now_iso
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.now_iso = original_now_iso
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -7021,12 +7026,12 @@ class LocalCiTests(unittest.TestCase):
         )
 
     def test_cmd_cloud_run_rejects_build_leg_override_for_docs_check(self):
-        original_gh_available = self.mod.gh_available
-        self.mod.gh_available = lambda: True
+        original_gh_available = self.cloud.gh_available
+        self.cloud.gh_available = lambda: True
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="docs-check",
                         branch="feature/cloud",
@@ -7039,27 +7044,27 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
+            self.cloud.gh_available = original_gh_available
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 1)
         self.assertIn("--macos-runner-selector-json is not supported", output)
 
     def test_cmd_cloud_run_dispatches_waits_and_persists_record(self):
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_view = self.mod.gh_run_view
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_view = self.cloud.gh_run_view
         original_sleep = self.mod.time.sleep
-        original_now_iso = self.mod.now_iso
+        original_now_iso = self.cloud.now_iso
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
         dispatched = {}
-        self.mod.gh_workflow_dispatch = (
+        self.cloud.gh_workflow_dispatch = (
             lambda repository, workflow_file, ref, fields: dispatched.update(
                 {
                     "repository": repository,
@@ -7069,7 +7074,7 @@ class LocalCiTests(unittest.TestCase):
                 }
             )
         )
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: {
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: {
             "databaseId": 98765,
             "headBranch": ref,
             "headSha": "e" * 40,
@@ -7081,7 +7086,7 @@ class LocalCiTests(unittest.TestCase):
             "workflowName": "Docs Consistency",
             "match_ambiguous": False,
         }
-        self.mod.gh_run_view = lambda repository, run_id: {
+        self.cloud.gh_run_view = lambda repository, run_id: {
             "databaseId": run_id,
             "status": "completed",
             "conclusion": "success",
@@ -7102,11 +7107,11 @@ class LocalCiTests(unittest.TestCase):
             ],
         }
         self.mod.time.sleep = lambda _: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="docs-check",
                         branch="feature/cloud",
@@ -7119,14 +7124,14 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.gh_run_view = original_view
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.gh_run_view = original_view
             self.mod.time.sleep = original_sleep
-            self.mod.now_iso = original_now_iso
+            self.cloud.now_iso = original_now_iso
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(dispatched["workflow_file"], "docs-check.yml")
@@ -7137,7 +7142,7 @@ class LocalCiTests(unittest.TestCase):
                 "runner_selector_json": "\"namespace-profile-default\"",
             },
         )
-        records = self.mod.list_cloud_records()
+        records = self.cloud.list_cloud_records()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["run_id"], 98765)
         self.assertEqual(records[0]["provider_resolved"], "namespace")
@@ -7145,18 +7150,18 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(records[0]["conclusion"], "success")
 
     def test_cmd_cloud_run_explicit_runner_selector_overrides_config_default(self):
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_now_iso = self.mod.now_iso
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_now_iso = self.cloud.now_iso
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
         dispatched = {}
-        self.mod.gh_workflow_dispatch = (
+        self.cloud.gh_workflow_dispatch = (
             lambda repository, workflow_file, ref, fields: dispatched.update(
                 {
                     "repository": repository,
@@ -7166,12 +7171,12 @@ class LocalCiTests(unittest.TestCase):
                 }
             )
         )
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: None
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="docs-check",
                         branch="feature/cloud",
@@ -7184,12 +7189,12 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.now_iso = original_now_iso
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.now_iso = original_now_iso
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -7199,11 +7204,11 @@ class LocalCiTests(unittest.TestCase):
                 "runner_selector_json": "\"namespace-profile-big-apple\"",
             },
         )
-        records = self.mod.list_cloud_records()
+        records = self.cloud.list_cloud_records()
         self.assertEqual(records[0]["runner_selector_json"], "\"namespace-profile-big-apple\"")
 
     def test_cmd_cloud_status_shows_runner_selector(self):
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "sel123def456",
                 "workflow_key": "docs-check",
@@ -7255,7 +7260,7 @@ class LocalCiTests(unittest.TestCase):
 
         buf = io.StringIO()
         with redirect_stdout(buf):
-            exit_code = self.mod.cmd_cloud_status(
+            exit_code = self.cloud.cmd_cloud_status(
                 SimpleNamespace(identifier="latest", refresh=False, limit=5)
             )
 
@@ -7274,10 +7279,10 @@ class LocalCiTests(unittest.TestCase):
         del config["github_actions"]["workflows"]["docs-check"]["providers"]["namespace"]["runner_selector_json"]
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        original_gh_available = self.mod.gh_available
-        original_repo_variables = self.mod.gh_repo_variables
-        self.mod.gh_available = lambda: True
-        self.mod.gh_repo_variables = lambda repository: {
+        original_gh_available = self.cloud.gh_available
+        original_repo_variables = self.cloud.gh_repo_variables
+        self.cloud.gh_available = lambda: True
+        self.cloud.gh_repo_variables = lambda repository: {
             "PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON": "\"namespace-profile-docs\"",
             "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON": "\"namespace-profile-linux\"",
             "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON": "\"namespace-profile-windows\"",
@@ -7285,10 +7290,10 @@ class LocalCiTests(unittest.TestCase):
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_defaults(SimpleNamespace())
+                exit_code = self.cloud.cmd_cloud_defaults(SimpleNamespace())
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.gh_repo_variables = original_repo_variables
+            self.cloud.gh_available = original_gh_available
+            self.cloud.gh_repo_variables = original_repo_variables
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -7307,14 +7312,14 @@ class LocalCiTests(unittest.TestCase):
         config["github_actions"]["defaults"]["wait_poll_secs"] = "not-an-int"
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        original_gh_available = self.mod.gh_available
-        self.mod.gh_available = lambda: False
+        original_gh_available = self.cloud.gh_available
+        self.cloud.gh_available = lambda: False
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_defaults(SimpleNamespace())
+                exit_code = self.cloud.cmd_cloud_defaults(SimpleNamespace())
         finally:
-            self.mod.gh_available = original_gh_available
+            self.cloud.gh_available = original_gh_available
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -7334,7 +7339,7 @@ class LocalCiTests(unittest.TestCase):
             }
         }
 
-        summary = self.mod.estimate_cloud_record_cost(
+        summary = self.cloud.estimate_cloud_record_cost(
             {
                 "provider_requested": "namespace",
                 "provider_resolved": "namespace",
@@ -7368,11 +7373,11 @@ class LocalCiTests(unittest.TestCase):
             }
         }
 
-        original_gh_available = self.mod.gh_available
-        original_gh_api_json = self.mod.gh_api_json
-        original_billing_window = self.mod.billing_period_window
-        self.mod.gh_available = lambda: True
-        self.mod.billing_period_window = lambda start_day, now_dt=None: (
+        original_gh_available = self.cloud.gh_available
+        original_gh_api_json = self.cloud.gh_api_json
+        original_billing_window = self.cloud.billing_period_window
+        self.cloud.gh_available = lambda: True
+        self.cloud.billing_period_window = lambda start_day, now_dt=None: (
             datetime(2026, 3, 15, tzinfo=timezone.utc),
             datetime(2026, 4, 15, tzinfo=timezone.utc),
         )
@@ -7429,13 +7434,13 @@ class LocalCiTests(unittest.TestCase):
                     )
             return (None, "unexpected call")
 
-        self.mod.gh_api_json = fake_gh_api_json
+        self.cloud.gh_api_json = fake_gh_api_json
         try:
-            summary = self.mod.fetch_github_repo_actions_billing_summary("danielraffel/pulp", config)
+            summary = self.cloud.fetch_github_repo_actions_billing_summary("danielraffel/pulp", config)
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.gh_api_json = original_gh_api_json
-            self.mod.billing_period_window = original_billing_window
+            self.cloud.gh_available = original_gh_available
+            self.cloud.gh_api_json = original_gh_api_json
+            self.cloud.billing_period_window = original_billing_window
 
         self.assertEqual(summary["status"], "actual")
         self.assertEqual(summary["currency"], "USD")
@@ -7455,7 +7460,7 @@ class LocalCiTests(unittest.TestCase):
         }
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "hist123def456",
                 "workflow_key": "docs-check",
@@ -7500,19 +7505,19 @@ class LocalCiTests(unittest.TestCase):
             }
         )
 
-        original_billing_period_window = self.mod.billing_period_window
-        self.mod.billing_period_window = lambda start_day, now_dt=None: (
+        original_billing_period_window = self.cloud.billing_period_window
+        self.cloud.billing_period_window = lambda start_day, now_dt=None: (
             datetime(2026, 4, 1, tzinfo=timezone.utc),
             datetime(2026, 5, 1, tzinfo=timezone.utc),
         )
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_history(
+                exit_code = self.cloud.cmd_cloud_history(
                     SimpleNamespace(workflow=None, provider=None, limit=10)
                 )
         finally:
-            self.mod.billing_period_window = original_billing_period_window
+            self.cloud.billing_period_window = original_billing_period_window
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -7528,7 +7533,7 @@ class LocalCiTests(unittest.TestCase):
         }
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "histgh123456",
                 "workflow_key": "build",
@@ -7546,8 +7551,8 @@ class LocalCiTests(unittest.TestCase):
             }
         )
 
-        original_fetch = self.mod.fetch_github_repo_actions_billing_summary
-        self.mod.fetch_github_repo_actions_billing_summary = lambda repository, cfg: {
+        original_fetch = self.cloud.fetch_github_repo_actions_billing_summary
+        self.cloud.fetch_github_repo_actions_billing_summary = lambda repository, cfg: {
             "status": "actual",
             "currency": "USD",
             "actual_total": 2.7,
@@ -7556,11 +7561,11 @@ class LocalCiTests(unittest.TestCase):
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_history(
+                exit_code = self.cloud.cmd_cloud_history(
                     SimpleNamespace(workflow=None, provider=None, limit=10)
                 )
         finally:
-            self.mod.fetch_github_repo_actions_billing_summary = original_fetch
+            self.cloud.fetch_github_repo_actions_billing_summary = original_fetch
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -7581,7 +7586,7 @@ class LocalCiTests(unittest.TestCase):
         }
         self.config_path.write_text(json.dumps(config) + "\n")
 
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "cmpns123456",
                 "workflow_key": "build",
@@ -7620,7 +7625,7 @@ class LocalCiTests(unittest.TestCase):
                 },
             }
         )
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "cmpgh123456",
                 "workflow_key": "build",
@@ -7643,7 +7648,7 @@ class LocalCiTests(unittest.TestCase):
 
         buf = io.StringIO()
         with redirect_stdout(buf):
-            exit_code = self.mod.cmd_cloud_compare(SimpleNamespace(workflow="build"))
+            exit_code = self.cloud.cmd_cloud_compare(SimpleNamespace(workflow="build"))
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -7658,7 +7663,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("note: estimated; verify provider pricing", output)
 
     def test_cmd_cloud_recommend_prefers_fastest_observed_provider(self):
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "recns123456",
                 "workflow_key": "build",
@@ -7670,7 +7675,7 @@ class LocalCiTests(unittest.TestCase):
                 "duration_secs": 120,
             }
         )
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "recgh123456",
                 "workflow_key": "build",
@@ -7685,7 +7690,7 @@ class LocalCiTests(unittest.TestCase):
 
         buf = io.StringIO()
         with redirect_stdout(buf):
-            exit_code = self.mod.cmd_cloud_recommend(SimpleNamespace(workflow="build"))
+            exit_code = self.cloud.cmd_cloud_recommend(SimpleNamespace(workflow="build"))
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -7693,20 +7698,20 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("note: estimated; verify provider pricing", output)
 
     def test_cmd_cloud_run_wait_fails_when_refresh_cannot_fetch_github_state(self):
-        original_gh_available = self.mod.gh_available
-        original_resolve_repo = self.mod.resolve_github_repository
-        original_current_login = self.mod.gh_current_login
-        original_dispatch = self.mod.gh_workflow_dispatch
-        original_find = self.mod.gh_find_dispatched_run
-        original_view = self.mod.gh_run_view
+        original_gh_available = self.cloud.gh_available
+        original_resolve_repo = self.cloud.resolve_github_repository
+        original_current_login = self.cloud.gh_current_login
+        original_dispatch = self.cloud.gh_workflow_dispatch
+        original_find = self.cloud.gh_find_dispatched_run
+        original_view = self.cloud.gh_run_view
         original_sleep = self.mod.time.sleep
-        original_now_iso = self.mod.now_iso
+        original_now_iso = self.cloud.now_iso
 
-        self.mod.gh_available = lambda: True
-        self.mod.resolve_github_repository = lambda settings: "danielraffel/pulp"
-        self.mod.gh_current_login = lambda: "danielraffel"
-        self.mod.gh_workflow_dispatch = lambda repository, workflow_file, ref, fields: None
-        self.mod.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: {
+        self.cloud.gh_available = lambda: True
+        self.cloud.resolve_github_repository = lambda settings: "danielraffel/pulp"
+        self.cloud.gh_current_login = lambda: "danielraffel"
+        self.cloud.gh_workflow_dispatch = lambda repository, workflow_file, ref, fields: None
+        self.cloud.gh_find_dispatched_run = lambda repository, workflow_file, ref, dispatched_at, timeout_secs: {
             "databaseId": 98765,
             "workflowName": "Docs Consistency",
             "headBranch": "feature/cloud",
@@ -7718,13 +7723,13 @@ class LocalCiTests(unittest.TestCase):
             "updatedAt": "2026-04-04T12:00:06+00:00",
             "jobs": [],
         }
-        self.mod.gh_run_view = lambda repository, run_id: None
+        self.cloud.gh_run_view = lambda repository, run_id: None
         self.mod.time.sleep = lambda _: None
-        self.mod.now_iso = lambda: "2026-04-04T12:00:00+00:00"
+        self.cloud.now_iso = lambda: "2026-04-04T12:00:00+00:00"
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_run(
+                exit_code = self.cloud.cmd_cloud_run(
                     SimpleNamespace(
                         workflow="docs-check",
                         branch="feature/cloud",
@@ -7737,21 +7742,21 @@ class LocalCiTests(unittest.TestCase):
                     )
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.resolve_github_repository = original_resolve_repo
-            self.mod.gh_current_login = original_current_login
-            self.mod.gh_workflow_dispatch = original_dispatch
-            self.mod.gh_find_dispatched_run = original_find
-            self.mod.gh_run_view = original_view
+            self.cloud.gh_available = original_gh_available
+            self.cloud.resolve_github_repository = original_resolve_repo
+            self.cloud.gh_current_login = original_current_login
+            self.cloud.gh_workflow_dispatch = original_dispatch
+            self.cloud.gh_find_dispatched_run = original_find
+            self.cloud.gh_run_view = original_view
             self.mod.time.sleep = original_sleep
-            self.mod.now_iso = original_now_iso
+            self.cloud.now_iso = original_now_iso
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 1)
         self.assertIn("Error: Failed to refresh GitHub run 98765 from danielraffel/pulp.", output)
 
     def test_cmd_status_includes_recent_cloud_summary(self):
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "abc123def456",
                 "workflow_key": "docs-check",
@@ -7788,7 +7793,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("gha#98765", output)
 
     def test_cmd_cloud_status_refresh_uses_record_repository(self):
-        self.mod.save_cloud_record(
+        self.cloud.save_cloud_record(
             {
                 "dispatch_id": "repo123def456",
                 "workflow_key": "docs-check",
@@ -7804,11 +7809,11 @@ class LocalCiTests(unittest.TestCase):
             }
         )
 
-        original_gh_available = self.mod.gh_available
-        original_view = self.mod.gh_run_view
+        original_gh_available = self.cloud.gh_available
+        original_view = self.cloud.gh_run_view
         seen = {}
-        self.mod.gh_available = lambda: True
-        self.mod.gh_run_view = lambda repository, run_id: (
+        self.cloud.gh_available = lambda: True
+        self.cloud.gh_run_view = lambda repository, run_id: (
             seen.update({"repository": repository, "run_id": run_id}) or {
                 "databaseId": 77777,
                 "workflowName": "Docs Consistency",
@@ -7825,12 +7830,12 @@ class LocalCiTests(unittest.TestCase):
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                exit_code = self.mod.cmd_cloud_status(
+                exit_code = self.cloud.cmd_cloud_status(
                     SimpleNamespace(identifier="latest", refresh=True, limit=5)
                 )
         finally:
-            self.mod.gh_available = original_gh_available
-            self.mod.gh_run_view = original_view
+            self.cloud.gh_available = original_gh_available
+            self.cloud.gh_run_view = original_view
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(seen["repository"], "other-owner/other-repo")
@@ -7874,7 +7879,7 @@ class LocalCiTests(unittest.TestCase):
         self.config_path.write_text(json.dumps(config) + "\n")
 
         for index in range(6):
-            self.mod.save_cloud_record(
+            self.cloud.save_cloud_record(
                 {
                     "dispatch_id": f"hist{index:02d}abcdef",
                     "workflow_key": "build",
@@ -7902,11 +7907,11 @@ class LocalCiTests(unittest.TestCase):
         original_current_branch = self.mod.current_branch
         original_utm_status = self.mod.utmctl_vm_status
         original_ssh_reachable = self.mod.ssh_reachable
-        original_billing_period_window = self.mod.billing_period_window
+        original_billing_period_window = self.cloud.billing_period_window
         self.mod.current_branch = lambda: "feature/cloud"
         self.mod.utmctl_vm_status = lambda vm_name: "stopped"
         self.mod.ssh_reachable = lambda host, timeout=5: True
-        self.mod.billing_period_window = lambda start_day, now_dt=None: (
+        self.cloud.billing_period_window = lambda start_day, now_dt=None: (
             datetime(2026, 4, 1, tzinfo=timezone.utc),
             datetime(2026, 5, 1, tzinfo=timezone.utc),
         )
@@ -7918,7 +7923,7 @@ class LocalCiTests(unittest.TestCase):
             self.mod.current_branch = original_current_branch
             self.mod.utmctl_vm_status = original_utm_status
             self.mod.ssh_reachable = original_ssh_reachable
-            self.mod.billing_period_window = original_billing_period_window
+            self.cloud.billing_period_window = original_billing_period_window
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
