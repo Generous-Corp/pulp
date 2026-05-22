@@ -1172,7 +1172,21 @@ void View::simulate_hover(Point root_pos) {
         coords.emplace_back("y", static_cast<double>(root_pos.y));
         pulp::view::motion::record_simulated_input("hover", id, std::move(coords));
     }
-    if (target) target->set_hovered(true);
+    if (target) {
+        target->set_hovered(true);
+        // WYSIWYG T1 — also deliver a positioned hover sample so a widget can
+        // track WHICH sub-region of itself the pointer is over (e.g. the
+        // inspector ToolStrip's per-button tooltip, which set_hovered() alone
+        // can't drive because on_mouse_enter carries no coordinate). Convert
+        // the root-space point into the target's local space by subtracting
+        // its accumulated bounds origin up the parent chain.
+        float ox = 0.0f, oy = 0.0f;
+        for (View* v = target; v; v = v->parent()) {
+            ox += v->bounds().x;
+            oy += v->bounds().y;
+        }
+        target->on_hover_move(Point{root_pos.x - ox, root_pos.y - oy});
+    }
 }
 
 // ── Grid template parsing ────────────────────────────────────────────────────

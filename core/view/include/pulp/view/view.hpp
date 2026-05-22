@@ -215,6 +215,16 @@ public:
 
     virtual void on_mouse_enter() {}
     virtual void on_mouse_leave() {}
+
+    /// Pointer moved over this view with no button held, reported in this
+    /// view's LOCAL coordinates. Unlike on_mouse_enter/leave (which carry no
+    /// position), this fires on every hover sample over the hit target so a
+    /// widget can track WHICH sub-region of itself the pointer is over (e.g.
+    /// the inspector ToolStrip's per-button tooltip). Dispatched by
+    /// simulate_hover() — the same path the platform host's mouse-move handler
+    /// drives. Default no-op so no existing widget changes behavior.
+    virtual void on_hover_move(Point local_pos) { (void)local_pos; }
+
     bool is_hovered() const { return hovered_; }
     void set_hovered(bool h);
 

@@ -5330,3 +5330,65 @@ TEST_CASE("InspectorWindow P3: tool strip is present and active-tool "
     window.paint_all(canvas);
     REQUIRE(canvas.command_count() > 0);
 }
+
+// WYSIWYG T1 — the V/T tooltips. The strip paints an inline "Select (V)" /
+// "Text (T)" tooltip keyed on the hovered button. The bug was that a
+// mouse-MOVE (hover, no button down) never reached the strip's hit-tracking:
+// simulate_hover() set hovered_ via on_mouse_enter (no position), so
+// hovered_button_ stayed -1 and the tooltip never showed. T1 adds a positioned
+// on_hover_move() hook that simulate_hover() now delivers to the hit target.
+TEST_CASE("InspectorWindow T1: hover over a tool button shows its tooltip",
+          "[inspect][window][wysiwyg][t1]") {
+    auto helper = [](int button_index, const char* expect_tip,
+                     const char* not_tip) {
+        View root;
+        root.set_bounds({0, 0, 400, 300});
+        InspectorWindow window(root);
+        window.set_bounds({0, 0, 400, 600});
+        window.layout_children();
+
+        View* strip = window.child_at(0);
+        REQUIRE(strip != nullptr);
+
+        // Button centers in ROOT space mirror the click test above:
+        //   button 0 (Select) ≈ x=26, button 1 (Text) ≈ x=70.
+        const float strip_y = strip->bounds().y + strip->bounds().height * 0.5f;
+        const float bx = button_index == 0 ? 26.0f : 70.0f;
+
+        // Before any hover the tooltip is absent.
+        {
+            pulp::canvas::RecordingCanvas canvas;
+            window.paint_all(canvas);
+            bool tip_drawn = false;
+            for (const auto& c : canvas.commands())
+                if (c.type == pulp::canvas::DrawCommand::Type::fill_text &&
+                    c.text == expect_tip)
+                    tip_drawn = true;
+            REQUIRE_FALSE(tip_drawn);
+        }
+
+        // Drive a hover over the button via the window root — exactly the path
+        // the platform host's mouseMoved: handler uses. T1 makes this deliver
+        // on_hover_move() to the strip so hovered_button_ is set.
+        window.simulate_hover({bx, strip_y});
+
+        pulp::canvas::RecordingCanvas canvas;
+        window.paint_all(canvas);
+        bool expect_drawn = false;
+        bool other_drawn = false;
+        for (const auto& c : canvas.commands()) {
+            if (c.type != pulp::canvas::DrawCommand::Type::fill_text) continue;
+            if (c.text == expect_tip) expect_drawn = true;
+            if (c.text == not_tip) other_drawn = true;
+        }
+        REQUIRE(expect_drawn);        // the hovered button's tooltip shows
+        REQUIRE_FALSE(other_drawn);   // and only that one
+    };
+
+    SECTION("Select button → 'Select (V)'") {
+        helper(0, "Select (V)", "Text (T)");
+    }
+    SECTION("Text button → 'Text (T)'") {
+        helper(1, "Text (T)", "Select (V)");
+    }
+}

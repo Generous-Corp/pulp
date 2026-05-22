@@ -256,20 +256,21 @@ public:
     void on_mouse_event(const MouseEvent& event) override {
         // Track the hovered button for the inline tooltip (FIX 3). A press
         // also picks the tool. event.position is local to this View.
-        int hit = -1;
-        for (int i = 0; i < 2; ++i) {
-            Rect r = button_rect(i);
-            if (event.position.x >= (r.x - bounds().x) &&
-                event.position.x <= (r.x - bounds().x) + r.width &&
-                event.position.y >= 0 && event.position.y <= r.height) {
-                hit = i;
-                break;
-            }
-        }
+        const int hit = button_at_local(event.position);
         hovered_button_ = hit;
         if (event.is_down && hit >= 0) {
             if (on_picked_ && *on_picked_) (*on_picked_)(hit);
         }
+    }
+
+    // WYSIWYG T1 — positioned hover. The platform host's mouse-move handler
+    // dispatches simulate_hover(), which now delivers on_hover_move() to the
+    // hit target in local coordinates. Without this the strip only received
+    // on_mouse_enter (no position), so hovered_button_ stayed -1 and the
+    // "Select (V)"/"Text (T)" tooltip never appeared. on_mouse_event still
+    // sets it on a press, but a hover with no button down took THIS path.
+    void on_hover_move(Point local_pos) override {
+        hovered_button_ = button_at_local(local_pos);
     }
 
     void on_mouse_leave() override { hovered_button_ = -1; }
@@ -285,6 +286,23 @@ private:
         auto b = bounds();
         return Rect{b.x + 6 + static_cast<float>(i) * (kButtonWidth + 4),
                     b.y + 4, kButtonWidth, b.height - 8};
+    }
+
+    // Hit-test a LOCAL-space point against the two tool buttons. Returns the
+    // button index (0 = Select, 1 = Text) or -1 if the point is off both.
+    // button_rect() is in root space; subtract bounds().x to compare against
+    // a local x (button_rect's y already starts at bounds().y + 4, so the
+    // local y window is [4, height-4)).
+    int button_at_local(Point local_pos) const {
+        for (int i = 0; i < 2; ++i) {
+            Rect r = button_rect(i);
+            const float lx = r.x - bounds().x;
+            if (local_pos.x >= lx && local_pos.x <= lx + r.width &&
+                local_pos.y >= 0 && local_pos.y <= r.height) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     const int* active_tool_ = nullptr;
