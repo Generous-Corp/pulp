@@ -9,9 +9,10 @@
 //   auto plugins = scanner.scan();
 //   for (auto& p : plugins) { ... p.name, p.path, p.format ... }
 
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
-#include <functional>
 
 namespace pulp::host {
 
