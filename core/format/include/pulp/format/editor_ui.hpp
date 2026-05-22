@@ -33,6 +33,11 @@ inline EditorUiInstance build_editor_ui(state::StateStore& store,
         auto root = std::make_unique<view::View>();
         root->set_theme(view::Theme::dark());
         root->flex().direction = view::FlexDirection::column;
+        // The scripted UI paints through the Skia/Dawn pipeline; tag the
+        // root so adapters auto-select the GPU PluginViewHost. (Adapters
+        // also check ViewBridge::uses_script_ui(); this keeps the flag
+        // correct when the view is inspected outside a bridge.)
+        root->set_requires_gpu_host(true);
 
         view::ScriptedUiOptions options;
         options.script_path = *script_path;

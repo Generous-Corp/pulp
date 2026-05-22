@@ -5,6 +5,7 @@
 #ifdef PULP_VST3_GUI
 
 #include <pulp/format/vst3_plug_view.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #include <pulp/runtime/log.hpp>
 #include <cstring>
 
@@ -43,9 +44,10 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     }
 
     const auto& hints = bridge_.size_hints();
+    const auto gpu = decide_gpu_host(bridge_);
     view::PluginViewHost::Options opts;
     opts.size = {hints.preferred_width, hints.preferred_height};
-    opts.use_gpu = false;  // CoreGraphics for now; GPU opt-in later
+    opts.use_gpu = gpu.use_gpu;
 
     editor_host_ = view::PluginViewHost::create(*bridge_.view(), opts);
     if (!editor_host_) {
@@ -53,6 +55,10 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         bridge_.close();
         return kResultFalse;
     }
+    warn_if_unexpected_cpu_fallback(gpu, editor_host_.get());
+
+    // Pump the scripted UI session (async results, timers, rAF) per vsync.
+    editor_host_->set_idle_callback(make_scripted_idle_pump(bridge_));
 
     editor_host_->attach_to_parent(parent);
     auto result = CPluginView::attached(parent, type);
@@ -66,9 +72,9 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     // Attach succeeded — now fire Processor::on_view_opened.
     bridge_.notify_attached();
 
-    runtime::log_info("VST3 editor: attached ({}x{}, mode={})",
+    runtime::log_info("VST3 editor: attached ({}x{}, mode={}, gpu={})",
                       hints.preferred_width, hints.preferred_height,
-                      bridge_.uses_script_ui() ? "scripted" : "autoui");
+                      gpu.mode, editor_host_->is_gpu_backed());
     return result;
 }
 

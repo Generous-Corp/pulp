@@ -14,6 +14,7 @@
 
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -129,9 +130,10 @@ static const char kOwnershipKey = 0;
     const uint32_t w = bridge->size_hints().preferred_width;
     const uint32_t h = bridge->size_hints().preferred_height;
 
+    const auto gpu = format::decide_gpu_host(*bridge);
     view::PluginViewHost::Options opts;
     opts.size = {w, h};
-    opts.use_gpu = false;
+    opts.use_gpu = gpu.use_gpu;
 
     auto host = view::PluginViewHost::create(*bridge->view(), opts);
     if (!host) {
@@ -139,11 +141,17 @@ static const char kOwnershipKey = 0;
         bridge->close();
         return nil;
     }
+    format::warn_if_unexpected_cpu_fallback(gpu, host.get());
+
+    // Pump the scripted UI session per vsync. Captures the ViewBridge object
+    // by address (stable across the unique_ptr move into the ownership wrapper
+    // below); the wrapper destroys host (stops the display link) before bridge.
+    host->set_idle_callback(format::make_scripted_idle_pump(*bridge));
 
     bridge->notify_attached();
 
-    runtime::log_info("AU v2 editor: created view ({}x{}, mode={})",
-                      w, h, bridge->uses_script_ui() ? "scripted" : "autoui");
+    runtime::log_info("AU v2 editor: created view ({}x{}, mode={}, gpu={})",
+                      w, h, gpu.mode, host->is_gpu_backed());
 
     NSView* editorView = (__bridge NSView*)host->native_handle();
     [editorView setFrame:NSMakeRect(0, 0, w, h)];

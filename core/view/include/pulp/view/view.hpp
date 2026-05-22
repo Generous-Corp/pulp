@@ -285,6 +285,22 @@ public:
     bool backface_visible() const { return backface_visible_; }
     void set_backface_visible(bool v) { backface_visible_ = v; }
 
+    /// GPU-host capability signal (pulp #2700-followup, GPU-plugin-view-host).
+    /// A view that is rendered through the Skia/Dawn/Yoga scripted-UI path —
+    /// or any custom `Processor::create_view()` that paints via GPU-backed
+    /// widgets (e.g. WebGPU/Three.js canvases, the scripted React UI) — sets
+    /// this true so plugin format adapters auto-select the GPU
+    /// `PluginViewHost` instead of the CoreGraphics CPU fallback. Default
+    /// false: a plain widget tree renders fine on CPU and a Processor that
+    /// returns `nullptr` from `create_view()` intentionally selects AutoUi.
+    ///
+    /// This lives on the View (not the Processor) because `create_view()` can
+    /// return a different view per editor instance and the flag must not touch
+    /// the node ABI. Adapters read it via `ViewBridge::view()` after
+    /// `ViewBridge::open()`. See `planning/2026-05-22-gpu-view-host-in-plugins.md`.
+    bool requires_gpu_host() const { return requires_gpu_host_; }
+    void set_requires_gpu_host(bool v) { requires_gpu_host_ = v; }
+
     /// Mark layout as needing recalculation (auto-invalidation)
     void invalidate_layout() { layout_dirty_ = true; }
     bool layout_dirty() const { return layout_dirty_; }
@@ -1334,6 +1350,7 @@ private:
     bool hit_testable_ = true;
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;
+    bool requires_gpu_host_ = false;
     FrameClock* frame_clock_ = nullptr;
 
     // Visual properties

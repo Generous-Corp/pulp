@@ -4,6 +4,7 @@
 #include <memory>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 namespace pulp::view {
 
@@ -66,6 +67,29 @@ public:
     // Resize
     virtual void set_size(uint32_t width, uint32_t height) = 0;
     virtual Size get_size() const = 0;
+
+    // True only when this host is rendering through the GPU (Dawn/Skia
+    // Graphite) pipeline AND GPU initialization succeeded. CoreGraphics
+    // CPU hosts return false, and a GPU host that failed to initialize
+    // Dawn/Skia and fell back to CPU also returns false. Adapters read
+    // this after create() to scream when a GPU/scripted editor view
+    // silently took the CPU path (see `format/gpu_host_select.hpp`).
+    virtual bool is_gpu_backed() const { return false; }
+
+    // Per-vsync idle pump. GPU hosts invoke this callback once per display
+    // link tick (before rendering) so a scripted UI's `ScriptedUiSession::poll()`
+    // — async results, timers, requestAnimationFrame — keeps running while
+    // the editor is embedded. CPU hosts ignore it. Default no-op.
+    virtual void set_idle_callback(std::function<void()> callback) {
+        (void) callback;
+    }
+
+    // Capture the host's current back buffer as a PNG (mirrors
+    // `WindowHost::capture_back_buffer_png`, issue #2001). GPU hosts read
+    // back the rendered Skia frame via `SkiaSurface::read_current_rgba`;
+    // hosts that cannot capture return an empty vector. Used by the
+    // embedded-editor host smoke tests.
+    virtual std::vector<uint8_t> capture_back_buffer_png() { return {}; }
 
     // Attach/detach a native child view inside the plugin editor host.
     // Coordinates use Pulp's top-left origin convention, matching WindowHost.

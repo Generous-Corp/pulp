@@ -16,6 +16,7 @@
 #include <pulp/format/clap_adapter.hpp>
 #ifdef PULP_CLAP_GUI
 #include <pulp/format/editor_ui.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
@@ -314,15 +315,19 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
     }
 
     const auto& hints = p->bridge->size_hints();
+    const auto gpu = decide_gpu_host(*p->bridge);
     view::PluginViewHost::Options opts;
     opts.size = {hints.preferred_width, hints.preferred_height};
-    opts.use_gpu = false;  // Start with CoreGraphics; GPU opt-in later
+    opts.use_gpu = gpu.use_gpu;
 
     p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
     if (p->editor_host) {
-        runtime::log_info("CLAP editor: created ({}x{}, mode={})",
+        warn_if_unexpected_cpu_fallback(gpu, p->editor_host.get());
+        // Pump the scripted UI session (async results, timers, rAF) per vsync.
+        p->editor_host->set_idle_callback(make_scripted_idle_pump(*p->bridge));
+        runtime::log_info("CLAP editor: created ({}x{}, mode={}, gpu={})",
                           hints.preferred_width, hints.preferred_height,
-                          p->bridge->uses_script_ui() ? "scripted" : "autoui");
+                          gpu.mode, p->editor_host->is_gpu_backed());
     } else {
         runtime::log_error("CLAP editor: failed to create host");
         p->bridge->close();
