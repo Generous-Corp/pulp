@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pathlib
 import subprocess
@@ -1013,6 +1014,155 @@ class LocalCiPureHelperTests(unittest.TestCase):
         self.mod.update_target_repo_path(config, "windows", r"C:\Pulp")
         self.assertEqual(config["targets"]["windows"]["repo_path"], r"C:\Pulp")
         self.assertEqual(config["desktop_automation"]["targets"]["windows"]["repo_path"], r"C:\Pulp")
+
+    def test_desktop_source_request_manifest_and_command_edges(self) -> None:
+        args = Namespace(
+            source_mode="exact_sha",
+            branch="feature/source",
+            sha="abc123",
+            prepare_command="  ./setup.sh --desktop  ",
+            prepare_timeout=12,
+        )
+        request = self.mod.make_desktop_source_request(args)
+
+        self.assertEqual(request["mode"], "exact-sha")
+        self.assertEqual(request["prepare_command"], "./setup.sh --desktop")
+        self.assertEqual(request["prepare_timeout_secs"], 12.0)
+        self.assertEqual(
+            self.mod.desktop_source_cache_key(request),
+            self.mod.desktop_source_cache_key({**request, "mode": "live", "branch": "main"}),
+        )
+        self.assertNotEqual(
+            self.mod.desktop_source_cache_key(request),
+            self.mod.desktop_source_cache_key({**request, "prepare_command": "cmake --build build"}),
+        )
+
+        with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.root / "state")}, clear=True):
+            source_root = self.mod.desktop_source_root("windows", request)
+        self.assertEqual(source_root.parent, self.root / "state" / "desktop-source" / "windows")
+
+        self.assertIsNone(self.mod._command_path_rewrite_candidate("/tmp/outside-tool"))
+        self.assertIsNone(self.mod._command_path_rewrite_candidate("pulp-ui-preview"))
+        self.assertEqual(
+            self.mod._command_path_rewrite_candidate("./tools/local-ci/local_ci.py"),
+            self.mod.ROOT / "tools" / "local-ci" / "local_ci.py",
+        )
+        self.assertIsNone(self.mod.rewrite_launch_command_for_source_root(None, self.root / "prepared"))
+        self.assertEqual(
+            self.mod.rewrite_launch_command_for_source_root('"unterminated', self.root / "prepared"),
+            '"unterminated',
+        )
+        self.assertEqual(
+            self.mod.rewrite_launch_command_for_posix_root("pulp-ui-preview --flag", "$HOME/source"),
+            "pulp-ui-preview --flag",
+        )
+
+        local_command = f"'{self.mod.ROOT / 'tools' / 'local-ci' / 'local_ci.py'}' --json"
+        rewritten_local = self.mod.rewrite_launch_command_for_source_root(local_command, self.root / "prepared source")
+        rewritten_posix = self.mod.rewrite_launch_command_for_posix_root(local_command, "$HOME/prepared source")
+        rewritten_windows = self.mod.rewrite_launch_command_for_windows_root(
+            r".\tools\local-ci\local_ci.py --json",
+            r"C:\Prepared Source",
+        )
+        self.assertIn(str(self.root / "prepared source" / "tools" / "local-ci" / "local_ci.py"), rewritten_local)
+        self.assertIn("'$HOME/prepared source/tools/local-ci/local_ci.py'", rewritten_posix)
+        self.assertIn(r'"C:\Prepared Source\tools\local-ci\local_ci.py" --json', rewritten_windows)
+
+        commands = self.mod.split_windows_prepare_commands('echo "one;two"; cmake --build build\nctest -C Debug')
+        self.assertEqual(commands, ['echo "one;two"', "cmake --build build", "ctest -C Debug"])
+        self.mod.validate_windows_prepare_commands(['cmake -G "Visual Studio 17 2022"'])
+        with self.assertRaisesRegex(ValueError, "single-quoted tokens"):
+            self.mod.validate_windows_prepare_commands(["cmake -G 'Visual Studio 17 2022'"])
+
+        manifest: dict = {}
+        self.mod.attach_desktop_source_to_manifest(manifest, None)
+        self.assertEqual(manifest, {})
+        self.mod.attach_desktop_source_to_manifest(
+            manifest,
+            {
+                "mode": "prepared",
+                "branch": "feature/source",
+                "sha": "abc123",
+                "prepare_command": "./setup.sh",
+                "prepare_timeout_secs": 12.0,
+                "prepared_root": "/real/root",
+                "prepared_root_display": "$STATE/root",
+                "launch_cwd": "/real/root/examples",
+                "launch_cwd_display": "$STATE/root/examples",
+                "prepare_log": "prepare.log",
+            },
+        )
+        self.assertEqual(manifest["source"]["mode"], "prepared")
+        self.assertEqual(manifest["source"]["sha"], "abc123")
+        self.assertEqual(manifest["source"]["prepared_root"], "$STATE/root")
+        self.assertEqual(manifest["source"]["launch_cwd"], "$STATE/root/examples")
+        self.assertEqual(manifest["artifacts"]["prepare_log"], "prepare.log")
+        self.assertEqual(self.mod.slugify_token(" UI Preview / Smoke! "), "ui-preview-smoke")
+        self.assertEqual(self.mod.slugify_token("!!!"), "run")
+        self.assertEqual(len(self.mod.slugify_token("x" * 80, max_len=12)), 12)
+
+    def test_desktop_publish_report_rollup_edges(self) -> None:
+        config = {
+            "desktop_automation": {
+                "artifact_root": str(self.root / "desktop-artifacts"),
+                "publish_mode": "local",
+                "publish_branch": "dev-artifacts",
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "at least one run manifest"):
+            self.mod.stage_desktop_publish_report(config, [])
+
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        (bundle / "manifest.json").write_text('{"label":"bundle-copy"}\n')
+        stdout_log = bundle / "stdout.log"
+        stdout_log.write_text("hello\n")
+        manifest = {
+            "target": "mac<>",
+            "action": "inspect",
+            "label": "UI & Smoke",
+            "completed_at": "2026-05-22T12:00:00+00:00",
+            "artifacts": {
+                "bundle_dir": str(bundle),
+                "stdout": str(stdout_log),
+                "screenshot": str(bundle / "missing.png"),
+                "image_change": {"changed": False},
+            },
+            "interaction": {"mode": "dom"},
+        }
+
+        output_dir = self.root / "desktop-artifacts" / "_published" / "20260522-gallery"
+        report = self.mod.stage_desktop_publish_report(config, [manifest], output_dir=output_dir, label="Gallery <One>")
+
+        self.assertEqual(report["label"], "Gallery <One>")
+        self.assertEqual(report["run_count"], 1)
+        self.assertTrue((output_dir / "index.html").is_file())
+        self.assertTrue((output_dir / "index.json").is_file())
+        payload = json.loads((output_dir / "index.json").read_text())
+        published_run = payload["runs"][0]
+        self.assertEqual(payload["publish_mode"], "local")
+        self.assertEqual(payload["publish_branch"], "dev-artifacts")
+        self.assertEqual(published_run["target"], "mac<>")
+        self.assertEqual(published_run["interaction_mode"], "dom")
+        self.assertIn("stdout", published_run["artifacts"])
+        self.assertIn("manifest", published_run["artifacts"])
+        self.assertNotIn("screenshot", published_run["artifacts"])
+        self.assertEqual(published_run["artifacts"]["image_change"], {"changed": False})
+        self.assertTrue((output_dir / published_run["artifacts"]["stdout"]).is_file())
+        self.assertTrue((output_dir / published_run["artifacts"]["manifest"]).is_file())
+        html_text = (output_dir / "index.html").read_text()
+        self.assertIn("Gallery &lt;One&gt;", html_text)
+        self.assertIn("mac&lt;&gt;/inspect", html_text)
+
+        invalid = output_dir.parent / "zz-invalid"
+        invalid.mkdir()
+        (invalid / "index.json").write_text("{not json")
+        reports = self.mod.desktop_publish_reports(config, limit=1)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["label"], "Gallery <One>")
+        self.assertEqual(reports[0]["output_dir"], str(output_dir))
+        self.assertTrue((output_dir.parent / "latest-report.json").is_file())
+        self.assertTrue((output_dir.parent / "reports.jsonl").is_file())
 
     def test_remote_probe_wrappers_parse_mocked_outputs(self) -> None:
         win_success = subprocess.CompletedProcess(
