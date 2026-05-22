@@ -123,6 +123,10 @@ class CodecovYamlStructure(unittest.TestCase):
         self.assertIn("tools/harness/visual/tests/*.py", python_omits)
         self.assertIn("tools/harness/visual/tests/**/*.py", python_omits)
         self.assertIn("tools/harness/visual/tests/**", set(self.doc["ignore"]))
+        self.assertIn("tools/test_*.py", python_omits)
+        self.assertIn("tools/test_*.py", set(self.doc["ignore"]))
+        self.assertIn("tools/motion/visual/test_*.py", python_omits)
+        self.assertIn("tools/motion/visual/test_*.py", set(self.doc["ignore"]))
 
     def test_component_management_defines_all_axes(self):
         # Path-based slicing lives on components, not only on flags.
