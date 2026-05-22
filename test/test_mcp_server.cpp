@@ -365,7 +365,7 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
     {
         std::ofstream cfg(home.path / "config.toml");
         cfg << "[import_design]\n"
-            << "default_mode = \"baked\"\n";
+            << "default_mode = 'baked'\n";
     }
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
