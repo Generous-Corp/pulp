@@ -109,6 +109,9 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Changed args not reflected in `cli-commands.yaml`
 - Changed behavior not reflected in slash command `.md`
 - Skills calling the old invocation syntax
+- Output path flags should accept both nested paths and bare filenames; guard
+  empty `std::filesystem::path::parent_path()` before creating directories and
+  add shellout coverage for the bare-filename case.
 
 ### Rust CLI cutover path convention
 

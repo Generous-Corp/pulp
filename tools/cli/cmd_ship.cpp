@@ -593,7 +593,8 @@ int cmd_ship(const std::vector<std::string>& args) {
           item.pub_date = buf; }
 
         feed.items.insert(feed.items.begin(), std::move(item));
-        fs::create_directories(fs::path(output_path).parent_path());
+        const auto parent = fs::path(output_path).parent_path();
+        if (!parent.empty()) fs::create_directories(parent);
         std::ofstream out(output_path);
         if (!out) { std::cerr << "Error: cannot write to " << output_path << "\n"; return 1; }
         out << feed.to_xml();

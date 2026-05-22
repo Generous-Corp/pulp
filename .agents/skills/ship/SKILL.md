@@ -172,6 +172,14 @@ parsing the item instead of throwing out of `Appcast::from_xml`. Keep this
 behavior covered in `test/test_appcast.cpp` when changing
 `ship/src/appcast.cpp`.
 
+### Appcast output paths
+
+`pulp ship appcast --output appcast.xml` must work from a project root. When
+creating the output directory, guard empty `parent_path()` values before calling
+`std::filesystem::create_directories`; otherwise a bare filename can throw
+instead of writing the feed. Keep this covered in
+`test/test_cli_ship_shellout.cpp`.
+
 ### Android package tests fail only on Windows
 
 Pulp executes Android package helpers through `cmd.exe /c` on Windows. Android
