@@ -21,6 +21,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent.parent.parent
@@ -29,7 +30,14 @@ if str(REPO_ROOT) not in sys.path:
 
 from tools.harness.adapters.base import CatalogEntry, Result  # noqa: E402
 from tools.harness.status import Status  # noqa: E402
-from tools.harness.verifier import check_evidence, _grace_active  # noqa: E402
+from tools.harness.verifier import (  # noqa: E402
+    _TEST_CASE_INDEX_CACHE,
+    _extract_test_case_index,
+    _extract_test_case_tags,
+    _grace_active,
+    _validate_test_ref,
+    check_evidence,
+)
 
 
 def _make_entry(
@@ -77,6 +85,7 @@ class EvidenceCheckTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
         self.repo_root = Path(self.tmp.name)
+        _TEST_CASE_INDEX_CACHE.clear()
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -203,6 +212,159 @@ class EvidenceCheckTests(unittest.TestCase):
         results = [_make_result(entry, Status.PASS)]
         updated = check_evidence(self.repo_root, results, {})
         self.assertEqual(updated[0].status, Status.SUPPORTED_NO_EVIDENCE)
+
+    def test_test_case_index_extracts_concatenated_names_tags_and_caches(self) -> None:
+        test_path = self.repo_root / "test/test_widget.cpp"
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.write_text(
+            'TEST_CASE("first " "case", "[alpha][ beta ]") {}\n'
+            'TEST_CASE("single arg " "case") {}\n',
+            encoding="utf-8",
+        )
+
+        tags, names = _extract_test_case_index(test_path)
+        test_path.write_text("not parsed after cache fill\n", encoding="utf-8")
+        cached_tags, cached_names = _extract_test_case_index(test_path)
+
+        self.assertEqual(tags, {"alpha", "beta"})
+        self.assertEqual(names, {"first case", "single arg case"})
+        self.assertIs(tags, cached_tags)
+        self.assertIs(names, cached_names)
+        self.assertEqual(_extract_test_case_tags(test_path), {"alpha", "beta"})
+        self.assertIn(test_path, _TEST_CASE_INDEX_CACHE)
+
+    def test_test_case_index_handles_missing_unreadable_and_empty_names(self) -> None:
+        missing = self.repo_root / "test/missing.cpp"
+        self.assertEqual(_extract_test_case_index(missing), (set(), set()))
+
+        unreadable = self.repo_root / "test/unreadable.cpp"
+        unreadable.parent.mkdir(parents=True, exist_ok=True)
+        unreadable.write_text('TEST_CASE("hidden", "[hidden]") {}\n', encoding="utf-8")
+        original_read_text = Path.read_text
+
+        def fake_read_text(path: Path, *args: object, **kwargs: object) -> str:
+            if path == unreadable:
+                raise OSError("permission denied")
+            return original_read_text(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", fake_read_text):
+            self.assertEqual(_extract_test_case_index(unreadable), (set(), set()))
+        self.assertIn(unreadable, _TEST_CASE_INDEX_CACHE)
+
+        empty_name = self.repo_root / "test/empty.cpp"
+        empty_name.write_text('TEST_CASE("") {}\n', encoding="utf-8")
+        self.assertEqual(_extract_test_case_index(empty_name), (set(), set()))
+
+    def test_validate_test_ref_accepts_typed_fixture_ids_and_existing_paths(self) -> None:
+        js_path = self.repo_root / "packages/app/widget.test.ts"
+        js_path.parent.mkdir(parents=True, exist_ok=True)
+        js_path.write_text("test('widget', () => {})\n", encoding="utf-8")
+        cpp_path = self.repo_root / "test/test_widget.cpp"
+        cpp_path.parent.mkdir(parents=True, exist_ok=True)
+        cpp_path.write_text('TEST_CASE("widget", "[widget]") {}\n', encoding="utf-8")
+
+        for ref in (
+            "cannot-validate: host limitation",
+            "semantic:yoga/aspect-ratio",
+            "visual:harness/golden-id",
+            "dom:react-native/event-fixture",
+            "unit:plain-fixture-id",
+            "unit:test/test_widget.cpp",
+            "behavior:packages/app/widget.test.ts",
+        ):
+            with self.subTest(ref=ref):
+                ok, reason = _validate_test_ref(self.repo_root, ref)
+                self.assertTrue(ok)
+                self.assertEqual(reason, "")
+
+    def test_validate_test_ref_rejects_missing_typed_and_named_paths(self) -> None:
+        for ref, needle in (
+            ("unit:test/missing.cpp", "typed ref"),
+            ("behavior:packages/app/missing.test.ts", "typed ref"),
+            ("test/missing.ts::case", "file `test/missing.ts` not found"),
+            ("test/missing.cpp::case", "file `test/missing.cpp` not found"),
+            ("test/missing.cpp [tag]", "file `test/missing.cpp` not found"),
+            ("", "empty test reference"),
+        ):
+            with self.subTest(ref=ref):
+                ok, reason = _validate_test_ref(self.repo_root, ref)
+                self.assertFalse(ok)
+                self.assertIn(needle, reason)
+
+    def test_validate_test_ref_checks_cpp_names_and_preserves_bracket_precedence(self) -> None:
+        cpp_path = self.repo_root / "test/test_widget.cpp"
+        cpp_path.parent.mkdir(parents=True, exist_ok=True)
+        cpp_path.write_text(
+            'TEST_CASE("named case", "[tag]") {}\n'
+            'TEST_CASE("name " "with concat", "[concat]") {}\n',
+            encoding="utf-8",
+        )
+
+        ok, reason = _validate_test_ref(self.repo_root, 'test/test_widget.cpp::"named case"')
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+        ok, reason = _validate_test_ref(self.repo_root, "test/test_widget.cpp::name with concat")
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+        ok, reason = _validate_test_ref(
+            self.repo_root,
+            "test/test_widget.cpp [tag] (View::method mention)",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+        ok, reason = _validate_test_ref(self.repo_root, "test/test_widget.cpp::missing case")
+        self.assertFalse(ok)
+        self.assertIn("TEST_CASE name 'missing case' not found", reason)
+
+    def test_validate_test_ref_handles_path_only_and_tag_edge_cases(self) -> None:
+        path_only = self.repo_root / "test/path_only.txt"
+        path_only.parent.mkdir(parents=True, exist_ok=True)
+        path_only.write_text("exists\n", encoding="utf-8")
+        no_cases = self.repo_root / "test/no_cases.cpp"
+        no_cases.write_text("// no TEST_CASE declarations\n", encoding="utf-8")
+        tagged = self.repo_root / "test/tagged.cpp"
+        tagged.write_text('TEST_CASE("tagged", "[present]") {}\n', encoding="utf-8")
+
+        ok, reason = _validate_test_ref(self.repo_root, "test/path_only.txt")
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+        ok, reason = _validate_test_ref(self.repo_root, "test/tagged.cpp []")
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+        ok, reason = _validate_test_ref(self.repo_root, "test/no_cases.cpp [missing]")
+        self.assertFalse(ok)
+        self.assertIn("no TEST_CASE was found", reason)
+
+        ok, reason = _validate_test_ref(self.repo_root, "test/tagged.cpp [missing]")
+        self.assertFalse(ok)
+        self.assertIn("tag(s) ['missing'] not found", reason)
+
+    def test_check_evidence_after_grace_summarizes_all_dangling_reasons(self) -> None:
+        past = (date.today() - timedelta(days=1)).isoformat()
+        test_path = self.repo_root / "test/test_foo.cpp"
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.write_text('TEST_CASE("foo evidence", "[real]") {}\n', encoding="utf-8")
+        entry = _make_entry(
+            name="css/allDangling",
+            tests=[
+                "test/test_foo.cpp [missing]",
+                "test/absent.cpp [tag]",
+            ],
+        )
+
+        updated = check_evidence(self.repo_root, [_make_result(entry)], self._compat(past))
+
+        self.assertEqual(updated[0].status, Status.SUPPORTED_NO_EVIDENCE)
+        self.assertIn("every test reference is dangling", updated[0].detail or "")
+        self.assertIn("test/test_foo.cpp [missing]", updated[0].detail or "")
+        self.assertIn("test/absent.cpp [tag]", updated[0].detail or "")
+        self.assertIn("tag(s) ['missing']", updated[0].detail or "")
+        self.assertIn("not found", updated[0].detail or "")
 
 
 if __name__ == "__main__":
