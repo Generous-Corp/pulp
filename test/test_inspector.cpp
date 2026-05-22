@@ -3612,14 +3612,14 @@ TEST_CASE("InspectorOverlay P2c: Shift + handle drag scales content proportional
     REQUIRE(child_ptr->scale() == Catch::Approx(scaled));
 }
 
-// Selection comes ONLY from the canvas: in the floating window's read-only
-// mode a tree-row "click" (firing the tree's on_select) shows the node's
-// properties but does NOT change the shared selection and does NOT fire
-// on_view_selected. reflect_selection() is the one-way mirror that never
-// loops back.
-TEST_CASE("InspectorOverlay P2c: tree click in read-only window does not drive "
-          "selection",
-          "[inspect][window][p2c][decouple][issue-wysiwyg-p2c]") {
+// Read-only mode is the supported OPT-OUT (the default is two-way, P2e). In
+// read-only mode a tree-row "click" (firing the tree's on_select) shows the
+// node's properties but does NOT change the shared selection / fire
+// on_view_selected. reflect_selection() never fires the callback either (it is
+// the no-feedback canvas → window mirror).
+TEST_CASE("InspectorWindow P2e: read-only mode opt-out suppresses the select "
+          "callback",
+          "[inspect][window][p2e][readonly][issue-wysiwyg-p2e]") {
     View inspected_root;
     inspected_root.set_bounds({0, 0, 400, 300});
     auto child = std::make_unique<View>();
@@ -3828,12 +3828,15 @@ TEST_CASE("InspectorOverlay P2d: cursor affordance is move on body, resize on "
     REQUIRE(overlay.cursor_affordance_at({160, 110}) == CA::none);
 }
 
-// P2d (A): reflect_selection (a canvas-driven mirror) shows the node's
-// properties but must NOT highlight a tree row in the floating inspector.
-// (Maintainer: "the inspector should reflect state and never have boxes
-// highlight/selecting things in it when I select things in the canvas.")
-TEST_CASE("InspectorWindow P2d: reflect_selection does not highlight a tree row",
-          "[inspect][window][p2d][reflect][issue-wysiwyg-p2d]") {
+// P2e (CORRECTS P2d): reflect_selection (a canvas-driven mirror) DOES
+// highlight the matching tree row AND shows the node's properties — two-way
+// selection means a canvas pick highlights the corresponding row in the
+// inspector tree. (Maintainer correction: "we DO want to be able to tap and
+// select an item in the inspector as it works today." The only forbidden
+// thing is a stray selection BOX inside the inspector window — that leak is
+// fixed in the paint hook, not by stripping the row highlight.)
+TEST_CASE("InspectorWindow P2e: reflect_selection highlights the matching tree row",
+          "[inspect][window][p2e][reflect][issue-wysiwyg-p2e]") {
     View inspected_root;
     inspected_root.set_id("root");
 
@@ -3843,7 +3846,6 @@ TEST_CASE("InspectorWindow P2d: reflect_selection does not highlight a tree row"
     inspected_root.add_child(std::move(child));
 
     InspectorWindow window(inspected_root);
-    window.set_selection_readonly(true);
 
     auto* tabs = dynamic_cast<TabPanel*>(window.child_at(0));
     REQUIRE(tabs != nullptr);
@@ -3855,23 +3857,114 @@ TEST_CASE("InspectorWindow P2d: reflect_selection does not highlight a tree row"
     auto* node = tree->find_node_by_user_data(child_ptr);
     REQUIRE(node != nullptr);
 
-    // A canvas reflection: must show properties but leave the tree row
-    // un-highlighted (selected_node == nullptr).
+    // A canvas reflection: shows properties AND highlights the matching row.
     window.reflect_selection(child_ptr);
-    REQUIRE(tree->selected_node() == nullptr);
+    REQUIRE(tree->selected_node() == node);
 
-    // A subsequent refresh (idle tick) keeps the row cleared — the reflection
-    // must not "resurrect" a tree highlight on the next 30 Hz refresh.
+    // A subsequent refresh (idle tick) keeps the row highlighted — the
+    // reflection's highlight survives the next 30 Hz refresh.
     window.refresh();
-    REQUIRE(tree->selected_node() == nullptr);
+    REQUIRE(tree->selected_node() == node);
 
-    // But a DELIBERATE tree click (window-originated navigation) still shows
-    // its own row highlighted — only canvas reflections suppress it.
+    // A DELIBERATE tree click also highlights its own row (unchanged).
     REQUIRE(tree->on_select);
     tree->set_selected_node(node);   // TreeView selects on click before on_select
     tree->on_select(*node);
     REQUIRE(tree->selected_node() == node);
-    // And it survives the next refresh (structure unchanged, not a reflection).
     window.refresh();
     REQUIRE(tree->selected_node() == node);
+}
+
+// P2e Fix 1 — paint-leak gate. The installed inspector paint hook must NOT
+// paint the in-canvas overlay when the painting root is NOT the inspected
+// root (e.g. the floating InspectorWindow painting its own root). This is the
+// root cause of the "stray box at a random coordinate inside the inspector
+// window": the global paint hook fired for every root that painted, so the
+// overlay's selection box leaked into the inspector window's surface.
+TEST_CASE("InspectorOverlay P2e: paint hook gates on the painting root",
+          "[inspect][overlay][p2e][paint-leak][issue-wysiwyg-p2e]") {
+    View inspected_root;
+    inspected_root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_bounds({40, 40, 100, 60});
+    auto* child_ptr = child.get();
+    inspected_root.add_child(std::move(child));
+
+    // A SEPARATE root standing in for the floating InspectorWindow's own root.
+    View other_root;
+    other_root.set_bounds({0, 0, 340, 300});
+
+    InspectorOverlay overlay(inspected_root);
+    overlay.set_active(true);
+    overlay.set_selected_view(child_ptr);  // something to draw a box around
+
+    install_inspector_hooks(overlay);
+
+    // Painting the INSPECTED root: the overlay paints (selection box etc.).
+    pulp::canvas::RecordingCanvas inspected_canvas;
+    View::paint_overlays(inspected_canvas, &inspected_root);
+    REQUIRE(inspected_canvas.command_count() > 0);
+
+    // Painting a DIFFERENT root (the inspector window's own root): the overlay
+    // must NOT paint — no stray box leaks into that surface.
+    pulp::canvas::RecordingCanvas other_canvas;
+    View::paint_overlays(other_canvas, &other_root);
+    REQUIRE(other_canvas.command_count() == 0);
+
+    // nullptr (legacy/headless caller, root unknown) still paints.
+    pulp::canvas::RecordingCanvas null_canvas;
+    View::paint_overlays(null_canvas, nullptr);
+    REQUIRE(null_canvas.command_count() > 0);
+
+    // Clean up the global hooks so later tests aren't affected.
+    g_active_inspector = nullptr;
+    View::set_inspector_paint_hook({});
+    View::set_inspector_key_hook({});
+    View::set_inspector_mouse_hook({});
+}
+
+// P2e Fix 2 — two-way selection. A tree-row click (default, non-read-only)
+// fires on_view_selected so the host can drive the SHARED canvas selection,
+// and a canvas-driven reflection highlights the matching tree row. This
+// asserts the round-trip both directions without recursing.
+TEST_CASE("InspectorWindow P2e: two-way selection (canvas <-> tree row)",
+          "[inspect][window][p2e][two-way][issue-wysiwyg-p2e]") {
+    View inspected_root;
+    inspected_root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_id("child");
+    auto* child_ptr = child.get();
+    inspected_root.add_child(std::move(child));
+
+    InspectorWindow window(inspected_root);
+    // Default (NOT read-only) — two-way selection is the P2e default.
+    REQUIRE_FALSE(window.selection_readonly());
+
+    auto* tabs = dynamic_cast<TabPanel*>(window.child_at(0));
+    REQUIRE(tabs != nullptr);
+    auto* tree = first_view_of_type<TreeView>(*tabs->child_at(0));
+    REQUIRE(tree != nullptr);
+    window.refresh();
+    auto* node = tree->find_node_by_user_data(child_ptr);
+    REQUIRE(node != nullptr);
+
+    // Direction 1: a tree-row click drives canvas selection via the callback.
+    View* canvas_selected = nullptr;
+    int callback_count = 0;
+    window.on_view_selected = [&](View* v) {
+        ++callback_count;
+        canvas_selected = v;
+    };
+    REQUIRE(tree->on_select);
+    tree->set_selected_node(node);   // TreeView highlights the row on click
+    tree->on_select(*node);
+    REQUIRE(callback_count == 1);
+    REQUIRE(canvas_selected == child_ptr);   // drove the shared canvas selection
+    REQUIRE(tree->selected_node() == node);  // and its own row highlights
+
+    // Direction 2: a canvas reflection highlights the matching row WITHOUT
+    // firing on_view_selected (no feedback loop / recursion).
+    window.reflect_selection(child_ptr);
+    REQUIRE(callback_count == 1);            // reflection did NOT re-fire
+    REQUIRE(tree->selected_node() == node);  // row highlighted by the reflection
 }

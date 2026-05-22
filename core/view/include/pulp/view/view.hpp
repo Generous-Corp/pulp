@@ -689,11 +689,25 @@ public:
         View* owner = nullptr;
     };
     static std::vector<OverlayRequest>& overlay_queue();
-    static void paint_overlays(canvas::Canvas& canvas);
+    /// Paint queued overlays + the inspector paint hook. `painting_root` is the
+    /// root View whose tree was just painted into `canvas` — it is forwarded to
+    /// the inspector paint hook so the hook can gate (WYSIWYG P2e). When a host
+    /// paints multiple roots into separate surfaces (e.g. the floating
+    /// InspectorWindow's own root vs. the main canvas root), the inspector
+    /// overlay's selection box / handles / drop indicators must paint ONLY on
+    /// the inspected root, never leak into the inspector window at the overlay's
+    /// root coordinates (the "stray box" bug). nullptr means "root unknown" and
+    /// the hook paints unconditionally (legacy callers).
+    static void paint_overlays(canvas::Canvas& canvas, View* painting_root = nullptr);
 
     /// Inspector hooks — set by the inspector module to intercept input and paint
     /// without a circular dependency (view doesn't link inspect).
-    static void set_inspector_paint_hook(std::function<void(canvas::Canvas&)> hook);
+    ///
+    /// The paint hook receives the painting root (see paint_overlays) so it can
+    /// gate: the in-canvas overlay must paint only when the root being painted
+    /// is the inspected root, not the floating inspector window's own root.
+    static void set_inspector_paint_hook(
+        std::function<void(canvas::Canvas&, View* painting_root)> hook);
     static void set_inspector_key_hook(std::function<bool(const KeyEvent&)> hook);
     static void set_inspector_mouse_hook(std::function<bool(const MouseEvent&)> hook);
     static bool call_inspector_key_hook(const KeyEvent& e);

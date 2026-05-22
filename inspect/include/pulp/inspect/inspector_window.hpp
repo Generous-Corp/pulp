@@ -93,34 +93,39 @@ public:
 
     /// Called when a view is selected in the tree.
     ///
-    /// WYSIWYG decoupling (planning/2026-05-21 § R-decouple, maintainer
-    /// "we don't want to select items in the inspector ever"): when
-    /// `selection_readonly_` is set (set_selection_readonly(true)), a
-    /// click in the tree does NOT fire this callback and does NOT change
-    /// the shared selection — it only shows that node's properties for
-    /// READ-ONLY display. Selection is then driven exclusively by the
-    /// in-canvas overlay. Hosts that want the legacy two-way coupling
-    /// leave read-only mode OFF (the default), so existing behavior is
-    /// unchanged.
+    /// WYSIWYG P2e two-way selection (maintainer correction: "we DO want to
+    /// be able to tap and select an item in the inspector as it works
+    /// today"): by default (selection_readonly_ == false) a tree-row click
+    /// fires this callback so the host can drive the SHARED selection —
+    /// highlight the picked view in the canvas overlay. The tree row also
+    /// highlights and its properties show. The forbidden behavior — a stray
+    /// selection box drawn inside the inspector window — is prevented by the
+    /// paint-hook root gate, not by suppressing this callback.
+    ///
+    /// Read-only mode (set_selection_readonly(true)) is a supported opt-out:
+    /// a tree click then only shows properties and does NOT fire this
+    /// callback / drive the shared selection.
     std::function<void(View* view)> on_view_selected;
 
     /// Select a view from external code (e.g., Cmd+click in plugin
     /// window). Fires on_view_selected — this is the WRITE path. Avoid
-    /// from a sync mirror; use reflect_selection() instead so the canvas
-    /// stays the single selection source.
+    /// from a sync mirror; use reflect_selection() instead so a host-side
+    /// sync does not re-enter on_view_selected.
     void select_view(View* view);
 
-    /// Reflect the canvas-driven selection into this window WITHOUT
-    /// firing on_view_selected (no feedback loop) and WITHOUT treating it
-    /// as a window-originated pick. Shows the node's properties read-only.
-    /// This is the one-way mirror the WYSIWYG decoupling uses: the canvas
-    /// overlay is the only selection source; the floating window only
-    /// reflects.
+    /// Reflect the canvas-driven selection into this window WITHOUT firing
+    /// on_view_selected (no feedback loop into the canvas). P2e: this now
+    /// HIGHLIGHTS the matching tree row AND shows the node's properties —
+    /// two-way selection means a canvas pick highlights the corresponding row
+    /// in the inspector tree. It is the canvas → window mirror the host calls
+    /// from sync_selection; the no-feedback property (does not fire
+    /// on_view_selected) is what keeps the round-trip from recursing.
     void reflect_selection(View* view);
 
     /// When true, clicking a tree row only shows that node's properties
     /// (read-only display) and never changes the shared selection (does
-    /// not fire on_view_selected). Default false (legacy two-way pick).
+    /// not fire on_view_selected). Default false (two-way pick — the P2e
+    /// behavior the maintainer wants).
     void set_selection_readonly(bool readonly) {
         selection_readonly_ = readonly;
     }
@@ -179,20 +184,17 @@ private:
     // Currently selected view (Elements tab)
     View* selected_view_ = nullptr;
 
-    // WYSIWYG decoupling: when true, tree-row clicks only display
-    // properties read-only and never drive the shared selection. See
+    // WYSIWYG P2e: when true, tree-row clicks only display properties
+    // read-only and never drive the shared selection (opt-out). Default
+    // false — two-way selection, the maintainer's wanted behavior. See
     // set_selection_readonly().
     bool selection_readonly_ = false;
 
-    // P2d (A) — reflect-state-only. When the current selection arrived via
-    // reflect_selection() (a canvas-driven mirror) rather than a tree click,
-    // the tree must NOT highlight a row: the maintainer wants the floating
-    // window to REFLECT properties without "boxes highlighting/selecting
-    // things in it" when the user picks in the canvas. While this is true,
-    // refresh_elements() leaves the tree's selected node cleared. A real tree
-    // click clears the flag (so the user's own tree navigation still shows a
-    // selected row's properties, just without driving the canvas).
-    bool reflect_only_ = false;
+    // P2e — reflect_selection() (the canvas → window mirror) now HIGHLIGHTS
+    // the matching tree row + shows props, the same as a tree-row pick. The
+    // P2d "reflect-state-only" suppression (which left the row un-highlighted)
+    // was reverted: two-way selection is wanted, and the only thing forbidden
+    // is the stray box inside the inspector window, fixed in the paint hook.
 
     // P2d (A) — tree-structure signature, to suppress the empty-content
     // flicker. refresh_elements() runs on every idle tick (~30 Hz); rebuilding

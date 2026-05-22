@@ -1242,7 +1242,7 @@ static void install_app_menu(NSString* appName) {
             static_cast<float>(bounds.size.height)});
         self.rootView->layout_children();
         self.rootView->paint_all(canvas);
-        pulp::view::View::paint_overlays(canvas);
+        pulp::view::View::paint_overlays(canvas, self.rootView);
 
         // Inspector overlay is painted automatically via View::paint_overlays()
     }
@@ -2274,11 +2274,11 @@ private:
             canvas.translate(tx, ty);
             canvas.scale(sx, sy);
             root_.paint_all(canvas);
-            pulp::view::View::paint_overlays(canvas);
+            pulp::view::View::paint_overlays(canvas, &root_);
             canvas.restore_to_count(saved);
         } else {
             root_.paint_all(canvas);
-            pulp::view::View::paint_overlays(canvas);
+            pulp::view::View::paint_overlays(canvas, &root_);
         }
 
         // Inspector overlay is painted automatically via View::paint_overlays()

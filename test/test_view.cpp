@@ -398,10 +398,13 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
         }
     });
     View::overlay_queue().push_back(View::OverlayRequest{});
-    View::set_inspector_paint_hook([&](pulp::canvas::Canvas& canvas) {
-        ++paint_hook_calls;
-        canvas.fill_rect(1, 1, 1, 1);
-    });
+    View* last_painting_root = nullptr;
+    View::set_inspector_paint_hook(
+        [&](pulp::canvas::Canvas& canvas, View* painting_root) {
+            ++paint_hook_calls;
+            last_painting_root = painting_root;
+            canvas.fill_rect(1, 1, 1, 1);
+        });
 
     pulp::canvas::RecordingCanvas canvas;
     View::paint_overlays(canvas);
@@ -409,6 +412,18 @@ TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
     REQUIRE(overlay_calls == 1);
     REQUIRE(paint_hook_calls == 1);
     REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 2);
+    // No painting root supplied → hook receives nullptr (legacy/headless path).
+    REQUIRE(last_painting_root == nullptr);
+
+    // WYSIWYG P2e: paint_overlays forwards the painting root to the hook so it
+    // can gate which root the inspector overlay paints into.
+    View probe_root;
+    View::set_inspector_paint_hook(
+        [&](pulp::canvas::Canvas&, View* painting_root) {
+            last_painting_root = painting_root;
+        });
+    View::paint_overlays(canvas, &probe_root);
+    REQUIRE(last_painting_root == &probe_root);
 
     View::set_inspector_key_hook({});
     View::set_inspector_mouse_hook({});

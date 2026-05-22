@@ -877,11 +877,12 @@ std::vector<View::OverlayRequest>& View::overlay_queue() {
 
 // Inspector hooks — set by the inspector module via function pointers
 // to avoid circular dependency (view → inspect).
-static std::function<void(canvas::Canvas&)> s_inspector_paint_hook;
+static std::function<void(canvas::Canvas&, View*)> s_inspector_paint_hook;
 static std::function<bool(const KeyEvent&)> s_inspector_key_hook;
 static std::function<bool(const MouseEvent&)> s_inspector_mouse_hook;
 
-void View::set_inspector_paint_hook(std::function<void(canvas::Canvas&)> hook) {
+void View::set_inspector_paint_hook(
+    std::function<void(canvas::Canvas&, View*)> hook) {
     s_inspector_paint_hook = std::move(hook);
 }
 void View::set_inspector_key_hook(std::function<bool(const KeyEvent&)> hook) {
@@ -1008,16 +1009,20 @@ bool View::overlay_contains(Point window_pt) const {
            window_pt.y >= min_y && window_pt.y <= max_y;
 }
 
-void View::paint_overlays(canvas::Canvas& canvas) {
+void View::paint_overlays(canvas::Canvas& canvas, View* painting_root) {
     auto& queue = overlay_queue();
     for (auto& req : queue) {
         if (req.paint_fn) req.paint_fn(canvas);
     }
     queue.clear();
 
-    // Inspector paint hook — called after all overlays, topmost layer
+    // Inspector paint hook — called after all overlays, topmost layer.
+    // `painting_root` is forwarded so the hook can gate (WYSIWYG P2e): the
+    // in-canvas overlay must paint its selection box / handles / drop
+    // indicators ONLY on the inspected root, never into the floating
+    // InspectorWindow's own root at the overlay's root coordinates.
     if (s_inspector_paint_hook) {
-        s_inspector_paint_hook(canvas);
+        s_inspector_paint_hook(canvas, painting_root);
     }
 }
 

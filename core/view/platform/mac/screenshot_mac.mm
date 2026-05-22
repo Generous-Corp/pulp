@@ -104,7 +104,7 @@ std::vector<uint8_t> render_to_png_coregraphics(View& root,
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
     root.paint_all(canvas);
-    pulp::view::View::paint_overlays(canvas);
+    pulp::view::View::paint_overlays(canvas, &root);
 
     CGImageRef image = CGBitmapContextCreateImage(ctx);
     CGContextRelease(ctx);
@@ -154,7 +154,7 @@ std::vector<uint8_t> render_to_png_skia(View& root,
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
     root.paint_all(canvas);
-    pulp::view::View::paint_overlays(canvas);
+    pulp::view::View::paint_overlays(canvas, &root);
 
     std::vector<uint8_t> pixels(static_cast<size_t>(pixel_w) * pixel_h * 4u);
     SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(pixel_w) * 4u);

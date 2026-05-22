@@ -1526,33 +1526,51 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    // ── P2c: ONE-WAY selection (canvas is the single source) ───────────
+    // ── P2e: TWO-WAY selection (canvas ⇄ inspector tree) ───────────────
     //
     // ONE input owner per process, dispatching to BOTH surfaces. The
     // in-canvas overlay is FIRST in the chain (it needs canvas-space mouse
-    // coords for move/resize) AND is the SOLE selection source. The
-    // floating window only REFLECTS the canvas selection read-only.
+    // coords for move/resize). Selection is TWO-WAY:
+    //   - canvas-click  → overlay selects → reflect into the floating window
+    //                     (highlight the matching tree row + show props).
+    //   - tree-row click → on_view_selected drives the SHARED selection
+    //                     (highlight in the canvas overlay + repaint).
     //
-    // Maintainer requirement (live testing): "we don't want to select
-    // items in the inspector ever." So selection flows ONE WAY —
-    // canvas-click → overlay-selection → reflect into floating window.
-    // Clicking the floating window's tree shows that node's properties
-    // read-only (set_selection_readonly below) but never changes the
-    // shared selection or highlights the main view. on_view_selected is
-    // left unset so a tree pick can never drive the canvas.
+    // Maintainer requirement (P2e correction): "we DO want to be able to tap
+    // and select an item in the inspector as it works today." The only thing
+    // forbidden is a stray selection BOX drawn inside the inspector window —
+    // that's the paint-leak fixed in the paint hook above (Fix 1), NOT a
+    // reason to strip the tree-row highlight or break two-way selection.
+    //
+    // sync_selection keeps a re-entry guard so the on_view_selected →
+    // sync_selection → reflect_selection path can't recurse.
     //
     // Activation: Cmd+I toggles BOTH the floating window and the in-canvas
     // manipulate overlay — no PULP_INSPECTOR env var required.
-    inspector_view_ptr->set_selection_readonly(true);
+    inspector_view_ptr->set_selection_readonly(false);
+    bool syncing_selection = false;
     auto sync_selection = [&](View* v) {
+        if (syncing_selection) return;  // re-entry guard (no recursion)
+        syncing_selection = true;
         inspector_selected = v;
         inspector.set_selected_view(v);
-        // reflect_selection (NOT select_view) is the one-way mirror: it
-        // displays the node's properties without firing on_view_selected,
-        // so there is no feedback loop back into the canvas selection.
+        // reflect_selection (NOT select_view) is the canvas → window mirror: it
+        // highlights the matching tree row + shows its props WITHOUT firing
+        // on_view_selected, so there is no feedback loop back into the canvas.
         if (inspector_window) inspector_view_ptr->reflect_selection(v);
         if (inspector_window) inspector_window->repaint();
         if (window) window->repaint();
+        syncing_selection = false;
+    };
+
+    // P2e Fix 2 — tree-row click is a real selection SOURCE again. A pick in
+    // the floating inspector drives the shared selection: highlight that view
+    // in the canvas overlay and repaint both surfaces. The re-entry guard in
+    // sync_selection prevents recursion (this fires on_view_selected, which we
+    // do NOT re-enter because reflect_selection — used by sync_selection — does
+    // not fire it, and the guard short-circuits any reentry).
+    inspector_view_ptr->on_view_selected = [&](View* v) {
+        sync_selection(v);
     };
 
     View::set_inspector_key_hook([&](const KeyEvent& e) -> bool {
@@ -1597,19 +1615,22 @@ int main(int argc, char* argv[]) {
         return false;
     });
 
-    // P2c: intentionally NOT wiring on_view_selected. Selection is driven
-    // ONLY by the in-canvas overlay; a tree pick in the floating window
-    // must never change the canvas selection (maintainer: "we don't want
-    // to select items in the inspector ever"). set_selection_readonly(true)
-    // above already prevents the tree from firing this callback, but we
-    // leave it unset as a second guard so even legacy paths can't couple.
-    inspector_view_ptr->on_view_selected = nullptr;
+    // P2e: on_view_selected is wired above (two-way selection). A tree pick in
+    // the floating inspector drives the shared canvas selection — see the
+    // sync_selection / on_view_selected wiring in the P2e block above.
 
-    View::set_inspector_paint_hook([&](pulp::canvas::Canvas& canvas) {
-        // The overlay paints the selection box + handles (manipulate-only
-        // mode suppresses its dev side-panel). It only paints while active.
-        inspector.paint(canvas);
-    });
+    View::set_inspector_paint_hook(
+        [&](pulp::canvas::Canvas& canvas, View* painting_root) {
+            // WYSIWYG P2e Fix 1 — paint-leak gate. The overlay paints the
+            // selection box + handles + drop indicators in the MAIN canvas
+            // root's coordinate space. Paint ONLY when the root being painted
+            // is that inspected root (`root`), never when the floating
+            // InspectorWindow paints its own root — otherwise the overlay's box
+            // leaks into the inspector window at a stray coordinate. nullptr
+            // (legacy/headless caller, root unknown) paints unconditionally.
+            if (painting_root && painting_root != &root) return;
+            inspector.paint(canvas);
+        });
 
     // P2d (B) — cursor affordances. While the overlay is active and a view is
     // selected, hovering a corner handle shows a resize cursor and hovering

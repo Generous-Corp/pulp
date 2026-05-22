@@ -559,7 +559,7 @@ private:
                               static_cast<float>(logical.width),
                               static_cast<float>(logical.height));
             root_.paint_all(*canvas);
-            View::paint_overlays(*canvas);
+            View::paint_overlays(*canvas, &root_);
             (void)b;
         }
 

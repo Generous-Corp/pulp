@@ -207,24 +207,21 @@ std::unique_ptr<View> InspectorWindow::build_elements_tab() {
     tree->on_select = [this](TreeNode& node) {
         if (node.user_data) {
             View* picked = static_cast<View*>(node.user_data);
-            // WYSIWYG decoupling: in read-only mode a tree click only
-            // shows that node's properties — it must NOT change the shared
-            // selection or fire on_view_selected, so the in-canvas overlay
-            // stays the single selection source (maintainer: "we don't
-            // want to select items in the inspector ever").
-            if (selection_readonly_) {
-                // A deliberate tree click is window-originated navigation,
-                // not a canvas reflection — clear reflect_only_ so this row
-                // stays highlighted (its own properties on display). It still
-                // does NOT drive the shared canvas selection.
-                reflect_only_ = false;
-                show_properties_for(picked);
-                return;
-            }
-            reflect_only_ = false;
+            // P2e two-way selection: a tree-row click is a real selection
+            // SOURCE. It highlights its own row (TreeView does that before
+            // firing on_select), shows the node's properties, and drives the
+            // SHARED selection via on_view_selected — which the host mirrors
+            // into the canvas overlay. The maintainer wants this: "we DO want
+            // to be able to tap and select an item in the inspector as it
+            // works today."
+            //
+            // Read-only mode (set_selection_readonly(true)) remains a supported
+            // opt-out: a tree click then only shows properties and does NOT
+            // drive the shared selection. The default (false) is two-way.
             selected_view_ = picked;
-            show_properties_for(selected_view_);
-            if (on_view_selected) on_view_selected(selected_view_);
+            show_properties_for(picked);
+            if (selection_readonly_) return;
+            if (on_view_selected) on_view_selected(picked);
         }
     };
     tree_view_ = tree.get();
@@ -545,21 +542,17 @@ void InspectorWindow::refresh_elements() {
         root_node.expanded = true;
 
         // Restore selection: find the new node matching the previously
-        // selected view — but NOT when the current selection is a canvas
-        // reflection (reflect_only_): the floating window must reflect
-        // properties without highlighting a tree row.
-        if (saved_selection && !reflect_only_) {
+        // selected view. P2e — a canvas-driven reflection now highlights its
+        // row too (two-way selection), so the row is restored unconditionally
+        // after a structural rebuild. The stray-box leak is fixed in the paint
+        // hook, not by suppressing the row highlight.
+        if (saved_selection) {
             auto* restored = tree_view_->find_node_by_user_data(saved_selection);
             tree_view_->set_selected_node(restored);
         } else {
             tree_view_->set_selected_node(nullptr);
         }
         tree_signature_ = sig;
-    } else if (reflect_only_ && tree_view_->selected_node()) {
-        // Structure unchanged, but a canvas reflection arrived after the last
-        // rebuild — keep the tree row cleared so no box highlights in the
-        // inspector for a canvas-driven selection.
-        tree_view_->set_selected_node(nullptr);
     }
 
     // Refresh theme colors section. Only rebuilt when the tree structure
@@ -626,17 +619,22 @@ void InspectorWindow::select_view(View* view) {
 }
 
 void InspectorWindow::reflect_selection(View* view) {
-    // One-way mirror from the canvas: track + display the node read-only,
-    // never fire on_view_selected (no feedback loop into the canvas).
-    // P2d (A): this is a REFLECTION, not a window pick — the floating window
-    // must show the node's properties but must NOT highlight a tree row (the
-    // maintainer: "the inspector should reflect state and never have boxes
-    // highlight/selecting things in it when I select things in the canvas").
-    // So we set reflect_only_ and clear the tree's selected node; the next
-    // refresh_elements() keeps it cleared.
+    // Canvas → window mirror: track + display the node WITHOUT firing
+    // on_view_selected (no feedback loop into the canvas selection).
+    //
+    // P2e correction (revises P2d): a canvas-driven reflection MUST highlight
+    // the matching tree row AND show the node's properties. The maintainer
+    // clarified that two-way selection is wanted — clicking in the canvas
+    // should highlight the corresponding row/text in the inspector tree. The
+    // ONLY thing forbidden is a stray selection BOX painted at a random
+    // coordinate inside the inspector window; that leak is fixed in the
+    // paint-hook gate (it no longer paints the in-canvas overlay into the
+    // inspector window's surface), NOT by stripping the row highlight.
     selected_view_ = view;
-    reflect_only_ = true;
-    if (tree_view_) tree_view_->set_selected_node(nullptr);
+    if (tree_view_) {
+        auto* node = tree_view_->find_node_by_user_data(view);
+        tree_view_->set_selected_node(node);
+    }
     show_properties_for(view);
 }
 

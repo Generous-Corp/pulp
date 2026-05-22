@@ -35,6 +35,12 @@ class InspectorOverlay {
 public:
     explicit InspectorOverlay(View& root);
 
+    // The root View this overlay inspects and paints into. Used by the
+    // installed paint hook to gate (WYSIWYG P2e): the overlay's selection box /
+    // handles / drop indicators paint only when this exact root is the one being
+    // painted, so they never leak into the floating inspector window's surface.
+    View& inspected_root() const { return root_; }
+
     // ── Toggle ──────────────────────────────────────────────────────
     bool is_active() const { return active_; }
     void set_active(bool active);

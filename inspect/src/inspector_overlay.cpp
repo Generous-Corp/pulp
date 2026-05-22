@@ -91,9 +91,19 @@ bool apply_move_tweak_to_view(View& view,
 void install_inspector_hooks(InspectorOverlay& inspector) {
     g_active_inspector = &inspector;
     // Install all hooks via function pointers — no circular dependency
-    View::set_inspector_paint_hook([&inspector](Canvas& canvas) {
-        inspector.paint(canvas);
-    });
+    // WYSIWYG P2e: gate the overlay paint on the painting root. The overlay's
+    // selection box / handles / drop indicators are positioned in the inspected
+    // root's coordinate space, so they must paint ONLY when the root being
+    // painted is the inspected root. Without this gate the same overlay paints
+    // into the floating InspectorWindow's own root surface at the overlay's
+    // root coordinates — a stray box at a random spot inside the inspector
+    // window. nullptr (root unknown, legacy caller) paints unconditionally.
+    View::set_inspector_paint_hook(
+        [&inspector](Canvas& canvas, View* painting_root) {
+            if (painting_root && painting_root != &inspector.inspected_root())
+                return;
+            inspector.paint(canvas);
+        });
     View::set_inspector_key_hook([&inspector](const KeyEvent& e) -> bool {
         return inspector.handle_key_event(e);
     });
