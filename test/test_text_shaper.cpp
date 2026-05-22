@@ -298,6 +298,109 @@ TEST_CASE("Parallelogram contains accepts interior and edge points",
     REQUIRE_FALSE(para.contains(46.0f, 20.0f));
 }
 
+TEST_CASE("GlyphArrangement aggregates manual lines and clears layout state",
+          "[canvas][text_layout][codecov]") {
+    TextLine first;
+    first.width = 20.0f;
+    first.ascent = 6.0f;
+    first.descent = 2.0f;
+    first.baseline_y = 8.0f;
+    first.glyphs.push_back({0.0f, 0.0f, 8.0f, 'a', 0});
+    first.glyphs.push_back({8.0f, 0.0f, 12.0f, 'b', 1});
+
+    TextLine second;
+    second.width = 12.0f;
+    second.ascent = 6.0f;
+    second.descent = 4.0f;
+    second.baseline_y = 22.0f;
+    second.glyphs.push_back({0.0f, 0.0f, 6.0f, 'c', 2});
+    second.glyphs.push_back({6.0f, 0.0f, 6.0f, 'd', 3});
+
+    GlyphArrangement arrangement;
+    arrangement.add_line(first);
+    arrangement.add_line(second);
+
+    REQUIRE(arrangement.line_count() == 2);
+    REQUIRE(arrangement.lines().size() == 2);
+    REQUIRE_THAT(arrangement.total_width(), WithinAbs(20.0f, 1e-5f));
+    REQUIRE_THAT(arrangement.total_height(), WithinAbs(26.0f, 1e-5f));
+    REQUIRE(arrangement.hit_test(1.0f, 1.0f) == 0);
+    REQUIRE(arrangement.hit_test(11.0f, 1.0f) == 1);
+    REQUIRE(arrangement.hit_test(99.0f, 1.0f) == 2);
+    REQUIRE(arrangement.hit_test(4.0f, 17.0f) == 3);
+    REQUIRE_THAT(arrangement.position_for_index(0), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(arrangement.position_for_index(3), WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(arrangement.position_for_index(99), WithinAbs(12.0f, 1e-5f));
+
+    arrangement.clear();
+    REQUIRE(arrangement.line_count() == 0);
+    REQUIRE_THAT(arrangement.total_width(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(arrangement.total_height(), WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("layout_paragraph preserves hard breaks while wrapping later glyphs",
+          "[canvas][text_layout][codecov]") {
+    FontSpec font;
+    font.size = 10.0f;
+
+    auto layout = layout_paragraph("ab\ncde", font, 12.0f);
+    REQUIRE(layout.line_count() == 3);
+
+    REQUIRE(layout.lines()[0].glyphs[0].text_index == 0);
+    REQUIRE(layout.lines()[0].glyphs[1].text_index == 1);
+    REQUIRE_THAT(layout.lines()[0].width, WithinAbs(12.0f, 1e-5f));
+    REQUIRE_THAT(layout.lines()[0].baseline_y, WithinAbs(8.0f, 1e-5f));
+
+    REQUIRE(layout.lines()[1].glyphs[0].text_index == 3);
+    REQUIRE(layout.lines()[1].glyphs[1].text_index == 4);
+    REQUIRE_THAT(layout.lines()[1].width, WithinAbs(12.0f, 1e-5f));
+    REQUIRE_THAT(layout.lines()[1].baseline_y, WithinAbs(18.0f, 1e-5f));
+
+    REQUIRE(layout.lines()[2].glyphs.size() == 1);
+    REQUIRE(layout.lines()[2].glyphs[0].text_index == 5);
+    REQUIRE_THAT(layout.lines()[2].width, WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(layout.lines()[2].baseline_y, WithinAbs(28.0f, 1e-5f));
+    REQUIRE_THAT(layout.total_height(), WithinAbs(30.0f, 1e-5f));
+
+    REQUIRE(layout.hit_test(2.0f, 27.0f) == 5);
+    REQUIRE_THAT(layout.position_for_index(5), WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("layout_paragraph treats non-positive width as unbounded and narrow width as per-glyph wrap",
+          "[canvas][text_layout][codecov]") {
+    FontSpec font;
+    font.size = 10.0f;
+
+    auto zero_width = layout_paragraph("abc", font, 0.0f);
+    REQUIRE(zero_width.line_count() == 1);
+    REQUIRE_THAT(zero_width.total_width(), WithinAbs(18.0f, 1e-5f));
+
+    auto negative_width = layout_paragraph("abc", font, -1.0f);
+    REQUIRE(negative_width.line_count() == 1);
+    REQUIRE_THAT(negative_width.total_width(), WithinAbs(18.0f, 1e-5f));
+
+    auto narrow = layout_paragraph("abc", font, 1.0f);
+    REQUIRE(narrow.line_count() == 3);
+    REQUIRE(narrow.lines()[0].glyphs[0].text_index == 0);
+    REQUIRE(narrow.lines()[1].glyphs[0].text_index == 1);
+    REQUIRE(narrow.lines()[2].glyphs[0].text_index == 2);
+    REQUIRE_THAT(narrow.lines()[0].width, WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(narrow.lines()[1].width, WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(narrow.lines()[2].width, WithinAbs(6.0f, 1e-5f));
+}
+
+TEST_CASE("Parallelogram contains accepts reverse winding and rejects exterior points",
+          "[canvas][text_layout][codecov]") {
+    Parallelogram clockwise{0.0f, 0.0f, 0.0f, 10.0f, 10.0f, 10.0f, 10.0f, 0.0f};
+
+    REQUIRE(clockwise.contains(5.0f, 5.0f));
+    REQUIRE(clockwise.contains(0.0f, 5.0f));
+    REQUIRE(clockwise.contains(10.0f, 10.0f));
+    REQUIRE_FALSE(clockwise.contains(-0.1f, 5.0f));
+    REQUIRE_FALSE(clockwise.contains(5.0f, 10.1f));
+    REQUIRE_FALSE(clockwise.contains(11.0f, 5.0f));
+}
+
 // ── pulp #1737 — CSS overflow-wrap / word-break BreakMode ───────────────
 // PR-1 of 2 in the css/overflowWrap roadmap slice. PR-1 ships the
 // TextShaper API for honoring break-word + anywhere break opportunities;
