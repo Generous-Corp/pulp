@@ -391,6 +391,11 @@ std::unique_ptr<View> InspectorWindow::build_performance_tab() {
     frame_time_label_ = ft.get();
     root->add_child(std::move(ft));
 
+    // GPU render time (whole-recording, from Skia Graphite GpuStats — #2611)
+    auto gpu = make_prop_label("GPU render: —", 13);
+    gpu_render_label_ = gpu.get();
+    root->add_child(std::move(gpu));
+
     // Budget
     auto bgt = make_prop_label("Budget: —", 13);
     budget_label_ = bgt.get();
@@ -703,6 +708,15 @@ void InspectorWindow::refresh_performance() {
         fps_label_->set_text("FPS: " + format_float(fps, 1));
     if (frame_time_label_)
         frame_time_label_->set_text("Frame time: " + format_float(total_ms, 2) + " ms");
+    if (gpu_render_label_) {
+        // Whole-recording GPU render time (#2611). Honest about availability:
+        // unsupported adapters / no-sample-yet read as "unavailable", never a
+        // fake 0.
+        if (rpm_->gpu_render_timing_available())
+            gpu_render_label_->set_text("GPU render: " + format_float(rpm_->gpu_render_time_ms(), 2) + " ms");
+        else
+            gpu_render_label_->set_text("GPU render: unavailable");
+    }
     if (budget_label_) {
         std::string btext = "Budget: " + format_float(rpm_->budget(), 1) + " ms";
         if (rpm_->over_budget()) btext += "  [OVER BUDGET]";

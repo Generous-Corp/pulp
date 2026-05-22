@@ -10,6 +10,7 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/inspector_window.hpp>
+#include <pulp/render/render_pass.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -1450,6 +1451,14 @@ int main(int argc, char* argv[]) {
     auto* inspector_view_ptr = inspector_view.get();
     View* inspector_selected = nullptr;
 
+    // #2611 — feed the inspector's Performance tab a live RenderPassManager
+    // carrying whole-recording GPU render time, sampled from the main window's
+    // SkiaSurface each idle tick (see the idle callback below). The number is
+    // produced by Skia Graphite's GpuStats(kElapsedTime); WindowHost forwards
+    // it via gpu_render_time_ms()/gpu_render_timing_available().
+    pulp::render::RenderPassManager inspector_rpm;
+    inspector_view_ptr->set_render_pass_manager(&inspector_rpm);
+
     auto open_inspector = [&]() {
         if (inspector_window) return;
         WindowOptions iopts;
@@ -1540,6 +1549,11 @@ int main(int argc, char* argv[]) {
 
     window->set_idle_callback([&] {
         if (inspector_window) {
+            // #2611 — sample the main window's GPU render time and hand it to
+            // the Performance tab's RenderPassManager before refreshing.
+            inspector_rpm.set_gpu_render_time_ms(
+                static_cast<float>(window->gpu_render_time_ms()),
+                window->gpu_render_timing_available());
             // Only refresh the active tab's data (refresh() already does this).
             // The NSTimer fires at 30 Hz regardless of window focus.
             inspector_view_ptr->refresh();

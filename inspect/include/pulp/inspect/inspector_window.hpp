@@ -138,6 +138,7 @@ private:
     // Performance tab
     Label* fps_label_ = nullptr;
     Label* frame_time_label_ = nullptr;
+    Label* gpu_render_label_ = nullptr;
     Label* budget_label_ = nullptr;
     View* pass_list_ = nullptr;
     Label* view_count_label_ = nullptr;
