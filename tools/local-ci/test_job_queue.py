@@ -140,16 +140,23 @@ class JobQueueTests(unittest.TestCase):
 
         normalized = self.mod.normalize_job(legacy_job)
         self.assertEqual(len(normalized["id"]), 12)
+        self.assertEqual(normalized["branch"], "feature/local-ci")
+        self.assertEqual(normalized["sha"], "abc123")
         self.assertEqual(normalized["priority"], "high")
         self.assertEqual(normalized["targets"], ["mac", "windows"])
         self.assertEqual(normalized["validation"], "smoke")
         self.assertEqual(normalized["status"], "pending")
         self.assertEqual(normalized["provenance"]["execution_kind"], "hosted")
+        self.assertEqual(normalized["submission"]["provenance"]["execution_kind"], "hosted")
 
         preserved = self.mod.normalize_job({"id": "manual-id", "targets": []})
         self.assertEqual(preserved["id"], "manual-id")
         self.assertEqual(preserved["priority"], "normal")
         self.assertEqual(preserved["validation"], "full")
+        self.assertEqual(preserved["targets"], [])
+        self.assertEqual(preserved["status"], "pending")
+        self.assertEqual(preserved["submission"]["provenance"]["execution_kind"], "direct")
+        self.assertEqual(preserved["provenance"]["execution_kind"], "direct")
 
         queue_file = self.mod.queue_path()
         self.assertEqual(self.mod.load_queue_unlocked(), [])
@@ -163,6 +170,43 @@ class JobQueueTests(unittest.TestCase):
 
         self.mod.save_queue_unlocked([normalized])
         self.assertEqual(json.loads(queue_file.read_text())[0]["id"], normalized["id"])
+        self.assertTrue(queue_file.read_text().endswith("\n"))
+
+    def test_normalize_job_prefers_top_level_provenance_and_validates_fields(self):
+        job = {
+            "id": "explicit",
+            "priority": "low",
+            "targets": ["ubuntu", "ubuntu", "mac"],
+            "status": "running",
+            "validation": "full",
+            "submission": {
+                "provenance": {
+                    "execution_kind": "hosted",
+                    "hosted_orchestrator": "github-actions",
+                    "runner_provider": "github-hosted",
+                }
+            },
+            "provenance": {
+                "execution_kind": "local",
+                "host": "dev-mac",
+            },
+        }
+
+        normalized = self.mod.normalize_job(job)
+
+        self.assertEqual(normalized["id"], "explicit")
+        self.assertEqual(normalized["priority"], "low")
+        self.assertEqual(normalized["targets"], ["mac", "ubuntu"])
+        self.assertEqual(normalized["status"], "running")
+        self.assertEqual(normalized["validation"], "full")
+        self.assertEqual(normalized["submission"]["provenance"]["execution_kind"], "hosted")
+        self.assertEqual(normalized["provenance"]["execution_kind"], "local")
+        self.assertEqual(normalized["provenance"]["host"], "dev-mac")
+
+        with self.assertRaisesRegex(ValueError, "Invalid priority"):
+            self.mod.normalize_job({"priority": "urgent"})
+        with self.assertRaisesRegex(ValueError, "Invalid validation mode"):
+            self.mod.normalize_job({"validation": "quick"})
 
 
 

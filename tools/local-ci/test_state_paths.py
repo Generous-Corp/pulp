@@ -151,12 +151,17 @@ class StatePathsTests(unittest.TestCase):
     def test_state_paths_all_use_the_state_root(self):
         with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.state_dir)}, clear=True):
             self.assertEqual(self.mod.queue_path(), self.state_dir / "queue.json")
+            self.assertEqual(self.mod.results_dir(), self.state_dir / "results")
+            self.assertEqual(self.mod.cloud_runs_dir(), self.state_dir / "cloud-runs")
             self.assertEqual(self.mod.evidence_path(), self.state_dir / "evidence.json")
+            self.assertEqual(self.mod.logs_dir(), self.state_dir / "logs")
+            self.assertEqual(self.mod.bundles_dir(), self.state_dir / "bundles")
             self.assertEqual(self.mod.prepared_dir(), self.state_dir / "prepared")
             self.assertEqual(self.mod.queue_lock_path(), self.state_dir / "queue.lock")
             self.assertEqual(self.mod.evidence_lock_path(), self.state_dir / "evidence.lock")
             self.assertEqual(self.mod.drain_lock_path(), self.state_dir / "drain.lock")
             self.assertEqual(self.mod.runner_info_path(), self.state_dir / "runner.json")
+            self.assertEqual(self.mod.job_logs_dir("job789"), self.state_dir / "logs" / "job789")
             self.assertEqual(self.mod.desktop_state_dir(), self.state_dir / "desktop-automation")
             self.assertEqual(
                 self.mod.desktop_receipts_dir(),
@@ -165,6 +170,9 @@ class StatePathsTests(unittest.TestCase):
 
     def test_state_dir_uses_platform_defaults_when_no_override_is_set(self):
         state_paths_mod = sys.modules["state_paths"]
+        with mock.patch.dict(os.environ, {"HOME": "/Users/pulp", "PULP_LOCAL_CI_HOME": "~/ci-state"}, clear=True):
+            self.assertEqual(self.mod.state_dir(), Path("/Users/pulp/ci-state"))
+
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
             state_paths_mod.Path,
             "home",
@@ -214,6 +222,8 @@ class StatePathsTests(unittest.TestCase):
 
             self.assertEqual(prepared, path)
             self.assertEqual(prepared.read_text(), "")
+            self.assertTrue(prepared.parent.is_dir())
+            self.assertEqual(prepared.name, "mac.log")
 
 
 
