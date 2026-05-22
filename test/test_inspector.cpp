@@ -5129,6 +5129,45 @@ TEST_CASE("InspectorOverlay QA BUG1: typed char lands AT the caret, not the end"
     REQUIRE_FALSE(overlay.text_edit_buffer() == "polywavet");  // not appended
 }
 
+TEST_CASE("InspectorOverlay QA BUG2: Delete removes only the SELECTION, not all",
+          "[inspect][overlay][wysiwyg][qa][bug2]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    Label* label = nullptr;
+    root.add_child(t2_make_label("polywave", &label));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tool(InspectorOverlay::Tool::text);
+    REQUIRE(overlay.begin_text_edit(label));
+
+    // Caret at end (8). Home, then Shift+Right x4 selects "poly" [0,4).
+    overlay.text_move_home(/*extend=*/false);
+    KeyEvent shright; shright.key = KeyCode::right; shright.is_down = true;
+    shright.modifiers = pulp::view::kModShift;
+    for (int i = 0; i < 4; ++i) REQUIRE(overlay.handle_key_event(shright));
+    REQUIRE(overlay.text_has_selection());
+    {
+        auto [lo, hi] = overlay.text_selection();
+        REQUIRE(lo == 0);
+        REQUIRE(hi == 4);
+    }
+
+    // Backspace removes EXACTLY "poly" — leaving "wave", not wiping the whole
+    // string (the reported bug erased everything).
+    KeyEvent bs; bs.key = KeyCode::backspace; bs.is_down = true;
+    REQUIRE(overlay.handle_key_event(bs));
+    REQUIRE(overlay.text_edit_buffer() == "wave");
+    REQUIRE(label->text() == "wave");
+    REQUIRE_FALSE(overlay.text_has_selection());  // collapsed to the cut point
+    REQUIRE(overlay.text_caret() == 0);
+
+    // Forward Delete with NO selection removes one char at the caret ('w').
+    KeyEvent del; del.key = KeyCode::delete_; del.is_down = true;
+    REQUIRE(overlay.handle_key_event(del));
+    REQUIRE(overlay.text_edit_buffer() == "ave");
+}
+
 TEST_CASE("InspectorOverlay P3: Select tool clicks still select (unchanged)",
           "[inspect][overlay][phase3][text-tool][regression]") {
     View root;
