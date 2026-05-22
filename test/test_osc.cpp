@@ -269,6 +269,21 @@ TEST_CASE("OSC encode/decode preserves blob payloads at padding boundaries",
             == std::vector<uint8_t>{0x04, 0x05, 0x06, 0x07});
 }
 
+TEST_CASE("OSC decode preserves empty blob alignment before following arguments",
+          "[osc][codec][blob][codecov]") {
+    Message msg("/zero-blob-next");
+    msg.add(std::vector<uint8_t>{});
+    msg.add(77);
+
+    auto data = encode(msg);
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/zero-blob-next");
+    REQUIRE(decoded.args.size() == 2);
+    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[0]).empty());
+    REQUIRE(decoded.get_int(1) == 77);
+}
+
 // ── UDP sender/receiver ─────────────────────────────────────────────────────
 
 TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
@@ -342,6 +357,48 @@ TEST_CASE("OSC Sender rejects invalid hostnames", "[osc][udp][sender]") {
     REQUIRE_FALSE(tx.is_connected());
 }
 
+TEST_CASE("OSC Sender disconnects idempotently and reconnects to loopback",
+          "[osc][udp][sender][codecov]") {
+    std::atomic<int> handled{0};
+
+    Receiver rx;
+    REQUIRE(rx.listen(0, [&](const Message& msg) {
+        if (msg.address == "/sender/reconnect" && msg.get_int(0) == 5) {
+            handled.fetch_add(1, std::memory_order_release);
+        }
+    }));
+    const auto port = rx.local_port();
+    REQUIRE(port != 0);
+
+    Sender tx;
+    REQUIRE(tx.connect("127.0.0.1", port));
+    REQUIRE(tx.is_connected());
+
+    tx.disconnect();
+    REQUIRE_FALSE(tx.is_connected());
+    tx.disconnect();
+
+    Message rejected("/sender/reconnect");
+    rejected.add(5);
+    REQUIRE_FALSE(tx.send(rejected));
+
+    REQUIRE(tx.connect("127.0.0.1", port));
+    REQUIRE(tx.is_connected());
+
+    Message msg("/sender/reconnect");
+    msg.add(5);
+    for (int i = 0; i < 100 && handled.load(std::memory_order_acquire) == 0; ++i) {
+        REQUIRE(tx.send(msg));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    REQUIRE(handled.load(std::memory_order_acquire) > 0);
+    tx.disconnect();
+    rx.stop();
+    REQUIRE_FALSE(tx.is_connected());
+    REQUIRE_FALSE(rx.is_listening());
+}
+
 TEST_CASE("OSC Receiver drops invalid datagrams without invoking handler", "[osc][udp][receiver]") {
     std::atomic<int> handled{0};
 
@@ -363,6 +420,30 @@ TEST_CASE("OSC Receiver drops invalid datagrams without invoking handler", "[osc
     tx.disconnect();
 
     REQUIRE(handled.load(std::memory_order_relaxed) == 0);
+    REQUIRE_FALSE(rx.is_listening());
+}
+
+TEST_CASE("OSC Receiver with empty handler accepts datagrams until stopped",
+          "[osc][udp][receiver][codecov]") {
+    Receiver rx;
+    REQUIRE(rx.listen(0, {}));
+    REQUIRE(rx.is_listening());
+    const auto port = rx.local_port();
+    REQUIRE(port != 0);
+
+    Sender tx;
+    REQUIRE(tx.connect("127.0.0.1", port));
+    Message msg("/receiver/no-handler");
+    msg.add(123);
+    REQUIRE(tx.send(msg));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    REQUIRE(rx.is_listening());
+    REQUIRE(rx.local_port() == port);
+
+    tx.disconnect();
+    rx.stop();
+    REQUIRE_FALSE(tx.is_connected());
     REQUIRE_FALSE(rx.is_listening());
 }
 
