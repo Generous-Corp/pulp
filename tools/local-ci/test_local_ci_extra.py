@@ -575,7 +575,10 @@ class LocalCiPureHelperTests(unittest.TestCase):
             ],
         }
         nodes = list(self.mod.iter_view_tree_nodes(view_tree))
+        self.assertEqual(list(self.mod.iter_view_tree_nodes("not-a-node")), [])
         self.assertEqual(nodes[-1][1], {"x": 22.0, "y": 34.0, "width": 30.0, "height": 10.0})
+        self.assertEqual(nodes[0][1]["x"], 10.0)
+        self.assertEqual(nodes[0][1]["height"], 100.0)
         self.assertEqual(
             self.mod.resolve_view_tree_click_point(
                 view_tree,
@@ -583,6 +586,16 @@ class LocalCiPureHelperTests(unittest.TestCase):
                 view_type="button",
                 view_text="OK",
                 view_label="Confirm",
+            ),
+            (37.0, 39.0),
+        )
+        self.assertEqual(
+            self.mod.resolve_view_tree_click_point(
+                view_tree,
+                view_id=None,
+                view_type="button",
+                view_text="OK",
+                view_label=None,
             ),
             (37.0, 39.0),
         )
@@ -602,6 +615,14 @@ class LocalCiPureHelperTests(unittest.TestCase):
             ),
             (210.0, 190.0),
         )
+        self.assertEqual(
+            self.mod.screen_point_for_content_point(
+                {"bounds": {"x": 5, "y": 6, "width": 20, "height": 10}},
+                (40, 30),
+                (3, 4),
+            ),
+            (8.0, 10.0),
+        )
 
         running = mock.Mock()
         running.poll.return_value = None
@@ -614,6 +635,59 @@ class LocalCiPureHelperTests(unittest.TestCase):
         complete.poll.return_value = 0
         self.mod.terminate_process(complete)
         complete.terminate.assert_not_called()
+
+    def test_macos_capture_and_local_worktree_helpers_cover_retry_edges(self) -> None:
+        output_path = self.root / "captures" / "window.png"
+
+        def successful_capture(*_args, **_kwargs):
+            output_path.write_bytes(b"png")
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with mock.patch.object(self.mod.subprocess, "run", side_effect=successful_capture) as run:
+            self.mod.capture_macos_window(42, output_path)
+        self.assertEqual(output_path.read_bytes(), b"png")
+        self.assertTrue(output_path.parent.is_dir())
+        self.assertEqual(run.call_args.args[0][0], "screencapture")
+        self.assertIn("-l", run.call_args.args[0])
+        self.assertIn("42", run.call_args.args[0])
+
+        failed_output = self.root / "captures" / "missing.png"
+        with mock.patch.object(
+            self.mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 1, stdout="stdout detail", stderr=""),
+        ), mock.patch.object(self.mod.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "stdout detail"):
+                self.mod.capture_macos_window(99, failed_output)
+        self.assertEqual(sleep.call_count, 4)
+        self.assertFalse(failed_output.exists())
+        self.assertEqual(sleep.call_args.args[0], 0.2)
+
+        missing = self.root / "missing-worktree"
+        self.assertFalse(self.mod._local_worktree_matches(missing, "abc123"))
+        worktree = self.root / "worktree"
+        worktree.mkdir()
+        (worktree / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        with mock.patch.object(
+            self.mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="abc123\n", stderr=""),
+        ) as run:
+            self.assertTrue(self.mod._local_worktree_matches(worktree, "abc123"))
+        self.assertEqual(run.call_args.args[0][2], str(worktree))
+        self.assertEqual(run.call_args.kwargs["text"], True)
+        with mock.patch.object(
+            self.mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="other\n", stderr=""),
+        ):
+            self.assertFalse(self.mod._local_worktree_matches(worktree, "abc123"))
+        with mock.patch.object(
+            self.mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 128, stdout="", stderr="bad git"),
+        ):
+            self.assertFalse(self.mod._local_worktree_matches(worktree, "abc123"))
 
     def test_filesystem_helpers_cover_tails_atomic_writes_and_image_hashes(self) -> None:
         self.assertEqual(self.mod.tail_lines(self.root / "missing.log"), [])
@@ -1294,6 +1368,18 @@ class LocalCiPureHelperTests(unittest.TestCase):
         with mock.patch.object(self.mod.urllib.request, "urlopen", return_value=FakeResponse("{bad")):
             with self.assertRaisesRegex(RuntimeError, "invalid JSON response"):
                 self.mod.probe_webdriver_endpoint("http://driver")
+        with mock.patch.object(
+            self.mod.urllib.request,
+            "urlopen",
+            side_effect=self.mod.urllib.error.URLError("connection refused"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "connection refused"):
+                self.mod.probe_webdriver_endpoint("http://driver")
+        with mock.patch.object(self.mod.urllib.request, "urlopen", return_value=FakeResponse("[]")):
+            probe = self.mod.probe_webdriver_endpoint("http://driver")
+        self.assertIsNone(probe["ready"])
+        self.assertEqual(probe["message"], "")
+        self.assertEqual(probe["payload"], [])
 
     def test_remote_detail_helpers_cover_missing_and_partial_states(self) -> None:
         self.assertEqual(self.mod.windows_desktop_session_user(None), "")
@@ -1323,6 +1409,52 @@ class LocalCiPureHelperTests(unittest.TestCase):
         self.assertEqual(self.mod.linux_tooling_detail({}, "xauth", missing_hint="install xauth"), "install xauth")
         self.assertEqual(self.mod.linux_tooling_detail({"xvfb_run_found": True, "xvfb_run_path": "/usr/bin/xvfb-run"}, "xvfb_run"), "/usr/bin/xvfb-run")
         self.assertFalse(self.mod.linux_remote_tooling_ready({"git_found": True, "git_lfs_found": True}))
+
+    def test_linux_launch_backend_and_windows_tool_install_edges(self) -> None:
+        linux_probe = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="mode=display\ndisplay=:7\nignored-line\nxdg_runtime_dir=/run/user/501\n",
+            stderr="",
+        )
+        with mock.patch.object(self.mod, "ssh_command_result", return_value=linux_probe) as ssh_result:
+            backend = self.mod.probe_linux_launch_backend("ubuntu")
+        self.assertEqual(backend["mode"], "display")
+        self.assertEqual(backend["display"], ":7")
+        self.assertEqual(backend["xdg_runtime_dir"], "/run/user/501")
+        self.assertEqual(ssh_result.call_args.kwargs["timeout"], 30)
+        self.assertEqual(ssh_result.call_args.args[0], "ubuntu")
+        self.assertIn("xvfb-run", ssh_result.call_args.args[1])
+
+        empty_probe = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with mock.patch.object(self.mod, "ssh_command_result", return_value=empty_probe):
+            self.assertEqual(self.mod.probe_linux_launch_backend("ubuntu"), {"mode": "missing"})
+
+        failed_probe = subprocess.CompletedProcess([], 7, stdout="", stderr="ssh denied")
+        with mock.patch.object(self.mod, "ssh_command_result", return_value=failed_probe):
+            with self.assertRaisesRegex(RuntimeError, "ssh denied"):
+                self.mod.probe_linux_launch_backend("ubuntu")
+
+        probes = [
+            {"git_found": False, "winget_found": True},
+            {"git_found": True, "winget_found": True, "gh_found": False},
+            {"git_found": True, "winget_found": True, "gh_found": True},
+        ]
+        with mock.patch.object(self.mod, "probe_windows_remote_tooling", side_effect=probes), \
+             mock.patch.object(self.mod, "install_windows_remote_tool", side_effect=[None, RuntimeError("optional failed")]) as install:
+            ensured = self.mod.ensure_windows_remote_tooling("win", install_optional=True)
+        self.assertEqual(ensured["installed"], ["git"])
+        self.assertTrue(ensured["probe"]["git_found"])
+        self.assertTrue(ensured["probe"]["winget_found"])
+        self.assertEqual(install.call_count, 2)
+        self.assertEqual(install.call_args_list[0].args[0], "win")
+        self.assertEqual(install.call_args_list[0].args[1], self.mod.WINDOWS_REQUIRED_REMOTE_TOOLS["git"]["winget_id"])
+
+        with mock.patch.object(self.mod, "probe_windows_remote_tooling", return_value={"git_found": False, "winget_found": False}), \
+             mock.patch.object(self.mod, "install_windows_remote_tool") as install:
+            with self.assertRaisesRegex(RuntimeError, "winget"):
+                self.mod.ensure_windows_remote_tooling("win")
+        install.assert_not_called()
 
     def test_desktop_bundle_and_prune_helpers_cover_edge_filters(self) -> None:
         config = {"desktop_automation": {"artifact_root": str(self.root / "artifacts")}}
