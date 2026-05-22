@@ -1173,3 +1173,24 @@ Gotchas:
 - **`tools/cli/cli_doctor_helpers.cpp` owns doctor check bodies** (2026-05, R2-4). The 971-line doctor block moved out of `cli_common.cpp` into its own TU. Public API (`DoctorCheck` struct + `run_doctor_*` functions) stays in `cli_common.hpp`; no new public header was added (Codex risk callout: don't replace one catch-all surface with another). When adding a new doctor check, edit `cli_doctor_helpers.cpp` only.
 - **`pulp doctor list` + `--only <name>`** (2026-05, R2-8). `pulp doctor list` enumerates available checks; `pulp doctor --only <substring>` case-insensitive filter runs a subset. Works across modes (`pulp doctor android list`, `pulp doctor --only emulator`). Filter logic lives in `cmd_doctor.cpp`, not in the helpers TU — the `DoctorCheck` vector returned by `run_doctor_checks` already IS the registry. No new struct or registration step needed when adding a check.
 - **Validator commands must suppress editor hosts.** Any CLI path that shells out to `auval`, `pluginval`, `clap-validator`, or `vstvalidator` must run the command with `PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`. This is part of the launch-safety contract: validation should never open a native plugin editor or OS window on a user/agent machine.
+
+## Build type — repo/example builds default to Release (perf)
+
+`ensure_repo_build_configured` (`cli_common.cpp`, the `pulp build` configure
+path for repo/example plugins) now passes `-DCMAKE_BUILD_TYPE=Release` on a
+fresh configure. Previously it passed NO build type, so CMake configured with
+no optimization (no `-O`, no `NDEBUG`) — an unoptimized binary whose plugin
+editor/DSP feels sluggish in a DAW for the same reason a Debug build does
+(confirmed 2026-05-22: ChainerSynth AU laggy unoptimized, "super snappy" in
+Release). `pulp create` already defaults Release with a `--debug` opt-in.
+
+Notes for CLI maintenance:
+- Override per-build with `PULP_BUILD_TYPE=Debug pulp build` (read in
+  `ensure_repo_build_configured`); it only applies on a FRESH configure — an
+  existing `CMakeCache.txt` build type is left untouched (re-configure or wipe
+  `build/` to change it). `pulp build` prints `Build type: <type>`.
+- Don't reintroduce an empty/Debug default for plugin builds — plugins are
+  perf-tested in a host, so unoptimized is the wrong default.
+- Companion runtime signal: `decide_gpu_host` (core/format/gpu_host_select.hpp)
+  logs `build=debug|release` on the `[plugin-gpu-host]` adapter line and warns
+  once on Debug, so a host log immediately shows which build was loaded.
