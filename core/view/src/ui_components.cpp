@@ -450,7 +450,7 @@ void ScrollView::set_scroll(float x, float y) {
     smooth_scroll_y_.set(target_scroll_y_);
 }
 
-void ScrollView::scroll_by(float dx, float dy) {
+void ScrollView::scroll_by(float dx, float dy, bool animate) {
     target_scroll_x_ += dx;
     target_scroll_y_ += dy;
     clamp_scroll_targets();
@@ -462,7 +462,12 @@ void ScrollView::scroll_by(float dx, float dy) {
     // the slot) and only fast-path to instant when the author
     // explicitly sets `scroll-behavior: auto`.
     const std::string& sb = scroll_behavior();
-    if (sb == "auto") {
+    if (sb == "auto" || !animate) {
+        // WYSIWYG P6 FIX 4 — wheel/trackpad scroll passes animate=false so
+        // the offset jumps instantly. A trackpad sends a continuous delta
+        // stream; the OS already smooths/inerts it, so animating each delta
+        // lags behind the fingers. Programmatic scroll (animate defaults to
+        // true) still eases below.
         smooth_scroll_x_.set(target_scroll_x_);
         smooth_scroll_y_.set(target_scroll_y_);
         return;
@@ -647,6 +652,28 @@ View* ScrollView::hit_test(Point local_point) {
     return this;
 }
 
+ScrollView* find_scroll_view_at(View& root, Point root_point) {
+    // Recursive descent that converts the point into each view's local
+    // space and tracks the DEEPEST ScrollView whose bounds contain it.
+    // Bounds-only (ignores visibility/hit-test gates beyond visibility)
+    // so empty background inside a scroll pane still resolves.
+    ScrollView* best = nullptr;
+    std::function<void(View&, Point)> walk = [&](View& v, Point local) {
+        if (!v.visible()) return;
+        if (!v.local_bounds().contains(local)) return;
+        if (auto* sv = dynamic_cast<ScrollView*>(&v)) best = sv;
+        for (size_t i = 0; i < v.child_count(); ++i) {
+            View* child = v.child_at(i);
+            if (!child) continue;
+            Point child_local{local.x - child->bounds().x,
+                              local.y - child->bounds().y};
+            walk(*child, child_local);
+        }
+    };
+    walk(root, root_point);
+    return best;
+}
+
 void ScrollView::on_mouse_event(const MouseEvent& event) {
     if (event.is_wheel) {
         // macOS trackpad provides pixel-level deltas
@@ -655,7 +682,8 @@ void ScrollView::on_mouse_event(const MouseEvent& event) {
         // Restrict to configured scroll direction
         if (direction_ == Direction::vertical) dx = 0;
         if (direction_ == Direction::horizontal) dy = 0;
-        scroll_by(dx, dy);
+        // animate=false: wheel/trackpad scrolls instantly (see scroll_by).
+        scroll_by(dx, dy, /*animate=*/false);
         // Show scrollbar while scrolling (will fade when we add animation timer)
         bar_opacity_.set(0.6f);
         bar_width_.set(6.0f);

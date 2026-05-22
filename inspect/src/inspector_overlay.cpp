@@ -90,6 +90,30 @@ bool apply_move_tweak_to_view(View& view,
     return false;
 }
 
+BadgePlacement compute_badge_placement(float sel_x, float sel_y, float sel_h,
+                                       float badge_w, float badge_h,
+                                       float root_w,
+                                       float gap, float top_margin) {
+    BadgePlacement out;
+    float above_y = sel_y - gap - badge_h;
+    if (above_y < top_margin) {
+        // Not enough room above — flip below the selection.
+        out.y = sel_y + sel_h + gap;
+        out.below = true;
+    } else {
+        out.y = above_y;
+        out.below = false;
+    }
+
+    // Clamp x to keep the badge on-screen left/right.
+    float x = sel_x;
+    if (x < 0.0f) x = 0.0f;
+    if (root_w > 0.0f && x + badge_w > root_w) x = root_w - badge_w;
+    if (x < 0.0f) x = 0.0f;  // badge wider than root: pin to left edge
+    out.x = x;
+    return out;
+}
+
 void install_inspector_hooks(InspectorOverlay& inspector) {
     g_active_inspector = &inspector;
     // Install all hooks via function pointers — no circular dependency
@@ -2272,16 +2296,22 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
         canvas.set_line_width(1.5f);
         canvas.stroke_rect(r.x, r.y, r.width, r.height);
 
-        // Tooltip
+        // Tooltip (type + W×H badge). WYSIWYG P6 FIX 2 — flip below the
+        // selection when there's no room above (the badge would slide under
+        // the window title bar and clip), and clamp x to the window edges.
         auto type = ViewInspector::type_name(*hovered_);
         auto label = type + " " + std::to_string(static_cast<int>(r.width))
                    + "×" + std::to_string(static_cast<int>(r.height));
         canvas.set_font("monospace", kFontSize);
-        canvas.set_fill_color(kPanelBg);
         float tw = canvas.measure_text(label);
-        canvas.fill_rounded_rect(r.x, r.y - 18, tw + 8, 16, 3);
+        constexpr float kBadgeH = 16.0f;
+        auto bp = compute_badge_placement(r.x, r.y, r.height, tw + 8, kBadgeH,
+                                          root_.bounds().width,
+                                          /*gap=*/2.0f, /*top_margin=*/kBadgeH);
+        canvas.set_fill_color(kPanelBg);
+        canvas.fill_rounded_rect(bp.x, bp.y, tw + 8, kBadgeH, 3);
         canvas.set_fill_color(kPanelText);
-        canvas.fill_text(label, r.x + 4, r.y - 5);
+        canvas.fill_text(label, bp.x + 4, bp.y + 13);
     }
 
     // Selected view highlight (orange)
@@ -2333,10 +2363,17 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
             const std::string msg = "grid child - move disabled";
             canvas.set_font("monospace", kFontSize);
             float tw = canvas.measure_text(msg);
+            // WYSIWYG P6 FIX 2 — flip below + edge-clamp like the hover badge
+            // so it doesn't clip under the window top.
+            constexpr float kBadgeH = 16.0f;
+            auto bp = compute_badge_placement(r.x, r.y, r.height, tw + 10,
+                                              kBadgeH, root_.bounds().width,
+                                              /*gap=*/4.0f,
+                                              /*top_margin=*/kBadgeH);
             canvas.set_fill_color(Color::rgba(0.8f, 0.1f, 0.1f, 0.92f));
-            canvas.fill_rounded_rect(r.x, r.y - 20, tw + 10, 16, 3);
+            canvas.fill_rounded_rect(bp.x, bp.y, tw + 10, kBadgeH, 3);
             canvas.set_fill_color(Color::rgba(1, 1, 1, 1));
-            canvas.fill_text(msg, r.x + 5, r.y - 7);
+            canvas.fill_text(msg, bp.x + 5, bp.y + 13);
         }
     }
 }

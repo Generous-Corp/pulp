@@ -230,8 +230,16 @@ public:
     }
     void set_scroll(float x, float y);
 
-    /// Scroll by a delta (e.g., from mouse wheel). Animates smoothly.
-    void scroll_by(float dx, float dy);
+    /// Scroll by a delta.
+    ///
+    /// @param animate When true (the default, used for PROGRAMMATIC scroll
+    ///        such as scroll-into-view), the offset eases to its target over
+    ///        ~motion.duration.fast. When false, the offset jumps instantly —
+    ///        used for WHEEL / trackpad input, where the OS already smooths
+    ///        and inertia-pads the delta stream, so animating each frame lags
+    ///        behind the fingers. The `scroll-behavior: auto` fast-path forces
+    ///        instant regardless of this flag.
+    void scroll_by(float dx, float dy, bool animate = true);
 
     void paint(canvas::Canvas& canvas) override;
     void paint_all(canvas::Canvas& canvas) override;
@@ -269,6 +277,17 @@ private:
     bool dragging_h_bar_ = false;
     float drag_offset_ = 0;  // offset from top of thumb where drag started
 };
+
+/// Find the deepest ScrollView whose bounds contain @p root_point (a point
+/// in @p root's local coordinate space).
+///
+/// Unlike View::hit_test, this ignores hit_testable / pointer-events gates
+/// and matches a ScrollView even over its EMPTY background (where hit_test
+/// can return null if no child sits under the point). The mac window host
+/// uses this so a wheel/trackpad scroll routes to the pane the cursor is
+/// over even when hovering blank space inside it — no click required.
+/// Returns nullptr if the point is over no ScrollView.
+ScrollView* find_scroll_view_at(View& root, Point root_point);
 
 // ── ListBox ──────────────────────────────────────────────────────────────
 

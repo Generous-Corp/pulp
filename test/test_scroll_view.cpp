@@ -1,5 +1,6 @@
 // Automated test for ScrollView (already exists from animation merge)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
@@ -15,6 +16,88 @@ TEST_CASE("ScrollView: scroll_by changes offset", "[scrollview]") {
 
     sv.scroll_by(0, 50);
     REQUIRE(sv.target_scroll_y() > 0.0f);
+}
+
+// WYSIWYG P6 FIX 4 — wheel/trackpad scroll is INSTANT; programmatic scroll
+// (the animate=true default) eases. The OS already smooths trackpad input,
+// so animating each delta lags behind the fingers.
+TEST_CASE("ScrollView: wheel scroll is instant, programmatic is animated",
+          "[scrollview]") {
+    SECTION("wheel event jumps the offset immediately") {
+        ScrollView sv;
+        sv.set_bounds({0, 0, 200, 100});
+        sv.set_content_size({200, 500});
+
+        MouseEvent wheel;
+        wheel.is_wheel = true;
+        wheel.scroll_delta_y = 1.0f;
+        sv.on_mouse_event(wheel);
+
+        // Offset reached its target with no pending animation.
+        REQUIRE(sv.target_scroll_y() > 0.0f);
+        REQUIRE(sv.scroll_y() == Catch::Approx(sv.target_scroll_y()));
+        REQUIRE_FALSE(sv.scroll_animating());
+    }
+
+    SECTION("scroll_by(animate=false) jumps instantly") {
+        ScrollView sv;
+        sv.set_bounds({0, 0, 200, 100});
+        sv.set_content_size({200, 500});
+
+        sv.scroll_by(0, 60, /*animate=*/false);
+        REQUIRE(sv.scroll_y() == Catch::Approx(sv.target_scroll_y()));
+        REQUIRE_FALSE(sv.scroll_animating());
+    }
+
+    SECTION("programmatic scroll_by (default) eases to its target") {
+        ScrollView sv;
+        sv.set_bounds({0, 0, 200, 100});
+        sv.set_content_size({200, 500});
+
+        sv.scroll_by(0, 60);  // animate defaults to true
+        // Mid-animation the visible offset has not yet reached the target.
+        REQUIRE(sv.target_scroll_y() == Catch::Approx(60.0f));
+        REQUIRE(sv.scroll_animating());
+        REQUIRE(sv.scroll_y() < sv.target_scroll_y());
+
+        // After enough advance it settles on the target.
+        for (int i = 0; i < 60; ++i) sv.advance_animations(1.0f / 60.0f);
+        REQUIRE(sv.scroll_y() == Catch::Approx(sv.target_scroll_y()).margin(0.5));
+    }
+}
+
+// WYSIWYG P6 FIX 4 (part 2) — find_scroll_view_at resolves the ScrollView a
+// point is over even when the point sits over EMPTY background inside the
+// pane (where hit_test can return null). The mac host uses this to route a
+// wheel event to the pane the cursor hovers without a prior click.
+TEST_CASE("find_scroll_view_at resolves the pane under a point",
+          "[scrollview]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    auto sv = std::make_unique<ScrollView>();
+    sv->set_bounds({50, 60, 300, 200});
+    sv->set_content_size({300, 1000});
+    ScrollView* sv_raw = sv.get();
+    root.add_child(std::move(sv));
+
+    // Point inside the ScrollView's bounds, over empty background (no child).
+    REQUIRE(find_scroll_view_at(root, {100, 120}) == sv_raw);
+    // Point outside the ScrollView resolves to nothing.
+    REQUIRE(find_scroll_view_at(root, {10, 10}) == nullptr);
+
+    SECTION("nested ScrollView returns the deepest one") {
+        auto inner = std::make_unique<ScrollView>();
+        inner->set_bounds({20, 20, 100, 100});  // local to sv
+        inner->set_content_size({100, 400});
+        ScrollView* inner_raw = inner.get();
+        sv_raw->add_child(std::move(inner));
+
+        // Window point (90,100) → sv-local (40,40) → inside inner (20..120).
+        REQUIRE(find_scroll_view_at(root, {90, 100}) == inner_raw);
+        // A point inside sv but outside inner stays on the outer one.
+        REQUIRE(find_scroll_view_at(root, {300, 250}) == sv_raw);
+    }
 }
 
 TEST_CASE("ScrollView: scroll wheel event scrolls", "[scrollview]") {

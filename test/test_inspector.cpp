@@ -3101,6 +3101,58 @@ TEST_CASE("InspectorOverlay P2: move tweak round-trips on the C++ apply path",
                                            choc::value::createString("#fff")));
 }
 
+// WYSIWYG P6 FIX 2 — the selection badge (type W×H tooltip and the grid-
+// refuse "can't move" badge) flips BELOW the selection when there isn't
+// room above (so it doesn't clip under the window title bar), and clamps
+// its x to the window edges. compute_badge_placement is the pure helper
+// both badges share.
+TEST_CASE("compute_badge_placement flips below near the window top",
+          "[inspect][overlay][badge][issue-wysiwyg-p6]") {
+    constexpr float kBadgeW = 80.0f;
+    constexpr float kBadgeH = 16.0f;
+    constexpr float kRootW  = 400.0f;
+    constexpr float kGap    = 2.0f;
+    constexpr float kTopMargin = kBadgeH;
+
+    SECTION("plenty of room above → badge sits above") {
+        auto bp = compute_badge_placement(/*sel_x=*/100, /*sel_y=*/200,
+                                          /*sel_h=*/50, kBadgeW, kBadgeH,
+                                          kRootW, kGap, kTopMargin);
+        REQUIRE_FALSE(bp.below);
+        REQUIRE(bp.y == Catch::Approx(200.0f - kGap - kBadgeH));
+        REQUIRE(bp.x == Catch::Approx(100.0f));
+    }
+
+    SECTION("selection at the very top → badge flips below") {
+        auto bp = compute_badge_placement(/*sel_x=*/100, /*sel_y=*/2,
+                                          /*sel_h=*/40, kBadgeW, kBadgeH,
+                                          kRootW, kGap, kTopMargin);
+        REQUIRE(bp.below);
+        REQUIRE(bp.y == Catch::Approx(2.0f + 40.0f + kGap));
+    }
+
+    SECTION("x clamps off the left edge") {
+        auto bp = compute_badge_placement(/*sel_x=*/-20, /*sel_y=*/200,
+                                          /*sel_h=*/50, kBadgeW, kBadgeH,
+                                          kRootW, kGap, kTopMargin);
+        REQUIRE(bp.x == Catch::Approx(0.0f));
+    }
+
+    SECTION("x clamps off the right edge") {
+        auto bp = compute_badge_placement(/*sel_x=*/380, /*sel_y=*/200,
+                                          /*sel_h=*/50, kBadgeW, kBadgeH,
+                                          kRootW, kGap, kTopMargin);
+        REQUIRE(bp.x == Catch::Approx(kRootW - kBadgeW));
+    }
+
+    SECTION("badge wider than root pins to left") {
+        auto bp = compute_badge_placement(/*sel_x=*/10, /*sel_y=*/200,
+                                          /*sel_h=*/50, /*badge_w=*/500,
+                                          kBadgeH, kRootW, kGap, kTopMargin);
+        REQUIRE(bp.x == Catch::Approx(0.0f));
+    }
+}
+
 // Re-import round-trip: a moved element's tweaks survive an apply pass — the
 // TweakStore values reconstruct an absolute view at the moved left/top.
 TEST_CASE("InspectorOverlay P2: move tweaks reconstruct absolute view on re-apply",

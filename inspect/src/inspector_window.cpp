@@ -333,9 +333,21 @@ std::unique_ptr<View> InspectorWindow::build_elements_tab() {
     root->flex().direction = FlexDirection::column;
     root->flex().flex_grow = 1;
 
-    // TreeView (top half — view hierarchy)
+    // TreeView (top half — view hierarchy), wrapped in a vertical
+    // ScrollView so a deep/expanded hierarchy past the ~200px viewport
+    // stays scrollable instead of being clipped and unreachable. The
+    // tree sizes itself to its full content height (see refresh_elements,
+    // which calls tree->content_height() into the ScrollView's content
+    // size after each structural rebuild); the ScrollView clips to the
+    // fixed viewport and scrolls within it. The props pane below remains
+    // its own ScrollView — two independent scroll panes is intended.
+    auto tree_scroll = std::make_unique<ScrollView>();
+    tree_scroll->flex().preferred_height = 200;
+    tree_scroll->flex().flex_shrink = 0;
+    tree_scroll->set_direction(ScrollView::Direction::vertical);
+    tree_scroll->set_background_color(kBgPanel);
+
     auto tree = std::make_unique<TreeView>();
-    tree->flex().preferred_height = 200;
     tree->flex().flex_shrink = 0;
     tree->set_background_color(kBgPanel);
     tree->on_select = [this](TreeNode& node) {
@@ -359,7 +371,13 @@ std::unique_ptr<View> InspectorWindow::build_elements_tab() {
         }
     };
     tree_view_ = tree.get();
-    root->add_child(std::move(tree));
+    // Give the tree an initial content size; refresh_elements() updates
+    // the height to the real content as the hierarchy is populated.
+    tree->flex().preferred_height = 200;
+    tree_scroll->set_content_size({300, 200});
+    tree_scroll->add_child(std::move(tree));
+    tree_scroll_ = tree_scroll.get();
+    root->add_child(std::move(tree_scroll));
 
     // Scrollable property sections below the tree
     auto scroll = std::make_unique<ScrollView>();
@@ -693,6 +711,13 @@ void InspectorWindow::refresh_elements() {
             tree_view_->set_selected_node(nullptr);
         }
         tree_signature_ = sig;
+
+        // Size the TreeView to its full visible-content height and tell the
+        // wrapping ScrollView, so an expanded hierarchy taller than the
+        // ~200px viewport scrolls instead of clipping (WYSIWYG P6 FIX 3).
+        float h = tree_view_->content_height();
+        tree_view_->flex().preferred_height = h;
+        if (tree_scroll_) tree_scroll_->set_content_size({300, h});
     }
 
     // Refresh theme colors section. Only rebuilt when the tree structure

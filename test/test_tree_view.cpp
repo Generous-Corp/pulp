@@ -61,6 +61,43 @@ TEST_CASE("TreeNode add children", "[view][tree]") {
     REQUIRE(child2.label == "Effects");
 }
 
+// WYSIWYG P6 FIX 3 — the TreeView reports a content height equal to its
+// visible-row count * row height. A wrapping ScrollView sizes the tree to
+// this so an expanded hierarchy past the viewport scrolls instead of
+// clipping. Collapsed subtrees must NOT count toward the height.
+TEST_CASE("TreeView content height grows with visible nodes", "[view][tree]") {
+    TreeView tree;
+    tree.set_row_height(22.0f);
+    auto& root = tree.root();
+    root.expanded = true;
+
+    // Empty tree: no visible rows.
+    REQUIRE(tree.visible_node_count() == 0);
+    REQUIRE(tree.content_height() == 0.0f);
+
+    // Two top-level rows.
+    auto& a = root.add_child("A");
+    root.add_child("B");
+    REQUIRE(tree.visible_node_count() == 2);
+    REQUIRE(tree.content_height() == 44.0f);
+
+    // Add two children under A, collapsed — they must not count yet.
+    a.add_child("A1");
+    a.add_child("A2");
+    a.expanded = false;
+    REQUIRE(tree.visible_node_count() == 2);
+    REQUIRE(tree.content_height() == 44.0f);
+
+    // Expand A — its two children now contribute.
+    a.expanded = true;
+    REQUIRE(tree.visible_node_count() == 4);
+    REQUIRE(tree.content_height() == 88.0f);
+
+    // Row height scales the content height.
+    tree.set_row_height(30.0f);
+    REQUIRE(tree.content_height() == 120.0f);
+}
+
 TEST_CASE("TreeNode nested children", "[view][tree]") {
     TreeNode root;
     auto& synths = root.add_child("Synths");

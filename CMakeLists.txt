@@ -66,6 +66,14 @@ option(PULP_REQUIRE_GPU_FOR_SDK
        OFF)
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
+# Dev inspector (Cmd+I overlay) in the standalone host. Default ON for
+# dev/examples builds. Release / standalone-ship builds should configure
+# with -DPULP_ENABLE_INSPECTOR=OFF so a shipped standalone app does not
+# expose the developer inspector to end users. Plugin formats never link
+# the inspector, so this is standalone-only. The inspector also requires
+# GPU + desktop (PULP_HAS_INSPECT), which gates linking; this flag gates
+# the source-side wiring on top of that.
+option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (dev/examples ON, release-ship OFF)" ON)
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)

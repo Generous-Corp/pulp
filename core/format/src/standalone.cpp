@@ -5,7 +5,24 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/window_host.hpp>
-#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
+
+// WYSIWYG P6 FIX 5 — the dev inspector (Cmd+I overlay) is gated behind the
+// PULP_ENABLE_INSPECTOR compile flag (root CMake option, default ON for
+// dev/examples builds; release/standalone-ship builds set it OFF) so a
+// shipped standalone app does not expose the developer inspector to end
+// users. It additionally requires PULP_HAS_INSPECT (GPU + desktop, the link
+// gate) and a non-Android platform. PULP_STANDALONE_INSPECTOR folds all
+// three into one condition used by every inspector block below.
+#if !defined(PULP_ENABLE_INSPECTOR)
+#define PULP_ENABLE_INSPECTOR 1
+#endif
+#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT) && PULP_ENABLE_INSPECTOR
+#define PULP_STANDALONE_INSPECTOR 1
+#else
+#define PULP_STANDALONE_INSPECTOR 0
+#endif
+
+#if PULP_STANDALONE_INSPECTOR
 #include <pulp/inspect/inspector_overlay.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
@@ -272,7 +289,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         stop();
     });
 
-#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
+#if PULP_STANDALONE_INSPECTOR
     // Create inspector overlay — activated via Cmd+I / Ctrl+I
     auto* inspector_host = &window_root;
     auto inspector = std::make_unique<inspect::InspectorOverlay>(*inspector_host);
@@ -288,7 +305,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // so the headless screenshot block (further below) can compose with it
     // instead of clobbering via a second set_idle_callback.
     std::function<void()> pre_screenshot_idle;
-#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
+#if PULP_STANDALONE_INSPECTOR
     if (scripted_ui_ptr) {
         pre_screenshot_idle = [scripted_ui_ptr, settings_ptr, inspector_ptr, inspector_host] {
             if (scripted_ui_ptr) scripted_ui_ptr->poll();

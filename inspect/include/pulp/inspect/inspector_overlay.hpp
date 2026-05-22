@@ -1310,6 +1310,30 @@ bool apply_move_tweak_to_view(View& view,
                               std::string_view property_path,
                               const choc::value::Value& value);
 
+/// Computed top-left placement for a selection badge (the `type W×H`
+/// hover tooltip and the grid-refuse "can't move" badge).
+struct BadgePlacement {
+    float x = 0.0f;
+    float y = 0.0f;
+    bool below = false;  ///< true when flipped below the selection
+};
+
+/// Place a badge of size (@p badge_w × @p badge_h) for a selection whose
+/// top-left is at (@p sel_x, @p sel_y) with height @p sel_h.
+///
+/// Default position is ABOVE the selection (sel_y - gap - badge_h). When
+/// that would clip under the window top (badge top < @p top_margin), the
+/// badge flips to BELOW the selection (sel_y + sel_h + gap). The x is
+/// clamped so the badge never runs off the left (< 0) or right
+/// (> root_w - badge_w) edge. @p root_w <= 0 disables the right clamp.
+///
+/// Pure arithmetic so it is unit-testable headlessly (WYSIWYG P6 FIX 2).
+BadgePlacement compute_badge_placement(float sel_x, float sel_y, float sel_h,
+                                       float badge_w, float badge_h,
+                                       float root_w,
+                                       float gap = 5.0f,
+                                       float top_margin = 0.0f);
+
 /// Global inspector instance for the current window.
 /// Set by the host when creating the inspector. The platform WindowHost
 /// checks this to intercept key/mouse events before normal dispatch.

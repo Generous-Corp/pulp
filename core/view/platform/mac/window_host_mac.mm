@@ -250,7 +250,25 @@ static void install_app_menu(NSString* appName) {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
     auto* target = self.rootView->hit_test(pt);
-    if (!target) return;
+    if (!target) {
+        // WYSIWYG P6 FIX 4 — hovering over EMPTY background inside a scroll
+        // pane returns no hit (no hit-testable child under the point), which
+        // previously dropped the wheel event. Route it to the ScrollView the
+        // cursor is over so scrolling works anywhere in the pane without a
+        // click first.
+        if (auto* sv = pulp::view::find_scroll_view_at(*self.rootView, pt)) {
+            pulp::view::MouseEvent me;
+            me.position = pt;
+            me.window_position = pt;
+            me.is_wheel = true;
+            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+            sv->on_mouse_event(me);
+            sv->layout_children();
+            [self setNeedsDisplay:YES];
+        }
+        return;
+    }
 
     pulp::view::MouseEvent me;
     me.position = pt;

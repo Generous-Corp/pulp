@@ -189,6 +189,7 @@ private:
 
     // Elements tab
     TreeView* tree_view_ = nullptr;
+    ScrollView* tree_scroll_ = nullptr;  // viewport wrapping tree_view_
     CollapsableSection* identity_section_ = nullptr;
     CollapsableSection* layout_section_ = nullptr;
     CollapsableSection* visual_section_ = nullptr;
