@@ -1557,6 +1557,19 @@ public:
         // between here and the caller's earlier-destroyed bridge/engine, so
         // cancelling now reliably catches every still-queued block.
         [view_ prepareForTeardown];
+        // Fully detach the NSWindow when the host is destroyed (e.g. the Cmd+I
+        // toggle's reset()). Without this the window LINGERED on screen with
+        // its C++ root torn out (so it looked "cleared"), the unique_ptr went
+        // null so the next Cmd+I stacked ANOTHER inspector, and the lingering
+        // window's delegate still pointed at the freed close_callback_ — so
+        // closing it invoked a dangling callback (UAF / pointer-auth crash).
+        // Clear the callback + delegate FIRST so close can't re-enter
+        // windowShouldClose:/onClose during teardown; releasedWhenClosed=NO so
+        // our ARC strong ref controls the final dealloc.
+        delegate_.onClose = nil;
+        [window_ setDelegate:nil];
+        [window_ setReleasedWhenClosed:NO];
+        [window_ close];
         root_.set_window_host(nullptr);
         root_.set_frame_clock(nullptr);
     }
