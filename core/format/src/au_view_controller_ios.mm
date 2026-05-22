@@ -36,9 +36,14 @@
 @end
 
 @implementation PulpAUViewController {
+    // Declaration order is load-bearing — see -dealloc. _viewHost holds a
+    // `View& root_`; it MUST be destroyed before whichever object owns that
+    // View (the bridge's view, OR _fallbackView in the no-bridge preview
+    // path). Declaring _viewHost LAST makes it destroy FIRST (reverse order),
+    // which is safe for both paths.
     std::unique_ptr<pulp::format::ViewBridge> _bridge;
-    std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
     std::unique_ptr<pulp::view::View> _fallbackView;
+    std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
 }
 
 - (void)viewDidLoad {
@@ -127,33 +132,36 @@
 }
 
 - (void)dealloc {
-    // Destruction-order contract (Codex P1 review on PR #653):
+    // Destruction-order contract (Codex P1 review on PR #653; fallback-path
+    // UAF fix, GPU-plugin-view-host):
     //
     // PulpAUViewController declares its ivars in order:
-    //     _bridge       (ViewBridge — owns the View tree)
+    //     _bridge       (ViewBridge — owns the View tree on the success path)
+    //     _fallbackView (the View on the no-bridge preview path)
     //     _viewHost     (PluginViewHost — holds `View& root_`)
-    //     _fallbackView (only used when bridge fails)
     //
     // After [super dealloc] the runtime destroys C++-typed ivars in
-    // REVERSE declaration order: _fallbackView, then _viewHost, then
+    // REVERSE declaration order: _viewHost, then _fallbackView, then
     // _bridge. That ordering is load-bearing:
-    //   1. ~_fallbackView runs (no-op when bridge succeeded).
-    //   2. ~unique_ptr<PluginViewHost> runs. Its destructor calls
-    //      `root_.set_plugin_view_host(nullptr)` — the View that
-    //      `root_` references is still alive (still owned by
-    //      `_bridge->view_`), so the call is safe and clears the
-    //      back-pointer.
-    //   3. ~unique_ptr<ViewBridge> runs. Its destructor calls
-    //      `close()` which fires `Processor::on_view_closed`,
-    //      releases the scripted UI, and resets the View. The
-    //      back-pointer was already cleared in step 2, so the
-    //      View's own teardown can't reach a dead host.
+    //   1. ~unique_ptr<PluginViewHost> runs FIRST. Its destructor calls
+    //      `root_.set_plugin_view_host(nullptr)` (and, for the GPU host,
+    //      `root_.set_frame_clock(nullptr)`). `root_` references either
+    //      `_bridge->view_` or `_fallbackView` — BOTH are still alive at
+    //      this point, so the back-pointer clear is safe on either path.
+    //      (Previously _viewHost was declared before _fallbackView, so on
+    //      the fallback path the View died first and ~PluginViewHost
+    //      dereferenced a dangling `root_`.)
+    //   2. ~unique_ptr<View> (_fallbackView) runs (no-op when bridge
+    //      succeeded; on the fallback path the back-pointer was cleared
+    //      in step 1).
+    //   3. ~unique_ptr<ViewBridge> runs. Its destructor calls `close()`
+    //      which fires `Processor::on_view_closed`, releases the scripted
+    //      UI, and resets the View. The back-pointer was already cleared
+    //      in step 1, so the View's own teardown can't reach a dead host.
     //
-    // Calling `_bridge->close()` HERE explicitly (before [super
-    // dealloc]) reverses that order — the View dies first, then
-    // ~PluginViewHost dereferences a dangling `root_` reference and
-    // crashes AUv3 editor close. Don't reintroduce the explicit
-    // close in this dealloc path.
+    // Calling `_bridge->close()` HERE explicitly (before [super dealloc])
+    // reverses that order — the View dies first, then ~PluginViewHost
+    // dereferences a dangling `root_`. Don't reintroduce the explicit close.
     [super dealloc];
 }
 
