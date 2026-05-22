@@ -163,6 +163,9 @@ public:
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {
                 float s = channels[ch][i];
+                // Non-finite samples (NaN/Inf) would poison RMS/LUFS/integrated
+                // accumulators irrecoverably (#2695). Treat them as silence.
+                if (!std::isfinite(s)) s = 0.0f;
                 float abs_s = std::abs(s);
 
                 if (abs_s > block_peak_[ch]) block_peak_[ch] = abs_s;
@@ -176,6 +179,8 @@ public:
             if (num_channels >= 2) {
                 float l = channels[0][i];
                 float r = channels[1][i];
+                if (!std::isfinite(l)) l = 0.0f;
+                if (!std::isfinite(r)) r = 0.0f;
                 correlation_sum_xy_ += static_cast<double>(l) * r;
                 correlation_sum_xx_ += static_cast<double>(l) * l;
                 correlation_sum_yy_ += static_cast<double>(r) * r;

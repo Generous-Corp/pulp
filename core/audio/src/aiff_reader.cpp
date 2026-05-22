@@ -240,9 +240,12 @@ public:
                     int16_t v = static_cast<int16_t>((p[0] << 8) | p[1]);
                     sample = static_cast<float>(v) / 32768.0f;
                 } else if (bits_per_sample == 24) {
-                    int32_t v = (static_cast<int32_t>(p[0]) << 24) |
-                                (static_cast<int32_t>(p[1]) << 16) |
-                                (static_cast<int32_t>(p[2]) << 8);
+                    // Build the 24-bit word with unsigned arithmetic; a signed
+                    // left-shift of a byte >= 0x80 into bit 31 is UB (#2694).
+                    uint32_t raw = (static_cast<uint32_t>(p[0]) << 24) |
+                                   (static_cast<uint32_t>(p[1]) << 16) |
+                                   (static_cast<uint32_t>(p[2]) << 8);
+                    int32_t v = static_cast<int32_t>(raw);
                     sample = static_cast<float>(v) / 2147483648.0f;
                 } else if (bits_per_sample == 32) {
                     int32_t v = static_cast<int32_t>(read_be32(p));

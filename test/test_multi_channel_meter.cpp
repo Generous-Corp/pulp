@@ -273,3 +273,32 @@ TEST_CASE("MultiChannelBallistics clamps channel count and clears clip holds", "
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
     REQUIRE_THAT(ballistics.channels[0].clip_hold_counter, WithinAbs(0.0f, 1e-6f));
 }
+
+TEST_CASE("MultiChannelMeter treats non-finite samples as silence (no NaN poisoning)",
+          "[signal][meter][issue-2695]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, 1);  // ~1-sample blocks so snapshots emit quickly
+
+    const float nan_s = std::numeric_limits<float>::quiet_NaN();
+    const float inf_s = std::numeric_limits<float>::infinity();
+    float nan_buf[] = {nan_s};
+    float inf_buf[] = {inf_s};
+    float good[]    = {0.5f};
+    const float* ch_nan[]  = {nan_buf};
+    const float* ch_inf[]  = {inf_buf};
+    const float* ch_good[] = {good};
+
+    // A NaN/Inf sample must not irrecoverably poison the RMS/LUFS/integrated
+    // accumulators (#2695): subsequent valid audio must still read finite.
+    meter.process(ch_nan, 1, 1);
+    meter.process(ch_inf, 1, 1);
+    for (int i = 0; i < 64; ++i) meter.process(ch_good, 1, 1);
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(std::isfinite(snap.channels[0].peak));
+    REQUIRE(std::isfinite(snap.channels[0].rms));
+    REQUIRE_FALSE(std::isnan(snap.lufs_integrated));
+    REQUIRE_FALSE(std::isnan(snap.channels[0].lufs_momentary));
+    // The valid 0.5 samples should register a real RMS, not 0/NaN.
+    REQUIRE(snap.channels[0].rms > 0.0f);
+}

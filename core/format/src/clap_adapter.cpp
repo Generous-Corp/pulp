@@ -28,8 +28,12 @@ static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
 // See #688. memcpy into a stack local guarantees proper alignment.
 template <typename T>
 static T load_event(const clap_event_header_t* hdr) {
-    T out;
-    std::memcpy(&out, hdr, sizeof(T));
+    // Guard against a short/malformed host event: copying sizeof(T) bytes when
+    // hdr->size < sizeof(T) reads past the event (OOB / UB on the audio thread,
+    // #2691). Copy only the bytes the host actually provided; the rest stay
+    // zero-initialised. (memcpy-into-a-stack-local also fixes alignment, #688.)
+    T out{};
+    std::memcpy(&out, hdr, std::min(static_cast<std::size_t>(hdr->size), sizeof(T)));
     return out;
 }
 

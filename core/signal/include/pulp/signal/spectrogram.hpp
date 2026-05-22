@@ -26,6 +26,10 @@ public:
 
     /// Map a normalized value (0 = minimum, 1 = maximum) to a color.
     SpectrogramColor map(float t) const {
+        // std::clamp(NaN, …) returns NaN, which the ramps then cast to uint8_t
+        // (undefined behavior, #2695). Sanitize NaN to 0 first; ±Inf clamp
+        // safely to 1.0 / 0.0 below.
+        if (std::isnan(t)) t = 0.0f;
         t = std::clamp(t, 0.0f, 1.0f);
 
         switch (ramp_) {

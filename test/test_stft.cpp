@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vector>
 #include <numeric>
+#include <limits>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -613,4 +614,26 @@ TEST_CASE("MultiChannelBallistics clear_clips", "[signal][meter]") {
     ballistics.clear_clips();
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
     REQUIRE_FALSE(ballistics.channels[1].clip_indicator);
+}
+
+TEST_CASE("ColorMapper sanitizes NaN input (no NaN->uint8 UB)",
+          "[signal][spectrogram][issue-2695]") {
+    const float nan_t = std::numeric_limits<float>::quiet_NaN();
+    const float pinf  = std::numeric_limits<float>::infinity();
+    for (auto ramp : {ColorRamp::grayscale, ColorRamp::inferno,
+                      ColorRamp::viridis, ColorRamp::heat}) {
+        ColorMapper mapper(ramp);
+        // NaN must not reach the uint8_t cast (UB); map() sanitizes NaN to 0,
+        // so map(NaN) == map(0). +/-Inf clamp safely to 1.0 / 0.0.
+        auto at_zero = mapper.map(0.0f);
+        auto at_one  = mapper.map(1.0f);
+        auto at_nan  = mapper.map(nan_t);
+        REQUIRE(at_nan.r == at_zero.r);
+        REQUIRE(at_nan.g == at_zero.g);
+        REQUIRE(at_nan.b == at_zero.b);
+        auto at_pinf = mapper.map(pinf);   // clamps to 1.0
+        REQUIRE(at_pinf.r == at_one.r);
+        REQUIRE(at_pinf.g == at_one.g);
+        REQUIRE(at_pinf.b == at_one.b);
+    }
 }
