@@ -74,6 +74,7 @@ COVERAGE_SURFACES = (
             "tools/harness/tests/test_validate_test_ref.py",
             "tools/harness/tests/test_verifier.py",
             "tools/harness/tests/test_verify_report.py",
+            "tools/harness/tests/test_yoga_adapter.py",
             "tools/harness/visual/tests/test_check_skia_pin.py",
             "tools/harness/visual/tests/test_differ.py",
             "tools/harness/visual/tests/test_runner.py",
