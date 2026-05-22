@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02000"></a>
+## [0.200.0] - 2026-05-22
+
+- docs(skills): cli-maintenance — repo/example builds default to Release + build-type flag ([#2749](https://github.com/danielraffel/pulp/pull/2749))
+- test(local-ci): cover bundle upload probe edges ([#2748](https://github.com/danielraffel/pulp/pull/2748))
+- test(import-validation): cover source contract helper edges ([#2747](https://github.com/danielraffel/pulp/pull/2747))
+- test(headers): cover self-contained header checker ([#2746](https://github.com/danielraffel/pulp/pull/2746))
+- ci: header self-containment gate + watchdog reaper (#2576 prevention) ([#2745](https://github.com/danielraffel/pulp/pull/2745))
+- test(import-validation): cover region diff CLI edges ([#2741](https://github.com/danielraffel/pulp/pull/2741))
+
 <a id="v01990"></a>
 ## [0.199.0] - 2026-05-22
 
@@ -2607,6 +2617,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.200.0]: https://github.com/danielraffel/pulp/releases/tag/v0.200.0
 [0.199.0]: https://github.com/danielraffel/pulp/releases/tag/v0.199.0
 [0.198.0]: https://github.com/danielraffel/pulp/releases/tag/v0.198.0
 [0.197.4]: https://github.com/danielraffel/pulp/releases/tag/v0.197.4
