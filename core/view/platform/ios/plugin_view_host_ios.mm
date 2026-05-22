@@ -311,6 +311,9 @@ private:
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <functional>
+#include <memory>
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 
@@ -318,13 +321,28 @@ class IOSGpuPluginViewHost;
 
 }  // namespace pulp::view
 
-// Metal-backed UIView for GPU rendering in AUv3 hosts
+// Metal-backed UIView for GPU rendering in AUv3 hosts.
+//
+// Like the mac embedded view, the display link is driven by window-attach,
+// not by attach_to_parent — the AUv3 controller adds this view to its own
+// hierarchy, so the host wires `onWindowChange` / `onLayout` to start/stop
+// the link and re-sync surfaces at the right times.
 @interface PulpMetalPluginView : UIView
+@property (nonatomic, copy) void (^onWindowChange)(void);
+@property (nonatomic, copy) void (^onLayout)(void);
 @end
 
 @implementation PulpMetalPluginView
 + (Class)layerClass { return [CAMetalLayer class]; }
 - (CAMetalLayer *)metalLayer { return (CAMetalLayer *)self.layer; }
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if (self.onWindowChange) self.onWindowChange();
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.onLayout) self.onLayout();
+}
 @end
 
 // CADisplayLink target — relays the vsync tick to the C++ host.
@@ -338,52 +356,63 @@ namespace pulp::view {
 class IOSGpuPluginViewHost : public PluginViewHost {
 public:
     IOSGpuPluginViewHost(View& root, const Options& opts)
-        : root_(root), size_(opts.size) {
+        : root_(root), size_(opts.size),
+          alive_(std::make_shared<std::atomic<bool>>(true)) {
         @autoreleasepool {
+            root_.set_frame_clock(&frame_clock_);
             CGRect frame = CGRectMake(0, 0, opts.size.width, opts.size.height);
             metal_view_ = [[PulpMetalPluginView alloc] initWithFrame:frame];
             metal_view_.multipleTouchEnabled = YES;
             metal_view_.autoresizingMask =
                 UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            metal_view_.onWindowChange = ^{ this->handle_window_change(); };
+            metal_view_.onLayout = ^{ this->handle_layout(); };
 
-            CGFloat scale = UIScreen.mainScreen.scale;
-            uint32_t pw = static_cast<uint32_t>(opts.size.width * scale);
-            uint32_t ph = static_cast<uint32_t>(opts.size.height * scale);
+            scale_ = current_scale();
+            uint32_t pw = static_cast<uint32_t>(opts.size.width * scale_);
+            uint32_t ph = static_cast<uint32_t>(opts.size.height * scale_);
 
             CAMetalLayer* layer = [metal_view_ metalLayer];
             layer.device = MTLCreateSystemDefaultDevice();
             layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+            layer.framebufferOnly = NO;
             layer.drawableSize = CGSizeMake(pw, ph);
-            layer.contentsScale = scale;
+            layer.contentsScale = scale_;
 
-            render::GpuSurface::Config gpu_cfg;
-            gpu_cfg.width = pw;
-            gpu_cfg.height = ph;
-            gpu_cfg.native_surface_handle = (__bridge void*)layer;
-
-            gpu_surface_ = std::make_unique<render::GpuSurface>();
-            if (gpu_surface_->initialize(gpu_cfg)) {
-                render::SkiaSurface::Config skia_cfg;
-                skia_cfg.width = pw;
-                skia_cfg.height = ph;
-                skia_cfg.dawn_device = gpu_surface_->dawn_device_handle();
-                skia_cfg.dawn_queue = gpu_surface_->dawn_queue_handle();
-                skia_cfg.dawn_instance = gpu_surface_->dawn_instance_handle();
-
-                skia_surface_ = std::make_unique<render::SkiaSurface>();
-                if (!skia_surface_->initialize(skia_cfg)) {
-                    skia_surface_.reset();
+            // Current render API: create the Dawn surface, then build the
+            // Skia Graphite surface from it (mirrors the mac host). GpuSurface
+            // gets PHYSICAL pixels; SkiaSurface gets LOGICAL size + scale.
+            gpu_surface_ = render::GpuSurface::create_dawn();
+            if (gpu_surface_) {
+                render::GpuSurface::Config gpu_cfg{};
+                gpu_cfg.width = pw;
+                gpu_cfg.height = ph;
+                gpu_cfg.native_surface_handle = (__bridge void*)layer;
+                if (gpu_surface_->initialize(gpu_cfg)) {
+                    render::SkiaSurface::Config skia_cfg{};
+                    skia_cfg.width = opts.size.width;
+                    skia_cfg.height = opts.size.height;
+                    skia_cfg.scale_factor = static_cast<float>(scale_);
+                    skia_surface_ = render::SkiaSurface::create(*gpu_surface_, skia_cfg);
+                    if (!skia_surface_) gpu_surface_.reset();
+                } else {
                     gpu_surface_.reset();
                 }
-            } else {
-                gpu_surface_.reset();
             }
         }
     }
 
     ~IOSGpuPluginViewHost() override {
+        alive_->store(false, std::memory_order_release);
         root_.set_plugin_view_host(nullptr);
         stop_display_link();
+        @autoreleasepool {
+            metal_view_.onWindowChange = nil;
+            metal_view_.onLayout = nil;
+        }
+        skia_surface_.reset();
+        gpu_surface_.reset();
+        root_.set_frame_clock(nullptr);
     }
 
     NativeViewHandle native_handle() override { return (__bridge void*)metal_view_; }
@@ -393,7 +422,7 @@ public:
             UIView* pv = (__bridge UIView*)parent;
             if (pv && metal_view_) {
                 [pv addSubview:metal_view_];
-                start_display_link();
+                // Display link starts via -didMoveToWindow → handle_window_change().
                 needs_repaint_.store(true, std::memory_order_relaxed);
             }
         }
@@ -411,6 +440,18 @@ public:
     }
 
     void tick() {
+        if (!alive_->load(std::memory_order_acquire)) return;
+        // Pump idle (scripted poll: async results, timers, rAF) FIRST so any
+        // request_repaint they trigger is seen below.
+        if (idle_callback_) idle_callback_();
+
+        const bool tick_subscribers = frame_clock_.has_active_subscribers();
+        const bool animate = tree_has_active_css_animation(&root_);
+        if (tick_subscribers || animate) {
+            frame_clock_.tick(1.0f / 60.0f);
+            root_.tick_animations(1.0f / 60.0f);
+            needs_repaint_.store(true, std::memory_order_relaxed);
+        }
         if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
             render_frame();
         }
@@ -420,18 +461,31 @@ public:
         size_ = {w, h};
         @autoreleasepool {
             metal_view_.frame = CGRectMake(0, 0, w, h);
-            CGFloat scale = UIScreen.mainScreen.scale;
-            [metal_view_ metalLayer].drawableSize = CGSizeMake(w * scale, h * scale);
+            scale_ = current_scale();
+            [metal_view_ metalLayer].contentsScale = scale_;
+            [metal_view_ metalLayer].drawableSize = CGSizeMake(w * scale_, h * scale_);
+            // Resize parity: GpuSurface PHYSICAL, SkiaSurface LOGICAL + scale.
+            if (gpu_surface_) {
+                gpu_surface_->resize(static_cast<uint32_t>(w * scale_),
+                                     static_cast<uint32_t>(h * scale_));
+            }
             if (skia_surface_) {
-                skia_surface_->resize(static_cast<uint32_t>(w * scale),
-                                      static_cast<uint32_t>(h * scale),
-                                      static_cast<float>(scale));
+                skia_surface_->resize(w, h, static_cast<float>(scale_));
             }
         }
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
     Size get_size() const override { return size_; }
+
+    bool is_gpu_backed() const override {
+        return gpu_surface_ != nullptr && skia_surface_ != nullptr &&
+               skia_surface_->is_available();
+    }
+
+    void set_idle_callback(std::function<void()> callback) override {
+        idle_callback_ = std::move(callback);
+    }
 
     bool attach_native_child_view(NativeViewHandle child_view,
                                   float x,
@@ -459,9 +513,59 @@ private:
     PulpMetalPluginView* metal_view_ = nil;
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
+    FrameClock frame_clock_;
     std::atomic<bool> needs_repaint_{false};
     CADisplayLink* display_link_ = nil;
     PulpIOSPluginDisplayLinkTarget* display_link_target_ = nil;
+    std::function<void()> idle_callback_;
+    CGFloat scale_ = 1.0;
+    // Liveness token (parity with the mac host). CADisplayLink ticks run on
+    // the main run loop and stop on -invalidate, but the token makes a racing
+    // teardown safe and matches the cross-platform contract.
+    std::shared_ptr<std::atomic<bool>> alive_;
+
+    // Prefer the view's window-screen scale; fall back to the view's own
+    // content scale, then the main screen. Updated on layout / window change.
+    CGFloat current_scale() const {
+        if (metal_view_.window && metal_view_.window.screen)
+            return metal_view_.window.screen.scale;
+        if (metal_view_)
+            return metal_view_.contentScaleFactor;
+        return UIScreen.mainScreen.scale;
+    }
+
+    static bool tree_has_active_css_animation(View* view) {
+        if (!view) return false;
+        if (view->animation_play_state() != "paused") {
+            for (const auto& a : view->active_animations()) {
+                if (a.active) return true;
+            }
+        }
+        for (size_t i = 0; i < view->child_count(); ++i) {
+            if (tree_has_active_css_animation(view->child_at(i))) return true;
+        }
+        return false;
+    }
+
+    void handle_window_change() {
+        if (metal_view_.window) {
+            scale_ = current_scale();
+            start_display_link();
+            needs_repaint_.store(true, std::memory_order_relaxed);
+        } else {
+            stop_display_link();
+        }
+    }
+
+    void handle_layout() {
+        const CGFloat new_scale = current_scale();
+        const CGSize bounds = metal_view_.bounds.size;
+        const uint32_t w = static_cast<uint32_t>(bounds.width);
+        const uint32_t h = static_cast<uint32_t>(bounds.height);
+        if (new_scale != scale_ || w != size_.width || h != size_.height) {
+            if (w > 0 && h > 0) set_size(w, h);
+        }
+    }
 
     void start_display_link() {
         if (display_link_) return;
@@ -481,7 +585,10 @@ private:
                 [display_link_ invalidate];
                 display_link_ = nil;
             }
-            display_link_target_ = nil;
+            if (display_link_target_) {
+                display_link_target_.host = nullptr;
+                display_link_target_ = nil;
+            }
         }
     }
 
@@ -532,8 +639,14 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
 #ifdef PULP_HAS_SKIA
     if (options.use_gpu) {
         auto host = std::make_unique<IOSGpuPluginViewHost>(root, options);
-        root.set_plugin_view_host(host.get());
-        return host;
+        if (host->is_gpu_backed()) {
+            root.set_plugin_view_host(host.get());
+            return host;
+        }
+        // GPU init failed — fall back to the CoreGraphics host so the editor
+        // never disappears (item 9). The runtime scream-guard in the adapter
+        // (`warn_if_unexpected_cpu_fallback`) logs the mismatch loudly.
+        host.reset();
     }
 #endif
     auto host = std::make_unique<IOSPluginViewHost>(root, options.size);
