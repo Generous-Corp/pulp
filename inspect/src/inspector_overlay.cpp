@@ -913,9 +913,13 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
             // window is unaffected (it's owned by the host, not set_active).
             set_active(false);
             set_active(true);
-            return true;
         }
-        set_active(false);
+        // Esc NEVER exits the inspector (use Cmd+I / the window close button
+        // for that). A second Esc with nothing selected is a NO-OP so the
+        // overlay stays active and hover + click keep working. This used to
+        // fall through to set_active(false), deactivating the overlay — so the
+        // user saw "1st Esc deselects, 2nd Esc kills hover/click until I cycle
+        // Cmd+I". Now Esc only ever deselects.
         return true;
     }
 

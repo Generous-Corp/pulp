@@ -310,15 +310,21 @@ TEST_CASE("InspectorOverlay: Cmd+I toggles") {
     REQUIRE_FALSE(overlay.is_active());
 }
 
-TEST_CASE("InspectorOverlay: Escape dismisses") {
+TEST_CASE("InspectorOverlay: Escape deselects, never dismisses") {
     View root;
     InspectorOverlay overlay(root);
     overlay.set_active(true);
     KeyEvent ke;
     ke.key = KeyCode::escape;
     ke.is_down = true;
+    // Esc with nothing selected is a NO-OP — the inspector stays active.
+    // (It is dismissed only via Cmd+I / the window close button.) Previously
+    // a second Esc fell through to set_active(false), which deactivated the
+    // overlay so the user had to cycle Cmd+I to interact again.
     REQUIRE(overlay.handle_key_event(ke));
-    REQUIRE_FALSE(overlay.is_active());
+    REQUIRE(overlay.is_active());
+    REQUIRE(overlay.handle_key_event(ke));
+    REQUIRE(overlay.is_active());
 }
 
 TEST_CASE("InspectorOverlay: inactive ignores events") {
@@ -2532,11 +2538,13 @@ TEST_CASE("InspectorOverlay P1: click selects deepest nested element, "
     REQUIRE(overlay.selected_view() == nested_ptr);
     REQUIRE(overlay.selected_view()->parent() == container_ptr);
 
-    // Esc deselects again; Esc with nothing selected then exits the inspector.
+    // Esc deselects again; a further Esc with nothing selected is a NO-OP —
+    // the inspector stays active (Esc never dismisses; Cmd+I / close does).
     REQUIRE(overlay.handle_key_event(esc));
     REQUIRE(overlay.selected_view() == nullptr);
+    REQUIRE(overlay.is_active());
     REQUIRE(overlay.handle_key_event(esc));
-    REQUIRE_FALSE(overlay.is_active());
+    REQUIRE(overlay.is_active());
 }
 
 // P1 minimal manipulate layer: in manipulate-only mode point_in_panel is
