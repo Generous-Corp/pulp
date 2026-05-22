@@ -613,6 +613,16 @@ Rules when touching an adapter's editor-attach path:
 - AU v2 has no host resize callback — use `host->set_resize_callback(...)` to
   forward native-NSView frame changes to `bridge->resize()`. VST3/CLAP drive
   resize through their own host size callbacks and don't need it.
+- **Embedded plugin views route their own mouse input.** The mac plugin views
+  (`PulpGpuPluginView` GPU + `PulpPluginView` CPU, in `plugin_view_host_mac.mm`)
+  implement `mouseDown/Dragged/Up/scrollWheel` → `hit_test` → `on_mouse_event` +
+  `on_mouse_down/drag/up` with W3C pointer/drag bubbling to ancestors and
+  drag-target liveness, reusing the standalone window host's `mac_geometry`
+  helpers. Without these the editor paints but swallows every click. They also
+  set flexible `autoresizingMask` so they follow host editor-container resizes.
+- **AU specifically also needs the Cocoa view advertised** (`kAudioUnitProperty_CocoaUI`)
+  or the host shows its own generic param view regardless of the host wiring —
+  see the `auv2` skill's "AU v2 MUST advertise its Cocoa view" gotcha.
 
 See `planning/2026-05-22-gpu-view-host-in-plugins.md` and its `qa/` doc.
 

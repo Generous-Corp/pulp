@@ -166,6 +166,36 @@ NSView directly, so native frame changes are forwarded to `bridge->resize()`
 through that seam. Full contract: the `view-bridge` skill's "GPU view host
 auto-selection" section. (GPU-plugin-view-host work, 2026-05.)
 
+### AU v2 MUST advertise its Cocoa view, or the host shows its generic UI
+
+Selecting the GPU host (above) is necessary but NOT sufficient. The host only
+loads the Pulp editor if the AU advertises `kAudioUnitProperty_CocoaUI`. For a
+long time NO Pulp AU v2 did — `fill_cocoa_view_info()` existed but was never
+wired into `GetProperty`, so Logic/auval saw `Cocoa Views Available: 0` and fell
+back to a generic param view (the symptom: a plain "Level" slider instead of the
+real editor). Both `PulpAUEffect` and `PulpAUInstrument` now serve
+`kAudioUnitProperty_CocoaUI` in `GetProperty`/`GetPropertyInfo`. Watch-outs:
+
+- The adapters compile into the shared `pulp-format` lib **without** `PULP_AU_GUI`,
+  while the Cocoa view module (`au_v2_cocoa_view.mm`) is added per-`*_AU` target
+  **with** it. So an `#ifdef PULP_AU_GUI` in the adapter is always off. The view
+  is reached via a runtime hook `g_cocoa_view_info_filler` (hidden visibility,
+  defined in `au_v2_adapter.cpp`) that the view module's static-init registers.
+  Query it ungated; null → delegate to base (no view).
+- The **instrument** (`PulpAUInstrument`, `MusicDeviceBase`) must ALSO serve
+  `kPulpEditorContextProperty` — the Cocoa view factory reads it to reach the
+  Processor + StateStore. It originally overrode no `GetProperty` at all.
+- **`CFBundleCopyBundleURL` PAC-crashes** (`__CFCheckCFInfoPACSignature`,
+  PAC_EXCEPTION/SIGKILL) inside pointer-auth-hardened sandboxed hosts (Logic's
+  `AUHostingServiceXPC`, auval) the instant the view is queried — a hardware trap
+  a `@try` cannot catch. Use `-[NSBundle bundleURL]` instead. This was the actual
+  reason the editor never loaded even in code paths that tried.
+- The factory ObjC class name MUST be **per-plugin-unique** (`PULP_AU_COCOA_VIEW_CLASS`,
+  injected per `*_AU` target from MFR+CODE 4ccs). ObjC class names are
+  process-global; two Pulp AUs in one host would collide on a fixed name.
+- Validate with `auval -v` → expect `Cocoa Views Available: 1`. Covered by
+  `test/test_au_v2_cocoa_ui.mm`.
+
 ### `auval` automation must disable editor creation
 
 `auval` can instantiate AU editor surfaces during validation, which is
