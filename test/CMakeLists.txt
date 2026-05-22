@@ -1758,6 +1758,8 @@ if(APPLE)
 endif()
 
 # Canvas tests
+pulp_add_test_suite(pulp-test-canvas-color LIBRARIES pulp::canvas)
+
 add_executable(pulp-test-canvas test_canvas.cpp)
 target_link_libraries(pulp-test-canvas PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(APPLE)
