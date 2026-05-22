@@ -55,32 +55,16 @@ class InstallShipyardQueueRepair(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
 
-            # Pre-populate a fake Shipyard install so the "already installed"
-            # short-circuit fires. We pin PULP_HOME to our tmp so install
-            # locations live under the fake HOME.
-            pulp_home = home / ".pulp"
-            # Read pinned version from the real shipyard.toml so the path
-            # matches what install-shipyard.sh computes.
-            version = ""
-            for line in (REPO_ROOT / "tools" / "shipyard.toml").read_text().splitlines():
-                if line.startswith("version"):
-                    version = line.split('"')[1]
-                    break
-            self.assertTrue(version, "could not parse version from shipyard.toml")
-
-            install_dir = pulp_home / "shipyard" / version
-            bin_dir = pulp_home / "bin"
-            install_dir.mkdir(parents=True)
+            # Pre-populate the upstream installer's canonical destination
+            # and ask it to reuse that binary. This keeps the regression
+            # offline while still proving the wrapper repairs queue.json
+            # before delegating to Shipyard's installer.
+            bin_dir = home / ".local" / "bin"
             bin_dir.mkdir(parents=True)
             bin_name = "shipyard.exe" if sys.platform.startswith("win") else "shipyard"
-            installed = install_dir / bin_name
-            installed.write_text("#!/bin/sh\necho stub\n")
+            installed = bin_dir / bin_name
+            installed.write_text("#!/bin/sh\necho shipyard 0.0.0-test\n")
             installed.chmod(0o755)
-            symlink = bin_dir / bin_name
-            try:
-                symlink.symlink_to(installed)
-            except OSError:
-                self.skipTest("no symlink support on this host")
 
             # Write a truncated (zero-byte) queue file under the stubbed
             # state dir to simulate the #528 recovery scenario.
@@ -92,7 +76,10 @@ class InstallShipyardQueueRepair(unittest.TestCase):
 
             env = os.environ.copy()
             env["HOME"] = str(home)
-            env["PULP_HOME"] = str(pulp_home)
+            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+            env["SHIPYARD_INSTALL_DIR"] = str(bin_dir)
+            env["SHIPYARD_SKIP_DOWNLOAD"] = "1"
+            env["SHIPYARD_SKIP_SMOKE"] = "1"
             # Unset XDG_STATE_HOME so Linux path falls back to ~/.local/state.
             env.pop("XDG_STATE_HOME", None)
 
@@ -114,26 +101,12 @@ class InstallShipyardQueueRepair(unittest.TestCase):
         """A non-empty queue file must NOT be overwritten."""
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            pulp_home = home / ".pulp"
-            # Minimal pre-install so the short-circuit fires.
-            version = ""
-            for line in (REPO_ROOT / "tools" / "shipyard.toml").read_text().splitlines():
-                if line.startswith("version"):
-                    version = line.split('"')[1]
-                    break
-            install_dir = pulp_home / "shipyard" / version
-            bin_dir = pulp_home / "bin"
-            install_dir.mkdir(parents=True)
+            bin_dir = home / ".local" / "bin"
             bin_dir.mkdir(parents=True)
             bin_name = "shipyard.exe" if sys.platform.startswith("win") else "shipyard"
-            installed = install_dir / bin_name
+            installed = bin_dir / bin_name
             installed.write_text("#!/bin/sh\n")
             installed.chmod(0o755)
-            symlink = bin_dir / bin_name
-            try:
-                symlink.symlink_to(installed)
-            except OSError:
-                self.skipTest("no symlink support on this host")
 
             state_dir = _stub_state_dir(home)
             queue_file = state_dir / "queue" / "queue.json"
@@ -143,7 +116,10 @@ class InstallShipyardQueueRepair(unittest.TestCase):
 
             env = os.environ.copy()
             env["HOME"] = str(home)
-            env["PULP_HOME"] = str(pulp_home)
+            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+            env["SHIPYARD_INSTALL_DIR"] = str(bin_dir)
+            env["SHIPYARD_SKIP_DOWNLOAD"] = "1"
+            env["SHIPYARD_SKIP_SMOKE"] = "1"
             env.pop("XDG_STATE_HOME", None)
 
             result = self._run_install(env)
