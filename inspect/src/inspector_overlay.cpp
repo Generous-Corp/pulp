@@ -276,6 +276,11 @@ InspectorOverlay::snapshot_layout(const View* v) const {
     s.has_left = v->has_left();
     s.has_top = v->has_top();
     s.scale = v->scale();
+    // P2i (Refinement B) — capture transform-origin + overflow so undo of a
+    // proportional resize reverts the top-left anchor and the box-clip.
+    s.origin_x = v->transform_origin_x();
+    s.origin_y = v->transform_origin_y();
+    s.overflow = v->overflow();
     s.bounds = v->bounds();
     return s;
 }
@@ -298,6 +303,10 @@ void InspectorOverlay::restore_layout(View* v, const LayoutSnapshot& s) const {
     v->set_top(s.top, s.top_unit);
     // P2c — restore proportional-resize content scale.
     v->set_scale(s.scale);
+    // P2i (Refinement B) — restore transform-origin + overflow so undo of a
+    // proportional resize removes the top-left anchor + box-clip we applied.
+    v->set_transform_origin(s.origin_x, s.origin_y);
+    v->set_overflow(s.overflow);
     v->set_bounds(s.bounds);
     v->invalidate_layout();
 }
@@ -724,30 +733,59 @@ void InspectorOverlay::resolve_drop_target(Point pos) {
     }
     drop_index_ = idx;
 
-    // Build the paint affordance:
-    //  - REORDER (same parent, has siblings): blue insertion LINE at the gap.
-    //  - DROP-INSIDE (different parent) OR empty container: container HIGHLIGHT.
+    // Build the paint affordance. The choice of INSERTION LINE vs container
+    // HIGHLIGHT is driven by whether the cursor resolves to a position
+    // BETWEEN/around the container's existing children, NOT by whether the
+    // drop reparents:
+    //  - Container has visible sibling slots -> crisp blue insertion LINE at
+    //    the resolved boundary (before-first / between-each / after-last).
+    //    This is the Figma-style "it'll drop here" line, and it shows for
+    //    BOTH a same-parent reorder AND a cross-parent reparent into a
+    //    populated container, so the user almost always sees a precise drop
+    //    position rather than a vague highlight.
+    //  - Container has NO sibling slots (empty interior, nothing to insert
+    //    between) -> translucent container HIGHLIGHT (drop-inside). This is
+    //    the only case where a boundary line would be meaningless.
+    // The line spans the container's full cross-axis extent so it reads as a
+    // 2px boundary across the whole row/column, and it tracks the cursor on
+    // every drag tick because resolve_drop_target() runs per move event.
     const Rect cr = view_bounds_in_root(container);
-    if (!drop_inside_ && !slots.empty()) {
-        // Insertion line between siblings idx-1 and idx.
+    if (!slots.empty()) {
+        // Insertion line at the boundary for index `idx`:
+        //   idx == 0    -> before the first sibling
+        //   0 < idx < N -> between slots[idx-1] and slots[idx] (in the gap)
+        //   idx == N    -> after the last sibling
         drop_indicator_is_line_ = true;
         if (horizontal) {
             float line_x;
-            if (idx <= 0) line_x = slots.front().bounds.x;
-            else if (idx >= static_cast<int>(slots.size()))
+            if (idx <= 0) {
+                line_x = slots.front().bounds.x;
+            } else if (idx >= static_cast<int>(slots.size())) {
                 line_x = slots.back().bounds.x + slots.back().bounds.width;
-            else line_x = slots[idx].bounds.x;
+            } else {
+                const float prev_edge =
+                    slots[idx - 1].bounds.x + slots[idx - 1].bounds.width;
+                const float next_edge = slots[idx].bounds.x;
+                line_x = 0.5f * (prev_edge + next_edge);
+            }
             drop_indicator_ = {line_x - 1.0f, cr.y, 2.0f, cr.height};
         } else {
             float line_y;
-            if (idx <= 0) line_y = slots.front().bounds.y;
-            else if (idx >= static_cast<int>(slots.size()))
+            if (idx <= 0) {
+                line_y = slots.front().bounds.y;
+            } else if (idx >= static_cast<int>(slots.size())) {
                 line_y = slots.back().bounds.y + slots.back().bounds.height;
-            else line_y = slots[idx].bounds.y;
+            } else {
+                const float prev_edge =
+                    slots[idx - 1].bounds.y + slots[idx - 1].bounds.height;
+                const float next_edge = slots[idx].bounds.y;
+                line_y = 0.5f * (prev_edge + next_edge);
+            }
             drop_indicator_ = {cr.x, line_y - 1.0f, cr.width, 2.0f};
         }
     } else {
-        // Container highlight (drop-inside / empty container).
+        // Empty container interior -- no sibling boundary to draw a line at,
+        // so fall back to the drop-inside container highlight.
         drop_indicator_is_line_ = false;
         drop_indicator_ = cr;
     }
@@ -1205,24 +1243,45 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             if (resize_proportional_) {
                 // P2c — PROPORTIONAL resize (Shift). Instead of stretching
                 // the box, SCALE the container's content uniformly so the
-                // panel keeps its internal proportions. The scale factor is
-                // the box-size ratio along the larger-magnitude axis,
-                // anchored at the gesture-start scale. The box itself still
+                // panel keeps its internal proportions. The box itself still
                 // grows (preferred_*) so the scaled content has room; the
-                // uniform set_scale() keeps children's relative layout. We
-                // pick the ratio from whichever axis the start box was
-                // larger in, so a corner drag scales coherently.
+                // uniform set_scale() keeps children's relative layout.
+                //
+                // WYSIWYG P2i (Refinement B) — keep scaled content INSIDE the
+                // resize box. Two coupled fixes:
+                //   1. Anchor the scale to the box's TOP-LEFT corner
+                //      (transform-origin 0,0) instead of the default center
+                //      (0.5,0.5). With a center origin the content scales
+                //      symmetrically about the middle and the top/left edges
+                //      grow OUT of the box (the "knob spilling past the
+                //      top-left corner" the maintainer saw). A top-left origin
+                //      makes content grow DOWN-RIGHT into the box, matching
+                //      the fixed top-left of drag_start_bounds_.
+                //   2. Pick the scale ratio from the SMALLER axis
+                //      (min, not average). Content that fit the start box
+                //      (w0 x h0) scaled by min(new_w/w0, new_h/h0) is
+                //      guaranteed <= the new box on BOTH axes, so it can never
+                //      exceed the box even on a non-uniform corner drag.
+                // Belt-and-suspenders: also clip the container to its bounds
+                // (overflow:hidden) so any residual sub-pixel spill from
+                // descendant transforms is contained by the box rectangle.
                 const float w0 = std::max(1.0f, drag_start_bounds_.width);
                 const float h0 = std::max(1.0f, drag_start_bounds_.height);
                 const float ratio_w = new_w / w0;
                 const float ratio_h = new_h / h0;
-                // Uniform scale: average the two axis ratios so a diagonal
-                // drag scales smoothly, then clamp to a sane range.
-                float ratio = 0.5f * (ratio_w + ratio_h);
+                // Uniform scale bounded by the tighter axis so the scaled
+                // content stays within the box on both axes, then clamp.
+                float ratio = std::min(ratio_w, ratio_h);
                 float new_scale = std::clamp(drag_start_scale_ * ratio,
                                              0.1f, 10.0f);
+                // Top-left transform-origin: content grows into the box from
+                // its top-left corner, never past it.
+                selected_->set_transform_origin(0.0f, 0.0f);
                 selected_->set_scale(new_scale);
-                // Grow the box to match so the scaled content isn't clipped.
+                // Clip scaled content to the box so nothing spills outside the
+                // selection rectangle.
+                selected_->set_overflow(View::Overflow::hidden);
+                // Grow the box to match so the scaled content has room.
                 auto& f = selected_->flex();
                 f.preferred_width = new_w;
                 f.preferred_height = new_h;

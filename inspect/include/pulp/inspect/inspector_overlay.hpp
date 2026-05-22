@@ -188,6 +188,17 @@ public:
         return move_active_ && !move_float_ && drop_target_ != nullptr &&
                (drop_indicator_.width > 0 || drop_indicator_.height > 0);
     }
+    /// P2i (Refinement A) — test-visible accessors for the resolved reflow
+    /// drop. drop_index() is the insertion slot among the target container's
+    /// visible children (0 == before first, count == after last);
+    /// drop_indicator_is_line() distinguishes the Figma-style between-sibling
+    /// insertion LINE from the empty-container drop-inside HIGHLIGHT;
+    /// drop_indicator_rect() is the indicator geometry in root coords;
+    /// drop_target() is the container the cursor resolved into (or null).
+    int drop_index() const { return drop_index_; }
+    bool drop_indicator_is_line() const { return drop_indicator_is_line_; }
+    Rect drop_indicator_rect() const { return drop_indicator_; }
+    const View* drop_target() const { return drop_target_; }
     /// Map a CursorAffordance to a View::CursorStyle; returns the int cast
     /// the cursor hook reports to the host (or -1 for `none`/no override).
     int cursor_style_for(Point pos) const;
@@ -744,6 +755,12 @@ private:
         bool has_top = false;
         // P2c — content scale (proportional resize via View::set_scale()).
         float scale = 1.0f;
+        // P2i (Refinement B) — transform-origin + overflow captured so undo
+        // of a proportional resize also reverts the top-left scale anchor and
+        // the box-clip we apply to keep scaled content inside the box.
+        float origin_x = 0.5f;
+        float origin_y = 0.5f;
+        View::Overflow overflow = View::Overflow::visible;
         // Resolved bounds at capture (so undo restores the local paint box
         // before Yoga's next layout pass overwrites it).
         Rect bounds{};

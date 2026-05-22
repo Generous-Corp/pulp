@@ -4327,3 +4327,267 @@ TEST_CASE("InspectorOverlay P2h: legacy is_down gesture convention still works "
     REQUIRE(child_ptr->bounds().width == 100.0f);
     REQUIRE(child_ptr->bounds().height == 55.0f);
 }
+
+// ── WYSIWYG P2i (Refinement A) ────────────────────────────────────────────
+// During a reflow body-drag over a flex container, resolve_drop_target() must
+// resolve a valid insertion slot for EVERY cursor position across the child
+// span (before-first, between each pair, after-last) and surface the
+// Figma-style blue insertion LINE — not a vague container highlight — at the
+// resolved boundary. The committed drop must land at the indicated slot.
+TEST_CASE("InspectorOverlay P2i: reflow drag shows an insertion LINE at every "
+          "slot across a row container's children",
+          "[inspect][overlay][p2i][reflow][drop-indicator][issue-wysiwyg-p2i]") {
+    View root;
+    root.set_bounds({0, 0, 600, 200});
+    root.flex().direction = FlexDirection::row;
+
+    // Four equal siblings so there are 5 boundaries: before a, a|b, b|c, c|d,
+    // after d. We drag `a` and aim the cursor at each boundary in turn.
+    auto make = [&](const char* anchor) -> View* {
+        auto v = std::make_unique<View>();
+        v->set_anchor_id(anchor);
+        v->flex().preferred_width = 100;
+        v->flex().preferred_height = 50;
+        View* p = v.get();
+        root.add_child(std::move(v));
+        return p;
+    };
+    View* a = make("anchor-a");
+    View* b = make("anchor-b");
+    View* c = make("anchor-c");
+    View* d = make("anchor-d");
+    root.layout_children();
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(a);
+
+    // Begin a plain (reflow) body-drag on `a`.
+    MouseEvent press;
+    press.position = {a->bounds().x + 10, a->bounds().y + 10};
+    press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    const float cy = b->bounds().y + b->bounds().height * 0.5f;
+
+    // Helper: drag to an x position, then assert the indicator is a LINE
+    // (not a highlight) and report the resolved slot index.
+    auto drag_to_x = [&](float x) -> int {
+        MouseEvent drag;
+        drag.position = {x, cy};
+        drag.is_down = false;
+        REQUIRE(overlay.handle_mouse_event(drag));
+        REQUIRE(overlay.drop_indicator_active());
+        // A populated row container always resolves to the between-sibling
+        // insertion LINE, never the empty-container highlight.
+        REQUIRE(overlay.drop_indicator_is_line());
+        // The line is a thin vertical bar spanning the container cross-axis.
+        const Rect ind = overlay.drop_indicator_rect();
+        REQUIRE(ind.width <= 3.0f);
+        REQUIRE(ind.height > 0.0f);
+        return overlay.drop_index();
+    };
+
+    // The drop slots exclude the dragged node `a`, so the visible siblings in
+    // order are {b, c, d} (3 slots → indices 0..3). Sweep across the span and
+    // assert the index increases monotonically as the cursor moves right.
+    // Far left (before b): slot 0.
+    int s_before = drag_to_x(b->bounds().x - 5);
+    REQUIRE(s_before == 0);
+
+    // Between b and c.
+    int s_bc = drag_to_x((b->bounds().x + b->bounds().width + c->bounds().x) * 0.5f);
+    REQUIRE(s_bc == 1);
+
+    // Between c and d.
+    int s_cd = drag_to_x((c->bounds().x + c->bounds().width + d->bounds().x) * 0.5f);
+    REQUIRE(s_cd == 2);
+
+    // After d (far right): last slot (3).
+    int s_after = drag_to_x(d->bounds().x + d->bounds().width + 5);
+    REQUIRE(s_after == 3);
+
+    // Monotonic across the whole span.
+    REQUIRE(s_before < s_bc);
+    REQUIRE(s_bc < s_cd);
+    REQUIRE(s_cd < s_after);
+
+    // The committed drop must match the LAST indicated slot (after d): `a`
+    // ends up last in the row.
+    const int indicated = overlay.drop_index();
+    REQUIRE(indicated == 3);
+    MouseEvent release;
+    release.position = {d->bounds().x + d->bounds().width + 5, cy};
+    release.is_down = true;
+    overlay.handle_mouse_event(release);
+    root.layout_children();
+    // `a` now sorts after b, c, d — i.e. it landed at the indicated slot.
+    REQUIRE(a->bounds().x > b->bounds().x);
+    REQUIRE(a->bounds().x > c->bounds().x);
+    REQUIRE(a->bounds().x > d->bounds().x);
+}
+
+// Column container variant — the insertion LINE is horizontal and the slot
+// index tracks the cursor's Y across the child span.
+TEST_CASE("InspectorOverlay P2i: reflow drag shows a horizontal insertion LINE "
+          "across a column container's children",
+          "[inspect][overlay][p2i][reflow][drop-indicator][issue-wysiwyg-p2i]") {
+    View root;
+    root.set_bounds({0, 0, 200, 600});
+    root.flex().direction = FlexDirection::column;
+
+    auto make = [&](const char* anchor) -> View* {
+        auto v = std::make_unique<View>();
+        v->set_anchor_id(anchor);
+        v->flex().preferred_width = 100;
+        v->flex().preferred_height = 100;
+        View* p = v.get();
+        root.add_child(std::move(v));
+        return p;
+    };
+    View* a = make("col-a");
+    View* b = make("col-b");
+    View* c = make("col-c");
+    root.layout_children();
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(a);
+
+    MouseEvent press;
+    press.position = {a->bounds().x + 10, a->bounds().y + 10};
+    press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    const float cx = b->bounds().x + b->bounds().width * 0.5f;
+    auto drag_to_y = [&](float y) -> int {
+        MouseEvent drag;
+        drag.position = {cx, y};
+        drag.is_down = false;
+        REQUIRE(overlay.handle_mouse_event(drag));
+        REQUIRE(overlay.drop_indicator_active());
+        REQUIRE(overlay.drop_indicator_is_line());
+        const Rect ind = overlay.drop_indicator_rect();
+        // Horizontal line: thin in height, spans the cross-axis width.
+        REQUIRE(ind.height <= 3.0f);
+        REQUIRE(ind.width > 0.0f);
+        return overlay.drop_index();
+    };
+
+    // Visible slots {b, c} (dragged `a` excluded): indices 0..2.
+    int s_before = drag_to_y(b->bounds().y - 5);
+    int s_bc = drag_to_y((b->bounds().y + b->bounds().height + c->bounds().y) * 0.5f);
+    int s_after = drag_to_y(c->bounds().y + c->bounds().height + 5);
+    REQUIRE(s_before == 0);
+    REQUIRE(s_bc == 1);
+    REQUIRE(s_after == 2);
+}
+
+// ── WYSIWYG P2i (Refinement B) ────────────────────────────────────────────
+// After a Shift (proportional) resize, the scaled content must stay WITHIN
+// the resize box: every direct child's scaled rect (origin-(0,0) anchored,
+// scaled by the view's scale()) must lie inside the container's box bounds —
+// no spill past any edge. Also asserts the box is clipped (overflow:hidden)
+// and the scale anchor is top-left.
+TEST_CASE("InspectorOverlay P2i: Shift-resize keeps scaled content inside the "
+          "box (no spill past the selection rectangle)",
+          "[inspect][overlay][p2i][resize][proportional][issue-wysiwyg-p2i]") {
+    View root;
+    root.set_bounds({0, 0, 800, 600});
+
+    // A container whose child fills it edge-to-edge at scale 1 (a knob that
+    // already touches the box corners — the worst case for spill). Bounds are
+    // set manually and we do NOT call layout_children() before the gesture so
+    // the box stays put (Yoga would otherwise reflow a flex child to the
+    // content origin and move the resize handles). This mirrors the existing
+    // P2c proportional-resize test's setup.
+    auto box = std::make_unique<View>();
+    box->set_anchor_id("anchor-box");
+    box->set_bounds({40, 40, 120, 80});
+    box->flex().preferred_width = 120;
+    box->flex().preferred_height = 80;
+    View* box_ptr = box.get();
+
+    auto knob = std::make_unique<View>();
+    knob->set_anchor_id("anchor-knob");
+    // Child fills the box exactly at scale 1 (local coords, origin at box TL).
+    knob->set_bounds({0, 0, 120, 80});
+    knob->flex().preferred_width = 120;
+    knob->flex().preferred_height = 80;
+    View* knob_ptr = knob.get();
+    box->add_child(std::move(knob));
+    root.add_child(std::move(box));
+
+    TweakStore store;
+    pulp::state::EditHistory history;
+    history.set_coalesce(false);
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_edit_history(&history);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(box_ptr);
+
+    // Shift + SE-corner press (corner at box bottom-right: 40+120, 40+80).
+    MouseEvent press;
+    press.position = {160, 120};
+    press.is_down = true;
+    press.modifiers = kModShift;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    // NON-UNIFORM corner drag: grow width much more than height. With the old
+    // average-ratio + center-origin scheme the content would overflow the
+    // top/left of the box. Drag +200 in x, +20 in y.
+    MouseEvent drag;
+    drag.position = {360, 140};
+    drag.is_down = false;
+    drag.modifiers = kModShift;
+    REQUIRE(overlay.handle_mouse_event(drag));
+
+    // The content scaled up.
+    REQUIRE(box_ptr->scale() > 1.0f);
+
+    // Box grew.
+    const Rect bb = box_ptr->bounds();
+    REQUIRE(bb.width > 120.0f);
+
+    // Scale is anchored at the box's top-left, and the box clips its content.
+    REQUIRE(box_ptr->transform_origin_x() == Catch::Approx(0.0f));
+    REQUIRE(box_ptr->transform_origin_y() == Catch::Approx(0.0f));
+    REQUIRE(box_ptr->overflow() == View::Overflow::hidden);
+
+    // The child's SCALED extent (origin-(0,0) anchored) must fit inside the
+    // box on every edge. Local child rect scaled by box scale:
+    const float s = box_ptr->scale();
+    const Rect kb = knob_ptr->bounds();  // local coords within box
+    const float scaled_left   = kb.x * s;
+    const float scaled_top    = kb.y * s;
+    const float scaled_right  = (kb.x + kb.width) * s;
+    const float scaled_bottom = (kb.y + kb.height) * s;
+    // Top-left anchor → no negative spill.
+    REQUIRE(scaled_left >= -0.01f);
+    REQUIRE(scaled_top >= -0.01f);
+    // Right/bottom within the box (small epsilon for float).
+    REQUIRE(scaled_right <= bb.width + 0.01f);
+    REQUIRE(scaled_bottom <= bb.height + 0.01f);
+
+    // Release commits one undoable unit.
+    MouseEvent release;
+    release.position = {360, 140};
+    release.is_down = true;
+    overlay.handle_mouse_event(release);
+    REQUIRE(history.undo_count() == 1);
+
+    // Undo restores the original scale, transform-origin, and overflow.
+    REQUIRE(history.undo());
+    REQUIRE(box_ptr->scale() == Catch::Approx(1.0f));
+    REQUIRE(box_ptr->transform_origin_x() == Catch::Approx(0.5f));
+    REQUIRE(box_ptr->transform_origin_y() == Catch::Approx(0.5f));
+    REQUIRE(box_ptr->overflow() == View::Overflow::visible);
+}
