@@ -20,7 +20,26 @@
 
 #include <pulp/inspect/inspector_overlay.hpp>  // pulls in pulp::canvas::Color
 
+#include <iomanip>
+#include <sstream>
+#include <string>
+
 namespace pulp::inspect {
+
+// Format a Color as a CSS hex string (#rrggbb or #rrggbbaa). Shared across the
+// inspector-overlay TUs (used by the eyedropper pick path + the paint TU);
+// `inline` so each TU sees a single definition. P11-5 (#2647) — relocated from
+// a file-local static in inspector_overlay.cpp when paint_* split out.
+inline std::string color_to_hex(const Color& c) {
+    std::ostringstream oss;
+    oss << '#' << std::hex << std::nouppercase << std::setfill('0');
+    oss << std::setw(2) << static_cast<int>(c.r8())
+        << std::setw(2) << static_cast<int>(c.g8())
+        << std::setw(2) << static_cast<int>(c.b8());
+    if (c.a8() != 255)
+        oss << std::setw(2) << static_cast<int>(c.a8());
+    return oss.str();
+}
 
 // ── Overlay color palette ───────────────────────────────────────────────────
 // Shared across the inspector-overlay TUs. `inline` so each TU sees a
