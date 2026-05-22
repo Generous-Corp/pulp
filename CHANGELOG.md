@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01974"></a>
+## [0.197.4] - 2026-05-22
+
+- fix(view,host): honor 0% dimensions, fix grid-template:none throw, cap CLAP scan count (#2703 #2704) ([#2710](https://github.com/danielraffel/pulp/pull/2710))
+- test(tools): cover motion visual analyzer helpers ([#2709](https://github.com/danielraffel/pulp/pull/2709))
+
 <a id="v01973"></a>
 ## [0.197.3] - 2026-05-22
 
@@ -2570,6 +2576,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.197.4]: https://github.com/danielraffel/pulp/releases/tag/v0.197.4
 [0.197.3]: https://github.com/danielraffel/pulp/releases/tag/v0.197.3
 [0.197.1]: https://github.com/danielraffel/pulp/releases/tag/v0.197.1
 [0.197.0]: https://github.com/danielraffel/pulp/releases/tag/v0.197.0
