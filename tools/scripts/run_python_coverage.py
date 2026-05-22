@@ -94,6 +94,7 @@ COVERAGE_SURFACES = (
             "tools/test_check_format_validation.py",
             "tools/test_check_status_ladder.py",
             "tools/test_list_limitations.py",
+            "tools/test_motion_visual_analyze_sequence.py",
         ),
         (
             "tools/test_*.py",
@@ -118,6 +119,7 @@ COVERAGE_SURFACES = (
             # the measured source set and aligned with codecov.yml ignore.
             "tools/harness/visual/tests/*.py",
             "tools/harness/visual/tests/**/*.py",
+            "tools/motion/visual/test_*.py",
         ),
         always_include=True,
     ),

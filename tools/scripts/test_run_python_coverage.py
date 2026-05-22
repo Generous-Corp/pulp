@@ -96,6 +96,10 @@ class CoveragercTests(unittest.TestCase):
         self.assertIn("tools/test_check_format_validation.py", rpc.DEFAULT_TEST_GLOBS)
         self.assertIn("tools/test_check_status_ladder.py", rpc.DEFAULT_TEST_GLOBS)
         self.assertIn(
+            "tools/test_motion_visual_analyze_sequence.py",
+            rpc.DEFAULT_TEST_GLOBS,
+        )
+        self.assertIn(
             "tools/import-validation/test_source_contracts.py",
             rpc.DEFAULT_TEST_GLOBS,
         )
