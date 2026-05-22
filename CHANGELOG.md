@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01973"></a>
+## [0.197.3] - 2026-05-22
+
+- fix(ship): allow bare appcast output paths ([#2705](https://github.com/danielraffel/pulp/pull/2705))
+- ci: add release-dry-run workflow to catch release-chain breakage pre-tag (P9-2, #2576) ([#2701](https://github.com/danielraffel/pulp/pull/2701))
+- test(canvas): cover text layout edge cases ([#2700](https://github.com/danielraffel/pulp/pull/2700))
+
 <a id="v01971"></a>
 ## [0.197.1] - 2026-05-22
 
@@ -2563,6 +2570,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.197.3]: https://github.com/danielraffel/pulp/releases/tag/v0.197.3
 [0.197.1]: https://github.com/danielraffel/pulp/releases/tag/v0.197.1
 [0.197.0]: https://github.com/danielraffel/pulp/releases/tag/v0.197.0
 [0.196.0]: https://github.com/danielraffel/pulp/releases/tag/v0.196.0
