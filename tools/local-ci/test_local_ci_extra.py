@@ -2096,6 +2096,244 @@ class LocalCiPureHelperTests(unittest.TestCase):
                 self.assertEqual(self.mod.cmd_evidence(Namespace(branch=None, sha=None, limit=1)), 1)
         self.assertIn("No local CI evidence recorded", buf.getvalue())
 
+    def test_command_status_prints_live_target_submission_and_cloud_edges(self) -> None:
+        result_path = self.root / "result.json"
+        result_path.write_text(json.dumps({
+            "overall": "pass",
+            "results": [{"target": "mac", "status": "pass"}],
+            "provenance": {"submitted_root": str(self.root)},
+        }))
+        running = {
+            "id": "run123",
+            "branch": "feature/run",
+            "sha": "a" * 40,
+            "status": "running",
+            "targets": ["mac"],
+            "started_at": "2026-01-01T00:00:00Z",
+            "submission": {
+                "submitted_root": str(self.root),
+                "config_path": "local-ci.json",
+                "config_source": "repo",
+                "provenance": {"submitted_root": str(self.root)},
+            },
+        }
+        pending = {
+            "id": "pend456",
+            "branch": "feature/pending",
+            "sha": "b" * 40,
+            "status": "pending",
+            "priority": "low",
+            "targets": ["ubuntu"],
+            "queued_at": "2026-01-01T00:01:00Z",
+            "last_progress_at": "2026-01-01T00:02:00Z",
+            "active_targets": {
+                "ubuntu": {
+                    "phase": "bootstrap",
+                    "validation_mode": "smoke",
+                    "transport_mode": "ssh",
+                    "test_policy": "smoke",
+                    "prepared_state": "ready",
+                    "wait_reason": "queue",
+                    "cleanup_status": "done",
+                    "last_output_at": "out",
+                    "last_heartbeat_at": "beat",
+                    "quiet_for_secs": 3,
+                    "liveness": "alive",
+                    "log_path": str(self.root / "ubuntu.log"),
+                    "last_line": "building",
+                    "cleanup_result": "removed",
+                }
+            },
+            "submission": {"provenance": {"submitted_root": str(self.root)}},
+        }
+        completed = {
+            "id": "done789",
+            "branch": "feature/done",
+            "sha": "c" * 40,
+            "status": "completed",
+            "targets": ["mac"],
+            "result_file": str(result_path),
+        }
+        runner = {
+            "pid": 1234,
+            "active_job_id": "run123",
+            "active_branch": "feature/run",
+            "active_targets": {
+                "mac": {
+                    "phase": "test",
+                    "validation_mode": "full",
+                    "transport_mode": "local",
+                    "last_line": "ok",
+                }
+            },
+        }
+        config = {"targets": {"ubuntu": {"type": "ssh", "host": "ubuntu.example"}}, "defaults": {}}
+        cloud_settings = {"workflow": "build", "provider": "namespace"}
+        with mock.patch.object(self.mod, "load_config", return_value=config), \
+             mock.patch.object(self.mod, "state_dir", return_value=self.root / "state"), \
+             mock.patch.object(self.mod, "config_path", return_value=self.root / "local-ci.json"), \
+             mock.patch.object(self.mod, "load_queue", return_value=[running, pending, completed]), \
+             mock.patch.object(self.mod, "current_runner_info", return_value=runner), \
+             mock.patch.object(self.mod, "current_branch", return_value="feature/run"), \
+             mock.patch.object(self.mod, "print_evidence_summary", return_value=False) as evidence, \
+             mock.patch.object(self.mod, "list_cloud_records", side_effect=[[{"id": "cloud1"}], [{"id": "cloud1"}]]), \
+             mock.patch.object(self.mod, "load_optional_config", return_value={"github_actions": {}}), \
+             mock.patch.object(self.mod, "github_actions_settings_for_display", return_value=cloud_settings), \
+             mock.patch.object(self.mod, "resolve_github_actions_settings", side_effect=ValueError("cloud config bad")), \
+             mock.patch.object(self.mod, "resolve_default_provider_for_workflow", return_value=("namespace", "config")), \
+             mock.patch.object(self.mod, "print_billing_period_summary") as billing, \
+             mock.patch.object(self.mod, "cloud_record_summary", return_value="cloud row"), \
+             mock.patch.object(self.mod, "print_local_ci_state_footprint") as footprint, \
+             mock.patch.object(self.mod, "utmctl_vm_status", return_value="stopped"), \
+             mock.patch.object(self.mod, "ssh_reachable", return_value=True):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_status(Namespace()), 0)
+
+        output = buf.getvalue()
+        self.assertIn("Runner: pid=1234 active=[run123] feature/run", output)
+        self.assertIn("submission: root=", output)
+        self.assertIn("mac: phase=test, mode=full, transport=local", output)
+        self.assertIn("ubuntu: phase=bootstrap, mode=smoke, transport=ssh, tests=smoke", output)
+        self.assertIn("log=ubuntu.log", output)
+        self.assertIn("cleanup: removed", output)
+        self.assertIn("Cloud defaults: workflow=build provider=namespace", output)
+        evidence.assert_called_once_with(branch="feature/run", limit=2, indent="  ")
+        self.assertEqual(billing.call_count, 1)
+        self.assertEqual(footprint.call_count, 1)
+
+    def test_desktop_config_dispatch_and_error_paths_report_context(self) -> None:
+        with mock.patch.object(self.mod, "load_config", side_effect=FileNotFoundError("missing config")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_config_show(Namespace(json=False)), 1)
+        self.assertIn("missing config", buf.getvalue())
+
+        desktop_config = {
+            "desktop_automation": {
+                "artifact_root": "runs",
+                "publish_mode": "local",
+                "publish_branch": "desktop-artifacts",
+                "retention_days": 7,
+            }
+        }
+        with mock.patch.object(self.mod, "load_config", return_value=desktop_config):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_config_show(Namespace(json=False)), 0)
+        self.assertIn("Desktop automation config:", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_config_set(Namespace(key="retention_days", value="-1", json=False)), 1)
+        self.assertIn("retention_days must be >= 0", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_config_set(Namespace(key="target.mac.bad.field", value="1", json=False)), 1)
+        self.assertIn("Target desktop config keys must look like", buf.getvalue())
+
+        with mock.patch.object(self.mod, "cmd_desktop_config_show", return_value=7) as show:
+            self.assertEqual(self.mod.cmd_desktop_config(Namespace(desktop_config_command="show")), 7)
+        show.assert_called_once()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(self.mod.cmd_desktop_config(Namespace(desktop_config_command=None)), 1)
+        self.assertIn("desktop config subcommand required", buf.getvalue())
+
+    def test_desktop_listing_publish_cleanup_empty_and_error_paths(self) -> None:
+        with mock.patch.object(self.mod, "load_config", side_effect=FileNotFoundError("missing desktop config")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_recent(Namespace(target=None, action=None, limit=5, json=False)), 1)
+        self.assertIn("missing desktop config", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}), \
+             mock.patch.object(self.mod, "desktop_run_manifests", return_value=[]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_recent(Namespace(target=None, action=None, limit=5, json=True)), 0)
+        self.assertIn("No desktop automation runs found.", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}), \
+             mock.patch.object(self.mod, "desktop_proof_summaries", side_effect=ValueError("bad source")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_proof(Namespace(target=None, action=None, source_mode="bad", sha=None, branch=None, limit=5, json=False)), 1)
+        self.assertIn("bad source", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}), \
+             mock.patch.object(self.mod, "desktop_proof_summaries", return_value=[]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_proof(Namespace(target="mac", action="smoke", source_mode="live", sha="a" * 40, branch="feature/a", limit=5, json=False)), 0)
+        self.assertIn("No desktop proofs found", buf.getvalue())
+        self.assertIn("sha=aaaaaaaaaaaa", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}), \
+             mock.patch.object(self.mod, "desktop_run_manifests", return_value=[]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_publish(Namespace(target=None, action=None, limit=5, output=None, label=None, json=False)), 0)
+        self.assertIn("No desktop automation runs found.", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {}}), \
+             mock.patch.object(self.mod, "desktop_run_manifests", return_value=[{"target": "mac"}]), \
+             mock.patch.object(self.mod, "stage_desktop_publish_report", side_effect=RuntimeError("publish failed")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_publish(Namespace(target=None, action=None, limit=5, output=None, label=None, json=False)), 1)
+        self.assertIn("publish failed", buf.getvalue())
+
+        with mock.patch.object(self.mod, "load_config", return_value={"desktop_automation": {"retention_days": 30}}), \
+             mock.patch.object(self.mod, "prune_desktop_run_manifests", return_value=[]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_cleanup(Namespace(target=None, older_than_days=None, keep_last=1, json=False)), 0)
+        self.assertIn("Desktop cleanup: nothing to remove.", buf.getvalue())
+
+    def test_desktop_action_validation_errors_and_dispatch_guards(self) -> None:
+        config = {
+            "desktop_automation": {
+                "targets": {
+                    "mac": {"adapter": "macos-local", "target_type": "local"},
+                    "linux": {"adapter": "linux-xvfb", "target_type": "ssh"},
+                    "windows": {"adapter": "windows-session-agent", "target_type": "ssh"},
+                    "other": {"adapter": "remote-session-agent", "target_type": "ssh"},
+                }
+            }
+        }
+        with mock.patch.object(self.mod, "load_config", return_value=config), \
+             mock.patch.object(self.mod, "resolve_desktop_target", side_effect=lambda _config, name: config["desktop_automation"]["targets"][name]), \
+             mock.patch.object(self.mod, "make_desktop_source_request", return_value={}):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_smoke(Namespace(target="linux", launch_command=None, bundle_id=None, label=None, output=None, capture_ui_snapshot=False, click=None, click_view_id=None, click_view_type=None, click_view_text=None, click_view_label=None, capture_before=False, settle_secs=0.0, timeout=1.0, pulp_app_automation=False)), 1)
+            self.assertIn("requires --command for linux-xvfb", buf.getvalue())
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_smoke(Namespace(target="windows", launch_command="app", bundle_id=None, label=None, output=None, capture_ui_snapshot=True, click=None, click_view_id=None, click_view_type=None, click_view_text=None, click_view_label=None, capture_before=False, settle_secs=0.0, timeout=1.0, pulp_app_automation=False)), 1)
+            self.assertIn("supports --capture-ui-snapshot only with --pulp-app-automation", buf.getvalue())
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_click(Namespace(target="windows", launch_command="app", bundle_id=None, label=None, output=None, capture_ui_snapshot=False, click=None, click_view_id="root", click_view_type=None, click_view_text=None, click_view_label=None, settle_secs=0.0, timeout=1.0, pulp_app_automation=False)), 1)
+            self.assertIn("supports view-target selectors only with --pulp-app-automation", buf.getvalue())
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop_inspect(Namespace(target="other", launch_command="app", bundle_id=None, label=None, output=None, timeout=1.0, pulp_app_automation=False)), 1)
+            self.assertIn("desktop inspect is not implemented", buf.getvalue())
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(self.mod.cmd_desktop(Namespace(desktop_command=None)), 1)
+            self.assertIn("desktop subcommand required", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
