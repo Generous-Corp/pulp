@@ -5093,6 +5093,42 @@ TEST_CASE("InspectorOverlay T2: caret + selection paint as a light overlay",
     REQUIRE(rects >= 1);  // selection band and/or caret line drawn
 }
 
+// ── WYSIWYG QA follow-ups — maintainer-reported live bugs ───────────────────
+//
+// These pin the exact scenarios the maintainer reported from the running app
+// (the headless suite passed but the live behavior was wrong / chrome was
+// wrong). BUGs 1–3 lock the in-place text-edit semantics at the precise
+// boundary the QA report named; BUG 4 locks the select-chrome predicate.
+
+TEST_CASE("InspectorOverlay QA BUG1: typed char lands AT the caret, not the end",
+          "[inspect][overlay][wysiwyg][qa][bug1]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    Label* label = nullptr;
+    root.add_child(t2_make_label("polywave", &label));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tool(InspectorOverlay::Tool::text);
+    REQUIRE(overlay.begin_text_edit(label));
+    REQUIRE(overlay.text_caret() == 8);  // seeded at end of "polywave"
+
+    // Put the caret between 'y' and 'w' (after "poly", index 4) the way the
+    // maintainer did: four LEFT arrows from the end.
+    KeyEvent left; left.key = KeyCode::left; left.is_down = true;
+    for (int i = 0; i < 4; ++i) REQUIRE(overlay.handle_key_event(left));
+    REQUIRE(overlay.text_caret() == 4);
+
+    // Type 't' — it must land AT the caret ("polytwave"), NOT appended
+    // ("polywavet" was the bug), and the caret must advance past the insert.
+    TextInputEvent ti; ti.text = "t";
+    REQUIRE(overlay.handle_text_input(ti));
+    REQUIRE(overlay.text_edit_buffer() == "polytwave");
+    REQUIRE(label->text() == "polytwave");   // live View text updated too
+    REQUIRE(overlay.text_caret() == 5);      // caret advanced past 't'
+    REQUIRE_FALSE(overlay.text_edit_buffer() == "polywavet");  // not appended
+}
+
 TEST_CASE("InspectorOverlay P3: Select tool clicks still select (unchanged)",
           "[inspect][overlay][phase3][text-tool][regression]") {
     View root;
