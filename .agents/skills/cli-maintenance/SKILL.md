@@ -183,6 +183,15 @@ import-design skill aligned. The JSX baked snapshot policy is
 default, `warn` proceeds with a structured diagnostic, and `accept` proceeds
 silently.
 
+The shipped import-design default is `--mode live --emit js`. User preference
+overrides belong in the existing config surface as
+`import_design.default_mode` (`live|baked`) and `import_design.default_emit`
+(`js|ir-json|cpp`), with `PULP_IMPORT_DESIGN_DEFAULT_MODE` /
+`PULP_IMPORT_DESIGN_DEFAULT_EMIT` as one-environment overrides. Keep C++ and
+Rust `pulp config`, `pulp status`, the import-design helper, docs, slash
+commands, and the MCP status output aligned whenever these keys change. If
+only `default_mode=baked` is configured, `ir-json` is implied.
+
 **Sidecar output anchoring:** when a CLI command takes `--output
 <path>/main.ext` and also emits sidecar artifacts (e.g.
 `pulp import-design` writes `bridge_handlers.cpp`, `classnames.json`,

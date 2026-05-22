@@ -667,12 +667,29 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
     )
     .map_err(io_err)?;
 
+    write_import_design_default_status(out)?;
+
     if proj.standalone {
         write_standalone_sdk_detail(&proj, out)?;
     } else {
         write_source_tree_counts(&proj, out)?;
         write_plugin_format_availability(&proj, out)?;
     }
+    Ok(())
+}
+
+fn write_import_design_default_status(out: &mut impl Write) -> Result<()> {
+    let defaults = crate::config::effective_import_design_defaults();
+    if let Some(error) = defaults.error {
+        writeln!(out, "Import design defaults: invalid ({error})").map_err(io_err)?;
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "Import design defaults: --mode {} ({}), --emit {} ({})",
+        defaults.mode, defaults.mode_source, defaults.emit, defaults.emit_source
+    )
+    .map_err(io_err)?;
     Ok(())
 }
 

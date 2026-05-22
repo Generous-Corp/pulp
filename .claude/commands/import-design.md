@@ -183,9 +183,17 @@ pulp import-design --from claude --file design.html --no-bridge-scaffold
 
 Artifact flags:
 - `--output <path>` selects the primary artifact destination.
+- Built-in default is live runtime import: `--mode live --emit js`.
 - `--emit {js|ir-json|cpp}` selects the artifact kind; `cpp` requires `--mode baked`.
 - `--mode {live|baked}` selects the runtime model.
 - `--snapshot-semantics {fail|warn|accept}` gates JSX baked snapshots with dynamic APIs.
+- Persistent defaults live in `~/.pulp/config.toml`: `pulp config set import_design.default_mode live|baked` and `pulp config set import_design.default_emit js|ir-json|cpp`. If only `default_mode=baked` is set, `ir-json` is implied. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and `PULP_IMPORT_DESIGN_DEFAULT_EMIT` override config for one environment/session. Direct CLI flags override the matching preference.
+
+Artifact mental model:
+- Live/runtime import: run the original app at launch.
+- Baked DesignIR: save the materialized UI tree as an inspectable snapshot.
+- Baked C++: compile that saved tree into native view-construction code.
+- You can go live iteration -> baked IR -> baked C++; you cannot reconstruct live React from baked IR because program logic is gone.
 
 Use `--dry-run` to preview without writing files.
 

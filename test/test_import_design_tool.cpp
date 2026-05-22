@@ -144,6 +144,9 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
         REQUIRE(r.stdout_output.find("Precompiled React JSX runtime bundle") != std::string::npos);
         REQUIRE(r.stdout_output.find("baked emits IR or C++ artifacts") != std::string::npos);
+        REQUIRE(r.stdout_output.find("Built-in default is --mode live --emit js") != std::string::npos);
+        REQUIRE(r.stdout_output.find("import_design.default_mode") != std::string::npos);
+        REQUIRE(r.stdout_output.find("PULP_IMPORT_DESIGN_DEFAULT_EMIT") != std::string::npos);
         REQUIRE(r.stdout_output.find("CLI dispatch reserved") == std::string::npos);
         REQUIRE(r.stdout_output.find("baked reserved for future imports") == std::string::npos);
     }
@@ -455,6 +458,71 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE_FALSE(baked.timed_out);
         REQUIRE(baked.exit_code == 2);
         REQUIRE(baked.stderr_output.find("--mode baked requires --emit ir-json or --emit cpp") != std::string::npos);
+    }
+
+    SECTION("persistent import-design defaults can select baked DesignIR") {
+        const auto home = tmp.path / "pulp-home-baked-default";
+        fs::create_directories(home);
+        write_text(home / "config.toml",
+                   "[import_design]\n"
+                   "default_mode = \"baked\"\n");
+        ScopedEnvVar pulp_home("PULP_HOME", home.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        const auto baked_output = tmp.path / "config-default.out.json";
+        auto baked = run_import_design({"--from", "stitch",
+                                        "--file", input.string(),
+                                        "--output", baked_output.string()});
+        REQUIRE_FALSE(baked.timed_out);
+        REQUIRE(baked.exit_code == 0);
+        REQUIRE(read_text(baked_output).find("\"version\":1") != std::string::npos);
+        REQUIRE(baked.stdout_output.find("DesignIR v1") != std::string::npos);
+
+        const auto live_output = tmp.path / "config-default-live.js";
+        auto live_override = run_import_design({"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--mode", "live",
+                                                "--emit", "js",
+                                                "--output", live_output.string()});
+        REQUIRE_FALSE(live_override.timed_out);
+        REQUIRE(live_override.exit_code == 0);
+        REQUIRE(read_text(live_output).find("\"version\":1") == std::string::npos);
+    }
+
+    SECTION("environment import-design defaults override config defaults") {
+        const auto home = tmp.path / "pulp-home-env-default";
+        fs::create_directories(home);
+        write_text(home / "config.toml",
+                   "[import_design]\n"
+                   "default_mode = \"live\"\n"
+                   "default_emit = \"js\"\n");
+        ScopedEnvVar pulp_home("PULP_HOME", home.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "baked");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "cpp");
+
+        const auto cpp_output = tmp.path / "env-default.cpp";
+        const auto header_output = tmp.path / "env-default.hpp";
+        auto cpp = run_import_design({"--from", "stitch",
+                                      "--file", input.string(),
+                                      "--output", cpp_output.string()});
+        REQUIRE_FALSE(cpp.timed_out);
+        REQUIRE(cpp.exit_code == 0);
+        REQUIRE(fs::exists(cpp_output));
+        REQUIRE(fs::exists(header_output));
+        REQUIRE(cpp.stdout_output.find("env-default.cpp") != std::string::npos);
+    }
+
+    SECTION("invalid import-design default preferences are usage errors") {
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "frozen");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+        auto bad_mode = run_import_design({"--from", "stitch",
+                                           "--file", input.string(),
+                                           "--output", (tmp.path / "bad-mode.js").string()});
+        REQUIRE_FALSE(bad_mode.timed_out);
+        REQUIRE(bad_mode.exit_code == 2);
+        REQUIRE(bad_mode.stderr_output.find("invalid import-design default mode") != std::string::npos);
+        REQUIRE(bad_mode.stderr_output.find("PULP_IMPORT_DESIGN_DEFAULT_MODE") != std::string::npos);
     }
 
     SECTION("jsx live mode writes the precompiled bundle verbatim") {

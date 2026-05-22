@@ -21,6 +21,10 @@
 //!   check_interval_hours   = integer                           (default 24)
 //!   channel                = stable | beta                     (default stable)
 //!   bump_projects          = prompt | auto | off               (default prompt)
+//!
+//! [import_design]
+//!   default_mode           = live | baked                       (default live)
+//!   default_emit           = js | ir-json | cpp                 (default js)
 //! ```
 //!
 //! # Invariants
@@ -107,6 +111,8 @@ pub const KNOWN_KEYS: &[(&str, &str)] = &[
     ("update.check_interval_hours", "24"),
     ("update.channel", "stable"),
     ("update.bump_projects", "prompt"),
+    ("import_design.default_mode", "live"),
+    ("import_design.default_emit", "js"),
 ];
 
 /// Parse a dotted key (e.g. `update.mode`) into `(section, key)`.
@@ -178,8 +184,140 @@ pub fn validate_value(section: &str, key: &str, value: &str) -> Result<()> {
                 ))
             }
         }
+        ("import_design", "default_mode") => {
+            if matches!(value, "live" | "baked") {
+                Ok(())
+            } else {
+                Err(bad(
+                    "import_design.default_mode must be one of: live, baked",
+                ))
+            }
+        }
+        ("import_design", "default_emit") => {
+            if matches!(value, "js" | "ir-json" | "cpp") {
+                Ok(())
+            } else {
+                Err(bad(
+                    "import_design.default_emit must be one of: js, ir-json, cpp",
+                ))
+            }
+        }
         _ => Ok(()), // allowed but unvalidated — future-proof for new keys
     }
+}
+
+/// Effective import-design defaults after applying config + env
+/// precedence. CLI flags still win inside `pulp import-design`; this
+/// helper is for status/reporting surfaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportDesignDefaults {
+    /// Effective `--mode` value.
+    pub mode: String,
+    /// Effective `--emit` value.
+    pub emit: String,
+    /// Where the effective mode came from.
+    pub mode_source: String,
+    /// Where the effective emit value came from.
+    pub emit_source: String,
+    /// Validation error for a configured or environment-supplied value.
+    pub error: Option<String>,
+}
+
+/// Resolve import-design defaults from built-ins, config, and env.
+#[must_use]
+pub fn effective_import_design_defaults() -> ImportDesignDefaults {
+    let mut out = ImportDesignDefaults {
+        mode: "live".to_owned(),
+        emit: "js".to_owned(),
+        mode_source: "built-in".to_owned(),
+        emit_source: "built-in".to_owned(),
+        error: None,
+    };
+
+    let doc = config_path().as_deref().and_then(|p| read(p).ok());
+
+    let apply_emit = |raw: String, source: String, out: &mut ImportDesignDefaults| -> bool {
+        let value = raw.trim().trim_matches('"').to_ascii_lowercase();
+        if !matches!(value.as_str(), "js" | "ir-json" | "cpp") {
+            out.error = Some(format!(
+                "import_design.default_emit must be one of: js, ir-json, cpp from {source}"
+            ));
+            out.emit_source = source;
+            return false;
+        }
+        out.emit = value;
+        out.emit_source = source;
+        true
+    };
+    let apply_mode = |raw: String, source: String, out: &mut ImportDesignDefaults| -> bool {
+        let value = raw.trim().trim_matches('"').to_ascii_lowercase();
+        if !matches!(value.as_str(), "live" | "baked") {
+            out.error = Some(format!(
+                "import_design.default_mode must be one of: live, baked from {source}"
+            ));
+            out.mode_source = source;
+            return false;
+        }
+        out.mode = value;
+        out.mode_source = source;
+        true
+    };
+
+    if let Ok(env) = std::env::var("PULP_IMPORT_DESIGN_DEFAULT_EMIT") {
+        if !env.is_empty()
+            && !apply_emit(
+                env,
+                "env:PULP_IMPORT_DESIGN_DEFAULT_EMIT".to_owned(),
+                &mut out,
+            )
+        {
+            return out;
+        }
+    } else if let Some(doc) = doc.as_ref() {
+        let configured = read_value(doc, "import_design", "default_emit");
+        if !configured.is_empty()
+            && !apply_emit(
+                configured,
+                "config:import_design.default_emit".to_owned(),
+                &mut out,
+            )
+        {
+            return out;
+        }
+    }
+
+    if let Ok(env) = std::env::var("PULP_IMPORT_DESIGN_DEFAULT_MODE") {
+        if !env.is_empty()
+            && !apply_mode(
+                env,
+                "env:PULP_IMPORT_DESIGN_DEFAULT_MODE".to_owned(),
+                &mut out,
+            )
+        {
+            return out;
+        }
+    } else if let Some(doc) = doc.as_ref() {
+        let configured = read_value(doc, "import_design", "default_mode");
+        if !configured.is_empty()
+            && !apply_mode(
+                configured,
+                "config:import_design.default_mode".to_owned(),
+                &mut out,
+            )
+        {
+            return out;
+        }
+    }
+
+    if out.emit_source == "built-in" && out.mode == "baked" {
+        out.emit = "ir-json".to_owned();
+        out.emit_source = format!("implied by {}", out.mode_source);
+    }
+    if out.mode_source == "built-in" && matches!(out.emit.as_str(), "ir-json" | "cpp") {
+        out.mode = "baked".to_owned();
+        out.mode_source = format!("implied by {}", out.emit_source);
+    }
+    out
 }
 
 /// Load the config document from `path`. Missing file yields an empty

@@ -20,6 +20,16 @@
       "key": "update.bump_projects",
       "value": "prompt",
       "default": true
+    },
+    {
+      "key": "import_design.default_mode",
+      "value": "live",
+      "default": true
+    },
+    {
+      "key": "import_design.default_emit",
+      "value": "js",
+      "default": true
     }
   ]
 }

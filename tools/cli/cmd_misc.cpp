@@ -6,10 +6,13 @@
 #include "cli_common.hpp"
 #include "sdk_cache_paths.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #if defined(__APPLE__) || defined(__linux__)
@@ -32,6 +35,93 @@
 #endif
 
 namespace {
+
+std::string normalize_import_design_pref(std::string value) {
+    value = strip_quotes(trim(value));
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool valid_import_design_mode(const std::string& value) {
+    const auto normalized = normalize_import_design_pref(value);
+    return normalized == "live" || normalized == "baked";
+}
+
+bool valid_import_design_emit(const std::string& value) {
+    const auto normalized = normalize_import_design_pref(value);
+    return normalized == "js" || normalized == "ir-json" || normalized == "cpp";
+}
+
+struct ImportDesignDefaultStatus {
+    std::string mode = "live";
+    std::string emit = "js";
+    std::string mode_source = "built-in";
+    std::string emit_source = "built-in";
+    std::string error;
+};
+
+ImportDesignDefaultStatus resolve_import_design_default_status() {
+    ImportDesignDefaultStatus out;
+
+    auto apply_emit = [&](std::string raw, std::string source) -> bool {
+        raw = normalize_import_design_pref(std::move(raw));
+        if (!valid_import_design_emit(raw)) {
+            out.error = "import_design.default_emit must be one of: js, ir-json, cpp from " + source;
+            out.emit_source = std::move(source);
+            return false;
+        }
+        out.emit = std::move(raw);
+        out.emit_source = std::move(source);
+        return true;
+    };
+    auto apply_mode = [&](std::string raw, std::string source) -> bool {
+        raw = normalize_import_design_pref(std::move(raw));
+        if (!valid_import_design_mode(raw)) {
+            out.error = "import_design.default_mode must be one of: live, baked from " + source;
+            out.mode_source = std::move(source);
+            return false;
+        }
+        out.mode = std::move(raw);
+        out.mode_source = std::move(source);
+        return true;
+    };
+
+    if (const char* env = std::getenv("PULP_IMPORT_DESIGN_DEFAULT_EMIT"); env && *env) {
+        if (!apply_emit(env, "env:PULP_IMPORT_DESIGN_DEFAULT_EMIT")) return out;
+    } else if (auto configured = read_user_config_value("import_design", "default_emit");
+               !configured.empty()) {
+        if (!apply_emit(configured, "config:import_design.default_emit")) return out;
+    }
+
+    if (const char* env = std::getenv("PULP_IMPORT_DESIGN_DEFAULT_MODE"); env && *env) {
+        if (!apply_mode(env, "env:PULP_IMPORT_DESIGN_DEFAULT_MODE")) return out;
+    } else if (auto configured = read_user_config_value("import_design", "default_mode");
+               !configured.empty()) {
+        if (!apply_mode(configured, "config:import_design.default_mode")) return out;
+    }
+
+    if (out.emit_source == "built-in" && out.mode == "baked") {
+        out.emit = "ir-json";
+        out.emit_source = "implied by " + out.mode_source;
+    }
+    if (out.mode_source == "built-in" && (out.emit == "ir-json" || out.emit == "cpp")) {
+        out.mode = "baked";
+        out.mode_source = "implied by " + out.emit_source;
+    }
+    return out;
+}
+
+void print_import_design_default_status() {
+    const auto defaults = resolve_import_design_default_status();
+    if (!defaults.error.empty()) {
+        std::cout << "Import design defaults: invalid (" << defaults.error << ")\n";
+        return;
+    }
+    std::cout << "Import design defaults: --mode " << defaults.mode << " ("
+              << defaults.mode_source << "), --emit " << defaults.emit
+              << " (" << defaults.emit_source << ")\n";
+}
 
 void print_pr_workflow_status(const fs::path& root, bool source_tree_mode) {
     auto workflow = resolve_pr_workflow();
@@ -160,6 +250,7 @@ int cmd_status(const std::vector<std::string>& args) {
         std::cout << "Build: not configured (run `pulp build`)\n";
     }
     print_pr_workflow_status(root, !standalone_mode);
+    print_import_design_default_status();
 
     if (standalone_mode) {
         const auto version = read_sdk_version(root);

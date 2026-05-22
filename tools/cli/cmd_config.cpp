@@ -9,6 +9,8 @@
 //   pulp config get update.mode
 //   pulp config set update.mode manual
 //   pulp config set update.check_interval_hours 24
+//   pulp config set import_design.default_mode baked
+//   pulp config set import_design.default_emit ir-json
 //   pulp config list
 //
 // Slice 5 (#550) wires the auto/prompt/manual/off modes into the
@@ -70,6 +72,9 @@ bool is_allowed_key(const std::string& section, const std::string& key) {
                // prompt | auto | off. Default: prompt.
                key == "bump_projects";
     }
+    if (section == "import_design") {
+        return key == "default_mode" || key == "default_emit";
+    }
     return false;
 }
 
@@ -104,6 +109,14 @@ std::string validate_value(const std::string& section,
         if (value == "prompt" || value == "auto" || value == "off") return {};
         return "update.bump_projects must be one of: prompt, auto, off";
     }
+    if (section == "import_design" && key == "default_mode") {
+        if (value == "live" || value == "baked") return {};
+        return "import_design.default_mode must be one of: live, baked";
+    }
+    if (section == "import_design" && key == "default_emit") {
+        if (value == "js" || value == "ir-json" || value == "cpp") return {};
+        return "import_design.default_emit must be one of: js, ir-json, cpp";
+    }
     return {};
 }
 
@@ -122,13 +135,21 @@ int usage() {
     std::cout << "  update.channel                stable | beta                 (default: stable)\n";
     std::cout << "  update.bump_projects          prompt | auto | off           (default: prompt)\n";
     std::cout << "                                [reserved — Slice 7 (#564) implements the behavior]\n";
+    std::cout << "\nSupported keys (import_design section):\n";
+    std::cout << "  import_design.default_mode    live | baked                  (default: live)\n";
+    std::cout << "  import_design.default_emit    js | ir-json | cpp            (default: js)\n";
+    std::cout << "                                CLI flags override these; env overrides below.\n";
     std::cout << "\nExamples:\n";
     std::cout << "  pulp config set pr.workflow github\n";
     std::cout << "  pulp config set update.mode manual\n";
+    std::cout << "  pulp config set import_design.default_mode baked\n";
+    std::cout << "  pulp config set import_design.default_emit ir-json\n";
     std::cout << "  pulp config get update.mode\n";
     std::cout << "\nNotes:\n";
     std::cout << "  Changing update.mode clears the 24h snooze at ~/.pulp/update-snooze\n";
     std::cout << "  so the new mode takes effect on the next invocation.\n";
+    std::cout << "  PULP_IMPORT_DESIGN_DEFAULT_MODE and PULP_IMPORT_DESIGN_DEFAULT_EMIT\n";
+    std::cout << "  override import_design defaults for one environment/session.\n";
     return 0;
 }
 
@@ -267,6 +288,8 @@ int cmd_config(const std::vector<std::string>& args) {
         show("update", "check_interval_hours", "24");
         show("update", "channel", "stable");
         show("update", "bump_projects", "prompt");
+        show("import_design", "default_mode", "live");
+        show("import_design", "default_emit", "js");
         return 0;
     }
 

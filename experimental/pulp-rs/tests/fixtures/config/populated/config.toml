@@ -5,3 +5,7 @@ mode = "auto"
 check_interval_hours = "48"
 channel = "beta"
 bump_projects = "off"
+
+[import_design]
+default_mode = "baked"
+default_emit = "cpp"

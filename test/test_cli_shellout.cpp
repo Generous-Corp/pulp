@@ -246,9 +246,14 @@ TEST_CASE("pulp status reports effective PR workflow",
     {
         std::ofstream cfg(tmp_home / "config.toml");
         cfg << "[pr]\nworkflow = \"manual\"\n"
-            << "[update]\nmode = \"off\"\n";
+            << "[update]\nmode = \"off\"\n"
+            << "[import_design]\ndefault_mode = \"baked\"\n";
     }
 
+    ScopedEnvVar import_mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE");
+    ScopedEnvVar import_emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT");
+    import_mode_env.set("");
+    import_emit_env.set("");
     pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
     pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
     auto r = run_pulp({"status"});
@@ -260,6 +265,7 @@ TEST_CASE("pulp status reports effective PR workflow",
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("PR workflow: manual (config:pr.workflow)") != std::string::npos);
     REQUIRE(r.stdout_output.find("Shipyard tracking: disabled by pr.workflow=manual") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Import design defaults: --mode baked (config:import_design.default_mode), --emit ir-json (implied by config:import_design.default_mode)") != std::string::npos);
 }
 
 TEST_CASE("pulp status and clean reject unexpected arguments before side effects",
@@ -349,6 +355,16 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     REQUIRE(set_channel.exit_code == 0);
     REQUIRE(set_channel.stdout_output.find("Set update.channel = beta") != std::string::npos);
 
+    auto set_import_mode = run_pulp({"config", "set", "import_design.default_mode", "baked"}, 10000);
+    REQUIRE_FALSE(set_import_mode.timed_out);
+    REQUIRE(set_import_mode.exit_code == 0);
+    REQUIRE(set_import_mode.stdout_output.find("Set import_design.default_mode = baked") != std::string::npos);
+
+    auto set_import_emit = run_pulp({"config", "set", "import_design.default_emit", "cpp"}, 10000);
+    REQUIRE_FALSE(set_import_emit.timed_out);
+    REQUIRE(set_import_emit.exit_code == 0);
+    REQUIRE(set_import_emit.stdout_output.find("Set import_design.default_emit = cpp") != std::string::npos);
+
     auto list = run_pulp({"config", "list"}, 10000);
     const auto config_body = read_file(home / "config.toml");
     fs::remove_all(home);
@@ -359,9 +375,14 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     REQUIRE(list.stdout_output.find("update.check_interval_hours = 24") != std::string::npos);
     REQUIRE(list.stdout_output.find("update.channel = beta") != std::string::npos);
     REQUIRE(list.stdout_output.find("update.bump_projects = prompt") != std::string::npos);
+    REQUIRE(list.stdout_output.find("import_design.default_mode = baked") != std::string::npos);
+    REQUIRE(list.stdout_output.find("import_design.default_emit = cpp") != std::string::npos);
     REQUIRE(config_body.find("[update]") != std::string::npos);
+    REQUIRE(config_body.find("[import_design]") != std::string::npos);
     REQUIRE(config_body.find("mode = \"manual\"") != std::string::npos);
     REQUIRE(config_body.find("channel = \"beta\"") != std::string::npos);
+    REQUIRE(config_body.find("default_mode = \"baked\"") != std::string::npos);
+    REQUIRE(config_body.find("default_emit = \"cpp\"") != std::string::npos);
 }
 
 TEST_CASE("pulp config rejects malformed and invalid update keys",
@@ -401,6 +422,20 @@ TEST_CASE("pulp config rejects malformed and invalid update keys",
     REQUIRE(bad_interval.exit_code != 0);
     REQUIRE(bad_interval.stderr_output.find("non-negative integer") != std::string::npos);
     REQUIRE_FALSE(config_written);
+
+    auto bad_import_mode =
+        run_pulp({"config", "set", "import_design.default_mode", "frozen"}, 10000);
+    REQUIRE_FALSE(bad_import_mode.timed_out);
+    REQUIRE(bad_import_mode.exit_code != 0);
+    REQUIRE(bad_import_mode.stderr_output.find("import_design.default_mode must be one of")
+            != std::string::npos);
+
+    auto bad_import_emit =
+        run_pulp({"config", "set", "import_design.default_emit", "tokens"}, 10000);
+    REQUIRE_FALSE(bad_import_emit.timed_out);
+    REQUIRE(bad_import_emit.exit_code != 0);
+    REQUIRE(bad_import_emit.stderr_output.find("import_design.default_emit must be one of")
+            != std::string::npos);
 
     auto extra_get = run_pulp({"config", "get", "update.mode", "extra"}, 10000);
     REQUIRE_FALSE(extra_get.timed_out);

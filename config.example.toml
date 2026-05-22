@@ -94,6 +94,17 @@
 # default_formats = "VST3 CLAP AU Standalone"   # Plugin formats to scaffold
 
 
+# ── Design Import Defaults ────────────────────────────────────────────────
+# Used by: pulp import-design
+#
+# Built-in default is live runtime import: --mode live --emit js.
+# Set these only if you strongly prefer baked DesignIR or baked C++ by default.
+
+[import_design]
+# default_mode = "live"     # live | baked
+# default_emit = "js"       # js | ir-json | cpp
+
+
 # ── Appcast / Update Feed ─────────────────────────────────────────────────
 # Used by: pulp ship appcast
 #

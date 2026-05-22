@@ -20,6 +20,16 @@
       "key": "update.bump_projects",
       "value": "off",
       "default": false
+    },
+    {
+      "key": "import_design.default_mode",
+      "value": "baked",
+      "default": false
+    },
+    {
+      "key": "import_design.default_emit",
+      "value": "cpp",
+      "default": false
     }
   ]
 }
