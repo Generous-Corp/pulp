@@ -8,6 +8,31 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01990"></a>
+## [0.199.0] - 2026-05-22
+
+- docs(skills): AU v2 Cocoa view advertisement + embedded-view input gotchas ([#2740](https://github.com/danielraffel/pulp/pull/2740))
+- test(local-ci): cover desktop doctor edge paths ([#2739](https://github.com/danielraffel/pulp/pull/2739))
+- test(coverage): omit CI bootstrap tests from Python surface ([#2735](https://github.com/danielraffel/pulp/pull/2735))
+- test(local-ci): cover desktop command edge paths ([#2734](https://github.com/danielraffel/pulp/pull/2734))
+- test(local-ci): cover queue log command edges ([#2733](https://github.com/danielraffel/pulp/pull/2733))
+- test(local-ci): cover command submission paths ([#2732](https://github.com/danielraffel/pulp/pull/2732))
+- test(local-ci): cover scheduler execution edges ([#2731](https://github.com/danielraffel/pulp/pull/2731))
+- test(local-ci): cover exact sha source helpers ([#2730](https://github.com/danielraffel/pulp/pull/2730))
+- test(local-ci): cover desktop helper edges ([#2729](https://github.com/danielraffel/pulp/pull/2729))
+- test(harness): cover evidence validator refs ([#2728](https://github.com/danielraffel/pulp/pull/2728))
+- test(tools): cover motion visual analyzer helpers ([#2727](https://github.com/danielraffel/pulp/pull/2727))
+- test(tools): cover local ci core helper branches ([#2726](https://github.com/danielraffel/pulp/pull/2726))
+- test(tools): cover local ci cloud cli helpers ([#2725](https://github.com/danielraffel/pulp/pull/2725))
+- test(tools): cover Android local ci target helpers ([#2724](https://github.com/danielraffel/pulp/pull/2724))
+- test(tools): cover local ci helper modules ([#2723](https://github.com/danielraffel/pulp/pull/2723))
+- test(tools): cover local ci desktop helpers ([#2722](https://github.com/danielraffel/pulp/pull/2722))
+- test(tools): refresh embed js generator coverage ([#2721](https://github.com/danielraffel/pulp/pull/2721))
+- test(tools): cover Yoga harness adapter classifier ([#2720](https://github.com/danielraffel/pulp/pull/2720))
+- test(tools): cover RN harness adapter classifier ([#2718](https://github.com/danielraffel/pulp/pull/2718))
+- test(tools): cover harness verifier orchestration ([#2714](https://github.com/danielraffel/pulp/pull/2714))
+- test(tools): cover import reference diff helpers ([#2713](https://github.com/danielraffel/pulp/pull/2713))
+
 <a id="v01980"></a>
 ## [0.198.0] - 2026-05-22
 
@@ -2582,6 +2607,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.199.0]: https://github.com/danielraffel/pulp/releases/tag/v0.199.0
 [0.198.0]: https://github.com/danielraffel/pulp/releases/tag/v0.198.0
 [0.197.4]: https://github.com/danielraffel/pulp/releases/tag/v0.197.4
 [0.197.3]: https://github.com/danielraffel/pulp/releases/tag/v0.197.3
