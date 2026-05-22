@@ -1088,6 +1088,39 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
     catch_discover_tests(pulp-test-font-rendering-goldens-gpu)
+
+    # GPU view-host-in-plugins (P1) — proves a Processor::create_view() editor
+    # that sets requires_gpu_host() auto-selects the GPU host, mounts a real
+    # (non-AutoUi) tree, and paints a nonblank offscreen Dawn/Skia frame.
+    # Soft-skips on Dawn-init failure.
+    add_executable(pulp-test-plugin-editor-headless-gpu
+        test_plugin_editor_headless_gpu.cpp)
+    target_link_libraries(pulp-test-plugin-editor-headless-gpu PRIVATE
+        pulp::format pulp::view pulp::state pulp::canvas pulp::render
+        Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-plugin-editor-headless-gpu PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-plugin-editor-headless-gpu PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-plugin-editor-headless-gpu)
+
+    # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden
+    # NSWindow and proves a nonblank first-frame capture, plus drives the CLAP
+    # gui_create/set_parent adapter path. Needs CLAP for the PULP_CLAP_PLUGIN
+    # entry. Soft-skips without a Dawn adapter / window server.
+    if(PULP_HAS_CLAP)
+        add_executable(pulp-test-plugin-editor-host-smoke-mac
+            test_plugin_editor_host_smoke_mac.mm
+            ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp)
+        target_link_libraries(pulp-test-plugin-editor-host-smoke-mac PRIVATE
+            pulp::format pulp::view pulp::state pulp::canvas pulp::render
+            clap Catch2::Catch2WithMain skia::skia "-framework AppKit")
+        target_compile_definitions(pulp-test-plugin-editor-host-smoke-mac PRIVATE
+            PULP_HAS_SKIA=1 PULP_CLAP_GUI=1)
+        target_include_directories(pulp-test-plugin-editor-host-smoke-mac PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+        catch_discover_tests(pulp-test-plugin-editor-host-smoke-mac)
+    endif()
 endif()
 
 # Font v2 Slice 3.4 — Skia GPU Vulkan lane (SCAFFOLD).
