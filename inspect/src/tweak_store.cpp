@@ -117,6 +117,37 @@ std::size_t TweakStore::apply_tweak(std::string_view anchor_id,
     return total;
 }
 
+std::size_t TweakStore::apply_tweaks_batch(std::string_view anchor_id,
+                                           std::vector<BatchEntry> entries,
+                                           std::string_view source) {
+    std::size_t total = 0;
+    {
+        std::lock_guard lock(mtx_);
+        // Take the lock ONCE for the whole batch and suspend auto-save so
+        // the individual key writes don't each flush disk (Risk 6). The
+        // single flush happens after the lock is released, below.
+        ++auto_save_suspend_depth_;
+        auto& anchor_map = tweaks_[std::string(anchor_id)];
+        for (auto& entry : entries) {
+            const auto path_key = std::move(entry.property_path);
+            if (auto existing = anchor_map.find(path_key);
+                existing != anchor_map.end()) {
+                existing->second.value = std::move(entry.value);
+                existing->second.source = std::string(source);
+            } else {
+                Entry rec{std::move(entry.value), std::string(source),
+                          next_sequence_++};
+                anchor_map.emplace(path_key, std::move(rec));
+            }
+        }
+        --auto_save_suspend_depth_;
+        for (auto& [_, m] : tweaks_) total += m.size();
+    }
+    // One atomic flush for the whole batch — all-or-nothing on disk.
+    maybe_auto_save_unlocked();
+    return total;
+}
+
 bool TweakStore::remove_tweak(std::string_view anchor_id,
                               std::string_view property_path) {
     bool removed = false;
@@ -767,6 +798,9 @@ void TweakStore::maybe_auto_save_unlocked() const {
     // method also returns the error path.)
     std::lock_guard lock(mtx_);
     if (!auto_save_) return;
+    // Suspended inside a batch — defer the flush to the batch's single
+    // post-write call so a multi-key move persists all-or-nothing.
+    if (auto_save_suspend_depth_ > 0) return;
     (void)save_locked(auto_save_path_);
 }
 

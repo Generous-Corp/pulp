@@ -83,6 +83,33 @@ public:
                             choc::value::Value value,
                             std::string_view source = {});
 
+    /// One (property_path, value) pair within a batched apply. All pairs
+    /// in a batch share the same anchor + source.
+    struct BatchEntry {
+        std::string property_path;  ///< Dotted path, e.g. "layout.left".
+        choc::value::Value value;
+    };
+
+    /// Apply several tweaks under one anchor as a SINGLE atomic unit.
+    ///
+    /// Motivation (planning/2026-05-21 Risk 6): the drag-to-move gesture
+    /// writes three tweaks — `layout.position`, `layout.left`,
+    /// `layout.top` — and `apply_tweak()` auto-saves to disk after EVERY
+    /// call, so three separate calls flush the file three times and a
+    /// crash mid-sequence can persist a partial move (e.g. `left`/`top`
+    /// without `position`). Worse, that partial state is NOT a no-op:
+    /// Yoga applies insets to relative nodes too, so a still-`relative`
+    /// node with stray `left`/`top` shifts in flow.
+    ///
+    /// `apply_tweaks_batch` takes the internal lock once, mutates every
+    /// (anchor, path) key, and triggers at most ONE auto-save flush after
+    /// all keys are written — so the on-disk state is all-or-nothing.
+    /// Returns the post-write total tweak count. A no-op (returns the
+    /// current count) when `entries` is empty.
+    std::size_t apply_tweaks_batch(std::string_view anchor_id,
+                                   std::vector<BatchEntry> entries,
+                                   std::string_view source = {});
+
     /// Remove a single (anchor_id, property_path) entry. Returns true
     /// if something was removed.
     bool remove_tweak(std::string_view anchor_id,
@@ -330,6 +357,12 @@ private:
     // mutation completes. Both fields are guarded by `mtx_`.
     bool auto_save_ = false;
     std::string auto_save_path_;
+
+    // Batch suspension depth (planning/2026-05-21 Risk 6). While > 0,
+    // maybe_auto_save_unlocked() is a no-op so a multi-key batch flushes
+    // disk exactly once, after the last key is written. Guarded by mtx_.
+    // A counter (not a bool) keeps nested batches correct.
+    int auto_save_suspend_depth_ = 0;
 
     // Helpers (assume mtx_ held by caller unless noted).
     std::string to_json_locked() const;
