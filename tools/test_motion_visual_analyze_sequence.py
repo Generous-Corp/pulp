@@ -112,6 +112,69 @@ class FakeFrameArray:
         return FakeVector(self.luma)
 
 
+class FakeLumaMatrix:
+    shape = (3, 3)
+
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+
+    def mean(self) -> float:
+        return sum(self.values) / len(self.values)
+
+    def astype(self, dtype: str) -> tuple[str, tuple[float, ...]]:
+        return dtype, tuple(self.values)
+
+
+class FakeAffineFrameArray:
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+
+    def __matmul__(self, weights: object) -> FakeLumaMatrix:
+        return FakeLumaMatrix(self.values)
+
+
+class FakePoints:
+    def __init__(self, points: list[tuple[float, float]]) -> None:
+        self.points = points
+        self.shape: tuple[int, int, int] | None = None
+
+    def reshape(self, *shape: int) -> "FakePoints":
+        self.shape = shape
+        return self
+
+
+class FakeAffineMatrix:
+    values = {
+        (0, 0): 0.0,
+        (0, 2): 3.5,
+        (1, 0): 4.0,
+        (1, 2): -2.25,
+    }
+
+    def __getitem__(self, key: tuple[int, int]) -> float:
+        return self.values[key]
+
+
+class FakeAffineNumpy:
+    float32 = "float32"
+
+    @staticmethod
+    def array(values: list[float], dtype: str) -> tuple[str, tuple[float, ...]]:
+        return dtype, tuple(values)
+
+    @staticmethod
+    def float32(values: list[tuple[float, float]]) -> FakePoints:  # type: ignore[assignment]
+        return FakePoints(values)
+
+    @staticmethod
+    def arctan2(y: float, x: float) -> tuple[str, float, float]:
+        return "atan2", y, x
+
+    @staticmethod
+    def degrees(value: tuple[str, float, float]) -> float:
+        return 90.0
+
+
 class FakeNumpy:
     float32 = "float32"
     uint8 = "uint8"
@@ -193,6 +256,126 @@ class FakeImageModule:
         return sprite
 
 
+class FakeGridCrop:
+    def __init__(self, values: list[int]) -> None:
+        self.values = values
+        self.mode = ""
+
+    def convert(self, mode: str) -> "FakeGridCrop":
+        self.mode = mode
+        return self
+
+    def getdata(self) -> list[int]:
+        return self.values
+
+
+class FakeGridImage:
+    saved: list[tuple[str, str | None]] = []
+
+    def __init__(
+        self,
+        mode: str = "RGB",
+        size: tuple[int, int] = (12, 8),
+        color: tuple[int, ...] = (255, 255, 255),
+        values: list[int] | None = None,
+    ) -> None:
+        self.mode = mode
+        self.size = size
+        self.color = color
+        self.values = values if values is not None else [240, 245, 250]
+        self.crop_boxes: list[tuple[int, int, int, int]] = []
+
+    def crop(self, box: tuple[int, int, int, int]) -> FakeGridCrop:
+        self.crop_boxes.append(box)
+        return FakeGridCrop(self.values)
+
+    def convert(self, mode: str) -> "FakeGridImage":
+        self.mode = mode
+        return self
+
+    def save(self, path: str, format: str | None = None) -> None:
+        self.saved.append((path, format))
+
+
+class FakeGridImageModule:
+    opened: list[str] = []
+    new_calls: list[tuple[str, tuple[int, int], tuple[int, ...]]] = []
+    composites: list[tuple[FakeGridImage, FakeGridImage]] = []
+
+    @classmethod
+    def open(cls, path: str) -> FakeGridImage:
+        cls.opened.append(path)
+        return FakeGridImage()
+
+    @classmethod
+    def new(
+        cls,
+        mode: str,
+        size: tuple[int, int],
+        color: tuple[int, ...],
+    ) -> FakeGridImage:
+        cls.new_calls.append((mode, size, color))
+        return FakeGridImage(mode=mode, size=size, color=color)
+
+    @classmethod
+    def alpha_composite(
+        cls, base: FakeGridImage, overlay: FakeGridImage
+    ) -> FakeGridImage:
+        cls.composites.append((base, overlay))
+        return FakeGridImage(size=base.size)
+
+
+class FakeGridDraw:
+    instances: list["FakeGridDraw"] = []
+
+    def __init__(self, image: FakeGridImage) -> None:
+        self.image = image
+        self.lines: list[tuple[list[tuple[int, int]], tuple[int, ...], int]] = []
+        self.rectangles: list[tuple[tuple[int, int, int, int], tuple[int, ...]]] = []
+        self.texts: list[tuple[tuple[int, int], str, tuple[int, ...], object]] = []
+        self.textsize_calls: list[tuple[str, object]] = []
+        self.textbbox_calls: list[tuple[tuple[int, int], str, object]] = []
+        FakeGridDraw.instances.append(self)
+
+    def line(
+        self,
+        points: list[tuple[int, int]],
+        *,
+        fill: tuple[int, ...],
+        width: int,
+    ) -> None:
+        self.lines.append((points, fill, width))
+
+    def textbbox(self, xy: tuple[int, int], text: str, *, font: object) -> tuple[int, int, int, int]:
+        self.textbbox_calls.append((xy, text, font))
+        raise RuntimeError("old pillow")
+
+    def textsize(self, text: str, *, font: object) -> tuple[int, int]:
+        self.textsize_calls.append((text, font))
+        return (len(text) + 2, 3)
+
+    def rectangle(
+        self, box: tuple[int, int, int, int], *, fill: tuple[int, ...]
+    ) -> None:
+        self.rectangles.append((box, fill))
+
+    def text(
+        self,
+        xy: tuple[int, int],
+        text: str,
+        *,
+        fill: tuple[int, ...],
+        font: object,
+    ) -> None:
+        self.texts.append((xy, text, fill, font))
+
+
+class FakeImageDrawModule:
+    @staticmethod
+    def Draw(image: FakeGridImage) -> FakeGridDraw:
+        return FakeGridDraw(image)
+
+
 class MotionVisualAnalyzeSequenceTests(unittest.TestCase):
     def test_dependency_import_success_and_failure_paths_are_explicit(self) -> None:
         real_import = __import__
@@ -254,6 +437,35 @@ class MotionVisualAnalyzeSequenceTests(unittest.TestCase):
         self.assertEqual(font[2], 12)
         self.assertEqual(len(FakeFontModule.calls), 1)
 
+    def test_grid_font_loader_falls_back_when_fonts_are_unavailable(self) -> None:
+        real_import = __import__
+
+        class FakeFontModule:
+            calls: list[tuple[str, int]] = []
+
+            @classmethod
+            def truetype(cls, path: str, *, size: int) -> object:
+                cls.calls.append((path, size))
+                raise OSError("missing font")
+
+            @staticmethod
+            def load_default() -> str:
+                return "default-font"
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "PIL":
+                return types.SimpleNamespace(ImageFont=FakeFontModule)
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            font = az._grid_load_font(14)
+
+        self.assertEqual(font, "default-font")
+        self.assertEqual(len(FakeFontModule.calls), 5)
+        self.assertEqual(FakeFontModule.calls[0][1], 14)
+        self.assertIn("Arial.ttf", FakeFontModule.calls[0][0])
+        self.assertIn("arial.ttf", FakeFontModule.calls[-1][0])
+
     def test_load_frame_array_and_pair_metrics_use_dependency_protocols(self) -> None:
         FakeOpenImageModule.opened.clear()
         arr, size = az.load_frame_array(Path("frame.png"), FakeAsArray, FakeOpenImageModule)
@@ -309,6 +521,67 @@ class MotionVisualAnalyzeSequenceTests(unittest.TestCase):
         self.assertEqual(az._grid_pick_theme(empty, 2, 3, "auto"), "dark")
         self.assertEqual(az._grid_pick_theme(bright, 2, 3, "dark"), "dark")
         self.assertEqual(az._grid_pick_theme(dark, 2, 3, "light"), "light")
+
+    def test_render_grid_overlay_draws_lines_labels_and_uses_textsize_fallback(self) -> None:
+        FakeGridImage.saved.clear()
+        FakeGridImageModule.opened.clear()
+        FakeGridImageModule.new_calls.clear()
+        FakeGridImageModule.composites.clear()
+        FakeGridDraw.instances.clear()
+        real_import = __import__
+
+        class FakeFontModule:
+            @staticmethod
+            def truetype(path: str, *, size: int) -> tuple[str, int]:
+                return "font", size
+
+            @staticmethod
+            def load_default() -> str:
+                return "default"
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "PIL":
+                return types.SimpleNamespace(
+                    ImageDraw=FakeImageDrawModule,
+                    ImageFont=FakeFontModule,
+                )
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            az.render_grid_overlay(
+                Path("source.png"),
+                Path("grid.png"),
+                FakeGridImageModule,
+                rows=40,
+                cols=0,
+                theme="auto",
+            )
+
+        draw = FakeGridDraw.instances[0]
+        self.assertEqual(FakeGridImageModule.opened, ["source.png"])
+        self.assertEqual(FakeGridImageModule.new_calls, [("RGBA", (12, 8), (0, 0, 0, 0))])
+        self.assertEqual(FakeGridImageModule.new_calls[0][0], "RGBA")
+        self.assertEqual(FakeGridImageModule.new_calls[0][1], (12, 8))
+        self.assertEqual(FakeGridImageModule.new_calls[0][2], (0, 0, 0, 0))
+        self.assertEqual(len(FakeGridImageModule.composites), 1)
+        self.assertEqual(FakeGridImageModule.composites[0][0].mode, "RGBA")
+        self.assertEqual(FakeGridImageModule.composites[0][1].mode, "RGBA")
+        self.assertEqual(len(draw.lines), 25)
+        self.assertEqual(draw.lines[0][0], [(0, 0), (11, 0)])
+        self.assertEqual(draw.lines[0][1], (0, 0, 0, 160))
+        self.assertEqual(draw.lines[0][2], 1)
+        self.assertEqual(draw.lines[-1][0], [(0, 8), (11, 8)])
+        self.assertEqual(len(draw.textbbox_calls), 26)
+        self.assertEqual(len(draw.textsize_calls), 26)
+        self.assertEqual(len(draw.rectangles), 26)
+        self.assertEqual(len(draw.texts), 26)
+        self.assertEqual(draw.textbbox_calls[0][1], "A1")
+        self.assertEqual(draw.textsize_calls[0][0], "A1")
+        self.assertEqual(draw.rectangles[0][1], (255, 255, 255, 180))
+        self.assertEqual(draw.texts[0][1], "A1")
+        self.assertEqual(draw.texts[-1][1], "Z1")
+        self.assertEqual(draw.texts[0][2], (0, 0, 0, 255))
+        self.assertEqual(FakeGridImage.saved, [("grid.png", "PNG")])
 
     def test_detect_motion_window_handles_empty_idle_and_active_ranges(self) -> None:
         self.assertEqual(az.detect_motion_window([], threshold=0.01), (0, 0))
@@ -382,6 +655,66 @@ class MotionVisualAnalyzeSequenceTests(unittest.TestCase):
         az.compute_confidence([bad], affine_block=affine)
         self.assertAlmostEqual(good.confidence, 0.98)
         self.assertAlmostEqual(bad.confidence, 0.90)
+
+    def test_estimate_affine_uses_opencv_matches_when_available(self) -> None:
+        real_import = __import__
+
+        keypoints = [
+            types.SimpleNamespace(pt=(1.0, 2.0)),
+            types.SimpleNamespace(pt=(3.0, 4.0)),
+            types.SimpleNamespace(pt=(5.0, 6.0)),
+        ]
+        matches = [
+            types.SimpleNamespace(distance=3, queryIdx=2, trainIdx=0),
+            types.SimpleNamespace(distance=1, queryIdx=0, trainIdx=1),
+            types.SimpleNamespace(distance=2, queryIdx=1, trainIdx=2),
+        ]
+
+        class FakeOrb:
+            calls: list[tuple[object, None]] = []
+
+            def detectAndCompute(self, gray: object, mask: None) -> tuple[list[object], object]:
+                self.calls.append((gray, mask))
+                return keypoints, object()
+
+        class FakeMatcher:
+            def __init__(self, norm: int, *, crossCheck: bool) -> None:
+                self.norm = norm
+                self.cross_check = crossCheck
+
+            def match(self, des1: object, des2: object) -> list[object]:
+                self.descriptors = (des1, des2)
+                return matches
+
+        fake_orb = FakeOrb()
+        fake_cv2 = types.SimpleNamespace(
+            NORM_HAMMING=7,
+            ORB_create=lambda *, nfeatures: fake_orb,
+            BFMatcher=FakeMatcher,
+            estimateAffinePartial2D=lambda src, dst: (FakeAffineMatrix(), "inliers"),
+        )
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "cv2":
+                return fake_cv2
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            affine = az.estimate_affine_first_to_last(
+                FakeAffineFrameArray([10.0, 20.0, 30.0]),
+                FakeAffineFrameArray([15.0, 25.0, 35.0]),
+                FakeAffineNumpy,
+                object(),
+            )
+
+        self.assertEqual(affine["translation"], {"dx": 3.5, "dy": -2.25})
+        self.assertEqual(affine["rotation_deg"], 90.0)
+        self.assertEqual(affine["scale_ratio"], 4.0)
+        self.assertAlmostEqual(affine["opacity_delta"], 5.0 / 255.0)
+        self.assertEqual(affine["method"], "opencv")
+        self.assertEqual(len(fake_orb.calls), 2)
+        self.assertEqual(fake_orb.calls[0][0][0], "uint8")
+        self.assertEqual(fake_orb.calls[1][0][0], "uint8")
 
     def test_image_helpers_use_image_module_contracts_without_real_pillow(self) -> None:
         FakeImageModule.fromarray_calls.clear()
