@@ -395,10 +395,19 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(contains(xml, "2.3.4"));
     REQUIRE(contains(xml, "https://example.com/FakeShipPlugin-2.3.4.pkg"));
 
-    auto remote_sign = run_pulp_in(root,
+    auto bare_output = run_pulp_in(root,
         {"ship", "appcast",
          "--url", "https://example.com/FakeShipPlugin-2.3.5.pkg",
          "--version", "2.3.5",
+         "--output", "appcast.xml"});
+    REQUIRE_FALSE(bare_output.timed_out);
+    REQUIRE(bare_output.exit_code == 0);
+    REQUIRE(fs::exists(root / "appcast.xml"));
+
+    auto remote_sign = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", "https://example.com/FakeShipPlugin-2.3.6.pkg",
+         "--version", "2.3.6",
          "--sign-key", "not-a-real-key"});
     REQUIRE_FALSE(remote_sign.timed_out);
     REQUIRE(remote_sign.exit_code != 0);
