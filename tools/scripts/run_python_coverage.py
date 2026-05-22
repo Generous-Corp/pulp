@@ -94,6 +94,7 @@ COVERAGE_SURFACES = (
             "tools/test_check_format_validation.py",
             "tools/test_check_status_ladder.py",
             "tools/test_list_limitations.py",
+            "tools/test_motion_visual_capture_sim_frames.py",
             "tools/test_motion_visual_analyze_sequence.py",
         ),
         (

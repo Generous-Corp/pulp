@@ -100,6 +100,10 @@ class CoveragercTests(unittest.TestCase):
             rpc.DEFAULT_TEST_GLOBS,
         )
         self.assertIn(
+            "tools/test_motion_visual_capture_sim_frames.py",
+            rpc.DEFAULT_TEST_GLOBS,
+        )
+        self.assertIn(
             "tools/import-validation/test_source_contracts.py",
             rpc.DEFAULT_TEST_GLOBS,
         )
