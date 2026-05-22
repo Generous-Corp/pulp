@@ -1189,6 +1189,10 @@ Notes for CLI maintenance:
   `ensure_repo_build_configured`); it only applies on a FRESH configure — an
   existing `CMakeCache.txt` build type is left untouched (re-configure or wipe
   `build/` to change it). `pulp build` prints `Build type: <type>`.
+- The `PULP_BUILD_TYPE` value is `shell_quote`'d before it goes into the cmake
+  command (the configure runs via the shell), like every other interpolated
+  value there. Never concatenate a raw env value into a shell command string —
+  a value like `Release; rm -rf ~` would execute.
 - Don't reintroduce an empty/Debug default for plugin builds — plugins are
   perf-tested in a host, so unoptimized is the wrong default.
 - Companion runtime signal: `decide_gpu_host` (core/format/gpu_host_select.hpp)
