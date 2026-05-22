@@ -1241,6 +1241,148 @@ class LocalCiPureHelperTests(unittest.TestCase):
         self.assertIn("xdotool click 1", command)
         self.assertIn("sleep 0.250", command)
 
+    def test_webdriver_probe_parses_status_shapes_and_errors(self) -> None:
+        self.assertEqual(self.mod.webdriver_status_url("http://127.0.0.1:4444"), "http://127.0.0.1:4444/status")
+        self.assertEqual(self.mod.webdriver_status_url("http://host/wd/hub"), "http://host/wd/hub/status")
+        self.assertEqual(self.mod.webdriver_status_url("http://host/status?old=1#frag"), "http://host/status")
+        with self.assertRaisesRegex(ValueError, "scheme and host"):
+            self.mod.webdriver_status_url("localhost:4444")
+
+        class FakeResponse:
+            def __init__(self, payload: str) -> None:
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def read(self) -> bytes:
+                return self.payload.encode("utf-8")
+
+        with mock.patch.object(
+            self.mod.urllib.request,
+            "urlopen",
+            return_value=FakeResponse('{"value":{"ready":true,"message":" ok "}}'),
+        ) as urlopen:
+            probe = self.mod.probe_webdriver_endpoint("http://driver")
+            self.assertEqual(probe["status_url"], "http://driver/status")
+            self.assertTrue(probe["ready"])
+            self.assertEqual(probe["message"], "ok")
+            self.assertEqual(urlopen.call_args.kwargs["timeout"], 5.0)
+
+        with mock.patch.object(
+            self.mod.urllib.request,
+            "urlopen",
+            return_value=FakeResponse('{"ready":false,"message":"not ready"}'),
+        ):
+            probe = self.mod.probe_webdriver_endpoint("http://driver/status", timeout=1.5)
+            self.assertFalse(probe["ready"])
+            self.assertEqual(probe["message"], "not ready")
+
+        http_error = self.mod.urllib.error.HTTPError(
+            "http://driver/status",
+            500,
+            "boom",
+            {},
+            mock.Mock(read=lambda: b"server body"),
+        )
+        with mock.patch.object(self.mod.urllib.request, "urlopen", side_effect=http_error):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 500: server body"):
+                self.mod.probe_webdriver_endpoint("http://driver")
+        with mock.patch.object(self.mod.urllib.request, "urlopen", return_value=FakeResponse("{bad")):
+            with self.assertRaisesRegex(RuntimeError, "invalid JSON response"):
+                self.mod.probe_webdriver_endpoint("http://driver")
+
+    def test_remote_detail_helpers_cover_missing_and_partial_states(self) -> None:
+        self.assertEqual(self.mod.windows_desktop_session_user(None), "")
+        self.assertEqual(self.mod.windows_desktop_session_user({"logged_on_user": " alice "}), "alice")
+        self.assertEqual(self.mod.windows_desktop_session_state({"session_state": " Active "}), "Active")
+        self.assertEqual(self.mod.windows_tooling_detail({"git_found": True, "git_path": "C:/Git/bin/git.exe"}, "git"), "C:/Git/bin/git.exe")
+        self.assertEqual(self.mod.windows_tooling_detail({}, "git", missing_hint="install git"), "install git")
+        self.assertTrue(self.mod.windows_remote_tooling_ready({"git_found": True}))
+        self.assertFalse(self.mod.windows_remote_tooling_ready({}))
+
+        self.assertEqual(self.mod.windows_repo_checkout_detail(None, fallback_path=r"C:\\Pulp"), r"C:\\Pulp")
+        self.assertIn("not a git checkout", self.mod.windows_repo_checkout_detail({"repo_path": r"C:\\Pulp", "repo_exists": True}))
+        self.assertIn("empty git repo", self.mod.windows_repo_checkout_detail({"git_dir_exists": True, "repo_path": r"C:\\Pulp"}))
+        self.assertIn(
+            "checkout incomplete",
+            self.mod.windows_repo_checkout_detail({"git_dir_exists": True, "head_exists": True, "repo_path": r"C:\\Pulp"}),
+        )
+        self.assertEqual(
+            self.mod.windows_repo_checkout_detail({"repo_path": r"C:\\Pulp", "origin_url": "https://example/repo.git"}),
+            r"C:\\Pulp (https://example/repo.git)",
+        )
+
+        self.assertEqual(
+            self.mod.linux_tooling_detail({"git_lfs_found": False, "git_lfs_hint": "PATH missing"}, "git_lfs"),
+            "PATH missing",
+        )
+        self.assertEqual(self.mod.linux_tooling_detail({}, "xauth", missing_hint="install xauth"), "install xauth")
+        self.assertEqual(self.mod.linux_tooling_detail({"xvfb_run_found": True, "xvfb_run_path": "/usr/bin/xvfb-run"}, "xvfb_run"), "/usr/bin/xvfb-run")
+        self.assertFalse(self.mod.linux_remote_tooling_ready({"git_found": True, "git_lfs_found": True}))
+
+    def test_desktop_bundle_and_prune_helpers_cover_edge_filters(self) -> None:
+        config = {"desktop_automation": {"artifact_root": str(self.root / "artifacts")}}
+        run_bundle = self.mod.create_desktop_run_bundle(config, "mac", "smoke")
+        publish_bundle = self.mod.create_desktop_publish_bundle(config)
+        self.assertTrue((run_bundle / "screenshots").is_dir())
+        self.assertEqual(run_bundle.parents[1].name, "mac")
+        self.assertTrue((publish_bundle / "assets").is_dir())
+        self.assertEqual(publish_bundle.parent, self.root / "artifacts" / "_published")
+
+        bundle_a = self.root / "bundle-a"
+        bundle_b = self.root / "bundle-b"
+        bundle_a.mkdir()
+        bundle_b.mkdir()
+        manifests = [
+            {"completed_at": "bad-date", "artifacts": {"bundle_dir": str(bundle_a)}},
+            {"completed_at": "2000-01-01T00:00:00Z", "artifacts": {"bundle_dir": str(bundle_a)}},
+            {"started_at": "2000-01-02T00:00:00Z", "artifacts": {"bundle_dir": str(bundle_b)}},
+            {"completed_at": "2999-01-01T00:00:00Z", "artifacts": {"bundle_dir": str(self.root / "missing")}},
+        ]
+        with mock.patch.object(self.mod, "desktop_run_manifests", return_value=manifests):
+            self.assertEqual(self.mod.prune_desktop_run_manifests(config, older_than_days=1), [bundle_a, bundle_b])
+            self.assertEqual(self.mod.prune_desktop_run_manifests(config, keep_last=2), [bundle_b])
+
+    def test_filesystem_and_git_wrappers_cover_fallbacks(self) -> None:
+        src = self.root / "src"
+        dest = self.root / "dest"
+        src.mkdir()
+        (src / "nested").mkdir()
+        (src / "nested" / "file.txt").write_text("nested")
+        (src / "top.txt").write_text("top")
+        self.mod._copy_directory_contents(src, dest)
+        self.assertEqual((dest / "nested" / "file.txt").read_text(), "nested")
+        self.assertEqual((dest / "top.txt").read_text(), "top")
+
+        keep_git = dest / ".git"
+        keep_git.mkdir()
+        self.mod._clear_directory_contents(dest)
+        self.assertTrue(keep_git.exists())
+        self.assertFalse((dest / "nested").exists())
+        self.assertFalse((dest / "top.txt").exists())
+
+        ok = subprocess.CompletedProcess(["git"], 0, stdout="ok", stderr="")
+        fail = subprocess.CompletedProcess(["git"], 2, stdout="", stderr="bad ref")
+        with mock.patch.object(self.mod.subprocess, "run", return_value=ok) as run:
+            self.assertIs(self.mod._run_git(["status"], cwd=self.root), ok)
+            self.assertEqual(run.call_args.args[0], ["git", "status"])
+        with mock.patch.object(self.mod.subprocess, "run", return_value=fail):
+            self.assertIs(self.mod._run_git(["status"], cwd=self.root, check=False), fail)
+            with self.assertRaisesRegex(RuntimeError, "bad ref"):
+                self.mod._run_git(["status"], cwd=self.root)
+
+        with mock.patch.object(
+            self.mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(["git"], 1, stdout="", stderr="no remote"),
+        ):
+            self.assertIsNone(self.mod.git_origin_http_url(self.root))
+            self.assertIsNone(self.mod.git_origin_clone_url(self.root))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
