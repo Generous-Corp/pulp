@@ -170,6 +170,79 @@ class SurfaceExtraTests(unittest.TestCase):
         self.assertIn("source =\n    tools/scripts", text)
         self.assertIn("omit =\n    tools/scripts/test_*.py", text)
 
+    def test_broader_tools_surface_omits_first_party_test_harness_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            paths = [
+                "tools/audit.py",
+                "tools/check_status_ladder.py",
+                "tools/test_check_status_ladder.py",
+                "tools/ci/bootstrap_macos_host.py",
+                "tools/ci/test_bootstrap_macos_host.py",
+                "tools/scripts/run_python_coverage.py",
+                "tools/scripts/test_run_python_coverage.py",
+                "tools/deps/audit.py",
+                "tools/deps/test_audit.py",
+                "tools/local-ci/local_ci.py",
+                "tools/local-ci/test_local_ci.py",
+                "tools/import-validation/diff_against_reference.py",
+                "tools/import-validation/test_diff_against_reference.py",
+                "tools/packages/freshness_check.py",
+                "tools/packages/test_freshness_check.py",
+                "tools/sandbox-e2e/fixture.py",
+                "tools/sandbox-e2e/nested/fixture.py",
+                "tools/harness/visual/runner.py",
+                "tools/harness/visual/tests/test_runner.py",
+                "tools/motion/visual/analyze_sequence.py",
+                "tools/motion/visual/test_analyze_sequence.py",
+            ]
+            for rel_path in paths:
+                path = root / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("print('fixture')\n", encoding="utf-8")
+
+            broader_surface = next(surface for surface in rpc.COVERAGE_SURFACES if surface.always_include)
+            omit_globs = broader_surface.resolved_omit_globs()
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                files = {
+                    path.relative_to(root).as_posix()
+                    for path in rpc._report_source_files(["tools"], list(omit_globs))
+                }
+
+        self.assertIn("tools/test_*.py", omit_globs)
+        self.assertIn("tools/ci/test_*.py", omit_globs)
+        self.assertIn("tools/scripts/test_*.py", omit_globs)
+        self.assertIn("tools/deps/test_*.py", omit_globs)
+        self.assertIn("tools/local-ci/test_*.py", omit_globs)
+        self.assertIn("tools/import-validation/test_*.py", omit_globs)
+        self.assertIn("tools/packages/test_*.py", omit_globs)
+        self.assertIn("tools/sandbox-e2e/*.py", omit_globs)
+        self.assertIn("tools/sandbox-e2e/**/*.py", omit_globs)
+        self.assertIn("tools/harness/visual/tests/*.py", omit_globs)
+        self.assertIn("tools/harness/visual/tests/**/*.py", omit_globs)
+        self.assertIn("tools/motion/visual/test_*.py", omit_globs)
+        self.assertIn("tools/audit.py", files)
+        self.assertIn("tools/check_status_ladder.py", files)
+        self.assertIn("tools/ci/bootstrap_macos_host.py", files)
+        self.assertIn("tools/scripts/run_python_coverage.py", files)
+        self.assertIn("tools/deps/audit.py", files)
+        self.assertIn("tools/local-ci/local_ci.py", files)
+        self.assertIn("tools/import-validation/diff_against_reference.py", files)
+        self.assertIn("tools/packages/freshness_check.py", files)
+        self.assertIn("tools/harness/visual/runner.py", files)
+        self.assertIn("tools/motion/visual/analyze_sequence.py", files)
+        self.assertNotIn("tools/test_check_status_ladder.py", files)
+        self.assertNotIn("tools/ci/test_bootstrap_macos_host.py", files)
+        self.assertNotIn("tools/scripts/test_run_python_coverage.py", files)
+        self.assertNotIn("tools/deps/test_audit.py", files)
+        self.assertNotIn("tools/local-ci/test_local_ci.py", files)
+        self.assertNotIn("tools/import-validation/test_diff_against_reference.py", files)
+        self.assertNotIn("tools/packages/test_freshness_check.py", files)
+        self.assertNotIn("tools/sandbox-e2e/fixture.py", files)
+        self.assertNotIn("tools/sandbox-e2e/nested/fixture.py", files)
+        self.assertNotIn("tools/harness/visual/tests/test_runner.py", files)
+        self.assertNotIn("tools/motion/visual/test_analyze_sequence.py", files)
+
 
 class CoberturaPathExtraTests(unittest.TestCase):
     def test_repo_relative_xml_filename_normalizes_backslashes_and_dot_source(self) -> None:

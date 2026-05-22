@@ -57,6 +57,7 @@ class CoveragercTests(unittest.TestCase):
                         "tools/scripts/test_*.py",
                         "tools/deps/test_*.py",
                         "tools/local-ci/test_*.py",
+                        "tools/ci/test_*.py",
                         "tools/packages/test_*.py",
                     ),
                     always_include=True,
@@ -77,6 +78,7 @@ class CoveragercTests(unittest.TestCase):
             self.assertIn("tools/test_*.py", text)
             self.assertIn("tools/scripts/test_*.py", text)
             self.assertIn("tools/local-ci/test_*.py", text)
+            self.assertIn("tools/ci/test_*.py", text)
             self.assertIn("tools/deps/_*.py", text)
             self.assertIn("tools/packages/test_*.py", text)
             self.assertIn("core/view/js/_*.py", text)
@@ -145,6 +147,8 @@ class CoveragercTests(unittest.TestCase):
             for rel_path in (
                 "tools/audit.py",
                 "tools/test_audit.py",
+                "tools/ci/bootstrap_macos_host.py",
+                "tools/ci/test_bootstrap_macos_host.py",
                 "tools/packages/freshness_check.py",
                 "tools/packages/validate_registry.py",
                 "tools/packages/_private.py",
@@ -159,6 +163,7 @@ class CoveragercTests(unittest.TestCase):
                     ["tools", "core/view/js"],
                     [
                         "tools/test_*.py",
+                        "tools/ci/test_*.py",
                         "tools/packages/_*.py",
                         "core/view/js/_*.py",
                     ],
@@ -168,6 +173,7 @@ class CoveragercTests(unittest.TestCase):
                 [path.relative_to(root).as_posix() for path in files],
                 [
                     "tools/audit.py",
+                    "tools/ci/bootstrap_macos_host.py",
                     "tools/packages/freshness_check.py",
                     "tools/packages/validate_registry.py",
                     "core/view/js/embed_js.py",
