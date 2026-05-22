@@ -71,6 +71,16 @@ TEST_CASE("OSC TimeTag converts fractional halves without losing the fraction",
     REQUIRE_THAT(tt.to_unix(), WithinAbs(1000.5, 0.000001));
 }
 
+TEST_CASE("OSC TimeTag converts positive sub-second unix times",
+          "[osc][bundle][timetag][codecov]") {
+    auto tt = TimeTag::from_unix(0.25);
+
+    REQUIRE(tt.seconds == 2208988800u);
+    REQUIRE(tt.fraction == 0x40000000u);
+    REQUIRE_THAT(tt.to_unix(), WithinAbs(0.25, 0.000001));
+    REQUIRE_FALSE(tt == TimeTag::immediate());
+}
+
 // ── Bundle construction ─────────────────────────────────────────────────
 
 TEST_CASE("OSC Bundle add message", "[osc][bundle]") {
@@ -124,6 +134,20 @@ TEST_CASE("OSC BundleElement takes ownership of unique_ptr bundles",
     REQUIRE(elem.bundle().timetag == TimeTag::from_unix(42.0));
     REQUIRE(elem.bundle().elements.size() == 1);
     REQUIRE(elem.bundle().elements[0].message().address == "/owned");
+}
+
+TEST_CASE("OSC BundleElement message constructor preserves message content",
+          "[osc][bundle][codecov]") {
+    Message msg("/direct");
+    msg.add(11).add(std::string("payload"));
+
+    BundleElement elem(std::move(msg));
+
+    REQUIRE(elem.is_message());
+    REQUIRE_FALSE(elem.is_bundle());
+    REQUIRE(elem.message().address == "/direct");
+    REQUIRE(elem.message().get_int(0) == 11);
+    REQUIRE(elem.message().get_string(1) == "payload");
 }
 
 TEST_CASE("OSC BundleElement value constructor copies nested bundle content",
@@ -483,6 +507,25 @@ TEST_CASE("Address pattern star backtracks within a path segment",
     REQUIRE(address_matches("/foo/a*c", "/foo/abc"));
     REQUIRE(address_matches("/foo/*", "/foo/"));
     REQUIRE_FALSE(address_matches("/foo/*bar", "/foo/baz/bar"));
+}
+
+TEST_CASE("Address pattern handles class, star, and alternative boundaries",
+          "[osc][bundle][pattern][codecov]") {
+    REQUIRE(address_matches("/[A-C]/x", "/B/x"));
+    REQUIRE_FALSE(address_matches("/[C-A]/x", "/B/x"));
+    REQUIRE_FALSE(address_matches("/[]/x", "/a/x"));
+    REQUIRE_FALSE(address_matches("/[ab]/x", "//x"));
+    REQUIRE_FALSE(address_matches("/[ab]/x", "/a/y"));
+    REQUIRE_FALSE(address_matches("/[ab]/x", "/aa/x"));
+
+    REQUIRE(address_matches("/prefix{A,B}suffix", "/prefixBsuffix"));
+    REQUIRE_FALSE(address_matches("/prefix{A,,B}suffix", "/prefixBsuffix"));
+    REQUIRE_FALSE(address_matches("/prefix{}suffix", "/prefixsuffix"));
+    REQUIRE_FALSE(address_matches("/prefix{A,B}suffix", "/prefixBother"));
+
+    REQUIRE(address_matches("/foo/*/bar", "/foo//bar"));
+    REQUIRE_FALSE(address_matches("/foo/*/bar", "/foo/a/b/bar"));
+    REQUIRE(address_matches("/foo/*", "/foo/abc"));
 }
 
 TEST_CASE("Malformed address patterns fail closed",

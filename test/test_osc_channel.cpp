@@ -157,9 +157,16 @@ TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]
     }
     REQUIRE(a->is_open());
     REQUIRE_FALSE(a->send(nullptr, 0));
+    REQUIRE_FALSE(a->send(nullptr, 1));
     const uint8_t byte = 0;
     REQUIRE_FALSE(a->send(&byte, 0));
     a->close();
+}
+
+TEST_CASE("OscChannel open rejects invalid remote hosts",
+          "[osc_channel][lifecycle][codecov]") {
+    auto channel = OscChannel::open("999.999.999.999", 29876, 0);
+    REQUIRE_FALSE(channel);
 }
 
 TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]") {
@@ -201,6 +208,27 @@ TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
         return closed_count.load(std::memory_order_acquire) == 1;
     }, 500ms));
     REQUIRE(closed_count.load() == 1);
+}
+
+TEST_CASE("OscChannel close uses the latest registered closed callback",
+          "[osc_channel][lifecycle][codecov]") {
+    auto a = open_loopback_endpoint();
+    if (!a) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+
+    int first_count = 0;
+    int second_count = 0;
+    a->on_closed([&] { ++first_count; });
+    a->on_closed([&] { ++second_count; });
+
+    a->close();
+    a->close();
+
+    REQUIRE(first_count == 0);
+    REQUIRE(second_count == 1);
+    REQUIRE_FALSE(a->is_open());
 }
 
 TEST_CASE("OscChannel routes close callbacks through custom executor",
@@ -262,6 +290,49 @@ TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
         REQUIRE(decoded.address == "/raw/path");
         REQUIRE(decoded.get_int(0) == 7);
         REQUIRE(decoded.get_string(1) == "abc");
+    }
+
+    a->close();
+    b->close();
+}
+
+TEST_CASE("OscChannel message callback replacement uses latest callback",
+          "[osc_channel][raw][codecov]") {
+    auto pair = open_loopback_pair();
+    if (!pair) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+    auto& a = pair.first;
+    auto& b = pair.second;
+
+    std::mutex mu;
+    int first_count = 0;
+    std::vector<uint8_t> received;
+    b->on_message([&](const pulp::runtime::Message&) {
+        std::lock_guard<std::mutex> lock(mu);
+        ++first_count;
+    });
+    b->on_message([&](const pulp::runtime::Message& m) {
+        std::lock_guard<std::mutex> lock(mu);
+        received = m.payload;
+    });
+
+    Message msg("/replace");
+    msg.add(int32_t{41});
+    const auto encoded = encode(msg);
+
+    REQUIRE(send_until([&] { return a->send(encoded.data(), encoded.size()); }, [&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return !received.empty();
+    }));
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        REQUIRE(first_count == 0);
+        auto decoded = decode(received.data(), received.size());
+        REQUIRE(decoded.address == "/replace");
+        REQUIRE(decoded.get_int(0) == 41);
     }
 
     a->close();
