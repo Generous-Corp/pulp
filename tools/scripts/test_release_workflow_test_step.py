@@ -51,6 +51,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIGN_AND_RELEASE = REPO_ROOT / ".github" / "workflows" / "sign-and-release.yml"
 RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
+BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 
 
 class SignAndReleaseTestStep(unittest.TestCase):
@@ -166,7 +167,8 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
 
         After splitting CLI/SDK builds for #720, the SDK tarball must
         still ship WebViewPanel + make_webview_embedded_resource_fetcher
-        symbols in libpulp-view.a so plugin authors can use WebView.
+        symbols in the split view-core archive so plugin authors can use
+        WebView through the SDK.
         """
         # Either a separate `build-sdk` configure with WebView=ON, or
         # the original single configure with WebView=ON, is acceptable.
@@ -180,6 +182,40 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "PULP_BUILD_WEBVIEW=ON so the SDK tarball still ships "
             "WebViewPanel symbols. See the `Prepare SDK build dir (Linux)` "
             "step in release-cli.yml.",
+        )
+
+    def test_sdk_symbol_check_uses_view_core_archive(self) -> None:
+        """Phase 9 split keeps WebView symbols in the view-core archive."""
+        self.assertIn("sdk-staging/lib/libpulp-view-core.a", self.text)
+        self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        self.assertNotIn(
+            'data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()',
+            self.text,
+        )
+        self.assertNotIn(
+            "Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); "
+            "assert b'WebViewPanel'",
+            self.text,
+        )
+
+
+class BuildWorkflowReleaseGate(unittest.TestCase):
+    """build.yml release-path PR gate must match the split SDK archives."""
+
+    def setUp(self) -> None:
+        self.assertTrue(
+            BUILD_WORKFLOW.exists(),
+            f"missing workflow file: {BUILD_WORKFLOW}",
+        )
+        self.text = BUILD_WORKFLOW.read_text()
+
+    def test_windows_release_gate_checks_view_core_archive(self) -> None:
+        self.assertIn("sdk-staging/lib/pulp-view.lib", self.text)
+        self.assertIn("sdk-staging/lib/pulp-view-core.lib", self.text)
+        self.assertNotIn(
+            "Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); "
+            "assert b'WebViewPanel'",
+            self.text,
         )
 
 

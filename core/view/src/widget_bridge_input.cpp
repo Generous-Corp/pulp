@@ -17,6 +17,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/script_event_dispatch.hpp>
 #include <string>
 
 namespace pulp::view {
@@ -78,6 +79,14 @@ bool shortcut_key_matches(KeyCode registered_key, int incoming_key_code) noexcep
     }
     return false;
 }
+
+struct ScriptGlobalKeyDispatcherRegistrar {
+    ScriptGlobalKeyDispatcherRegistrar() {
+        script_events::set_global_key_dispatcher(&WidgetBridge::dispatch_global_key);
+    }
+};
+
+const ScriptGlobalKeyDispatcherRegistrar script_global_key_dispatcher_registrar;
 
 } // namespace
 

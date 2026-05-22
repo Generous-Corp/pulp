@@ -140,7 +140,7 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   (pulp #695). `.github/workflows/release-cli.yml` now configures the
   release build with `-DPULP_BUILD_WEBVIEW=ON`, installs Linux's
   `libgtk-3-dev` + `libwebkit2gtk-4.1-dev`, and verifies the staged
-  `pulp-view` archive still contains `WebViewPanel` and
+  `pulp-view-core` archive still contains `WebViewPanel` and
   `make_webview_embedded_resource_fetcher`. If you touch the release
   workflow or `tools/scripts/release-cli-local.sh`, preserve that
   contract or WebView-using downstream SDK consumers will link-fail.

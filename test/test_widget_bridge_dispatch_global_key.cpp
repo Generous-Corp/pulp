@@ -4,9 +4,10 @@
 //
 //   Every live WidgetBridge auto-registers itself in a static set in its
 //   ctor (and unregisters in its dtor). The macOS platform host
-//   (window_host_mac.mm) calls WidgetBridge::dispatch_global_key from
-//   both keyDown: and performKeyEquivalent:, fanning the event out to
-//   every live bridge's forward_key_event. That delivers:
+//   (window_host_mac.mm) calls the core script_events global-key hook
+//   from both keyDown: and performKeyEquivalent:. The script target
+//   registers WidgetBridge::dispatch_global_key with that hook, fanning
+//   the event out to every live bridge's forward_key_event. That delivers:
 //
 //     1. `registerShortcut(key, mods, callback)` matches → JS callback fires.
 //     2. Unconditional `__dispatch__('__global__', 'keydown', {...})` →
@@ -30,6 +31,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/state/store.hpp>
 
@@ -180,4 +182,27 @@ TEST_CASE("dispatch_global_key respects is_down filtering at the per-bridge leve
 
     WidgetBridge::dispatch_global_key('s', 0, /*is_down=*/true);
     REQUIRE(count() == 1);
+}
+
+TEST_CASE("core script global-key dispatcher reaches the WidgetBridge fan-out",
+          "[view][widget-bridge][keyboard][wireup][2128]") {
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var events = [];
+        window.addEventListener('keydown', function(e) { events.push(e.key); });
+        function count() { return events.length; }
+        function at(i) { return events[i] || ''; }
+    )JS");
+
+    script_events::dispatch_global_key('s', 0, /*is_down=*/true);
+
+    REQUIRE(engine.evaluate("count()").getWithDefault<int>(-1) == 1);
+    REQUIRE(engine.evaluate("at(0)").toString() == "s");
 }

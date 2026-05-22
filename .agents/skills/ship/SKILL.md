@@ -289,14 +289,14 @@ or `pulp::view::make_webview_embedded_resource_fetcher`.
 
 Root cause: `core/view/CMakeLists.txt` defaults `PULP_BUILD_WEBVIEW=OFF`,
 so any release SDK build that forgets to opt in will ship a
-`libpulp-view` / `pulp-view.lib` without the native WebView objects.
+`libpulp-view-core` / `pulp-view-core.lib` without the native WebView objects.
 
 Fix (active since pulp #695): keep the release SDK path aligned with the
 GitHub release workflow:
 1. Configure release SDK builds with `-DPULP_BUILD_WEBVIEW=ON`.
 2. On Linux, install `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` before
    configuring.
-3. Before packaging, verify the staged SDK archive still contains
+3. Before packaging, verify the staged SDK view-core archive still contains
    `WebViewPanel` and `make_webview_embedded_resource_fetcher`.
 
 This applies to both `.github/workflows/release-cli.yml` and the local

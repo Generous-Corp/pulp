@@ -54,7 +54,7 @@ SDK_STAGING="$DIST_DIR/pulp-sdk-staging"
 rm -rf "$SDK_STAGING"
 cmake --install "$MAC_BUILD_DIR" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
 if [ -f "$SDK_STAGING/version.txt" ]; then
-    SDK_WEBVIEW_LIB="$SDK_STAGING/lib/libpulp-view.a" python3 - <<'PY'
+    SDK_WEBVIEW_LIB="$SDK_STAGING/lib/libpulp-view-core.a" python3 - <<'PY'
 from pathlib import Path
 import os
 data = Path(os.environ["SDK_WEBVIEW_LIB"]).read_bytes()

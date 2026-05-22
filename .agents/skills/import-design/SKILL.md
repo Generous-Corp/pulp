@@ -95,7 +95,9 @@ diagnostics instead of throwing. Keep image assets routed through
 `IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
 from IR attributes. The materialization call site itself should not run JS, but
 do not market this as "no JS engine" globally because live React/parity lanes
-still use the JS runtime.
+still use the JS runtime. Baked/native consumers can link `pulp::view-core`;
+live import, `ScriptEngine`, `WidgetBridge`, and scripted UI consumers should
+link `pulp::view-script` or the full compatibility target, `pulp::view`.
 
 The `baked-cpp` exporter emits native C++ source from the same resolved tree via
 `generate_pulp_cpp(const DesignIR&, const IRAssetManifest&,
@@ -107,17 +109,18 @@ audio parameter or meter bindings. Preserve duplicate token names even when
 their values alias, and emit non-hex semantic color tokens as strings rather
 than trying to parse them as colors.
 
-The Phase 5/7 benchmark harness lives at `pulp-design-import-bench` and is driven
+The Phase 5/7/9 benchmark harness lives at `pulp-design-import-bench` and is driven
 by `tools/scripts/design_import_benchmark.py`. Run it under no-launch env
 (`PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1
 PULP_INSPECTOR_NO_LAUNCH=1`). It compares `live`, `baked-native`, and
 `baked-cpp` lanes, emits startup/idle/interactive metrics, and computes the
-Phase 9 gate from linked text+data section size using `size`/`llvm-size`; do not
-use Debug object-file byte counts as the gate input. A valid report must record
-the explicit binary-size delta and whether JS evaluation churn is actually the
-dominant bottleneck for the measured fixture. Keep the legacy top-level
-`comparison` entry pointed at `baked-native`, and add per-lane results under
-`comparisons` for both baked lanes.
+Phase 9 gate from linked text+data section size using `size`/`llvm-size`; after
+the target split it tracks live-runtime objects under `pulp-view-script`. Do
+not use Debug object-file byte counts as the gate input. A valid report must
+record the explicit binary-size delta and whether JS evaluation churn is
+actually the dominant bottleneck for the measured fixture. Keep the legacy
+top-level `comparison` entry pointed at `baked-native`, and add per-lane
+results under `comparisons` for both baked lanes.
 
 ### Step 1: Identify source and input
 

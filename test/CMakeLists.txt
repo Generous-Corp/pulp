@@ -2429,6 +2429,23 @@ target_link_libraries(pulp-test-design-import-native-materializer PRIVATE pulp::
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-view-core-link test_view_core_link.cpp)
+target_link_libraries(pulp-test-view-core-link PRIVATE pulp::view-core Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-view-core-link
+    PROPERTIES LABELS "parser-import")
+
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-view-core-window-host-link
+        test_view_core_window_host_link.mm)
+    target_link_libraries(pulp-test-view-core-window-host-link
+        PRIVATE pulp::view-core Catch2::Catch2WithMain)
+    target_link_options(pulp-test-view-core-window-host-link PRIVATE
+        "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view-core.dir/platform/mac/window_host_mac.mm.o"
+    )
+    catch_discover_tests(pulp-test-view-core-window-host-link
+        PROPERTIES LABELS "parser-import")
+endif()
+
 add_executable(pulp-test-design-import-cpp-codegen
     test_design_import_cpp_codegen.cpp
     fixtures/design_import_generated_cpp_fixture.cpp)
@@ -3083,7 +3100,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     # object to register the class without dragging in every other .mm
     # (which would duplicate-symbol on PulpAccessibilityElement).
     target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
-        "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view.dir/platform/mac/window_host_mac.mm.o"
+        "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view-core.dir/platform/mac/window_host_mac.mm.o"
     )
     catch_discover_tests(pulp-test-mac-perform-key-equivalent)
 endif()
