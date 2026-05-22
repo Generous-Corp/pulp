@@ -1,0 +1,81 @@
+name: Release-watchdog reaper
+
+# The release watchdogs (release-cadence-check, release-cli-watchdog,
+# release-draft-stuck-check, auto-release-watchdog) file a per-version tracker
+# when a release lags, but only auto-close trackers inside a recent scan window.
+# Historical per-version trackers therefore orphan forever — 334 had piled up by
+# 2026-05-22 (pulp #2576). This reaper sweeps ALL open trackers daily and closes
+# any whose version is now released or superseded by a newer release, so stale
+# noise can't re-accumulate.
+#
+# Conservative by construction: it only touches issues whose titles match the
+# exact auto-generated watchdog patterns, and only closes when the release
+# objectively exists or a strictly-greater version has shipped.
+on:
+  schedule:
+    - cron: '0 6 * * *'  # daily 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: watchdog-reaper
+  cancel-in-progress: false
+
+jobs:
+  reap:
+    name: Close stale release-watchdog trackers
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Reap superseded/released trackers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest="$(gh release list --repo "$REPO" --limit 1 \
+            --json tagName --jq '.[0].tagName // empty')"
+          if [ -z "$latest" ]; then
+            echo "No releases found; nothing to reap."
+            exit 0
+          fi
+          echo "Latest release: $latest"
+
+          # Open issues whose titles are auto-generated watchdog trackers.
+          gh issue list --repo "$REPO" --state open --limit 1000 \
+            --json number,title \
+            --jq '.[] | select(.title | test("^Tag v[0-9.]+ has no GitHub Release$|^release-cli failed for v[0-9.]+|^release: stuck — fix/feat merged without bump|^Tag v[0-9.]+ stuck as draft")) | "\(.number)\t\(.title)"' \
+            > trackers.txt || true
+
+          total=$(wc -l < trackers.txt | tr -d ' ')
+          echo "Open watchdog trackers: $total"
+          closed=0
+
+          while IFS=$'\t' read -r num title; do
+            [ -z "${num:-}" ] && continue
+            ver="$(printf '%s' "$title" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+            [ -z "$ver" ] && continue
+
+            reason=""
+            if gh release view "$ver" --repo "$REPO" >/dev/null 2>&1; then
+              reason="release $ver has published"
+            else
+              # superseded if a strictly-greater version has shipped
+              top="$(printf '%s\n%s\n' "$ver" "$latest" | sort -V | tail -1)"
+              if [ "$top" = "$latest" ] && [ "$ver" != "$latest" ]; then
+                reason="superseded by $latest (its code shipped in a later release)"
+              fi
+            fi
+
+            if [ -n "$reason" ]; then
+              gh issue close "$num" --repo "$REPO" --reason completed \
+                -c "Auto-reaped by watchdog-reaper.yml: $reason. Closing this stale tracker (pulp #2576). Reopen if a specific version's binaries are genuinely needed." \
+                >/dev/null 2>&1 && closed=$((closed+1))
+            fi
+          done < trackers.txt
+
+          echo "Reaped $closed / $total stale trackers."

@@ -50,6 +50,19 @@ Slice 6 (#551).
   build/packaging/appcast-generation regression surfaces BEFORE a real tag.
   Keep it credential-free (notarize/sign stay in the real path) so it can run
   on a schedule without secrets.
+- `.github/workflows/header-self-contained.yml` (pulp #2576) is a BLOCKING gate
+  for the "compiles on Apple Clang, breaks on Linux" transitive-include class
+  (e.g. `uint32_t` without `#include <cstdint>` — broke the v0.197.4 release).
+  It compiles each PR-changed public header standalone with Linux Clang via
+  `tools/scripts/check_headers_selfcontained.py`. Unlike the advisory IWYU gate
+  it only fails on a header that genuinely won't compile alone (no "unused
+  include" false positives), so it is safe to block on. Headers whose module
+  isn't in the GPU-off compile DB are skipped, not failed.
+- `.github/workflows/watchdog-reaper.yml` (pulp #2576) sweeps ALL open release
+  watchdog trackers daily and closes any whose version is released or superseded
+  — the existing watchdogs only auto-close inside a recent window, so historical
+  per-version trackers orphaned (334 had accumulated). It only matches the exact
+  auto-generated tracker titles and only closes objectively-resolved ones.
 - Keep watchdog/issue-maintenance workflows on REST `gh api` calls. Avoid
   `gh issue list` / `gh pr *` helpers in those paths because they can use the
   shared GraphQL quota; a watchdog must not fail while reporting that the
