@@ -207,7 +207,7 @@ ReportEntry ValidationHarness::capture_screenshot(
             << "\"width\": " << opts_.screenshot_width << ","
             << "\"height\": " << opts_.screenshot_height << ","
             << "\"scale\": " << opts_.screenshot_scale << ","
-            << "\"backend\": \"" << opts_.screenshot_backend << "\","
+            << "\"backend\": \"" << escape_json(opts_.screenshot_backend) << "\","
             << "\"view_id\": \"" << view_id << "\""
             << "}";
     entry.payload_json = payload.str();

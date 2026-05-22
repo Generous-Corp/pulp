@@ -205,6 +205,15 @@ TEST_CASE("ValidationHarness creates and reports descriptor", "[harness][phase2]
     REQUIRE(harness.descriptor().name == "HarnessTestGain");
 }
 
+TEST_CASE("ValidationHarness exposes the underlying headless host",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    const auto& const_harness = harness;
+
+    REQUIRE(&harness.host().descriptor() == &harness.descriptor());
+    REQUIRE(&const_harness.host().descriptor() == &const_harness.descriptor());
+}
+
 TEST_CASE("ValidationHarness option and entry defaults match report schema",
           "[harness][coverage][phase3]") {
     pulp::format::ValidationRunOptions options;
@@ -490,6 +499,23 @@ TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
     REQUIRE_THAT(report, ContainsSubstring("line1\\nline2\\\\done"));
 }
 
+TEST_CASE("ValidationHarness report escapes generic control characters",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    pulp::format::ReportEntry entry;
+    entry.type = "test_suite";
+    entry.status = pulp::format::ValidationStatus::pass;
+    entry.target = std::string("suite") + static_cast<char>(0x01) + "name";
+    entry.payload_json = "{\"total\":1}";
+    harness.add_entry(entry);
+
+    const auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("suite\\u0001name"));
+    REQUIRE_THAT(report, ContainsSubstring("\"test_suite\": {\"total\":1}"));
+}
+
 TEST_CASE("ValidationHarness empty report is valid", "[harness][phase2]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
@@ -543,6 +569,20 @@ TEST_CASE("ValidationHarness write_report creates nested directories",
     REQUIRE_FALSE(ec);
 }
 
+TEST_CASE("ValidationHarness write_report reports failure for directory paths",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-report-as-dir");
+    std::filesystem::create_directories(dir);
+    REQUIRE_FALSE(harness.write_report(dir));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
 // ── Validator graceful degradation ──────────────────────────────────────────
 
 TEST_CASE("ValidationHarness run_validator skips missing tool", "[harness][phase2]") {
@@ -558,6 +598,9 @@ TEST_CASE("ValidationHarness run_validator skips missing tool", "[harness][phase
 
     REQUIRE(entry.status == pulp::format::ValidationStatus::skip);
     REQUIRE_THAT(entry.error_message, ContainsSubstring("not found"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool\": \"nonexistent-validator-tool-xyz\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("fake-plugin-for-skip-test.vst3"));
+    REQUIRE(harness.entries().size() == 1);
 
     std::filesystem::remove(tmp_plugin);
 }
@@ -758,6 +801,80 @@ TEST_CASE("ValidationHarness run_validator defaults clap-validator format",
     std::filesystem::remove_all(dir, ec);
     REQUIRE_FALSE(ec);
 }
+
+TEST_CASE("ValidationHarness run_validator defaults auval format",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-auval-pass");
+    std::filesystem::create_directories(dir);
+    auto plugin = dir / "Fake.component";
+    { std::ofstream f(plugin); f << "dummy"; }
+
+    write_executable_script(
+        dir,
+        "auval",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  printf 'auval fake 2.0\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'auval args:%s\\n' \"$*\"\n"
+        "exit 0\n");
+
+    ScopedPathPrefix path_prefix(dir);
+    auto entry = harness.run_validator("auval", plugin);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(entry.error_message.empty());
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool\": \"auval\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool_version\": \"auval fake 2.0\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_format\": \"au\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("-v aufx pulp Pulp"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness run_validator defaults vstvalidator format and trims CRLF versions",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-vstvalidator-pass");
+    std::filesystem::create_directories(dir);
+    auto plugin = dir / "Fake.vst3";
+    { std::ofstream f(plugin); f << "dummy"; }
+
+    write_executable_script(
+        dir,
+        "vstvalidator",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  printf 'vstvalidator fake 3.0\\r\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'vstvalidator saw:%s\\n' \"$1\"\n"
+        "exit 0\n");
+
+    ScopedPathPrefix path_prefix(dir);
+    auto entry = harness.run_validator("vstvalidator", plugin);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(entry.error_message.empty());
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool\": \"vstvalidator\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool_version\": \"vstvalidator fake 3.0\""));
+    REQUIRE(entry.payload_json.find("fake 3.0\\r") == std::string::npos);
+    REQUIRE(entry.payload_json.find("fake 3.0\\n") == std::string::npos);
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_format\": \"vst3\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("vstvalidator saw:"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
 #endif
 
 // ── Screenshot / inspector providers (#298) ─────────────────────────────────
@@ -826,7 +943,7 @@ TEST_CASE("ValidationHarness screenshot passes configured capture options to pro
         .screenshot_width = 320,
         .screenshot_height = 180,
         .screenshot_scale = 1.5f,
-        .screenshot_backend = "software-test",
+        .screenshot_backend = "software\"test\\gpu",
     });
 
     float captured_scale = 0.0f;
@@ -844,9 +961,9 @@ TEST_CASE("ValidationHarness screenshot passes configured capture options to pro
     auto entry = harness.capture_screenshot("/tmp/test-options.png");
     REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
     REQUIRE_THAT(static_cast<double>(captured_scale), WithinAbs(1.5, 0.001));
-    REQUIRE(captured_backend == "software-test");
+    REQUIRE(captured_backend == "software\"test\\gpu");
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"width\": 320"));
-    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"backend\": \"software-test\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"backend\": \"software\\\"test\\\\gpu\""));
 }
 
 TEST_CASE("ValidationHarness screenshot fails when provider returns false",
@@ -987,6 +1104,52 @@ TEST_CASE("ValidationHarness compare_screenshots differing files -> fail",
     REQUIRE_THAT(entry.error_message, ContainsSubstring("differ"));
     std::filesystem::remove(a);
     std::filesystem::remove(b);
+}
+
+TEST_CASE("ValidationHarness report renders capture and diff payload sections",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({
+        .diff_tolerance = 7,
+        .diff_threshold = 0.42f,
+    });
+
+    auto dir = make_temp_dir("pulp-harness-report-payloads");
+    std::filesystem::create_directories(dir);
+    auto screenshot = dir / "shot.png";
+    auto ref = dir / "ref.bin";
+    auto rendered = dir / "rendered.bin";
+    { std::ofstream f(ref); f << "A"; }
+    { std::ofstream f(rendered); f << "B"; }
+
+    harness.set_capture_screenshot_provider(
+        [](const std::filesystem::path& p, uint32_t, uint32_t, float, const std::string&) {
+            std::ofstream(p) << "PNG";
+            return true;
+        });
+    harness.set_capture_inspector_provider(
+        []() { return std::string("{\"type\":\"Root\",\"children\":[]}"); });
+
+    REQUIRE(harness.capture_screenshot(screenshot).status ==
+            pulp::format::ValidationStatus::pass);
+    REQUIRE(harness.compare_screenshots(ref, rendered).status ==
+            pulp::format::ValidationStatus::fail);
+    REQUIRE(harness.capture_inspector().status ==
+            pulp::format::ValidationStatus::pass);
+
+    const auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("\"screenshot\": {"));
+    REQUIRE_THAT(report, ContainsSubstring("\"diff\": {"));
+    REQUIRE_THAT(report, ContainsSubstring("\"inspector\": {"));
+    REQUIRE_THAT(report, ContainsSubstring("\"tolerance\": 7"));
+    REQUIRE_THAT(report, ContainsSubstring("\"threshold\": 0.42"));
+    REQUIRE_THAT(report, ContainsSubstring("\"comparison\": \"byte-level\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"view_tree\": {\"type\":\"Root\""));
+    REQUIRE_THAT(report, ContainsSubstring("    },\n    {"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
 }
 
 // #308 Codex P1: compare_screenshots must NOT throw filesystem_error
