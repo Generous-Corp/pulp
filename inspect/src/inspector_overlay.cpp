@@ -611,30 +611,34 @@ bool InspectorOverlay::commit_text_edit() {
 
     bool emitted = false;
     const std::string anchor = tgt->anchor_id();
-    if (tweak_store_ && !anchor.empty()) {
-        // One undoable unit: do_fn re-applies the new text (live View +
-        // tweak); undo_fn restores the prior text and removes-or-restores
-        // the tweak so Cmd+Z fully reverts. Falls back to a plain
-        // tweak+apply when no EditHistory is wired.
-        const std::string path = text_tweak_path_;
-        auto prior = tweak_store_->lookup(anchor, path);
+    const std::string path = text_tweak_path_;
+    // The TWEAK persists only for anchored (imported) views, but the UNDO of
+    // the live View text must work even for an UN-anchored view (e.g. a
+    // --script Chainer label with no anchor_id) — otherwise Cmd+Z can't
+    // restore edited text (maintainer QA). So push the EditHistory entry
+    // whenever the text actually changed + history is wired, and gate ONLY the
+    // tweak apply/restore on the anchor.
+    const bool anchored = (tweak_store_ != nullptr) && !anchor.empty();
+    if (old_text != new_text) {
+        std::optional<choc::value::Value> prior_val;
+        if (anchored) {
+            auto prior = tweak_store_->lookup(anchor, path);
+            if (prior.has_value()) prior_val = *prior;
+        }
         if (edit_history_) {
             auto* self = this;
-            std::optional<choc::value::Value> prior_val =
-                prior.has_value() ? std::optional<choc::value::Value>(*prior)
-                                  : std::nullopt;
             edit_history_->perform(
-                [self, tgt, anchor, path, new_text]() {
+                [self, tgt, anchor, path, new_text, anchored]() {
                     set_editable_text_of(tgt, new_text);
-                    if (self->tweak_store_)
+                    if (anchored && self->tweak_store_)
                         self->tweak_store_->apply_tweak(
                             anchor, path,
                             choc::value::createString(new_text),
                             "inspector-text-edit");
                 },
-                [self, tgt, anchor, path, old_text, prior_val]() {
+                [self, tgt, anchor, path, old_text, prior_val, anchored]() {
                     set_editable_text_of(tgt, old_text);
-                    if (!self->tweak_store_) return;
+                    if (!(anchored && self->tweak_store_)) return;
                     if (prior_val.has_value())
                         self->tweak_store_->apply_tweak(
                             anchor, path, *prior_val, "inspector-undo");
@@ -642,12 +646,13 @@ bool InspectorOverlay::commit_text_edit() {
                         self->tweak_store_->remove_tweak(anchor, path);
                 },
                 "edit-text");
-        } else {
+            emitted = true;
+        } else if (anchored) {
             tweak_store_->apply_tweak(anchor, path,
                                       choc::value::createString(new_text),
                                       "inspector-text-edit");
+            emitted = true;
         }
-        emitted = true;
     }
 
     text_edit_target_ = nullptr;
@@ -1377,6 +1382,9 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         }
         if (event.key == KeyCode::escape) {
             cancel_text_edit();
+            // Figma parity: Esc out of text editing returns to the Select
+            // (move/resize) tool — selection goes blue-edit → orange-select.
+            set_tool(Tool::select);
             return true;
         }
         // WYSIWYG P5 FIX 1 — guard against a target freed mid-edit for every
@@ -2535,12 +2543,13 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
         return canvas.measure_text(text_edit_buffer_.substr(0, bytes));
     };
 
-    // The text origin is the target's left edge; vertically center the caret
-    // band on the box. (Most imported text sits with a small left inset; we
-    // keep it flush-left which is correct for the common Label case.)
+    // The text origin is the target's left edge; align the caret band to the
+    // TOP of the box (where top-aligned label text renders), NOT the box
+    // center — otherwise growing the box floats the caret far below the actual
+    // text (maintainer QA). (Was: r.y + (r.height - band_h) * 0.5f.)
     const float text_x = r.x;
     const float band_h = std::min(r.height, font_size * 1.3f);
-    const float band_y = r.y + (r.height - band_h) * 0.5f;
+    const float band_y = r.y;
 
     // Selection band (translucent accent) behind the caret.
     if (text_has_selection()) {
