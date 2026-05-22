@@ -197,6 +197,177 @@ class SourceContractsTest(unittest.TestCase):
         self.assertEqual(state, "optional-missing")
         self.assertIn("planning submodule", reason)
 
+    def test_shell_path_normalization_handles_quotes_defaults_and_unknowns(self) -> None:
+        self.assertEqual(checker._strip_shell_value("'quoted'"), "quoted")
+        self.assertEqual(checker._strip_shell_value('"quoted"'), "quoted")
+        self.assertEqual(checker._strip_shell_value("${VALUE:-fallback}"), "fallback")
+        self.assertEqual(
+            checker.normalize_shell_repo_path('"${PULP_DIR}/test/fixtures/a.tsx"'),
+            "test/fixtures/a.tsx",
+        )
+        self.assertEqual(
+            checker.normalize_shell_repo_path("'$PULP/tools/import-validation/a.sh'"),
+            "tools/import-validation/a.sh",
+        )
+        self.assertEqual(
+            checker.normalize_shell_repo_path("${REFERENCE:-/tmp/repo/planning/screenshots/a.png}"),
+            "planning/screenshots/a.png",
+        )
+        self.assertEqual(
+            checker.normalize_shell_repo_path("/var/tmp/work/test/fixtures/b.tsx"),
+            "test/fixtures/b.tsx",
+        )
+        self.assertIsNone(checker.normalize_shell_repo_path("/var/tmp/unowned/file.txt"))
+
+    def test_literal_roundtrip_assignments_filters_relevant_variables(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            script = Path(td) / "roundtrip.sh"
+            script.write_text(
+                "\n".join(
+                    [
+                        'REFERENCE="${PULP_DIR}/planning/screenshots/ref.png"',
+                        "MAIN_FIXTURE=$PULP/test/fixtures/source.tsx",
+                        "IGNORED_REFERENCE_SUFFIX=$PULP/test/fixtures/ignored.tsx",
+                        "OTHER=$PULP/test/fixtures/other.tsx",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            assignments = checker._literal_roundtrip_assignments(script)
+        self.assertEqual(len(assignments), 2)
+        self.assertNotIn(("OTHER", "test/fixtures/other.tsx"), assignments)
+        self.assertEqual(
+            assignments,
+            [
+                ("REFERENCE", "planning/screenshots/ref.png"),
+                ("MAIN_FIXTURE", "test/fixtures/source.tsx"),
+            ],
+        )
+
+    def test_entry_path_collectors_ignore_malformed_shapes(self) -> None:
+        entry = {
+            "validation": {
+                "fixtures": ["test/fixtures/a.tsx", 42],
+                "pulp_render_reference": {"path": "planning/screenshots/a.png"},
+            },
+            "format_versions": [
+                {"fixture_paths": ["test/fixtures/b.tsx", None]},
+                {"fixture_paths": "not-a-list"},
+                "bad-version",
+            ],
+        }
+        self.assertEqual(
+            checker._entry_fixture_paths(entry),
+            {"test/fixtures/a.tsx", "test/fixtures/b.tsx"},
+        )
+        self.assertEqual(
+            checker._entry_reference_paths(entry),
+            {"planning/screenshots/a.png"},
+        )
+        self.assertEqual(checker._entry_reference_paths({"validation": {}}), set())
+
+    def test_shape_checker_reports_invalid_modes_and_missing_fields(self) -> None:
+        findings: list = []
+        checker._check_entry_shape(
+            findings,
+            {
+                "source": 123,
+                "kind": "bad-kind",
+                "trust": "bad-trust",
+                "compat": {"mode": "bad-mode"},
+                "dispatch": {"kind": "bad-dispatch"},
+                "validation": {"pulp_render_reference": {"status": "bad-status"}},
+            },
+        )
+        codes = _codes(findings)
+        self.assertEqual(len(findings), 13)
+        self.assertIn("missing-required-field", codes)
+        self.assertIn("invalid-kind", codes)
+        self.assertIn("invalid-trust", codes)
+        self.assertIn("invalid-compat-mode", codes)
+        self.assertIn("invalid-dispatch-kind", codes)
+        self.assertIn("invalid-reference-status", codes)
+        self.assertEqual({finding.source for finding in findings}, {"<unknown>"})
+
+    def test_existing_path_checker_reports_missing_empty_and_optional_info(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            present = root / "test/fixtures/present.tsx"
+            present.parent.mkdir(parents=True)
+            present.write_text("fixture", encoding="utf-8")
+            findings: list = []
+            checker._check_existing_path(findings, root, "src", "test/fixtures/present.tsx", "missing", "fixture")
+            checker._check_existing_path(findings, root, "src", "", "missing", "fixture")
+            checker._check_existing_path(findings, root, "src", "test/fixtures/missing.tsx", "missing", "fixture")
+            checker._check_existing_path(findings, root, "src", "planning/screenshots/a.png", "missing", "fixture")
+        self.assertEqual([finding.code for finding in findings], ["missing", "missing", "optional-planning-missing"])
+        self.assertEqual(findings[-1].severity, "info")
+        self.assertIn("planning submodule", findings[-1].message)
+
+    def test_test_tag_checker_reports_empty_missing_files_and_missing_fragments(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            test_file = root / "tests/source.test"
+            test_file.parent.mkdir(parents=True)
+            test_file.write_text("[known] body", encoding="utf-8")
+            findings: list = []
+            checker._check_test_tags(findings, root, {"source": "empty", "validation": {}})
+            checker._check_test_tags(
+                findings,
+                root,
+                {
+                    "source": "tagged",
+                    "validation": {
+                        "test_files": ["tests/source.test", "tests/missing.test"],
+                        "test_tags": ["[known][missing]", 12],
+                    },
+                },
+            )
+        codes = [finding.code for finding in findings]
+        self.assertEqual(codes, ["missing-test-files", "missing-test-file", "missing-test-tag"])
+        self.assertEqual([finding.source for finding in findings], ["empty", "tagged", "tagged"])
+        self.assertEqual(findings[1].path, "tests/missing.test")
+        self.assertIn("missing", findings[2].message)
+
+    def test_cadence_checker_covers_manual_future_invalid_and_overdue(self) -> None:
+        today = dt.date(2026, 5, 22)
+        findings: list = []
+        checker._check_cadence(findings, {"source": "manual", "last_verified": "2020-01-01", "recheck_interval": "manual"}, today)
+        checker._check_cadence(findings, {"source": "future", "last_verified": "2026-05-20", "recheck_interval_days": 10}, today)
+        checker._check_cadence(findings, {"source": "missing-date", "recheck_interval_days": 10}, today)
+        checker._check_cadence(findings, {"source": "bad-date", "last_verified": "nope", "recheck_interval_days": 10}, today)
+        checker._check_cadence(findings, {"source": "old", "last_verified": "2026-01-01", "recheck_interval_days": 1}, today)
+        self.assertEqual(
+            [(finding.source, finding.code) for finding in findings],
+            [
+                ("missing-date", "invalid-last-verified"),
+                ("bad-date", "invalid-last-verified"),
+                ("old", "stale-source-contract"),
+            ],
+        )
+
+    def test_report_rendering_escapes_markdown_and_handles_empty(self) -> None:
+        finding = checker.Finding(
+            "warning",
+            "pipe-code",
+            "source",
+            "message with | pipe",
+            "path/file.tsx",
+        )
+        self.assertEqual(checker.render_report([], fmt="text"), "source-contracts: no findings\n")
+        self.assertEqual(
+            checker.render_report([], fmt="markdown"),
+            "Source-contract check: no findings.\n",
+        )
+        text = checker.render_report([finding], fmt="text")
+        markdown = checker.render_report([finding], fmt="markdown")
+        self.assertTrue(markdown.startswith("| Severity | Code | Source | Path | Message |"))
+        self.assertNotIn("message with | pipe", markdown)
+        self.assertIn("[warning] pipe-code source", text)
+        self.assertIn("(path/file.tsx)", text)
+        self.assertIn("message with \\| pipe", markdown)
+        self.assertIn("`pipe-code`", markdown)
+
     def test_strict_flips_exit_code_only_on_warnings(self) -> None:
         registry = _load_registry()
         _contract(registry, "figma")["last_verified"] = "unverified"
