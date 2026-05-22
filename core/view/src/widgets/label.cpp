@@ -445,6 +445,48 @@ std::string Label::apply_text_transform(const std::string& in) const {
     return out;
 }
 
+// pulp #1737 — translate the CSS font-variant CSV → SkShaper Feature tags and
+// apply them to the canvas. Wires the storage-only View::font_variant_ slot
+// into the active paint. Empty CSV → clear features so the previous view's
+// settings don't bleed across paint calls. Each CSS keyword maps to its
+// OpenType feature tag (per CSS Fonts Module 4 §7.3):
+//   tabular-nums       → tnum
+//   small-caps         → smcp
+//   oldstyle-nums      → onum
+//   lining-nums        → lnum
+//   proportional-nums  → pnum
+// Unknown values are silently ignored (forward-compat).
+//
+// Shared by paint() and text_edit_metrics() — the WYSIWYG caret invariant: the
+// inline-edit caret/selection must shape with the SAME features the painter
+// renders, or the per-byte caret x drifts for font-variant labels.
+void Label::apply_font_features(canvas::Canvas& canvas) const {
+    const std::string& fv = font_variant();
+    if (fv.empty()) {
+        canvas.clear_font_features();
+        return;
+    }
+    std::vector<canvas::Canvas::FontFeature> features;
+    size_t i = 0;
+    while (i < fv.size()) {
+        while (i < fv.size() && (std::isspace(static_cast<unsigned char>(fv[i])) || fv[i] == ',')) ++i;
+        if (i >= fv.size()) break;
+        size_t end = i;
+        while (end < fv.size() && fv[end] != ',') ++end;
+        std::string token(fv, i, end - i);
+        while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) token.pop_back();
+        if      (token == "tabular-nums")      features.push_back({canvas::Canvas::make_font_feature_tag("tnum"), 1});
+        else if (token == "small-caps")        features.push_back({canvas::Canvas::make_font_feature_tag("smcp"), 1});
+        else if (token == "oldstyle-nums")     features.push_back({canvas::Canvas::make_font_feature_tag("onum"), 1});
+        else if (token == "lining-nums")       features.push_back({canvas::Canvas::make_font_feature_tag("lnum"), 1});
+        else if (token == "proportional-nums") features.push_back({canvas::Canvas::make_font_feature_tag("pnum"), 1});
+        // Unknown token → silently ignored.
+        i = end + 1;
+    }
+    if (!features.empty()) canvas.set_font_features(std::move(features));
+    else                   canvas.clear_font_features();
+}
+
 Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
                                                 std::string_view edit_text) const {
     TextEditMetrics m;
@@ -459,6 +501,11 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     // slant/letter-spacing).
     canvas.set_font_full(rs.family, rs.font_size, rs.font_weight,
                          rs.font_slant, rs.letter_spacing);
+
+    // Apply the SAME font-variant OpenType features paint() applies, so the
+    // caret/selection x shapes with identical glyph advances (tabular-nums,
+    // small-caps, …). Without this the caret drifts for font-variant labels.
+    apply_font_features(canvas);
 
     // Per-byte caret offsets over the FULL shaped run.
     m.caret_x_by_byte.resize(m.display_text.size() + 1, 0.0f);
@@ -534,41 +581,10 @@ void Label::paint(canvas::Canvas& canvas) {
     canvas.set_font_full(family, effective_font_size, effective_font_weight,
                           font_style_, effective_letter_spacing);
 
-    // pulp #1737 — translate CSS font-variant CSV → SkShaper Feature
-    // tags. Wires the storage-only View::font_variant_ slot into the
-    // active paint. Empty CSV → clear features so previous view's
-    // settings don't bleed across paint calls. Each CSS keyword maps
-    // to its OpenType feature tag (per CSS Fonts Module 4 §7.3):
-    //   tabular-nums       → tnum
-    //   small-caps         → smcp
-    //   oldstyle-nums      → onum
-    //   lining-nums        → lnum
-    //   proportional-nums  → pnum
-    // Unknown values are silently ignored (forward-compat).
-    const std::string& fv = font_variant();
-    if (fv.empty()) {
-        canvas.clear_font_features();
-    } else {
-        std::vector<canvas::Canvas::FontFeature> features;
-        size_t i = 0;
-        while (i < fv.size()) {
-            while (i < fv.size() && (std::isspace(static_cast<unsigned char>(fv[i])) || fv[i] == ',')) ++i;
-            if (i >= fv.size()) break;
-            size_t end = i;
-            while (end < fv.size() && fv[end] != ',') ++end;
-            std::string token(fv, i, end - i);
-            while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) token.pop_back();
-            if      (token == "tabular-nums")      features.push_back({canvas::Canvas::make_font_feature_tag("tnum"), 1});
-            else if (token == "small-caps")        features.push_back({canvas::Canvas::make_font_feature_tag("smcp"), 1});
-            else if (token == "oldstyle-nums")     features.push_back({canvas::Canvas::make_font_feature_tag("onum"), 1});
-            else if (token == "lining-nums")       features.push_back({canvas::Canvas::make_font_feature_tag("lnum"), 1});
-            else if (token == "proportional-nums") features.push_back({canvas::Canvas::make_font_feature_tag("pnum"), 1});
-            // Unknown token → silently ignored.
-            i = end + 1;
-        }
-        if (!features.empty()) canvas.set_font_features(std::move(features));
-        else                    canvas.clear_font_features();
-    }
+    // pulp #1737 — apply the CSS font-variant CSV as SkShaper OpenType feature
+    // tags. Factored into apply_font_features() so text_edit_metrics() shapes
+    // the caret with the IDENTICAL features (WYSIWYG caret invariant).
+    apply_font_features(canvas);
 
     // Apply text-transform
     std::string display_text = text_;

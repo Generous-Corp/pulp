@@ -220,6 +220,12 @@ private:
     };
     ResolvedTextStyle resolve_text_style() const;
     std::string apply_text_transform(const std::string& in) const;
+    /// Translate the CSS `font-variant` CSV (View::font_variant_) into SkShaper
+    /// OpenType feature tags and apply them to `canvas` (empty CSV → clear).
+    /// paint() AND text_edit_metrics() both call this so the caret/selection
+    /// geometry shapes with the SAME features the painter renders — without it
+    /// a tabular-nums / small-caps label's caret x drifts (pulp WYSIWYG sweep).
+    void apply_font_features(canvas::Canvas& canvas) const;
 
     std::string text_;
     std::string font_family_;     ///< Empty == widget default ("Inter")

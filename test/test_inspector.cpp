@@ -6104,6 +6104,97 @@ TEST_CASE("WYSIWYG caret: inherited letter-spacing + alignment shift the band",
     }
 }
 
+// ── WYSIWYG caret-x — font-variant feature regression (sweep P2) ─────────────
+//
+// Label::paint() applies the CSS font-variant CSV as SkShaper OpenType feature
+// tags (tabular-nums → tnum, small-caps → smcp, …) so HarfBuzz uses the
+// alternate glyph advances. A pre-fix text_edit_metrics() set the font + letter-
+// spacing but NOT the features, so for a font-variant label the caret/selection
+// x was shaped from the DEFAULT advances and drifted from the rendered glyphs.
+// The fix factors the feature setup into a shared apply_font_features() that
+// BOTH paint() and text_edit_metrics() call.
+//
+// We prove it with a feature-aware spy canvas: when font features are active the
+// per-glyph advance widens (mirroring how tabular-nums forces a wider, uniform
+// advance). The metrics MUST measure with features applied, so caret_x_by_byte
+// reflects the WIDER, feature-applied width — not the default-advance width.
+namespace {
+class FeatureWidthCanvas : public pulp::canvas::RecordingCanvas {
+public:
+    static constexpr float kBaseAdvance = 10.0f;
+    static constexpr float kFeatureAdvance = 14.0f;  // wider when features active
+
+    void set_font_features(std::vector<pulp::canvas::Canvas::FontFeature> f) override {
+        (void)f;
+        features_active_ = true;
+        set_feature_calls_++;
+    }
+    void clear_font_features() override {
+        features_active_ = false;
+    }
+    float measure_text(const std::string& text) override {
+        const float adv = features_active_ ? kFeatureAdvance : kBaseAdvance;
+        return static_cast<float>(text.size()) * adv;
+    }
+    bool features_active() const { return features_active_; }
+    int set_feature_calls() const { return set_feature_calls_; }
+
+private:
+    bool features_active_ = false;
+    int set_feature_calls_ = 0;
+};
+} // namespace
+
+TEST_CASE("WYSIWYG caret: font-variant features apply to text_edit_metrics",
+          "[inspect][overlay][wysiwyg][caret][issue-1737]") {
+    const std::string kText = "12345";  // 5 ASCII glyphs
+
+    Label label(kText);
+    label.set_bounds({0, 0, 400, 40});
+    label.set_text_align(LabelAlign::left);
+    label.set_font_variant("tabular-nums");  // → tnum feature
+
+    FeatureWidthCanvas canvas;
+    const auto m = label.text_edit_metrics(canvas, kText);
+
+    // The metrics resolver pushed the font-variant feature into the canvas.
+    REQUIRE(canvas.set_feature_calls() >= 1);
+
+    // caret_x_by_byte was shaped with features ACTIVE, so the end caret is the
+    // WIDER feature-applied width (5 × 14 = 70), not the default (5 × 10 = 50).
+    const float feature_w =
+        static_cast<float>(kText.size()) * FeatureWidthCanvas::kFeatureAdvance;
+    const float default_w =
+        static_cast<float>(kText.size()) * FeatureWidthCanvas::kBaseAdvance;
+    REQUIRE(m.caret_x_by_byte.size() == kText.size() + 1);
+    REQUIRE(m.caret_x_by_byte.back() == Catch::Approx(feature_w));
+    REQUIRE(m.caret_x_by_byte.back() != Catch::Approx(default_w));
+    // Per-byte boundaries land on the feature-applied advance grid.
+    for (std::size_t i = 0; i <= kText.size(); ++i)
+        REQUIRE(m.caret_x_by_byte[i] ==
+                Catch::Approx(static_cast<float>(i) *
+                              FeatureWidthCanvas::kFeatureAdvance));
+}
+
+// A label with NO font-variant must NOT activate features — caret shapes with
+// the default advances (the cross-check that the fix didn't force features on).
+TEST_CASE("WYSIWYG caret: empty font-variant leaves features clear",
+          "[inspect][overlay][wysiwyg][caret][issue-1737]") {
+    const std::string kText = "12345";
+    Label label(kText);
+    label.set_bounds({0, 0, 400, 40});
+    label.set_text_align(LabelAlign::left);
+    // No set_font_variant — empty CSV.
+
+    FeatureWidthCanvas canvas;
+    const auto m = label.text_edit_metrics(canvas, kText);
+
+    REQUIRE_FALSE(canvas.features_active());
+    const float default_w =
+        static_cast<float>(kText.size()) * FeatureWidthCanvas::kBaseAdvance;
+    REQUIRE(m.caret_x_by_byte.back() == Catch::Approx(default_w));
+}
+
 // WYSIWYG caret RESIZE/SCALE — once a text field has been RESIZED or SCALED
 // via the Select-tool corner drag, re-entering text edit must still land the
 // caret/selection on the RENDERED glyphs. There are two resize modes:
