@@ -109,6 +109,7 @@ COVERAGE_SURFACES = (
             "tools/scripts/test_*.py",
             "tools/deps/test_*.py",
             "tools/local-ci/test_*.py",
+            "tools/ci/test_*.py",
             "tools/import-validation/test_*.py",
             "tools/packages/test_*.py",
             "tools/scripts/_*.py",

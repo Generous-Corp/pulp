@@ -108,6 +108,9 @@ ignore:
   # Targeted top-level Python helper tests live next to the tools they
   # validate, but remain test code rather than product coverage surface.
   - "tools/test_*.py"
+  # CI bootstrap tests live beside the shell scripts they validate, but
+  # remain test code and must not appear as uncovered Python source.
+  - "tools/ci/test_*.py"
   # Motion visual self-check scripts are executable test harnesses. The
   # Python coverage lane runs a pure helper unit test for the analyzer
   # instead of counting those dependency-gated scripts as product code.
