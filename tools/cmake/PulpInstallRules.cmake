@@ -29,7 +29,8 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-format
-    pulp-canvas pulp-view pulp-host pulp-standalone pulp-dsl
+    pulp-canvas pulp-view-core pulp-view-script pulp-view
+    pulp-host pulp-standalone pulp-dsl
 )
 
 if(TARGET pulp-render)
@@ -378,4 +379,3 @@ if(PULP_HAS_SKIA)
         DESTINATION external
     )
 endif()
-

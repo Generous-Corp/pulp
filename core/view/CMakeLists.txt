@@ -1,5 +1,12 @@
-add_library(pulp-view)
+add_library(pulp-view-core)
+add_library(pulp::view-core ALIAS pulp-view-core)
+
+add_library(pulp-view-script)
+add_library(pulp::view-script ALIAS pulp-view-script)
+
+add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
+target_link_libraries(pulp-view PUBLIC pulp::view-script)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -126,15 +133,21 @@ add_custom_command(
     VERBATIM
 )
 
-# The generated .cpp is a real pulp-view source: CMake wires the
+# The generated .cpp is a real pulp-view-script source: CMake wires the
 # custom-command dependency automatically, so no separate aggregator target
 # is needed. widget_bridge.cpp includes only the (stable) declaration header.
-target_sources(pulp-view PRIVATE ${PULP_JS_EMBEDDED_SOURCE})
+target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE})
 
-target_include_directories(pulp-view
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+foreach(_pulp_view_target pulp-view-core pulp-view-script)
+    target_include_directories(${_pulp_view_target}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+endforeach()
+unset(_pulp_view_target)
+
+target_include_directories(pulp-view-script
     PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}  # For generated web_compat_preludes_gen.{hpp,cpp}
 )
@@ -161,10 +174,10 @@ set(PULP_JS_ENGINE_SOURCES
 if(PULP_JS_ENGINE STREQUAL "v8" OR (PULP_JS_ENGINE STREQUAL "auto" AND DEFINED V8_INCLUDE_DIR))
     if(DEFINED V8_INCLUDE_DIR AND DEFINED V8_LIB_DIR)
         list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
-        target_include_directories(pulp-view PRIVATE ${V8_INCLUDE_DIR})
-        target_link_directories(pulp-view PRIVATE ${V8_LIB_DIR})
+        target_include_directories(pulp-view-script PRIVATE ${V8_INCLUDE_DIR})
+        target_link_directories(pulp-view-script PRIVATE ${V8_LIB_DIR})
         if(V8_LIBRARY_PATH)
-            target_link_libraries(pulp-view PRIVATE ${V8_LIBRARY_PATH})
+            target_link_libraries(pulp-view-script PRIVATE ${V8_LIBRARY_PATH})
         else()
             set(PULP_V8_PROVIDER_NAMES)
             if(V8_LIBRARY_NAME)
@@ -179,7 +192,7 @@ if(PULP_JS_ENGINE STREQUAL "v8" OR (PULP_JS_ENGINE STREQUAL "auto" AND DEFINED V
             )
 
             if(PULP_V8_PROVIDER_LIBRARY)
-                target_link_libraries(pulp-view PRIVATE ${PULP_V8_PROVIDER_LIBRARY})
+                target_link_libraries(pulp-view-script PRIVATE ${PULP_V8_PROVIDER_LIBRARY})
             else()
                 message(FATAL_ERROR
                     "Could not find a V8 provider library in ${V8_LIB_DIR}. "
@@ -205,16 +218,16 @@ endif()
 
 # Set compile definitions for engine availability / defaults
 if(PULP_HAS_V8_ACTUAL)
-    target_compile_definitions(pulp-view PRIVATE PULP_HAS_V8=1)
+    target_compile_definitions(pulp-view-script PRIVATE PULP_HAS_V8=1)
 endif()
 
 # Only set non-QuickJS default when explicitly requested (not auto)
 if(PULP_JS_ENGINE STREQUAL "jsc")
     if(APPLE)
-        target_compile_definitions(pulp-view PRIVATE PULP_DEFAULT_ENGINE_JSC=1)
+        target_compile_definitions(pulp-view-script PRIVATE PULP_DEFAULT_ENGINE_JSC=1)
     endif()
 elseif(PULP_JS_ENGINE STREQUAL "v8" AND PULP_HAS_V8_ACTUAL)
-    target_compile_definitions(pulp-view PRIVATE PULP_DEFAULT_ENGINE_V8=1)
+    target_compile_definitions(pulp-view-script PRIVATE PULP_DEFAULT_ENGINE_V8=1)
 endif()
 # auto → QuickJS default (backward compatible with all existing code)
 
@@ -239,8 +252,7 @@ else()
     set(PULP_TEXT_ACCESSIBILITY_SOURCE src/text_accessibility.cpp)
 endif()
 
-target_sources(pulp-view PRIVATE
-    ${PULP_JS_ENGINE_SOURCES}
+target_sources(pulp-view-core PRIVATE
     src/accessibility.cpp
     ${PULP_TEXT_ACCESSIBILITY_SOURCE}
     src/table_model.cpp
@@ -250,25 +262,20 @@ target_sources(pulp-view PRIVATE
     src/image_cache.cpp
     src/resizable_shell.cpp
     src/graph_editor_view.cpp
-    src/script_engine.cpp
-    src/js_engine_recommend.cpp
     src/theme.cpp
     src/theme_contrast.cpp
     src/theme_presets.cpp
     src/appearance_tracker.cpp
     src/motion_preferences.cpp
     src/asset_manager.cpp
+    src/script_event_dispatch.cpp
     src/view.cpp
     src/yoga_layout.cpp
     src/layout_snapshot.cpp
     src/widgets.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
-    src/widget_bridge.cpp
-    src/widget_bridge_input.cpp
     src/editor_bridge.cpp
-    src/hot_reload.cpp
-    src/scripted_ui.cpp
     src/inspector.cpp
     src/sdl_window_host.cpp
     src/auto_ui.cpp
@@ -283,8 +290,6 @@ target_sources(pulp-view PRIVATE
     src/design_codegen.cpp
     src/lock_to_source.cpp
     src/jsx_lock.cpp
-    src/claude_bundle.cpp
-    src/claude_bundle_sources.cpp
     src/design_import_shortcuts.cpp
     src/design_import_designmd.cpp
     src/token_lock.cpp
@@ -319,6 +324,18 @@ target_sources(pulp-view PRIVATE
     src/inspector_window.cpp
 )
 
+target_sources(pulp-view-script PRIVATE
+    ${PULP_JS_ENGINE_SOURCES}
+    src/script_engine.cpp
+    src/js_engine_recommend.cpp
+    src/widget_bridge.cpp
+    src/widget_bridge_input.cpp
+    src/hot_reload.cpp
+    src/scripted_ui.cpp
+    src/claude_bundle.cpp
+    src/claude_bundle_sources.cpp
+)
+
 # WebView support — compiled separately to avoid platform WebView runtime
 # auto-loading in plugin hosts. Only link into standalone apps, not
 # AU/VST3/CLAP plugins.
@@ -342,8 +359,8 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     if(PkgConfig_FOUND)
         pkg_check_modules(PULP_ATK QUIET IMPORTED_TARGET atk)
         if(PULP_ATK_FOUND)
-            target_compile_definitions(pulp-view PRIVATE PULP_HAS_ATK=1)
-            target_link_libraries(pulp-view PRIVATE PkgConfig::PULP_ATK)
+            target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_ATK=1)
+            target_link_libraries(pulp-view-core PRIVATE PkgConfig::PULP_ATK)
             message(STATUS
                 "Pulp: Linux ATK ${PULP_ATK_VERSION} found — "
                 "accessibility_linux.cpp will use real AtkRole enum")
@@ -358,39 +375,44 @@ endif()
 
 option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
 if(PULP_BUILD_WEBVIEW)
-    target_sources(pulp-view PRIVATE src/web_view.cpp)
+    target_sources(pulp-view-core PRIVATE src/web_view.cpp)
     if(APPLE AND NOT PULP_IOS)
-        target_link_libraries(pulp-view PRIVATE "-framework WebKit")
+        target_link_libraries(pulp-view-core PRIVATE "-framework WebKit")
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
         pkg_check_modules(WEBKIT2GTK REQUIRED IMPORTED_TARGET webkit2gtk-4.1)
-        target_link_libraries(pulp-view PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
+        target_link_libraries(pulp-view-core PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
     # Android: WebView is handled by the Kotlin layer, not native GTK
     endif()
 endif()
 
 # CHOC headers (JS engine, utilities)
-target_include_directories(pulp-view PUBLIC
-    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
-)
+foreach(_pulp_view_target pulp-view-core pulp-view-script)
+    target_include_directories(${_pulp_view_target} PUBLIC
+        $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:include>
+    )
+endforeach()
+unset(_pulp_view_target)
 
-target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::host)
+target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::host)
+target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 # pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
-target_link_libraries(pulp-view PRIVATE pulp::runtime)
+target_link_libraries(pulp-view-core PRIVATE pulp::runtime)
+target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
 
 # yaml-cpp (MIT) — DESIGN.md frontmatter parsing.
 # Wrapped in $<BUILD_INTERFACE:...> because yaml-cpp is a build-only
 # dependency: Pulp's public headers never expose YAML types, so
 # downstream consumers of installed pulp-view (via PulpTargets export
 # set) must not see yaml-cpp as a transitive requirement.
-target_link_libraries(pulp-view PRIVATE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
+target_link_libraries(pulp-view-core PRIVATE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
 
 # JavaScriptCore framework for JSC backend (Apple only)
 if(APPLE)
-    target_link_libraries(pulp-view PRIVATE "-framework JavaScriptCore")
+    target_link_libraries(pulp-view-script PRIVATE "-framework JavaScriptCore")
 endif()
 
 if(WIN32)
@@ -399,26 +421,26 @@ endif()
 
 # Yoga layout engine (MIT)
 if(PULP_HAS_YOGA)
-    target_link_libraries(pulp-view PRIVATE
+    target_link_libraries(pulp-view-core PRIVATE
         $<BUILD_INTERFACE:yogacore>
         $<INSTALL_INTERFACE:Pulp::yogacore>
     )
-    target_compile_definitions(pulp-view PRIVATE PULP_HAS_YOGA=1)
+    target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_YOGA=1)
 endif()
 
 # SDL3 for cross-platform windowing
 if(PULP_HAS_SDL3)
-    target_link_libraries(pulp-view PRIVATE
+    target_link_libraries(pulp-view-core PRIVATE
         $<BUILD_INTERFACE:SDL3::SDL3-static>
         $<INSTALL_INTERFACE:Pulp::sdl3-static>
     )
-    target_compile_definitions(pulp-view PRIVATE PULP_HAS_SDL3=1)
+    target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_SDL3=1)
 endif()
 
 # Platform-specific window host and frameworks
 if(APPLE)
     if(PULP_IOS)
-        target_sources(pulp-view PRIVATE
+        target_sources(pulp-view-core PRIVATE
             platform/ios/window_host_ios.mm
             platform/ios/plugin_view_host_ios.mm
             platform/ios/accessibility_ios.mm
@@ -434,13 +456,13 @@ if(APPLE)
             src/screenshot_stub.cpp
             src/window_host_stub.cpp
         )
-        target_link_libraries(pulp-view PRIVATE
+        target_link_libraries(pulp-view-core PRIVATE
             "-framework UIKit"
             "-framework CoreGraphics"
             "-framework QuartzCore"
         )
     else()
-        target_sources(pulp-view PRIVATE
+        target_sources(pulp-view-core PRIVATE
             platform/mac/window_host_mac.mm
             platform/mac/window_host_mac_capture.mm
             platform/mac/window_host_mac_geometry.mm
@@ -461,7 +483,7 @@ if(APPLE)
             src/screenshot_stub.cpp
             src/window_host_stub.cpp
         )
-        target_link_libraries(pulp-view PRIVATE
+        target_link_libraries(pulp-view-core PRIVATE
             "-framework CoreServices"
             "-framework Cocoa"
             "-framework ImageIO"
@@ -469,14 +491,14 @@ if(APPLE)
         )
         # GPU rendering: link render module and Metal for CAMetalLayer-backed window host
         if(PULP_HAS_SKIA)
-            target_link_libraries(pulp-view PRIVATE pulp::render
+            target_link_libraries(pulp-view-core PRIVATE pulp::render
                 "-framework Metal"
                 "-framework QuartzCore"
             )
         endif()
     endif()
 elseif(WIN32)
-    target_sources(pulp-view PRIVATE
+    target_sources(pulp-view-core PRIVATE
         src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
@@ -487,16 +509,16 @@ elseif(WIN32)
     # Workstream 04 #247 phase 1: UIAutomationCore for
     # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
     # UiaRaiseStructureChangedEvent.
-    target_link_libraries(pulp-view PRIVATE uiautomationcore)
+    target_link_libraries(pulp-view-core PRIVATE uiautomationcore)
 elseif(ANDROID)
-    target_sources(pulp-view PRIVATE
+    target_sources(pulp-view-core PRIVATE
         src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
     )
     # Android accessibility wired via Kotlin TalkBack integration
 elseif(UNIX)
-    target_sources(pulp-view PRIVATE
+    target_sources(pulp-view-core PRIVATE
         src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
@@ -509,8 +531,8 @@ elseif(UNIX)
     if(PkgConfig_FOUND OR PKG_CONFIG_FOUND)
         pkg_check_modules(ATK_BRIDGE IMPORTED_TARGET atk-bridge-2.0)
         if(ATK_BRIDGE_FOUND)
-            target_compile_definitions(pulp-view PRIVATE PULP_HAS_ATSPI=1)
-            target_link_libraries(pulp-view PRIVATE PkgConfig::ATK_BRIDGE)
+            target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_ATSPI=1)
+            target_link_libraries(pulp-view-core PRIVATE PkgConfig::ATK_BRIDGE)
             message(STATUS "Pulp: AT-SPI bridge enabled (atk-bridge-2.0)")
         endif()
     endif()
@@ -526,10 +548,11 @@ endif()
 # PULP_BENCHMARK, and downstream targets that only use view APIs do
 # NOT need to link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
-    target_link_libraries(pulp-view PRIVATE pulp::render)
+    target_link_libraries(pulp-view-core PRIVATE pulp::render)
+    target_link_libraries(pulp-view-script PRIVATE pulp::render)
     # Slice 16 — when pulp-render is linked, WindowHost::mark_dirty() can
     # route dirty marks through a vblank-paced RenderLoop. GPU-off builds
     # (sanitizer matrix) have no pulp-render target, so mark_dirty() there
     # degrades to a direct repaint(); the define gates that cleanly.
-    target_compile_definitions(pulp-view PRIVATE PULP_VIEW_HAS_RENDER_LOOP=1)
+    target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_RENDER_LOOP=1)
 endif()

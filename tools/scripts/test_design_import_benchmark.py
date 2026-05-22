@@ -49,19 +49,19 @@ class BinarySizeTests(unittest.TestCase):
             write_sized(primary_archive, 1)
             self.assertEqual(dib.default_pulp_view_archive(build), primary_archive)
 
-    def test_object_lookup_prefers_pulp_view_obj_variant(self) -> None:
+    def test_object_lookup_prefers_pulp_view_script_obj_variant(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             build = pathlib.Path(td) / "build"
-            preferred = build / "core" / "view" / "CMakeFiles" / "pulp-view.dir" / "src" / "widget_bridge.cpp.obj"
+            preferred = build / "core" / "view" / "CMakeFiles" / "pulp-view-script.dir" / "src" / "widget_bridge.cpp.obj"
             fallback = build / "other" / "widget_bridge.cpp.obj"
             direct = build / "direct" / "object.obj"
             write_sized(fallback, 10)
             write_sized(preferred, 20)
             write_sized(direct, 30)
 
-            variants = dib.object_name_variants("core/view/CMakeFiles/pulp-view.dir/src/widget_bridge.cpp.o")
-            obj_variants = dib.object_name_variants("core/view/CMakeFiles/pulp-view.dir/src/widget_bridge.cpp.obj")
-            found = dib.find_build_object(build, "core/view/CMakeFiles/pulp-view.dir/src/widget_bridge.cpp.o")
+            variants = dib.object_name_variants("core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge.cpp.o")
+            obj_variants = dib.object_name_variants("core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge.cpp.obj")
+            found = dib.find_build_object(build, "core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge.cpp.o")
             direct_found = dib.find_build_object(build, "direct/object.obj")
             missing = dib.find_build_object(build, "missing-object.o")
 
@@ -71,6 +71,18 @@ class BinarySizeTests(unittest.TestCase):
         self.assertEqual(found, preferred)
         self.assertEqual(direct_found, direct)
         self.assertIsNone(missing)
+
+    def test_split_view_archives_are_summed_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            build = pathlib.Path(td) / "build"
+            core = build / "core" / "view" / "libpulp-view-core.a"
+            script = build / "core" / "view" / "libpulp-view-script.a"
+            compat = build / "core" / "view" / "libpulp-view.a"
+            write_sized(core, 3_000)
+            write_sized(script, 7_000)
+            write_sized(compat, 100)
+
+            self.assertEqual(dib.default_pulp_view_archives(build), [core, script, compat])
 
     def test_parse_size_output_ignores_headers_and_non_numeric_rows(self) -> None:
         output = """\

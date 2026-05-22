@@ -64,35 +64,35 @@ if [[ -n "$cache" ]]; then
   esac
 fi
 
-# --- 3. pulp-view static library must contain Skia / Graphite symbols ------
+# --- 3. pulp-view-core static library must contain Skia / Graphite symbols ---
 # The library lives at either:
-#   <build>/core/view/libpulp-view.a   (build tree)
-#   <install>/lib/libpulp-view.a       (install tree)
-pulp_view_a=""
+#   <build>/core/view/libpulp-view-core.a   (build tree)
+#   <install>/lib/libpulp-view-core.a       (install tree)
+pulp_view_core_a=""
 for c in \
-  "$SDK_PATH/core/view/libpulp-view.a" \
-  "$SDK_PATH/lib/libpulp-view.a"
+  "$SDK_PATH/core/view/libpulp-view-core.a" \
+  "$SDK_PATH/lib/libpulp-view-core.a"
 do
-  if [[ -f "$c" ]]; then pulp_view_a="$c"; break; fi
+  if [[ -f "$c" ]]; then pulp_view_core_a="$c"; break; fi
 done
 
-if [[ -z "$pulp_view_a" ]]; then
-  red "  FAIL: libpulp-view.a not found under $SDK_PATH"
+if [[ -z "$pulp_view_core_a" ]]; then
+  red "  FAIL: libpulp-view-core.a not found under $SDK_PATH"
   fail=1
 else
-  echo "  pulp-view: $pulp_view_a"
+  echo "  pulp-view-core: $pulp_view_core_a"
   # Skia presence: look for SkSurface symbols
-  if nm "$pulp_view_a" 2>/dev/null | grep -qE 'SkSurface'; then
+  if nm "$pulp_view_core_a" 2>/dev/null | grep -qE 'SkSurface'; then
     grn "  ✓ Skia symbols present (SkSurface)"
   else
-    red "  FAIL: libpulp-view.a has no Skia symbols (SDK shipped without GPU — #1817)"
+    red "  FAIL: libpulp-view-core.a has no Skia symbols (SDK shipped without GPU — #1817)"
     fail=1
   fi
   # Graphite presence: look for skgpu::graphite symbols
-  if nm "$pulp_view_a" 2>/dev/null | grep -qE 'skgpu.*graphite|graphite.*Resource'; then
+  if nm "$pulp_view_core_a" 2>/dev/null | grep -qE 'skgpu.*graphite|graphite.*Resource'; then
     grn "  ✓ Graphite symbols present (skgpu::graphite)"
   else
-    yel "  WARN: libpulp-view.a has no Graphite symbols — GPU path may be unavailable on this lane"
+    yel "  WARN: libpulp-view-core.a has no Graphite symbols — GPU path may be unavailable on this lane"
     warn=1
   fi
 fi

@@ -21,6 +21,13 @@ supports the basic function-component + `useState` + `useEffect` +
 exercised. The matrix entries here are currently empty pending a
 dedicated end-to-end React-feature audit.
 
+Platform hosts deliver global key events through the core view
+script-events hook when `pulp::view-script` is linked. `WidgetBridge`
+registers the React/runtime fan-out from the keyboard-input translation
+unit, so `window.addEventListener('keydown', ...)` and
+`registerShortcut(...)` continue to work for React apps without forcing
+core-only `pulp::view-core` consumers to link the JS runtime.
+
 Follow-up: enumerate observed React features (concurrent rendering,
 suspense boundaries, transition state, error boundaries, portal
 targets) and populate per-feature entries.

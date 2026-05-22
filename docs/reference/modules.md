@@ -717,6 +717,12 @@ Full widget toolkit with CSS-inspired layout and JS scripting.
 
 **Link:** `pulp::view` · **Include prefix:** `<pulp/view/...>`
 
+`pulp::view` is the full compatibility target and links both native widgets and
+the JS runtime bridge. Baked/native UI code that constructs `View` trees
+directly and does not evaluate JS can link `pulp::view-core`; code that uses
+`ScriptEngine`, `WidgetBridge`, scripted UIs, or runtime import should link
+`pulp::view-script` or the full `pulp::view` target.
+
 ### Creating a UI
 
 ```cpp

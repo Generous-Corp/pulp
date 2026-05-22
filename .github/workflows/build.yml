@@ -843,7 +843,10 @@ jobs:
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
           }
-          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
+          if (!(Test-Path sdk-staging/lib/pulp-view-core.lib)) {
+            throw "sdk-staging/lib/pulp-view-core.lib missing"
+          }
+          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
   # Branch protection requires a context literally named `macos`. Keep it

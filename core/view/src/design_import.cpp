@@ -3,8 +3,6 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/zip.hpp>
-#include <pulp/view/script_engine.hpp>
-#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -344,6 +342,32 @@ std::vector<std::string> extract_html_style_blocks(const std::string& html) {
     return blocks;
 }
 
+std::optional<std::string> extract_bundler_template_html(const std::string& html) {
+    const std::string opener_dq = "<script type=\"__bundler/template\"";
+    const std::string opener_sq = "<script type='__bundler/template'";
+    size_t tag_start = html.find(opener_dq);
+    size_t header_len = opener_dq.size();
+    if (tag_start == std::string::npos) {
+        tag_start = html.find(opener_sq);
+        header_len = opener_sq.size();
+        if (tag_start == std::string::npos) return std::nullopt;
+    }
+
+    const size_t open_end = html.find('>', tag_start + header_len);
+    if (open_end == std::string::npos) return std::nullopt;
+
+    const size_t close = html.find("</script>", open_end + 1);
+    if (close == std::string::npos) return std::nullopt;
+
+    try {
+        auto value = choc::json::parseValue(html.substr(open_end + 1, close - (open_end + 1)));
+        if (!value.isString()) return std::nullopt;
+        return std::string(value.getString());
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 } // namespace
 
 ClaudeClassNameRules extract_claude_classnames(const std::string& html) {
@@ -356,14 +380,12 @@ ClaudeClassNameRules extract_claude_classnames(const std::string& html) {
         collect_classnames_from_css(css, rules);
     }
 
-    // For self-bundled Claude Design exports, the actual app CSS lives
-    // inside the `<script type="__bundler/template">` payload (a
-    // JSON-encoded HTML string). Unwrap and walk its <style> blocks
-    // too. parse_claude_bundle silently returns nullopt when the
-    // envelope is missing — that's the expected branch for hand-rolled
-    // fixtures, so we just fall through.
-    if (auto bundle = parse_claude_bundle(html)) {
-        for (auto& css : extract_html_style_blocks(bundle->template_html)) {
+    // For self-bundled Claude Design exports, the actual app CSS lives inside
+    // the JSON-encoded `<script type="__bundler/template">` payload. Decode
+    // only that template here so the static importer stays linkable from the
+    // core view library without pulling in the runtime-import JS harness.
+    if (auto template_html = extract_bundler_template_html(html)) {
+        for (auto& css : extract_html_style_blocks(*template_html)) {
             collect_classnames_from_css(css, rules);
         }
     }

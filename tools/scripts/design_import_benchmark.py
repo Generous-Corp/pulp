@@ -4,7 +4,7 @@
 The C++ harness emits one JSON file per lane. This script drives the live,
 baked-native, and baked-cpp lanes, aggregates the three Phase 5 metric groups,
 and estimates the removable live-runtime linked footprint by summing the object
-files Phase 9 would move behind a target split.
+files that live behind the Phase 9 script-runtime target split.
 """
 
 from __future__ import annotations
@@ -26,11 +26,11 @@ PHASE9_DELTA_BYTES_THRESHOLD = 2 * 1024 * 1024
 PHASE9_DELTA_PERCENT_THRESHOLD = 0.30
 
 DEFAULT_LIVE_RUNTIME_OBJECTS = [
-    "core/view/CMakeFiles/pulp-view.dir/src/js_quickjs_engine.cpp.o",
-    "core/view/CMakeFiles/pulp-view.dir/src/js_engine_factory.cpp.o",
-    "core/view/CMakeFiles/pulp-view.dir/src/script_engine.cpp.o",
-    "core/view/CMakeFiles/pulp-view.dir/src/widget_bridge.cpp.o",
-    "core/view/CMakeFiles/pulp-view.dir/src/widget_bridge_input.cpp.o",
+    "core/view/CMakeFiles/pulp-view-script.dir/src/js_quickjs_engine.cpp.o",
+    "core/view/CMakeFiles/pulp-view-script.dir/src/js_engine_factory.cpp.o",
+    "core/view/CMakeFiles/pulp-view-script.dir/src/script_engine.cpp.o",
+    "core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge.cpp.o",
+    "core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge_input.cpp.o",
 ]
 
 BAKED_LANES = ("baked-native", "baked-cpp")
@@ -80,14 +80,31 @@ def default_bench_exe(build_dir: Path) -> Path:
     return found if found else candidates[0]
 
 
-def default_pulp_view_archive(build_dir: Path) -> Path | None:
-    candidates = [
-        build_dir / "core" / "view" / "libpulp-view.a",
-        build_dir / "core" / "view" / "Debug" / "pulp-view.lib",
-        build_dir / "core" / "view" / "Release" / "pulp-view.lib",
-        build_dir / "core" / "view" / "pulp-view.lib",
+def archive_candidates(build_dir: Path, target: str) -> list[Path]:
+    return [
+        build_dir / "core" / "view" / f"lib{target}.a",
+        build_dir / "core" / "view" / "Debug" / f"{target}.lib",
+        build_dir / "core" / "view" / "Release" / f"{target}.lib",
+        build_dir / "core" / "view" / f"{target}.lib",
     ]
-    return first_existing(candidates)
+
+
+def default_pulp_view_archive(build_dir: Path) -> Path | None:
+    return first_existing(archive_candidates(build_dir, "pulp-view"))
+
+
+def default_pulp_view_archives(build_dir: Path) -> list[Path]:
+    split_archives = [
+        archive
+        for target in ("pulp-view-core", "pulp-view-script", "pulp-view")
+        if (archive := first_existing(archive_candidates(build_dir, target))) is not None
+    ]
+    if any("pulp-view-core" in archive.name or "pulp-view-script" in archive.name
+           for archive in split_archives):
+        return split_archives
+
+    fallback = default_pulp_view_archive(build_dir)
+    return [fallback] if fallback else []
 
 
 def stat_size(path: Path) -> int:
@@ -112,7 +129,7 @@ def find_build_object(build_dir: Path, rel: str) -> Path | None:
     if direct.exists():
         return direct
 
-    preferred_fragment = str(Path("core") / "view" / "CMakeFiles" / "pulp-view.dir")
+    preferred_fragment = str(Path("core") / "view" / "CMakeFiles" / "pulp-view-script.dir")
     matches: list[Path] = []
     for name in object_name_variants(rel):
         matches.extend(build_dir.rglob(name))
@@ -163,7 +180,7 @@ def measure_binary_sizes(
 ) -> dict[str, Any]:
     build_dir = build_dir.resolve()
     bench_exe = (bench_exe or default_bench_exe(build_dir)).resolve()
-    view_archive = default_pulp_view_archive(build_dir)
+    view_archives = default_pulp_view_archives(build_dir)
 
     objects = []
     live_runtime_file_bytes = 0
@@ -182,8 +199,8 @@ def measure_binary_sizes(
         live_runtime_file_bytes += file_size
         live_runtime_linked_bytes += linked_size
 
-    pulp_view_bytes = stat_size(view_archive) if view_archive else 0
-    pulp_view_linked_bytes = linked_size_bytes(view_archive) if view_archive else 0
+    pulp_view_bytes = sum(stat_size(path) for path in view_archives)
+    pulp_view_linked_bytes = sum(linked_size_bytes(path) for path in view_archives)
     app_bytes = stat_size(bench_exe)
     app_linked_bytes = linked_size_bytes(bench_exe)
     delta_percent_of_pulp_view = (
@@ -199,7 +216,8 @@ def measure_binary_sizes(
     )
 
     return {
-        "pulp_view_archive_path": str(view_archive) if view_archive else "",
+        "pulp_view_archive_path": ";".join(str(path) for path in view_archives),
+        "pulp_view_archive_paths": [str(path) for path in view_archives],
         "pulp_view_archive_bytes": pulp_view_bytes,
         "pulp_view_archive_linked_bytes": pulp_view_linked_bytes,
         "benchmark_app_path": str(bench_exe),

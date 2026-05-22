@@ -133,8 +133,8 @@ jobs:
 
       # Fetch Skia prebuilt binaries — the root fix for pulp #1817.
       #
-      # The release tarball must ship libpulp-view.a with MacGpuWindowHost
-      # compiled in, otherwise SDK consumers that pass `use_gpu=true`
+      # The release tarball must ship the view-core archive with
+      # MacGpuWindowHost compiled in, otherwise SDK consumers that pass `use_gpu=true`
       # silently fall back to CoreGraphics CPU rendering. The Skia
       # binaries are pinned in tools/deps/manifest.json and live at
       # skia-builder's GitHub release assets — neither bootstrap nor
@@ -298,7 +298,7 @@ jobs:
       # #720). For the SDK tarball, do a SEPARATE configure+build into
       # `build-sdk/` with WebView=ON so plugin authors who consume the
       # SDK still get WebViewPanel + make_webview_embedded_resource_fetcher
-      # symbols in libpulp-view.a. Using a separate build directory
+      # symbols in the split view-core archive. Using a separate build directory
       # avoids re-linking the already-built CLI binary against
       # libwebkit2gtk during the reconfigure (which would defeat the
       # purpose of the split).
@@ -345,11 +345,12 @@ jobs:
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
           test -f sdk-staging/lib/libpulp-view.a
+          test -f sdk-staging/lib/libpulp-view-core.a
           python3 - <<'PY'
           import os
           from pathlib import Path
           platform = os.environ["MATRIX_PLATFORM"]
-          data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()
+          data = Path("sdk-staging/lib/libpulp-view-core.a").read_bytes()
           # WebView lane (existing).
           assert b"WebViewPanel" in data, "WebViewPanel symbol missing"
           assert b"make_webview_embedded_resource_fetcher" in data, (
@@ -366,12 +367,12 @@ jobs:
           # follow-up (see pulp #1817 plan, Layer 3).
           if platform == "darwin-arm64":
               assert b"MacGpuWindowHost" in data, (
-                  "MacGpuWindowHost symbol missing from libpulp-view.a — "
+                  "MacGpuWindowHost symbol missing from libpulp-view-core.a — "
                   "Skia path was #ifdef'd out at compile time. Consumers "
                   "passing use_gpu=true will silently fall back to "
                   "CoreGraphics CPU rendering. See pulp #1817."
               )
-              print("OK: MacGpuWindowHost symbol present in libpulp-view.a")
+              print("OK: MacGpuWindowHost symbol present in libpulp-view-core.a")
           PY
           mv sdk-staging pulp-sdk
           tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
@@ -385,7 +386,10 @@ jobs:
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
           }
-          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
+          if (!(Test-Path sdk-staging/lib/pulp-view-core.lib)) {
+            throw "sdk-staging/lib/pulp-view-core.lib missing"
+          }
+          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
           Rename-Item sdk-staging pulp-sdk
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk

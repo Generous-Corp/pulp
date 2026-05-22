@@ -5,10 +5,10 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/modal.hpp>
+#include <pulp/view/script_event_dispatch.hpp>
 
 #include "window_host_mac_capture.h"
 #include "window_host_mac_internal.hpp"
-#include <pulp/view/widget_bridge.hpp>
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -671,7 +671,7 @@ static void install_app_menu(NSString* appName) {
 // pulp #2128 follow-up — NSResponder routes Cmd-modified key chords
 // through performKeyEquivalent:, NOT keyDown:. Without this override,
 // every Cmd+,/Cmd+S/Cmd+? chord is consumed by the responder chain and
-// never reaches View::on_global_key OR WidgetBridge::dispatch_global_key,
+// never reaches View::on_global_key OR the script global-key dispatcher,
 // so `registerShortcut(...)` callbacks and `window.addEventListener
 // ('keydown', ...)` listeners are silently dead for Cmd-modified chords.
 - (BOOL)performKeyEquivalent:(NSEvent*)event {
@@ -684,11 +684,11 @@ static void install_app_menu(NSString* appName) {
     gke.is_down = true;
     gke.is_repeat = event.isARepeat;
     if (self.rootView->on_global_key) self.rootView->on_global_key(gke);
-    // Fan out to every live WidgetBridge so `@pulp/react` apps (Spectr,
-    // etc.) and the design-tool both receive Cmd-modified chords without
-    // each having to wire its own `on_global_key` lambda.
-    pulp::view::WidgetBridge::dispatch_global_key(
-        static_cast<int>(key), mods, /*is_down=*/true);
+    // Fan out through the script runtime hook when that target is linked;
+    // core-only view consumers keep this as a no-op.
+    pulp::view::script_events::dispatch_global_key(static_cast<int>(key),
+                                                   mods,
+                                                   /*is_down=*/true);
     // Return NO so the responder chain still considers standard menu
     // shortcuts (Cmd+W close, Cmd+Q quit, etc.) — the bridge fan-out is
     // additive, not consuming.
@@ -769,8 +769,9 @@ static void install_app_menu(NSString* appName) {
         // widget owns focus (see WidgetBridge::forward_key_event), so
         // typing `?` into a search box doesn't trigger a `?` shortcut.
         // This is additive — focused-view delivery still runs below.
-        pulp::view::WidgetBridge::dispatch_global_key(
-            static_cast<int>(key), mods, /*is_down=*/true);
+        pulp::view::script_events::dispatch_global_key(static_cast<int>(key),
+                                                       mods,
+                                                       /*is_down=*/true);
 
         if (key == pulp::view::KeyCode::escape && self.rootView) {
             if (auto* modal = find_topmost_modal(self.rootView)) {

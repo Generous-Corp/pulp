@@ -71,6 +71,12 @@ are ignored. The default `--snapshot-semantics fail` exits with code 2. `warn`
 emits the IR and records a `snapshot-dynamic-api` diagnostic; `accept` emits
 the IR or C++ with provenance recording the accepted policy.
 
+Generated baked/native artifacts can link the core view target,
+`pulp::view-core`, when they only construct `View` trees and do not evaluate
+JS. Live import, `ScriptEngine`, `WidgetBridge`, and scripted UI consumers
+should link `pulp::view-script` or the full compatibility target,
+`pulp::view`.
+
 ### export-tokens
 
 Export a Pulp theme as W3C Design Tokens JSON.
