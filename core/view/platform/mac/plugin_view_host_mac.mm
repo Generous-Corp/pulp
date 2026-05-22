@@ -10,6 +10,8 @@
 #import <Cocoa/Cocoa.h>
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
+#include <exception>
 
 #include <functional>
 #include <memory>
@@ -104,8 +106,15 @@ pulp::view::Point pulp_plugin_local_point(NSView* self, NSEvent* event) {
     return pulp::view::Point{static_cast<float>(p.x), h - static_cast<float>(p.y)};
 }
 
+// Dispatched handlers (on_click / on_mouse_* / on_pointer_event / on_drag) are
+// std::function callbacks — for a scripted UI they reach into the JS bridge and
+// CAN throw. If a C++ exception unwinds out of these functions it crosses the
+// AppKit ObjC frame that delivered the event → undefined behavior / host crash.
+// Wrap each dispatch in try/catch, exactly as the standalone PulpView mouse
+// handlers do (window_host_mac.mm), so a throwing handler is contained.
 void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
                             pulp::view::Point pt, pulp::view::View** drag_target) {
+  try {
     if (!root) return;
     *drag_target = root->hit_test(pt);
     pulp::view::ComboBox::notify_global_click(*drag_target);
@@ -130,10 +139,16 @@ void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
         bme.position = to_local(pt, b, root);
         b->on_pointer_event(bme);
     }
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[plugin-view-host] mouseDown handler threw: %s\n", e.what());
+  } catch (...) {
+    std::fprintf(stderr, "[plugin-view-host] mouseDown handler threw (unknown)\n");
+  }
 }
 
 void pulp_plugin_mouse_drag(pulp::view::View* root, pulp::view::Point pt,
                             pulp::view::View** drag_target) {
+  try {
     using namespace pulp::view::mac_geometry;
     if (!*drag_target || !root) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
@@ -144,10 +159,16 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, pulp::view::Point pt,
         if (!b->on_drag) continue;
         (*b).on_drag(to_local(pt, b, root));
     }
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
+  } catch (...) {
+    std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw (unknown)\n");
+  }
 }
 
 void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
                           pulp::view::Point pt, pulp::view::View** drag_target) {
+  try {
     using namespace pulp::view::mac_geometry;
     if (!*drag_target || !root) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
@@ -174,9 +195,17 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     }
     if (released == *drag_target && click_handler) click_handler();
     *drag_target = nullptr;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
+    if (drag_target) *drag_target = nullptr;
+  } catch (...) {
+    std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw (unknown)\n");
+    if (drag_target) *drag_target = nullptr;
+  }
 }
 
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
+  try {
     if (!root) return;
     auto* target = root->hit_test(pt);
     if (!target) return;
@@ -195,6 +224,11 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
         if (v->on_pointer_event) v->on_mouse_event(me);
     }
     target->on_mouse_event(me);
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[plugin-view-host] scrollWheel handler threw: %s\n", e.what());
+  } catch (...) {
+    std::fprintf(stderr, "[plugin-view-host] scrollWheel handler threw (unknown)\n");
+  }
 }
 
 } // namespace

@@ -700,7 +700,7 @@ int ensure_repo_build_configured(const fs::path& project_root, const fs::path& b
         build_type = bt;
     }
     std::string configure_cmd = "cmake -B " + shell_quote(build_dir) + " -S " + shell_quote(project_root)
-                              + " -DCMAKE_BUILD_TYPE=" + build_type;
+                              + " -DCMAKE_BUILD_TYPE=" + shell_quote(build_type);
     append_windows_visual_studio_generator_args(configure_cmd);
     std::cout << "Build type: " << build_type
               << (build_type == "Release" ? "" : "  (set PULP_BUILD_TYPE=Release for perf)")
