@@ -810,6 +810,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     std::memcpy(rt.output_ptrs[c], input.channel_ptr(c),
                                 sizeof(float) * static_cast<size_t>(num_samples));
                 }
+                for (int c = chs; c < static_cast<int>(rt.output_ptrs.size()); ++c) {
+                    std::memset(rt.output_ptrs[c], 0,
+                                sizeof(float) * static_cast<size_t>(num_samples));
+                }
                 break;
             }
             case NodeType::Plugin: {

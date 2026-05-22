@@ -22,6 +22,21 @@
 using namespace pulp::host;
 using Catch::Matchers::WithinAbs;
 
+namespace {
+PluginInfo make_plugin_info(std::string name,
+                            int num_inputs = 0,
+                            int num_outputs = 0,
+                            std::string category = "Fx") {
+    PluginInfo info{};
+    info.name = std::move(name);
+    info.format = PluginFormat::CLAP;
+    info.num_inputs = num_inputs;
+    info.num_outputs = num_outputs;
+    info.category = std::move(category);
+    return info;
+}
+} // namespace
+
 // ── SignalGraph tests ───────────────────────────────────────────────────
 
 TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
@@ -693,6 +708,83 @@ TEST_CASE("SignalGraph process ignores non-positive block sizes",
     graph.release();
 }
 
+TEST_CASE("SignalGraph clears stale audio input channels",
+          "[host][graph][routing][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(2, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto output = graph.add_output_node(2, "out");
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(input, 1, gain, 1));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connect(gain, 1, output, 1));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> first_l(4, 0.25f);
+    std::vector<float> first_r(4, 0.75f);
+    std::vector<float> out_l(4, -1.0f);
+    std::vector<float> out_r(4, -1.0f);
+    const float* first_ptrs[2] = {first_l.data(), first_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> first_view(first_ptrs, 2, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 2, 4);
+
+    graph.process(out_view, first_view, 4);
+    for (float sample : out_l) REQUIRE(sample == 0.25f);
+    for (float sample : out_r) REQUIRE(sample == 0.75f);
+
+    std::vector<float> second_l(4, 0.5f);
+    const float* second_ptrs[1] = {second_l.data()};
+    pulp::audio::BufferView<const float> second_view(second_ptrs, 1, 4);
+    std::fill(out_l.begin(), out_l.end(), -1.0f);
+    std::fill(out_r.begin(), out_r.end(), -1.0f);
+
+    graph.process(out_view, second_view, 4);
+    for (float sample : out_l) REQUIRE(sample == 0.5f);
+    for (float sample : out_r) REQUIRE(sample == 0.0f);
+}
+
+TEST_CASE("SignalGraph placeholder plugin nodes preserve identity and clear extra outputs",
+          "[host][graph][routing][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    PluginInfo missing = make_plugin_info("Missing CLAP", 1, 2);
+    missing.manufacturer = "Pulp";
+    missing.version = "1.2.3";
+    missing.path = "/tmp/not-a-plugin.clap";
+    missing.unique_id = "missing.plugin";
+    auto plugin = graph.add_plugin_node(missing);
+    auto output = graph.add_output_node(2, "out");
+
+    const auto* plugin_node = graph.node(plugin);
+    REQUIRE(plugin_node != nullptr);
+    REQUIRE(plugin_node->type == NodeType::Plugin);
+    REQUIRE_FALSE(plugin_node->plugin);
+    REQUIRE(plugin_node->plugin_info.name == "Missing CLAP");
+    REQUIRE(plugin_node->plugin_info.unique_id == "missing.plugin");
+    REQUIRE(plugin_node->num_input_ports == 1);
+    REQUIRE(plugin_node->num_output_ports == 2);
+
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 1, output, 1));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples(4, 0.625f);
+    std::vector<float> out_l(4, -1.0f);
+    std::vector<float> out_r(4, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 2, 4);
+
+    graph.process(out_view, in_view, 4);
+
+    for (float sample : out_l) REQUIRE(sample == 0.625f);
+    for (float sample : out_r) REQUIRE(sample == 0.0f);
+}
+
 TEST_CASE("SignalGraph PDC aligns parallel branches", "[host][graph][pdc]") {
     // in → A(latency=32) → mix
     // in → B(latency=0)  → mix   (should be delayed by 32 so A and B align)
@@ -781,7 +873,7 @@ public:
     int latency_samples() const override { return 0; }
     int tail_samples() const override { return 0; }
 private:
-    PluginInfo info_{"SC", "", "", "", "", PluginFormat::CLAP};
+    PluginInfo info_ = make_plugin_info("SC");
 };
 } // namespace
 
@@ -925,7 +1017,7 @@ public:
     int tail_samples() const override { return 0; }
     const pulp::midi::MidiBuffer& last_seen() const { return last_seen_; }
 private:
-    PluginInfo info_{"MidiFwd", "", "", "", "", PluginFormat::CLAP};
+    PluginInfo info_ = make_plugin_info("MidiFwd", 0, 0, "MidiEffect");
     pulp::midi::MidiBuffer last_seen_;
 };
 } // namespace
@@ -975,6 +1067,12 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     REQUIRE(arrived[0].sample_offset == 0);
     REQUIRE(arrived[1].sample_offset == 16);
 
+    arrived.clear();
+    graph.process(ov, iv, 32);
+    REQUIRE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived.empty());
+    REQUIRE(fwd_ptr->last_seen().empty());
+
     graph.release();
 }
 
@@ -1015,8 +1113,17 @@ public:
     static constexpr uint32_t kParamId = 42;
 
     explicit MockAutomatable(ParamRate rate = ParamRate::ControlRate,
-                             bool stepped = false)
-        : rate_(rate), stepped_(stepped) {}
+                             bool stepped = false,
+                             bool automatable = true,
+                             bool read_only = false,
+                             float min_value = 0.0f,
+                             float max_value = 1.0f)
+        : rate_(rate),
+          stepped_(stepped),
+          automatable_(automatable),
+          read_only_(read_only),
+          min_value_(min_value),
+          max_value_(max_value) {}
 
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
@@ -1038,10 +1145,11 @@ public:
         HostParamInfo p;
         p.id = kParamId;
         p.name = "mod";
-        p.min_value = 0.0f;
-        p.max_value = 1.0f;
-        p.default_value = 0.0f;
-        p.flags.automatable = true;
+        p.min_value = min_value_;
+        p.max_value = max_value_;
+        p.default_value = min_value_;
+        p.flags.automatable = automatable_;
+        p.flags.read_only = read_only_;
         p.flags.stepped = stepped_;
         p.rate = rate_;
         return {p};
@@ -1061,9 +1169,13 @@ public:
     const std::vector<pulp::host::ParameterEvent>& received() const { return received_; }
 
 private:
-    PluginInfo info_{"MockAuto", "", "", "", "", PluginFormat::CLAP};
+    PluginInfo info_ = make_plugin_info("MockAuto", 0, 1);
     ParamRate rate_ = ParamRate::ControlRate;
     bool stepped_ = false;
+    bool automatable_ = true;
+    bool read_only_ = false;
+    float min_value_ = 0.0f;
+    float max_value_ = 1.0f;
     std::vector<pulp::host::ParameterEvent> received_;
 };
 } // namespace
@@ -1138,6 +1250,37 @@ TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
         in_node, 0, plug, MockAutomatable::kParamId + 1, 0.0f, 1.0f));
 
     REQUIRE(graph.connections().empty());
+}
+
+TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
+          "[host][graph][automation][coverage][phase3]") {
+    SignalGraph graph;
+    auto source = graph.add_input_node(1, "source");
+    auto passthrough = graph.add_gain_node("passthrough");
+    auto read_only = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(ParamRate::ControlRate, false, true, true),
+        0, 1, "read-only");
+    auto non_automatable = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(ParamRate::ControlRate, false, false),
+        0, 1, "not-automatable");
+    auto unresolved = graph.add_unresolved_plugin_node(
+        make_plugin_info("missing", 0, 1),
+        0, 1, "missing");
+    auto target = graph.add_plugin_node(std::make_unique<MockAutomatable>(), 1, 1,
+                                        "target");
+
+    REQUIRE_FALSE(graph.connect_automation(
+        source, 0, read_only, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_automation(
+        source, 0, non_automatable, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_automation(
+        source, 0, unresolved, MockAutomatable::kParamId, 0.0f, 1.0f));
+
+    REQUIRE(graph.connect(target, 0, passthrough, 0));
+    REQUIRE_FALSE(graph.connect_automation(
+        passthrough, 0, target, MockAutomatable::kParamId, 0.0f, 1.0f));
+
+    REQUIRE(graph.connections().size() == 1);
 }
 
 TEST_CASE("SignalGraph automation clamps add-mode and stored smoothing",
@@ -1225,6 +1368,42 @@ TEST_CASE("SignalGraph connect_audio_rate_modulation gates on audio-rate params"
         0.0f, AutomationMix::Add));
 }
 
+TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cycle edges",
+          "[host][graph][automation][audio-rate][coverage][phase3]") {
+    SignalGraph graph;
+    auto source = graph.add_input_node(1, "source");
+    auto passthrough = graph.add_gain_node("passthrough");
+    auto read_only = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(ParamRate::AudioRate, false, true, true),
+        0, 1, "read-only");
+    auto not_automatable = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(ParamRate::AudioRate, false, false),
+        0, 1, "not-automatable");
+    auto unresolved = graph.add_unresolved_plugin_node(
+        make_plugin_info("missing", 0, 1),
+        0, 1, "missing");
+    auto target = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(ParamRate::AudioRate),
+        1, 1, "target");
+
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        999, 0, target, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        source, 0, 999, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        source, 0, read_only, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        source, 0, not_automatable, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        source, 0, unresolved, MockAutomatable::kParamId, 0.0f, 1.0f));
+
+    REQUIRE(graph.connect(target, 0, passthrough, 0));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        passthrough, 0, target, MockAutomatable::kParamId, 0.0f, 1.0f));
+
+    REQUIRE(graph.connections().size() == 1);
+}
+
 TEST_CASE("SignalGraph audio-rate modulation delivers one event per sample",
           "[host][graph][automation][audio-rate]") {
     SignalGraph graph;
@@ -1302,6 +1481,39 @@ TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge orde
     REQUIRE(std::abs(run(true) - 0.25f) < 1e-6f);
 }
 
+TEST_CASE("SignalGraph audio-rate replace and add modulation clamp to parameter bounds",
+          "[host][graph][automation][audio-rate][coverage][phase3]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot = std::make_unique<MockAutomatable>(
+        ParamRate::AudioRate, false, true, false, -0.5f, 0.5f);
+    auto* slot_ptr = slot.get();
+    auto plug = graph.add_plugin_node(std::move(slot), 0, 1, "audio-rate");
+
+    REQUIRE(graph.connect_audio_rate_modulation(
+        in_node, 0, plug, MockAutomatable::kParamId, -0.25f, 0.25f,
+        0.0f, AutomationMix::Replace));
+    REQUIRE(graph.connect_audio_rate_modulation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.4f, 0.4f,
+        0.0f, AutomationMix::Add));
+    REQUIRE(graph.prepare(48000.0, 3));
+
+    std::vector<float> input_samples{0.0f, 0.5f, 1.0f};
+    std::vector<float> output_samples(3, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 3);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 3);
+
+    graph.process(out_view, in_view, 3);
+
+    const auto& events = slot_ptr->received();
+    REQUIRE(events.size() == 3);
+    REQUIRE_THAT(events[0].value, WithinAbs(0.15f, 1e-6f));
+    REQUIRE_THAT(events[1].value, WithinAbs(0.4f, 1e-6f));
+    REQUIRE_THAT(events[2].value, WithinAbs(0.5f, 1e-6f));
+}
+
 TEST_CASE("SignalGraph audio-rate modulation composes with PDC",
           "[host][graph][automation][audio-rate][pdc]") {
     SignalGraph graph;
@@ -1357,5 +1569,3 @@ TEST_CASE("SignalGraph audio-rate modulation fails closed when event capacity is
 }
 
 // ── Phase 3 GraphSerializer round-trip ──────────────────────────────────
-
-
