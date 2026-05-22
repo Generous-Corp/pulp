@@ -77,7 +77,9 @@ std::string trim_copy(const std::string& s) {
 }
 
 std::string strip_quotes_copy(const std::string& s) {
-    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+    if (s.size() >= 2
+        && ((s.front() == '"' && s.back() == '"')
+            || (s.front() == '\'' && s.back() == '\'')))
         return s.substr(1, s.size() - 2);
     return s;
 }

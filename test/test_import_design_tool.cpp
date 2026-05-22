@@ -465,7 +465,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         fs::create_directories(home);
         write_text(home / "config.toml",
                    "[import_design]\n"
-                   "default_mode = \"baked\"\n");
+                   "default_mode = 'baked'\n");
         ScopedEnvVar pulp_home("PULP_HOME", home.string());
         ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
         ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
