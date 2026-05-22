@@ -42,6 +42,14 @@ Slice 6 (#551).
 
 ## GitHub workflow gotchas
 
+- `.github/workflows/release-dry-run.yml` (P9-2, #2576) exercises the release
+  build → `package_cli.py` → `pulp ship appcast` chain on a synthetic version
+  (`0.0.0-dryrun`) WITHOUT publishing — no GitHub release, no signing/notarize,
+  no appcast upload; artifacts are throwaway. It's additive (does not touch
+  `release-cli.yml` / `sign-and-release.yml`) and runs weekly + on demand, so a
+  build/packaging/appcast-generation regression surfaces BEFORE a real tag.
+  Keep it credential-free (notarize/sign stay in the real path) so it can run
+  on a schedule without secrets.
 - Keep watchdog/issue-maintenance workflows on REST `gh api` calls. Avoid
   `gh issue list` / `gh pr *` helpers in those paths because they can use the
   shared GraphQL quota; a watchdog must not fail while reporting that the

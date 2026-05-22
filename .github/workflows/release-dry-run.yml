@@ -1,0 +1,82 @@
+name: Release Dry-Run
+
+# P9-2 (#2576): exercise the release build → package → appcast chain on a
+# SYNTHETIC version WITHOUT publishing, so release-chain breakage (build /
+# packaging / appcast-generation regressions) is caught BEFORE a real tag is
+# cut — instead of manually, post-tag, after a failed release.
+#
+# This is intentionally additive: it does NOT touch the real release path
+# (release-cli.yml / sign-and-release.yml), creates NO GitHub release, does NO
+# code-signing or Apple notarization (those need production credentials), and
+# publishes NOTHING. Artifacts are uploaded only as throwaway workflow
+# artifacts. Runs weekly and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 12 * * 1'  # Mondays 12:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dry-run:
+    name: Release dry-run (darwin-arm64, no publish)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Fetch Skia binaries
+        run: python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+        shell: bash
+
+      - name: Configure (mirrors release-cli.yml darwin-arm64)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_REQUIRE_GPU_FOR_SDK=ON \
+            -DPULP_BUILD_WEBVIEW=ON
+        shell: bash
+
+      - name: Build CLI
+        run: cmake --build build --config Release --target pulp pulp-cpp pulp-mcp
+        shell: bash
+
+      - name: Package CLI (dry-run — no upload)
+        run: |
+          python3 tools/scripts/package_cli.py \
+            --binary build/pulp \
+            --cpp-binary build/tools/cli/pulp-cpp \
+            --mcp-binary build/tools/mcp/pulp-mcp \
+            --build-dir build \
+            --platform darwin-arm64 \
+            --out pulp-darwin-arm64.tar.gz
+          test -s pulp-darwin-arm64.tar.gz || { echo "::error::package_cli produced no tarball"; exit 1; }
+        shell: bash
+
+      - name: Generate + validate appcast (synthetic version, no publish)
+        run: |
+          ./build/pulp ship appcast \
+            --version 0.0.0-dryrun \
+            --url https://example.invalid/pulp-0.0.0-dryrun.pkg \
+            --output appcast.xml
+          test -s appcast.xml || { echo "::error::appcast generation produced no file"; exit 1; }
+          xmllint --noout appcast.xml
+        shell: bash
+
+      - name: Upload dry-run artifacts (throwaway — NOT a release)
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-dry-run-darwin-arm64
+          path: |
+            pulp-darwin-arm64.tar.gz
+            appcast.xml
+          retention-days: 7
