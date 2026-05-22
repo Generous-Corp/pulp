@@ -465,6 +465,23 @@ static void install_app_menu(NSString* appName) {
 - (void)mouseDragged:(NSEvent*)event {
     @try {
         try {
+            // Inspector intercept — route drag-ticks to the in-canvas overlay
+            // so its move/resize gesture state machine sees the drag stream.
+            // mouseDown alone is not enough: without this the overlay gets the
+            // press but never the drag or release, so a drag "sort of works"
+            // but never completes/commits. Consume when the overlay handles it.
+            {
+                auto pt_i = [self localPoint:event];
+                auto mods = modifiers_from_ns_flags(event.modifierFlags);
+                pulp::view::MouseEvent me;
+                me.position = {pt_i.x, pt_i.y};
+                me.modifiers = mods;
+                me.is_down = true;  // button still held during drag
+                if (pulp::view::View::call_inspector_mouse_hook(me)) {
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+            }
             // pulp #992 — _dragTarget is captured in mouseDown but the View
             // it points to may be unmounted (and freed) before the next
             // drag event arrives, e.g. when a click triggers a React state
@@ -510,6 +527,21 @@ static void install_app_menu(NSString* appName) {
 - (void)mouseUp:(NSEvent*)event {
     @try {
         try {
+            // Inspector intercept — route the release to the overlay so its
+            // move/resize gesture commits (and records its undo entry).
+            // Mirrors mouseDown/mouseDragged. Consume when handled.
+            {
+                auto pt_i = [self localPoint:event];
+                auto mods = modifiers_from_ns_flags(event.modifierFlags);
+                pulp::view::MouseEvent me;
+                me.position = {pt_i.x, pt_i.y};
+                me.modifiers = mods;
+                me.is_down = false;  // release
+                if (pulp::view::View::call_inspector_mouse_hook(me)) {
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+            }
             if (_dragTarget) {
                 // pulp #992 — _dragTarget may point at a freed View if
                 // the mouseDown handler triggered a React unmount of the
