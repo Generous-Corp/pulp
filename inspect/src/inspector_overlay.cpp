@@ -2525,9 +2525,13 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
     // Resolve the target's font so caret math matches the rendered glyphs.
     float font_size = 13.0f;
     std::string font_family;
+    int font_weight = 400;
+    float letter_spacing = 0.0f;
     if (auto* lbl = dynamic_cast<const Label*>(text_edit_target_)) {
         font_size = lbl->font_size();
         font_family = lbl->font_family();
+        font_weight = lbl->font_weight();
+        letter_spacing = lbl->letter_spacing();
     } else if (auto* ed = dynamic_cast<const TextEditor*>(text_edit_target_)) {
         font_size = ed->font_size();
     }
@@ -2535,7 +2539,13 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
 
     const Rect r = view_bounds_in_root(text_edit_target_);
     canvas.save();
-    canvas.set_font(font_family, font_size);
+    // Use the label's FULL font config (esp. letter-spacing + weight) so
+    // measure_text matches the rendered glyph advances. With the 2-arg
+    // set_font, letter-spacing stayed 0, so prefix widths were short and the
+    // caret landed a glyph early on a letter-spaced label like "ENVELOPE"
+    // (maintainer QA). measure_text applies the canvas letter_spacing_.
+    canvas.set_font_full(font_family, font_size, font_weight, /*slant=*/0,
+                         letter_spacing);
 
     // Measure helper: width of the buffer's first `bytes` bytes.
     auto prefix_w = [&](std::size_t bytes) -> float {
