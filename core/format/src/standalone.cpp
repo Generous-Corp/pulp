@@ -23,14 +23,19 @@ StandaloneApp::~StandaloneApp() {
 }
 
 bool StandaloneApp::start() {
-    // Create processor
-    processor_ = factory_();
+    // Create the processor once and reuse it across audio reconfigurations
+    // (apply_config soft-restart). Recreating it on every settings change would
+    // dangle an editor ViewBridge holding a Processor& (#2693); parameters are
+    // defined a single time so the StateStore isn't re-registered on restart.
     if (!processor_) {
-        runtime::log_error("Standalone: failed to create processor");
-        return false;
+        processor_ = factory_();
+        if (!processor_) {
+            runtime::log_error("Standalone: failed to create processor");
+            return false;
+        }
+        processor_->set_state_store(&store_);
+        processor_->define_parameters(store_);
     }
-    processor_->set_state_store(&store_);
-    processor_->define_parameters(store_);
 
     auto desc = processor_->descriptor();
     runtime::log_info("Standalone: starting '{}'", desc.name);
@@ -168,7 +173,11 @@ bool StandaloneApp::start() {
 
 bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     bool was_running = running_.load();
-    if (was_running) stop();
+    // Soft restart: tear down only the audio/MIDI devices and rebuild them for
+    // the new config, KEEPING the processor instance (start() reuses it and
+    // re-prepare()s it). A full stop()+start() would recreate the processor and
+    // dangle an editor ViewBridge holding a Processor& (#2693).
+    if (was_running) stop_audio_keep_processor();
     config_ = new_config;
     if (was_running) return start();
     return true;
@@ -374,7 +383,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     return true;
 }
 
-void StandaloneApp::stop() {
+void StandaloneApp::stop_audio_keep_processor() {
     running_.store(false);
     if (midi_input_) {
         midi_input_->close();
@@ -385,6 +394,10 @@ void StandaloneApp::stop() {
         audio_device_->close();
         audio_device_.reset();
     }
+}
+
+void StandaloneApp::stop() {
+    stop_audio_keep_processor();
     if (processor_) {
         processor_->release();
         processor_.reset();

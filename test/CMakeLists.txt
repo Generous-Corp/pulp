@@ -1255,6 +1255,7 @@ pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 
 # Standalone editor chrome helpers
 pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone)
+pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone)
 
 # Headless screenshot capture state machine (pulp #468)
 pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone)

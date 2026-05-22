@@ -64,6 +64,11 @@ public:
     midi::MidiSystem* midi_system() { return midi_system_.get(); }
 
 private:
+    // Tear down the audio + MIDI devices but KEEP the processor instance alive.
+    // apply_config() uses this so a settings change does not recreate the
+    // Processor out from under an editor ViewBridge holding a Processor& (#2693).
+    void stop_audio_keep_processor();
+
     ProcessorFactory factory_;
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
