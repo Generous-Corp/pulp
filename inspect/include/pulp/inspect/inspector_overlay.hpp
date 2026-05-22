@@ -148,9 +148,17 @@ public:
     /// only emits for anchored views). Undo re-emits the edit with the ORIGINAL
     /// parent, so the host re-derives the inverse rewrite — the engine's
     /// idempotent `already_current` path keeps repeated emits safe.
+    ///
+    /// WYSIWYG sweep P1 — `insert_after_anchor` carries the requested insertion
+    /// SLOT: the anchor of the sibling the dragged node should follow under the
+    /// new parent, or EMPTY to land as the parent's first child. Without it the
+    /// source rewrite always dropped the node as the first child, losing the
+    /// drop position the user dragged to. Empty is the well-defined "first
+    /// child" sentinel (an empty anchor never resolves to a real sibling).
     struct ReparentSourceEdit {
         std::string child_anchor;
         std::string new_parent_anchor;
+        std::string insert_after_anchor;  // preceding sibling, or "" = first child
     };
     void set_reparent_source_sink(std::function<void(const ReparentSourceEdit&)> sink) {
         reparent_source_sink_ = std::move(sink);
@@ -1307,6 +1315,14 @@ private:
     // anchor id and re-find the live view here (nullptr → graceful no-op).
     // Returns nullptr for an empty anchor or a view no longer in the tree.
     View* resolve_anchor(const std::string& anchor) const;
+
+    // WYSIWYG sweep P1 — the anchor of the VISIBLE sibling immediately preceding
+    // `child` under `parent` in flex-order (or "" when `child` is the first
+    // child / parent is null / the preceding sibling is un-anchored). Used to
+    // carry the requested insertion SLOT in ReparentSourceEdit so the source
+    // rewrite drops the moved block at the dragged position, not first-child.
+    static std::string preceding_sibling_anchor(const View* parent,
+                                                 const View* child);
 
     // WYSIWYG sweep P1 — un-anchored fallback. Some edited/reparented views
     // carry NO anchor (e.g. a --script Chainer label), so they cannot be

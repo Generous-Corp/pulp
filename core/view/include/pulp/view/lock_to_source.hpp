@@ -167,9 +167,18 @@ lock_tweaks_into_source(const std::string& source,
 /// A single structural reparent to promote into source: move the element
 /// anchored by `child_anchor_id` to become a child of the element anchored by
 /// `new_parent_anchor_id`.
+///
+/// WYSIWYG sweep P1 — `insert_after_anchor_id` carries the requested insertion
+/// SLOT: the anchor of the sibling the moved block should physically follow
+/// under the new parent, or EMPTY to land as the new parent's FIRST child.
+/// Without it the relocation always dropped the block as the first child,
+/// discarding the drop position. An empty / unresolved value falls back to
+/// first-child (the prior behavior), so callers that don't set it are
+/// unaffected.
 struct ReparentToSourceEdit {
     std::string child_anchor_id;
     std::string new_parent_anchor_id;
+    std::string insert_after_anchor_id;  // preceding sibling, or "" = first child
 };
 
 /// Rewrite the dragged element's `appendChild` receiver so the generated source

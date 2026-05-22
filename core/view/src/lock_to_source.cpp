@@ -688,13 +688,38 @@ LockResult reparent_in_source(const std::string& source,
             insert_at = lines.size();
         } else {
             // Walk to the end of the parent's OWN element block: the first blank
-            // line after the parent anchor, or the next anchor comment.
+            // line after the parent anchor, or the next anchor comment. This is
+            // the FIRST-CHILD insertion point (immediately after the parent's
+            // setAnchor) — the default when no insertion slot is requested.
             std::size_t j = pa + 1;
             for (; j < lines.size(); ++j) {
                 if (trim(lines[j]).empty()) { ++j; break; }       // past the blank
                 if (!anchor_comment_id(lines[j]).empty()) break;  // next element
             }
             insert_at = j;
+
+            // WYSIWYG sweep P1 — honor the requested insertion SLOT. When the
+            // edit names a preceding sibling, drop the moved block right after
+            // THAT sibling's subtree instead of as the parent's first child, so
+            // the source order matches the position the user dragged to. The
+            // sibling must resolve in the post-erase buffer; if it doesn't (or
+            // is the moved node itself), fall back to first-child.
+            if (!edit.insert_after_anchor_id.empty()) {
+                std::size_t sib_line = 0;
+                bool sib_found = false;
+                for (std::size_t i = 0; i < lines.size(); ++i) {
+                    if (anchor_comment_id(lines[i]) == edit.insert_after_anchor_id) {
+                        sib_line = i;
+                        sib_found = true;
+                        break;
+                    }
+                }
+                std::size_t sib_begin = 0, sib_end = 0;
+                if (sib_found &&
+                    find_subtree_range(lines, sib_line, sib_begin, sib_end)) {
+                    insert_at = sib_end;
+                }
+            }
         }
     }
     lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at),

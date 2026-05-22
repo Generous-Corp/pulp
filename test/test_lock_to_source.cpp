@@ -473,6 +473,94 @@ TEST_CASE("reparent_in_source physically relocates the child subtree",
     REQUIRE(r.source.find(card_var + ".appendChild(") != std::string::npos);
 }
 
+// WYSIWYG sweep P1 — the reparent edit carries an insertion SLOT. When the
+// edit names a preceding sibling (insert_after_anchor_id), the moved block must
+// land right AFTER that sibling's subtree under the new parent — not always as
+// the parent's first child (the prior behavior that discarded the drop slot).
+TEST_CASE("reparent_in_source honors the requested insertion slot",
+          "[lock-to-source][wysiwyg][issue-wysiwyg-reflow-slot]") {
+    // Root → { Card, Panel{ PanelA, PanelB } }. Reparent Card under Panel,
+    // landing AFTER PanelA (i.e. between PanelA and PanelB).
+    IRNode root;
+    root.type = "frame"; root.name = "Root";
+    root.style.background_color = "#222222";
+    root.style.width = 320.0f; root.style.height = 200.0f;
+
+    IRNode card;
+    card.type = "frame"; card.name = "Card";
+    card.style.background_color = "#888888"; card.style.width = 80.0f;
+    root.children.push_back(card);
+
+    IRNode panel;
+    panel.type = "frame"; panel.name = "Panel";
+    panel.style.background_color = "#444444"; panel.style.width = 120.0f;
+    IRNode panel_a;
+    panel_a.type = "frame"; panel_a.name = "PanelA";
+    panel_a.style.background_color = "#555555"; panel_a.style.width = 30.0f;
+    IRNode panel_b;
+    panel_b.type = "frame"; panel_b.name = "PanelB";
+    panel_b.style.background_color = "#666666"; panel_b.style.width = 30.0f;
+    panel.children.push_back(panel_a);
+    panel.children.push_back(panel_b);
+    root.children.push_back(panel);
+
+    DesignIR ir;
+    ir.root = std::move(root);
+    ir.source = DesignSource::v0;
+    ir.source_file = "slot.tsx";
+    assign_anchors(ir.root, AnchorStrategy::content_hash);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = true;
+    const std::string gen = generate_pulp_js(ir, opts);
+
+    const std::string card_anchor   = *ir.root.children[0].stable_anchor_id;
+    const std::string panel_anchor  = *ir.root.children[1].stable_anchor_id;
+    const std::string panelA_anchor =
+        *ir.root.children[1].children[0].stable_anchor_id;
+    const std::string panelB_anchor =
+        *ir.root.children[1].children[1].stable_anchor_id;
+
+    SECTION("insert after PanelA → lands between PanelA and PanelB") {
+        ReparentToSourceEdit edit{card_anchor, panel_anchor, panelA_anchor};
+        LockResult r = reparent_in_source(gen, edit);
+        REQUIRE(r.status == LockStatus::rewritten);
+        REQUIRE(r.mutated());
+
+        const std::size_t a_p = anchor_pos(r.source, panelA_anchor);
+        const std::size_t card_p = anchor_pos(r.source, card_anchor);
+        const std::size_t b_p = anchor_pos(r.source, panelB_anchor);
+        REQUIRE(a_p != std::string::npos);
+        REQUIRE(card_p != std::string::npos);
+        REQUIRE(b_p != std::string::npos);
+        // Card sits AFTER PanelA and BEFORE PanelB — the requested slot.
+        REQUIRE(a_p < card_p);
+        REQUIRE(card_p < b_p);
+    }
+
+    SECTION("empty slot → first child (PanelA), preserving prior behavior") {
+        ReparentToSourceEdit edit{card_anchor, panel_anchor, ""};
+        LockResult r = reparent_in_source(gen, edit);
+        REQUIRE(r.status == LockStatus::rewritten);
+        const std::size_t panel_p = anchor_pos(r.source, panel_anchor);
+        const std::size_t card_p = anchor_pos(r.source, card_anchor);
+        const std::size_t a_p = anchor_pos(r.source, panelA_anchor);
+        // Card lands immediately under Panel, BEFORE PanelA (first child).
+        REQUIRE(panel_p < card_p);
+        REQUIRE(card_p < a_p);
+    }
+
+    SECTION("unresolved slot anchor → graceful first-child fallback") {
+        ReparentToSourceEdit edit{card_anchor, panel_anchor, "no-such-anchor"};
+        LockResult r = reparent_in_source(gen, edit);
+        REQUIRE(r.status == LockStatus::rewritten);
+        const std::size_t card_p = anchor_pos(r.source, card_anchor);
+        const std::size_t a_p = anchor_pos(r.source, panelA_anchor);
+        REQUIRE(card_p < a_p);  // fell back to first-child
+    }
+}
+
 TEST_CASE("reparent_in_source relocation is idempotent",
           "[lock-to-source][wysiwyg][t5]") {
     const std::string gen = nested_reparent_source();

@@ -395,6 +395,32 @@ View* InspectorOverlay::resolve_anchor(const std::string& anchor) const {
     return ViewInspector::find_by_anchor(root_, anchor);
 }
 
+// WYSIWYG sweep P1 — the anchor of the visible sibling immediately preceding
+// `child` under `parent` in flex-order, or "" for first-child / no parent /
+// un-anchored preceding sibling. Mirrors commit_reflow_drop's sibling ordering
+// (visible children sorted by flex().order, stable).
+std::string InspectorOverlay::preceding_sibling_anchor(const View* parent,
+                                                       const View* child) {
+    if (!parent || !child) return {};
+    std::vector<const View*> sibs;
+    for (std::size_t i = 0; i < parent->child_count(); ++i) {
+        const View* c = parent->child_at(i);
+        if (!c->visible()) continue;
+        sibs.push_back(c);
+    }
+    std::stable_sort(sibs.begin(), sibs.end(),
+        [](const View* a, const View* b) {
+            return a->flex().order < b->flex().order;
+        });
+    const View* prev = nullptr;
+    for (const View* c : sibs) {
+        if (c == child) break;
+        prev = c;
+    }
+    if (!prev) return {};                 // child is first → first-child slot
+    return prev->anchor_id();             // "" if the preceding sibling is un-anchored
+}
+
 // WYSIWYG sweep P1 — register a raw View* that an EditHistory closure captured
 // because the view has NO anchor to re-find it by. De-duplicates so the list
 // stays small across coalesced gestures.
@@ -1332,6 +1358,18 @@ bool InspectorOverlay::commit_reflow_drop(View* dragged) {
     std::stable_sort(others.begin(), others.end(),
         [](View* a, View* b) { return a->flex().order < b->flex().order; });
 
+    // WYSIWYG sweep P1 — capture each child's OLD order so we can persist a
+    // `layout.order` tweak for every node whose order actually changed (not
+    // just the dragged one). The order rewrite was previously live-only; the
+    // comment claiming it was "persisted elsewhere" was wrong. The tweak/lock
+    // path (T4 added `layout.order` to the allow-list) round-trips it into the
+    // generated source as `el.style.order`.
+    auto record_old_order = [](View* v) { return std::pair<View*, int>{v, v->flex().order}; };
+    std::vector<std::pair<View*, int>> old_orders;
+    old_orders.reserve(others.size() + 1);
+    old_orders.push_back(record_old_order(dragged));
+    for (View* o : others) old_orders.push_back(record_old_order(o));
+
     int insert_at = std::clamp(drop_index_, 0,
                                static_cast<int>(others.size()));
     int next_order = 0;
@@ -1350,6 +1388,22 @@ bool InspectorOverlay::commit_reflow_drop(View* dragged) {
         }
     }
     (void)assigned;
+
+    // Persist `layout.order` for every anchored child whose order changed.
+    // Keyed by the child's own anchor (NOT selected_), so a normalized sibling
+    // is locked too. Un-anchored children can't be locked to source — skipped.
+    if (tweak_store_) {
+        for (const auto& [v, old_order] : old_orders) {
+            const int new_order = v->flex().order;
+            if (new_order == old_order) continue;
+            const std::string& a = v->anchor_id();
+            if (a.empty()) continue;
+            tweak_store_->apply_tweak(
+                a, "layout.order",
+                choc::value::createInt64(static_cast<int64_t>(new_order)),
+                "inspector-reflow-order");
+        }
+    }
 
     target->invalidate_layout();
     if (old_parent && old_parent != target) old_parent->invalidate_layout();
@@ -2097,6 +2151,12 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 const std::string child_anchor = tgt->anchor_id();
                 const std::string old_parent_anchor =
                     before_parent ? before_parent->anchor_id() : std::string{};
+                // WYSIWYG sweep P1 — capture the BEFORE insertion slot (the
+                // anchor of the visible sibling tgt followed under its OLD
+                // parent, in flex-order) so undo can re-derive the inverse
+                // source rewrite at the right position, not always first-child.
+                const std::string old_insert_after_anchor =
+                    preceding_sibling_anchor(before_parent, tgt);
                 bool changed = commit_reflow_drop(tgt);
                 if (changed && edit_history_ && before_parent) {
                     View* after_parent = tgt->parent();
@@ -2111,10 +2171,18 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                     }
                     const std::string new_parent_anchor =
                         after_parent ? after_parent->anchor_id() : std::string{};
+                    // WYSIWYG sweep P1 — the AFTER insertion slot: the anchor of
+                    // the visible sibling tgt now follows under the NEW parent
+                    // (flex-order). Threaded into ReparentSourceEdit so the
+                    // source rewrite drops the moved block at the dragged
+                    // position instead of always as the parent's first child.
+                    const std::string new_insert_after_anchor =
+                        preceding_sibling_anchor(after_parent, tgt);
                     // WYSIWYG T5 — emit a structural source rewrite ONLY for a
-                    // genuine cross-parent reparent (a same-parent reorder is a
-                    // flex().order tweak, persisted elsewhere) where every
-                    // anchor resolves and a sink is wired. The do_fn locks the
+                    // genuine cross-parent reparent (the same-parent reorder is
+                    // persisted as a layout.order tweak in commit_reflow_drop)
+                    // where every anchor resolves and a sink is wired. The do_fn
+                    // locks the
                     // child under the NEW parent; the undo_fn re-emits the edit
                     // with the OLD parent so the host re-derives the inverse
                     // source rewrite. The engine's idempotent `already_current`
@@ -2146,6 +2214,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                     edit_history_->perform(
                         [self, tgt, after_parent, after_index, after_order,
                          emit_source_reparent, child_anchor, new_parent_anchor,
+                         new_insert_after_anchor,
                          child_anchored, new_parent_anchored]() {
                             View* child = child_anchored
                                 ? self->resolve_anchor(child_anchor) : tgt;
@@ -2159,10 +2228,12 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                             child->invalidate_layout();
                             if (emit_source_reparent && self->reparent_source_sink_)
                                 self->reparent_source_sink_(
-                                    {child_anchor, new_parent_anchor});
+                                    {child_anchor, new_parent_anchor,
+                                     new_insert_after_anchor});
                         },
                         [self, tgt, before_parent, before_index, before_order,
                          emit_source_reparent, child_anchor, old_parent_anchor,
+                         old_insert_after_anchor,
                          child_anchored, old_parent_anchored]() {
                             View* child = child_anchored
                                 ? self->resolve_anchor(child_anchor) : tgt;
@@ -2176,7 +2247,8 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                             child->invalidate_layout();
                             if (emit_source_reparent && self->reparent_source_sink_)
                                 self->reparent_source_sink_(
-                                    {child_anchor, old_parent_anchor});
+                                    {child_anchor, old_parent_anchor,
+                                     old_insert_after_anchor});
                         },
                         "move-reflow");
                 }
