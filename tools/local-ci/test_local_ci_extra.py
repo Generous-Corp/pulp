@@ -2449,6 +2449,117 @@ class LocalCiPureHelperTests(unittest.TestCase):
                 self.assertEqual(self.mod.cmd_desktop_cleanup(Namespace(target=None, older_than_days=None, keep_last=1, json=False)), 0)
         self.assertIn("Desktop cleanup: nothing to remove.", buf.getvalue())
 
+    def test_desktop_artifact_report_helpers_cover_filter_and_fallback_edges(self) -> None:
+        config = {"desktop_automation": {"artifact_root": str(self.root / "artifacts"), "publish_root": str(self.root / "publish")}}
+        publish_root = self.mod.desktop_publish_root(config)
+        old_dir = publish_root / "2026-01-01T00-00-00Z"
+        new_dir = publish_root / "2026-01-02T00-00-00Z"
+        malformed_dir = publish_root / "malformed"
+        missing_dir = publish_root / "missing-index"
+        old_dir.mkdir(parents=True)
+        new_dir.mkdir(parents=True)
+        malformed_dir.mkdir(parents=True)
+        missing_dir.mkdir(parents=True)
+        (old_dir / "index.json").write_text(json.dumps({"generated_at": "2026-01-01T00:00:00Z", "label": "old"}))
+        (new_dir / "index.json").write_text(json.dumps({"generated_at": "2026-01-02T00:00:00Z", "label": "new"}))
+        (malformed_dir / "index.json").write_text("{")
+
+        reports = self.mod.desktop_publish_reports(config)
+        self.assertEqual([report["label"] for report in reports], ["new", "old"])
+        self.assertEqual(reports[0]["output_dir"], str(new_dir))
+        self.assertEqual(reports[0]["index_json"], str(new_dir / "index.json"))
+        self.assertEqual(reports[0]["index_html"], str(new_dir / "index.html"))
+        self.assertEqual(self.mod.desktop_publish_reports(config, limit=1)[0]["label"], "new")
+
+        self.mod.write_desktop_publish_rollups(config)
+        self.assertEqual(json.loads((publish_root / "latest-report.json").read_text())["label"], "new")
+        self.assertEqual(len((publish_root / "reports.jsonl").read_text().splitlines()), 2)
+
+        ready = self.root / "ready.txt"
+        ready.write_text("ok")
+        self.assertEqual(self.mod.wait_for_path(ready, 0.1), ready)
+        with self.assertRaisesRegex(RuntimeError, "timed out waiting for artifact"):
+            self.mod.wait_for_path(self.root / "missing.txt", 0.0)
+
+        self.assertEqual(self.mod.count_view_tree_nodes("not-a-node"), 0)
+        self.assertEqual(self.mod.count_view_tree_nodes({"children": "bad"}), 1)
+        self.assertEqual(self.mod.count_view_tree_nodes({"children": [{"children": [{}]}, {}]}), 4)
+
+        app_binary = self.root / "Demo.app" / "Contents" / "MacOS" / "Demo"
+        app_binary.parent.mkdir(parents=True)
+        app_binary.write_text("")
+        self.assertIsNone(self.mod.detect_macos_app_bundle(None))
+        self.assertIsNone(self.mod.detect_macos_app_bundle(""))
+        self.assertEqual(self.mod.detect_macos_app_bundle(str(app_binary)), self.root / "Demo.app")
+        self.assertIsNone(self.mod.macos_bundle_id_for_app_path(self.root / "Missing.app"))
+        info_plist = self.root / "Demo.app" / "Contents" / "Info.plist"
+        info_plist.write_text("not plist")
+        self.assertIsNone(self.mod.macos_bundle_id_for_app_path(self.root / "Demo.app"))
+        info_plist.write_bytes(self.mod.plistlib.dumps({"CFBundleIdentifier": "com.example.demo"}))
+        self.assertEqual(self.mod.macos_bundle_id_for_app_path(self.root / "Demo.app"), "com.example.demo")
+        info_plist.write_bytes(self.mod.plistlib.dumps({"CFBundleIdentifier": ""}))
+        self.assertIsNone(self.mod.macos_bundle_id_for_app_path(self.root / "Demo.app"))
+
+    def test_desktop_manifest_and_window_wait_helpers_cover_edge_paths(self) -> None:
+        artifact_root = self.root / "artifacts"
+        config = {
+            "desktop_automation": {
+                "artifact_root": str(artifact_root),
+                "targets": {"mac": {"adapter": "macos-local"}, "windows": {"adapter": "windows-session-agent"}},
+            }
+        }
+        valid_bundle = artifact_root / "mac" / "smoke" / "run-new"
+        old_bundle = artifact_root / "mac" / "smoke" / "run-old"
+        malformed_bundle = artifact_root / "mac" / "smoke" / "bad"
+        wrong_action = artifact_root / "mac" / "inspect" / "run"
+        missing_manifest = artifact_root / "windows" / "smoke" / "run"
+        for path in (valid_bundle, old_bundle, malformed_bundle, wrong_action, missing_manifest):
+            path.mkdir(parents=True)
+        (valid_bundle / "manifest.json").write_text(json.dumps({"target": "mac", "started_at": "2026-01-02T00:00:00Z"}))
+        (old_bundle / "manifest.json").write_text(json.dumps({"target": "mac", "completed_at": "2026-01-01T00:00:00Z"}))
+        (malformed_bundle / "manifest.json").write_text("{")
+        (wrong_action / "manifest.json").write_text(json.dumps({"target": "mac", "started_at": "2026-01-03T00:00:00Z"}))
+
+        manifests = self.mod.desktop_run_manifests(config, target_name="mac", action="smoke")
+        self.assertEqual(len(manifests), 2)
+        self.assertEqual(manifests[0]["target"], "mac")
+        self.assertEqual(manifests[0]["artifacts"]["bundle_dir"], str(valid_bundle))
+        self.assertEqual(manifests[1]["artifacts"]["bundle_dir"], str(old_bundle))
+        self.assertEqual(self.mod.desktop_run_manifests(config, target_name="missing"), [])
+        self.assertEqual(len(self.mod.desktop_run_manifests(config, action="inspect")), 1)
+
+        self.assertEqual(self.mod.normalize_desktop_proof_source_mode(None), "legacy")
+        self.assertEqual(self.mod.normalize_desktop_proof_source_mode(" exact_sha "), "exact-sha")
+        with self.assertRaisesRegex(ValueError, "Invalid desktop proof source mode"):
+            self.mod.normalize_desktop_proof_source_mode("archive")
+        self.assertEqual(self.mod.desktop_manifest_adapter(config, {"adapter": "custom"}), "custom")
+        self.assertEqual(self.mod.desktop_manifest_adapter(config, {"target": "mac"}), "macos-local")
+        self.assertEqual(self.mod.desktop_manifest_adapter(config, {"target": "missing"}), "unknown")
+        self.assertEqual(self.mod.desktop_manifest_adapter({"desktop_automation": {"targets": []}}, {"target": "mac"}), "unknown")
+
+        with mock.patch.object(self.mod.time, "time", side_effect=[0.0, 0.0, 1.0]), \
+             mock.patch.object(self.mod.time, "sleep") as sleep, \
+             mock.patch.object(self.mod, "macos_window_info_for_pid", side_effect=subprocess.SubprocessError("boom")):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                self.mod.wait_for_macos_window(123, 0.5)
+        sleep.assert_called_once_with(0.2)
+
+        with mock.patch.object(self.mod.time, "time", side_effect=[0.0, 0.0, 1.0]), \
+             mock.patch.object(self.mod.time, "sleep") as sleep, \
+             mock.patch.object(self.mod, "macos_window_info_for_bundle_id", return_value={"pid": 456, "windows": []}), \
+             mock.patch.object(self.mod, "activate_macos_bundle_id", return_value={"stderr": "still hidden"}) as activate:
+            with self.assertRaisesRegex(RuntimeError, "still hidden"):
+                self.mod.wait_for_macos_bundle_window("com.example.demo", 0.5)
+        activate.assert_called_once_with("com.example.demo")
+        sleep.assert_called_once_with(0.2)
+
+        with mock.patch.object(self.mod.time, "time", side_effect=[0.0, 0.0]), \
+             mock.patch.object(self.mod, "macos_window_info_for_pid", return_value={"windows": [{"id": 7}]}):
+            self.assertEqual(self.mod.wait_for_macos_window(123, 0.5), {"id": 7})
+        with mock.patch.object(self.mod.time, "time", side_effect=[0.0, 0.0]), \
+             mock.patch.object(self.mod, "macos_window_info_for_bundle_id", return_value={"pid": 456, "windows": [{"id": 8}]}):
+            self.assertEqual(self.mod.wait_for_macos_bundle_window("com.example.demo", 0.5), (456, {"id": 8}))
+
     def test_desktop_action_validation_errors_and_dispatch_guards(self) -> None:
         config = {
             "desktop_automation": {
