@@ -69,6 +69,7 @@ COVERAGE_SURFACES = (
             "tools/harness/tests/test_evidence_check.py",
             "tools/harness/tests/test_html_adapter.py",
             "tools/harness/tests/test_html_adapter_element_events_union.py",
+            "tools/harness/tests/test_rn_adapter.py",
             "tools/harness/tests/test_status.py",
             "tools/harness/tests/test_validate_test_ref.py",
             "tools/harness/tests/test_verifier.py",
