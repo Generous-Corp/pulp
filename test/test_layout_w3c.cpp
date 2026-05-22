@@ -467,6 +467,69 @@ TEST_CASE("KeyframeAnimation: multi-step keyframes", "[animation]") {
 // CSS Grid Layout Level 1
 // ═══════════════════════════════════════════════════════════════════
 
+TEST_CASE("Layout: max-width 0% clamps a growing child to zero (issue-2704)",
+          "[layout][w3c][issue-2704]") {
+    // A flex-grow child with max-width:0% must be clamped to 0 — the percent
+    // max path also used the >0 guard that dropped 0%.
+    View root;
+    root.set_bounds({0, 0, 400, 50});
+    root.flex().direction = FlexDirection::row;
+    auto child = std::make_unique<View>();
+    child->flex().flex_grow = 1;
+    child->flex().dim_max_width = Dimension{0.0f, DimensionUnit::percent};
+    root.add_child(std::move(child));
+    root.layout_children();
+    REQUIRE(root.child_at(0)->bounds().width == 0.0f);
+}
+
+TEST_CASE("Grid: parse_template 'none' is empty and never throws (issue-2704)",
+          "[layout][grid][issue-2704]") {
+    // `none` is the CSS initial value for grid-template-* — std::stof("none")
+    // used to throw out of WidgetBridge::load_script. It must yield no tracks.
+    REQUIRE_NOTHROW(GridStyle::parse_template("none"));
+    REQUIRE(GridStyle::parse_template("none").empty());
+    // Unparseable tokens are skipped, not thrown; valid tracks still parse.
+    REQUIRE_NOTHROW(GridStyle::parse_template("none auto 1fr garbage"));
+    auto mixed = GridStyle::parse_template("none auto 1fr garbage");
+    REQUIRE(mixed.size() == 2);
+    REQUIRE(mixed[0].type == GridTrack::Type::auto_);
+    REQUIRE(mixed[1].type == GridTrack::Type::fr);
+}
+
+TEST_CASE("Layout: width 0% lays out at zero, not intrinsic (issue-2704)",
+          "[layout][w3c][issue-2704]") {
+    View root;
+    root.set_bounds({0, 0, 300, 50});
+    root.flex().direction = FlexDirection::row;
+    auto child = std::make_unique<View>();
+    child->flex().preferred_width = 100;  // intrinsic fallback
+    child->flex().dim_width = Dimension{0.0f, DimensionUnit::percent};  // width: 0%
+    root.add_child(std::move(child));
+    root.layout_children();
+    // 0% must win over the intrinsic 100 (previously the >0 guard dropped 0%).
+    REQUIRE(root.child_at(0)->bounds().width == 0.0f);
+}
+
+TEST_CASE("Layout: flex-basis 0% is honored, not treated as auto (issue-2704)",
+          "[layout][w3c][issue-2704]") {
+    // Two flex:1 children with different intrinsic widths but flex-basis:0%
+    // should split the row EQUALLY (the classic `flex: 1` behavior). With the
+    // old >0 guard, 0% basis was dropped and the unequal intrinsics leaked in.
+    View root;
+    root.set_bounds({0, 0, 300, 50});
+    root.flex().direction = FlexDirection::row;
+    for (int i = 0; i < 2; ++i) {
+        auto c = std::make_unique<View>();
+        c->flex().preferred_width = 40.0f + static_cast<float>(i) * 80.0f;
+        c->flex().flex_grow = 1;
+        c->flex().dim_flex_basis = Dimension{0.0f, DimensionUnit::percent};
+        root.add_child(std::move(c));
+    }
+    root.layout_children();
+    REQUIRE(root.child_at(0)->bounds().width == root.child_at(1)->bounds().width);
+    REQUIRE(root.child_at(0)->bounds().width > 0.0f);
+}
+
 TEST_CASE("Grid: parse_template '1fr 2fr auto 100px'", "[layout][grid]") {
     auto tracks = GridStyle::parse_template("1fr 2fr auto 100");
     REQUIRE(tracks.size() == 4);

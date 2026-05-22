@@ -1153,17 +1153,34 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl) {
     std::vector<GridTrack> tracks;
     std::istringstream ss(tmpl);
     std::string token;
+    // Parse a numeric prefix without throwing; std::stof on a non-numeric
+    // token (e.g. the CSS initial value `none`) used to throw out of
+    // WidgetBridge::load_script (#2704). Returns false for unparseable tokens.
+    auto try_parse = [](const std::string& s, float& out) -> bool {
+        try {
+            size_t consumed = 0;
+            out = std::stof(s, &consumed);
+            return consumed > 0;
+        } catch (...) {
+            return false;
+        }
+    };
     while (ss >> token) {
+        // `none` is the CSS initial value for grid-template-* — no explicit
+        // tracks. Skip it (and any other non-track keyword) rather than throw.
+        if (token == "none") continue;
         if (token.back() == 'r' && token.size() > 2 && token[token.size()-2] == 'f') {
             // "1fr", "2.5fr"
-            float val = std::stof(token.substr(0, token.size() - 2));
-            tracks.push_back(GridTrack::fractional(val));
+            float val = 0.0f;
+            if (try_parse(token.substr(0, token.size() - 2), val))
+                tracks.push_back(GridTrack::fractional(val));
         } else if (token == "auto") {
             tracks.push_back(GridTrack::auto_size());
         } else {
-            // "100px" or "100" — treat as fixed pixels
-            float val = std::stof(token);
-            tracks.push_back(GridTrack::fixed_px(val));
+            // "100px" or "100" — treat as fixed pixels; skip unparseable tokens.
+            float val = 0.0f;
+            if (try_parse(token, val))
+                tracks.push_back(GridTrack::fixed_px(val));
         }
     }
     return tracks;

@@ -130,7 +130,7 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         // YGNodeStyleSetFlexBasisPercent; numeric → existing px API.
         if (f.dim_flex_basis.unit == DimensionUnit::auto_) {
             YGNodeStyleSetFlexBasisAuto(node);
-        } else if (f.dim_flex_basis.unit == DimensionUnit::percent && f.dim_flex_basis.value > 0) {
+        } else if (f.dim_flex_basis.unit == DimensionUnit::percent && f.dim_flex_basis.value >= 0) {
             YGNodeStyleSetFlexBasisPercent(node, f.dim_flex_basis.value);
         } else if (f.flex_basis >= 0) {
             YGNodeStyleSetFlexBasis(node, f.flex_basis);
@@ -297,30 +297,30 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     // gets cleared.
     if (f.dim_width.unit == DimensionUnit::auto_) {
         YGNodeStyleSetWidthAuto(node);
-    } else if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value > 0) {
+    } else if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value >= 0) {
         YGNodeStyleSetWidthPercent(node, f.dim_width.value);
     } else if (f.preferred_width > 0) {
         YGNodeStyleSetWidth(node, f.preferred_width);
     }
     if (f.dim_height.unit == DimensionUnit::auto_) {
         YGNodeStyleSetHeightAuto(node);
-    } else if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value > 0) {
+    } else if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value >= 0) {
         YGNodeStyleSetHeightPercent(node, f.dim_height.value);
     } else if (f.preferred_height > 0) {
         YGNodeStyleSetHeight(node, f.preferred_height);
     }
     // pulp #1434 (rn batch C) — min/max width/height dispatch on dim_*.unit
     // for the percent path; existing px path stays for numeric values.
-    if (f.dim_min_width.unit == DimensionUnit::percent && f.dim_min_width.value > 0) {
+    if (f.dim_min_width.unit == DimensionUnit::percent && f.dim_min_width.value >= 0) {
         YGNodeStyleSetMinWidthPercent(node, f.dim_min_width.value);
     } else if (f.min_width > 0) YGNodeStyleSetMinWidth(node, f.min_width);
-    if (f.dim_min_height.unit == DimensionUnit::percent && f.dim_min_height.value > 0) {
+    if (f.dim_min_height.unit == DimensionUnit::percent && f.dim_min_height.value >= 0) {
         YGNodeStyleSetMinHeightPercent(node, f.dim_min_height.value);
     } else if (f.min_height > 0) YGNodeStyleSetMinHeight(node, f.min_height);
-    if (f.dim_max_width.unit == DimensionUnit::percent && f.dim_max_width.value > 0) {
+    if (f.dim_max_width.unit == DimensionUnit::percent && f.dim_max_width.value >= 0) {
         YGNodeStyleSetMaxWidthPercent(node, f.dim_max_width.value);
     } else if (f.max_width > 0) YGNodeStyleSetMaxWidth(node, f.max_width);
-    if (f.dim_max_height.unit == DimensionUnit::percent && f.dim_max_height.value > 0) {
+    if (f.dim_max_height.unit == DimensionUnit::percent && f.dim_max_height.value >= 0) {
         YGNodeStyleSetMaxHeightPercent(node, f.dim_max_height.value);
     } else if (f.max_height > 0) YGNodeStyleSetMaxHeight(node, f.max_height);
 
