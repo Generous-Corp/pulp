@@ -14,6 +14,8 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/view/viewport_reconcile.hpp>
+#include <pulp/inspect/inspector_overlay.hpp>  // WYSIWYG T6 — in-canvas overlay
+#include <pulp/inspect/tweak_store.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/runtime/system.hpp>
 #include <filesystem>
@@ -639,6 +641,37 @@ int main(int argc, char* argv[]) {
     window->set_close_callback([] {
         std::cout << "Window closed\n";
     });
+
+    // ── WYSIWYG T6 — in-canvas move/resize/reflow overlay ──────────────────
+    //
+    // Wire the SAME InspectorOverlay + install_inspector_hooks that ui-preview
+    // and the standalone host use, so the design tool gets the WYSIWYG direct-
+    // manipulation layer (drag-to-move, corner-resize, reflow reorder/reparent,
+    // Text-tool inline edit with the T2 caret/selection) on its live JS-built
+    // view tree.
+    //
+    // Clean integration with design-tool's existing JS-side inspector:
+    //   * The JS inspector (design-tool-chat.js wireInspectorAndGlobalKeys)
+    //     uses Cmd+CLICK to set an AI-chat scope target and Cmd+Z/Cmd+Shift+Z
+    //     for TOKEN-history undo. The C++ overlay binds Cmd+I (free — the JS
+    //     side never uses it) to toggle, and starts INACTIVE, so until the
+    //     user presses Cmd+I the mouse/key/paint hooks all early-out on
+    //     `is_active()` and the JS Cmd+click + token-undo paths are untouched.
+    //   * We deliberately DO NOT wire an EditHistory into the overlay: its
+    //     Cmd+Z manipulation-undo is gated behind `active_ && edit_history_`,
+    //     so leaving edit_history_ null means Cmd+Z always falls through to the
+    //     JS token-undo even while the overlay is active. (A manipulation gesture
+    //     still persists its tweak to the local TweakStore below; it just is not
+    //     Cmd+Z-undoable here, to avoid hijacking the design tool's own undo.)
+    //   * A local TweakStore gives move/resize/reorder/text edits somewhere to
+    //     persist (the same role ui-preview's store plays).
+    pulp::inspect::TweakStore design_tweaks;
+    auto inspector_overlay =
+        std::make_unique<pulp::inspect::InspectorOverlay>(root);
+    inspector_overlay->set_tweak_store(&design_tweaks);
+    inspector_overlay->set_manipulate_only(true);  // bare manipulation layer
+    pulp::inspect::install_inspector_hooks(*inspector_overlay);
+    auto* inspector_overlay_ptr = inspector_overlay.get();
 
     // No resize callback is needed: paint_scene reads design_viewport_w_/h_
     // every frame and re-pins root bounds at design size, so the window

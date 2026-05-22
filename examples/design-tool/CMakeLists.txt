@@ -19,7 +19,13 @@ if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU)
             "example. See planning/2026-05-19-gpu-host-fallback.md.")
     endif()
     add_executable(pulp-design-tool main.cpp)
-    target_link_libraries(pulp-design-tool PRIVATE pulp::view pulp::canvas pulp::state)
+    # WYSIWYG T6 — pulp::inspect supplies the in-canvas InspectorOverlay
+    # (move/resize/reflow manipulation layer) wired via install_inspector_hooks,
+    # the same overlay ui-preview uses. pulp::inspect itself requires the
+    # GPU/Skia stack, which this branch already guarantees
+    # (APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA above).
+    target_link_libraries(pulp-design-tool PRIVATE
+        pulp::view pulp::canvas pulp::state pulp::inspect)
     target_compile_features(pulp-design-tool PRIVATE cxx_std_20)
     # Propagate PULP_HAS_SKIA so the example can do a belt-and-suspenders
     # runtime check in main() (defense-in-depth — CMake gate could be
