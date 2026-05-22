@@ -28,7 +28,7 @@ commands:
 
   - name: status
     status: usable
-    summary: Show project root, git info, build state, and whether the active project is in source-tree mode or sdk mode.
+    summary: Show project root, git info, build state, import-design defaults, and whether the active project is in source-tree mode or sdk mode.
     docs: reference/cli.md#status
 
   - name: validate
@@ -364,12 +364,12 @@ commands:
 
   - name: config
     status: usable
-    summary: Read or write ~/.pulp/config.toml settings. Supports `[pr] workflow` plus the `[update]` section (mode, check_interval_hours, channel, bump_projects). `set update.mode` clears ~/.pulp/update-snooze so the new mode takes effect on the next invocation.
+    summary: Read or write ~/.pulp/config.toml settings. Supports `[pr] workflow`, `[update]` settings, and `[import_design]` defaults for import-design mode/emit. `set update.mode` clears ~/.pulp/update-snooze so the new mode takes effect on the next invocation.
     subcommands:
       - name: get
         summary: Print the value for a dotted key (e.g. `pr.workflow` or `update.mode`). Empty output if unset.
       - name: set
-        summary: Write a value for a dotted key. Validates PR workflow, update enums, and integer shapes. Mode changes clear the 24h snooze file.
+        summary: Write a value for a dotted key. Validates PR workflow, update enums, import-design defaults, and integer shapes. Mode changes clear the 24h snooze file.
       - name: list
         summary: Dump current supported settings with defaults filled in.
     docs: reference/cli.md#config
@@ -612,10 +612,10 @@ commands:
         description: "Destination file for the primary artifact (default: ui.js)"
       - name: --emit
         kind: option
-        description: "Primary artifact kind: js, ir-json, cpp, or legacy classnames sidecar; cpp requires --mode baked"
+        description: "Primary artifact kind: js, ir-json, cpp, or legacy classnames sidecar; built-in default js; persistent default import_design.default_emit; cpp requires --mode baked"
       - name: --mode
         kind: option
-        description: "Runtime model: live (default) or baked for canonical IR / baked C++ artifacts"
+        description: "Runtime model: live (built-in default) or baked for canonical IR / baked C++ artifacts; persistent default import_design.default_mode"
       - name: --snapshot-semantics
         kind: option
         description: "JSX baked snapshot policy: fail rejects dynamic APIs, warn proceeds with diagnostics, accept proceeds silently; JSX live JS pass-through rejects validation/debug flags"

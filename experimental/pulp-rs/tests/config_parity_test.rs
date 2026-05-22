@@ -84,6 +84,8 @@ fn list_human_lane_reports_keys_with_resolved_values() {
     assert!(s.contains("Pulp config ("));
     assert!(s.contains("update.mode = manual"));
     assert!(s.contains("update.channel = stable")); // defaulted
+    assert!(s.contains("import_design.default_mode = live")); // defaulted
+    assert!(s.contains("import_design.default_emit = js")); // defaulted
 }
 
 #[test]
@@ -138,4 +140,20 @@ fn set_rejects_bad_value_with_exit_two() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("auto, prompt, manual, off"));
+
+    let output = run(
+        &["config", "set", "import_design.default_mode", "frozen"],
+        home.path(),
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("live, baked"));
+
+    let output = run(
+        &["config", "set", "import_design.default_emit", "tokens"],
+        home.path(),
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("js, ir-json, cpp"));
 }

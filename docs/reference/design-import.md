@@ -23,8 +23,8 @@ pulp import-design --from <source> [options]
 | `--frame <name>` | Frame/artboard to import (Figma) | first frame |
 | `--screen <name>` | Screen to import (Stitch) | first screen |
 | `--output <path>` | Destination file for the primary artifact | `ui.js` |
-| `--emit {js\|ir-json\|cpp}` | Primary artifact kind. `js`, `ir-json`, and `cpp` are implemented; `cpp` requires `--mode baked`. | `js` |
-| `--mode {live\|baked}` | Runtime model. `live` is the default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. | `live` |
+| `--emit {js\|ir-json\|cpp}` | Primary artifact kind. `js`, `ir-json`, and `cpp` are implemented; `cpp` requires `--mode baked`. | `js` built-in, or `import_design.default_emit` |
+| `--mode {live\|baked}` | Runtime model. `live` is the built-in default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. | `live` built-in, or `import_design.default_mode` |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. | `PULP_IMPORT_ASSET_CACHE` or user cache |
@@ -48,6 +48,40 @@ pulp import-design --from <source> [options]
 | `--report-new-format` | Emit a fingerprint-diff JSON for a new format-version. Implies `--detect-only` | — |
 
 Either `--file` or `--url` is required (or `--directory` for `--detect-only`). When `--url` is provided without `--file`, the URL is fetched through an argv-safe `curl` invocation into a unique temporary file. Literal `--file` paths are read directly and may contain normal filesystem punctuation; `--url` still rejects shell metacharacters before fetching.
+
+The shipped default is live runtime import: `--mode live --emit js`. In that
+mode Pulp keeps the generated JS/runtime artifact, which is the right default
+for iteration, hot reload, dynamic React behavior, and design-tool workflows.
+Users who strongly prefer a different default can persist it in
+`~/.pulp/config.toml`:
+
+```bash
+pulp config set import_design.default_mode baked
+pulp config set import_design.default_emit ir-json
+```
+
+For baked C++ by default, set `import_design.default_emit cpp` as well. If only
+`import_design.default_mode baked` is set, Pulp chooses `ir-json` as the baked
+artifact default. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and
+`PULP_IMPORT_DESIGN_DEFAULT_EMIT` override those config keys for one
+environment/session, and direct `--mode` / `--emit` flags override the matching
+preference.
+`pulp status` reports the effective import-design defaults.
+
+Mental model:
+
+| Flow | What ships | Runtime behavior |
+|------|------------|------------------|
+| Live/runtime import | The generated JS or precompiled React bundle | Runs the app at launch through the JS/React/runtime bridge |
+| Baked DesignIR | A serialized snapshot of the materialized UI tree | No React program remains; the IR is an inspectable UI blueprint |
+| Baked C++ | Native C++ generated from DesignIR | Constructs native views directly without a JS engine |
+
+Live/runtime import means "run the original app." Baked DesignIR means "run
+the app once and save the resulting UI structure." Baked C++ means "compile
+that saved structure into native code." You can move from live iteration to a
+baked snapshot and then to baked C++; you cannot reconstruct the original live
+React program from baked IR because loops, hooks, closures, and arbitrary JS
+logic are not preserved in the snapshot.
 
 `--emit ir-json` writes a canonical [DesignIR v1](design-ir-v1.md) envelope.
 Asset collection runs before serialization. Local files and data URIs are

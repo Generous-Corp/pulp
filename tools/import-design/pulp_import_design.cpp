@@ -9,6 +9,7 @@
 #include "import_detect.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -22,6 +23,7 @@
 #include <ctime>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 #include <unordered_map>
@@ -49,6 +51,177 @@ enum class SnapshotSemantics {
     warn,
     accept
 };
+
+const char* artifact_emit_name(ArtifactEmit emit) {
+    switch (emit) {
+        case ArtifactEmit::js:      return "js";
+        case ArtifactEmit::ir_json: return "ir-json";
+        case ArtifactEmit::cpp:     return "cpp";
+    }
+    return "js";
+}
+
+const char* runtime_mode_name(RuntimeMode mode) {
+    switch (mode) {
+        case RuntimeMode::live:  return "live";
+        case RuntimeMode::baked: return "baked";
+    }
+    return "live";
+}
+
+std::string trim_copy(const std::string& s) {
+    auto b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return {};
+    auto e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+std::string strip_quotes_copy(const std::string& s) {
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        return s.substr(1, s.size() - 2);
+    return s;
+}
+
+std::string normalize_pref_value(std::string value) {
+    value = strip_quotes_copy(trim_copy(value));
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+std::optional<ArtifactEmit> parse_artifact_emit_pref(const std::string& raw) {
+    const auto value = normalize_pref_value(raw);
+    if (value == "js") return ArtifactEmit::js;
+    if (value == "ir-json") return ArtifactEmit::ir_json;
+    if (value == "cpp") return ArtifactEmit::cpp;
+    return std::nullopt;
+}
+
+std::optional<RuntimeMode> parse_runtime_mode_pref(const std::string& raw) {
+    const auto value = normalize_pref_value(raw);
+    if (value == "live") return RuntimeMode::live;
+    if (value == "baked") return RuntimeMode::baked;
+    return std::nullopt;
+}
+
+fs::path pulp_home_path() {
+    if (const char* home = std::getenv("PULP_HOME"); home && *home)
+        return fs::path(home);
+#ifdef _WIN32
+    if (const char* home = std::getenv("USERPROFILE"); home && *home)
+        return fs::path(home) / ".pulp";
+#else
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return fs::path(home) / ".pulp";
+#endif
+    return {};
+}
+
+std::string read_import_design_config_value(const std::string& section,
+                                            const std::string& key) {
+    const auto home = pulp_home_path();
+    if (home.empty()) return {};
+    const auto path = home / "config.toml";
+    if (!fs::exists(path)) return {};
+
+    std::ifstream f(path);
+    if (!f.is_open()) return {};
+
+    std::string line;
+    std::string current_section;
+    while (std::getline(f, line)) {
+        const auto comment = line.find('#');
+        if (comment != std::string::npos) line = line.substr(0, comment);
+        const auto trimmed = trim_copy(line);
+        if (trimmed.empty()) continue;
+
+        if (trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']') {
+            current_section = trim_copy(trimmed.substr(1, trimmed.size() - 2));
+            continue;
+        }
+        if (current_section != section) continue;
+
+        const auto eq = trimmed.find('=');
+        if (eq == std::string::npos) continue;
+        if (trim_copy(trimmed.substr(0, eq)) != key) continue;
+        return strip_quotes_copy(trim_copy(trimmed.substr(eq + 1)));
+    }
+    return {};
+}
+
+struct DefaultSelection {
+    ArtifactEmit emit = ArtifactEmit::js;
+    RuntimeMode mode = RuntimeMode::live;
+    std::string emit_source = "built-in";
+    std::string mode_source = "built-in";
+    std::string error;
+};
+
+DefaultSelection resolve_import_design_defaults(ArtifactEmit cli_emit,
+                                                RuntimeMode cli_mode,
+                                                bool emit_explicit,
+                                                bool mode_explicit) {
+    DefaultSelection out;
+    out.emit = cli_emit;
+    out.mode = cli_mode;
+    if (emit_explicit) out.emit_source = "cli";
+    if (mode_explicit) out.mode_source = "cli";
+
+    auto apply_emit = [&](const std::string& raw, const std::string& source) -> bool {
+        auto parsed = parse_artifact_emit_pref(raw);
+        if (!parsed) {
+            out.error = "invalid import-design default emit '" + raw + "' from " + source
+                + " (expected js, ir-json, or cpp)";
+            return false;
+        }
+        out.emit = *parsed;
+        out.emit_source = source;
+        return true;
+    };
+    auto apply_mode = [&](const std::string& raw, const std::string& source) -> bool {
+        auto parsed = parse_runtime_mode_pref(raw);
+        if (!parsed) {
+            out.error = "invalid import-design default mode '" + raw + "' from " + source
+                + " (expected live or baked)";
+            return false;
+        }
+        out.mode = *parsed;
+        out.mode_source = source;
+        return true;
+    };
+
+    if (!emit_explicit) {
+        if (const char* env = std::getenv("PULP_IMPORT_DESIGN_DEFAULT_EMIT"); env && *env) {
+            if (!apply_emit(env, "env:PULP_IMPORT_DESIGN_DEFAULT_EMIT")) return out;
+        } else if (auto configured = read_import_design_config_value("import_design", "default_emit");
+                   !configured.empty()) {
+            if (!apply_emit(configured, "config:import_design.default_emit")) return out;
+        }
+    }
+
+    if (!mode_explicit) {
+        if (const char* env = std::getenv("PULP_IMPORT_DESIGN_DEFAULT_MODE"); env && *env) {
+            if (!apply_mode(env, "env:PULP_IMPORT_DESIGN_DEFAULT_MODE")) return out;
+        } else if (auto configured = read_import_design_config_value("import_design", "default_mode");
+                   !configured.empty()) {
+            if (!apply_mode(configured, "config:import_design.default_mode")) return out;
+        }
+    }
+
+    if (!emit_explicit && out.emit_source == "built-in"
+        && !mode_explicit && out.mode == RuntimeMode::baked) {
+        out.emit = ArtifactEmit::ir_json;
+        out.emit_source = "implied by " + out.mode_source;
+    }
+    if (!mode_explicit && out.mode_source == "built-in"
+        && !emit_explicit
+        && (out.emit == ArtifactEmit::ir_json || out.emit == ArtifactEmit::cpp)) {
+        out.mode = RuntimeMode::baked;
+        out.mode_source = "implied by " + out.emit_source;
+    }
+
+    return out;
+}
 
 class ScopedTempDir {
 public:
@@ -392,9 +565,9 @@ static void print_usage() {
     std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
     std::cout << "  --emit {js|ir-json|cpp}\n";
-    std::cout << "                    Primary artifact kind (default: js)\n";
+    std::cout << "                    Primary artifact kind (built-in default: js)\n";
     std::cout << "  --mode {live|baked}\n";
-    std::cout << "                    Runtime model (default: live; baked emits IR or C++ artifacts)\n";
+    std::cout << "                    Runtime model (built-in default: live; baked emits IR or C++ artifacts)\n";
     std::cout << "  --snapshot-semantics {fail|warn|accept}\n";
     std::cout << "                    JSX baked snapshot policy (default: fail)\n";
     std::cout << "  --allow-network-fetch\n";
@@ -437,6 +610,13 @@ static void print_usage() {
     std::cout << "                    into a new compat.json[imports/<source>/detected-formats]\n";
     std::cout << "                    entry. Implies --detect-only.\n";
     std::cout << "  --help            Show this help\n\n";
+    std::cout << "Preferences:\n";
+    std::cout << "  Built-in default is --mode live --emit js (live runtime import).\n";
+    std::cout << "  Persistent defaults: pulp config set import_design.default_mode live|baked\n";
+    std::cout << "                       pulp config set import_design.default_emit js|ir-json|cpp\n";
+    std::cout << "  Environment overrides: PULP_IMPORT_DESIGN_DEFAULT_MODE, PULP_IMPORT_DESIGN_DEFAULT_EMIT\n";
+    std::cout << "  Each CLI flag overrides its matching preference. If only default_mode=baked is set, default_emit\n";
+    std::cout << "  becomes ir-json unless explicitly configured.\n\n";
     std::cout << "Examples:\n";
     std::cout << "  pulp import-design --from figma --file design.json\n";
     std::cout << "  pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'\n";
@@ -528,6 +708,8 @@ int main(int argc, char* argv[]) {
     std::string compat_override;                          // --compat: explicit compat.json path
     ArtifactEmit artifact_emit = ArtifactEmit::js;
     RuntimeMode runtime_mode = RuntimeMode::live;
+    bool artifact_emit_explicit = false;
+    bool runtime_mode_explicit = false;
     SnapshotSemantics snapshot_semantics = SnapshotSemantics::fail;
     bool allow_network_fetch = false;
     int asset_timeout_ms = 30000;
@@ -603,10 +785,13 @@ int main(int argc, char* argv[]) {
             std::string what = argv[++i];
             if (what == "js") {
                 artifact_emit = ArtifactEmit::js;
+                artifact_emit_explicit = true;
             } else if (what == "ir-json") {
                 artifact_emit = ArtifactEmit::ir_json;
+                artifact_emit_explicit = true;
             } else if (what == "cpp") {
                 artifact_emit = ArtifactEmit::cpp;
+                artifact_emit_explicit = true;
             } else if (what == "classnames") {
                 emit_classnames = true;
             } else {
@@ -622,8 +807,10 @@ int main(int argc, char* argv[]) {
             std::string mode = argv[++i];
             if (mode == "live") {
                 runtime_mode = RuntimeMode::live;
+                runtime_mode_explicit = true;
             } else if (mode == "baked") {
                 runtime_mode = RuntimeMode::baked;
+                runtime_mode_explicit = true;
             } else {
                 std::cerr << "Error: unsupported --mode value '" << mode
                           << "' (expected live or baked)\n";
@@ -686,6 +873,21 @@ int main(int argc, char* argv[]) {
             print_usage();
             return 0;
         }
+    }
+
+    DefaultSelection default_selection;
+    if (!export_tokens_mode && !detect_only) {
+        default_selection = resolve_import_design_defaults(
+            artifact_emit,
+            runtime_mode,
+            artifact_emit_explicit,
+            runtime_mode_explicit);
+        if (!default_selection.error.empty()) {
+            std::cerr << "Error: " << default_selection.error << "\n";
+            return 2;
+        }
+        artifact_emit = default_selection.emit;
+        runtime_mode = default_selection.mode;
     }
 
     if (artifact_emit == ArtifactEmit::cpp && !output_explicit)
@@ -852,10 +1054,18 @@ int main(int argc, char* argv[]) {
     if (runtime_mode == RuntimeMode::baked) {
         if (artifact_emit == ArtifactEmit::js) {
             std::cerr << "Error: --mode baked requires --emit ir-json or --emit cpp\n";
+            std::cerr << "       effective defaults: --mode " << runtime_mode_name(runtime_mode)
+                      << " (" << default_selection.mode_source << "), --emit "
+                      << artifact_emit_name(artifact_emit) << " ("
+                      << default_selection.emit_source << ")\n";
             return 2;
         }
     } else if (artifact_emit == ArtifactEmit::cpp) {
         std::cerr << "Error: --emit cpp requires --mode baked\n";
+        std::cerr << "       effective defaults: --mode " << runtime_mode_name(runtime_mode)
+                  << " (" << default_selection.mode_source << "), --emit "
+                  << artifact_emit_name(artifact_emit) << " ("
+                  << default_selection.emit_source << ")\n";
         return 2;
     }
     if (runtime_mode == RuntimeMode::baked) {

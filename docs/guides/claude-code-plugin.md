@@ -109,6 +109,10 @@ If neither exists, the launcher prints a readable diagnostic on stderr and
 exits 127 so Claude Code surfaces the failure rather than silently no-oping
 (`pulp #1821`).
 
+The `/status` command and `pulp_status` MCP tool include the effective
+`pulp import-design` defaults, so Claude Code can see whether a checkout is
+using the shipped `live/js` default or a local baked IR/C++ preference.
+
 To wire it up from a Pulp checkout:
 
 ```bash

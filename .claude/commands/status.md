@@ -17,6 +17,10 @@ Then run: `pulp status` when the CLI is on PATH, or `./build/pulp status` from a
 In a Pulp source checkout, include the PR workflow lines from `pulp status`
 when reporting status; they show whether this checkout is using Shipyard,
 direct `gh`, or manual PR handling.
+Also include the `Import design defaults:` line from `pulp status` when
+present; it shows whether `pulp import-design` will default to live JS,
+baked DesignIR, or baked C++, and whether that came from built-ins, config,
+or environment overrides.
 
 If the CLI binary doesn't exist, fall back to showing:
 1. `git status` — current branch and changes

@@ -158,7 +158,7 @@ fn do_help(out: &mut impl Write) -> Result<()> {
         "Commands:",
         "  get <section.key>           Print the value (empty if unset)",
         "  set <section.key> <value>   Write the value atomically",
-        "  list [--json]               Dump current update.* settings",
+        "  list [--json]               Dump current supported settings",
         "",
         "Supported keys (update section):",
         "  update.mode                   auto | prompt | manual | off  (default: prompt)",
@@ -166,13 +166,21 @@ fn do_help(out: &mut impl Write) -> Result<()> {
         "  update.channel                stable | beta                 (default: stable)",
         "  update.bump_projects          prompt | auto | off           (default: prompt)",
         "",
+        "Supported keys (import_design section):",
+        "  import_design.default_mode    live | baked                  (default: live)",
+        "  import_design.default_emit    js | ir-json | cpp            (default: js)",
+        "",
         "Examples:",
         "  pulp config set update.mode manual",
+        "  pulp config set import_design.default_mode baked",
+        "  pulp config set import_design.default_emit ir-json",
         "  pulp config get update.mode",
         "",
         "Notes:",
         "  Changing update.mode clears the 24h snooze at ~/.pulp/update-snooze",
         "  so the new mode takes effect on the next invocation.",
+        "  PULP_IMPORT_DESIGN_DEFAULT_MODE and PULP_IMPORT_DESIGN_DEFAULT_EMIT",
+        "  override import_design defaults for one environment/session.",
     ];
     for line in lines {
         writeln!(out, "{line}").map_err(|e| CliError::io("<stdout>", e))?;
@@ -339,6 +347,8 @@ mod tests {
         assert!(s.contains("update.check_interval_hours"));
         assert!(s.contains("update.channel"));
         assert!(s.contains("update.bump_projects"));
+        assert!(s.contains("import_design.default_mode"));
+        assert!(s.contains("import_design.default_emit"));
         assert!(s.contains("Clears the 24h snooze") || s.contains("clears the 24h snooze"));
     }
 

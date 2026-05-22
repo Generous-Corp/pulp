@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -56,6 +57,46 @@ struct TempDir {
     }
 
     std::filesystem::path path;
+};
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(std::string name, std::string value)
+        : name_(std::move(name)) {
+        if (const char* previous = std::getenv(name_.c_str())) {
+            had_previous_ = true;
+            previous_ = previous;
+        }
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        setenv(name_.c_str(), value.c_str(), 1);
+#endif
+    }
+
+    ~ScopedEnvVar() {
+#if defined(_WIN32)
+        if (had_previous_) {
+            _putenv_s(name_.c_str(), previous_.c_str());
+        } else {
+            _putenv_s(name_.c_str(), "");
+        }
+#else
+        if (had_previous_) {
+            setenv(name_.c_str(), previous_.c_str(), 1);
+        } else {
+            unsetenv(name_.c_str());
+        }
+#endif
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+private:
+    std::string name_;
+    std::string previous_;
+    bool had_previous_ = false;
 };
 
 bool has_repo_markers(const std::filesystem::path& candidate) {
@@ -317,6 +358,23 @@ TEST_CASE("MCP project-root dependent tools reject non-project directories", "[m
 
     auto response = handle_request(tool_call("20", "pulp_status"));
     require_contains(response, "Error: not in a Pulp project");
+}
+
+TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
+    TempDir home;
+    {
+        std::ofstream cfg(home.path / "config.toml");
+        cfg << "[import_design]\n"
+            << "default_mode = \"baked\"\n";
+    }
+    ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+    ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+    ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+    ScopedCurrentPath cwd(repo_root_path());
+
+    auto response = handle_request(tool_call("21", "pulp_status"));
+    require_contains(response,
+                     "Import design defaults: --mode baked (config:import_design.default_mode), --emit ir-json (implied by config:import_design.default_mode)");
 }
 
 // pulp #1997 — gap 1: each of the 11 previously-untested wrapper tools
