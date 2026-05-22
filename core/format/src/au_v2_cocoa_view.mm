@@ -148,6 +148,14 @@ static const char kOwnershipKey = 0;
     // below); the wrapper destroys host (stops the display link) before bridge.
     host->set_idle_callback(format::make_scripted_idle_pump(*bridge));
 
+    // AU v2 has no host size callback — the DAW resizes the returned NSView
+    // directly. Forward native frame changes to the bridge so the surfaces
+    // resize and Processor::on_view_resized fires.
+    format::ViewBridge* bridge_ptr = bridge.get();
+    host->set_resize_callback([bridge_ptr](uint32_t w, uint32_t h) {
+        bridge_ptr->resize(w, h);
+    });
+
     bridge->notify_attached();
 
     runtime::log_info("AU v2 editor: created view ({}x{}, mode={}, gpu={})",

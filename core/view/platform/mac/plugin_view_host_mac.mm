@@ -35,6 +35,7 @@ NSArray* pulp_text_accessibility_all_elements_macos();
 
 @interface PulpPluginView : NSView
 @property (nonatomic, assign) pulp::view::View* rootView;
+@property (nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -147,6 +148,14 @@ NSArray* pulp_text_accessibility_all_elements_macos();
     [self setNeedsDisplay:YES];
 }
 
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    if (self.onResize) {
+        self.onResize(static_cast<uint32_t>(newSize.width),
+                      static_cast<uint32_t>(newSize.height));
+    }
+}
+
 @end
 
 static NSRect child_view_frame_in_host(NSView* container,
@@ -238,11 +247,15 @@ public:
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             view_ = [[PulpPluginView alloc] initWithFrame:frame];
             view_.rootView = &root_;
+            view_.onResize = ^(uint32_t w, uint32_t h) {
+                this->on_native_frame_changed(w, h);
+            };
         }
     }
 
     ~MacPluginViewHost() override {
         root_.set_plugin_view_host(nullptr);
+        @autoreleasepool { view_.onResize = nil; }
         detach();
     }
 
@@ -286,6 +299,10 @@ public:
         return size_;
     }
 
+    void set_resize_callback(std::function<void(uint32_t, uint32_t)> cb) override {
+        resize_cb_ = std::move(cb);
+    }
+
     bool attach_native_child_view(NativeViewHandle child_view,
                                   float x,
                                   float y,
@@ -306,10 +323,18 @@ public:
         detach_child_view_from_host(view_, child_view);
     }
 
+    void on_native_frame_changed(uint32_t w, uint32_t h) {
+        if (w == size_.width && h == size_.height) return;
+        if (w == 0 || h == 0) return;
+        set_size(w, h);
+        if (resize_cb_) resize_cb_(w, h);
+    }
+
 private:
     View& root_;
     Size size_;
     PulpPluginView* view_ = nil;
+    std::function<void(uint32_t, uint32_t)> resize_cb_;
 };
 
 } // namespace pulp::view (close for ObjC declarations)
@@ -333,6 +358,7 @@ private:
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) void (^onWindowChange)(void);
 @property (nonatomic, copy) void (^onBackingChange)(void);
+@property (nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
 @end
 
 @implementation PulpGpuPluginView
@@ -368,6 +394,13 @@ private:
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
     self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
+    // AU v2 resizes this NSView directly (no host size callback). Notify the
+    // host; it resizes surfaces and forwards to ViewBridge::resize. The host
+    // guards against re-entrancy when *it* drove the frame change.
+    if (self.onResize) {
+        self.onResize(static_cast<uint32_t>(newSize.width),
+                      static_cast<uint32_t>(newSize.height));
+    }
 }
 
 // Start/stop the display link when the view joins or leaves a window. This is
@@ -416,6 +449,9 @@ public:
             // there too.
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onBackingChange = ^{ this->handle_backing_change(); };
+            metal_view_.onResize = ^(uint32_t w, uint32_t h) {
+                this->on_native_frame_changed(w, h);
+            };
 
             init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
         }
@@ -431,6 +467,7 @@ public:
         @autoreleasepool {
             metal_view_.onWindowChange = nil;
             metal_view_.onBackingChange = nil;
+            metal_view_.onResize = nil;
         }
         skia_surface_.reset();
         gpu_surface_.reset();
@@ -496,6 +533,10 @@ public:
                                  std::memory_order_release);
     }
 
+    void set_resize_callback(std::function<void(uint32_t, uint32_t)> cb) override {
+        resize_cb_ = std::move(cb);
+    }
+
     // Deterministic GPU back-buffer readback for hidden / headless test
     // hosts (mirrors WindowHost::capture_back_buffer_png, issue #2001).
     // Goes straight through render_frame()'s readback path; never shows a
@@ -545,6 +586,7 @@ private:
     std::atomic<bool> render_dispatch_queued_{false};
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
+    std::function<void(uint32_t, uint32_t)> resize_cb_;
     // Liveness token captured by the display-link main-thread dispatch
     // blocks. Flipped false in the destructor so a queued block after
     // teardown is a no-op (DAW teardown order is not under our control).
@@ -691,6 +733,17 @@ private:
             });
         }
         return kCVReturnSuccess;
+    }
+
+    // Called when the native NSView frame changed (e.g. AU host resize).
+    // Guards re-entrancy: when *we* drove the change via set_size(), size_
+    // already matches, so this is a no-op and never recurses through
+    // set_size()'s own [metal_view_ setFrameSize:] call.
+    void on_native_frame_changed(uint32_t w, uint32_t h) {
+        if (w == size_.width && h == size_.height) return;
+        if (w == 0 || h == 0) return;
+        set_size(w, h);
+        if (resize_cb_) resize_cb_(w, h);
     }
 
     void handle_window_change() {

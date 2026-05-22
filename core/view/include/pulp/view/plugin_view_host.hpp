@@ -76,6 +76,16 @@ public:
     // silently took the CPU path (see `format/gpu_host_select.hpp`).
     virtual bool is_gpu_backed() const { return false; }
 
+    // Native-frame resize notification. AU v2 has no host size callback — the
+    // DAW resizes the returned NSView directly. Hosts invoke this callback
+    // when their native view's frame changes (after they have already resized
+    // their own surfaces) so the adapter can forward to `ViewBridge::resize`
+    // (fires Processor::on_view_resized). VST3/CLAP drive resize through their
+    // own host size callbacks and don't need this. Default no-op.
+    virtual void set_resize_callback(std::function<void(uint32_t, uint32_t)> cb) {
+        (void) cb;
+    }
+
     // Per-vsync idle pump. GPU hosts invoke this callback once per display
     // link tick (before rendering) so a scripted UI's `ScriptedUiSession::poll()`
     // — async results, timers, requestAnimationFrame — keeps running while

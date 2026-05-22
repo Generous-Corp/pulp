@@ -11,6 +11,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -84,16 +85,32 @@
     }
 
     self.preferredContentSize = CGSizeMake(w, h);
-    auto size = pulp::view::PluginViewHost::Size{w, h};
-    _viewHost = pulp::view::PluginViewHost::create(*root, size);
+
+    // Auto-select the GPU host for a scripted / GPU-backed editor (P5) via the
+    // shared decision helper, using the Options overload. The preview/fallback
+    // case (no bridge) stays on the default CPU host.
+    pulp::view::PluginViewHost::Options opts;
+    opts.size = {w, h};
+    const char* mode = "fallback";
+    if (_bridge) {
+        const auto gpu = pulp::format::decide_gpu_host(*_bridge);
+        opts.use_gpu = gpu.use_gpu;
+        mode = gpu.mode;
+        _viewHost = pulp::view::PluginViewHost::create(*root, opts);
+        if (_viewHost) {
+            pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
+            _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
+        }
+    } else {
+        _viewHost = pulp::view::PluginViewHost::create(*root, opts);
+    }
 
     if (_viewHost) {
         _viewHost->attach_to_parent((__bridge void*)self.view);
         if (_bridge) _bridge->notify_attached();
-        pulp::runtime::log_info("AU iOS: view controller loaded, {}x{}, mode={}",
-                                size.width, size.height,
-                                _bridge ? (_bridge->uses_script_ui() ? "scripted" : "autoui")
-                                        : "fallback");
+        pulp::runtime::log_info("AU iOS: view controller loaded, {}x{}, mode={}, gpu={}",
+                                opts.size.width, opts.size.height, mode,
+                                _viewHost->is_gpu_backed());
     }
 }
 
