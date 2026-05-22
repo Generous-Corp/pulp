@@ -31,17 +31,20 @@ import argparse
 import sys
 from pathlib import Path
 
-try:
-    from PIL import Image
-except ImportError:
-    print("error: PIL/Pillow required (pip install Pillow)", file=sys.stderr)
-    sys.exit(2)
-
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
+def _image_module():
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("PIL/Pillow required (pip install Pillow)") from exc
+    return Image
+
+
 def load_normalized(path: Path, target_size: tuple[int, int]) -> Image.Image:
+    Image = _image_module()
     img = Image.open(path).convert("RGB")
     if img.size != target_size:
         img = img.resize(target_size, Image.Resampling.LANCZOS)
@@ -123,7 +126,11 @@ def main() -> int:
             print(f"error: file not found: {p}", file=sys.stderr)
             return 2
 
-    w, h = (int(x) for x in args.size.split("x"))
+    try:
+        w, h = (int(x) for x in args.size.split("x"))
+    except ValueError:
+        print(f"error: malformed --size {args.size}", file=sys.stderr)
+        return 2
     target = (w, h)
 
     try:

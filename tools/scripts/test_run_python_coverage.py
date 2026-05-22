@@ -104,6 +104,14 @@ class CoveragercTests(unittest.TestCase):
             rpc.DEFAULT_TEST_GLOBS,
         )
         self.assertIn(
+            "tools/import-validation/test_diff_against_reference.py",
+            rpc.DEFAULT_TEST_GLOBS,
+        )
+        self.assertIn(
+            "tools/import-validation/test_diff_against_reference_regions.py",
+            rpc.DEFAULT_TEST_GLOBS,
+        )
+        self.assertIn(
             "tools/import-validation/test_source_contracts.py",
             rpc.DEFAULT_TEST_GLOBS,
         )

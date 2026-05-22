@@ -38,12 +38,6 @@ import json
 import sys
 from pathlib import Path
 
-try:
-    from PIL import Image
-except ImportError:
-    print("error: PIL/Pillow required (pip install Pillow)", file=sys.stderr)
-    sys.exit(2)
-
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -83,7 +77,16 @@ SPECTR_REGIONS = {
 }
 
 
+def _image_module():
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("PIL/Pillow required (pip install Pillow)") from exc
+    return Image
+
+
 def load_normalized(path: Path, target_size: tuple[int, int]) -> Image.Image:
+    Image = _image_module()
     img = Image.open(path).convert("RGB")
     if img.size != target_size:
         img = img.resize(target_size, Image.Resampling.LANCZOS)
@@ -114,6 +117,7 @@ def histogram_similarity(a: Image.Image, b: Image.Image) -> float:
 def mean_pixel_distance(a: Image.Image, b: Image.Image) -> float:
     if a.size != b.size:
         # Resize candidate region to reference region; cheap.
+        Image = _image_module()
         b = b.resize(a.size, Image.Resampling.LANCZOS)
     pa = list(a.getdata())
     pb = list(b.getdata())

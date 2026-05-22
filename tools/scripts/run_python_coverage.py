@@ -83,7 +83,11 @@ COVERAGE_SURFACES = (
     ),
     CoverageSurface(
         ("tools/import-validation",),
-        ("tools/import-validation/test_source_contracts.py",),
+        (
+            "tools/import-validation/test_diff_against_reference.py",
+            "tools/import-validation/test_diff_against_reference_regions.py",
+            "tools/import-validation/test_source_contracts.py",
+        ),
     ),
     # Keep the broader first-party tooling roots represented while the
     # executed test set stays on the established tooling roots plus
