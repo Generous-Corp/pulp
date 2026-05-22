@@ -5300,6 +5300,172 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(captured["timeouts"], 1)
         self.assertEqual(captured["probe_config"]["targets"]["windows"]["host"], "desktop.example.com")
 
+    def test_config_for_bundle_probe_falls_back_when_submission_config_is_unreadable(self):
+        missing_path = Path(self.tmpdir.name) / "missing-config.json"
+        invalid_path = Path(self.tmpdir.name) / "invalid-config.json"
+        invalid_path.write_text("{not json}\n")
+        fallback_config = {"targets": {"fallback": {"type": "ssh"}}}
+
+        with mock.patch.object(self.mod, "load_optional_config", return_value=fallback_config) as optional_config:
+            missing = self.mod.config_for_bundle_probe({"submission": {"config_path": str(missing_path)}})
+            invalid = self.mod.config_for_bundle_probe({"submission": {"config_path": str(invalid_path)}})
+
+        self.assertEqual(missing, fallback_config)
+        self.assertEqual(invalid, fallback_config)
+        self.assertEqual(optional_config.call_count, 2)
+        self.assertFalse(missing_path.exists())
+        self.assertTrue(invalid_path.exists())
+        self.assertEqual(invalid_path.read_text(), "{not json}\n")
+
+    def test_sync_job_bundle_reports_progress_and_passes_text_pipes(self):
+        bundle_path = self.state_dir / "bundles" / "job781.bundle"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text("bundle")
+        progress_events = []
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                captured["timeout"] = timeout
+                return ("", "")
+
+        with mock.patch.object(self.mod, "create_job_bundle", return_value=bundle_path) as create_bundle:
+            with mock.patch.object(self.mod.subprocess, "Popen", side_effect=lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc()):
+                remote_name, bundle_ref = self.mod.sync_job_bundle_to_ssh_host(
+                    "ubuntu",
+                    {"id": "job781", "sha": "d" * 40},
+                    report_progress=lambda **event: progress_events.append(event),
+                    config={"targets": {"ubuntu": {"type": "ssh"}}},
+                )
+
+        self.assertEqual(remote_name, "pulp-ci-job781.bundle")
+        self.assertEqual(bundle_ref, "refs/pulp-ci-bundles/job781")
+        self.assertEqual(captured["cmd"], ["scp", str(bundle_path), "ubuntu:pulp-ci-job781.bundle"])
+        self.assertIs(captured["kwargs"]["stdout"], subprocess.PIPE)
+        self.assertIs(captured["kwargs"]["stderr"], subprocess.PIPE)
+        self.assertTrue(captured["kwargs"]["text"])
+        self.assertGreater(captured["timeout"], 0)
+        self.assertEqual(create_bundle.call_args.args[0]["id"], "job781")
+        self.assertEqual(progress_events[0]["phase"], "bundle-upload")
+        self.assertEqual(progress_events[0]["host"], "ubuntu")
+        self.assertEqual(progress_events[0]["bundle"], "pulp-ci-job781.bundle")
+        self.assertEqual(progress_events[0]["transport_mode"], "bundle")
+        self.assertIn("last_output_at", progress_events[0])
+
+    def test_sync_job_bundle_times_out_when_scp_never_finishes(self):
+        bundle_path = self.state_dir / "bundles" / "job782.bundle"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text("bundle")
+        captured = {"kills": 0, "communicates": 0}
+
+        class HungProc:
+            returncode = None
+
+            def communicate(self, timeout=None):
+                captured["communicates"] += 1
+                return ("partial stdout", "partial stderr")
+
+            def kill(self):
+                captured["kills"] += 1
+
+        with mock.patch.object(self.mod, "create_job_bundle", return_value=bundle_path):
+            with mock.patch.object(self.mod.subprocess, "Popen", return_value=HungProc()):
+                with mock.patch.object(self.mod.time, "time", side_effect=[100.0, 401.0]):
+                    with self.assertRaisesRegex(RuntimeError, "timed out waiting for scp"):
+                        self.mod.sync_job_bundle_to_ssh_host("ubuntu", {"id": "job782", "sha": "e" * 40})
+
+        self.assertEqual(captured["kills"], 1)
+        self.assertEqual(captured["communicates"], 1)
+        self.assertEqual(bundle_path.read_text(), "bundle")
+        self.assertTrue(bundle_path.exists())
+
+    def test_sync_job_bundle_kills_after_remote_size_completion_if_terminate_hangs(self):
+        bundle_path = self.state_dir / "bundles" / "job783.bundle"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text("bundle")
+        captured = {"kills": 0, "terminates": 0, "communicates": 0, "probes": []}
+
+        class SlowProc:
+            returncode = None
+
+            def communicate(self, timeout=None):
+                captured["communicates"] += 1
+                if captured["communicates"] in {1, 2}:
+                    raise subprocess.TimeoutExpired(["scp"], timeout)
+                return ("", "")
+
+            def terminate(self):
+                captured["terminates"] += 1
+
+            def kill(self):
+                captured["kills"] += 1
+
+        def fake_probe(host, remote_name, *, config):
+            captured["probes"].append((host, remote_name, config))
+            return bundle_path.stat().st_size
+
+        with mock.patch.object(self.mod, "create_job_bundle", return_value=bundle_path):
+            with mock.patch.object(self.mod.subprocess, "Popen", return_value=SlowProc()):
+                with mock.patch.object(self.mod, "probe_uploaded_bundle_size", side_effect=fake_probe):
+                    remote_name, bundle_ref = self.mod.sync_job_bundle_to_ssh_host(
+                        "ubuntu",
+                        {"id": "job783", "sha": "f" * 40},
+                        config={"targets": {"ubuntu": {"type": "ssh"}}},
+                    )
+
+        self.assertEqual(remote_name, "pulp-ci-job783.bundle")
+        self.assertEqual(bundle_ref, "refs/pulp-ci-bundles/job783")
+        self.assertEqual(captured["terminates"], 1)
+        self.assertEqual(captured["kills"], 1)
+        self.assertEqual(captured["communicates"], 3)
+        self.assertEqual(captured["probes"][0][0], "ubuntu")
+        self.assertEqual(captured["probes"][0][1], "pulp-ci-job783.bundle")
+        self.assertEqual(captured["probes"][0][2]["targets"]["ubuntu"]["type"], "ssh")
+
+    def test_sync_job_bundle_reports_scp_failure_details_and_launch_errors(self):
+        bundle_path = self.state_dir / "bundles" / "job784.bundle"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text("bundle")
+        captured = {"runs": 0}
+
+        class FailingProc:
+            returncode = 23
+
+            def communicate(self, timeout=None):
+                captured["runs"] += 1
+                return ("stdout detail", "stderr detail")
+
+        with mock.patch.object(self.mod, "create_job_bundle", return_value=bundle_path):
+            with mock.patch.object(self.mod.subprocess, "Popen", return_value=FailingProc()):
+                with self.assertRaisesRegex(RuntimeError, "stderr detail"):
+                    self.mod.sync_job_bundle_to_ssh_host("ubuntu", {"id": "job784", "sha": "1" * 40})
+
+        with mock.patch.object(self.mod, "create_job_bundle", return_value=bundle_path):
+            with mock.patch.object(self.mod.subprocess, "Popen", side_effect=OSError("scp missing")):
+                with self.assertRaisesRegex(RuntimeError, "scp missing"):
+                    self.mod.sync_job_bundle_to_ssh_host("ubuntu", {"id": "job784", "sha": "1" * 40})
+
+        self.assertEqual(captured["runs"], 1)
+        self.assertTrue(bundle_path.exists())
+        self.assertEqual(self.mod.remote_bundle_name("job784"), "pulp-ci-job784.bundle")
+
+    def test_probe_uploaded_bundle_size_returns_none_for_empty_or_non_numeric_output(self):
+        empty = subprocess.CompletedProcess(["ssh"], 0, stdout="\n", stderr="")
+        invalid = subprocess.CompletedProcess(["ssh"], 0, stdout="checking\nnot-a-size\n", stderr="")
+        failed = subprocess.CompletedProcess(["ssh"], 255, stdout="123\n", stderr="denied")
+
+        with mock.patch.object(self.mod.subprocess, "run", return_value=empty) as run:
+            self.assertIsNone(self.mod.probe_uploaded_bundle_size("ubuntu", "bundle.git", config={"targets": {}}))
+        with mock.patch.object(self.mod.subprocess, "run", return_value=invalid):
+            self.assertIsNone(self.mod.probe_uploaded_bundle_size("ubuntu", "bundle.git", config={"targets": {}}))
+        with mock.patch.object(self.mod.subprocess, "run", return_value=failed):
+            self.assertIsNone(self.mod.probe_uploaded_bundle_size("ubuntu", "bundle.git", config={"targets": {}}))
+
+        self.assertEqual(run.call_args.args[0][:3], ["ssh", "-o", "BatchMode=yes"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 15)
+
     def test_create_job_bundle_reuses_existing_artifact_across_threads(self):
         job = {"id": "job-concurrent", "sha": "a" * 40}
         bundle_path = self.state_dir / "bundles" / "job-concurrent.bundle"

@@ -688,8 +688,23 @@ int ensure_repo_build_configured(const fs::path& project_root, const fs::path& b
     }
 
     if (!needs_configure) return 0;
-    std::string configure_cmd = "cmake -B " + shell_quote(build_dir) + " -S " + shell_quote(project_root);
+    // Default to a Release build. Without an explicit CMAKE_BUILD_TYPE, CMake
+    // configures with NO optimization flags (no -O, no NDEBUG) — an unoptimized
+    // build whose plugin editor / DSP feels sluggish in a DAW for the same
+    // reason a Debug build does. Plugins are normally perf-tested in a host, so
+    // Release is the right default; `PULP_BUILD_TYPE=Debug pulp build` opts into
+    // a debuggable build. (Only applied on a fresh configure — an existing
+    // CMakeCache's build type is left untouched.)
+    std::string build_type = "Release";
+    if (const char* bt = std::getenv("PULP_BUILD_TYPE"); bt && bt[0] != '\0') {
+        build_type = bt;
+    }
+    std::string configure_cmd = "cmake -B " + shell_quote(build_dir) + " -S " + shell_quote(project_root)
+                              + " -DCMAKE_BUILD_TYPE=" + build_type;
     append_windows_visual_studio_generator_args(configure_cmd);
+    std::cout << "Build type: " << build_type
+              << (build_type == "Release" ? "" : "  (set PULP_BUILD_TYPE=Release for perf)")
+              << "\n";
     return run_with_spinner(configure_cmd, "Configuring");
 }
 

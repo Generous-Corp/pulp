@@ -66,11 +66,32 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
     const bool env_off = plugin_gpu_disabled_by_env();
     d.use_gpu = d.wants_gpu && !env_off;
 
+    // Build-type flag (#perf): a Debug / unoptimized build makes the editor
+    // (and DSP) feel sluggish in a DAW regardless of the GPU/JS path — the most
+    // common "why is this slow?" cause. Surface it in the same log line so it's
+    // obvious in Console/log stream which build a host loaded, and warn loudly
+    // once on Debug. `pulp build` defaults to Release; raw cmake without
+    // -DCMAKE_BUILD_TYPE does not, so this catches both.
+#ifdef NDEBUG
+    constexpr const char* kBuildType = "release";
+#else
+    constexpr const char* kBuildType = "debug";
+#endif
     runtime::log_info(
         "[plugin-gpu-host] adapter mode={} use_gpu={} wants_gpu={} "
-        "env_disabled={} scripted={} requires_gpu_host={} create_view_null={}",
+        "env_disabled={} scripted={} requires_gpu_host={} create_view_null={} build={}",
         d.mode, d.use_gpu, d.wants_gpu, env_off, scripted, view_wants,
-        d.create_view_null);
+        d.create_view_null, kBuildType);
+#ifndef NDEBUG
+    static bool warned_debug = false;
+    if (!warned_debug) {
+        warned_debug = true;
+        runtime::log_warn(
+            "[plugin-gpu-host] DEBUG build — the plugin UI/DSP will be noticeably "
+            "slower than a Release build. Build Release (the `pulp build` default; "
+            "with raw cmake pass -DCMAKE_BUILD_TYPE=Release) before judging perf.");
+    }
+#endif
 
     return d;
 }
