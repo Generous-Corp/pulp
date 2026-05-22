@@ -295,7 +295,7 @@ Builds the `.appex` only. The App Store container host-app target is authored se
 
 ### `PulpAUViewController::dealloc` — never call `_bridge->close()` explicitly
 
-Touched here because `core/format/src/au_view_controller_ios.mm` is dual-owned by `ios` + `auv3` + `view-bridge`. The view controller's ivars are declared `_bridge`, `_fallbackView`, `_viewHost` (the GPU-plugin-view-host work reordered them — see below) and destroyed in REVERSE declaration order, so `_viewHost` is destroyed FIRST. That makes `root_.set_plugin_view_host(nullptr)` / `set_frame_clock(nullptr)` in `~PluginViewHost` safe on BOTH paths (the bridge's view and the `_fallbackView` are still alive). Calling `_bridge->close()` explicitly in `dealloc` reverses that order, frees the View first, and the host's destructor then dereferences a dangling reference — crashes AUv3 editor close. Codex P1 review on PR #653. Full rationale lives in the `auv3` skill under "PulpAUViewController::dealloc — never call `_bridge->close()` explicitly".
+Touched here because `core/format/src/au_view_controller_ios.mm` is dual-owned by `ios` + `auv3` + `view-bridge`. The view controller's ivars are declared `_bridge`, `_fallbackView`, `_viewHost` (the GPU-plugin-view-host work reordered them — see below) and destroyed in REVERSE declaration order, so `_viewHost` is destroyed FIRST. That makes `root_.set_plugin_view_host(nullptr)` / `set_frame_clock(nullptr)` in `~PluginViewHost` safe on BOTH paths (the bridge's view and the `_fallbackView` are still alive). Calling `_bridge->close()` explicitly in `dealloc` reverses that order, frees the View first, and the host's destructor then dereferences a dangling reference — crashes AUv3 editor close. Full rationale lives in the `auv3` skill under "PulpAUViewController::dealloc — never call `_bridge->close()` explicitly".
 
 **Ivar order is load-bearing (2026-05 fallback-UAF fix):** the old order
 `_bridge, _viewHost, _fallbackView` destroyed `_fallbackView` BEFORE `_viewHost`.
@@ -337,7 +337,7 @@ GPU-plugin-view-host work):
   on a device/simulator.
 - **Embeddability matches mac:** display link starts on `-didMoveToWindow`
   (not `attach_to_parent`); `-layoutSubviews` re-syncs size/scale; `tick()`
-  pumps `idle_callback_` first (the #1402 contract — keep it), then frame clock
+  pumps `idle_callback_` first (the idle-pump-in-tick contract — keep it), then frame clock
   + CSS animations; liveness token; GpuSurface resized PHYSICAL, SkiaSurface
   LOGICAL+scale; CPU fallback in the factory when `is_gpu_backed()` is false.
 

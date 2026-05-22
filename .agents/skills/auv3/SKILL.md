@@ -381,8 +381,8 @@ a freed View (GPU-plugin-view-host work, 2026-05; Codex P1).
 Calling `_bridge->close()` HERE explicitly (before `[super dealloc]`)
 reverses that order: the View dies first, then `~PluginViewHost`
 dereferences a dangling `root_` reference and crashes AUv3 editor
-close. Codex P1 review on PR #653 caught the original variant — the fix
-is to remove the explicit close, NOT to add it.
+close. An earlier variant explicitly closed the bridge here and shipped
+that crash; the fix is to remove the explicit close, NOT to add it.
 
 The AUv3 editor now also auto-selects the GPU host via the shared
 `decide_gpu_host()` helper (Options overload) — see the `view-bridge`
