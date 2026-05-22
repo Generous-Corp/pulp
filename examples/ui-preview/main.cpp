@@ -1230,33 +1230,62 @@ int main(int argc, char* argv[]) {
             }
         } catch (...) { /* fall back to measured/--size */ }
 
-        // No self-declared viewport: keep the requested width (the design is
-        // authored to that column width) but TIGHTEN the height to the true
-        // content bottom so the window has no dead padding below the UI. We
-        // recurse the whole laid-out tree accumulating parent offsets — unlike
-        // the old direct-children-only walk, this captures absolutely-
-        // positioned overflow (e.g. a footer / export bar) that sits below its
-        // flex wrapper. Letterbox (set_design_viewport) is the backstop, so a
-        // slightly-off measure degrades to bars, never a clip.
+        // No self-declared viewport: measure the TRUE content extent in BOTH
+        // axes so an imported design opens at its real size — not a fixed
+        // portrait column. We recurse the whole laid-out tree accumulating
+        // parent offsets (captures absolutely-positioned overflow like a
+        // footer / export bar that sits below or right of its flex wrapper).
+        // Letterbox (set_design_viewport) is the backstop, so a slightly-off
+        // measure degrades to bars, never a clip.
+        //
+        // Robust-landscape fix (maintainer live testing 2026-05-21): the old
+        // path kept the hardcoded 360px request width and only measured
+        // height, so wide designs (e.g. the Chainer bundle, ~1280×509) opened
+        // as a 360px portrait column. Now we measure width too, clamp both
+        // axes to sane min/max, and fall back to a landscape default when the
+        // measure is unreliable (degenerate / absurd).
         if (!from_declaration) {
+            constexpr float kMinDim = 240.0f;
+            constexpr float kMaxDim = 4096.0f;
+            // Landscape fallback when measurement is unusable.
+            constexpr float kFallbackW = 1280.0f;
+            constexpr float kFallbackH = 720.0f;
+
+            float content_right = 0.0f;
             float content_bottom = 0.0f;
-            std::function<void(const View*, float)> measure =
-                [&](const View* v, float parent_abs_y) {
+            std::function<void(const View*, float, float)> measure =
+                [&](const View* v, float parent_abs_x, float parent_abs_y) {
                     if (!v) return;
                     for (size_t i = 0; i < v->child_count(); ++i) {
                         const View* c = v->child_at(i);
                         if (!c) continue;
                         const auto b = c->bounds();
+                        const float child_abs_x = parent_abs_x + b.x;
                         const float child_abs_y = parent_abs_y + b.y;
+                        content_right = std::max(content_right, child_abs_x + b.width);
                         content_bottom = std::max(content_bottom, child_abs_y + b.height);
-                        measure(c, child_abs_y);
+                        measure(c, child_abs_x, child_abs_y);
                     }
                 };
-            measure(&root, 0.0f);
-            if (content_bottom > 32.0f) {
-                design_h = std::max(240.0f, std::ceil(content_bottom));
-                std::cout << "[ui-preview] measured content height (recursive): "
-                          << content_bottom << " -> design_h=" << design_h << "\n";
+            measure(&root, 0.0f, 0.0f);
+
+            // A measure is "reliable" only if both axes report a sane,
+            // non-degenerate extent. Otherwise fall back to landscape.
+            const bool w_ok = content_right > 32.0f && content_right < kMaxDim;
+            const bool h_ok = content_bottom > 32.0f && content_bottom < kMaxDim;
+            if (w_ok && h_ok) {
+                design_w = std::clamp(std::ceil(content_right), kMinDim, kMaxDim);
+                design_h = std::clamp(std::ceil(content_bottom), kMinDim, kMaxDim);
+                std::cout << "[ui-preview] measured content (recursive): "
+                          << content_right << "x" << content_bottom
+                          << " -> design " << design_w << "x" << design_h << "\n";
+            } else {
+                design_w = kFallbackW;
+                design_h = kFallbackH;
+                std::cout << "[ui-preview] content measure unreliable ("
+                          << content_right << "x" << content_bottom
+                          << ") -> landscape fallback " << design_w << "x"
+                          << design_h << "\n";
             }
         }
 
@@ -1483,29 +1512,33 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    // ── P1: composing inspector hooks ──────────────────────────────────
+    // ── P2c: ONE-WAY selection (canvas is the single source) ───────────
     //
     // ONE input owner per process, dispatching to BOTH surfaces. The
     // in-canvas overlay is FIRST in the chain (it needs canvas-space mouse
-    // coords for move/resize); the floating window is the inspect surface.
-    // Selection is shared: a pick in either surface updates the other.
+    // coords for move/resize) AND is the SOLE selection source. The
+    // floating window only REFLECTS the canvas selection read-only.
+    //
+    // Maintainer requirement (live testing): "we don't want to select
+    // items in the inspector ever." So selection flows ONE WAY —
+    // canvas-click → overlay-selection → reflect into floating window.
+    // Clicking the floating window's tree shows that node's properties
+    // read-only (set_selection_readonly below) but never changes the
+    // shared selection or highlights the main view. on_view_selected is
+    // left unset so a tree pick can never drive the canvas.
     //
     // Activation: Cmd+I toggles BOTH the floating window and the in-canvas
     // manipulate overlay — no PULP_INSPECTOR env var required.
-    // Re-entry guard: select_view() fires InspectorWindow::on_view_selected,
-    // which calls back into sync_selection — without this flag that loops
-    // infinitely (select_view → on_view_selected → sync_selection → …) and
-    // overflows the stack. The guard makes the mirror one-way per call.
-    bool syncing_selection = false;
+    inspector_view_ptr->set_selection_readonly(true);
     auto sync_selection = [&](View* v) {
-        if (syncing_selection) return;
-        syncing_selection = true;
         inspector_selected = v;
         inspector.set_selected_view(v);
-        if (inspector_window) inspector_view_ptr->select_view(v);
+        // reflect_selection (NOT select_view) is the one-way mirror: it
+        // displays the node's properties without firing on_view_selected,
+        // so there is no feedback loop back into the canvas selection.
+        if (inspector_window) inspector_view_ptr->reflect_selection(v);
         if (inspector_window) inspector_window->repaint();
         if (window) window->repaint();
-        syncing_selection = false;
     };
 
     View::set_inspector_key_hook([&](const KeyEvent& e) -> bool {
@@ -1550,11 +1583,13 @@ int main(int argc, char* argv[]) {
         return false;
     });
 
-    inspector_view_ptr->on_view_selected = [&](View* view) {
-        // A pick in the floating window's tree updates the shared selection
-        // (so the in-canvas overlay can immediately move/resize it).
-        sync_selection(view);
-    };
+    // P2c: intentionally NOT wiring on_view_selected. Selection is driven
+    // ONLY by the in-canvas overlay; a tree pick in the floating window
+    // must never change the canvas selection (maintainer: "we don't want
+    // to select items in the inspector ever"). set_selection_readonly(true)
+    // above already prevents the tree from firing this callback, but we
+    // leave it unset as a second guard so even legacy paths can't couple.
+    inspector_view_ptr->on_view_selected = nullptr;
 
     View::set_inspector_paint_hook([&](pulp::canvas::Canvas& canvas) {
         // The overlay paints the selection box + handles (manipulate-only
