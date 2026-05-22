@@ -575,6 +575,28 @@ If you add a codegen property to `design_codegen.cpp`'s `generate_node`,
 add it to the `kKnown` allow-list in `lock_property_to_style_name()` too
 — otherwise that property can never be locked to source.
 
+- **WYSIWYG T5 — structural reparent (`reparent_in_source`).** A reflow-aware
+  drop ("drop element A inside container B") is a TREE edit, not a style tweak.
+  In the generated artifact every element block ends with
+  `<parentVar>.appendChild(<var>);`. `reparent_in_source(source, {child_anchor,
+  new_parent_anchor})` locates the child block by anchor, finds its
+  `<oldParent>.appendChild(<childVar>);` line, resolves the new parent block's
+  `const <var> =` name, and rewrites the receiver to that var. Status semantics
+  mirror `lock_tweak_into_source` (`rewritten` / `already_current` /
+  `anchor_not_found`). The shared block helpers `find_anchor_block()` +
+  `block_var_name()` back both engines.
+  - **Flagged / remaining (T5 is the scaffold, not the full feature):**
+    1. The receiver rewrite is sufficient to reparent the LIVE DOM (createElement
+       + appendChild are order-independent once the receiver is correct), but the
+       element block's TEXT is NOT physically relocated inside the new parent's
+       block. A re-import re-runs codegen from the IR and would lay it out by IR
+       order; the in-place block move is a follow-up.
+    2. `InspectorOverlay`'s reparent gesture (`reparent_view` /
+       `commit_reflow_drop`) still persists only to live + `EditHistory`; it does
+       NOT yet emit a structural-edit record to a store, so nothing calls
+       `reparent_in_source` from the live drop path yet. Wiring the gesture →
+       store → lock action is the remaining integration.
+
 ### Phase 4b — Lock-to-source, Path B (hand-authored JSX/TSX patch)
 
 `pulp/view/jsx_lock.hpp` (impl `core/view/src/jsx_lock.cpp`) is the

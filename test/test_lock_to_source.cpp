@@ -77,6 +77,45 @@ std::string root_anchor() {
     return *ir.root.stable_anchor_id;
 }
 
+// WYSIWYG T5 — a frame with TWO sibling children (Card + Panel) so a reparent
+// (drop Card inside Panel) has a real new-parent target.
+DesignIR make_two_child_ir() {
+    IRNode root;
+    root.type = "frame";
+    root.name = "Root";
+    root.style.background_color = "#222222";
+    root.style.width = 320.0f;
+    root.style.height = 200.0f;
+
+    IRNode card;
+    card.type = "frame";
+    card.name = "Card";
+    card.style.background_color = "#888888";
+    card.style.width = 80.0f;
+    root.children.push_back(card);
+
+    IRNode panel;
+    panel.type = "frame";
+    panel.name = "Panel";
+    panel.style.background_color = "#444444";
+    panel.style.width = 120.0f;
+    root.children.push_back(panel);
+
+    DesignIR ir;
+    ir.root = std::move(root);
+    ir.source = DesignSource::v0;
+    ir.source_file = "two.tsx";
+    assign_anchors(ir.root, AnchorStrategy::content_hash);
+    return ir;
+}
+
+std::string two_child_source() {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = true;
+    return generate_pulp_js(make_two_child_ir(), opts);
+}
+
 }  // namespace
 
 // ── Property-path mapping ───────────────────────────────────────────────
@@ -263,6 +302,72 @@ TEST_CASE("lock_tweak_into_source persists a transform.scale proportional resize
     LockResult again = lock_tweak_into_source(r.source, tweak);
     REQUIRE(again.status == LockStatus::already_current);
     REQUIRE(again.source == r.source);
+}
+
+// ── WYSIWYG T5 — structural reparent round-trip ─────────────────────────
+
+TEST_CASE("reparent_in_source rewrites the child's appendChild receiver",
+          "[lock-to-source][wysiwyg][t5]") {
+    const std::string gen = two_child_source();
+    auto ir = make_two_child_ir();
+    REQUIRE(ir.root.children.size() == 2);
+    const std::string card_anchor = *ir.root.children[0].stable_anchor_id;
+    const std::string panel_anchor = *ir.root.children[1].stable_anchor_id;
+
+    // Resolve the two child vars + the original root receiver from the source
+    // so the assertions don't hardcode codegen's var-numbering scheme.
+    // Both children are appended to the root var initially.
+    ReparentToSourceEdit edit{card_anchor, panel_anchor};
+    LockResult r = reparent_in_source(gen, edit);
+
+    REQUIRE(r.status == LockStatus::rewritten);
+    REQUIRE(r.ok());
+    REQUIRE(r.mutated());
+    REQUIRE(r.line > 0);
+    // The rewrite message records the receiver change.
+    REQUIRE(r.message.find("reparented") != std::string::npos);
+
+    // The Card block's appendChild now targets the Panel's var. Find the
+    // Panel's var name and assert the Card appends to it.
+    // Panel var: the `const <v> = document.createElement` in Panel's block.
+    const auto panel_anchor_pos = r.source.find("// @pulp-anchor " + panel_anchor);
+    REQUIRE(panel_anchor_pos != std::string::npos);
+    const auto panel_const = r.source.find("const ", panel_anchor_pos);
+    REQUIRE(panel_const != std::string::npos);
+    const auto panel_eq = r.source.find(" =", panel_const);
+    const std::string panel_var =
+        r.source.substr(panel_const + 6, panel_eq - (panel_const + 6));
+
+    // The Card block's appendChild receiver is now panel_var.
+    REQUIRE(r.source.find(panel_var + ".appendChild(") != std::string::npos);
+}
+
+TEST_CASE("reparent_in_source is idempotent + graceful on bad anchors",
+          "[lock-to-source][wysiwyg][t5]") {
+    const std::string gen = two_child_source();
+    auto ir = make_two_child_ir();
+    const std::string card_anchor = *ir.root.children[0].stable_anchor_id;
+    const std::string panel_anchor = *ir.root.children[1].stable_anchor_id;
+
+    LockResult first = reparent_in_source(gen, {card_anchor, panel_anchor});
+    REQUIRE(first.status == LockStatus::rewritten);
+
+    SECTION("re-applying the same reparent is a no-op") {
+        LockResult again =
+            reparent_in_source(first.source, {card_anchor, panel_anchor});
+        REQUIRE(again.status == LockStatus::already_current);
+        REQUIRE(again.source == first.source);  // byte-identical
+    }
+    SECTION("unknown child anchor fails gracefully") {
+        LockResult bad = reparent_in_source(gen, {"nope", panel_anchor});
+        REQUIRE(bad.status == LockStatus::anchor_not_found);
+        REQUIRE(bad.source == gen);  // untouched
+    }
+    SECTION("unknown parent anchor fails gracefully") {
+        LockResult bad = reparent_in_source(gen, {card_anchor, "nope"});
+        REQUIRE(bad.status == LockStatus::anchor_not_found);
+        REQUIRE(bad.source == gen);
+    }
 }
 
 // ── Idempotent re-lock ──────────────────────────────────────────────────

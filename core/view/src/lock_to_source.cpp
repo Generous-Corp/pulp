@@ -146,6 +146,47 @@ std::string escape_js_single(const std::string& s) {
     return out;
 }
 
+// WYSIWYG T5 — locate the [begin, end) line range of the element block whose
+// `// @pulp-anchor <id>` comment matches `anchor_id`. begin is the line AFTER
+// the anchor comment; end is the next anchor comment / blank line / EOF. Sets
+// anchor_line to the comment's index. Returns false when the anchor is absent.
+bool find_anchor_block(const std::vector<std::string>& lines,
+                       const std::string& anchor_id,
+                       int& anchor_line,
+                       std::size_t& block_begin,
+                       std::size_t& block_end) {
+    anchor_line = -1;
+    if (anchor_id.empty()) return false;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (anchor_comment_id(lines[i]) == anchor_id) {
+            anchor_line = static_cast<int>(i);
+            break;
+        }
+    }
+    if (anchor_line < 0) return false;
+    block_begin = static_cast<std::size_t>(anchor_line) + 1;
+    block_end = lines.size();
+    for (std::size_t i = block_begin; i < lines.size(); ++i) {
+        if (!anchor_comment_id(lines[i]).empty()) { block_end = i; break; }
+        if (trim(lines[i]).empty()) { block_end = i; break; }
+    }
+    return true;
+}
+
+// WYSIWYG T5 — extract the `const <var> =` declaration's variable name from an
+// element block, or empty if the block has no readable declaration.
+std::string block_var_name(const std::vector<std::string>& lines,
+                           std::size_t block_begin, std::size_t block_end) {
+    for (std::size_t i = block_begin; i < block_end; ++i) {
+        const std::string t = trim(lines[i]);
+        if (t.rfind("const ", 0) == 0) {
+            const auto eq = t.find(" = ");
+            if (eq != std::string::npos) return trim(t.substr(6, eq - 6));
+        }
+    }
+    return {};
+}
+
 // WYSIWYG T4 — turn an InspectorOverlay tweak value into the literal text
 // that should appear inside the generated `el.style.<name> = '<text>'`. Most
 // paths emit their value verbatim (a color, a "120px" dimension, "absolute").
@@ -404,6 +445,86 @@ LockResult lock_tweak_into_source(const std::string& source,
     result.message = "inserted " + *style_name + " = '" + tweak.value +
                      "' for anchor '" + tweak.anchor_id + "'";
     result.source = join_lines(lines, trailing_nl);
+    return result;
+}
+
+// WYSIWYG T5 — structural reparent. Rewrite the dragged element's appendChild
+// receiver so the generated source wires it under the new parent's element.
+LockResult reparent_in_source(const std::string& source,
+                              const ReparentToSourceEdit& edit) {
+    LockResult result;
+    result.source = source;
+
+    bool trailing_nl = true;
+    std::vector<std::string> lines = split_lines(source, trailing_nl);
+
+    // Locate the child block + the new parent block.
+    int child_anchor_line = -1, parent_anchor_line = -1;
+    std::size_t child_begin = 0, child_end = 0, parent_begin = 0, parent_end = 0;
+    if (!find_anchor_block(lines, edit.child_anchor_id, child_anchor_line,
+                           child_begin, child_end)) {
+        result.status = LockStatus::anchor_not_found;
+        result.message = "no // @pulp-anchor comment for child anchor '" +
+                         edit.child_anchor_id + "'";
+        return result;
+    }
+    if (!find_anchor_block(lines, edit.new_parent_anchor_id, parent_anchor_line,
+                           parent_begin, parent_end)) {
+        result.status = LockStatus::anchor_not_found;
+        result.message = "no // @pulp-anchor comment for new-parent anchor '" +
+                         edit.new_parent_anchor_id + "'";
+        return result;
+    }
+
+    // Resolve the child's own var (the appendChild ARGUMENT) and the new
+    // parent's var (the new appendChild RECEIVER).
+    const std::string child_var = block_var_name(lines, child_begin, child_end);
+    const std::string new_parent_var =
+        block_var_name(lines, parent_begin, parent_end);
+    if (child_var.empty() || new_parent_var.empty()) {
+        result.status = LockStatus::anchor_not_found;
+        result.message = "could not resolve child/parent variable name for "
+                         "reparent (child='" + edit.child_anchor_id +
+                         "', parent='" + edit.new_parent_anchor_id + "')";
+        return result;
+    }
+
+    // Find the child block's `<oldParent>.appendChild(<childVar>);` line and
+    // rewrite the receiver. The argument must be exactly the child var so we
+    // don't accidentally retarget an appendChild of a nested grandchild.
+    const std::string append_call = ".appendChild(" + child_var + ")";
+    for (std::size_t i = child_begin; i < child_end; ++i) {
+        const std::string t = trim(lines[i]);
+        const auto call_pos = t.find(append_call);
+        if (call_pos == std::string::npos) continue;
+        // The receiver is everything before ".appendChild(".
+        const std::string old_receiver = t.substr(0, call_pos);
+        if (old_receiver == new_parent_var) {
+            result.status = LockStatus::already_current;
+            result.message = "child '" + edit.child_anchor_id +
+                             "' already appends to parent '" +
+                             edit.new_parent_anchor_id + "'";
+            result.line = static_cast<int>(i) + 1;
+            result.source = source;
+            return result;
+        }
+        const std::string ind = indent_of(lines[i]);
+        lines[i] = ind + new_parent_var + ".appendChild(" + child_var + ");";
+        result.status = LockStatus::rewritten;
+        result.line = static_cast<int>(i) + 1;
+        result.message = "reparented '" + edit.child_anchor_id + "' under '" +
+                         edit.new_parent_anchor_id + "' (" + old_receiver +
+                         " -> " + new_parent_var + ")";
+        result.source = join_lines(lines, trailing_nl);
+        return result;
+    }
+
+    // No appendChild line for the child — e.g. it was the root, or codegen
+    // emitted it without a parent. Graceful failure; leave source untouched.
+    result.status = LockStatus::anchor_not_found;
+    result.message = "no '" + child_var +
+                     "' appendChild line found in child block for anchor '" +
+                     edit.child_anchor_id + "'";
     return result;
 }
 
