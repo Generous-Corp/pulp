@@ -33,6 +33,9 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 
+#include <clap/ext/preset-load.h>
+
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -165,6 +168,22 @@ public:
     mutable bool had_mpe_input = false;
     mutable bool had_ump_input = false;
     mutable bool had_param_events = false;
+    mutable PrepareContext captured_prepare{};
+    mutable ProcessContext captured_context{};
+    mutable int prepare_count = 0;
+    mutable int release_count = 0;
+    mutable int process_count = 0;
+    mutable int captured_input_channels = 0;
+    mutable int captured_output_channels = 0;
+    mutable int captured_num_samples = 0;
+    mutable bool had_sidechain_input = false;
+    mutable int captured_sidechain_channels = 0;
+    mutable int captured_sidechain_samples = 0;
+    mutable float captured_sidechain_first_sample = 0.0f;
+    mutable float captured_sidechain_second_sample = 0.0f;
+    mutable float captured_modulated_value = 0.0f;
+    bool mutate_param_in_process = false;
+    float process_param_value = 0.0f;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -186,12 +205,37 @@ public:
             .range = {0.0f, 1.0f, 0.0f, 0.0f},
         });
     }
-    void prepare(const PrepareContext&) override {}
-    void process(audio::BufferView<float>&,
-                 const audio::BufferView<const float>&,
+    void prepare(const PrepareContext& context) override {
+        captured_prepare = context;
+        ++prepare_count;
+    }
+    void release() override { ++release_count; }
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>& audio_input,
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 const ProcessContext& context) override {
+        ++process_count;
+        captured_context = context;
+        captured_input_channels = static_cast<int>(audio_input.num_channels());
+        captured_output_channels = static_cast<int>(audio_output.num_channels());
+        captured_num_samples = static_cast<int>(audio_input.num_samples());
+        captured_modulated_value = state().get_modulated(kParamId);
+        had_sidechain_input = sidechain_input() != nullptr;
+        captured_sidechain_channels = 0;
+        captured_sidechain_samples = 0;
+        captured_sidechain_first_sample = 0.0f;
+        captured_sidechain_second_sample = 0.0f;
+        if (auto* sc = sidechain_input()) {
+            captured_sidechain_channels = static_cast<int>(sc->num_channels());
+            captured_sidechain_samples = static_cast<int>(sc->num_samples());
+            if (sc->num_channels() > 0 && sc->num_samples() > 0) {
+                captured_sidechain_first_sample = sc->channel(0)[0];
+            }
+            if (sc->num_channels() > 1 && sc->num_samples() > 0) {
+                captured_sidechain_second_sample = sc->channel(1)[0];
+            }
+        }
         captured_midi.clear();
         for (const auto& ev : midi_in) captured_midi.add(ev);
         for (const auto& se : midi_in.sysex()) {
@@ -207,6 +251,9 @@ public:
         captured_ump.clear();
         if (auto* ump = ump_input()) {
             for (const auto& e : *ump) captured_ump.push_back(e);
+        }
+        if (mutate_param_in_process) {
+            state().set_value_rt(kParamId, process_param_value);
         }
     }
 };
@@ -275,6 +322,10 @@ std::unique_ptr<Processor> make_emitting() {
     return up;
 }
 
+std::unique_ptr<Processor> make_null_processor() {
+    return nullptr;
+}
+
 // ── Driver: spin up a PulpClapPlugin, run one process block ─────────────
 
 struct Harness {
@@ -287,12 +338,14 @@ struct Harness {
     const float* in_ptrs[2]{};
     float* out_ptrs[2]{};
     clap_audio_buffer_t audio_in{}, audio_out{};
+    bool active = false;
 
     explicit Harness(ProcessorFactory factory) {
         plugin.factory = factory;
         plugin.plugin.plugin_data = &plugin;
         REQUIRE(clap_adapter::clap_init(&plugin.plugin));
         REQUIRE(clap_adapter::clap_activate(&plugin.plugin, 48000.0, 32, kFrames));
+        active = true;
         in_left.assign(kFrames, 0.0f);
         in_right.assign(kFrames, 0.0f);
         out_left.assign(kFrames, 0.0f);
@@ -308,23 +361,45 @@ struct Harness {
     }
 
     ~Harness() {
+        if (active) clap_adapter::clap_deactivate(&plugin.plugin);
+    }
+
+    void deactivate() {
+        REQUIRE(active);
         clap_adapter::clap_deactivate(&plugin.plugin);
+        active = false;
     }
 
     clap_process_status run(InputEventList& in_list,
                             OutputEventList* out_list = nullptr) {
-        clap_input_events_t in_vt = in_list.make_vtable();
+        return run_custom(&in_list, out_list,
+                          &audio_in, 1,
+                          &audio_out, 1,
+                          kFrames, nullptr);
+    }
+
+    clap_process_status run_custom(InputEventList* in_list,
+                                   OutputEventList* out_list,
+                                   clap_audio_buffer_t* inputs,
+                                   uint32_t input_count,
+                                   clap_audio_buffer_t* outputs,
+                                   uint32_t output_count,
+                                   uint32_t frames = kFrames,
+                                   const clap_event_transport_t* transport = nullptr) {
+        clap_input_events_t in_vt{};
+        if (in_list) in_vt = in_list->make_vtable();
         clap_output_events_t out_vt{};
         if (out_list) out_vt = out_list->make_vtable();
 
         clap_process_t proc{};
-        proc.frames_count = kFrames;
-        proc.audio_inputs = &audio_in;
-        proc.audio_inputs_count = 1;
-        proc.audio_outputs = &audio_out;
-        proc.audio_outputs_count = 1;
-        proc.in_events = &in_vt;
+        proc.frames_count = frames;
+        proc.audio_inputs = inputs;
+        proc.audio_inputs_count = input_count;
+        proc.audio_outputs = outputs;
+        proc.audio_outputs_count = output_count;
+        proc.in_events = in_list ? &in_vt : nullptr;
         proc.out_events = out_list ? &out_vt : nullptr;
+        proc.transport = transport;
         return clap_adapter::clap_process(&plugin.plugin, &proc);
     }
 };
@@ -340,6 +415,291 @@ clap_event_header_t make_header(uint32_t size, uint16_t type, uint32_t time) {
 }
 
 } // namespace
+
+// ── Lifecycle / process-shape edge cases ───────────────────────────────
+
+TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
+          "[clap][lifecycle]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+    REQUIRE(g_capturing != nullptr);
+
+    REQUIRE(g_capturing->prepare_count == 1);
+    REQUIRE(g_capturing->captured_prepare.sample_rate == 48000.0);
+    REQUIRE(g_capturing->captured_prepare.max_buffer_size == static_cast<int>(Harness::kFrames));
+    REQUIRE(g_capturing->captured_prepare.input_channels == 2);
+    REQUIRE(g_capturing->captured_prepare.output_channels == 2);
+
+    REQUIRE(clap_adapter::clap_start_processing(&h.plugin.plugin));
+    clap_adapter::clap_stop_processing(&h.plugin.plugin);
+    clap_adapter::clap_reset(&h.plugin.plugin);
+    clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+
+    h.deactivate();
+    REQUIRE(g_capturing->release_count == 1);
+
+    auto* raw = new clap_adapter::PulpClapPlugin;
+    raw->factory = make_capturing;
+    raw->plugin.plugin_data = raw;
+    REQUIRE(clap_adapter::clap_init(&raw->plugin));
+    clap_adapter::clap_destroy(&raw->plugin);
+    g_capturing = nullptr;
+}
+
+TEST_CASE("CLAP init and process fail cleanly without a processor",
+          "[clap][lifecycle]") {
+    clap_adapter::PulpClapPlugin init_plugin;
+    init_plugin.factory = make_null_processor;
+    init_plugin.plugin.plugin_data = &init_plugin;
+    REQUIRE_FALSE(clap_adapter::clap_init(&init_plugin.plugin));
+
+    clap_adapter::PulpClapPlugin process_plugin;
+    process_plugin.plugin.plugin_data = &process_plugin;
+    clap_process_t proc{};
+    proc.frames_count = Harness::kFrames;
+    REQUIRE(clap_adapter::clap_process(&process_plugin.plugin, &proc) == CLAP_PROCESS_ERROR);
+}
+
+TEST_CASE("CLAP zero-frame process block returns without touching processor state",
+          "[clap][process]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+    REQUIRE(g_capturing != nullptr);
+
+    InputEventList events;
+    clap_event_midi_t ev{};
+    ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI, 0);
+    ev.data[0] = 0xB0;
+    ev.data[1] = 74;
+    ev.data[2] = 64;
+    events.push(ev);
+
+    REQUIRE(h.run_custom(&events, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         0, nullptr) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->process_count == 0);
+    REQUIRE(g_capturing->captured_midi.empty());
+}
+
+TEST_CASE("CLAP process ignores non-core event namespaces",
+          "[clap][events][namespace]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    InputEventList events;
+    clap_event_param_value_t param{};
+    param.header = make_header(sizeof(param), CLAP_EVENT_PARAM_VALUE, 3);
+    param.header.space_id = 99;
+    param.param_id = CapturingProcessor::kParamId;
+    param.value = 0.75;
+    events.push(param);
+
+    clap_event_midi_t midi{};
+    midi.header = make_header(sizeof(midi), CLAP_EVENT_MIDI, 4);
+    midi.header.space_id = 99;
+    midi.data[0] = 0xB0;
+    midi.data[1] = 7;
+    midi.data[2] = 127;
+    events.push(midi);
+
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_midi.empty());
+    REQUIRE(g_capturing->captured_param_events.empty());
+    REQUIRE(g_capturing->state().get_value(CapturingProcessor::kParamId) == 0.0f);
+}
+
+TEST_CASE("CLAP parameter modulation applies for one block then resets",
+          "[clap][params][modulation]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    InputEventList mod_events;
+    clap_event_param_mod_t mod{};
+    mod.header = make_header(sizeof(mod), CLAP_EVENT_PARAM_MOD, 5);
+    mod.param_id = CapturingProcessor::kParamId;
+    mod.amount = 0.375;
+    mod_events.push(mod);
+
+    REQUIRE(h.run(mod_events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->had_param_events);
+    REQUIRE(g_capturing->captured_param_events.empty());
+    REQUIRE(g_capturing->captured_modulated_value == 0.375f);
+
+    InputEventList empty;
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_modulated_value == 0.0f);
+}
+
+TEST_CASE("CLAP gesture events forward through StateStore callbacks",
+          "[clap][params][gesture]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    std::vector<state::ParamID> began;
+    std::vector<state::ParamID> ended;
+    h.plugin.store.set_gesture_callbacks(
+        [&](state::ParamID id) { began.push_back(id); },
+        [&](state::ParamID id) { ended.push_back(id); });
+
+    InputEventList events;
+    clap_event_param_gesture_t begin{};
+    begin.header = make_header(sizeof(begin), CLAP_EVENT_PARAM_GESTURE_BEGIN, 1);
+    begin.param_id = CapturingProcessor::kParamId;
+    events.push(begin);
+    clap_event_param_gesture_t end{};
+    end.header = make_header(sizeof(end), CLAP_EVENT_PARAM_GESTURE_END, 9);
+    end.param_id = CapturingProcessor::kParamId;
+    events.push(end);
+
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(began.size() == 1);
+    REQUIRE(ended.size() == 1);
+    REQUIRE(began[0] == CapturingProcessor::kParamId);
+    REQUIRE(ended[0] == CapturingProcessor::kParamId);
+}
+
+TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
+          "[clap][audio][sidechain]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    std::vector<float> sc_left(Harness::kFrames, 0.25f);
+    std::vector<float> sc_right(Harness::kFrames, -0.5f);
+    float* sc_ptrs[2] = {sc_left.data(), sc_right.data()};
+    clap_audio_buffer_t sidechain{};
+    sidechain.data32 = sc_ptrs;
+    sidechain.channel_count = 2;
+
+    std::vector<float> aux_left(Harness::kFrames, 12.0f);
+    std::vector<float> aux_right(Harness::kFrames, -6.0f);
+    float* aux_ptrs[3] = {aux_left.data(), nullptr, aux_right.data()};
+    clap_audio_buffer_t aux_out{};
+    aux_out.data32 = aux_ptrs;
+    aux_out.channel_count = 3;
+
+    clap_audio_buffer_t inputs[2] = {h.audio_in, sidechain};
+    clap_audio_buffer_t outputs[2] = {h.audio_out, aux_out};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         inputs, 2,
+                         outputs, 2) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_capturing->had_sidechain_input);
+    REQUIRE(g_capturing->captured_sidechain_channels == 2);
+    REQUIRE(g_capturing->captured_sidechain_samples == static_cast<int>(Harness::kFrames));
+    REQUIRE(g_capturing->captured_sidechain_first_sample == 0.25f);
+    REQUIRE(g_capturing->captured_sidechain_second_sample == -0.5f);
+    REQUIRE(g_capturing->captured_input_channels == 2);
+    REQUIRE(g_capturing->captured_output_channels == 2);
+    REQUIRE(std::all_of(aux_left.begin(), aux_left.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(aux_right.begin(), aux_right.end(), [](float v) { return v == 0.0f; }));
+}
+
+TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",
+          "[clap][audio][sidechain]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_audio_buffer_t inactive_sidechain{};
+    inactive_sidechain.data32 = nullptr;
+    inactive_sidechain.channel_count = 2;
+    clap_audio_buffer_t inputs_with_inactive[2] = {h.audio_in, inactive_sidechain};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         inputs_with_inactive, 2,
+                         &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->had_sidechain_input);
+
+    std::vector<float> sc_left(Harness::kFrames, 0.5f);
+    float* partial_ptrs[2] = {sc_left.data(), nullptr};
+    clap_audio_buffer_t partial_sidechain{};
+    partial_sidechain.data32 = partial_ptrs;
+    partial_sidechain.channel_count = 2;
+    clap_audio_buffer_t inputs_with_partial[2] = {h.audio_in, partial_sidechain};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         inputs_with_partial, 2,
+                         &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->had_sidechain_input);
+}
+
+TEST_CASE("CLAP transport state maps into ProcessContext",
+          "[clap][transport]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
+                    | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    transport.tempo = 132.25;
+    transport.song_pos_beats = 25 * (CLAP_BEATTIME_FACTOR / 2);
+    transport.tsig_num = 7;
+    transport.tsig_denom = 8;
+
+    InputEventList events;
+    REQUIRE(h.run_custom(&events, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_capturing->captured_context.is_playing);
+    REQUIRE(g_capturing->captured_context.tempo_bpm == 132.25);
+    REQUIRE(g_capturing->captured_context.position_beats == 12.5);
+    REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);
+    REQUIRE(g_capturing->captured_context.time_sig_denominator == 8);
+    REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
+}
+
+TEST_CASE("CLAP emits parameter event when processor changes automatable state",
+          "[clap][params][out-events]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+    g_capturing->mutate_param_in_process = true;
+    g_capturing->process_param_value = 0.625f;
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+
+    auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(params.size() == 1);
+    REQUIRE(params[0]->header.time == 0);
+    REQUIRE(params[0]->header.space_id == CLAP_CORE_EVENT_SPACE_ID);
+    REQUIRE(params[0]->param_id == CapturingProcessor::kParamId);
+    REQUIRE(params[0]->note_id == -1);
+    REQUIRE(params[0]->port_index == -1);
+    REQUIRE(params[0]->channel == -1);
+    REQUIRE(params[0]->key == -1);
+    REQUIRE(params[0]->value == 0.625);
+}
+
+TEST_CASE("CLAP preset-load extension is exposed only for supported ids",
+          "[clap][preset]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    auto* preset = static_cast<const clap_plugin_preset_load_t*>(
+        clap_adapter::clap_get_extension(&h.plugin.plugin, CLAP_EXT_PRESET_LOAD));
+    REQUIRE(preset != nullptr);
+    REQUIRE(clap_adapter::clap_get_extension(
+        &h.plugin.plugin, CLAP_EXT_PRESET_LOAD_COMPAT) == preset);
+    REQUIRE(clap_adapter::clap_get_extension(&h.plugin.plugin, "pulp.unknown") == nullptr);
+
+    REQUIRE_FALSE(preset->from_location(&h.plugin.plugin, 0, nullptr, nullptr));
+    REQUIRE_FALSE(preset->from_location(&h.plugin.plugin, 42, "/tmp/pulp-missing.preset", nullptr));
+    REQUIRE_FALSE(preset->from_location(&h.plugin.plugin, 0, "/tmp/pulp-missing.preset", nullptr));
+}
 
 // ── Inbound: CLAP_EVENT_MIDI ────────────────────────────────────────────
 
@@ -480,6 +840,45 @@ TEST_CASE("CLAP_EVENT_MIDI decodes pitch bend, program change, poly AT, channel 
     REQUIRE(gchat.channel() == 5);
     REQUIRE(gchat.data()[0] == 0xD5);
     REQUIRE(gchat.data()[1] == 33);
+}
+
+TEST_CASE("CLAP note on and note off events decode into MidiBuffer",
+          "[clap][midi][notes]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    InputEventList events;
+    clap_event_note_t on{};
+    on.header = make_header(sizeof(on), CLAP_EVENT_NOTE_ON, 2);
+    on.note_id = -1;
+    on.port_index = 0;
+    on.channel = 6;
+    on.key = 67;
+    on.velocity = 0.75;
+    events.push(on);
+
+    clap_event_note_t off{};
+    off.header = make_header(sizeof(off), CLAP_EVENT_NOTE_OFF, 18);
+    off.note_id = -1;
+    off.port_index = 0;
+    off.channel = 6;
+    off.key = 67;
+    off.velocity = 0.25;
+    events.push(off);
+
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_midi.size() == 2);
+    REQUIRE(g_capturing->captured_midi[0].is_note_on());
+    REQUIRE(g_capturing->captured_midi[0].channel() == 6);
+    REQUIRE(g_capturing->captured_midi[0].note() == 67);
+    REQUIRE(g_capturing->captured_midi[0].velocity() == 95);
+    REQUIRE(g_capturing->captured_midi[0].sample_offset == 2);
+    REQUIRE(g_capturing->captured_midi[1].is_note_off());
+    REQUIRE(g_capturing->captured_midi[1].channel() == 6);
+    REQUIRE(g_capturing->captured_midi[1].note() == 67);
+    REQUIRE(g_capturing->captured_midi[1].velocity() == 31);
+    REQUIRE(g_capturing->captured_midi[1].sample_offset == 18);
 }
 
 // ── Inbound: CLAP_EVENT_NOTE_CHOKE ──────────────────────────────────────
@@ -1073,6 +1472,30 @@ TEST_CASE("midi_out sysex surfaces on CLAP out_events",
     REQUIRE(sysexes[0]->size == 5);
     REQUIRE(sysexes[0]->buffer[0] == 0xF0);
     REQUIRE(sysexes[0]->buffer[4] == 0xF7);
+}
+
+TEST_CASE("midi_out negative sample offsets clamp to start of CLAP block",
+          "[clap][midi][outbound]") {
+    g_pending_emit.clear();
+    g_pending_sysex.clear();
+    auto cc = midi::MidiEvent::cc(/*ch*/0, /*num*/1, /*val*/11);
+    cc.sample_offset = -5;
+    g_pending_emit = {cc};
+    midi::MidiBuffer::SysexEvent se;
+    se.data = {0xF0, 0x7D, 0x02, 0xF7};
+    se.sample_offset = -1;
+    g_pending_sysex = {se};
+
+    Harness h(make_emitting);
+    InputEventList in;
+    OutputEventList out;
+    REQUIRE(h.run(in, &out) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(out.size() == 2);
+    REQUIRE(out.at(0)->time == 0);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_MIDI);
+    REQUIRE(out.at(1)->time == 0);
+    REQUIRE(out.at(1)->type == CLAP_EVENT_MIDI_SYSEX);
 }
 
 TEST_CASE("midi_out program change (2-byte) clamps size padding on CLAP out_events",
