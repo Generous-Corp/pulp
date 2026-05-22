@@ -120,6 +120,10 @@ class CoveragercTests(unittest.TestCase):
             rpc.DEFAULT_TEST_GLOBS,
         )
         self.assertIn(
+            "tools/harness/tests/test_yoga_adapter.py",
+            rpc.DEFAULT_TEST_GLOBS,
+        )
+        self.assertIn(
             "tools/harness/tests/test_rn_adapter.py",
             rpc.DEFAULT_TEST_GLOBS,
         )
