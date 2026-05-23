@@ -664,6 +664,116 @@ TEST_CASE("Canvas SDF fallback covers stroked shape variants",
     REQUIRE(rc.commands().back().f[4] == Catch::Approx(0.0f));
 }
 
+TEST_CASE("RecordingCanvas captures sticky paint and image state payloads",
+          "[canvas][recording][coverage]") {
+    RecordingCanvas rc;
+    const uint8_t pixels[] = {
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+    };
+
+    rc.set_line_cap(LineCap::square);
+    rc.set_line_join(LineJoin::bevel);
+    rc.set_miter_limit(7.5f);
+    rc.set_image_smoothing(false, Canvas::ImageSmoothingQuality::high);
+    rc.set_direction(Canvas::TextDirection::rtl);
+    rc.set_filter("blur(2px) saturate(140%)");
+    rc.set_fill_pattern("pattern.png", Canvas::PatternTileMode::repeat,
+                        Canvas::PatternTileMode::no_repeat);
+    rc.set_stroke_pattern("stroke.png", Canvas::PatternTileMode::no_repeat,
+                          Canvas::PatternTileMode::repeat);
+    rc.save_backdrop_filter(1, 2, 3, 4, 5);
+    REQUIRE(rc.write_pixels(pixels, 2, 1, 9, 10));
+
+    REQUIRE(rc.count(DrawCommand::Type::set_line_cap) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_line_join) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_miter_limit) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_image_smoothing) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_direction) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_filter) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_fill_pattern) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_pattern) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save_backdrop_filter) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::write_pixels) == 1);
+
+    REQUIRE(rc.commands()[2].f[0] == Catch::Approx(7.5f));
+    REQUIRE(rc.commands()[3].f[0] == Catch::Approx(0.0f));
+    REQUIRE(rc.commands()[3].f[1] == Catch::Approx(2.0f));
+    REQUIRE(rc.commands()[5].text == "blur(2px) saturate(140%)");
+    REQUIRE(rc.commands()[6].f[1] == Catch::Approx(1.0f));
+    REQUIRE(rc.commands().back().text.size() == sizeof(pixels));
+}
+
+TEST_CASE("RecordingCanvas captures stroke gradient commands and stop payloads",
+          "[canvas][recording][coverage]") {
+    RecordingCanvas rc;
+    const Color colors[] = {
+        Color::rgba8(10, 20, 30, 40),
+        Color::rgba8(50, 60, 70, 80),
+    };
+    const float positions[] = {0.25f, 0.75f};
+
+    rc.set_stroke_gradient_linear(1, 2, 3, 4, colors, positions, 2);
+    rc.set_stroke_gradient_radial(5, 6, 7, colors, positions, 1);
+    rc.set_stroke_gradient_radial_two_circles(8, 9, 10, 11, 12, 13,
+                                              colors, positions, 2);
+    rc.set_stroke_gradient_conic(14, 15, 16, colors + 1, positions + 1, 1);
+    rc.clear_stroke_gradient();
+
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_gradient_linear) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_gradient_radial) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_gradient_radial_two_circles) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_gradient_conic) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::clear_stroke_gradient) == 1);
+
+    const auto& linear = rc.commands()[0];
+    REQUIRE(linear.f[0] == Catch::Approx(1.0f));
+    REQUIRE(linear.f[3] == Catch::Approx(4.0f));
+    REQUIRE(linear.floats.size() == 10);
+    REQUIRE(linear.floats[0] == Catch::Approx(0.25f));
+    REQUIRE(linear.floats[1] == Catch::Approx(colors[0].r));
+    REQUIRE(linear.floats[5] == Catch::Approx(0.75f));
+
+    const auto& two_circle = rc.commands()[2];
+    REQUIRE(two_circle.f[0] == Catch::Approx(8.0f));
+    REQUIRE(two_circle.f[5] == Catch::Approx(13.0f));
+    REQUIRE(two_circle.floats.size() == 10);
+
+    const auto& conic = rc.commands()[3];
+    REQUIRE(conic.f[2] == Catch::Approx(16.0f));
+    REQUIRE(conic.floats.size() == 5);
+    REQUIRE(rc.commands().back().type == DrawCommand::Type::clear_stroke_gradient);
+}
+
+TEST_CASE("Canvas base fallbacks delegate through recording backend",
+          "[canvas][fallback][coverage]") {
+    RecordingCanvas rc;
+    const Color colors[] = {Color::rgba8(3, 4, 5, 6)};
+    const float positions[] = {0.0f};
+
+    rc.Canvas::set_stroke_gradient_linear(0, 0, 1, 1, colors, positions, 1);
+    rc.Canvas::set_stroke_gradient_radial_two_circles(0, 0, 2, 3, 4, 5,
+                                                       colors, positions, 1);
+    rc.Canvas::set_stroke_gradient_conic(2, 3, 4, colors, positions, 0);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_color) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_gradient_radial) == 1);
+    REQUIRE(rc.commands()[0].color == colors[0]);
+    REQUIRE(rc.commands()[1].type == DrawCommand::Type::set_stroke_gradient_radial);
+
+    rc.Canvas::fill_text_anchored("anchor", 7, 8, Canvas::TextAnchor::GlyphCenter);
+    rc.Canvas::fill_text_with_max_width("wide", 9, 10, 40);
+    rc.Canvas::stroke_text("outline", 11, 12, 50);
+    REQUIRE(rc.count(DrawCommand::Type::fill_text) == 3);
+    REQUIRE(rc.commands()[2].text == "anchor");
+    REQUIRE(rc.commands()[3].text == "wide");
+    REQUIRE(rc.commands()[4].text == "outline");
+
+    rc.Canvas::set_font_full("fallback", 18, 700, 1, 0.5f);
+    REQUIRE(rc.count(DrawCommand::Type::set_font) == 1);
+    REQUIRE(rc.commands().back().text == "fallback");
+    REQUIRE(rc.commands().back().f[0] == Catch::Approx(18.0f));
+}
+
 #ifdef PULP_HAS_SKIA
 // Issue-897 P1 follow-up: ctx.setTransform must compose onto the parent
 // View's transform, not overwrite it. Without this, a CanvasWidget at
