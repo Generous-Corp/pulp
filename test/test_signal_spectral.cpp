@@ -256,6 +256,46 @@ TEST_CASE("FFT forward_real preserves exact-bin conjugate symmetry", "[signal][f
     REQUIRE_THAT(output[bin].imag(), WithinAbs(-output[N - bin].imag(), 1e-4f));
 }
 
+TEST_CASE("FFT real transform exposes DC and Nyquist bins explicitly",
+          "[signal][fft][coverage][phase3]") {
+    constexpr int N = 16;
+    Fft fft(N);
+    std::vector<float> constant(N, 0.25f);
+    std::vector<std::complex<float>> output(N);
+
+    fft.forward_real(constant.data(), output.data());
+
+    REQUIRE(fft.size() == N);
+    REQUIRE_THAT(output[0].real(), WithinAbs(4.0f, 1e-5f));
+    REQUIRE_THAT(output[0].imag(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(output[N / 2].real(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(output[N / 2].imag(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(std::abs(output[0]), WithinAbs(4.0f, 1e-5f));
+    REQUIRE_THAT(std::abs(output[N / 2]), WithinAbs(0.0f, 1e-5f));
+    for (int i = 1; i < N / 2; ++i) {
+        REQUIRE_THAT(output[i].real(), WithinAbs(output[N - i].real(), 1e-5f));
+        REQUIRE_THAT(output[i].imag(), WithinAbs(-output[N - i].imag(), 1e-5f));
+        REQUIRE(std::abs(output[i]) < 1e-5f);
+    }
+}
+
+TEST_CASE("FFT magnitude helpers tolerate empty ranges and preserve destination values",
+          "[signal][fft][coverage][phase3]") {
+    Fft fft(8);
+    std::vector<std::complex<float>> bins(8, {1.0f, 0.0f});
+    std::vector<float> linear = {7.0f, 8.0f};
+    std::vector<float> db = {9.0f, 10.0f};
+
+    REQUIRE(fft.size() == 8);
+    fft.magnitude(bins.data(), linear.data(), 0);
+    fft.magnitude_db(bins.data(), db.data(), 0);
+
+    REQUIRE_THAT(linear[0], WithinAbs(7.0f, 1e-6f));
+    REQUIRE_THAT(linear[1], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(db[0], WithinAbs(9.0f, 1e-6f));
+    REQUIRE_THAT(db[1], WithinAbs(10.0f, 1e-6f));
+}
+
 // ── Convolver ────────────────────────────────────────────────────────────────
 
 TEST_CASE("Convolver with identity IR", "[signal][convolver]") {
@@ -332,4 +372,68 @@ TEST_CASE("Convolver reset clears buffered overlap", "[signal][convolver][issue-
     for (float sample : output) {
         REQUIRE_THAT(sample, WithinAbs(0.0f, 1e-4f));
     }
+}
+
+TEST_CASE("Convolver unloaded and empty IR paths pass through safely",
+          "[signal][convolver][coverage][phase3]") {
+    Convolver conv;
+    REQUIRE_THAT(conv.process(0.375f), WithinAbs(0.375f, 1e-6f));
+    REQUIRE_THAT(conv.process(-0.25f), WithinAbs(-0.25f, 1e-6f));
+
+    std::vector<float> input = {0.0f, 0.25f, -0.5f, 0.75f};
+    std::vector<float> output(input.size(), 99.0f);
+    conv.process(input.data(), output.data(), static_cast<int>(input.size()));
+    REQUIRE_THAT(output[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(output[2], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(output[3], WithinAbs(0.75f, 1e-6f));
+    for (size_t i = 0; i < input.size(); ++i)
+        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-6f));
+
+    float dummy = 1.0f;
+    conv.load_ir(&dummy, 0, 8);
+    REQUIRE_THAT(conv.process(0.5f), WithinAbs(0.5f, 1e-6f));
+
+    conv.process(input.data(), output.data(), static_cast<int>(input.size()));
+    REQUIRE_THAT(output[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(output[2], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(output[3], WithinAbs(0.75f, 1e-6f));
+    for (size_t i = 0; i < input.size(); ++i)
+        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-6f));
+
+    conv.load_ir(nullptr, 4, 8);
+    REQUIRE_THAT(conv.process(-0.75f), WithinAbs(-0.75f, 1e-6f));
+}
+
+TEST_CASE("Convolver default block size and reload reset the buffered stream",
+          "[signal][convolver][coverage][phase3]") {
+    Convolver conv;
+    float identity[] = {1.0f};
+    conv.load_ir(identity, 1);
+
+    std::vector<float> warmup(256, 0.0f);
+    std::vector<float> output(256, 99.0f);
+    warmup[0] = 1.0f;
+    conv.process(warmup.data(), output.data(), static_cast<int>(warmup.size()));
+
+    REQUIRE_THAT(output[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(output[255], WithinAbs(0.0f, 1e-5f));
+
+    std::vector<float> second(256, 0.0f);
+    second[0] = 0.5f;
+    conv.process(second.data(), output.data(), static_cast<int>(second.size()));
+
+    REQUIRE_THAT(output[0], WithinAbs(1.0f, 1e-4f));
+    REQUIRE_THAT(output[1], WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(output[2], WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(output[255], WithinAbs(0.0f, 1e-5f));
+
+    conv.load_ir(identity, 1, 8);
+    for (int i = 0; i < 7; ++i)
+        REQUIRE_THAT(conv.process(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(conv.process(1.0f), WithinAbs(0.0f, 1e-6f));
+    for (int i = 0; i < 7; ++i)
+        REQUIRE_THAT(conv.process(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(conv.process(0.0f), WithinAbs(1.0f, 1e-4f));
 }

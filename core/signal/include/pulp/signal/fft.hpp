@@ -236,7 +236,18 @@ class Convolver {
 public:
     // Load an impulse response
     void load_ir(const float* ir, int ir_length, int block_size = 0) {
-        if (ir_length <= 0) return;
+        if (ir == nullptr || ir_length <= 0) {
+            fft_.reset();
+            ir_freq_.clear();
+            input_buf_.clear();
+            output_buf_.clear();
+            overlap_.clear();
+            freq_buf_.clear();
+            fft_size_ = 0;
+            block_size_ = 0;
+            pos_ = 0;
+            return;
+        }
 
         block_size_ = block_size > 0 ? block_size : 256;
 
@@ -253,15 +264,18 @@ public:
         fft_->forward(ir_freq_.data());
 
         // Buffers
-        input_buf_.resize(fft_size_, 0);
-        output_buf_.resize(fft_size_, 0);
-        overlap_.resize(fft_size_, 0);
-        freq_buf_.resize(fft_size_);
+        input_buf_.assign(fft_size_, 0.0f);
+        output_buf_.assign(fft_size_, 0.0f);
+        overlap_.assign(fft_size_, 0.0f);
+        freq_buf_.assign(fft_size_, {});
         pos_ = 0;
     }
 
     // Process a single sample
     float process(float input) {
+        if (!fft_ || block_size_ <= 0)
+            return input;
+
         input_buf_[pos_] = input;
         float output = output_buf_[pos_];
         ++pos_;
