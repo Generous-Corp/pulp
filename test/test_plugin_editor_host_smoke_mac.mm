@@ -232,6 +232,151 @@ TEST_CASE("CLAP gui_create/set_parent attaches the embedded editor (mac)",
     }
 }
 
+TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
+          "[gpu][skia][plugin-gpu-host][mac][clap][resize]") {
+    // Drives the Phase 3 resize-negotiation path end to end through the
+    // CLAP entry: gui_can_resize, gui_get_resize_hints (preserve aspect),
+    // gui_adjust_size (snap to design aspect), then create+set_parent+
+    // set_size on a hidden NSWindow + capture. A second set_size lands on
+    // a different rect — the captured PNG after the second resize differs
+    // in size from the first, proving the surface tracks gui_set_size and
+    // the design viewport scales content rather than re-laying it out.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        REQUIRE(clap_entry.init("test"));
+        auto* factory = static_cast<const clap_plugin_factory_t*>(
+            clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+        REQUIRE(factory != nullptr);
+        auto* desc = factory->get_plugin_descriptor(factory, 0);
+        REQUIRE(desc != nullptr);
+        const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+        REQUIRE(plugin != nullptr);
+        REQUIRE(plugin->init(plugin));
+
+        auto* gui = static_cast<const clap_plugin_gui_t*>(
+            plugin->get_extension(plugin, CLAP_EXT_GUI));
+        REQUIRE(gui != nullptr);
+
+        // ── Pre-create assertions (resize hints work without a window) ──
+        REQUIRE(gui->can_resize(plugin));
+
+        if (!gui->is_api_supported(plugin, CLAP_WINDOW_API_COCOA, false)) {
+            SUCCEED("Cocoa GUI API not supported — CLAP resize smoke skipped.");
+            plugin->destroy(plugin);
+            clap_entry.deinit();
+            return;
+        }
+
+        if (!gui->create(plugin, CLAP_WINDOW_API_COCOA, false)) {
+            SUCCEED("CLAP gui_create returned false (no window server) — skipped.");
+            plugin->destroy(plugin);
+            clap_entry.deinit();
+            return;
+        }
+
+        // ── Resize hints expose design aspect ─────────────────────────
+        clap_gui_resize_hints_t hints{};
+        REQUIRE(gui->get_resize_hints(plugin, &hints));
+        REQUIRE(hints.can_resize_horizontally);
+        REQUIRE(hints.can_resize_vertically);
+        REQUIRE(hints.preserve_aspect_ratio);
+        REQUIRE(hints.aspect_ratio_width == smoke::kW);
+        REQUIRE(hints.aspect_ratio_height == smoke::kH);
+
+        // ── adjust_size snaps a non-aspect rect to design aspect ──────
+        const double design_aspect =
+            static_cast<double>(smoke::kW) / static_cast<double>(smoke::kH);
+        {
+            // Request a much wider rect than the design aspect — width
+            // should shrink to height * design_aspect.
+            uint32_t adj_w = smoke::kW * 4;
+            uint32_t adj_h = smoke::kH;
+            REQUIRE(gui->adjust_size(plugin, &adj_w, &adj_h));
+            const double adj_aspect =
+                static_cast<double>(adj_w) / static_cast<double>(adj_h);
+            REQUIRE(std::abs(adj_aspect - design_aspect) < 0.01);
+        }
+        {
+            // Request a much taller rect — height should shrink to
+            // width / design_aspect.
+            uint32_t adj_w = smoke::kW;
+            uint32_t adj_h = smoke::kH * 4;
+            REQUIRE(gui->adjust_size(plugin, &adj_w, &adj_h));
+            const double adj_aspect =
+                static_cast<double>(adj_w) / static_cast<double>(adj_h);
+            REQUIRE(std::abs(adj_aspect - design_aspect) < 0.01);
+        }
+
+        // ── Attach to a hidden window so capture_back_buffer_png can
+        //    acquire a drawable. Skip if no window server is available. ─
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — CLAP resize+capture smoke skipped.");
+            gui->destroy(plugin);
+            plugin->destroy(plugin);
+            clap_entry.deinit();
+            return;
+        }
+
+        clap_window_t cw{};
+        cw.api = CLAP_WINDOW_API_COCOA;
+        cw.cocoa = (__bridge void*)window.contentView;
+        REQUIRE(gui->set_parent(plugin, &cw));
+        REQUIRE(gui->set_size(plugin, smoke::kW, smoke::kH));
+        smoke::pump_run_loop(5);
+
+        // Reach into the CLAP instance for the editor host so we can
+        // capture the back buffer and inspect the host-side size — proof
+        // that gui_set_size threaded through to host->set_size.
+        auto* clap_inst = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+        REQUIRE(clap_inst != nullptr);
+        REQUIRE(clap_inst->editor_host != nullptr);
+
+        if (!clap_inst->editor_host->is_gpu_backed()) {
+            // GPU host fell back to CPU (no Dawn adapter) — capture path
+            // is GPU-only; the structural assertions above still ran.
+            SUCCEED("No GPU adapter — CLAP capture-resize smoke partial-skip.");
+            gui->destroy(plugin);
+            plugin->destroy(plugin);
+            clap_entry.deinit();
+            [window close];
+            return;
+        }
+
+        // First capture at design size — proves the design viewport set
+        // in gui_create is active and the capture path works.
+        auto png_design = clap_inst->editor_host->capture_back_buffer_png();
+        REQUIRE_FALSE(png_design.empty());
+        REQUIRE(smoke::looks_like_png(png_design));
+
+        // Resize to 2x design — the design viewport scales content; the
+        // back buffer changes physical dimensions.
+        REQUIRE(gui->set_size(plugin, smoke::kW * 2, smoke::kH * 2));
+        smoke::pump_run_loop(3);
+        const auto host_size = clap_inst->editor_host->get_size();
+        REQUIRE(host_size.width == smoke::kW * 2);
+        REQUIRE(host_size.height == smoke::kH * 2);
+
+        auto png_2x = clap_inst->editor_host->capture_back_buffer_png();
+        REQUIRE_FALSE(png_2x.empty());
+        REQUIRE(smoke::looks_like_png(png_2x));
+        // PNGs at different surface sizes encode different byte streams
+        // (size is in the IHDR chunk). If both byte streams were
+        // identical, gui_set_size never reached the host — different
+        // bytes prove the wire works end to end.
+        REQUIRE(png_design.size() != png_2x.size());
+
+        gui->destroy(plugin);
+        plugin->destroy(plugin);
+        clap_entry.deinit();
+        [window close];
+    }
+}
+
 #else  // !(PULP_HAS_SKIA && __APPLE__)
 
 TEST_CASE("embedded GPU plugin host smoke is mac+Skia only", "[gpu][plugin-gpu-host][mac]") {
