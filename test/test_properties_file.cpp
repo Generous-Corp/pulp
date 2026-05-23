@@ -2,13 +2,54 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/state/properties_file.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 
 using namespace pulp::state;
 using namespace pulp::runtime;
 using Catch::Matchers::WithinAbs;
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char* name, const std::string& value)
+        : name_(name) {
+        if (const char* existing = std::getenv(name)) {
+            old_value_ = existing;
+        }
+        set(name, value);
+    }
+
+    ~ScopedEnvVar() {
+        if (old_value_.has_value()) {
+            set(name_.c_str(), *old_value_);
+        } else {
+            unset(name_.c_str());
+        }
+    }
+
+private:
+    static void set(const char* name, const std::string& value) {
+#ifdef _WIN32
+        _putenv_s(name, value.c_str());
+#else
+        setenv(name, value.c_str(), 1);
+#endif
+    }
+
+    static void unset(const char* name) {
+#ifdef _WIN32
+        _putenv_s(name, "");
+#else
+        unsetenv(name);
+#endif
+    }
+
+    std::string name_;
+    std::optional<std::string> old_value_;
+};
 
 // ── PropertiesFile basic operations ─────────────────────────────────────
 
@@ -536,6 +577,42 @@ TEST_CASE("PropertiesFile successful load replaces stale values",
     REQUIRE(props.get_int("count").value_or(0) == 3);
 }
 
+TEST_CASE("PropertiesFile load coerces false and numeric JSON scalars",
+          "[state][properties][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << R"json({"enabled":false,"voices":16,"gain":1.25,"label":"main"})json";
+    }
+
+    PropertiesFile props;
+    REQUIRE(props.load(tmp.path_string()));
+    REQUIRE(props.contains("enabled"));
+    REQUIRE(props.get_bool("enabled").has_value());
+    REQUIRE_FALSE(props.get_bool("enabled").value());
+    REQUIRE(props.get_int("voices").value_or(0) == 16);
+    REQUIRE_THAT(props.get_double("gain").value_or(0.0), WithinAbs(1.25, 0.000001));
+    REQUIRE(props.get_string("label").value_or("") == "main");
+}
+
+TEST_CASE("PropertiesFile can save to a path without a parent directory",
+          "[state][properties][coverage][phase3-large]") {
+    const std::filesystem::path path("properties_file_parentless_unit.json");
+    std::filesystem::remove(path);
+
+    PropertiesFile props;
+    props.set_string("mode", "local");
+    REQUIRE(props.save(path.string()));
+    REQUIRE(props.path() == path.string());
+    REQUIRE(std::filesystem::exists(path));
+
+    PropertiesFile reloaded;
+    REQUIRE(reloaded.load(path.string()));
+    REQUIRE(reloaded.get_string("mode").value_or("") == "local");
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("PropertiesFile setters copy string-view keys and values",
           "[state][properties][coverage][phase3-large]") {
     std::string key = "dynamic_key";
@@ -624,4 +701,44 @@ TEST_CASE("ApplicationProperties paths are platform-appropriate", "[state][prope
 #elif defined(__linux__)
     REQUIRE(user_dir.find(".config") != std::string::npos);
 #endif
+}
+
+TEST_CASE("ApplicationProperties load reads user settings from the platform path",
+          "[state][properties][coverage][phase3-large]") {
+    TemporaryFile home_marker(".home");
+    const auto home_dir = std::filesystem::path(home_marker.path_string() + "_dir");
+    std::filesystem::create_directories(home_dir);
+#ifdef _WIN32
+    ScopedEnvVar scoped_appdata("APPDATA", home_dir.string());
+#else
+    ScopedEnvVar scoped_home("HOME", home_dir.string());
+#endif
+
+    const std::string app_name = "PulpUnitLoad";
+    const auto user_dir = std::filesystem::path(ApplicationProperties::user_settings_dir(app_name));
+    std::filesystem::create_directories(user_dir);
+    {
+        std::ofstream f(user_dir / "settings.json");
+        f << R"json({"theme":"dark","enabled":true,"voices":8,"gain":0.75})json";
+    }
+
+    ApplicationProperties app(app_name);
+    app.user_settings().set_string("stale", "old");
+    app.common_settings().set_string("scope", "common");
+
+    app.load();
+
+    REQUIRE(app.app_name() == app_name);
+    REQUIRE(app.user_settings().path().find(app_name) != std::string::npos);
+    REQUIRE(app.user_settings().path().find("settings.json") != std::string::npos);
+    REQUIRE_FALSE(app.user_settings().contains("stale"));
+    REQUIRE(app.user_settings().contains("theme"));
+    REQUIRE(app.user_settings().get_string("theme").value_or("") == "dark");
+    REQUIRE(app.user_settings().get_bool("enabled").value_or(false));
+    REQUIRE(app.user_settings().get_int("voices").value_or(0) == 8);
+    REQUIRE_THAT(app.user_settings().get_double("gain").value_or(0.0),
+                 WithinAbs(0.75, 0.000001));
+    REQUIRE(app.common_settings().get_string("scope").value_or("") == "common");
+    REQUIRE(app.common_settings().path().find(app_name) != std::string::npos);
+    REQUIRE(app.common_settings().path().find("settings.json") != std::string::npos);
 }

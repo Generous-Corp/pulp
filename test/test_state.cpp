@@ -1405,6 +1405,60 @@ TEST_CASE("StateStore migrations are scoped to each store instance",
     REQUIRE(second_called);
 }
 
+TEST_CASE("StateStore can copy registered migrations to a restore probe",
+          "[state][serialize][migration][coverage][phase3-large]") {
+    StateStore saved;
+    saved.set_state_version(8);
+    saved.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    saved.set_value(42, 73.0f);
+    auto data = saved.serialize();
+
+    int source_calls = 0;
+    StateStore source_schema;
+    source_schema.set_state_version(9);
+    source_schema.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    REQUIRE(source_schema.register_state_migration(
+        8, 9,
+        [&source_calls](std::span<const uint8_t> source_blob,
+                        std::vector<uint8_t>& migrated) {
+            ++source_calls;
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32_le(migrated, 4, 9);
+            const auto crc_offset = migrated.size() - 4;
+            write_u32_le(migrated, crc_offset,
+                         crc32_simple_for_test(migrated, crc_offset));
+            return true;
+        }));
+
+    StateStore probe;
+    probe.set_state_version(9);
+    probe.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    int probe_calls = 0;
+    REQUIRE(probe.register_state_migration(
+        8, 9,
+        [&probe_calls](std::span<const uint8_t>, std::vector<uint8_t>&) {
+            ++probe_calls;
+            return false;
+        }));
+    REQUIRE_FALSE(probe.deserialize(data));
+    REQUIRE(probe_calls == 1);
+    REQUIRE(source_calls == 0);
+    REQUIRE_THAT(probe.get_value(42), WithinAbs(10.0, 0.001));
+
+    probe.copy_state_migrations_from(source_schema);
+    REQUIRE(probe.deserialize(data));
+    REQUIRE(source_calls == 1);
+    REQUIRE_THAT(probe.get_value(42), WithinAbs(73.0, 0.001));
+
+    StateStore live;
+    live.set_state_version(9);
+    live.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    live.copy_state_migrations_from(probe);
+    REQUIRE(live.deserialize(data));
+    REQUIRE(source_calls == 2);
+    REQUIRE_THAT(live.get_value(42), WithinAbs(73.0, 0.001));
+}
+
 TEST_CASE("StateStore rejects corrupt source blobs before migration callbacks",
           "[state][serialize][migration]") {
     StateStore source;
