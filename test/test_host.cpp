@@ -585,6 +585,51 @@ float process_first_sample(PluginSlot& slot, float input_sample) {
 
 } // namespace
 
+TEST_CASE("PluginScanner CLAP descriptor surfaces PulpGain bundle metadata",
+          "[host][scanner][clap][coverage][issue-493]") {
+    namespace fs = std::filesystem;
+    const fs::path path = PULP_TEST_CLAP_PATH;
+    if (!fs::exists(path)) {
+        WARN("CLAP test plugin not built at " << path << " - skipping");
+        return;
+    }
+
+    PluginScanner scanner;
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths = { path.parent_path().string() };
+
+    const auto plugins = scanner.scan(opts);
+    const PluginInfo* found = nullptr;
+    for (const auto& plugin : plugins) {
+        if (plugin.path == path.string()) {
+            found = &plugin;
+            break;
+        }
+    }
+
+    REQUIRE(found != nullptr);
+    REQUIRE(found->path == path.string());
+    REQUIRE(found->format == PluginFormat::CLAP);
+    REQUIRE(found->name == "PulpGain");
+    REQUIRE(found->manufacturer == "Pulp");
+    REQUIRE(found->version == "1.0.0");
+    REQUIRE(found->unique_id == "com.pulp.gain");
+    REQUIRE_FALSE(found->unique_id.empty());
+    REQUIRE(found->category == "Fx");
+    REQUIRE(found->is_effect);
+    REQUIRE_FALSE(found->is_instrument);
+    REQUIRE(found->features.size() == 1);
+    REQUIRE(found->features.front() == "audio-effect");
+    REQUIRE_FALSE(found->supports_midi_in);
+    REQUIRE_FALSE(found->supports_midi_out);
+    REQUIRE(found->description.empty());
+}
+
 TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][integration]") {
     namespace fs = std::filesystem;
     const std::string path = PULP_TEST_CLAP_PATH;
@@ -622,6 +667,78 @@ TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][int
     REQUIRE(sum > 0.0f);
 
     slot->release();
+}
+
+TEST_CASE("ClapSlot process delivers automation and MIDI events to CLAP",
+          "[host][slot][clap][coverage][issue-493]") {
+    auto slot = load_pulpgain_clap_slot();
+    if (!slot) return;
+
+    REQUIRE(slot->prepare(48000.0, 64));
+    REQUIRE_FALSE(slot->is_bypassed());
+    REQUIRE(slot->parameters().size() == 3);
+
+    constexpr int kFrames = 32;
+    std::vector<float> in_l(kFrames, 0.5f), in_r(kFrames, 0.25f);
+    std::vector<float> out_l(kFrames, 0.0f), out_r(kFrames, 0.0f);
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> in(in_ptrs, 2, kFrames);
+    pulp::audio::BufferView<float> out(out_ptrs, 2, kFrames);
+
+    pulp::host::ParameterEventQueue params;
+    params.push({kPulpGainOutputGain, 0, 6.0f});
+    params.push({kPulpGainInputGain, 8, 0.0f});
+    REQUIRE(params.size() == 2);
+    REQUIRE_FALSE(params.empty());
+
+    pulp::midi::MidiBuffer midi_in;
+    auto note = pulp::midi::MidiEvent::note_on(0, 60, 100);
+    note.sample_offset = 12;
+    auto program = pulp::midi::MidiEvent::program_change(0, 5);
+    program.sample_offset = 4;
+    midi_in.add(note);
+    midi_in.add(program);
+    REQUIRE(midi_in.size() == 2);
+    REQUIRE_FALSE(midi_in.empty());
+
+    pulp::midi::MidiBuffer midi_out;
+    REQUIRE(midi_out.empty());
+    slot->process(out, in, midi_in, midi_out, params, kFrames);
+
+    REQUIRE(midi_out.empty());
+    REQUIRE(out_l[0] > in_l[0]);
+    REQUIRE(out_r[0] > in_r[0]);
+    REQUIRE(std::isfinite(out_l[0]));
+    REQUIRE(std::isfinite(out_r[0]));
+    REQUIRE_THAT(out_l[0] / out_r[0], WithinAbs(2.0f, 1e-3f));
+
+    slot->release();
+}
+
+TEST_CASE("ClapSlot handles zero-channel processing and unknown params",
+          "[host][slot][clap][coverage][issue-493]") {
+    auto slot = load_pulpgain_clap_slot();
+    if (!slot) return;
+
+    REQUIRE(slot->prepare(48000.0, 64));
+
+    const float before = slot->get_parameter(0xFEEDu);
+    slot->set_parameter(0xFEEDu, 12.0f);
+    const float after = slot->get_parameter(0xFEEDu);
+    REQUIRE_THAT(before, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(after, WithinAbs(0.0f, 1e-6f));
+    REQUIRE(slot->parameters().size() == 3);
+
+    pulp::audio::BufferView<const float> in;
+    pulp::audio::BufferView<float> out;
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    pulp::host::ParameterEventQueue params;
+    REQUIRE_NOTHROW(slot->process(out, in, midi_in, midi_out, params, 0));
+    REQUIRE(midi_out.empty());
+
+    slot->release();
+    REQUIRE_FALSE(slot->is_bypassed());
 }
 
 TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
