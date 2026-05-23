@@ -79,13 +79,17 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
         return std::nullopt;
 
     for (int attempt = 0; attempt < 32; ++attempt) {
-        int status = mz_inflate(&stream, MZ_FINISH);
+        int status = mz_inflate(&stream, MZ_NO_FLUSH);
         if (status == MZ_STREAM_END) {
+            if (stream.total_in != size) {
+                mz_inflateEnd(&stream);
+                return std::nullopt;
+            }
             result.resize(stream.total_out);
             mz_inflateEnd(&stream);
             return result;
         }
-        if (status == MZ_BUF_ERROR) {
+        if (status == MZ_BUF_ERROR || status == MZ_OK) {
             if (stream.avail_in == 0 && stream.avail_out > 0) {
                 mz_inflateEnd(&stream);
                 return std::nullopt;

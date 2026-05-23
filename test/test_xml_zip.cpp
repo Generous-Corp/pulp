@@ -287,6 +287,31 @@ TEST_CASE("gzip empty input", "[runtime][zip]") {
     REQUIRE(decompressed->empty());
 }
 
+TEST_CASE("gzip_compress writes a deterministic empty RFC 1952 member",
+          "[runtime][zip][coverage]") {
+    auto compressed = gzip_compress("", 9);
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() >= 18);
+    CHECK((*compressed)[0] == 0x1f);
+    CHECK((*compressed)[1] == 0x8b);
+    CHECK((*compressed)[2] == 0x08);
+    CHECK((*compressed)[3] == 0x00);
+    CHECK((*compressed)[4] == 0x00);
+    CHECK((*compressed)[5] == 0x00);
+    CHECK((*compressed)[6] == 0x00);
+    CHECK((*compressed)[7] == 0x00);
+    CHECK((*compressed)[8] == 0x00);
+    CHECK((*compressed)[9] == 0xff);
+    CHECK((*compressed)[compressed->size() - 4] == 0x00);
+    CHECK((*compressed)[compressed->size() - 3] == 0x00);
+    CHECK((*compressed)[compressed->size() - 2] == 0x00);
+    CHECK((*compressed)[compressed->size() - 1] == 0x00);
+
+    auto decompressed = gzip_decompress(compressed->data(), compressed->size());
+    REQUIRE(decompressed.has_value());
+    REQUIRE(decompressed->empty());
+}
+
 TEST_CASE("deflate compress/decompress round-trip", "[runtime][zip]") {
     std::string original = "Deflate test data with some repeated content repeated content!";
     auto data = reinterpret_cast<const uint8_t*>(original.data());
@@ -381,6 +406,99 @@ TEST_CASE("deflate_decompress rejects empty raw streams without growth",
 
     const uint8_t unused = 0;
     REQUIRE_FALSE(deflate_decompress(&unused, 0).has_value());
+}
+
+TEST_CASE("deflate_decompress grows for highly compressed raw streams",
+          "[runtime][zip][coverage]") {
+    const std::string payload(96 * 1024, 'z');
+    const auto* bytes = reinterpret_cast<const uint8_t*>(payload.data());
+
+    auto compressed = deflate_compress(bytes, payload.size(), 9);
+    REQUIRE(compressed.has_value());
+    REQUIRE_FALSE(compressed->empty());
+    REQUIRE(compressed->size() * 4 < payload.size());
+
+    auto decompressed = deflate_decompress(compressed->data(), compressed->size());
+    REQUIRE(decompressed.has_value());
+    REQUIRE(decompressed->size() == payload.size());
+    REQUIRE(std::string(decompressed->begin(), decompressed->end()) == payload);
+}
+
+TEST_CASE("gzip_decompress grows for highly compressed RFC 1952 members",
+          "[runtime][zip][coverage]") {
+    const std::string payload(128 * 1024, 'g');
+
+    auto compressed = gzip_compress(payload, 9);
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() >= 18);
+    REQUIRE(compressed->size() * 4 < payload.size());
+    CHECK((*compressed)[0] == 0x1f);
+    CHECK((*compressed)[1] == 0x8b);
+
+    auto decompressed = gzip_decompress(compressed->data(), compressed->size());
+    REQUIRE(decompressed.has_value());
+    REQUIRE(decompressed->size() == payload.size());
+    REQUIRE(std::string(decompressed->begin(), decompressed->end()) == payload);
+
+    auto as_string = gzip_decompress_string(compressed->data(), compressed->size());
+    REQUIRE(as_string.has_value());
+    REQUIRE(as_string->size() == payload.size());
+    REQUIRE(*as_string == payload);
+}
+
+TEST_CASE("gzip_decompress rejects tiny gzip-looking prefixes",
+          "[runtime][zip][coverage]") {
+    const uint8_t unused = 0;
+    REQUIRE_FALSE(gzip_decompress(&unused, 0).has_value());
+
+    const uint8_t first_magic_only[] = {0x1f};
+    REQUIRE_FALSE(gzip_decompress(first_magic_only, sizeof(first_magic_only)).has_value());
+
+    const uint8_t wrong_second_magic[] = {0x1f, 0x00};
+    REQUIRE_FALSE(gzip_decompress(wrong_second_magic,
+                                  sizeof(wrong_second_magic)).has_value());
+
+    const uint8_t wrong_first_magic[] = {0x00, 0x8b};
+    REQUIRE_FALSE(gzip_decompress(wrong_first_magic,
+                                  sizeof(wrong_first_magic)).has_value());
+}
+
+TEST_CASE("gzip_decompress rejects complete headers without trailers",
+          "[runtime][zip][coverage]") {
+    const std::vector<uint8_t> fixed_header_only = {
+        0x1f, 0x8b, 0x08, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff,
+    };
+    REQUIRE_FALSE(gzip_decompress(fixed_header_only.data(),
+                                  fixed_header_only.size()).has_value());
+
+    const std::vector<uint8_t> fname_without_trailer = {
+        0x1f, 0x8b, 0x08, 0x08,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff,
+        'p', 'u', 'l', 'p', 0x00,
+    };
+    REQUIRE_FALSE(gzip_decompress(fname_without_trailer.data(),
+                                  fname_without_trailer.size()).has_value());
+}
+
+TEST_CASE("gzip_decompress rejects suffixes that start like partial members",
+          "[runtime][zip][coverage]") {
+    auto compressed = gzip_compress(std::string{"suffix boundary"});
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() > 18);
+
+    auto partial_member_prefix = *compressed;
+    partial_member_prefix.push_back(0x1f);
+    REQUIRE_FALSE(gzip_decompress(partial_member_prefix.data(),
+                                  partial_member_prefix.size()).has_value());
+
+    auto wrong_second_magic = *compressed;
+    wrong_second_magic.push_back(0x1f);
+    wrong_second_magic.push_back(0x00);
+    REQUIRE_FALSE(gzip_decompress(wrong_second_magic.data(),
+                                  wrong_second_magic.size()).has_value());
 }
 
 // ── RFC 1952 gzip wire-format compliance (issue-468 follow-up) ──────────
