@@ -72,8 +72,10 @@ struct AtlasInfo {
 
     /// Total addressable texels across every page.
     std::size_t texel_capacity() const {
-        return static_cast<std::size_t>(width) *
-               static_cast<std::size_t>(height) *
+        const int safe_width = width < 0 ? 0 : width;
+        const int safe_height = height < 0 ? 0 : height;
+        return static_cast<std::size_t>(safe_width) *
+               static_cast<std::size_t>(safe_height) *
                static_cast<std::size_t>(pages < 1 ? 1 : pages);
     }
 
@@ -127,7 +129,7 @@ public:
         info.kind = AtlasKind::gradient;
         info.label = label.empty() ? atlas_kind_name(AtlasKind::gradient)
                                     : std::move(label);
-        info.width = ramp_width;
+        info.width = ramp_width < 0 ? 0 : ramp_width;
         info.height = atlas.row_capacity();
         info.pages = 1;
         info.entries = atlas.entry_count();

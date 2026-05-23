@@ -28,6 +28,7 @@ public:
     /// Area of the atlas surface (width × height), in texels.
     /// Read-only introspection — used by the inspector's atlas viewer.
     std::size_t capacity() const {
+        if (width_ <= 0 || height_ <= 0) return 0;
         return static_cast<std::size_t>(width_) *
                static_cast<std::size_t>(height_);
     }
@@ -39,6 +40,10 @@ public:
     /// pixel area (shelf packing leaves gaps), which is exactly the
     /// number that answers "how close is this atlas to full?".
     std::size_t used_area() const {
+        if (width_ <= 0 || height_ <= 0 ||
+            (shelf_y_ <= 0 && shelf_x_ <= 0)) {
+            return 0;
+        }
         const std::size_t completed =
             static_cast<std::size_t>(shelf_y_) *
             static_cast<std::size_t>(width_);

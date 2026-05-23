@@ -469,6 +469,35 @@ TEST_CASE("AtlasPacker occupancy is zero for a degenerate atlas - phase6.2",
     REQUIRE(p.occupancy() == Catch::Approx(0.0f));  // no divide-by-zero.
 }
 
+TEST_CASE("AtlasPacker clamps degenerate capacity and used-area introspection",
+          "[render][atlas][coverage][phase3-render]") {
+    AtlasPacker zero_width(0, 64);
+    AtlasPacker zero_height(64, 0);
+    AtlasPacker negative_width(-16, 64);
+    AtlasPacker negative_height(64, -16);
+    AtlasPacker::Region r{};
+
+    REQUIRE(zero_width.capacity() == 0u);
+    REQUIRE(zero_width.used_area() == 0u);
+    REQUIRE(zero_width.occupancy() == Catch::Approx(0.0f));
+    REQUIRE_FALSE(zero_width.allocate(1, 1, r));
+
+    REQUIRE(zero_height.capacity() == 0u);
+    REQUIRE(zero_height.used_area() == 0u);
+    REQUIRE(zero_height.occupancy() == Catch::Approx(0.0f));
+    REQUIRE_FALSE(zero_height.allocate(1, 1, r));
+
+    REQUIRE(negative_width.capacity() == 0u);
+    REQUIRE(negative_width.used_area() == 0u);
+    REQUIRE(negative_width.occupancy() == Catch::Approx(0.0f));
+    REQUIRE_FALSE(negative_width.allocate(1, 1, r));
+
+    REQUIRE(negative_height.capacity() == 0u);
+    REQUIRE(negative_height.used_area() == 0u);
+    REQUIRE(negative_height.occupancy() == Catch::Approx(0.0f));
+    REQUIRE_FALSE(negative_height.allocate(1, 1, r));
+}
+
 TEST_CASE("ImageAtlas exposes dimensions and occupancy - phase6.2",
           "[render][atlas][phase6.2]") {
     ImageAtlas atlas(128);
@@ -581,6 +610,76 @@ TEST_CASE("AtlasInventory aggregates across multiple atlases - phase6.2",
     // The custom label survives; the default falls back to the kind name.
     REQUIRE(inv.atlases()[0].label == "images");
     REQUIRE(inv.atlases()[1].label == "glyph");
+}
+
+TEST_CASE("AtlasInventory clamps malformed page counts and occupancy inputs",
+          "[render][atlas][coverage][phase3-render]") {
+    AtlasInventory inv;
+    inv.add({AtlasKind::image, "negative pages", 10, 20, -5, 2u, -0.25f});
+    inv.add({AtlasKind::glyph, "zero pages", 5, 7, 0, 3u, 1.25f});
+    inv.add({AtlasKind::path, "normal", 4, 8, 3, 4u, 0.5f});
+
+    REQUIRE_FALSE(inv.empty());
+    REQUIRE(inv.size() == 3u);
+    REQUIRE(inv.total_pages() == 5);       // malformed page counts become 1 each.
+    REQUIRE(inv.total_entries() == 9u);
+    REQUIRE(inv.average_occupancy() == Catch::Approx(0.5f));
+
+    REQUIRE(inv.atlases()[0].texel_capacity() == 200u);
+    REQUIRE(inv.atlases()[1].texel_capacity() == 35u);
+    REQUIRE(inv.atlases()[2].texel_capacity() == 96u);
+    REQUIRE(inv.atlases()[0].occupancy_percent() == 0);
+    REQUIRE(inv.atlases()[1].occupancy_percent() == 100);
+    REQUIRE(inv.atlases()[2].occupancy_percent() == 50);
+}
+
+TEST_CASE("AtlasInfo texel capacity clamps negative dimensions to zero",
+          "[render][atlas][coverage][phase3-render]") {
+    AtlasInfo negative_width;
+    negative_width.width = -10;
+    negative_width.height = 20;
+    negative_width.pages = 4;
+    REQUIRE(negative_width.texel_capacity() == 0u);
+
+    AtlasInfo negative_height;
+    negative_height.width = 10;
+    negative_height.height = -20;
+    negative_height.pages = 4;
+    REQUIRE(negative_height.texel_capacity() == 0u);
+
+    AtlasInfo both_negative;
+    both_negative.width = -10;
+    both_negative.height = -20;
+    both_negative.pages = -2;
+    REQUIRE(both_negative.texel_capacity() == 0u);
+
+    AtlasInfo page_floor;
+    page_floor.width = 10;
+    page_floor.height = 20;
+    page_floor.pages = 0;
+    REQUIRE(page_floor.texel_capacity() == 200u);
+}
+
+TEST_CASE("AtlasInventory gradient snapshots clamp invalid ramp width",
+          "[render][atlas][coverage][phase3-render]") {
+    GradientAtlas ga;
+    int row = -1;
+    REQUIRE(ga.allocate(1, row));
+    REQUIRE(ga.allocate(2, row));
+
+    AtlasInventory inv;
+    inv.add_gradient(ga, "bad ramp", -64);
+
+    REQUIRE(inv.size() == 1u);
+    const AtlasInfo& info = inv.atlases().front();
+    REQUIRE(info.kind == AtlasKind::gradient);
+    REQUIRE(info.label == "bad ramp");
+    REQUIRE(info.width == 0);
+    REQUIRE(info.height == 512);
+    REQUIRE(info.pages == 1);
+    REQUIRE(info.entries == 2u);
+    REQUIRE(info.occupancy == Catch::Approx(2.0f / 512.0f));
+    REQUIRE(info.texel_capacity() == 0u);
 }
 
 TEST_CASE("AtlasInventory clear empties the collection - phase6.2",
