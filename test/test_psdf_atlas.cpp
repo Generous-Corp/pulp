@@ -32,6 +32,77 @@ TEST_CASE("PsdfAtlas keeps the SdfAtlas lookup and move surface",
     REQUIRE(moved.glyph(U'S') != nullptr);
 }
 
+TEST_CASE("PsdfAtlas default and invalid builds leave atlas empty",
+          "[canvas][psdf][coverage][phase3]") {
+    PsdfAtlas atlas;
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.base_size() == 0);
+    REQUIRE(atlas.width() == 0);
+    REQUIRE(atlas.height() == 0);
+    REQUIRE(atlas.pixels() == nullptr);
+    REQUIRE(atlas.glyph(U'P') == nullptr);
+
+    REQUIRE_FALSE(atlas.build("stub", {}, 32, 4, 256));
+    REQUIRE_FALSE(atlas.build("stub", {U'P'}, 0, 4, 256));
+    REQUIRE_FALSE(atlas.build("stub", {U'P'}, 32, -1, 256));
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.pixels() == nullptr);
+}
+
+TEST_CASE("PsdfAtlas packs glyph tiles and preserves metrics",
+          "[canvas][psdf][coverage][phase3]") {
+    PsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'P', U'S', U'D'}, 12, 2, 32));
+    REQUIRE(atlas.width() == 32);
+    REQUIRE(atlas.height() == 32);
+
+    const auto* p = atlas.glyph(U'P');
+    const auto* s = atlas.glyph(U'S');
+    const auto* d = atlas.glyph(U'D');
+    REQUIRE(p != nullptr);
+    REQUIRE(s != nullptr);
+    REQUIRE(d != nullptr);
+    REQUIRE(p->atlas_x == 2);
+    REQUIRE(s->atlas_x == 18);
+    REQUIRE(d->atlas_x == 2);
+    REQUIRE(d->atlas_y == 18);
+    REQUIRE(p->width == 12);
+    REQUIRE(s->height == 12);
+    REQUIRE(d->advance > 0.0f);
+}
+
+TEST_CASE("PsdfAtlas de-duplicates and can be rebuilt",
+          "[canvas][psdf][coverage][phase3]") {
+    PsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'P', U'P', U'S'}, 16, 2, 128));
+    REQUIRE(atlas.glyph_count() == 2);
+    REQUIRE(atlas.glyph(U'P') != nullptr);
+    REQUIRE(atlas.glyph(U'S') != nullptr);
+
+    REQUIRE(atlas.build("stub", {U'D'}, 20, 1, 64));
+    REQUIRE(atlas.glyph_count() == 1);
+    REQUIRE(atlas.base_size() == 20);
+    REQUIRE(atlas.glyph(U'D') != nullptr);
+    REQUIRE(atlas.glyph(U'P') == nullptr);
+    REQUIRE(atlas.pixels() != nullptr);
+}
+
+TEST_CASE("PsdfAtlas move assignment transfers the built atlas",
+          "[canvas][psdf][coverage][phase3]") {
+    PsdfAtlas source;
+    PsdfAtlas destination;
+    REQUIRE(source.build("stub", {U'A', U'B'}, 18, 2, 128));
+    REQUIRE(destination.build("stub", {U'Z'}, 10, 1, 64));
+
+    destination = std::move(source);
+    REQUIRE(destination.glyph_count() == 2);
+    REQUIRE(destination.base_size() == 18);
+    REQUIRE(destination.glyph(U'A') != nullptr);
+    REQUIRE(destination.glyph(U'B') != nullptr);
+    REQUIRE(destination.glyph(U'Z') == nullptr);
+    REQUIRE(destination.pixels() != nullptr);
+}
+
 TEST_CASE("vector_fallback threshold picks SDF vs path rendering",
           "[canvas][psdf][fallback]") {
     // base_size 48 → 1x at 48px, 4x at 192px, 10x at 480px.
@@ -56,4 +127,14 @@ TEST_CASE("vector_fallback equality and negative thresholds are strict",
     REQUIRE(should_use_vector_fallback(96.1f, 48.0f, 2.0f));
     REQUIRE(should_use_vector_fallback(1.0f, 48.0f, -1.0f));
     REQUIRE_FALSE(should_use_vector_fallback(1.0f, -48.0f, -1.0f));
+}
+
+TEST_CASE("vector_fallback scales render size against the selected base",
+          "[canvas][psdf][fallback][coverage][phase3]") {
+    REQUIRE_FALSE(should_use_vector_fallback(63.9f, 16.0f, 4.0f));
+    REQUIRE_FALSE(should_use_vector_fallback(64.0f, 16.0f, 4.0f));
+    REQUIRE(should_use_vector_fallback(64.1f, 16.0f, 4.0f));
+    REQUIRE_FALSE(should_use_vector_fallback(7.9f, 1.0f));
+    REQUIRE_FALSE(should_use_vector_fallback(8.0f, 1.0f));
+    REQUIRE(should_use_vector_fallback(8.1f, 1.0f));
 }
