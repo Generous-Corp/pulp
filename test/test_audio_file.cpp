@@ -14,9 +14,15 @@
 #include <limits>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <utility>
+
+#ifdef __APPLE__
+#include <AudioToolbox/AudioToolbox.h>
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;
@@ -264,6 +270,66 @@ static void write_base64_audio_fixture(const std::filesystem::path& path,
                static_cast<std::streamsize>(decoded->size()));
     REQUIRE(file.good());
 }
+
+#ifdef __APPLE__
+static std::filesystem::path write_coreaudio_caf_fixture(
+    std::string_view suffix,
+    double sample_rate,
+    uint32_t channels,
+    const std::vector<float>& interleaved) {
+    if (channels == 0 || interleaved.size() % channels != 0) {
+        throw std::invalid_argument("CAF fixture samples must align to channels");
+    }
+
+    auto path = unique_temp_audio_path(suffix);
+    auto path_string = path.string();
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
+        nullptr,
+        reinterpret_cast<const UInt8*>(path_string.c_str()),
+        static_cast<CFIndex>(path_string.size()),
+        false);
+    if (!url) {
+        throw std::runtime_error("could not create CAF fixture URL");
+    }
+
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = sample_rate;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+    format.mBytesPerPacket = static_cast<UInt32>(sizeof(float) * channels);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = static_cast<UInt32>(sizeof(float) * channels);
+    format.mChannelsPerFrame = channels;
+    format.mBitsPerChannel = 32;
+
+    ExtAudioFileRef file = nullptr;
+    auto status = ExtAudioFileCreateWithURL(url,
+                                            kAudioFileCAFType,
+                                            &format,
+                                            nullptr,
+                                            kAudioFileFlags_EraseFile,
+                                            &file);
+    CFRelease(url);
+    if (status != noErr || !file) {
+        throw std::runtime_error("could not create CAF fixture");
+    }
+
+    AudioBufferList buffers{};
+    buffers.mNumberBuffers = 1;
+    buffers.mBuffers[0].mNumberChannels = channels;
+    buffers.mBuffers[0].mDataByteSize =
+        static_cast<UInt32>(interleaved.size() * sizeof(float));
+    buffers.mBuffers[0].mData = const_cast<float*>(interleaved.data());
+
+    const auto frames = static_cast<UInt32>(interleaved.size() / channels);
+    status = ExtAudioFileWrite(file, frames, &buffers);
+    auto dispose_status = ExtAudioFileDispose(file);
+    if (status != noErr || dispose_status != noErr) {
+        throw std::runtime_error("could not write CAF fixture");
+    }
+    return path;
+}
+#endif
 
 }  // namespace
 
@@ -1605,6 +1671,78 @@ TEST_CASE("FormatRegistry routes CoreAudio compressed containers on Apple",
 
         std::filesystem::remove(path);
     }
+}
+
+TEST_CASE("CoreAudio reader decodes generated CAF fixtures on Apple",
+          "[audio][file][registry][coreaudio][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+    auto* reader = registry.find_reader(".CAF");
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->format_name() == "CoreAudio");
+    REQUIRE(reader->supports_extension(".caf"));
+    REQUIRE_FALSE(reader->supports_extension(".wav"));
+
+    const std::vector<float> stereo_interleaved = {
+        0.0f, 1.0f,
+        -0.25f, 0.25f,
+        0.5f, -0.5f,
+        0.75f, -0.75f,
+    };
+    auto stereo_path = write_coreaudio_caf_fixture(
+        "_coreaudio_stereo.CAF", 48000.0, 2, stereo_interleaved);
+
+    auto stereo_info = registry.read_info(stereo_path.string());
+    REQUIRE(stereo_info.has_value());
+    REQUIRE(stereo_info->sample_rate == 48000);
+    REQUIRE(stereo_info->num_channels == 2);
+    REQUIRE(stereo_info->num_frames == 4);
+    REQUIRE(stereo_info->bits_per_sample == 32);
+    REQUIRE_THAT(stereo_info->duration_seconds, WithinAbs(4.0 / 48000.0, 1e-9));
+    REQUIRE(stereo_info->format == "CoreAudio");
+
+    auto stereo = registry.read(stereo_path.string());
+    REQUIRE(stereo.has_value());
+    REQUIRE(stereo->sample_rate == 48000);
+    REQUIRE(stereo->num_channels() == 2);
+    REQUIRE(stereo->num_frames() == 4);
+    REQUIRE_FALSE(stereo->empty());
+    REQUIRE(stereo->channels[0].size() == 4);
+    REQUIRE(stereo->channels[1].size() == 4);
+    REQUIRE_THAT(stereo->channels[0][0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[1][0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[0][1], WithinAbs(-0.25f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[1][1], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[0][2], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[1][2], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[0][3], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(stereo->channels[1][3], WithinAbs(-0.75f, 1e-6f));
+
+    const std::vector<float> mono_interleaved = {
+        -1.0f, -0.5f, 0.0f, 0.5f, 1.0f,
+    };
+    auto mono_path = write_coreaudio_caf_fixture(
+        "_coreaudio_mono.caf", 22050.0, 1, mono_interleaved);
+
+    auto mono_info = reader->read_info(mono_path.string());
+    REQUIRE(mono_info.has_value());
+    REQUIRE(mono_info->sample_rate == 22050);
+    REQUIRE(mono_info->num_channels == 1);
+    REQUIRE(mono_info->num_frames == 5);
+    REQUIRE_THAT(mono_info->duration_seconds, WithinAbs(5.0 / 22050.0, 1e-9));
+
+    auto mono = reader->read(mono_path.string());
+    REQUIRE(mono.has_value());
+    REQUIRE(mono->sample_rate == 22050);
+    REQUIRE(mono->num_channels() == 1);
+    REQUIRE(mono->num_frames() == 5);
+    REQUIRE_THAT(mono->channels[0][0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(mono->channels[0][1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(mono->channels[0][2], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(mono->channels[0][3], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(mono->channels[0][4], WithinAbs(1.0f, 1e-6f));
+
+    std::filesystem::remove(stereo_path);
+    std::filesystem::remove(mono_path);
 }
 #endif
 
