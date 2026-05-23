@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02030"></a>
+## [0.203.0] - 2026-05-23
+
+- Phase 3: editor resize negotiation (CLAP + VST3) + #2762 post-merge fixes ([#2765](https://github.com/danielraffel/pulp/pull/2765))
+- test(dsl): cover Faust processor edge contracts ([#2764](https://github.com/danielraffel/pulp/pull/2764))
+- test(events): cover timer and discovery edge paths ([#2763](https://github.com/danielraffel/pulp/pull/2763))
+
 <a id="v02020"></a>
 ## [0.202.0] - 2026-05-22
 
@@ -2637,6 +2644,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.203.0]: https://github.com/danielraffel/pulp/releases/tag/v0.203.0
 [0.202.0]: https://github.com/danielraffel/pulp/releases/tag/v0.202.0
 [0.201.0]: https://github.com/danielraffel/pulp/releases/tag/v0.201.0
 [0.200.0]: https://github.com/danielraffel/pulp/releases/tag/v0.200.0
