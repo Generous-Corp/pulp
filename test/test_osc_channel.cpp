@@ -169,6 +169,21 @@ TEST_CASE("OscChannel open rejects invalid remote hosts",
     REQUIRE_FALSE(channel);
 }
 
+TEST_CASE("OscChannel open fails cleanly when requested local port is occupied",
+          "[osc_channel][lifecycle][coverage]") {
+    Receiver occupied;
+    REQUIRE(occupied.listen(0, [](const Message&) {}));
+    const auto local_port = occupied.local_port();
+    REQUIRE(local_port != 0);
+
+    auto channel = OscChannel::open("127.0.0.1", 29876, local_port);
+    REQUIRE_FALSE(channel);
+    REQUIRE(occupied.is_listening());
+
+    occupied.stop();
+    REQUIRE_FALSE(occupied.is_listening());
+}
+
 TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
@@ -185,6 +200,27 @@ TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]")
 
     const uint8_t bytes[] = {0, 0, 0, 0};
     REQUIRE_FALSE(a->send(bytes, sizeof(bytes)));
+}
+
+TEST_CASE("OscChannel accepts error callback replacement without changing state",
+          "[osc_channel][lifecycle][coverage]") {
+    auto a = open_loopback_endpoint();
+    if (!a) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+
+    int first_count = 0;
+    int second_count = 0;
+    a->on_error([&](std::string_view) { ++first_count; });
+    a->on_error([&](std::string_view) { ++second_count; });
+
+    REQUIRE(a->is_open());
+    REQUIRE(first_count == 0);
+    REQUIRE(second_count == 0);
+
+    a->close();
+    REQUIRE_FALSE(a->is_open());
 }
 
 TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
@@ -294,6 +330,31 @@ TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
 
     a->close();
     b->close();
+}
+
+TEST_CASE("OscChannel leaves unhandled incoming messages as no-op deliveries",
+          "[osc_channel][raw][coverage]") {
+    auto pair = open_loopback_pair();
+    if (!pair) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+    auto& a = pair.first;
+    auto& b = pair.second;
+
+    Message msg("/no/callback");
+    msg.add(int32_t{12});
+    const auto encoded = encode(msg);
+
+    REQUIRE(a->send(encoded.data(), encoded.size()));
+    std::this_thread::sleep_for(150ms);
+    REQUIRE(a->is_open());
+    REQUIRE(b->is_open());
+
+    a->close();
+    b->close();
+    REQUIRE_FALSE(a->is_open());
+    REQUIRE_FALSE(b->is_open());
 }
 
 TEST_CASE("OscChannel message callback replacement uses latest callback",

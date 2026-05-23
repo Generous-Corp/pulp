@@ -357,6 +357,44 @@ TEST_CASE("OSC Sender rejects invalid hostnames", "[osc][udp][sender]") {
     REQUIRE_FALSE(tx.is_connected());
 }
 
+TEST_CASE("OSC Sender sends caller-owned raw packets over loopback",
+          "[osc][udp][sender][coverage]") {
+    std::atomic<int> handled{0};
+    Message received;
+    std::mutex received_mutex;
+
+    Receiver rx;
+    REQUIRE(rx.listen(0, [&](const Message& msg) {
+        std::lock_guard<std::mutex> lock(received_mutex);
+        received = msg;
+        handled.fetch_add(1, std::memory_order_release);
+    }));
+    REQUIRE(rx.local_port() != 0);
+
+    Sender tx;
+    REQUIRE(tx.connect("127.0.0.1", rx.local_port()));
+
+    Message msg("/raw/sender");
+    msg.add(321);
+    const auto data = encode(msg);
+    for (int i = 0; i < 100 && handled.load(std::memory_order_acquire) == 0; ++i) {
+        REQUIRE(tx.send_raw(data.data(), data.size()));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    REQUIRE(handled.load(std::memory_order_acquire) > 0);
+    {
+        std::lock_guard<std::mutex> lock(received_mutex);
+        REQUIRE(received.address == "/raw/sender");
+        REQUIRE(received.get_int(0) == 321);
+    }
+
+    tx.disconnect();
+    rx.stop();
+    REQUIRE_FALSE(tx.is_connected());
+    REQUIRE_FALSE(rx.is_listening());
+}
+
 TEST_CASE("OSC Sender disconnects idempotently and reconnects to loopback",
           "[osc][udp][sender][codecov]") {
     std::atomic<int> handled{0};
@@ -783,6 +821,23 @@ TEST_CASE("OSC Receiver accepts an empty handler and stops cleanly",
     REQUIRE_FALSE(rx.is_listening());
 }
 
+TEST_CASE("OSC Receiver rejects binding to an already-used UDP port",
+          "[osc][udp][receiver][coverage]") {
+    Receiver first;
+    REQUIRE(first.listen(0, [](const Message&) {}));
+    const auto port = first.local_port();
+    REQUIRE(port != 0);
+
+    Receiver second;
+    REQUIRE_FALSE(second.listen(port, [](const Message&) {}));
+    REQUIRE_FALSE(second.is_listening());
+    REQUIRE(second.local_port() == 0);
+    REQUIRE(first.is_listening());
+
+    first.stop();
+    REQUIRE_FALSE(first.is_listening());
+}
+
 // ── Bundles and address patterns ────────────────────────────────────────────
 
 TEST_CASE("OSC bundle serializes and restores nested messages and bundles",
@@ -849,4 +904,22 @@ TEST_CASE("OSC address pattern rejects incomplete classes and alternatives",
 
     REQUIRE(address_matches("/track/?", "/track/A"));
     REQUIRE_FALSE(address_matches("/track/?", "/track//"));
+}
+
+TEST_CASE("OSC address pattern covers boundary backtracking failures",
+          "[osc][pattern][coverage]") {
+    REQUIRE(address_matches("/mix/*/tail", "/mix//tail"));
+    REQUIRE_FALSE(address_matches("/mix/*/tail", "/mix/a/b/tail"));
+    REQUIRE_FALSE(address_matches("/mix/*tail", "/mix/a/tail"));
+    REQUIRE_FALSE(address_matches("/mix/*tail", "/mix/tail/extra"));
+
+    REQUIRE_FALSE(address_matches("/note/[abc]", "/note/"));
+    REQUIRE_FALSE(address_matches("/note/[!abc]", "/note/a"));
+    REQUIRE(address_matches("/note/[!abc]", "/note/z"));
+    REQUIRE_FALSE(address_matches("/note/[z-a]", "/note/m"));
+
+    REQUIRE(address_matches("/{alpha,beta,gamma}/1", "/alpha/1"));
+    REQUIRE(address_matches("/{alpha,beta,gamma}/1", "/gamma/1"));
+    REQUIRE_FALSE(address_matches("/{alpha,beta,gamma}/1", "/gamma/2"));
+    REQUIRE_FALSE(address_matches("/{alpha,,gamma}/1", "/gamma/1"));
 }
