@@ -1,16 +1,18 @@
-// Audio Unit component entry point
-// Uses AUAudioUnit.registerSubclass to register the AU class directly.
+// AU v3 component entry point — generic AUAudioUnitFactory hook called by
+// AudioComponentInstanceNew. Returns a +1-retained NSObject conforming to
+// AUAudioUnitFactory whose createAudioUnitWithComponentDescription:error:
+// instantiates `PulpAudioUnit`.
+//
+// Plugin registration: per-plugin via `PULP_AUV3_PLUGIN(factory_fn)` from
+// `<pulp/format/au_v3_entry.hpp>`. That macro calls `PULP_REGISTER_PLUGIN`
+// in the AU v3 module so `registered_factory()` is non-null by the time this
+// entry is invoked. No plugin-specific force-link symbol is required.
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #import "au_audio_unit.h"
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
-
-// The factory function called by AudioComponentInstanceNew.
-// For AUv3-in-v2, this should return a factory object that conforms
-// to AUAudioUnitFactory. The factory's createAudioUnit: method is
-// then called to produce the actual AUAudioUnit instance.
 
 @interface PulpAUFactoryObj : NSObject <AUAudioUnitFactory>
 @end
@@ -20,7 +22,6 @@
 - (nullable AUAudioUnit *)createAudioUnitWithComponentDescription:(AudioComponentDescription)desc
                                                             error:(NSError * _Nullable *)error
 {
-    fprintf(stderr, "[pulp:AU] createAudioUnit called\n");
     return [[PulpAudioUnit alloc] initWithComponentDescription:desc
                                                        options:0
                                                          error:error];
@@ -28,18 +29,12 @@
 
 @end
 
-// Force linker to include au_register.cpp (prevents static init stripping)
-extern "C" void pulp_gain_force_link();
-
-extern "C" void* PulpAUFactory(const AudioComponentDescription* desc) {
-    // Touch the force_link symbol to ensure au_register.cpp is linked
-    pulp_gain_force_link();
-
+extern "C" void *PulpAUFactory(const AudioComponentDescription *desc) {
+    (void)desc;
     if (!pulp::format::registered_factory()) {
-        fprintf(stderr, "[pulp:AU] ERROR: factory still null after force_link\n"); fflush(stderr);
+        pulp::runtime::log_error("AU v3 entry: no processor factory registered — "
+                                 "did the plugin link a TU with PULP_AUV3_PLUGIN()?");
         return nullptr;
     }
-
-    fprintf(stderr, "[pulp:AU] factory OK, creating AUAudioUnitFactory\n"); fflush(stderr);
-    return (__bridge_retained void*)[[PulpAUFactoryObj alloc] init];
+    return (__bridge_retained void *)[[PulpAUFactoryObj alloc] init];
 }

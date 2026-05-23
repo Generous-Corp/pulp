@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS AU v3 .appex entitlements. app-sandbox is required for all
+     app extensions; allow-jit + allow-unsigned-executable-memory are
+     pragmatic defaults for JS-engine-backed editors (QuickJS / V8) and
+     GPU shader codegen (Skia / Dawn). disable-library-validation lets the
+     extension load the AUv3Framework that's signed with the same identity. -->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

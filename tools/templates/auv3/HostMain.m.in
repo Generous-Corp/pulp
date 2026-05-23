@@ -1,0 +1,48 @@
+// Generated container-app main for @PLUGIN_NAME@ AU v3 host.
+//
+// macOS AU v3 app extensions must live inside a containing .app bundle so
+// macOS Launch Services + PlugInKit can discover and register them. This
+// host is intentionally minimal — its only purpose is to be a valid .app
+// that holds Contents/PlugIns/@PLUGIN_NAME@.appex and
+// Contents/Frameworks/@PLUGIN_NAME@AUv3Framework.framework. The user opens
+// the host once after install; that triggers Launch Services to register
+// the embedded extension, after which AU hosts (Logic, MainStage,
+// GarageBand, AU Lab) see the plug-in.
+
+#import <Cocoa/Cocoa.h>
+
+@interface PulpAUv3HostDelegate : NSObject <NSApplicationDelegate>
+@property(strong) NSWindow *window;
+@end
+
+@implementation PulpAUv3HostDelegate
+- (void)applicationDidFinishLaunching:(NSNotification *)note {
+    self.window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(200, 200, 460, 160)
+                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                    backing:NSBackingStoreBuffered defer:NO];
+    self.window.title = @"@PLUGIN_NAME@ — AU v3 host";
+    NSTextField *label = [NSTextField labelWithString:
+        @"@PLUGIN_NAME@ AU v3 registration host.\n\n"
+        @"Launching this app lets macOS register the embedded\n"
+        @"AU v3 extension. You can close this window after\n"
+        @"Logic / MainStage rescans the AU components."];
+    label.frame = NSMakeRect(20, 20, 420, 120);
+    [self.window.contentView addSubview:label];
+    [self.window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { return YES; }
+@end
+
+int main(int argc, const char *argv[]) {
+    (void)argc; (void)argv;
+    @autoreleasepool {
+        NSApplication *app = [NSApplication sharedApplication];
+        PulpAUv3HostDelegate *del = [PulpAUv3HostDelegate new];
+        app.delegate = del;
+        [app setActivationPolicy:NSApplicationActivationPolicyRegular];
+        [app run];
+    }
+    return 0;
+}

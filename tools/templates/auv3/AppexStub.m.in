@@ -1,0 +1,20 @@
+// Generated AU v3 app-extension stub for @PLUGIN_NAME@.
+//
+// Per Apple's "Creating custom audio effects" sample: an AU v3 app extension's
+// main binary cannot be dynamically loaded into another app, so all executable
+// audio-unit code lives in a separate framework bundle
+// (@PLUGIN_BUNDLE_ID@.AUv3Framework). This .appex is a stub: it carries the
+// NSExtension Info.plist, links against the framework, and uses Apple's
+// _NSExtensionMain entry point. The system's PlugInKit loads the principal
+// class (the AUViewController + AUAudioUnitFactory) from the framework.
+//
+// Don't add factory C functions or AUAudioUnitFactory classes here — they
+// belong in the framework. iPlug2 follows the same pattern (see
+// IPlug/AUv3/IPlugAUv3Appex.m).
+
+#import <Foundation/Foundation.h>
+
+void Pulp_@PLUGIN_NAME_CSYM@_AUv3_keep_alive(void) {
+    // Force the linker to retain this TU + the framework's library
+    // load command. iPlug2 uses the same dummy-function pattern.
+}

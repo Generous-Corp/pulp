@@ -1,57 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Generic AU v3 app-extension Info.plist (macOS .appex). iOS uses the
+     dedicated templates/ios-auv3/Info.plist.in. Variables in @VAR@ form
+     are substituted by configure_file(... @ONLY); ${VAR} form is left
+     intact (matches Xcode's runtime variables). -->
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>${PLUGIN_NAME}</string>
+    <string>@PLUGIN_NAME@</string>
     <key>CFBundleExecutable</key>
-    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <string>@PLUGIN_NAME@</string>
     <key>CFBundleIdentifier</key>
-    <string>${BUNDLE_ID}.auv3</string>
+    <string>@PLUGIN_BUNDLE_ID@.auv3</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>${PLUGIN_NAME}</string>
+    <string>@PLUGIN_NAME@</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
+    <string>@PLUGIN_VERSION@</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>
         <dict>
+            <!-- AudioComponentBundle: the bundle ID housing the AUAudioUnit
+                 subclass. The view controller (NSExtensionPrincipalClass)
+                 lives here too; both live in the same .appex. Required by
+                 macOS Tahoe Pluginkit binding map; iPlug2 and Apple's
+                 sample-code AUv3 templates both set this. -->
+            <key>AudioComponentBundle</key>
+            <string>@PLUGIN_BUNDLE_ID@.AUv3Framework</string>
             <key>AudioComponents</key>
             <array>
                 <dict>
                     <key>description</key>
-                    <string>${PLUGIN_NAME}</string>
+                    <string>@PLUGIN_NAME@</string>
                     <key>manufacturer</key>
-                    <string>${MANUFACTURER_CODE}</string>
+                    <string>@PLUGIN_MANUFACTURER_CODE@</string>
                     <key>name</key>
-                    <string>${MANUFACTURER}: ${PLUGIN_NAME}</string>
+                    <string>@PLUGIN_MANUFACTURER@: @PLUGIN_NAME@</string>
                     <key>subtype</key>
-                    <string>${PLUGIN_CODE}</string>
+                    <string>@PLUGIN_SUBTYPE_CODE@</string>
                     <key>type</key>
-                    <string>${AU_TYPE}</string>
+                    <string>@PLUGIN_AU_TYPE@</string>
                     <key>version</key>
-                    <integer>1</integer>
+                    <integer>@PLUGIN_AU_VERSION_INT@</integer>
                     <key>sandboxSafe</key>
                     <true/>
                     <key>tags</key>
                     <array>
-                        <string>${AU_TAG}</string>
+                        <string>@PLUGIN_AU_TAG@</string>
                     </array>
                 </dict>
             </array>
         </dict>
         <key>NSExtensionPointIdentifier</key>
-        <string>com.apple.AudioUnit</string>
+        <string>@PULP_AUV3_EXTENSION_POINT@</string>
         <key>NSExtensionPrincipalClass</key>
-        <string>PulpAudioUnit</string>
+        <string>@PULP_AUV3_PRINCIPAL_CLASS@</string>
     </dict>
 </dict>
 </plist>
