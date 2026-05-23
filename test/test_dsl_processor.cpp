@@ -95,6 +95,20 @@ public:
 using MockFxDsp    = MockFaustDsp<1, 1>;   // Effect  — 1 in / 1 out
 using MockSynthDsp = MockFaustDsp<0, 2>;   // Instrument — 0 in / 2 out
 
+class MetadataFallbackDsp : public MockFaustDsp<1, 1> {
+public:
+    void metadata(Meta*) override {}
+};
+
+class FancyNameDsp : public MockFaustDsp<1, 1> {
+public:
+    void metadata(Meta* m) override {
+        m->declare("name", " Weird_NAME--42!! ");
+        m->declare("author", "DSP Lab");
+        m->declare("version", "2.5.1");
+    }
+};
+
 }  // namespace
 
 // ── PulpFaustUI contract ────────────────────────────────────────────────
@@ -173,6 +187,61 @@ TEST_CASE("PulpFaustUI skips passive bargraphs",
     REQUIRE(ui.zones().empty());
 }
 
+TEST_CASE("PulpFaustUI ignores empty groups and tolerates unmatched closes",
+          "[dsl][faust-ui][group][edge]") {
+    pulp::dsl::PulpFaustUI ui;
+    FAUSTFLOAT a{0}, b{0}, c{0};
+
+    ui.openTabBox("");
+    ui.openHorizontalBox(nullptr);
+    ui.addNumEntry("Top", &a, 0.25f, 0.0f, 1.0f, 0.05f);
+    ui.closeBox();
+
+    ui.openTabBox("Main");
+    ui.addButton("Trigger", &b);
+    ui.closeBox();
+    ui.closeBox();
+    ui.closeBox();
+    ui.addCheckButton(nullptr, &c);
+
+    REQUIRE(ui.zones().size() == 3);
+    REQUIRE(ui.zones()[0].desc.name == "Top");
+    REQUIRE(ui.zones()[0].desc.group.empty());
+    REQUIRE_THAT(ui.zones()[0].desc.default_value, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(ui.zones()[0].desc.step, WithinAbs(0.05f, 1e-6f));
+    REQUIRE(ui.zones()[1].desc.name == "Trigger");
+    REQUIRE(ui.zones()[1].desc.group == "Main");
+    REQUIRE_THAT(ui.zones()[1].desc.default_value, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(ui.zones()[1].desc.max, WithinAbs(1.0f, 1e-6f));
+    REQUIRE(ui.zones()[2].desc.name.empty());
+    REQUIRE(ui.zones()[2].desc.group.empty());
+    REQUIRE(ui.zones()[2].param_id == 0);
+}
+
+TEST_CASE("PulpFaustUI only maps unit metadata for the target zone",
+          "[dsl][faust-ui][metadata][edge]") {
+    pulp::dsl::PulpFaustUI ui;
+    FAUSTFLOAT with_unit{0}, without_unit{0}, ignored{0};
+
+    ui.declare(&with_unit, "unit", "Hz");
+    ui.declare(&without_unit, "style", "knob");
+    ui.declare(nullptr, "unit", "dB");
+    ui.addHorizontalSlider("Frequency", &with_unit, 440.0f, 20.0f, 20000.0f, 1.0f);
+    ui.addHorizontalSlider("Shape", &without_unit, 0.0f, -1.0f, 1.0f, 0.1f);
+    ui.addHorizontalSlider("Plain", &ignored, 0.5f, 0.0f, 1.0f, 0.01f);
+
+    REQUIRE(ui.zones().size() == 3);
+    REQUIRE(ui.zones()[0].desc.name == "Frequency");
+    REQUIRE(ui.zones()[0].desc.unit == "Hz");
+    REQUIRE_THAT(ui.zones()[0].desc.min, WithinAbs(20.0f, 1e-6f));
+    REQUIRE_THAT(ui.zones()[0].desc.max, WithinAbs(20000.0f, 1e-6f));
+    REQUIRE(ui.zones()[1].desc.name == "Shape");
+    REQUIRE(ui.zones()[1].desc.unit.empty());
+    REQUIRE_THAT(ui.zones()[1].desc.min, WithinAbs(-1.0f, 1e-6f));
+    REQUIRE(ui.zones()[2].desc.name == "Plain");
+    REQUIRE(ui.zones()[2].desc.unit.empty());
+}
+
 // ── PulpFaustMeta contract ──────────────────────────────────────────────
 
 TEST_CASE("PulpFaustMeta stores declared key/value pairs",
@@ -193,6 +262,15 @@ TEST_CASE("PulpFaustMeta::declare tolerates null key or value without crashing",
     meta.declare("y", nullptr);
     meta.declare(nullptr, nullptr);
     REQUIRE(meta.all().empty());
+}
+
+TEST_CASE("PulpFaustMeta returns caller fallback for missing keys",
+          "[dsl][faust-meta][fallback]") {
+    pulp::dsl::PulpFaustMeta meta;
+    meta.declare("name", "Known");
+    REQUIRE(meta.get("name", "Fallback") == "Known");
+    REQUIRE(meta.get("missing", "Fallback") == "Fallback");
+    REQUIRE(meta.all().size() == 1);
 }
 
 // ── FaustProcessor construction & reflection ────────────────────────────
@@ -245,6 +323,33 @@ TEST_CASE("FaustProcessor descriptor bundle_id sanitises the plugin name",
     auto desc = proc.descriptor();
     // MockSynth → "mocksynth"; the namespace prefix is fixed.
     REQUIRE(desc.bundle_id == "com.pulp.faust.mocksynth");
+}
+
+TEST_CASE("FaustProcessor descriptor uses metadata fallbacks when DSP omits them",
+          "[dsl][faust-processor][descriptor][fallback]") {
+    pulp::dsl::FaustProcessor<MetadataFallbackDsp> proc;
+    auto desc = proc.descriptor();
+
+    REQUIRE(desc.name == "FAUST Plugin");
+    REQUIRE(desc.manufacturer == "FAUST");
+    REQUIRE(desc.version == "1.0.0");
+    REQUIRE(desc.bundle_id == "com.pulp.faust.faust-plugin");
+    REQUIRE(desc.category == pulp::format::PluginCategory::Effect);
+    REQUIRE(desc.input_buses.size() == 1);
+    REQUIRE(desc.output_buses.size() == 1);
+}
+
+TEST_CASE("FaustProcessor descriptor sanitises mixed punctuation in bundle IDs",
+          "[dsl][faust-processor][descriptor][sanitize]") {
+    pulp::dsl::FaustProcessor<FancyNameDsp> proc;
+    auto desc = proc.descriptor();
+
+    REQUIRE(desc.name == " Weird_NAME--42!! ");
+    REQUIRE(desc.manufacturer == "DSP Lab");
+    REQUIRE(desc.version == "2.5.1");
+    REQUIRE(desc.bundle_id == "com.pulp.faust.weird-name-42-");
+    REQUIRE_FALSE(desc.accepts_midi);
+    REQUIRE_FALSE(desc.produces_midi);
 }
 
 // ── FaustProcessor::define_parameters() ─────────────────────────────────
@@ -360,6 +465,34 @@ TEST_CASE("FaustProcessor::process syncs StateStore values into FAUST zones befo
 
     REQUIRE_THAT(out.channel(0)[0], WithinAbs(0.9f, 1e-6f));
     REQUIRE_THAT(out.channel(0)[127], WithinAbs(0.9f, 1e-6f));
+}
+
+TEST_CASE("FaustProcessor::process supports instrument topology with no inputs",
+          "[dsl][faust-processor][process][instrument]") {
+    pulp::dsl::FaustProcessor<MockSynthDsp> proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    proc.prepare({44100.0, 64, 0, 2});
+
+    store.set_value(1, 0.7f);
+
+    pulp::audio::BufferView<const float> in_view;
+    pulp::audio::Buffer<float> out(2, 64);
+    auto out_view = out.view();
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    pulp::format::ProcessContext pctx;
+    pctx.sample_rate = 44100.0;
+    pctx.num_samples = 64;
+
+    proc.process(out_view, in_view, midi_in, midi_out, pctx);
+
+    REQUIRE(out.num_channels() == 2);
+    REQUIRE(out.num_samples() == 64);
+    REQUIRE_THAT(out.channel(0)[0], WithinAbs(0.7f, 1e-6f));
+    REQUIRE_THAT(out.channel(0)[63], WithinAbs(0.7f, 1e-6f));
+    REQUIRE_THAT(out.channel(1)[0], WithinAbs(0.7f, 1e-6f));
+    REQUIRE_THAT(out.channel(1)[63], WithinAbs(0.7f, 1e-6f));
 }
 
 TEST_CASE("FaustProcessor::process honours zero-length buffer (num_samples == 0)",
