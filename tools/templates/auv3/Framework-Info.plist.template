@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS AU v3 framework Info.plist. Per Apple's "Creating custom audio
+     effects" sample, the AU code (AUAudioUnit subclass + AUViewController +
+     processor factory) must live in a framework bundle, not in the .appex
+     itself. The .appex points here via AudioComponentBundle. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>@PLUGIN_NAME@AUv3Framework</string>
+    <key>CFBundleIdentifier</key>
+    <string>@PLUGIN_BUNDLE_ID@.AUv3Framework</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>@PLUGIN_NAME@AUv3Framework</string>
+    <key>CFBundlePackageType</key>
+    <string>FMWK</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@PLUGIN_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+</dict>
+</plist>

@@ -72,8 +72,5 @@ void SineSynth::process(BufferView<float>& out,
 
 } // namespace pulp::examples::ios_synth
 
-// Framework factory hook — required by the AUv3 template. Returns a new
-// processor instance per plugin load.
-std::unique_ptr<pulp::format::Processor> pulp_create_processor() {
-    return std::make_unique<pulp::examples::ios_synth::SineSynth>();
-}
+// Factory registration moved to src/au_v3_entry.cpp (PULP_AUV3_PLUGIN) so the
+// same wiring matches the macOS AU v3 + CLAP + AU v2 entry pattern.

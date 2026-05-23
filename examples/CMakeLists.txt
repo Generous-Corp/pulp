@@ -1,6 +1,12 @@
 # Pulp example projects
 # Each example validates a phase of the framework
 
+# Local-only dev: chainer-synth lives in this dir gitignored when present,
+# used for AU v3 / GPU editor validation. Not shipped on main.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/chainer-synth/CMakeLists.txt")
+    add_subdirectory(chainer-synth)
+endif()
+
 # Phase 2-3: PulpGain (trivial gain plugin)
 add_subdirectory(pulp-gain)
 

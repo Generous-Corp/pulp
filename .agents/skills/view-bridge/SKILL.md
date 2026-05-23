@@ -97,6 +97,28 @@ window. `StandaloneConfig::headless`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
 `run_with_editor()` fails before creating the host so tests cannot park a
 hidden live window forever.
 
+## AU v3 controller lifecycle — runs on XPC queue, NOT main (Phase 3.5)
+
+The host invokes `-[PulpAUMacViewController createAudioUnitWithComponentDescription:error:]`
+(macOS) and `-[PulpAUViewController ...]` (iOS) on
+`com.apple.NSXPCConnection.user.endpoint` — the XPC connection's
+serial queue, not the main thread. Any AppKit / UIKit call from there
+(`setPreferredContentSize:`, `self.view`, the `PluginViewHost`
+attach) throws `NSInternalInconsistencyException` and kills the
+.appex process. Host reports "Failed to load Audio Unit"; auval
+silently passes because it doesn't exercise the controller path.
+
+`au_view_controller_mac.mm` + `au_view_controller_ios.mm` apply a
+HARD GUARD at the top of `rebuildEditorIfReady` that bounces the body
+to `dispatch_get_main_queue()` if invoked off-main. **Don't guard
+only at `setAudioUnit:`** — the compiler can inline the property
+setter when `createAudioUnit` assigns to `self.audioUnit`, bypassing
+the check. The guard must live in `rebuildEditorIfReady`.
+
+Full recipe (macOS framework + stub .appex + container .app, signing,
+notarization, PlugInKit diagnostics) is in
+`.agents/skills/auv3/SKILL.md → "macOS AU v3 packaging"`.
+
 ## AU v2 dual-Processor gotcha (fixed)
 
 Pre-ViewBridge, the AU v2 Cocoa view factory called

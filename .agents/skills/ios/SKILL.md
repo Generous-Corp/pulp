@@ -113,6 +113,18 @@ xcrun simctl launch --console booted com.example.MyApp
 
 ## AUv3 App Extension
 
+> **macOS AU v3 is architecturally different — see the `auv3` skill.**
+> The macOS path (Phase 3.5) uses framework + stub .appex + container .app;
+> iOS stays monolithic. The threading hard guard (XPC queue →
+> `dispatch_async(main)` before any UIKit access) applies to BOTH
+> platforms, and is implemented in
+> `core/format/src/au_view_controller_ios.mm` for iOS. The lifecycle
+> fix (`createAudioUnitWithComponentDescription:` must actually
+> instantiate `PulpAudioUnit`, then `rebuildEditorIfReady` shared
+> between `viewDidLoad` and `setAudioUnit:`) also applies here. Full
+> recipe + diagnostics live in
+> `.agents/skills/auv3/SKILL.md → "macOS AU v3 packaging"`.
+
 An AUv3 plugin on iOS ships as an **App Extension** bundled inside a **host app** (App Store requires a host container). Both targets must be in the same Xcode project.
 
 Minimal structure:

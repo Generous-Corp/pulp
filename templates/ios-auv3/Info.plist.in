@@ -24,6 +24,11 @@
     <dict>
         <key>NSExtensionAttributes</key>
         <dict>
+            <!-- AudioComponentBundle: required by macOS Tahoe Pluginkit
+                 binding map. The AU class lives in the same .appex as the
+                 view controller. -->
+            <key>AudioComponentBundle</key>
+            <string>@PLUGIN_BUNDLE_ID@.appex</string>
             <key>AudioComponents</key>
             <array>
                 <dict>
@@ -49,9 +54,9 @@
             </array>
         </dict>
         <key>NSExtensionPointIdentifier</key>
-        <string>com.apple.AudioUnit-UI</string>
+        <string>@PULP_AUV3_EXTENSION_POINT@</string>
         <key>NSExtensionPrincipalClass</key>
-        <string>PulpAUViewController</string>
+        <string>@PULP_AUV3_PRINCIPAL_CLASS@</string>
     </dict>
     <key>MinimumOSVersion</key>
     <string>16.0</string>

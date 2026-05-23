@@ -86,22 +86,25 @@ The bridge struct `pulp::format::au::AUBridge` owns:
 
 ### Entry point: `PulpAUFactory` + `AUAudioUnitFactory`
 
-`au_entry.mm` defines two symbols a host uses:
+**macOS (Phase 3.5):** the .appex stub uses Apple's `_NSExtensionMain`
+entry point. `NSExtensionPrincipalClass` in Info.plist points at
+`PulpAUMacViewController`, which adopts `AUAudioUnitFactory` directly
+— its `createAudioUnitWithComponentDescription:error:` allocs a
+`PulpAudioUnit`. The legacy `PulpAUFactory` C component-registration
+function is NOT used on macOS; everything goes through PlugInKit's
+extension lifecycle. See the "macOS AU v3 packaging" section below
+for the full framework + stub .appex + container .app architecture.
 
-1. `PulpAUFactoryObj` — a tiny Obj-C class conforming to
-   `<AUAudioUnitFactory>`. Its `createAudioUnitWithComponentDescription:error:`
-   allocs a `PulpAudioUnit`.
-2. `extern "C" void* PulpAUFactory(const AudioComponentDescription*)` —
-   the C component-registration symbol the Info.plist points at. It
-   calls `pulp_gain_force_link()` to force the static
-   `register_plugin` initialisers to link (prevents the linker from
-   stripping `au_register.cpp`), then returns a `__bridge_retained`
-   pointer to a freshly-allocated `PulpAUFactoryObj`.
-
-If the registered factory is null at entry time, the function returns
-`NULL` and a DAW sees "no factory" rather than a crash. The
-`force_link` shim is what makes a static-library-only build actually
-ship the factory symbol.
+**iOS (legacy monolithic .appex):** `au_entry.mm` still defines
+`PulpAUFactoryObj` (NSObject conforming to `<AUAudioUnitFactory>`) and
+the C entry symbol `PulpAUFactory(const AudioComponentDescription*)`.
+iOS uses the same `_NSExtensionMain` path via Apple's
+`AUViewController`-based principal class
+(`PulpAUViewController` in `au_view_controller_ios.mm`); the C entry
+remains as a no-op safety net for `AudioComponentInstantiate`-style
+direct loads. The `PULP_AUV3_PLUGIN()` macro (in
+`<pulp/format/au_v3_entry.hpp>`) is what registers the per-plugin
+processor factory at static init — no `force_link` shim required.
 
 ### Bus construction
 
@@ -230,6 +233,263 @@ only on the iOS toolchain configure, because the other leg
 Coverage-macOS leg in PR #638 when `ACCEPTS_MIDI` was added to
 `_pulp_add_auv3` but not threaded through `pulp_add_ios_auv3`.
 
+## macOS AU v3 packaging — framework + stub .appex + container .app (Phase 3.5)
+
+**Apple's architecture, not a Pulp invention. Get this wrong and you
+will spend an entire session debugging silent Pluginkit rejections.**
+
+Apple's "Creating custom audio effects" sample doc states verbatim:
+
+> "Your extension's main binary cannot be dynamically loaded into
+> another app, which means all executable AU code must reside in a
+> separate framework bundle. The extension target still needs to
+> contain at least one source file for the extension binary to be
+> created, properly loaded, and linked with the framework bundle."
+
+iPlug2 ships the same 3-tier architecture. Pulp's macOS AU v3 lane
+(`tools/cmake/PulpAuv3.cmake`'s `_pulp_add_auv3_macos_*` helpers,
+Phase 3.5) follows this pattern exactly:
+
+```
+ChainerSynth.app/                                 ← container .app
+├── Contents/
+│   ├── MacOS/ChainerSynth                        ← tiny Cocoa shell, launched once to register
+│   ├── PlugIns/
+│   │   └── ChainerSynth.appex/                   ← stub .appex (NSExtensionMain entry)
+│   │       └── Contents/
+│   │           ├── Info.plist
+│   │           │   • NSExtensionPointIdentifier = com.apple.AudioUnit-UI
+│   │           │   • NSExtensionPrincipalClass = PulpAUMacViewController
+│   │           │   • NSExtensionAttributes.AudioComponentBundle =
+│   │           │       <bundle-id>.AUv3Framework    ← MUST match framework's CFBundleIdentifier
+│   │           └── MacOS/ChainerSynth            ← ~50KB stub binary, links framework
+│   └── Frameworks/
+│       └── ChainerSynthAUv3Framework.framework/  ← REAL code lives here
+│           ├── Info.plist  (CFBundlePackageType=FMWK)
+│           └── Versions/A/
+│               ├── ChainerSynthAUv3Framework     ← contains PulpAudioUnit + PulpAUMacViewController
+│               └── libwgpu_native.dylib          ← any embedded dylibs
+```
+
+**iOS is different — iOS AU v3 still uses the monolithic .appex.** The
+framework split is macOS-specific because of Apple's `loadInProcess`
+out-of-process requirement on macOS. `pulp_add_ios_auv3()` stays on the
+legacy monolithic path; `pulp_add_plugin(FORMATS AUv3)` dispatches to
+the macOS framework path on macOS.
+
+### What goes in the framework vs the .appex stub
+
+- **Framework** (`_pulp_add_auv3_macos_framework`): the per-plugin
+  Core OBJECT lib + `au_adapter.mm` (PulpAudioUnit) +
+  `au_view_controller_mac.mm` (PulpAUMacViewController +
+  AUAudioUnitFactory) + per-plugin `au_v3_entry.cpp` (the
+  `PULP_AUV3_PLUGIN` macro that registers the processor factory).
+- **Stub .appex** (`_pulp_add_auv3_macos_appex`): a generated 1-function
+  `.mm` source — `void Pulp_<plugin>_AUv3_keep_alive(void)`. Entry
+  point is Apple-provided `_NSExtensionMain`; we pass
+  `-e _NSExtensionMain` and `-fapplication-extension`. The stub links
+  the framework with `-Wl,-force_load,$<TARGET_FILE:framework>` so its
+  Obj-C classes register with the runtime — without `-force_load`,
+  `NSClassFromString(@"PulpAUMacViewController")` returns nil and the
+  host fails to instantiate the AU.
+- **Container .app** (`_pulp_add_auv3_macos_host`): tiny Cocoa shell
+  with a "this is the registration host" placeholder window. Bundle ID
+  `<plugin-bundle-id>.AUv3Host`. The user runs it once after install
+  to trigger Launch Services scan.
+
+**Do NOT put `au_entry.mm`'s `PulpAUFactoryObj` (legacy
+AudioComponentRegister factory C function) anywhere in the macOS AU v3
+lane.** The macOS path uses `_NSExtensionMain` + `NSExtensionPrincipalClass`
+to find the factory class. iPlug2 follows the same convention.
+
+### rpath: 4 levels up, not 2
+
+The .appex's binary at
+`MyApp.app/Contents/PlugIns/MyApp.appex/Contents/MacOS/MyApp` needs to
+find the framework at `MyApp.app/Contents/Frameworks/`. From the
+binary, that's **4 parent dirs up** (`MacOS → Contents → MyApp.appex →
+PlugIns → Contents → Frameworks`):
+
+```cmake
+set_target_properties(${appex_target} PROPERTIES
+    INSTALL_RPATH "@executable_path/../../../../Frameworks")
+```
+
+**iPlug2's modern CMake helper has this wrong** — it sets
+`@executable_path/../../Frameworks` which works for iOS's flat .appex
+layout but breaks macOS where the .appex has its own
+`Contents/MacOS/`. Don't copy that recipe.
+
+The container .app's binary at `MyApp.app/Contents/MacOS/MyApp` needs
+2 parent dirs up: `INSTALL_RPATH "@executable_path/../Frameworks"`.
+
+### Signing + notarization is mandatory on Sequoia/Tahoe
+
+macOS Tahoe's Pluginkit silently rejects ad-hoc-signed, Developer-ID-
+signed-without-notarization, and even properly Developer-ID-signed but
+unnotarized AU v3 .appex bundles. `pluginkit -mAvvv -p com.apple.AudioUnit-UI`
+returns "no matches" with zero log diagnostics. The only signal you
+get is the absence of the plugin.
+
+You MUST:
+
+1. **Sign embedded dylibs first** (`libwgpu_native.dylib`, etc.) with
+   `--timestamp --options runtime` and the same Developer ID identity
+2. **Sign the framework**
+3. **Sign the .appex** with `--entitlements <sandbox>.plist` (the
+   `com.apple.security.app-sandbox` entitlement is REQUIRED for app
+   extensions; without it pkd logs "plug-ins must be sandboxed" and
+   rejects). Plus `allow-jit` + `allow-unsigned-executable-memory` +
+   `disable-library-validation` for JS-engine + Skia/Dawn editors.
+4. **Sign the container .app** (also with hardened-runtime entitlements
+   for library validation)
+5. **Notarize the container .app** via `xcrun notarytool submit
+   --apple-id <id> --team-id <team> --password <app-specific-pwd>
+   --wait`
+6. **Staple** with `xcrun stapler staple`
+7. **Install to /Applications** and `lsregister -f -R`
+8. **Open the container .app once** to trigger Launch Services scan
+   → Pluginkit then registers the embedded extension
+
+The full recipe is in `tools/scripts/sign-notarize-auv3-mac.sh`.
+
+**Diagnostic for silent Pluginkit rejection:**
+
+```bash
+# Should return the plugin's bundle ID + path
+pluginkit -mAvvv -p com.apple.AudioUnit-UI | grep <your-plugin>
+
+# Should be registered as an AU component
+auval -a | grep <your-fourcc>
+
+# Should pass FORMAT + RENDER tests (validates the AU loads + processes
+# audio in AUHostingServiceXPC out-of-process)
+auval -v aumu <subtype> <manufacturer>
+```
+
+**auval does NOT exercise the AU v3 controller path** — auval calls
+`AudioComponentInstantiate` directly, bypassing the
+`AUAudioUnitFactory` lifecycle that hosts use via XPC. Threading bugs
+in `createAudioUnitWithComponentDescription:error:` /
+`PulpAUMacViewController` will pass auval and crash inside Logic /
+Reaper / Ableton. A proper integration test needs an XPC client that
+calls `requestViewControllerWithCompletionHandler` — Apple's AUv3Host
+sample is the template.
+
+### CMake POST_BUILD embed step doesn't re-fire on framework-only edits
+
+Without a sentinel, `add_custom_command(TARGET host POST_BUILD ... cp
+framework into app)` only runs when the host target itself relinks.
+A framework-only source edit (e.g. tweaking
+`au_view_controller_mac.mm`) won't relink the host, so the embedded
+framework in the .app stays stale. You sign + notarize the OLD binary
+while thinking you're testing the new one — symptom: the same
+crash repeats with the same byte offset after every "rebuild".
+
+`PulpAuv3.cmake` fixes this with a stamp-file `add_custom_command` +
+`add_custom_target(${host}_Embed ALL DEPENDS stamp)`. The host's
+output triggers the embed step whenever the framework or .appex
+binary is newer than the stamp. Don't revert to plain POST_BUILD.
+
+`tools/scripts/sign-notarize-auv3-mac.sh` also re-syncs the embed at
+sign time as a belt-and-suspenders.
+
+### Threading: `createAudioUnit:error:` runs on the XPC queue, NOT main
+
+The host (Logic / Reaper / Ableton / AUM) invokes
+`-[PulpAUMacViewController createAudioUnitWithComponentDescription:error:]`
+on the `com.apple.NSXPCConnection.user.endpoint` serial queue, not the
+main thread. Any AppKit/UIKit call from there throws
+`NSInternalInconsistencyException` (`setPreferredContentSize:`,
+`self.view`, the `PluginViewHost::attach_to_parent` AppKit attach).
+The thrown exception kills the .appex process and Logic reports
+"Failed to load Audio Unit".
+
+The fix in `au_view_controller_mac.mm` is a HARD GUARD at the top of
+`rebuildEditorIfReady`:
+
+```objc
+- (void)rebuildEditorIfReady {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self rebuildEditorIfReady];
+        });
+        return;
+    }
+    // ... AppKit work
+}
+```
+
+**Don't just guard at `setAudioUnit:` (the property setter).** The
+compiler can inline through the property setter when `createAudioUnit`
+assigns to `self.audioUnit`, bypassing your thread check. The hard
+guard inside `rebuildEditorIfReady` is the only safe place. Same
+gotcha on iOS — `au_view_controller_ios.mm` has the same guard.
+
+### Logic's per-plugin failed-state cache
+
+Logic Pro remembers AU v3 plugins that previously failed to validate
+in `~/Library/Preferences/com.apple.logic10.plist` under
+`audioUnitConfig.<type>-<subtype>-<manufacturer>`. Working entries are
+populated dicts; failed entries are `<dict/>` (empty). Logic will
+**not** re-attempt loading an empty-dict entry on relaunch — even
+after you've fixed the bug and reinstalled, Logic refuses to list the
+plugin until you delete that entry.
+
+Recovery without a full AU rescan:
+
+```bash
+# Logic Pro must be QUIT first
+killall -9 cfprefsd
+
+# Edit on disk while cfprefsd is dead so it reads fresh on next access
+plutil -convert xml1 -o /tmp/logic10.xml ~/Library/Preferences/com.apple.logic10.plist
+sed -i.bak '/<key>aumu-Chnr-Pulp<\/key>/{N;d;}' /tmp/logic10.xml
+plutil -convert binary1 -o ~/Library/Preferences/com.apple.logic10.plist /tmp/logic10.xml
+killall -9 cfprefsd AudioComponentRegistrar pkd
+rm -f ~/Library/Caches/AudioUnitCache/com.apple.audiounits.cache \
+      ~/Library/Caches/AudioUnitCache/com.apple.audiounits.sandboxed.cache
+
+# Now launch Logic — it'll incrementally rescan (NOT a full scan) and
+# pick up the fresh registration from AudioComponentRegistrar.
+```
+
+`PlistBuddy` does NOT work for editing this — it talks to cfprefsd
+which serves a cached in-memory view of the plist. Edit the XML
+directly while cfprefsd is killed.
+
+### Phase 3 / 3.5 view configuration plumbing
+
+`PulpAUMacViewController` + `PulpAUViewController` implement
+`AUAudioUnitFactory`, open `ViewBridge` against the AU's real
+`pulpProcessor` + `pulpStore`, build `PluginViewHost` via
+`decide_gpu_host`, and call `set_design_viewport(w, h)` +
+`set_fixed_aspect_ratio(w/h)` so the editor paints at design size and
+host-driven window resize is letterboxed proportionally.
+
+`PulpAudioUnit::supportedViewConfigurations:` accepts configurations
+within ~5% aspect tolerance of the design (a JUCE forum thread
+documents that Logic 10.6.1 probes 1024x768 / 1366x1024 — accepting
+at least one fixes a known Logic reopen-size bug). Falls back to
+accepting all configurations if none match the aspect floor.
+
+Padding at the top/bottom (or left/right) of the editor in a host
+window is the **expected letterbox** when the host gives us a window
+whose aspect ratio doesn't match the design's. Tighten by either
+adjusting the plugin's `view_size()` hint or implementing a tighter
+view-configuration policy.
+
+### The `PULP_AUV3_PLUGIN()` macro replaces hardcoded force_link
+
+Pre-Phase 3.5, `au_entry.mm` called `pulp_gain_force_link()` to force
+the linker to retain pulp-gain-specific static initializers. This
+broke AU v3 for every plugin OTHER than pulp-gain. Phase 3.5 ships
+`<pulp/format/au_v3_entry.hpp>` with `PULP_AUV3_PLUGIN(factory_fn)`
+— place it in ONE `.cpp` per plugin (convention: `au_v3_entry.cpp`
+in the plugin's source dir). The CMake helper auto-discovers and
+links it into the framework. Mirrors `PULP_CLAP_PLUGIN` and
+`PULP_AU_INSTRUMENT`.
+
 ## Gotchas
 
 ### `AURenderEventMIDIEventList` = UMP — not short MIDI, not raw sysex
@@ -307,15 +567,28 @@ main input (the pull overwrites it). `sidechain_abl` +
 inside the render block for the rare case where a host asks for more
 frames than `maximumFramesToRender` claimed.
 
-### Factory entry point needs `force_link` to keep registration alive
+### Factory entry point: use `PULP_AUV3_PLUGIN()`, NOT a hand-rolled force_link
 
-`pulp_gain_force_link()` is an empty function whose only purpose is to
-keep the linker from stripping `au_register.cpp`. The static
-initialisers in that TU are what populate the Pulp plugin registry
-before `PulpAUFactory` runs. If you add a new auto-registering TU,
-either reference it from `force_link` or the linker will drop it in
-release builds — and `registered_factory()` returns null at AU
-instantiation time.
+**Pre-Phase 3.5 (removed):** `au_entry.mm` called `pulp_gain_force_link()`
+to force-retain pulp-gain's `au_register.cpp` static initializers.
+That symbol was hardcoded to pulp-gain and broke AU v3 for every
+other plugin.
+
+**Phase 3.5+:** every plugin includes a per-plugin `au_v3_entry.cpp`
+in its source dir with:
+
+```cpp
+#include "my_plugin.hpp"
+#include <pulp/format/au_v3_entry.hpp>
+PULP_AUV3_PLUGIN(my_namespace::create_my_plugin)
+```
+
+`PulpAuv3.cmake` auto-discovers this file (by path convention) and
+links it into the AU v3 framework (macOS) or .appex (iOS). The
+macro expands to `PULP_REGISTER_PLUGIN`, which puts a static
+initializer in the TU; the linker keeps the file because CMake's
+OBJECT lib + framework SHARED lib both reference its symbols.
+Mirrors `PULP_CLAP_PLUGIN` and `PULP_AU_INSTRUMENT`.
 
 ### Channel count hard limit of 8
 
@@ -324,14 +597,22 @@ pre-allocated buffer array and validating hosts don't ask for more
 channels than the descriptor declares. Not a surround-readiness flag
 yet.
 
-### No `kAudioUnitProperty_CocoaUI` v3-native view plumbing today
+### AU v3 native view plumbing (Phase 3.5)
 
 AU v3 uses `requestViewControllerWithCompletionHandler:` to fetch an
-`AUViewController`. macOS bundles that ship a desktop editor for an AU
-v3 `.component` rely on the AU v2 Cocoa view path
-(`au_v2_cocoa_view.mm`) for the editor. iOS bundles use the
-`AUViewController` subclass directly. Cross-platform editor work lives
-in the `view-bridge` skill.
+`AUViewController`. macOS uses `PulpAUMacViewController` (in the
+framework, in macOS AU v3); iOS uses `PulpAUViewController` (in the
+monolithic .appex). Both implement `AUAudioUnitFactory` so the same
+class is both the factory and the view-providing controller — Apple's
+recommended pattern.
+
+`au_v2_cocoa_view.mm` (the AU v2 Cocoa view path) remains the editor
+mechanism for the AU v2 `.component` bundle. AU v3 has its own,
+parallel view path via the principal class.
+
+Cross-platform editor wiring (ViewBridge, PluginViewHost, design
+viewport, GPU host selection) is shared between both AU v3
+controllers — see the `view-bridge` skill.
 
 ### `auval` is the AU gate
 

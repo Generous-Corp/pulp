@@ -25,4 +25,5 @@ pulp_add_ios_auv3(
     SOURCES
         src/sine_synth.cpp
         src/sine_synth.hpp
+        src/au_v3_entry.cpp
 )

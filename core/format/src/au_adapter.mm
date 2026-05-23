@@ -4,12 +4,14 @@
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreAudioKit/CoreAudioKit.h>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
+#include <cmath>
 #include <memory>
 #include <array>
 #include <limits>
@@ -685,6 +687,86 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 - (void *)audioUnitARAFactory {
     return const_cast<void *>(
         pulp::format::ara_companion_factory_for(nullptr));
+}
+
+// ── AU v3 view configuration negotiation ───────────────────────────────────
+//
+// Hosts (Logic, MainStage, GarageBand) probe `supportedViewConfigurations:`
+// with a set of candidate window sizes and pick one via
+// `selectViewConfiguration:`. For a fixed-design GPU editor (the common
+// Pulp shape), we accept configurations whose aspect ratio is close to the
+// processor's design aspect, and we prefer the smallest config that can
+// contain the design viewport. The view controller's
+// `set_design_viewport` + `set_fixed_aspect_ratio` then scales the actual
+// paint at the host-chosen size.
+//
+// preferredContentSize remains authoritative for the initial editor size
+// when no host-selected configuration applies. Don't put an internal corner
+// resizer here — Logic's AU v3 path is host/container-driven.
+
+- (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations NS_AVAILABLE(10_13, 11_0) {
+    NSMutableIndexSet *result = [NSMutableIndexSet indexSet];
+    if (!_bridge.processor || availableViewConfigurations.count == 0) {
+        return result;
+    }
+
+    const auto hints = _bridge.processor->view_size();
+    const double design_w = static_cast<double>(hints.preferred_width);
+    const double design_h = static_cast<double>(hints.preferred_height);
+    if (design_w <= 0.0 || design_h <= 0.0) {
+        // No usable design size — accept everything and let the host decide.
+        [result addIndexesInRange:NSMakeRange(0, availableViewConfigurations.count)];
+        return result;
+    }
+
+    const double design_aspect = design_w / design_h;
+    // 5% aspect tolerance matches the JUCE AUv3 demo workaround for Logic
+    // 10.6.1's 1024x768 / 1366x1024 probe (forum.juce.com/t/auv3-resizing
+    // -issue-on-macos-not-ios/43811). Tight enough to reject obvious
+    // wrong-aspect candidates, loose enough to land on Logic's defaults.
+    constexpr double kAspectTolerance = 0.05;
+
+    for (NSUInteger i = 0; i < availableViewConfigurations.count; ++i) {
+        AUAudioUnitViewConfiguration *cfg = availableViewConfigurations[i];
+        const double w = static_cast<double>(cfg.width);
+        const double h = static_cast<double>(cfg.height);
+        if (w <= 0.0 || h <= 0.0) continue;
+
+        const double cfg_aspect = w / h;
+        const double aspect_delta = std::abs(cfg_aspect - design_aspect) / design_aspect;
+        if (aspect_delta <= kAspectTolerance) {
+            [result addIndex:i];
+            continue;
+        }
+
+        // Even on an aspect mismatch, accept configurations large enough to
+        // contain the design viewport — the controller will letterbox via
+        // set_design_viewport. Preferred only when at least one aspect-match
+        // option exists; if none do, the host needs some option to land on.
+        if (w >= design_w && h >= design_h) {
+            [result addIndex:i];
+        }
+    }
+
+    // If nothing matched (extreme aspect / undersized configs), fall back to
+    // accepting everything rather than telling the host we have no UI.
+    if (result.count == 0) {
+        [result addIndexesInRange:NSMakeRange(0, availableViewConfigurations.count)];
+    }
+    return result;
+}
+
+- (void)selectViewConfiguration:(AUAudioUnitViewConfiguration *)viewConfiguration NS_AVAILABLE(10_13, 11_0) {
+    // The view controller is the authority on actual sizing — it already
+    // observes its own bounds in viewDidLayout and forwards to
+    // PluginViewHost::set_size + ViewBridge::resize. This selector is the
+    // host telling us its preferred config; we log it for diagnostics and
+    // bump the preferredContentSize so any pending unload/reload of the
+    // controller picks up the new size.
+    pulp::runtime::log_info("AU v3 host selected view config: {}x{} (hostHasController={})",
+                            static_cast<int>(viewConfiguration.width),
+                            static_cast<int>(viewConfiguration.height),
+                            viewConfiguration.hostHasController ? "YES" : "NO");
 }
 
 @end
