@@ -377,9 +377,11 @@ TEST_CASE("GpuTimestamps degrades gracefully with no device",
     REQUIRE_FALSE(ok);
     REQUIRE(ts.support() == GpuTimestampSupport::unsupported);
     REQUIRE_FALSE(ts.available());
+    REQUIRE(ts.pass_capacity() == 0);
 
     // No-ops, no crash.
     ts.begin_frame(4);
+    REQUIRE(ts.pass_capacity() == 0);
     REQUIRE(ts.read_back().empty());
 
     // resolve() with no device (and a null instance) must report false

@@ -173,6 +173,19 @@ TEST_CASE("DirtyTracker ignores invalid viewport dimensions for promotion",
     REQUIRE(dt.dirty_rects().size() == 1);
 }
 
+TEST_CASE("DirtyTracker invalid viewport height disables promotion",
+          "[render][dirty][coverage][phase3-large]") {
+    DirtyTracker dt;
+    dt.set_viewport(100, 0, 0.01f);
+    dt.clear();
+    dt.invalidate(0, 0, 1000, 1000);
+
+    REQUIRE(dt.is_dirty());
+    REQUIRE_FALSE(dt.needs_full_repaint());
+    REQUIRE(dt.dirty_rects().size() == 1);
+    REQUIRE(dt.bounds().w == Catch::Approx(1000.0f));
+}
+
 TEST_CASE("DirtyTracker does not promote to full repaint without viewport", "[render][dirty][issue-646]") {
     DirtyTracker dt;
     dt.clear();
@@ -198,12 +211,46 @@ TEST_CASE("DirtyTracker coalesces nearby non-overlapping rects", "[render][dirty
     REQUIRE(b.h == Catch::Approx(10.0f));
 }
 
+TEST_CASE("DirtyTracker coalesces sparse overlaps through the intersects path",
+          "[render][dirty][coverage][phase3-large]") {
+    DirtyTracker dt;
+    dt.clear();
+
+    for (int i = 0; i < 15; ++i) {
+        dt.invalidate(static_cast<float>(i * 1000), 0, 1, 1);
+    }
+    dt.invalidate(0, 50, 1000, 1);
+    REQUIRE(dt.dirty_rects().size() == 16);
+
+    dt.invalidate(500, 0, 1, 1000);
+
+    REQUIRE(dt.dirty_rects().size() < 16);
+    auto b = dt.bounds();
+    REQUIRE(b.x == Catch::Approx(0.0f));
+    REQUIRE(b.y == Catch::Approx(0.0f));
+    REQUIRE(b.w >= 14001.0f);
+    REQUIRE(b.h == Catch::Approx(1000.0f));
+}
+
 TEST_CASE("Rect intersection", "[render][dirty]") {
     DirtyTracker::Rect a{0, 0, 10, 10};
     DirtyTracker::Rect b{5, 5, 10, 10};
     DirtyTracker::Rect c{20, 20, 10, 10};
     REQUIRE(a.intersects(b));
     REQUIRE_FALSE(a.intersects(c));
+}
+
+TEST_CASE("Rect intersection rejects each separating axis independently",
+          "[render][dirty][coverage][phase3-large]") {
+    DirtyTracker::Rect a{10, 10, 10, 10};
+    DirtyTracker::Rect left{0, 12, 5, 5};
+    DirtyTracker::Rect above{12, 0, 5, 5};
+    DirtyTracker::Rect below{12, 25, 5, 5};
+
+    REQUIRE_FALSE(a.intersects(left));
+    REQUIRE_FALSE(a.intersects(above));
+    REQUIRE_FALSE(a.intersects(below));
+    REQUIRE(a.area() == Catch::Approx(100.0f));
 }
 
 TEST_CASE("Rect merge returns bounding box", "[render][dirty][issue-646]") {

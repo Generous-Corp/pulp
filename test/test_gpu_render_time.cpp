@@ -151,3 +151,33 @@ TEST_CASE("RenderPassManager frame GPU time is independent of per-pass GPU time"
     REQUIRE(rpm.gpu_render_time_ms() == 8.0f);
     REQUIRE_FALSE(rpm.has_gpu_timing());
 }
+
+TEST_CASE("RenderPassManager handles empty pass endings and disabled budgets",
+          "[render][gpu-render-time][render-pass][coverage][phase3-large]") {
+    RenderPassManager rpm;
+    REQUIRE(rpm.budget() == 16.67f);
+    REQUIRE(rpm.frame_count() == 0);
+    REQUIRE(rpm.current_pass() == RenderPassType::background);
+
+    rpm.end_pass(12.0f, 4);
+    rpm.end_frame();
+    REQUIRE(rpm.passes().empty());
+    REQUIRE(rpm.total_time_ms() == 0.0f);
+    REQUIRE_FALSE(rpm.over_budget());
+
+    rpm.set_budget(0.0f);
+    REQUIRE(rpm.budget() == 0.0f);
+    rpm.begin_frame();
+    rpm.begin_pass(RenderPassType::post_effects);
+    rpm.end_pass(100.0f, 7);
+    rpm.end_frame();
+
+    REQUIRE(rpm.frame_count() == 1);
+    REQUIRE(rpm.current_pass() == RenderPassType::post_effects);
+    REQUIRE(rpm.passes().size() == 1);
+    REQUIRE(rpm.passes().front().type == RenderPassType::post_effects);
+    REQUIRE(rpm.passes().front().draw_calls == 7);
+    REQUIRE(rpm.passes().front().cpu_time_ms() == 100.0f);
+    REQUIRE(rpm.total_time_ms() == 100.0f);
+    REQUIRE_FALSE(rpm.over_budget());
+}

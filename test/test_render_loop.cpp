@@ -167,6 +167,20 @@ TEST_CASE("RenderLoop factory selects the timer backend under force-timer",
     REQUIRE(loop->backend() == RenderLoopBackend::timer);
 }
 
+TEST_CASE("RenderLoop explicit timer factory is deterministic",
+          "[render][loop][coverage][phase3-large]") {
+    auto loop = RenderLoop::create_timer_loop();
+    REQUIRE(loop != nullptr);
+    REQUIRE_FALSE(loop->is_running());
+    REQUIRE(loop->backend() == RenderLoopBackend::timer);
+
+    std::atomic<int> frames{0};
+    loop->start([&]() { frames.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(wait_for_count(frames, 1));
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+}
+
 TEST_CASE("render_loop_backend_is_vsync distinguishes real vblank sources",
           "[render][loop][vblank][slice-16]") {
     // The four native backends are real vblank sources; only the timer
