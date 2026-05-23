@@ -314,6 +314,130 @@ TEST_CASE("RecordingCanvas transforms", "[canvas]") {
     REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 1);
 }
 
+TEST_CASE("RecordingCanvas restores save stack and transform snapshots",
+          "[canvas][coverage][phase3-canvas]") {
+    RecordingCanvas canvas;
+
+    canvas.translate(5.0f, 7.0f);
+    canvas.save();
+    canvas.scale(2.0f, 3.0f);
+    canvas.save();
+    canvas.translate(11.0f, 13.0f);
+    canvas.capture_paint_baseline_transform();
+
+    REQUIRE(canvas.save_count() == 2);
+    REQUIRE(canvas.baseline_capture_count() == 1);
+
+    auto transformed = canvas.current_transform();
+    REQUIRE(transformed.e == Catch::Approx(27.0f));
+    REQUIRE(transformed.f == Catch::Approx(46.0f));
+
+    canvas.restore_to_count(1);
+    auto after_one_restore = canvas.current_transform();
+    REQUIRE(canvas.save_count() == 1);
+    REQUIRE(after_one_restore.e == Catch::Approx(5.0f));
+    REQUIRE(after_one_restore.f == Catch::Approx(7.0f));
+
+    canvas.restore_to_count(-1);
+    auto restored = canvas.current_transform();
+    REQUIRE(canvas.save_count() == 0);
+    REQUIRE(restored.e == Catch::Approx(5.0f));
+    REQUIRE(restored.f == Catch::Approx(7.0f));
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 2);
+}
+
+TEST_CASE("RecordingCanvas captures Canvas2D state and media command payloads",
+          "[canvas][coverage][phase3-canvas]") {
+    RecordingCanvas canvas;
+    const float dash[] = {2.0f, 4.0f, 6.0f};
+    const uint8_t pixels[] = {
+        0x10, 0x20, 0x30, 0x40,
+        0x50, 0x60, 0x70, 0x80,
+    };
+    const uint8_t image[] = {0xDE, 0xAD, 0xBE, 0xEF};
+
+    canvas.set_transform(1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f);
+    canvas.concat_transform(1.0f, 0.0f, 0.0f, 1.0f, 7.0f, 8.0f);
+    canvas.clip(FillRule::evenodd);
+    canvas.clip_path_svg("M0 0H10V10Z");
+    canvas.set_blend_mode(Canvas::BlendMode::destination_atop);
+    canvas.stroke_rect(1.0f, 2.0f, 3.0f, 4.0f);
+    canvas.fill_circle(9.0f, 8.0f, 7.0f);
+    canvas.set_font_full("Inter", 18.0f, 700, 1, 1.5f);
+    canvas.fill_text_with_max_width("fit", 2.0f, 3.0f, 44.0f);
+    canvas.stroke_text("outline", 4.0f, 5.0f, 66.0f);
+    canvas.set_line_dash(dash, 3, 1.25f);
+    REQUIRE(canvas.draw_image_from_file("/tmp/image.png", 1.0f, 2.0f, 3.0f, 4.0f));
+    REQUIRE(canvas.draw_image_from_data(image, sizeof(image), 5.0f, 6.0f, 7.0f, 8.0f));
+    REQUIRE(canvas.write_pixels(nullptr, 2, 1, 9, 10));
+    REQUIRE(canvas.write_pixels(pixels, 2, 1, 11, 12));
+    canvas.set_shadow_color(Color::rgba8(1, 2, 3, 4));
+    canvas.set_shadow_blur(12.0f);
+    canvas.set_shadow_offset_x(-3.0f);
+    canvas.set_shadow_offset_y(4.0f);
+    canvas.draw_box_shadow(1, 2, 3, 4, 5, 6, 7, 8,
+                           Color::rgba8(9, 10, 11, 12),
+                           true, 13);
+    canvas.set_image_smoothing(true, Canvas::ImageSmoothingQuality::high);
+    canvas.set_fill_pattern("fill://pattern",
+                            Canvas::PatternTileMode::no_repeat,
+                            Canvas::PatternTileMode::repeat);
+    canvas.set_stroke_pattern("stroke://pattern",
+                              Canvas::PatternTileMode::repeat,
+                              Canvas::PatternTileMode::no_repeat);
+
+    const auto& commands = canvas.commands();
+    REQUIRE(commands.size() == 24);
+    REQUIRE(commands[0].f[4] == Catch::Approx(5.0f));
+    REQUIRE(commands[1].type == DrawCommand::Type::concat_transform);
+    REQUIRE(commands[2].type == DrawCommand::Type::clip);
+    REQUIRE(commands[2].f[0] == Catch::Approx(1.0f));
+    REQUIRE(commands[3].text == "M0 0H10V10Z");
+    REQUIRE(commands[4].f[0] == Catch::Approx(static_cast<int>(Canvas::BlendMode::destination_atop)));
+    REQUIRE(commands[8].type == DrawCommand::Type::set_font_full);
+    REQUIRE(commands[8].f[1] == Catch::Approx(700.0f));
+    REQUIRE(commands[9].f[2] == Catch::Approx(44.0f));
+    REQUIRE(commands[10].type == DrawCommand::Type::stroke_text);
+    REQUIRE(commands[10].f[2] == Catch::Approx(66.0f));
+    REQUIRE(commands[11].floats.size() == 3);
+    REQUIRE(commands[11].floats[2] == Catch::Approx(6.0f));
+    REQUIRE(commands[13].text.size() == sizeof(image));
+    REQUIRE(commands[14].text.empty());
+    REQUIRE(commands[15].text.size() == sizeof(pixels));
+    REQUIRE(commands[20].f[4] == Catch::Approx(1.0f));
+    REQUIRE(commands[20].floats == std::vector<float>{5.0f, 6.0f, 7.0f, 8.0f});
+    REQUIRE(commands[21].f[0] == Catch::Approx(1.0f));
+    REQUIRE(commands[21].f[1] == Catch::Approx(static_cast<int>(Canvas::ImageSmoothingQuality::high)));
+    REQUIRE(commands[22].f[0] == Catch::Approx(1.0f));
+    REQUIRE(commands[22].f[1] == Catch::Approx(0.0f));
+    REQUIRE(commands[23].f[0] == Catch::Approx(0.0f));
+    REQUIRE(commands[23].f[1] == Catch::Approx(1.0f));
+}
+
+TEST_CASE("RecordingCanvas captures remaining path primitive payloads",
+          "[canvas][coverage][phase3-canvas]") {
+    RecordingCanvas canvas;
+
+    canvas.begin_path();
+    canvas.move_to(1.0f, 2.0f);
+    canvas.quad_to(3.0f, 4.0f, 5.0f, 6.0f);
+    canvas.arc(7.0f, 8.0f, 9.0f, 0.25f, 1.5f, true);
+    canvas.ellipse(10.0f, 11.0f, 12.0f, 13.0f, 0.5f, 0.75f, 2.0f, true);
+    canvas.round_rect(1.0f, 2.0f, 30.0f, 40.0f,
+                      3.0f, 4.0f, 5.0f, 6.0f,
+                      7.0f, 8.0f, 9.0f, 10.0f);
+
+    const auto& commands = canvas.commands();
+    REQUIRE(commands.size() == 6);
+    REQUIRE(commands[2].type == DrawCommand::Type::quad_to);
+    REQUIRE(commands[2].f[3] == Catch::Approx(6.0f));
+    REQUIRE(commands[3].f[5] == Catch::Approx(1.0f));
+    REQUIRE(commands[4].floats.size() == 2);
+    REQUIRE(commands[4].floats[0] == Catch::Approx(2.0f));
+    REQUIRE(commands[4].floats[1] == Catch::Approx(1.0f));
+    REQUIRE(commands[5].floats == std::vector<float>{5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f});
+}
+
 TEST_CASE("RecordingCanvas clear", "[canvas]") {
     RecordingCanvas canvas;
     canvas.fill_rect(0, 0, 10, 10);
