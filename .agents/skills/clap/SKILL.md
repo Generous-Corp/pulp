@@ -227,7 +227,7 @@ the host scales content to fit the resized window via a paint-time
 canvas transform — the JS/Yoga tree still thinks it's at design size,
 and the existing `gui_set_size` → `host->set_size(...)` path resizes
 the surfaces without re-laying out. This is the proportional+locked
-behavior the standalone host already had (pulp #59/#63/#64/#65); AU v2
+behavior the standalone host already had (same design-viewport contract as WindowHost); AU v2
 cannot offer it because the DAW resizes the returned NSView directly
 with no host-side `gui_can_resize` analogue. Cross-format design lives
 in the `view-bridge` skill.

@@ -649,7 +649,7 @@ See `planning/2026-05-22-gpu-view-host-in-plugins.md` and its `qa/` doc.
 ## Proportional resize with aspect lock — design viewport (2026-05)
 
 `PluginViewHost` now mirrors `WindowHost`'s design-viewport contract
-(pulp #59/#63/#64/#65) so DAW-embedded editors can corner-drag
+so DAW-embedded editors can corner-drag
 proportionally without re-laying out. Three new virtuals on the host
 (no-op defaults; full impl on the mac CPU + GPU hosts today):
 
