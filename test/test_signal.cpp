@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -1168,3 +1169,115 @@ TEST_CASE("Reverb handles zero decay, damping clamp, dry mix, and reset",
     REQUIRE_THAT(out.right, WithinAbs(0.25f, 1e-6f));
 }
 
+// ── Spectral display helpers ────────────────────────────────────────────────
+
+TEST_CASE("Signal target covers window families and bounded application",
+          "[signal][window][coverage]") {
+    const auto rectangular = WindowFunction::generate(6, WindowFunction::Type::rectangular);
+    REQUIRE(rectangular.size() == 6);
+    REQUIRE_THAT(rectangular[3], WithinAbs(1.0f, 1e-6f));
+
+    const auto hann = WindowFunction::generate(6, WindowFunction::Type::hann);
+    REQUIRE(hann.size() == 6);
+    REQUIRE_THAT(hann.front(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE(hann[2] > hann[1]);
+
+    const auto hamming = WindowFunction::generate(5, WindowFunction::Type::hamming);
+    REQUIRE_THAT(hamming.front(), WithinAbs(0.08f, 1e-5f));
+
+    const auto blackman = WindowFunction::generate(7, WindowFunction::Type::blackman);
+    REQUIRE(blackman[3] > blackman[0]);
+
+    const auto flat_top = WindowFunction::generate(7, WindowFunction::Type::flat_top);
+    REQUIRE(flat_top[3] > flat_top[0]);
+
+    const auto kaiser_default = WindowFunction::generate(5, WindowFunction::Type::kaiser);
+    const auto kaiser_custom = WindowFunction::generate(5, WindowFunction::Type::kaiser, 8.0f);
+    REQUIRE_THAT(kaiser_default.front(), WithinAbs(kaiser_default.back(), 1e-6f));
+    REQUIRE(kaiser_custom.front() < kaiser_default.front());
+
+    REQUIRE(WindowFunction::generate(0, WindowFunction::Type::hann).empty());
+    const auto single = WindowFunction::generate(1, WindowFunction::Type::kaiser, 4.0f);
+    REQUIRE(single.size() == 1);
+    REQUIRE_THAT(single[0], WithinAbs(1.0f, 1e-6f));
+
+    float buffer[] = {1.0f, 2.0f, 4.0f};
+    WindowFunction::apply(buffer, {1.0f, 0.5f});
+    REQUIRE_THAT(buffer[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(4.0f, 1e-6f));
+}
+
+TEST_CASE("Signal target covers spectrogram ramps axes and scrolling columns",
+          "[signal][spectrogram][coverage]") {
+    ColorMapper inferno(ColorRamp::inferno);
+    const auto inferno_low = inferno.map(0.0f);
+    const auto inferno_mid = inferno.map(0.5f);
+    const auto inferno_high = inferno.map(1.0f);
+    CHECK(inferno_low.a == 255);
+    CHECK(inferno_mid.r > inferno_low.r);
+    CHECK(inferno_high.g >= inferno_mid.g);
+
+    ColorMapper viridis(ColorRamp::viridis);
+    const auto viridis_low = viridis.map(0.0f);
+    const auto viridis_mid = viridis.map(0.5f);
+    CHECK(viridis_mid.g > viridis_low.g);
+
+    ColorMapper heat(ColorRamp::heat);
+    const auto heat_high = heat.map(1.0f);
+    CHECK(heat_high.r == 255);
+
+    ColorMapper grayscale(ColorRamp::grayscale);
+    const auto nan_gray = grayscale.map(std::numeric_limits<float>::quiet_NaN());
+    const auto clamped_gray = grayscale.map(4.0f);
+    CHECK(nan_gray.r == 0);
+    CHECK(clamped_gray.r == 255);
+
+    FrequencyAxis axis;
+    axis.configure(1024, 48000.0f, FrequencyScale::linear);
+    REQUIRE(axis.num_bins() == 513);
+    REQUIRE_THAT(axis.nyquist(), WithinAbs(24000.0f, 1e-6f));
+    REQUIRE_THAT(axis.bin_to_hz(256), WithinAbs(12000.0f, 1e-6f));
+    REQUIRE(axis.hz_to_bin(-100.0f) == 0);
+    REQUIRE(axis.hz_to_bin(999999.0f) == 512);
+    REQUIRE(axis.display_to_bin(-0.5f) == 0);
+    REQUIRE(axis.display_to_bin(2.0f) == 512);
+
+    FrequencyAxis log_axis;
+    log_axis.configure(1024, 48000.0f, FrequencyScale::logarithmic);
+    REQUIRE(log_axis.display_to_hz(0.0f) >= 1.0f);
+
+    FrequencyAxis mel_axis;
+    mel_axis.configure(1024, 48000.0f, FrequencyScale::mel);
+    REQUIRE(std::isfinite(mel_axis.hz_to_display(1000.0f)));
+
+    SpectrogramBuffer buffer;
+    buffer.configure(3, 4);
+    REQUIRE(buffer.width() == 3);
+    REQUIRE(buffer.height() == 4);
+    REQUIRE(buffer.frames_written() == 0);
+    REQUIRE(buffer.write_column() == 0);
+
+    const float magnitudes[] = {-80.0f, -40.0f, 0.0f, -20.0f};
+    buffer.push_column(magnitudes, 4, grayscale, -80.0f, 0.0f);
+    REQUIRE(buffer.frames_written() == 1);
+    REQUIRE(buffer.write_column() == 1);
+    CHECK(buffer.pixels()[0].a == 255);
+    CHECK(static_cast<int>(buffer.pixels()[3 * buffer.width()].r) == 191);
+
+    buffer.push_column(nullptr, 0, grayscale, -80.0f, -80.0f);
+    REQUIRE(buffer.frames_written() == 2);
+    REQUIRE(buffer.write_column() == 2);
+    CHECK(static_cast<int>(buffer.pixels()[1].r) == 0);
+}
+
+TEST_CASE("Signal target covers lookup table clamping and interpolation",
+          "[signal][lookup][coverage]") {
+    LookupTable table(3, 0.0f, 1.0f, [](float x) { return x * 2.0f; });
+
+    REQUIRE(table.size() == 3);
+    REQUIRE_THAT(table.process(-1.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(table.process(0.5f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(table[-2], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(table[99], WithinAbs(2.0f, 1e-6f));
+}
