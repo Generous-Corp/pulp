@@ -8,6 +8,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02020"></a>
+## [0.202.0] - 2026-05-22
+
+- feat(view): port WindowHost::set_design_viewport + aspect-lock to PluginViewHost ([#2762](https://github.com/danielraffel/pulp/pull/2762))
+- test(canvas): cover recording fallback edge paths ([#2761](https://github.com/danielraffel/pulp/pull/2761))
+- test(render): cover CPU render edge paths ([#2760](https://github.com/danielraffel/pulp/pull/2760))
+- test(state): cover properties and migration copy edges ([#2759](https://github.com/danielraffel/pulp/pull/2759))
+- test(signal): cover spectral utility branch edges ([#2758](https://github.com/danielraffel/pulp/pull/2758))
+- test(osc): cover UDP and channel branch edges ([#2757](https://github.com/danielraffel/pulp/pull/2757))
+- test(host): cover scanner and scan cache branch edges ([#2755](https://github.com/danielraffel/pulp/pull/2755))
+- test(local-ci): cover CLI scheduler branch edges ([#2754](https://github.com/danielraffel/pulp/pull/2754))
+- docs(skills): cli-maintenance — shell-quote PULP_BUILD_TYPE (injection guard) ([#2753](https://github.com/danielraffel/pulp/pull/2753))
+
 <a id="v02010"></a>
 ## [0.201.0] - 2026-05-22
 
@@ -2624,6 +2637,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.202.0]: https://github.com/danielraffel/pulp/releases/tag/v0.202.0
 [0.201.0]: https://github.com/danielraffel/pulp/releases/tag/v0.201.0
 [0.200.0]: https://github.com/danielraffel/pulp/releases/tag/v0.200.0
 [0.199.0]: https://github.com/danielraffel/pulp/releases/tag/v0.199.0
