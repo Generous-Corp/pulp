@@ -101,3 +101,49 @@ TEST_CASE("Timer with empty callback still tracks one-shot lifecycle",
     REQUIRE(timer.is_active());
     REQUIRE(wait_until([&] { return !timer.is_active(); }, 500ms));
 }
+
+TEST_CASE("Timer restart invalidates stale queued dispatches",
+          "[events][timer][coverage][issue-687]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+    Timer timer(loop, 75ms, [&] { calls.fetch_add(1); }, false);
+
+    REQUIRE_FALSE(timer.is_active());
+    timer.start();
+    REQUIRE(timer.is_active());
+
+    timer.stop();
+    REQUIRE_FALSE(timer.is_active());
+    timer.set_interval(5ms);
+    REQUIRE(timer.interval() == 5ms);
+
+    timer.start();
+    REQUIRE(timer.is_active());
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 500ms));
+    REQUIRE_FALSE(timer.is_active());
+
+    std::this_thread::sleep_for(100ms);
+    REQUIRE(calls.load() == 1);
+}
+
+TEST_CASE("Repeating timer can stop itself from its callback",
+          "[events][timer][coverage]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+    Timer* self = nullptr;
+    Timer timer(loop, 5ms, [&] {
+        calls.fetch_add(1);
+        self->stop();
+    }, true);
+    self = &timer;
+
+    REQUIRE_FALSE(timer.is_active());
+    timer.start();
+    REQUIRE(timer.is_active());
+
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 500ms));
+    REQUIRE_FALSE(timer.is_active());
+
+    std::this_thread::sleep_for(30ms);
+    REQUIRE(calls.load() == 1);
+}

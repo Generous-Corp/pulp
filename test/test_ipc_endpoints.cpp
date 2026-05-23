@@ -123,3 +123,25 @@ TEST_CASE("IPC socket endpoint failure can be reset with disconnect",
     connection.disconnect();
     REQUIRE(connection.state() == IpcState::Disconnected);
 }
+
+TEST_CASE("IPC socket client rejects hostless numeric endpoints",
+          "[events][ipc][endpoint][codecov]") {
+    const std::vector<std::string_view> endpoints = {
+        "0",
+        "1",
+        ":12345",
+        "12345",
+        "65535",
+    };
+
+    for (auto endpoint : endpoints) {
+        InterprocessConnection client;
+        REQUIRE_FALSE(client.connect(endpoint, IpcTransport::Socket));
+        REQUIRE(client.state() == IpcState::Error);
+        REQUIRE_FALSE(client.is_connected());
+
+        client.disconnect();
+        REQUIRE(client.state() == IpcState::Disconnected);
+        REQUIRE_FALSE(client.is_connected());
+    }
+}

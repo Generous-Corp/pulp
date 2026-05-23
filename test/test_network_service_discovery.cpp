@@ -519,6 +519,71 @@ TEST_CASE("NSD keys discoveries and loss by service name plus type",
     REQUIRE(nsd.discovered().front().type == "_pulp._tcp");
 }
 
+TEST_CASE("NSD routes register and unregister to the current backend after swaps",
+          "[events][service-discovery][codecov]") {
+    NetworkServiceDiscovery nsd;
+    auto first = std::make_unique<FakeBackend>();
+    auto first_log = first->log;
+    auto second = std::make_unique<FakeBackend>();
+    auto second_log = second->log;
+
+    nsd.install_backend(std::move(first));
+    REQUIRE(nsd.has_backend());
+    REQUIRE(nsd.register_service("first", "_pulp._tcp", 1111));
+    REQUIRE(first_log->registered.size() == 1);
+    REQUIRE(std::get<0>(first_log->registered.front()) == "first");
+
+    nsd.install_backend(std::move(second));
+    REQUIRE(first_log->stopped == 1);
+    REQUIRE(nsd.has_backend());
+    REQUIRE(nsd.register_service("second", "_pulp._tcp", 2222));
+    REQUIRE(first_log->registered.size() == 1);
+    REQUIRE(second_log->registered.size() == 1);
+    REQUIRE(std::get<0>(second_log->registered.front()) == "second");
+
+    nsd.unregister_service();
+    REQUIRE(first_log->unregistered == 0);
+    REQUIRE(second_log->unregistered == 1);
+}
+
+TEST_CASE("NSD loss matching ignores services with the same type but different name",
+          "[events][service-discovery][codecov]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    NetworkServiceDiscovery::Service alpha;
+    alpha.name = "alpha";
+    alpha.type = "_pulp._tcp";
+    alpha.hostname = "alpha.local";
+    alpha.port = 1;
+
+    NetworkServiceDiscovery::Service beta = alpha;
+    beta.name = "beta";
+    beta.hostname = "beta.local";
+    beta.port = 2;
+
+    nsd.notify_service_found(alpha);
+    nsd.notify_service_found(beta);
+    REQUIRE(nsd.discovered().size() == 2);
+
+    std::vector<std::string> lost;
+    nsd.on_service_lost = [&](const NetworkServiceDiscovery::Service& svc) {
+        lost.push_back(svc.name);
+    };
+
+    NetworkServiceDiscovery::Service missing = alpha;
+    missing.name = "missing";
+    nsd.notify_service_lost(missing);
+    REQUIRE(lost.empty());
+    REQUIRE(nsd.discovered().size() == 2);
+
+    nsd.notify_service_lost(alpha);
+    REQUIRE(lost == std::vector<std::string>{"alpha"});
+    REQUIRE(nsd.discovered().size() == 1);
+    REQUIRE(nsd.discovered().front().name == "beta");
+    REQUIRE(nsd.discovered().front().hostname == "beta.local");
+}
+
 TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",
           "[events][volume][lifecycle]") {
 #ifdef _WIN32
