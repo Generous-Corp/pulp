@@ -437,6 +437,196 @@ TEST_CASE("wait is idempotent after process completion",
     REQUIRE(first.stdout_output.find("once") != std::string::npos);
 }
 
+#ifndef _WIN32
+TEST_CASE("process reuse clears timeout state from prior run",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+    ProcessOptions timeout_opts;
+    timeout_opts.timeout_ms = 50;
+    REQUIRE(cp.start("sleep", {"10"}, timeout_opts));
+    auto timed_out = cp.wait();
+    REQUIRE(timed_out.timed_out);
+    REQUIRE(timed_out.exit_code == -1);
+
+    ProcessOptions fast_opts;
+    fast_opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf after-timeout"}, fast_opts));
+    auto reused = cp.wait();
+    REQUIRE(reused.exit_code == 0);
+    REQUIRE_FALSE(reused.timed_out);
+    REQUIRE_FALSE(reused.was_cancelled);
+    REQUIRE(reused.stdout_output.find("after-timeout") != std::string::npos);
+    REQUIRE(reused.stderr_output.empty());
+}
+
+TEST_CASE("process reuse clears cancellation state from prior run",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+    REQUIRE(cp.start("sleep", {"30"}));
+    REQUIRE(cp.is_running());
+    cp.cancel();
+    auto cancelled = cp.wait();
+    REQUIRE(cancelled.was_cancelled);
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf after-cancel"}, opts));
+    auto reused = cp.wait();
+    REQUIRE(reused.exit_code == 0);
+    REQUIRE_FALSE(reused.timed_out);
+    REQUIRE_FALSE(reused.was_cancelled);
+    REQUIRE(reused.stdout_output.find("after-cancel") != std::string::npos);
+}
+
+TEST_CASE("start cancels a running child before launching replacement",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+    REQUIRE(cp.start("sleep", {"30"}));
+    REQUIRE(cp.is_running());
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf replacement"}, opts));
+
+    auto replacement = cp.wait();
+    REQUIRE(replacement.exit_code == 0);
+    REQUIRE_FALSE(replacement.timed_out);
+    REQUIRE_FALSE(replacement.was_cancelled);
+    REQUIRE(replacement.stdout_output == "replacement");
+}
+
+TEST_CASE("failed restart after completion does not retain stale child state",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf before-failure"}));
+    auto first = cp.wait();
+    REQUIRE(first.exit_code == 0);
+    REQUIRE(first.stdout_output.find("before-failure") != std::string::npos);
+
+    ProcessOptions opts;
+    opts.timeout_ms = 250;
+    REQUIRE_FALSE(cp.start("pulp-child-process-missing-restart-binary-xyz", {}, opts));
+    REQUIRE_FALSE(cp.is_running());
+    REQUIRE(cp.read_available_output().empty());
+
+    auto failed = cp.wait();
+    REQUIRE(failed.exit_code == -1);
+    REQUIRE(failed.stdout_output.empty());
+    REQUIRE(failed.stderr_output.empty());
+    REQUIRE_FALSE(failed.timed_out);
+    REQUIRE_FALSE(failed.was_cancelled);
+}
+
+TEST_CASE("argv arguments preserve empty strings spaces and punctuation",
+          "[child_process][edge][coverage][phase3]") {
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+
+    auto r = ChildProcess::run(
+        "/usr/bin/printf",
+        {"%s|%s|%s", "", "two words", "semi;quote\"slash\\"},
+        opts);
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+    REQUIRE(r.stdout_output == "|two words|semi;quote\"slash\\");
+    REQUIRE(r.stderr_output.empty());
+}
+
+TEST_CASE("line callback emits empty lines and preserves order",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> lines;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.on_stdout_line = [&](std::string_view line) {
+        lines.emplace_back(line);
+    };
+
+    auto r = ChildProcess::run("/bin/sh", {"-c", "printf 'first\\n\\nthird\\n'"}, opts);
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(lines.size() == 3);
+    REQUIRE(lines[0] == "first");
+    REQUIRE(lines[1].empty());
+    REQUIRE(lines[2] == "third");
+}
+
+TEST_CASE("line callback joins a line split across drain passes",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> lines;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.on_stdout_line = [&](std::string_view line) {
+        lines.emplace_back(line);
+    };
+
+    auto r = ChildProcess::run(
+        "/bin/sh",
+        {"-c", "printf left; sleep 0.05; printf 'right\\n'"},
+        opts);
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(lines.size() == 1);
+    REQUIRE(lines[0] == "leftright");
+    REQUIRE(r.stdout_output.find("leftright") != std::string::npos);
+}
+
+TEST_CASE("line callback honors output cap before later complete lines",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> lines;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.max_output_bytes = 4;
+    opts.on_stdout_line = [&](std::string_view line) {
+        lines.emplace_back(line);
+    };
+
+    auto r = ChildProcess::run("/bin/sh", {"-c", "printf 'ab\\ncd\\n'"}, opts);
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.size() == 4);
+    REQUIRE(r.stdout_output.substr(0, 3) == "ab\n");
+    REQUIRE(lines.size() == 1);
+    REQUIRE(lines[0] == "ab");
+}
+
+TEST_CASE("read_available_output drains stdout without losing stderr result",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start(
+        "/bin/sh",
+        {"-c", "printf early; sleep 0.05; printf 'late-error\\n' >&2"},
+        opts));
+
+    std::string drained;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (drained.find("early") == std::string::npos
+           && std::chrono::steady_clock::now() < deadline) {
+        drained += cp.read_available_output();
+        if (drained.find("early") == std::string::npos) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    REQUIRE(drained == "early");
+
+    auto r = cp.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.empty());
+    REQUIRE(r.stderr_output.find("late-error") != std::string::npos);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+}
+#endif
+
 TEST_CASE("timeout preserves output emitted before termination",
           "[child_process][edge][issue-640]") {
     ProcessOptions opts;

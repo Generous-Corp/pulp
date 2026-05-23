@@ -104,14 +104,22 @@ ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 bool ChildProcess::start(const std::string& command,
                          const std::vector<std::string>& args,
                          const ProcessOptions& options) {
+    if (impl_->started && !impl_->finished) {
+        cancel();
+        wait();
+    }
+
+    impl_->pid = -1;
     impl_->options = options;
     impl_->stdout_full.clear();
     impl_->stderr_full.clear();
     impl_->stdout_lines_buf.clear();
     impl_->stderr_lines_buf.clear();
+    impl_->started = false;
     impl_->finished = false;
     impl_->exit_cached = false;
     impl_->cached_exit_status = -1;
+    impl_->result = {};
 
     if (!impl_->stdout_pipe.create() || !impl_->stderr_pipe.create()) {
         impl_->result.exit_code = -1;
@@ -179,6 +187,7 @@ bool ChildProcess::start(const std::string& command,
     if (rc != 0) {
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
+        impl_->pid = -1;
         impl_->result.exit_code = -1;
         return false;
     }
