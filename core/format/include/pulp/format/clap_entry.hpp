@@ -383,7 +383,17 @@ inline bool gui_get_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t*
 // resize locked to the editor's design aspect. The host's design viewport
 // (set in gui_create) scales content to fit the host window without
 // re-layout — so any (w, h) the DAW lands on still looks correct.
-inline bool gui_can_resize(const clap_plugin_t*) { return true; }
+// Guard matches gui_get_resize_hints: only advertise resize when the bridge
+// is live and the editor has declared a non-zero preferred size. Plugins
+// that have not opened an editor (bridge == nullptr) return false so that
+// host-automation test fixtures that call can_resize before gui_create
+// continue to see the expected false.
+inline bool gui_can_resize(const clap_plugin_t* plugin) {
+    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!p->bridge) return false;
+    const auto& size_hints = p->bridge->size_hints();
+    return size_hints.preferred_width > 0 && size_hints.preferred_height > 0;
+}
 
 inline bool gui_get_resize_hints(const clap_plugin_t* plugin,
                                  clap_gui_resize_hints_t* hints) {
