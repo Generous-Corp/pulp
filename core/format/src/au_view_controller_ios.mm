@@ -19,7 +19,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
-#include "pulp_audio_unit_fwd.h"
+#import "au_audio_unit.h"
 
 #include <algorithm>
 

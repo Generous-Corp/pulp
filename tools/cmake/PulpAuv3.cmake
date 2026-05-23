@@ -276,9 +276,15 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
     set(appex_src "$<TARGET_BUNDLE_DIR:${target}_AUv3>")
     set(embed_sentinel "${CMAKE_BINARY_DIR}/AUv3/${target}_embed.stamp")
 
+    # The sentinel depends on the upstream framework + appex outputs so
+    # the embed step re-fires when either is rebuilt. We also re-run if
+    # the host bundle was relinked (host_target itself is a dep) — that
+    # catches the case where someone wiped Contents/Frameworks by hand
+    # AND relinked the host; for the rarer "wiped by hand without
+    # relink" case, just delete the sentinel and re-build.
     add_custom_command(
         OUTPUT "${embed_sentinel}"
-        DEPENDS ${target}_AUv3Framework ${target}_AUv3
+        DEPENDS ${target}_AUv3Framework ${target}_AUv3 ${host_target}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${host_bundle}/Contents/Frameworks"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${host_bundle}/Contents/PlugIns"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${host_bundle}/Contents/Frameworks/${name}AUv3Framework.framework"
@@ -290,7 +296,6 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         VERBATIM
     )
     add_custom_target(${host_target}_Embed ALL DEPENDS "${embed_sentinel}")
-    add_dependencies(${host_target}_Embed ${host_target})
 endfunction()
 
 # ── iOS monolithic .appex (legacy Phase 3 shape) ──────────────────────────

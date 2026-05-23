@@ -80,16 +80,22 @@ HOST_ENTITLEMENTS="${HOST_ENTITLEMENTS:-}"
 # traverse the relative symlink. Without proper dylib signing here, notary
 # rejects with "binary is not signed with a valid Developer ID certificate"
 # (the dylibs ship with CMake/Skia's linker-only ad-hoc signature).
+#
+# NUL-separated read so paths with spaces don't word-split (e.g. when the
+# build dir lives under "~/Code/My Plugin/build/...").
 echo "🔐 1/5 Signing embedded dylibs..."
-DYLIBS="$(find "$APPEX/Contents" -name '*.dylib' 2>/dev/null; \
-          find "$FRAMEWORK/Versions" -type f \( -name '*.dylib' -o -name '*.framework' \) 2>/dev/null)"
-if [ -z "$DYLIBS" ]; then
-    echo "   (no nested dylibs found)"
-fi
-for dylib in $DYLIBS; do
+found_dylib=0
+while IFS= read -r -d '' dylib; do
+    found_dylib=1
     echo "   signing $dylib"
     codesign --force --sign "$APP_CERT" --timestamp --options runtime "$dylib"
-done
+done < <(
+    find "$APPEX/Contents" "$FRAMEWORK/Versions" \
+         -type f -name '*.dylib' -print0 2>/dev/null
+)
+if [ "$found_dylib" -eq 0 ]; then
+    echo "   (no nested dylibs found)"
+fi
 
 # Step 2: Sign the framework.
 echo "🔐 2/5 Signing framework..."

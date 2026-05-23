@@ -28,11 +28,14 @@
     <dict>
         <key>NSExtensionAttributes</key>
         <dict>
-            <!-- AudioComponentBundle: the bundle ID housing the AUAudioUnit
-                 subclass. The view controller (NSExtensionPrincipalClass)
-                 lives here too; both live in the same .appex. Required by
-                 macOS Tahoe Pluginkit binding map; iPlug2 and Apple's
-                 sample-code AUv3 templates both set this. -->
+            <!-- AudioComponentBundle: bundle ID housing the AUAudioUnit
+                 subclass + the AUViewController principal class. On
+                 macOS (Phase 3.5+) this points at the sibling FRAMEWORK
+                 (<bundle-id>.AUv3Framework) embedded in the container
+                 app's Contents/Frameworks/ — Apple's "Creating custom
+                 audio effects" sample requires the AU code to live in
+                 a framework, not in the .appex itself. Required by
+                 macOS Tahoe Pluginkit binding map. -->
             <key>AudioComponentBundle</key>
             <string>@PLUGIN_BUNDLE_ID@.AUv3Framework</string>
             <key>AudioComponents</key>

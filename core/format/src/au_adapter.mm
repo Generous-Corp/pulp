@@ -704,7 +704,7 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 // when no host-selected configuration applies. Don't put an internal corner
 // resizer here — Logic's AU v3 path is host/container-driven.
 
-- (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations {
+- (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations NS_AVAILABLE(10_13, 11_0) {
     NSMutableIndexSet *result = [NSMutableIndexSet indexSet];
     if (!_bridge.processor || availableViewConfigurations.count == 0) {
         return result;
