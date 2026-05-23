@@ -128,9 +128,11 @@ public:
                 info.num_channels = read_be16(comm);
                 info.num_frames = read_be32(comm + 2);
                 info.bits_per_sample = read_be16(comm + 6);
-                info.sample_rate = static_cast<uint32_t>(extended_to_double(comm + 8));
-                if (info.sample_rate == 0 || info.num_channels == 0)
+                const double sample_rate = extended_to_double(comm + 8);
+                if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
+                    sample_rate > std::numeric_limits<uint32_t>::max() || info.num_channels == 0)
                     return std::nullopt;
+                info.sample_rate = static_cast<uint32_t>(sample_rate);
                 info.duration_seconds = static_cast<double>(info.num_frames) / info.sample_rate;
                 return info;
             }
@@ -210,7 +212,8 @@ public:
             }
         }
 
-        if (num_channels == 0 || num_frames == 0 || sample_rate <= 0.0 ||
+        if (num_channels == 0 || num_frames == 0 || !std::isfinite(sample_rate) ||
+            sample_rate <= 0.0 || sample_rate > std::numeric_limits<uint32_t>::max() ||
             unsupported_aifc_compression || ssnd_data.empty())
             return std::nullopt;
 
