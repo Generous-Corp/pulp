@@ -1133,6 +1133,124 @@ TEST_CASE("HttpStream factories and refetch reset closed state to request result
     REQUIRE(read.error == StreamError::IoError);
 }
 
+TEST_CASE("http helpers reject invalid explicit ports",
+          "[network_stream][http][coverage][phase3]") {
+    const auto zero_port = http_get("http://127.0.0.1:0/path", 1);
+    REQUIRE(zero_port.status_code == 0);
+    REQUIRE(zero_port.body.empty());
+    REQUIRE(zero_port.headers.empty());
+    REQUIRE(zero_port.error == "Invalid URL");
+    REQUIRE_FALSE(zero_port.ok());
+
+    const auto too_large_port = http_post("http://127.0.0.1:65536/post",
+                                          "payload", "text/plain", 1);
+    REQUIRE(too_large_port.status_code == 0);
+    REQUIRE(too_large_port.body.empty());
+    REQUIRE(too_large_port.headers.empty());
+    REQUIRE(too_large_port.error == "Invalid URL");
+    REQUIRE_FALSE(too_large_port.ok());
+
+    const auto overflow_port = http_get("http://127.0.0.1:999999999999999999999/path", 1);
+    REQUIRE(overflow_port.status_code == 0);
+    REQUIRE(overflow_port.body.empty());
+    REQUIRE(overflow_port.headers.empty());
+    REQUIRE(overflow_port.error == "Invalid URL");
+    REQUIRE_FALSE(overflow_port.ok());
+}
+
+TEST_CASE("http helpers parse default ports without explicit port text",
+          "[network_stream][http][coverage][phase3]") {
+    const auto default_http = http_get("http://127.0.0.1", 1);
+    REQUIRE(default_http.body.find('\0') == std::string::npos);
+    REQUIRE(default_http.error.find('\0') == std::string::npos);
+    REQUIRE((default_http.status_code == 0 || default_http.status_code >= 100));
+
+    bool default_https_threw = false;
+    try {
+        (void)http_get("https://127.0.0.1", 1);
+    } catch (const std::exception& e) {
+        default_https_threw = true;
+        REQUIRE(std::string(e.what()) == "'https' scheme is not supported.");
+    }
+    REQUIRE(default_https_threw);
+
+    bool explicit_https_threw = false;
+    try {
+        (void)http_get("https://127.0.0.1:1/secure", 1);
+    } catch (const std::exception& e) {
+        explicit_https_threw = true;
+        REQUIRE(std::string(e.what()) == "'https' scheme is not supported.");
+    }
+    REQUIRE(explicit_https_threw);
+}
+
+TEST_CASE("http_post reports connection failure on refused loopback port",
+          "[network_stream][http][coverage][phase3]") {
+    const auto response = http_post("http://127.0.0.1:1/post",
+                                    R"({"ok":false})",
+                                    "application/json",
+                                    1);
+    REQUIRE(response.status_code == 0);
+    REQUIRE(response.body.empty());
+    REQUIRE(response.headers.empty());
+    REQUIRE(response.error.find("Connection failed:") == 0);
+    REQUIRE_FALSE(response.ok());
+}
+
+TEST_CASE("HttpResponse ok accepts only successful status codes",
+          "[network_stream][http][coverage][phase3]") {
+    HttpResponse response;
+    response.status_code = 199;
+    REQUIRE_FALSE(response.ok());
+    response.status_code = 200;
+    REQUIRE(response.ok());
+    response.status_code = 299;
+    REQUIRE(response.ok());
+    response.status_code = 300;
+    REQUIRE_FALSE(response.ok());
+    response.status_code = 0;
+    REQUIRE_FALSE(response.ok());
+}
+
+TEST_CASE("http_download returns false for non-ok responses and unwritable paths",
+          "[network_stream][http][coverage][phase3]") {
+    REQUIRE_FALSE(http_download("http://127.0.0.1:0/artifact",
+                                (std::filesystem::temp_directory_path() /
+                                 "pulp-invalid-download.bin").string(),
+                                1));
+
+    httplib::Server server;
+    server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 204;
+    });
+    server.Get("/not-found", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 404;
+        response.set_content("missing", "text/plain");
+    });
+    server.Get("/ok", [](const httplib::Request&, httplib::Response& response) {
+        response.set_content("body", "text/plain");
+    });
+
+    const int port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+    HttpServerRunner runner(server);
+    REQUIRE(runner.wait_until_running());
+    REQUIRE(wait_until_http_ready(port));
+
+    const auto not_found_path = std::filesystem::temp_directory_path() /
+        ("pulp-http-404-download-" + std::to_string(port) + ".bin");
+    std::filesystem::remove(not_found_path);
+
+    REQUIRE_FALSE(http_download("http://127.0.0.1:" + std::to_string(port) + "/not-found",
+                                not_found_path.string(),
+                                2));
+    REQUIRE_FALSE(std::filesystem::exists(not_found_path));
+
+    REQUIRE_FALSE(http_download("http://127.0.0.1:" + std::to_string(port) + "/ok",
+                                std::filesystem::temp_directory_path().string(),
+                                2));
+}
+
 TEST_CASE("HttpStream reads successful GET responses in chunks",
           "[network_stream][http][coverage][phase3]") {
     httplib::Server server;
