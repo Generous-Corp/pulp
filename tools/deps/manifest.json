@@ -539,6 +539,7 @@
       "determinism": {
         "skia_branch": "chrome/m149",
         "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
+        "skia_python_smoke_version": "144.0.post2",
         "release_assets": {
           "linux-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-linux-x64-gpu-release.zip",

@@ -3,20 +3,21 @@
 These constants mirror ``tools/deps/manifest.json`` so tests and tooling can
 fail early when the deterministic rendering stack drifts without an explicit
 manifest update.
+
+Skia is pinned at chrome/m149 via the danielraffel/skia-builder fork
+(see manifest.json determinism.skia_builder_fork). The fork tracks
+upstream olilarkin's tag pattern and adds iOS/visionOS/mac-x86_64
+slices upstream does not. ``SKIA_COMMIT`` and ``SKIA_BUILDER_REF`` are
+intentionally omitted on the m149 manifest entry — the fork tracks
+branch HEAD rather than a specific commit, and the test fixtures
+match the structured fields actually present in manifest.json.
 """
 
 from __future__ import annotations
 
-SKIA_BRANCH = "chrome/m144"
-SKIA_COMMIT = "cd0c5f445516ea4e90e02b5f634cbc5ca23b5a44"
-SKIA_BUILDER_REF = "7eecb8abf1f77b2a8bac2e81c38e20708cb79c24"
+SKIA_BRANCH = "chrome/m149"
+SKIA_BUILDER_FORK = "https://github.com/danielraffel/skia-builder"
 SKIA_PYTHON_SMOKE_VERSION = "144.0.post2"
-
-BUNDLED_PINS = {
-    "dawn": "6acf6ef3fe237cd4be7b825389602c93a1f16f2f",
-    "harfbuzz": "08b52ae2e44931eef163dbad71697f911fadc323",
-    "icu": "364118a1d9da24bb5b770ac3d762ac144d6da5a4",
-}
 
 FONT_SHA256 = {
     "external/fonts/Inter-Regular.ttf": (
@@ -29,12 +30,12 @@ FONT_SHA256 = {
 
 RELEASE_ASSET_SHA256 = {
     "linux-x64": (
-        "bde9977efb2c796e22a71b0086e2b15961b0ccc7dc4de8559b369229e922ce34"
+        "53e2bfb5225148311da9bbcb7e65da4479acf774bc3d40b0341530cdc48e97b6"
     ),
     "mac-arm64": (
-        "d495bc4b77fba29e055d9275852401d02998dd5fda0e628050fb72c4c9fce87a"
+        "774f5df966cd7133d05ce217eb3ed7bb226246ac336f764d7409350f175437f7"
     ),
     "mac-universal": (
-        "7990695504abf0e4b5b05d42616812845d9e72d41b243f347f261ab5fe8cb478"
+        "416c5872296bd69f307cd279a3125e6574b86ef9effbb10adc31203781e434aa"
     ),
 }

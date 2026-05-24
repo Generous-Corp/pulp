@@ -39,13 +39,13 @@ def test_visual_dependency_pins_match_manifest() -> None:
     determinism = skia["determinism"]
 
     assert determinism["skia_branch"] == pins.SKIA_BRANCH
-    assert determinism["skia_commit"] == pins.SKIA_COMMIT
-    assert determinism["skia_builder_ref"] == pins.SKIA_BUILDER_REF
+    assert determinism["skia_builder_fork"] == pins.SKIA_BUILDER_FORK
     assert determinism["skia_python_smoke_version"] == pins.SKIA_PYTHON_SMOKE_VERSION
 
-    for name, expected_commit in pins.BUNDLED_PINS.items():
-        assert determinism["bundled_pins"][name]["commit"] == expected_commit
-
+    # m149+ tracks the fork's branch HEAD rather than a specific commit;
+    # determinism is anchored at the release_assets sha256 level instead.
+    # `skia_commit` / `skia_builder_ref` / `bundled_pins` are not required
+    # keys on the m149 entry.
     for platform, expected_sha in pins.RELEASE_ASSET_SHA256.items():
         assert determinism["release_assets"][platform]["sha256"] == expected_sha
 
