@@ -1525,6 +1525,13 @@ private:
     bool had_prev_;
 };
 
+const DrawCommand* first_command(const RecordingCanvas& canvas, DrawCommand::Type type) {
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == type) return &cmd;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 TEST_CASE("CanvasWidget::paint logging path runs when PULP_LOG_CANVAS_PAINT=1",
@@ -1864,4 +1871,222 @@ TEST_CASE("CanvasWidget::paint draws placeholder when image path is empty even w
     }
     REQUIRE_FALSE(saw_draw_image);
     REQUIRE(saw_placeholder_fill);
+}
+
+TEST_CASE("CanvasWidget paint dispatches extended text and stroke state commands",
+          "[canvas_widget][coverage]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 160, 80});
+
+    auto add = [&](CanvasDrawCmd cmd) { cw.add_command(std::move(cmd)); };
+
+    CanvasDrawCmd stroke_text;
+    stroke_text.type = CanvasDrawCmd::Type::stroke_text;
+    stroke_text.text = "Outline";
+    stroke_text.x = 12.0f;
+    stroke_text.y = 24.0f;
+    stroke_text.w = 80.0f;
+    add(stroke_text);
+
+    CanvasDrawCmd font;
+    font.type = CanvasDrawCmd::Type::set_font_full;
+    font.text = "Inter";
+    font.extra = 18.0f;
+    font.x = 700.0f;
+    font.y = 1.0f;
+    font.x2 = 0.25f;
+    add(font);
+
+    for (int align : {1, 2}) {
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::set_text_align;
+        cmd.int_val = align;
+        add(cmd);
+    }
+    for (int cap : {1, 2}) {
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::set_line_cap;
+        cmd.int_val = cap;
+        add(cmd);
+    }
+    for (int join : {1, 2}) {
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::set_line_join;
+        cmd.int_val = join;
+        add(cmd);
+    }
+
+    CanvasDrawCmd miter;
+    miter.type = CanvasDrawCmd::Type::set_miter_limit;
+    miter.extra = 6.5f;
+    add(miter);
+
+    for (int quality : {1, 2}) {
+        CanvasDrawCmd smooth;
+        smooth.type = CanvasDrawCmd::Type::set_image_smoothing;
+        smooth.int_val = quality == 2 ? 1 : 0;
+        smooth.extra = static_cast<float>(quality);
+        add(smooth);
+    }
+
+    CanvasDrawCmd direction;
+    direction.type = CanvasDrawCmd::Type::set_direction;
+    direction.int_val = 2;
+    add(direction);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    const auto* text = first_command(rec, DrawCommand::Type::stroke_text);
+    REQUIRE(text != nullptr);
+    REQUIRE(text->text == "Outline");
+    REQUIRE(text->f[0] == Catch::Approx(12.0f));
+    REQUIRE(text->f[2] == Catch::Approx(80.0f));
+
+    const auto* full = first_command(rec, DrawCommand::Type::set_font_full);
+    REQUIRE(full != nullptr);
+    REQUIRE(full->text == "Inter");
+    REQUIRE(full->f[0] == Catch::Approx(18.0f));
+    REQUIRE(full->f[1] == Catch::Approx(700.0f));
+    REQUIRE(full->f[3] == Catch::Approx(0.25f));
+
+    REQUIRE(rec.count(DrawCommand::Type::set_text_align) == 2);
+    REQUIRE(rec.count(DrawCommand::Type::set_line_cap) == 2);
+    REQUIRE(rec.count(DrawCommand::Type::set_line_join) == 2);
+
+    const auto* miter_cmd = first_command(rec, DrawCommand::Type::set_miter_limit);
+    REQUIRE(miter_cmd != nullptr);
+    REQUIRE(miter_cmd->f[0] == Catch::Approx(6.5f));
+
+    REQUIRE(rec.count(DrawCommand::Type::set_image_smoothing) == 2);
+
+    const auto* dir = first_command(rec, DrawCommand::Type::set_direction);
+    REQUIRE(dir != nullptr);
+    REQUIRE(dir->f[0] == Catch::Approx(static_cast<float>(
+        pulp::canvas::Canvas::TextDirection::inherit)));
+}
+
+TEST_CASE("CanvasWidget paint dispatches gradient pattern and native path commands",
+          "[canvas_widget][coverage]") {
+    ScopedEnv guard("PULP_LOG_CANVAS_PAINT", "1");
+
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 160, 120});
+    const std::vector<pulp::canvas::Color> stops = {
+        pulp::canvas::Color::rgba8(255, 0, 0, 255),
+        pulp::canvas::Color::rgba8(0, 0, 255, 255)};
+    const std::vector<float> positions = {0.0f, 1.0f};
+
+    auto add_gradient = [&](CanvasDrawCmd::Type type) {
+        CanvasDrawCmd cmd;
+        cmd.type = type;
+        cmd.x = 1.0f; cmd.y = 2.0f; cmd.x2 = 3.0f; cmd.y2 = 4.0f;
+        cmd.w = 5.0f; cmd.extra = 6.0f;
+        cmd.gradient_colors = stops;
+        cmd.gradient_positions = positions;
+        cw.add_command(cmd);
+    };
+
+    add_gradient(CanvasDrawCmd::Type::set_fill_gradient_radial);
+    add_gradient(CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles);
+    add_gradient(CanvasDrawCmd::Type::set_fill_gradient_conic);
+    add_gradient(CanvasDrawCmd::Type::set_stroke_gradient_linear);
+    add_gradient(CanvasDrawCmd::Type::set_stroke_gradient_radial);
+    add_gradient(CanvasDrawCmd::Type::set_stroke_gradient_radial_two_circles);
+    add_gradient(CanvasDrawCmd::Type::set_stroke_gradient_conic);
+
+    CanvasDrawCmd clear_stroke;
+    clear_stroke.type = CanvasDrawCmd::Type::clear_stroke_gradient;
+    cw.add_command(clear_stroke);
+
+    for (auto [type, tiles] : {
+             std::pair{CanvasDrawCmd::Type::set_fill_pattern, 0x1},
+             std::pair{CanvasDrawCmd::Type::set_stroke_pattern, 0x2}}) {
+        CanvasDrawCmd pattern;
+        pattern.type = type;
+        pattern.text = "tile.png";
+        pattern.int_val = tiles;
+        cw.add_command(pattern);
+    }
+
+    CanvasDrawCmd arc;
+    arc.type = CanvasDrawCmd::Type::path_arc;
+    arc.x = 8.0f; arc.y = 9.0f; arc.extra = 10.0f;
+    arc.x2 = 0.25f; arc.y2 = 1.5f; arc.int_val = 1;
+    cw.add_command(arc);
+
+    CanvasDrawCmd arc_to;
+    arc_to.type = CanvasDrawCmd::Type::path_arc_to;
+    arc_to.x = 1.0f; arc_to.y = 2.0f; arc_to.x2 = 3.0f; arc_to.y2 = 4.0f;
+    arc_to.extra = 5.0f;
+    cw.add_command(arc_to);
+
+    CanvasDrawCmd ellipse;
+    ellipse.type = CanvasDrawCmd::Type::path_ellipse;
+    ellipse.x = 10.0f; ellipse.y = 11.0f; ellipse.w = 12.0f; ellipse.h = 13.0f;
+    ellipse.extra = 0.5f; ellipse.x2 = 0.0f; ellipse.y2 = 3.14f; ellipse.int_val = 1;
+    cw.add_command(ellipse);
+
+    CanvasDrawCmd round_rect;
+    round_rect.type = CanvasDrawCmd::Type::path_round_rect;
+    round_rect.x = 1.0f; round_rect.y = 2.0f; round_rect.w = 30.0f; round_rect.h = 20.0f;
+    round_rect.gradient_positions = {1, 2, 3, 4, 5, 6, 7, 8};
+    cw.add_command(round_rect);
+
+    CanvasDrawCmd default_round_rect;
+    default_round_rect.type = CanvasDrawCmd::Type::path_round_rect;
+    default_round_rect.x = 3.0f; default_round_rect.y = 4.0f;
+    default_round_rect.w = 5.0f; default_round_rect.h = 6.0f;
+    cw.add_command(default_round_rect);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    REQUIRE(rec.count(DrawCommand::Type::set_stroke_gradient_linear) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::set_stroke_gradient_radial) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::set_stroke_gradient_radial_two_circles) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::set_stroke_gradient_conic) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::clear_stroke_gradient) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::set_fill_pattern) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::set_stroke_pattern) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::arc) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::arc_to) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::ellipse) == 1);
+    REQUIRE(rec.count(DrawCommand::Type::round_rect) == 2);
+
+    const auto* stroke_two = first_command(rec, DrawCommand::Type::set_stroke_gradient_radial_two_circles);
+    REQUIRE(stroke_two != nullptr);
+    REQUIRE(stroke_two->f[5] == Catch::Approx(5.0f));
+    REQUIRE(stroke_two->floats.size() == 10);
+
+    const auto* pattern = first_command(rec, DrawCommand::Type::set_fill_pattern);
+    REQUIRE(pattern != nullptr);
+    REQUIRE(pattern->f[0] == Catch::Approx(1.0f));
+    REQUIRE(pattern->f[1] == Catch::Approx(0.0f));
+
+    const auto* rounded = first_command(rec, DrawCommand::Type::round_rect);
+    REQUIRE(rounded != nullptr);
+    REQUIRE(rounded->f[4] == Catch::Approx(1.0f));
+    REQUIRE(rounded->floats.back() == Catch::Approx(8.0f));
+}
+
+TEST_CASE("CanvasWidget data URI draw_image uses placeholder fallback",
+          "[canvas_widget][coverage]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 80, 60});
+
+    CanvasDrawCmd img;
+    img.type = CanvasDrawCmd::Type::draw_image;
+    img.text = "data:image/png;base64,AA==";
+    img.x = 4.0f; img.y = 5.0f; img.w = 20.0f; img.h = 10.0f;
+    cw.add_command(img);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    REQUIRE(rec.count(DrawCommand::Type::draw_image) == 0);
+    REQUIRE(rec.count(DrawCommand::Type::fill_rect) == 1);
+    const auto* text = first_command(rec, DrawCommand::Type::fill_text);
+    REQUIRE(text != nullptr);
+    REQUIRE(text->text == "data:image/png;base64,AA==");
 }
