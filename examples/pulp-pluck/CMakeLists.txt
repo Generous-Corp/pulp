@@ -26,7 +26,7 @@ if(APPLE AND PULP_HAS_AUSDK)
     add_test(
         NAME auval-PulpPluck
         COMMAND ${CMAKE_COMMAND} -E env
-            bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpPluck.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpPluck.component\" \"$d\" && auval -v aumu PPlk Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; rc=$?; rm -rf \"$d\"; exit $rc"
+            bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpPluck.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpPluck.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aumu PPlk Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc"
     )
     set_tests_properties(auval-PulpPluck PROPERTIES
         LABELS "validation;au"

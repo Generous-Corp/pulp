@@ -29,8 +29,14 @@ if(PULP_HAS_CLAP AND APPLE)
 endif()
 
 if(APPLE AND PULP_HAS_AUSDK)
+    # killall AudioComponentRegistrar before auval forces macOS to rescan the
+    # freshly-copied bundle. Without it, persistent self-hosted runners (and
+    # local dev iteration after a previous install of the same plugin) hit a
+    # stale cache: auval reports "Cannot get Component's Name strings" + error
+    # -50 even though the .component bundle on disk is well-formed. Codified
+    # in the auv2 skill.
     add_test(NAME auval-PulpEffect
-        COMMAND bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpEffect.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpEffect.component\" \"$d\" && auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; rc=$?; rm -rf \"$d\"; exit $rc")
+        COMMAND bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpEffect.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpEffect.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc")
     set_tests_properties(auval-PulpEffect PROPERTIES
         LABELS "validation;au"
         TIMEOUT 30

@@ -109,6 +109,53 @@ auval -v <type> <subtype> <manufacturer>
 
 Document this step in any issue or PR that flips a shipped plug-in's component type.
 
+### `auval` tests on persistent runners — kill the cache before every run
+
+Self-hosted CI runners (and local dev iteration where the same plug-in is
+rebuilt repeatedly) hit the same `AudioComponentRegistrar` cache that
+hosts use. Even with the `.auvaltest.component` rename trick (copy to a
+suffixed path to avoid the canonical `.component` collision), the cache is
+keyed by **bundle ID**, so a stale entry from the previously-installed
+canonical bundle survives. `auval` then reports:
+
+```
+ERROR: Cannot get Component's Name strings
+ERROR: Error from retrieving Component Version: -50
+* * FAIL
+FATAL ERROR: didn't find the component
+```
+
+even though the freshly-copied bundle is well-formed (`nm` shows the AU
+factory symbol, `plutil -p Info.plist` is valid, `codesign -dv` succeeds).
+On a fresh machine the test passes; on a persistent runner it
+intermittently fails.
+
+The fix is one line in the `auval` ctest command — kill the registrar
+between install and validation:
+
+```cmake
+add_test(NAME auval-MyPlugin
+    COMMAND bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/MyPlugin.auvaltest.component\"; \\
+                     rm -rf \"$d\"; \\
+                     cp -R \"${CMAKE_BINARY_DIR}/AU/MyPlugin.component\" \"$d\" && { \\
+                         killall -KILL AudioComponentRegistrar 2>/dev/null || true; \\
+                         sleep 1; \\
+                         auval -v aufx MyFx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; \\
+                     }; \\
+                     rc=\$?; rm -rf \"$d\"; exit \$rc")
+```
+
+`|| true` prevents `set -e` exit when no registrar is running; `sleep 1`
+gives macOS time to relaunch the daemon before `auval` queries it. The
+PulpEffect/PulpGain/PulpTone/PulpPluck examples all use this pattern.
+ChainerSynth doesn't need it because its `aumu Chnr` codes are first-time
+unique on the runner, but any new `aufx`/`aumu`/`aumf` plug-in sharing a
+manufacturer+subtype pattern with an existing test should add the cache
+kill.
+
+Surface symptom matches the host-cache one above; the difference is
+*you can't rely on `.auvaltest.component` alone* to defeat it.
+
 ### `AUEffectBase` vs `AUMIDIEffectBase`
 
 If you see `HandleMIDIEvent` that never fires: check the base class. `AUEffectBase` alone has no `AUMIDIBase` mixin — the SDK only wires `MIDIEvent` dispatch when the class multiply inherits `AUMIDIBase` (directly or via `AUMIDIEffectBase` / `MusicDeviceBase`). When you add a new AU v2 adapter, inheriting from `AUMIDIEffectBase` is cheap even for audio-only effects — the class does nothing extra until the host actually delivers MIDI, and it future-proofs the adapter against a later `accepts_midi` flip.
