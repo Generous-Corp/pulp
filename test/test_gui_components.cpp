@@ -582,6 +582,147 @@ TEST_CASE("ResizableCorner reports drag deltas from mouse down origin",
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 3);
 }
 
+TEST_CASE("Button constructors expose deterministic accessibility and intrinsic sizing",
+          "[gui][buttons][coverage][phase3]") {
+    TextButton default_text;
+    REQUIRE(default_text.label().empty());
+    REQUIRE(default_text.focusable());
+    REQUIRE(default_text.access_role() == View::AccessRole::toggle);
+    REQUIRE(default_text.intrinsic_height() == 36.0f);
+
+    default_text.set_label("Arm");
+    REQUIRE(default_text.label() == "Arm");
+    REQUIRE(default_text.access_label() == "Arm");
+
+    TextButton labeled("Bypass");
+    REQUIRE(labeled.label() == "Bypass");
+    REQUIRE(labeled.access_label() == "Bypass");
+    REQUIRE(labeled.focusable());
+
+    HyperlinkButton empty_link;
+    REQUIRE(empty_link.text().empty());
+    REQUIRE(empty_link.url().empty());
+    REQUIRE(empty_link.focusable());
+
+    HyperlinkButton link("Docs", "https://example.invalid");
+    REQUIRE(link.text() == "Docs");
+    REQUIRE(link.url() == "https://example.invalid");
+    REQUIRE(link.focusable());
+
+    ArrowButton up(ArrowDirection::up);
+    REQUIRE(up.direction() == ArrowDirection::up);
+    REQUIRE(up.focusable());
+
+    ShapeButton shape;
+    REQUIRE(shape.focusable());
+
+    ImageButton image;
+    REQUIRE(image.focusable());
+
+    ResizableCorner corner;
+    REQUIRE_FALSE(corner.focusable());
+    REQUIRE(corner.intrinsic_height() == 16.0f);
+}
+
+TEST_CASE("Buttons tolerate absent callbacks and reset transient states",
+          "[gui][buttons][coverage][phase3]") {
+    TextButton text("Mute");
+    text.set_bounds({0, 0, 96, 32});
+    REQUIRE_NOTHROW(text.on_mouse_down({4, 4}));
+    text.on_mouse_enter();
+    text.on_mouse_leave();
+
+    RecordingCanvas text_canvas;
+    text.paint(text_canvas);
+    REQUIRE(text_canvas.count(DrawCommand::Type::fill_text) == 1);
+
+    ArrowButton arrow(ArrowDirection::left);
+    arrow.set_bounds({0, 0, 18, 30});
+    REQUIRE_NOTHROW(arrow.on_mouse_down({2, 2}));
+    RecordingCanvas arrow_canvas;
+    arrow.paint(arrow_canvas);
+    REQUIRE(arrow_canvas.count(DrawCommand::Type::set_fill_color) == 1);
+
+    ShapeButton shape;
+    shape.set_bounds({0, 0, 20, 12});
+    shape.on_mouse_down({1, 1});
+    shape.on_mouse_leave();
+
+    std::pair<bool, bool> state{true, true};
+    shape.set_shape([&](Canvas&, float width, float height, bool hovered, bool pressed) {
+        state = {hovered || width != 20.0f, pressed || height != 12.0f};
+    });
+    RecordingCanvas shape_canvas;
+    shape.paint(shape_canvas);
+    REQUIRE_FALSE(state.first);
+    REQUIRE_FALSE(state.second);
+
+    ImageButton image;
+    image.set_bounds({0, 0, 24, 24});
+    REQUIRE_NOTHROW(image.on_mouse_down({3, 3}));
+    image.on_mouse_leave();
+    RecordingCanvas image_canvas;
+    image.paint(image_canvas);
+    REQUIRE(image_canvas.count(DrawCommand::Type::draw_image) == 0);
+}
+
+TEST_CASE("HyperlinkButton setter and hover states determine painted affordance",
+          "[gui][buttons][coverage][phase3]") {
+    HyperlinkButton link("Docs", "https://example.invalid/docs");
+    link.set_bounds({0, 0, 140, 28});
+    REQUIRE(link.text() == "Docs");
+    REQUIRE(link.url() == "https://example.invalid/docs");
+
+    link.set_text("Manual");
+    link.set_url("https://example.invalid/manual");
+    REQUIRE(link.text() == "Manual");
+    REQUIRE(link.url() == "https://example.invalid/manual");
+
+    RecordingCanvas normal;
+    link.paint(normal);
+    REQUIRE(normal.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE(normal.count(DrawCommand::Type::stroke_line) == 0);
+    REQUIRE(normal.commands().back().text == "Manual");
+
+    link.on_mouse_enter();
+    RecordingCanvas hovered;
+    link.paint(hovered);
+    REQUIRE(hovered.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE(hovered.count(DrawCommand::Type::stroke_line) == 1);
+
+    REQUIRE_NOTHROW(link.on_mouse_down({8, 8}));
+    link.on_mouse_leave();
+    RecordingCanvas left;
+    link.paint(left);
+    REQUIRE(left.count(DrawCommand::Type::stroke_line) == 0);
+}
+
+TEST_CASE("ResizableCorner drag without callback is safe and later reports new origin",
+          "[gui][buttons][coverage][phase3]") {
+    ResizableCorner corner;
+    corner.set_bounds({0, 0, 20, 20});
+
+    REQUIRE_NOTHROW(corner.on_mouse_drag({9, 11}));
+    corner.on_mouse_down({7, 9});
+    REQUIRE_NOTHROW(corner.on_mouse_drag({12, 1}));
+
+    std::vector<std::pair<float, float>> deltas;
+    corner.on_resize = [&](float dx, float dy) {
+        deltas.push_back({dx, dy});
+    };
+
+    corner.on_mouse_down({10, 10});
+    corner.on_mouse_drag({6, 14});
+    corner.on_mouse_drag({13, 3});
+    REQUIRE(deltas == std::vector<std::pair<float, float>>{{-4.0f, 4.0f}, {3.0f, -7.0f}});
+
+    RecordingCanvas canvas;
+    corner.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::set_stroke_color) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::set_line_width) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 3);
+}
+
 // ── ConcertinaPanel ─────────────────────────────────────────────────────
 
 TEST_CASE("ConcertinaPanel add sections", "[gui][concertina]") {
