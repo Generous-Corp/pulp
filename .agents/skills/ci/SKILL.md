@@ -1120,9 +1120,13 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m144` Linux release asset, verifies its
-SHA-256, installs the bundled Pulp fonts into fontconfig, and installs
-`skia-python==144.0.post2` for the B.0 SkPicture byte-identity smoke. The
+downloads the pinned Skia `chrome/m149` Linux release asset (from the
+`danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
+upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
+bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`
+for the B.0 SkPicture byte-identity smoke. The skia-python pin intentionally
+trails the C++ surface because the Python bindings ship one milestone behind
+on PyPI; the C++ raster harness is the source of truth for goldens. The
 workflow runs that Linux container and also runs the same pytest smoke on
 macOS arm64 so the future canonical raster lane has a platform signal. The
 `macOS local smoke` job resolves `runs-on` from

@@ -122,6 +122,14 @@ Pulp fetches, vendors, or redistributes it independently. Otherwise the audit
 will require standalone NOTICE/licensing rows for something whose license and
 distribution boundary are already covered by the parent prebuilt.
 
+The Skia toolchain itself is pinned at `chrome/m149` via the
+`danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
+`determinism.skia_builder_fork`). The fork tracks upstream
+`olilarkin/skia-builder`'s tag pattern and additionally publishes iOS
+device, iOS simulator, visionOS device, visionOS simulator, mac-x86_64,
+and `Skia.xcframework` slices upstream does not. While upstream stays on
+m144, this fork is the active dependency; revisit when upstream catches up.
+
 ## Bundled Fonts (and similar opt-in compile-time assets)
 
 Bundled fonts under `external/fonts/*.ttf` (`Inter`, `JetBrains Mono`,
