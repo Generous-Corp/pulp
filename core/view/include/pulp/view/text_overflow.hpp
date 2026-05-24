@@ -26,7 +26,10 @@ inline std::size_t utf8_advance(std::string_view text, std::size_t count) {
     while (count > 0 && i < text.size()) {
         unsigned char c = static_cast<unsigned char>(text[i]);
         if (c < 0x80)        i += 1;
-        else if (c < 0xC0)   i += 1;        // stray continuation byte → skip
+        else if (c < 0xC0) {
+            i += 1;  // stray continuation byte -> skip
+            continue;
+        }
         else if (c < 0xE0)   i += 2;
         else if (c < 0xF0)   i += 3;
         else                 i += 4;
@@ -43,7 +46,10 @@ inline std::size_t utf8_codepoint_count(std::string_view text) {
     for (std::size_t i = 0; i < text.size();) {
         unsigned char c = static_cast<unsigned char>(text[i]);
         if (c < 0x80)        i += 1;
-        else if (c < 0xC0)   i += 1;
+        else if (c < 0xC0) {
+            i += 1;
+            continue;
+        }
         else if (c < 0xE0)   i += 2;
         else if (c < 0xF0)   i += 3;
         else                 i += 4;

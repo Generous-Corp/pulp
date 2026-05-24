@@ -93,3 +93,93 @@ TEST_CASE("utf8 helpers count and advance over leading bytes correctly",
     REQUIRE(utf8_advance("\xc3\xb1o", 1) == 2);  // skip past 2-byte ñ
     REQUIRE(utf8_advance("hello", 99) == 5);     // clamps to size
 }
+
+TEST_CASE("utf8 helpers handle continuation three-byte and four-byte paths",
+          "[view][text-overflow][coverage][phase3]") {
+    const std::string stray_continuation("\x80" "abc", 4);
+    REQUIRE(utf8_codepoint_count(stray_continuation) == 3);
+    REQUIRE(utf8_advance(stray_continuation, 1) == 2);
+    REQUIRE(utf8_advance(stray_continuation, 2) == 3);
+
+    const std::string euro_then_a("\xe2\x82\xac" "a", 4);
+    REQUIRE(utf8_codepoint_count(euro_then_a) == 2);
+    REQUIRE(utf8_advance(euro_then_a, 1) == 3);
+    REQUIRE(utf8_advance(euro_then_a, 2) == 4);
+
+    const std::string emoji_then_z("\xf0\x9f\x98\x80" "z", 5);
+    REQUIRE(utf8_codepoint_count(emoji_then_z) == 2);
+    REQUIRE(utf8_advance(emoji_then_z, 1) == 4);
+    REQUIRE(utf8_advance(emoji_then_z, 2) == 5);
+}
+
+TEST_CASE("utf8 helpers clamp truncated multibyte sequences",
+          "[view][text-overflow][coverage][phase3]") {
+    const std::string truncated_two_byte("\xc3", 1);
+    REQUIRE(utf8_codepoint_count(truncated_two_byte) == 1);
+    REQUIRE(utf8_advance(truncated_two_byte, 1) == 1);
+    REQUIRE(utf8_advance(truncated_two_byte, 9) == 1);
+
+    const std::string truncated_three_byte("\xe2\x82", 2);
+    REQUIRE(utf8_codepoint_count(truncated_three_byte) == 1);
+    REQUIRE(utf8_advance(truncated_three_byte, 1) == 2);
+
+    const std::string truncated_four_byte("\xf0\x9f\x98", 3);
+    REQUIRE(utf8_codepoint_count(truncated_four_byte) == 1);
+    REQUIRE(utf8_advance(truncated_four_byte, 1) == 3);
+}
+
+TEST_CASE("truncate_to_width respects exact text and ellipsis boundaries",
+          "[view][text-overflow][coverage][phase3]") {
+    RecordingCanvas canvas;
+
+    REQUIRE(truncate_to_width(canvas, "abc", 21.0f) == "abc");
+    REQUIRE(truncate_to_width(canvas, "abc", 20.0f) == kEllipsis);
+    REQUIRE(truncate_to_width(canvas, "abc", 21.0f).size() == 3);
+
+    const auto one_char = truncate_to_width(canvas, "abcde", 28.0f);
+    REQUIRE(one_char == std::string("a") + kEllipsis);
+    REQUIRE(canvas.measure_text(one_char) == 28.0f);
+
+    const auto two_chars = truncate_to_width(canvas, "abcdef", 35.0f);
+    REQUIRE(two_chars == std::string("ab") + kEllipsis);
+    REQUIRE(canvas.measure_text(two_chars) == 35.0f);
+}
+
+TEST_CASE("truncate_to_width handles empty text in collapsed boxes",
+          "[view][text-overflow][coverage][phase3]") {
+    RecordingCanvas canvas;
+
+    REQUIRE(truncate_to_width(canvas, "", 0.0f) == kEllipsis);
+    REQUIRE(truncate_to_width(canvas, "", -1.0f) == kEllipsis);
+    REQUIRE(truncate_to_width(canvas, "", 1.0f) == "");
+    REQUIRE(truncate_to_width(canvas, "", 21.0f) == "");
+}
+
+TEST_CASE("truncate_to_width preserves full multibyte prefixes",
+          "[view][text-overflow][coverage][phase3]") {
+    RecordingCanvas canvas;
+
+    const std::string input = "\xe2\x82\xac" "\xf0\x9f\x98\x80" "abcd";
+    const auto euro_only = truncate_to_width(canvas, input, 42.0f);
+    REQUIRE(euro_only == std::string("\xe2\x82\xac") + kEllipsis);
+    REQUIRE(canvas.measure_text(euro_only) == 42.0f);
+
+    const auto euro_and_emoji = truncate_to_width(canvas, input, 70.0f);
+    REQUIRE(euro_and_emoji == std::string("\xe2\x82\xac" "\xf0\x9f\x98\x80") + kEllipsis);
+    REQUIRE(canvas.measure_text(euro_and_emoji) == 70.0f);
+
+    REQUIRE(utf8_codepoint_count(input) == 6);
+    REQUIRE(utf8_advance(input, 2) == 7);
+}
+
+TEST_CASE("truncate_to_width keeps exact multibyte fits unmodified",
+          "[view][text-overflow][coverage][phase3]") {
+    RecordingCanvas canvas;
+
+    const std::string text = "\xe2\x82\xac" "\xf0\x9f\x98\x80";
+    REQUIRE(canvas.measure_text(text) == 49.0f);
+    REQUIRE(truncate_to_width(canvas, text, 49.0f) == text);
+    REQUIRE(truncate_to_width(canvas, text, 48.0f) == std::string("\xe2\x82\xac") + kEllipsis);
+    REQUIRE(utf8_codepoint_count(text) == 2);
+    REQUIRE(utf8_advance(text, 99) == text.size());
+}
