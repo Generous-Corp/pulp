@@ -457,6 +457,54 @@ TEST_CASE("Matrix4 scale and rotations transform vectors",
     REQUIRE_THAT(around_z.z, WithinAbs(0.0f, 1e-5));
 }
 
+TEST_CASE("Matrix affine helpers compose transforms and preserve row-major layout",
+          "[dsp][matrix][coverage][phase3]") {
+    auto translate = translation_matrix(2.0f, -3.0f, 4.0f);
+    auto scale = scale_matrix(3.0f, 4.0f, 5.0f);
+    auto composed = translate * scale;
+
+    REQUIRE_THAT(composed(0, 0), WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(composed(1, 1), WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(composed(2, 2), WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(composed(0, 3), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(composed(1, 3), WithinAbs(-3.0f, 1e-6f));
+    REQUIRE_THAT(composed(2, 3), WithinAbs(4.0f, 1e-6f));
+
+    auto transformed = transform(composed, Vec3{1.0f, 2.0f, -1.0f});
+    REQUIRE_THAT(transformed.x, WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(transformed.y, WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(transformed.z, WithinAbs(-1.0f, 1e-6f));
+
+    auto transposed = composed.transposed();
+    REQUIRE_THAT(transposed(3, 0), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(transposed(3, 1), WithinAbs(-3.0f, 1e-6f));
+    REQUIRE_THAT(transposed(3, 2), WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(transposed(0, 3), WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("Matrix arithmetic covers cancellation, determinant signs, and inequality",
+          "[dsp][matrix][coverage][phase3]") {
+    Matrix2 a;
+    a(0, 0) = 2.0f;  a(0, 1) = -3.0f;
+    a(1, 0) = 4.0f;  a(1, 1) = 5.0f;
+
+    Matrix2 b;
+    b(0, 0) = -2.0f; b(0, 1) = 3.0f;
+    b(1, 0) = -4.0f; b(1, 1) = -5.0f;
+
+    auto cancelled = a + b;
+    REQUIRE(cancelled == Matrix2::zero());
+    REQUIRE_FALSE(a == b);
+    REQUIRE_THAT(determinant(a), WithinAbs(22.0f, 1e-6f));
+    REQUIRE_THAT(determinant(b), WithinAbs(22.0f, 1e-6f));
+
+    auto product = a * b;
+    REQUIRE_THAT(product(0, 0), WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(product(0, 1), WithinAbs(21.0f, 1e-6f));
+    REQUIRE_THAT(product(1, 0), WithinAbs(-28.0f, 1e-6f));
+    REQUIRE_THAT(product(1, 1), WithinAbs(-13.0f, 1e-6f));
+}
+
 // ── SpecialFunctions ────────────────────────────────────────────────────
 
 TEST_CASE("sinc function", "[dsp][special]") {

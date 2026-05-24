@@ -1208,6 +1208,60 @@ TEST_CASE("Signal target covers window families and bounded application",
     REQUIRE_THAT(buffer[2], WithinAbs(4.0f, 1e-6f));
 }
 
+TEST_CASE("WindowFunction edge sizes and symmetry stay deterministic",
+          "[signal][window][coverage][phase3]") {
+    REQUIRE(WindowFunction::generate(-3, WindowFunction::Type::blackman).empty());
+
+    for (auto type : {WindowFunction::Type::hann,
+                      WindowFunction::Type::hamming,
+                      WindowFunction::Type::blackman,
+                      WindowFunction::Type::flat_top,
+                      WindowFunction::Type::kaiser}) {
+        auto one = WindowFunction::generate(1, type, 5.0f);
+        REQUIRE(one.size() == 1);
+        REQUIRE_THAT(one[0], WithinAbs(1.0f, 1e-6f));
+    }
+
+    const auto hann = WindowFunction::generate(8, WindowFunction::Type::hann);
+    REQUIRE_THAT(hann.front(), WithinAbs(hann.back(), 1e-6f));
+    REQUIRE_THAT(hann[1], WithinAbs(hann[6], 1e-6f));
+    REQUIRE(hann[3] > hann[2]);
+
+    const auto blackman = WindowFunction::generate(8, WindowFunction::Type::blackman);
+    REQUIRE_THAT(blackman[0], WithinAbs(blackman[7], 1e-6f));
+    REQUIRE_THAT(blackman[2], WithinAbs(blackman[5], 1e-6f));
+    REQUIRE(blackman[3] > blackman[1]);
+
+    const auto flat_top = WindowFunction::generate(9, WindowFunction::Type::flat_top);
+    REQUIRE(flat_top[4] > 0.99f);
+    REQUIRE(flat_top[4] > flat_top[3]);
+}
+
+TEST_CASE("WindowFunction applies only provided coefficients and honors Kaiser alpha",
+          "[signal][window][coverage][phase3]") {
+    float partial[] = {2.0f, 4.0f, 8.0f, 16.0f};
+    WindowFunction::apply(partial, {0.25f, 0.5f});
+    REQUIRE_THAT(partial[0], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(partial[1], WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(partial[2], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(partial[3], WithinAbs(16.0f, 1e-6f));
+
+    float unchanged[] = {3.0f, 6.0f};
+    WindowFunction::apply(unchanged, {});
+    REQUIRE_THAT(unchanged[0], WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(unchanged[1], WithinAbs(6.0f, 1e-6f));
+
+    const auto default_alpha = WindowFunction::generate(7, WindowFunction::Type::kaiser, 0.0f);
+    const auto negative_alpha = WindowFunction::generate(7, WindowFunction::Type::kaiser, -2.0f);
+    const auto high_alpha = WindowFunction::generate(7, WindowFunction::Type::kaiser, 9.0f);
+
+    REQUIRE_THAT(default_alpha.front(), WithinAbs(negative_alpha.front(), 1e-6f));
+    REQUIRE_THAT(default_alpha[3], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(high_alpha[3], WithinAbs(1.0f, 1e-6f));
+    REQUIRE(high_alpha.front() < default_alpha.front());
+    REQUIRE_THAT(high_alpha[1], WithinAbs(high_alpha[5], 1e-6f));
+}
+
 TEST_CASE("Signal target covers spectrogram ramps axes and scrolling columns",
           "[signal][spectrogram][coverage]") {
     ColorMapper inferno(ColorRamp::inferno);
