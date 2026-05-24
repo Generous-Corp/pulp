@@ -146,20 +146,20 @@ TEST_CASE("truncate_to_width ignores stray continuation bytes when choosing pref
     const std::string leading = std::string("\x80", 1) + "abcdef";
     const std::string doubled = std::string("\x80\x81", 2) + "abcdef";
 
-    auto leading_out = truncate_to_width(canvas, leading, 49.0f);
+    auto leading_out = truncate_to_width(canvas, leading, 48.0f);
     REQUIRE(leading_out.compare(leading_out.size() - 3, 3, kEllipsis) == 0);
     REQUIRE(leading_out.find('\x80') != std::string::npos);
-    REQUIRE(leading_out.find("abc") != std::string::npos);
-    REQUIRE(leading_out.find("def") == std::string::npos);
-    REQUIRE(canvas.measure_text(leading_out) <= 49.0f);
+    REQUIRE(leading_out.find("ab") != std::string::npos);
+    REQUIRE(leading_out.find("cd") == std::string::npos);
+    REQUIRE(canvas.measure_text(leading_out) <= 48.0f);
 
-    auto doubled_out = truncate_to_width(canvas, doubled, 56.0f);
+    auto doubled_out = truncate_to_width(canvas, doubled, 55.0f);
     REQUIRE(doubled_out.compare(doubled_out.size() - 3, 3, kEllipsis) == 0);
     REQUIRE(doubled_out.find('\x80') != std::string::npos);
     REQUIRE(doubled_out.find('\x81') != std::string::npos);
-    REQUIRE(doubled_out.find("abc") != std::string::npos);
-    REQUIRE(doubled_out.find("def") == std::string::npos);
-    REQUIRE(canvas.measure_text(doubled_out) <= 56.0f);
+    REQUIRE(doubled_out.find("ab") != std::string::npos);
+    REQUIRE(doubled_out.find("cd") == std::string::npos);
+    REQUIRE(canvas.measure_text(doubled_out) <= 55.0f);
 }
 
 TEST_CASE("utf8 helpers handle continuation three-byte and four-byte paths",
