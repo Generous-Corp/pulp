@@ -41,6 +41,17 @@ if [ ! -d "$SKIA_BUILDER_DIR" ]; then
     git clone "$SKIA_BUILDER_URL" "$SKIA_BUILDER_DIR"
 fi
 
+# Re-point the existing clone's `origin` to $SKIA_BUILDER_URL if it drifted
+# (e.g. an older checkout from olilarkin/skia-builder + a newer SKIA_BUILDER_URL
+# override). Without this, subsequent `git fetch origin <ref>` calls would
+# silently pull from the stale remote and either fail to resolve the requested
+# branch or build from the wrong fork. Codex review on #2785 caught this.
+current_origin=$(git -C "$SKIA_BUILDER_DIR" remote get-url origin 2>/dev/null || echo "")
+if [ "$current_origin" != "$SKIA_BUILDER_URL" ]; then
+    echo "Updating origin: $current_origin → $SKIA_BUILDER_URL"
+    git -C "$SKIA_BUILDER_DIR" remote set-url origin "$SKIA_BUILDER_URL"
+fi
+
 if [ -n "$SKIA_BUILDER_REF" ]; then
     echo "Syncing skia-builder to $SKIA_BUILDER_REF..."
     git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BUILDER_REF"
