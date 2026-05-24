@@ -213,6 +213,86 @@ TEST_CASE("midi file helpers report missing and unwritable paths",
     REQUIRE_FALSE(write_midi_file(tmp.path.string(), data));
 }
 
+TEST_CASE("read_midi_file handles empty files and rejects malformed SMF headers",
+          "[midi][file][issue-645]") {
+    TempDir tmp;
+
+    const auto empty = tmp.path / "empty.mid";
+    write_bytes(empty, {});
+    auto empty_read = read_midi_file(empty.string());
+    REQUIRE(empty_read.has_value());
+    REQUIRE(empty_read->ticks_per_quarter == 60);
+    REQUIRE(empty_read->total_events() == 0);
+    REQUIRE(empty_read->duration_seconds() == Approx(0.0).margin(1e-9));
+
+    const auto bad_magic = tmp.path / "bad-magic.mid";
+    write_bytes(bad_magic, {
+        'N', 'O', 'P', 'E', 0x00, 0x00, 0x00, 0x06,
+        0x00, 0x00, 0x00, 0x01, 0x01, 0xE0,
+        'M', 'T', 'r', 'k', 0x00, 0x00, 0x00, 0x04,
+        0x00, 0xFF, 0x2F, 0x00,
+    });
+    REQUIRE_FALSE(read_midi_file(bad_magic.string()).has_value());
+
+    const auto short_header = tmp.path / "short-header.mid";
+    write_bytes(short_header, {
+        'M', 'T', 'h', 'd', 0x00, 0x00, 0x00,
+    });
+    REQUIRE_FALSE(read_midi_file(short_header.string()).has_value());
+
+    const auto missing_track = tmp.path / "missing-track.mid";
+    write_bytes(missing_track, {
+        'M', 'T', 'h', 'd', 0x00, 0x00, 0x00, 0x06,
+        0x00, 0x00, 0x00, 0x01, 0x01, 0xE0,
+    });
+    REQUIRE_FALSE(read_midi_file(missing_track.string()).has_value());
+}
+
+TEST_CASE("read_midi_file preserves short message channels and payloads",
+          "[midi][file][issue-645]") {
+    TempDir tmp;
+    const auto path = tmp.path / "short-message-payloads.mid";
+
+    write_bytes(path, {
+        'M', 'T', 'h', 'd', 0x00, 0x00, 0x00, 0x06,
+        0x00, 0x00, 0x00, 0x01, 0x01, 0xE0,
+        'M', 'T', 'r', 'k', 0x00, 0x00, 0x00, 0x13,
+        0x00, 0xC3, 0x2A,
+        0x00, 0xD4, 0x55,
+        0x00, 0xB5, 0x4A, 0x40,
+        0x81, 0x70, 0xE6, 0x00, 0x40,
+        0x00, 0xFF, 0x2F, 0x00,
+    });
+
+    auto read = read_midi_file(path.string());
+    REQUIRE(read.has_value());
+    REQUIRE(read->ticks_per_quarter == 480);
+    REQUIRE(read->tracks.size() == 1);
+    REQUIRE(read->total_events() == 4);
+    REQUIRE(read->duration_seconds() == Approx(0.25).margin(1e-6));
+
+    const auto& events = read->tracks.front().events;
+    REQUIRE(events[0].time_seconds == Approx(0.0).margin(1e-9));
+    REQUIRE(events[0].event.is_program_change());
+    REQUIRE(events[0].event.channel() == 3);
+    REQUIRE(events[0].event.size() == 2);
+    REQUIRE(events[0].event.data()[1] == 42);
+    REQUIRE(events[1].time_seconds == Approx(0.0).margin(1e-9));
+    REQUIRE(events[1].event.channel() == 4);
+    REQUIRE(events[1].event.size() == 2);
+    REQUIRE(events[1].event.data()[0] == 0xD4);
+    REQUIRE(events[1].event.data()[1] == 0x55);
+    REQUIRE(events[2].event.is_cc());
+    REQUIRE(events[2].event.channel() == 5);
+    REQUIRE(events[2].event.cc_number() == 74);
+    REQUIRE(events[2].event.cc_value() == 64);
+    REQUIRE(events[3].time_seconds == Approx(0.25).margin(1e-6));
+    REQUIRE(events[3].event.is_pitch_bend());
+    REQUIRE(events[3].event.channel() == 6);
+    REQUIRE(events[3].event.data()[1] == 0x00);
+    REQUIRE(events[3].event.data()[2] == 0x40);
+}
+
 TEST_CASE("write_midi_file emits a readable SMF header",
           "[midi][file][issue-645]") {
     TempDir tmp;
@@ -244,6 +324,52 @@ TEST_CASE("write_midi_file emits a readable SMF header",
     REQUIRE(read->ticks_per_quarter == 960);
     REQUIRE(read->total_events() == 2);
     REQUIRE(read->duration_seconds() == Approx(0.5).margin(0.05));
+}
+
+TEST_CASE("write_midi_file preserves mixed short messages across tracks",
+          "[midi][file][issue-645]") {
+    TempDir tmp;
+    const auto path = tmp.path / "mixed-short-messages.mid";
+
+    MidiFileData data;
+    data.ticks_per_quarter = 240;
+
+    MidiTrack controls;
+    controls.events.push_back({0.00, MidiEvent::cc(9, 1, 127)});
+    controls.events.push_back({0.25, MidiEvent::program_change(9, 7)});
+
+    MidiTrack notes;
+    notes.events.push_back({0.50, MidiEvent::note_on(10, 36, 100)});
+    notes.events.push_back({0.75, MidiEvent::pitch_bend(10, 8192)});
+    notes.events.push_back({1.00, MidiEvent::note_off(10, 36, 12)});
+
+    data.tracks.push_back(std::move(controls));
+    data.tracks.push_back(std::move(notes));
+
+    REQUIRE(data.total_events() == 5);
+    REQUIRE(write_midi_file(path.string(), data));
+
+    auto read = read_midi_file(path.string());
+    REQUIRE(read.has_value());
+    REQUIRE(read->ticks_per_quarter == 240);
+    REQUIRE(read->total_events() == 5);
+
+    const auto& events = read->tracks.front().events;
+    REQUIRE(events[0].event.is_cc());
+    REQUIRE(events[0].event.cc_number() == 1);
+    REQUIRE(events[0].event.cc_value() == 127);
+    REQUIRE(events[1].event.is_program_change());
+    REQUIRE(events[1].event.data()[1] == 7);
+    REQUIRE(events[2].event.is_note_on());
+    REQUIRE(events[2].event.note() == 36);
+    REQUIRE(events[2].event.velocity() == 100);
+    REQUIRE(events[3].event.is_pitch_bend());
+    REQUIRE(events[3].event.channel() == 10);
+    REQUIRE(events[3].event.data()[1] == 0x00);
+    REQUIRE(events[3].event.data()[2] == 0x40);
+    REQUIRE(events[4].event.is_note_off());
+    REQUIRE(events[4].event.note() == 36);
+    REQUIRE(events[4].event.velocity() == 12);
 }
 
 TEST_CASE("write_midi_file rejects missing parent directories",
