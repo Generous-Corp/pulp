@@ -821,6 +821,58 @@ TEST_CASE("WaveShaper handles zero and negative length buffers",
     REQUIRE_THAT(samples[2], WithinAbs(0.5f, 1e-6f));
 }
 
+TEST_CASE("WaveShaper covers soft clip and sine fold curves",
+          "[signal][waveshaper][coverage]") {
+    WaveShaper ws;
+    ws.set_curve(WaveShaper::Curve::soft_clip);
+    ws.set_drive(2.0f);
+
+    REQUIRE_THAT(ws.process(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(ws.process(0.5f), WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(ws.process(-0.5f), WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(ws.process(2.0f), WithinAbs(0.8f, 1e-6f));
+
+    ws.set_curve(WaveShaper::Curve::sine_fold);
+    ws.set_drive(1.0f);
+
+    REQUIRE_THAT(ws.process(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(ws.process(0.5f), WithinAbs(std::sin(0.5f * 1.5707963f), 1e-6f));
+    REQUIRE_THAT(ws.process(1.0f), WithinAbs(1.0f, 1e-5f));
+    REQUIRE_THAT(ws.process(-1.0f), WithinAbs(-1.0f, 1e-5f));
+}
+
+TEST_CASE("WaveShaper fold reflects repeated positive and negative overshoot",
+          "[signal][waveshaper][coverage]") {
+    WaveShaper ws;
+    ws.set_curve(WaveShaper::Curve::fold);
+    ws.set_drive(1.0f);
+
+    REQUIRE_THAT(ws.process(1.25f), WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(ws.process(1.75f), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(ws.process(2.25f), WithinAbs(-0.25f, 1e-6f));
+    REQUIRE_THAT(ws.process(3.25f), WithinAbs(-0.75f, 1e-6f));
+    REQUIRE_THAT(ws.process(-1.25f), WithinAbs(-0.75f, 1e-6f));
+    REQUIRE_THAT(ws.process(-1.75f), WithinAbs(-0.25f, 1e-6f));
+    REQUIRE_THAT(ws.process(-2.25f), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(ws.process(-3.25f), WithinAbs(0.75f, 1e-6f));
+}
+
+TEST_CASE("WaveShaper buffer processing applies the selected curve in place",
+          "[signal][waveshaper][coverage]") {
+    WaveShaper ws;
+    ws.set_curve(WaveShaper::Curve::hard_clip);
+    ws.set_drive(2.0f);
+
+    float samples[] = {-0.75f, -0.25f, 0.0f, 0.25f, 0.75f};
+    ws.process(samples, 5);
+
+    REQUIRE_THAT(samples[0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(samples[3], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(samples[4], WithinAbs(1.0f, 1e-6f));
+}
+
 // ── NoiseGate ────────────────────────────────────────────────────────────────
 
 TEST_CASE("NoiseGate attenuates quiet signals", "[signal][gate]") {
@@ -1334,4 +1386,49 @@ TEST_CASE("Signal target covers lookup table clamping and interpolation",
     REQUIRE_THAT(table.process(0.5f), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(table[-2], WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(table[99], WithinAbs(2.0f, 1e-6f));
+}
+
+TEST_CASE("Signal target covers lookup table construction edge cases",
+          "[signal][lookup][coverage]") {
+    LookupTable empty(0, -1.0f, 1.0f, [](float x) { return x * x; });
+    REQUIRE(empty.empty());
+    REQUIRE(empty.size() == 0);
+    REQUIRE_THAT(empty.process(0.75f), WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(empty[0], WithinAbs(0.0f, 1e-6f));
+
+    LookupTable singleton(1, 2.0f, 8.0f, [](float x) { return x + 3.0f; });
+    REQUIRE_FALSE(singleton.empty());
+    REQUIRE(singleton.size() == 1);
+    REQUIRE_THAT(singleton.process(-100.0f), WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(singleton.process(100.0f), WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(singleton[-1], WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(singleton[2], WithinAbs(5.0f, 1e-6f));
+
+    LookupTable flat_range(3, 4.0f, 4.0f, [](float x) { return x * 0.25f; });
+    REQUIRE(flat_range.size() == 3);
+    REQUIRE_THAT(flat_range.process(4.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(flat_range.process(10.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(flat_range[1], WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("Signal target covers lookup table reversed ranges and buffers",
+          "[signal][lookup][coverage]") {
+    LookupTable reversed(5, 2.0f, -2.0f, [](float x) { return x * x; });
+
+    REQUIRE(reversed.size() == 5);
+    REQUIRE_THAT(reversed.process(-3.0f), WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(reversed.process(-1.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(reversed.process(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(reversed.process(1.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(reversed.process(3.0f), WithinAbs(4.0f, 1e-6f));
+
+    float samples[] = {-3.0f, -0.5f, 0.5f, 3.0f};
+    reversed.process(samples, 4);
+    REQUIRE_THAT(samples[0], WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(samples[3], WithinAbs(4.0f, 1e-6f));
+
+    reversed.process(samples, 0);
+    REQUIRE_THAT(samples[0], WithinAbs(4.0f, 1e-6f));
 }
