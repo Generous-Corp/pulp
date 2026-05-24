@@ -2030,3 +2030,249 @@ TEST_CASE("AIFF reader rejects invalid COMM metadata and unsupported PCM depths"
         std::filesystem::remove(tmp_path);
     }
 }
+
+TEST_CASE("AIFF reader rejects malformed container headers and missing chunks",
+          "[audio][file][registry][aiff][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    SECTION("missing file") {
+        auto missing = unique_temp_audio_path("_aiff_missing.aiff");
+        std::filesystem::remove(missing);
+
+        REQUIRE_FALSE(registry.read_info(missing.string()).has_value());
+        REQUIRE_FALSE(registry.read(missing.string()).has_value());
+    }
+
+    SECTION("short header") {
+        auto tmp_path = unique_temp_audio_path("_aiff_short_header.aiff");
+        {
+            std::ofstream file(tmp_path, std::ios::binary);
+            file.write("FORM", 4);
+        }
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("non-FORM header") {
+        auto tmp_path = unique_temp_audio_path("_aiff_bad_form.aiff");
+        {
+            const unsigned char bytes[] = {
+                'F', 'A', 'K', 'E', 0, 0, 0, 4, 'A', 'I', 'F', 'F',
+            };
+            std::ofstream file(tmp_path, std::ios::binary);
+            file.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+        }
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("unsupported FORM type") {
+        auto tmp_path = unique_temp_audio_path("_aiff_bad_type.aiff");
+        write_aiff_fixture(tmp_path, "8SVX", {{"COMM", make_comm_chunk(1, 1, 16)}});
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("missing COMM chunk") {
+        auto tmp_path = unique_temp_audio_path("_aiff_missing_comm.aiff");
+        write_aiff_fixture(tmp_path, "AIFF", {{"SSND", make_ssnd_chunk({0x40, 0x00})}});
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("missing SSND chunk") {
+        auto tmp_path = unique_temp_audio_path("_aiff_missing_ssnd.aiff");
+        write_aiff_fixture(tmp_path, "AIFF", {{"COMM", make_comm_chunk(1, 1, 16)}});
+
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("zero-frame COMM metadata has info but no readable audio") {
+        auto tmp_path = unique_temp_audio_path("_aiff_zero_frames.aiff");
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(1, 0, 16)},
+                               {"SSND", make_ssnd_chunk({})},
+                           });
+
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE(info->num_frames == 0);
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("zero-channel COMM metadata is rejected by info and full reads") {
+        auto tmp_path = unique_temp_audio_path("_aiff_zero_channels_comm.aiff");
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(0, 1, 16)},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+}
+
+TEST_CASE("AIFF reader covers padding metadata and signed extended rates",
+          "[audio][file][registry][aiff][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    SECTION("COMM extra bytes and odd SSND padding") {
+        auto tmp_path = unique_temp_audio_path("_aiff_extra_comm_odd_ssnd.aif");
+        auto comm = make_comm_chunk(1, 1, 8);
+        comm.insert(comm.end(), {'N', 'A', 'M', 'E', 0, 'x', 'y'});
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", comm},
+                               {"SSND", make_ssnd_chunk({0x40})},
+                           });
+
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE(info->format == "AIFF");
+        REQUIRE(info->num_channels == 1);
+        REQUIRE(info->num_frames == 1);
+        REQUIRE(info->bits_per_sample == 8);
+
+        auto data = registry.read(tmp_path.string());
+        REQUIRE(data.has_value());
+        REQUIRE(data->sample_rate == 44100);
+        REQUIRE_THAT(data->channels[0][0], WithinAbs(0.5f, 0.001f));
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("negative extended sample rate is rejected") {
+        auto tmp_path = unique_temp_audio_path("_aiff_negative_rate.aiff");
+        auto comm = make_comm_chunk(1, 1, 16);
+        comm[8] |= 0x80;
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", comm},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("overflow extended sample rate is rejected") {
+        auto tmp_path = unique_temp_audio_path("_aiff_overflow_rate.aiff");
+        auto comm = make_comm_chunk(1, 1, 16);
+        const unsigned char huge_rate[10] = {0x40, 0x1F, 0x80, 0, 0, 0, 0, 0, 0, 0};
+        std::copy(std::begin(huge_rate), std::end(huge_rate), comm.begin() + 8);
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", comm},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("non-finite extended sample rate is rejected") {
+        auto tmp_path = unique_temp_audio_path("_aiff_nonfinite_rate.aiff");
+        auto comm = make_comm_chunk(1, 1, 16);
+        const unsigned char nonfinite_rate[10] = {0x7F, 0xFF, 0xFF, 0xFF, 0xFF,
+                                                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        std::copy(std::begin(nonfinite_rate), std::end(nonfinite_rate), comm.begin() + 8);
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", comm},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("AIFC COMM without compression type is rejected on read") {
+        auto tmp_path = unique_temp_audio_path("_aiff_short_aifc_comm.aifc");
+
+        write_aiff_fixture(tmp_path,
+                           "AIFC",
+                           {
+                               {"COMM", make_comm_chunk(1, 1, 16)},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+}
+
+TEST_CASE("AIFF writer rejects edge shapes and writes AIF extension",
+          "[audio][file][registry][aiff][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    SECTION("empty first channel") {
+        auto tmp_path = unique_temp_audio_path("_aiff_empty_first_channel.aiff");
+        AudioFileData data;
+        data.sample_rate = 44100;
+        data.channels = {{}};
+
+        REQUIRE_FALSE(registry.write(tmp_path.string(), data));
+    }
+
+    SECTION("zero channels with a sample rate") {
+        auto tmp_path = unique_temp_audio_path("_aiff_zero_channels.aiff");
+        AudioFileData data;
+        data.sample_rate = 44100;
+
+        REQUIRE_FALSE(registry.write(tmp_path.string(), data));
+    }
+
+    SECTION("aif extension round-trips and clamps samples") {
+        auto tmp_path = unique_temp_audio_path("_aiff_writer_extension.aif");
+        std::filesystem::remove(tmp_path);
+
+        AudioFileData data;
+        data.sample_rate = 44100;
+        data.channels = {{2.0f, -2.0f, 0.0f}};
+
+        REQUIRE(registry.write(tmp_path.string(), data));
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE(info->format == "AIFF");
+        REQUIRE(info->sample_rate == 44100);
+        REQUIRE(info->num_frames == 3);
+
+        auto read_data = registry.read(tmp_path.string());
+        REQUIRE(read_data.has_value());
+        REQUIRE(read_data->num_channels() == 1);
+        REQUIRE(read_data->num_frames() == 3);
+        REQUIRE_THAT(read_data->channels[0][0], WithinAbs(0.999f, 0.002f));
+        REQUIRE_THAT(read_data->channels[0][1], WithinAbs(-0.999f, 0.002f));
+        REQUIRE_THAT(read_data->channels[0][2], WithinAbs(0.0f, 0.001f));
+        std::filesystem::remove(tmp_path);
+    }
+}
