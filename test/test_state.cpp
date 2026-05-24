@@ -872,6 +872,107 @@ TEST_CASE("Binding gesture end records undoable parameter edits",
     REQUIRE(history.undo_count() == before);
 }
 
+TEST_CASE("Binding normalized writes notify only when the stored value changes",
+          "[state][binding][coverage][phase3-large]") {
+    StateStore store;
+    store.add_parameter(make_param_info(12, "Pan", "", {-1.0f, 1.0f, 0.0f}));
+
+    std::vector<ParamID> began;
+    std::vector<ParamID> ended;
+    store.set_gesture_callbacks(
+        [&](ParamID id) { began.push_back(id); },
+        [&](ParamID id) { ended.push_back(id); });
+
+    Binding binding(store, 12);
+    std::vector<float> notified;
+    binding.on_change({});
+    binding.on_change([&](float value) { notified.push_back(value); });
+
+    REQUIRE(binding.is_bound());
+    REQUIRE_THAT(binding.get_normalized(), WithinAbs(0.5, 0.001));
+
+    binding.set_normalized(0.75f);
+    REQUIRE_THAT(store.get_value(12), WithinAbs(0.5, 0.001));
+    REQUIRE_THAT(binding.get(), WithinAbs(0.5, 0.001));
+    REQUIRE(notified.size() == 1);
+    REQUIRE_THAT(notified.back(), WithinAbs(0.5, 0.001));
+
+    binding.set_normalized(0.75f);
+    REQUIRE(notified.size() == 1);
+
+    binding.set(9.0f);
+    REQUIRE_THAT(store.get_value(12), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(binding.get_normalized(), WithinAbs(1.0, 0.001));
+    REQUIRE(notified.size() == 2);
+    REQUIRE_THAT(notified.back(), WithinAbs(1.0, 0.001));
+
+    binding.set(1.0f);
+    REQUIRE(notified.size() == 2);
+
+    binding.begin_gesture();
+    binding.end_gesture();
+    REQUIRE(began == std::vector<ParamID>{12});
+    REQUIRE(ended == std::vector<ParamID>{12});
+    REQUIRE_FALSE(binding.edit_history());
+    REQUIRE(binding.poll());
+    REQUIRE(notified.size() == 3);
+    REQUIRE_THAT(notified.back(), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("Binding handles unregistered parameters without mutating the store",
+          "[state][binding][coverage][phase3-large]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 6.0f, -12.0f}));
+
+    Binding missing(store, 99);
+    std::vector<float> notified;
+    missing.on_change([&](float value) { notified.push_back(value); });
+
+    REQUIRE(missing.is_bound());
+    REQUIRE(missing.id() == 99);
+    REQUIRE(missing.info() == nullptr);
+    REQUIRE(missing.get() == 0.0f);
+    REQUIRE(missing.get_normalized() == 0.0f);
+
+    missing.begin_gesture();
+    missing.set(0.5f);
+    missing.set_normalized(0.25f);
+    missing.end_gesture();
+    missing.reset();
+
+    REQUIRE(notified.empty());
+    REQUIRE_THAT(store.get_value(1), WithinAbs(-12.0, 0.001));
+    REQUIRE(store.param_count() == 1);
+}
+
+TEST_CASE("create_bindings mirrors StateStore parameter registration order",
+          "[state][binding][coverage][phase3-large]") {
+    StateStore empty;
+    auto empty_bindings = create_bindings(empty);
+    REQUIRE(empty_bindings.empty());
+
+    StateStore store;
+    store.add_parameter(make_param_info(3, "Attack", "ms", {0.0f, 200.0f, 10.0f}));
+    store.add_parameter(make_param_info(1, "Release", "ms", {1.0f, 1000.0f, 100.0f}));
+    store.add_parameter(make_param_info(7, "Mix", "%", {0.0f, 100.0f, 50.0f}));
+
+    auto bindings = create_bindings(store);
+
+    REQUIRE(bindings.size() == 3);
+    REQUIRE(bindings[0].id() == 3);
+    REQUIRE(bindings[1].id() == 1);
+    REQUIRE(bindings[2].id() == 7);
+    REQUIRE(bindings[0].info() != nullptr);
+    REQUIRE(bindings[1].info() != nullptr);
+    REQUIRE(bindings[2].info() != nullptr);
+    REQUIRE(bindings[0].info()->name == "Attack");
+    REQUIRE(bindings[1].info()->name == "Release");
+    REQUIRE(bindings[2].info()->name == "Mix");
+
+    bindings[1].set_normalized(0.5f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(500.5, 0.001));
+}
+
 TEST_CASE("EditHistory trims depth clears redo and toggles coalescing",
           "[state][edit-history][coverage][phase3-large]") {
     EditHistory history(2);
