@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02060"></a>
+## [0.206.0] - 2026-05-23
+
+- feat(canvas+sdk): Skia chrome/m149 + DESIGN_WIDTH/HEIGHT auto-sizing (#2784 stage A) ([#2785](https://github.com/danielraffel/pulp/pull/2785))
+
 <a id="v02050"></a>
 ## [0.205.0] - 2026-05-23
 
@@ -2664,6 +2669,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.206.0]: https://github.com/danielraffel/pulp/releases/tag/v0.206.0
 [0.205.0]: https://github.com/danielraffel/pulp/releases/tag/v0.205.0
 [0.204.0]: https://github.com/danielraffel/pulp/releases/tag/v0.204.0
 [0.203.0]: https://github.com/danielraffel/pulp/releases/tag/v0.203.0
