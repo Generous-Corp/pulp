@@ -94,6 +94,74 @@ TEST_CASE("utf8 helpers count and advance over leading bytes correctly",
     REQUIRE(utf8_advance("hello", 99) == 5);     // clamps to size
 }
 
+TEST_CASE("utf8 helpers skip stray continuation bytes without spending codepoint budget",
+          "[view][text-overflow][issue-1407][coverage][phase3]") {
+    const std::string leading = std::string("\x80", 1) + "abc";
+    const std::string doubled = std::string("\x80\x81", 2) + "abc";
+    const std::string middle = std::string("a") + std::string("\x80", 1) + "bc";
+    const std::string trailing = std::string("abc") + std::string("\x80", 1);
+    const std::string only = std::string("\x80\x81\x82", 3);
+    const std::string mixed = std::string("\x80", 1) + "\xc3\xb1" +
+                              std::string("\x81", 1) + "o";
+
+    REQUIRE(utf8_codepoint_count(leading) == 3);
+    REQUIRE(utf8_codepoint_count(doubled) == 3);
+    REQUIRE(utf8_codepoint_count(middle) == 3);
+    REQUIRE(utf8_codepoint_count(trailing) == 3);
+    REQUIRE(utf8_codepoint_count(only) == 0);
+    REQUIRE(utf8_codepoint_count(mixed) == 2);
+
+    REQUIRE(utf8_advance(leading, 0) == 0);
+    REQUIRE(utf8_advance(leading, 1) == 2);
+    REQUIRE(utf8_advance(leading, 2) == 3);
+    REQUIRE(utf8_advance(leading, 3) == 4);
+    REQUIRE(utf8_advance(leading, 4) == 4);
+
+    REQUIRE(utf8_advance(doubled, 1) == 3);
+    REQUIRE(utf8_advance(doubled, 2) == 4);
+    REQUIRE(utf8_advance(doubled, 3) == 5);
+    REQUIRE(utf8_advance(doubled, 99) == 5);
+
+    REQUIRE(utf8_advance(middle, 1) == 1);
+    REQUIRE(utf8_advance(middle, 2) == 3);
+    REQUIRE(utf8_advance(middle, 3) == 4);
+    REQUIRE(utf8_advance(middle, 99) == 4);
+
+    REQUIRE(utf8_advance(trailing, 1) == 1);
+    REQUIRE(utf8_advance(trailing, 2) == 2);
+    REQUIRE(utf8_advance(trailing, 3) == 3);
+    REQUIRE(utf8_advance(trailing, 4) == 4);
+
+    REQUIRE(utf8_advance(only, 1) == 3);
+    REQUIRE(utf8_advance(only, 99) == 3);
+
+    REQUIRE(utf8_advance(mixed, 1) == 3);
+    REQUIRE(utf8_advance(mixed, 2) == 5);
+    REQUIRE(utf8_advance(mixed, 3) == 5);
+}
+
+TEST_CASE("truncate_to_width ignores stray continuation bytes when choosing prefix",
+          "[view][text-overflow][issue-1407][coverage][phase3]") {
+    RecordingCanvas canvas;
+    const std::string leading = std::string("\x80", 1) + "abcdef";
+    const std::string doubled = std::string("\x80\x81", 2) + "abcdef";
+
+    auto leading_out = truncate_to_width(canvas, leading, 49.0f);
+    REQUIRE(leading_out.compare(leading_out.size() - 3, 3, kEllipsis) == 0);
+    REQUIRE(leading_out.find('\x80') != std::string::npos);
+    REQUIRE(leading_out.find("abc") != std::string::npos);
+    REQUIRE(leading_out.find("def") == std::string::npos);
+    REQUIRE(canvas.measure_text(leading_out) <= 49.0f);
+
+    auto doubled_out = truncate_to_width(canvas, doubled, 56.0f);
+    REQUIRE(doubled_out.compare(doubled_out.size() - 3, 3, kEllipsis) == 0);
+    REQUIRE(doubled_out.find('\x80') != std::string::npos);
+    REQUIRE(doubled_out.find('\x81') != std::string::npos);
+    REQUIRE(doubled_out.find("abc") != std::string::npos);
+    REQUIRE(doubled_out.find("def") == std::string::npos);
+    REQUIRE(canvas.measure_text(doubled_out) <= 56.0f);
+}
+
 TEST_CASE("utf8 helpers handle continuation three-byte and four-byte paths",
           "[view][text-overflow][coverage][phase3]") {
     const std::string stray_continuation("\x80" "abc", 4);
