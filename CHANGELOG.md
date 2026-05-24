@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02070"></a>
+## [0.207.0] - 2026-05-24
+
+- test(view): cover text overflow edge cases ([#2799](https://github.com/danielraffel/pulp/pull/2799))
+- test(audio): cover CoreAudio CAF reader ([#2798](https://github.com/danielraffel/pulp/pull/2798))
+- test(canvas): cover recording canvas edge contracts ([#2797](https://github.com/danielraffel/pulp/pull/2797))
+- test(signal): cover shaping primitives ([#2796](https://github.com/danielraffel/pulp/pull/2796))
+- test(state): cover parameter cursor and edit history edges ([#2795](https://github.com/danielraffel/pulp/pull/2795))
+- test(runtime): cover http network edge cases ([#2794](https://github.com/danielraffel/pulp/pull/2794))
+- test(signal): cover matrix and window edge paths ([#2793](https://github.com/danielraffel/pulp/pull/2793))
+- test(ship): cover appcast edge branches ([#2792](https://github.com/danielraffel/pulp/pull/2792))
+- test(canvas): cover PSDF atlas lifecycle ([#2791](https://github.com/danielraffel/pulp/pull/2791))
+- test(state): cover state bindings ([#2790](https://github.com/danielraffel/pulp/pull/2790))
+- test(audio): cover OGG reader success paths ([#2787](https://github.com/danielraffel/pulp/pull/2787))
+- test(audio): cover AIFF reader edge cases ([#2783](https://github.com/danielraffel/pulp/pull/2783))
+
 <a id="v02060"></a>
 ## [0.206.0] - 2026-05-23
 
@@ -2669,6 +2685,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.207.0]: https://github.com/danielraffel/pulp/releases/tag/v0.207.0
 [0.206.0]: https://github.com/danielraffel/pulp/releases/tag/v0.206.0
 [0.205.0]: https://github.com/danielraffel/pulp/releases/tag/v0.205.0
 [0.204.0]: https://github.com/danielraffel/pulp/releases/tag/v0.204.0
