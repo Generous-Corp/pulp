@@ -360,6 +360,121 @@ TEST_CASE("UndoManager add_without_executing mixes with performed transaction ac
     REQUIRE(values == std::vector<int>{1, 2});
 }
 
+TEST_CASE("UndoManager committed transaction after undo clears redo history",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int value = 0;
+
+    um.perform(UndoAction::create("A", [&] { value = 0; }, [&] { value = 1; }));
+    um.perform(UndoAction::create("B", [&] { value = 1; }, [&] { value = 2; }));
+
+    REQUIRE(value == 2);
+    REQUIRE(um.undo_count() == 2);
+    REQUIRE(um.undo());
+    REQUIRE(value == 1);
+    REQUIRE(um.can_redo());
+    REQUIRE(um.redo_count() == 1);
+
+    um.begin_transaction("Batch");
+    um.perform(UndoAction::create("C", [&] { value = 1; }, [&] { value = 3; }));
+    um.perform(UndoAction::create("D", [&] { value = 3; }, [&] { value = 4; }));
+    um.end_transaction();
+
+    REQUIRE(value == 4);
+    REQUIRE(um.undo_count() == 2);
+    REQUIRE_FALSE(um.can_redo());
+    REQUIRE(um.redo_count() == 0);
+    REQUIRE(um.undo_name() == "Batch");
+
+    REQUIRE(um.undo());
+    REQUIRE(value == 1);
+    REQUIRE(um.redo_name() == "Batch");
+}
+
+TEST_CASE("UndoManager add_without_executing outside transaction clears redo history",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int value = 0;
+
+    um.perform(UndoAction::create("A", [&] { value = 0; }, [&] { value = 1; }));
+    um.perform(UndoAction::create("B", [&] { value = 1; }, [&] { value = 2; }));
+
+    REQUIRE(um.undo());
+    REQUIRE(value == 1);
+    REQUIRE(um.can_redo());
+    REQUIRE(um.redo_count() == 1);
+
+    value = 3;
+    um.add_without_executing(
+        UndoAction::create("C", [&] { value = 1; }, [&] { value = 3; }));
+
+    REQUIRE(value == 3);
+    REQUIRE(um.can_undo());
+    REQUIRE(um.undo_name() == "C");
+    REQUIRE_FALSE(um.can_redo());
+    REQUIRE(um.redo_count() == 0);
+
+    REQUIRE(um.undo());
+    REQUIRE(value == 1);
+    REQUIRE(um.redo());
+    REQUIRE(value == 3);
+}
+
+TEST_CASE("UndoManager open transaction publishes history only when ended",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int value = 0;
+    int state_changes = 0;
+    um.on_state_changed = [&] { ++state_changes; };
+
+    um.begin_transaction("Deferred");
+    um.perform(UndoAction::create("A", [&] { value = 0; }, [&] { value = 1; }));
+    um.perform(UndoAction::create("B", [&] { value = 1; }, [&] { value = 2; }));
+
+    REQUIRE(value == 2);
+    REQUIRE(um.undo_count() == 0);
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE(state_changes == 0);
+
+    um.end_transaction();
+
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.can_undo());
+    REQUIRE(um.undo_name() == "Deferred");
+    REQUIRE(state_changes == 1);
+
+    REQUIRE(um.undo());
+    REQUIRE(value == 0);
+    REQUIRE(state_changes == 2);
+}
+
+TEST_CASE("UndoManager max history trims whole transactions",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    um.set_max_history(2);
+    int value = 0;
+
+    for (int tx = 1; tx <= 3; ++tx) {
+        um.begin_transaction("T" + std::to_string(tx));
+        um.perform(UndoAction::create("first",
+            [&value, tx] { value = tx - 1; },
+            [&value, tx] { value = tx * 10; }));
+        um.perform(UndoAction::create("second",
+            [&value, tx] { value = tx - 1; },
+            [&value, tx] { value = tx; }));
+        um.end_transaction();
+    }
+
+    REQUIRE(um.undo_count() == 2);
+    REQUIRE(um.undo_name() == "T3");
+    REQUIRE(um.undo());
+    REQUIRE(value == 2);
+    REQUIRE(um.undo_name() == "T2");
+    REQUIRE(um.undo());
+    REQUIRE(value == 1);
+    REQUIRE_FALSE(um.can_undo());
+}
+
 TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
     UndoManager um;
     int v = 0;
