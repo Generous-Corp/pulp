@@ -1,7 +1,23 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/ship/appcast.hpp>
 
+#include <string>
+
 using namespace pulp::ship;
+
+namespace {
+
+int count_occurrences(const std::string& haystack, const std::string& needle) {
+    int count = 0;
+    size_t pos = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
+} // namespace
 
 TEST_CASE("Appcast XML generation", "[ship][appcast]") {
     Appcast feed;
@@ -308,6 +324,163 @@ TEST_CASE("Appcast from_xml only requires rss marker",
 
     REQUIRE(parsed.has_value());
     REQUIRE(parsed->items.empty());
+}
+
+TEST_CASE("Appcast XML emits stable empty-feed skeleton",
+          "[ship][appcast][coverage]") {
+    Appcast feed;
+    feed.title = "Empty Updates";
+    feed.link = "https://example.com/empty.xml";
+    feed.description = "No releases yet";
+
+    auto xml = feed.to_xml();
+
+    REQUIRE(xml.find("<?xml version=\"1.0\" encoding=\"utf-8\"?>") == 0);
+    REQUIRE(xml.find("<rss version=\"2.0\" xmlns:sparkle=\"http://www.andymatuschak.org/xml-namespaces/sparkle\">") != std::string::npos);
+    REQUIRE(xml.find("<title>Empty Updates</title>") != std::string::npos);
+    REQUIRE(xml.find("<language>en</language>") != std::string::npos);
+    REQUIRE(xml.find("<item>") == std::string::npos);
+    REQUIRE(xml.find("</rss>\n") != std::string::npos);
+}
+
+TEST_CASE("Appcast XML emits each item branch independently",
+          "[ship][appcast][coverage]") {
+    Appcast feed;
+    feed.title = "Mixed Feed";
+    feed.link = "https://example.com/appcast.xml";
+    feed.description = "Mixed release metadata";
+
+    AppcastItem fallback;
+    fallback.version = "8.0.0";
+    fallback.title = "Version 8.0.0";
+    fallback.pub_date = "Mon, 08 Jun 2026 12:00:00 +0000";
+    fallback.download_url = "https://example.com/Pulp-8.0.0.pkg";
+    fallback.file_size = 0;
+    feed.items.push_back(fallback);
+
+    AppcastItem full;
+    full.version = "8.1.0";
+    full.build_number = "810";
+    full.title = "Version 8.1.0";
+    full.description = "<ul><li>One</li><li>Two</li></ul>";
+    full.pub_date = "Tue, 09 Jun 2026 12:00:00 +0000";
+    full.download_url = "https://example.com/Pulp-8.1.0.pkg";
+    full.file_size = 8192;
+    full.minimum_os = "14.0";
+    full.ed_signature = "sig810";
+    feed.items.push_back(full);
+
+    auto xml = feed.to_xml();
+
+    REQUIRE(count_occurrences(xml, "<item>") == 2);
+    REQUIRE(count_occurrences(xml, "<enclosure") == 2);
+    REQUIRE(count_occurrences(xml, "<![CDATA[") == 1);
+    REQUIRE(xml.find("<sparkle:version>8.0.0</sparkle:version>") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:version>810</sparkle:version>") != std::string::npos);
+    REQUIRE(xml.find("length=\"0\"") != std::string::npos);
+    REQUIRE(xml.find("length=\"8192\"") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>") != std::string::npos);
+    REQUIRE(xml.find("sparkle:edSignature=\"sig810\"") != std::string::npos);
+}
+
+TEST_CASE("Appcast from_xml handles empty and zero-valued enclosure attributes",
+          "[ship][appcast][coverage]") {
+    auto parsed = Appcast::from_xml(R"(<rss version="2.0">
+  <channel>
+    <title>Zero Feed</title>
+    <item>
+      <title>Zero Length</title>
+      <sparkle:version>900</sparkle:version>
+      <sparkle:shortVersionString>9.0.0</sparkle:shortVersionString>
+      <enclosure url="" length="0" sparkle:edSignature="" />
+    </item>
+    <item>
+      <title>Missing Attributes</title>
+      <sparkle:shortVersionString>9.0.1</sparkle:shortVersionString>
+      <enclosure />
+    </item>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->items.size() == 2);
+    REQUIRE(parsed->items[0].title == "Zero Length");
+    REQUIRE(parsed->items[0].version == "9.0.0");
+    REQUIRE(parsed->items[0].download_url.empty());
+    REQUIRE(parsed->items[0].ed_signature.empty());
+    REQUIRE(parsed->items[0].file_size == 0);
+    REQUIRE(parsed->items[1].version == "9.0.1");
+    REQUIRE(parsed->items[1].download_url.empty());
+    REQUIRE(parsed->items[1].file_size == 0);
+}
+
+TEST_CASE("Appcast from_xml keeps partial item metadata when optional tags are malformed",
+          "[ship][appcast][coverage]") {
+    auto parsed = Appcast::from_xml(R"(<rss version="2.0">
+  <channel>
+    <title>Partial Items</title>
+    <item>
+      <title>Partial Release</title>
+      <pubDate>Wed, 10 Jun 2026 12:00:00 +0000
+      <sparkle:version>910</sparkle:version>
+      <sparkle:shortVersionString>9.1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.3
+      <enclosure url="https://example.com/Pulp-9.1.0.pkg" length="0910" />
+    </item>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->items.size() == 1);
+    REQUIRE(parsed->items[0].pub_date.empty());
+    REQUIRE(parsed->items[0].version == "9.1.0");
+    REQUIRE(parsed->items[0].minimum_os.empty());
+    REQUIRE(parsed->items[0].download_url == "https://example.com/Pulp-9.1.0.pkg");
+    REQUIRE(parsed->items[0].file_size == 910);
+}
+
+TEST_CASE("Appcast from_xml ignores single-quoted enclosure attributes",
+          "[ship][appcast][coverage]") {
+    auto parsed = Appcast::from_xml(R"(<rss version="2.0">
+  <channel>
+    <title>Quoted Feed</title>
+    <item>
+      <title>Single Quotes</title>
+      <sparkle:shortVersionString>9.2.0</sparkle:shortVersionString>
+      <enclosure url='https://example.com/Pulp-9.2.0.pkg' length='920' sparkle:edSignature='sig920' />
+    </item>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->items.size() == 1);
+    REQUIRE(parsed->items[0].version == "9.2.0");
+    REQUIRE(parsed->items[0].download_url.empty());
+    REQUIRE(parsed->items[0].ed_signature.empty());
+    REQUIRE(parsed->items[0].file_size == 0);
+}
+
+TEST_CASE("Appcast from_xml captures CDATA with nested markup and brackets",
+          "[ship][appcast][coverage]") {
+    auto parsed = Appcast::from_xml(R"(<rss version="2.0">
+  <channel>
+    <title>Notes Feed</title>
+    <item>
+      <title>Rich Notes</title>
+      <description><![CDATA[<p>Fix <strong>A</strong> & keep [B]</p>]]></description>
+      <sparkle:shortVersionString>9.3.0</sparkle:shortVersionString>
+      <enclosure url="https://example.com/Pulp-9.3.0.pkg" length="930" />
+    </item>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->items.size() == 1);
+    REQUIRE(parsed->items[0].title == "Rich Notes");
+    REQUIRE(parsed->items[0].description == "<p>Fix <strong>A</strong> & keep [B]</p>");
+    REQUIRE(parsed->items[0].version == "9.3.0");
+    REQUIRE(parsed->items[0].download_url == "https://example.com/Pulp-9.3.0.pkg");
+    REQUIRE(parsed->items[0].file_size == 930);
 }
 
 TEST_CASE("Version comparison", "[ship][version]") {
