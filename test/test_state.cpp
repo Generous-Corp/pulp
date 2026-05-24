@@ -216,6 +216,82 @@ TEST_CASE("ParamCursor is monotonic and null event queues fall back to StateStor
     REQUIRE(cursor.value(7) == 0.75f);
 }
 
+TEST_CASE("ParameterEventQueue exposes mutable and const iteration over active events",
+          "[state][params][events][coverage][phase3-state]") {
+    ParameterEventQueue queue;
+
+    REQUIRE(queue.empty());
+    REQUIRE(queue.push(ParameterEvent{.param_id = 1, .sample_offset = 16, .value = 0.25f,
+                                      .ramp_duration_sample_frames = 4}));
+    REQUIRE(queue.push(ParameterEvent{.param_id = 2, .sample_offset = 8, .value = 0.5f,
+                                      .ramp_duration_sample_frames = 2}));
+
+    for (auto& event : queue) {
+        event.value += 0.125f;
+    }
+
+    queue.sort();
+
+    const auto& const_queue = queue;
+    auto it = const_queue.begin();
+    REQUIRE(it != const_queue.end());
+    REQUIRE(it->param_id == 2);
+    REQUIRE(it->sample_offset == 8);
+    REQUIRE(it->ramp_duration_sample_frames == 2);
+    REQUIRE_THAT(it->value, WithinAbs(0.625f, 1e-6f));
+
+    ++it;
+    REQUIRE(it != const_queue.end());
+    REQUIRE(it->param_id == 1);
+    REQUIRE(it->sample_offset == 16);
+    REQUIRE(it->ramp_duration_sample_frames == 4);
+    REQUIRE_THAT(it->value, WithinAbs(0.375f, 1e-6f));
+
+    ++it;
+    REQUIRE(it == const_queue.end());
+}
+
+TEST_CASE("ParamCursor updates duplicate snapshots and ignores late unknown events",
+          "[state][params][cursor][coverage][phase3-state]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
+    store.set_value(1, 0.5f);
+
+    std::array<ParamSnapshotEntry, 3> snapshots{{
+        {1, 0.25f},
+        {99, 2.0f},
+        {1, 0.75f},
+    }};
+
+    ParameterEventQueue events;
+    REQUIRE(events.push(ParameterEvent{.param_id = 42, .sample_offset = 1, .value = 9.0f}));
+    REQUIRE(events.push(ParameterEvent{.param_id = 1, .sample_offset = 2, .value = -1.0f}));
+    REQUIRE(events.push(ParameterEvent{.param_id = 1, .sample_offset = 4, .value = 2.0f}));
+    events.sort();
+
+    ParamCursor cursor(store, &events, snapshots);
+
+    REQUIRE(cursor.tracked_param_count() == 2);
+    REQUIRE(cursor.is_tracked(1));
+    REQUIRE(cursor.is_tracked(99));
+    REQUIRE_FALSE(cursor.is_tracked(42));
+    REQUIRE_THAT(cursor.value(1), WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(cursor.value(99), WithinAbs(2.0f, 1e-6f));
+
+    cursor.advance_to(1);
+    REQUIRE(cursor.position() == 1);
+    REQUIRE_FALSE(cursor.is_tracked(42));
+    REQUIRE_THAT(cursor.value(42), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(cursor.value(1), WithinAbs(0.75f, 1e-6f));
+
+    cursor.advance_to(2);
+    REQUIRE_THAT(cursor.value(1), WithinAbs(0.0f, 1e-6f));
+
+    cursor.advance_to(4);
+    REQUIRE_THAT(cursor.value(1), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.5f, 1e-6f));
+}
+
 TEST_CASE("ParamRange with step", "[state][range]") {
     ParamRange range{0.0f, 10.0f, 5.0f, 1.0f}; // step = 1
 
@@ -1026,6 +1102,40 @@ TEST_CASE("EditHistory coalesces matching descriptions and clamps max depth",
     history.set_max_depth(0);
     REQUIRE(history.max_depth() == 0);
     REQUIRE_FALSE(history.can_undo());
+}
+
+TEST_CASE("EditHistory exposes empty descriptions, redo counts, and inert callbacks",
+          "[state][edit-history][coverage][phase3-state]") {
+    struct BlankAction final : EditAction {
+        explicit BlankAction(int& target) : value(&target) {}
+
+        void undo() override { *value = 0; }
+        void redo() override { *value = 1; }
+
+        int* value = nullptr;
+    };
+
+    EditHistory history;
+    int value = 0;
+
+    history.perform(std::make_unique<BlankAction>(value));
+    REQUIRE(value == 1);
+    REQUIRE(history.undo_description().empty());
+
+    REQUIRE(history.undo());
+    REQUIRE(value == 0);
+    REQUIRE(history.redo_count() == 1);
+    REQUIRE_FALSE(history.can_undo());
+
+    REQUIRE(history.redo());
+    REQUIRE(value == 1);
+    REQUIRE(history.redo_count() == 0);
+    REQUIRE_FALSE(history.can_redo());
+
+    LambdaEdit empty_callbacks({}, {}, "empty callbacks");
+    empty_callbacks.redo();
+    empty_callbacks.undo();
+    REQUIRE(empty_callbacks.description() == "empty callbacks");
 }
 
 TEST_CASE("StateStore unknown modulation and reset calls are inert",
