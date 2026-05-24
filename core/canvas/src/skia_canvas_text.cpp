@@ -44,7 +44,7 @@
 #include "include/core/SkSurface.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/effects/SkGradientShader.h"
+#include "include/effects/SkGradient.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/core/SkColorFilter.h"
@@ -69,6 +69,7 @@
 #include "modules/skparagraph/include/ParagraphBuilder.h"
 #include "modules/skparagraph/include/ParagraphStyle.h"
 #include "modules/skparagraph/include/TextStyle.h"
+#include "skia_unicode.hpp"
 #endif
 
 #ifdef PULP_HAS_SKIA
@@ -196,7 +197,7 @@ PreparedParagraph make_paragraph(const std::string& text,
     }
     pstyle.setTextStyle(tstyle);
 
-    auto pb = skia::textlayout::ParagraphBuilder::make(pstyle, fc);
+    auto pb = skia::textlayout::ParagraphBuilder::make(pstyle, fc, shared_sk_unicode());
     if (!pb) return result;
     pb->addText(text.c_str(), text.size());
     auto paragraph = pb->Build();

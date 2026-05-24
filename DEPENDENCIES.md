@@ -20,7 +20,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | CHOC | f0f5cdf5a938 | ISC | JS engine abstraction, MIDI utilities, audio helpers | multiple | 2026-03-24 |
 | CLAP | 1.2.2 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | cpp-httplib | vendored-snapshot | MIT | HTTP client (GET/POST/download) | pulp-runtime | 2026-04-07 |
-| Dawn | chrome/m144 deps @ 6acf6ef3fe23 | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-03-30 |
+| Dawn | chrome/m149 deps (bundled in Skia toolchain) | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-05-23 |
 | DRACO | 1.5.7 | Apache-2.0 | Optional glTF mesh decompression; fetched via FetchContent only when `PULP_ENABLE_DRACO=ON` (default OFF) | pulp-render | 2026-04-21 |
 | dr_libs | vendored-snapshot | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav) | pulp-audio | 2026-04-07 |
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
@@ -48,7 +48,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | react-reconciler | ^0.29.2 | MIT | Reconciler runtime that `@pulp/react` (packages/pulp-react) wraps to drive `pulp::view::WidgetBridge`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | scheduler | ^0.23.2 | MIT | Cooperative-scheduling runtime pulled in transitively by react-reconciler for `@pulp/react`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
-| Skia | chrome/m144 @ cd0c5f445516 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder). HarfBuzz (`08b52ae2e449`) and ICU (`364118a1d9da`) are locked through the Skia DEPS file for deterministic text shaping. Call sites use the `SkSpan`-based `SkFont` API so Pulp compiles whether the Skia build defines `SK_SUPPORT_UNSPANNED_APIS` or not (#543). | pulp-canvas, pulp-render | 2026-03-25 |
+| Skia | chrome/m149 | BSD-3-Clause | GPU 2D rendering engine. Pre-built via [danielraffel/skia-builder](https://github.com/danielraffel/skia-builder) fork (adds iOS device/simulator, visionOS, mac-x86_64, and `Skia.xcframework` slices that upstream `olilarkin/skia-builder` doesn't ship). The fork tracks Skia's `chrome/m149` tag and is the active dependency until upstream publishes those slices. Call sites use the m149-era `SkShaders::*` gradient namespace + the new 3-arg `ParagraphBuilder::make(..., SkUnicode)` signature. | pulp-canvas, pulp-render | 2026-05-23 |
 | three.js | 077dd13c0e86 | MIT | Native WebGPU bridge demos and tests (optional, fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON) | pulp-render | 2026-04-21 |
 | VST3 SDK | v3.7.12_build_20 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |

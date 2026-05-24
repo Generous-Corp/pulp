@@ -104,8 +104,12 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
         get_filename_component(_skia_root_dir "${_skia_include_dir}" DIRECTORY)
         list(APPEND SKIA_INCLUDE_DIRS "${_skia_root_dir}")
     endif()
-    # SkParagraph, skshaper, svg, skottie module headers
-    foreach(_mod skparagraph skshaper svg skottie)
+    # SkParagraph, skshaper, skunicode, svg, skottie module headers.
+    # skunicode added in m149 — Pulp's text shaper now calls
+    # `SkUnicodes::ICU::Make()` (see core/canvas/src/skia_unicode.hpp);
+    # the include lives at
+    # `modules/skunicode/include/SkUnicode_icu.h` in source layouts.
+    foreach(_mod skparagraph skshaper skunicode svg skottie)
         if(EXISTS "${SKIA_DIR}/modules/${_mod}/include")
             list(APPEND SKIA_INCLUDE_DIRS "${SKIA_DIR}/modules/${_mod}/include")
         endif()
@@ -137,8 +141,8 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     file(GLOB _skia_all_libs "${_skia_lib_dir}/*.a" "${_skia_lib_dir}/*.lib")
     set(SKIA_LIBRARIES ${_skia_all_libs})
 
-    # Skia chrome/m144 split SkUnicode into libskunicode_core.a (definitions)
-    # and libskunicode_icu.a (uses core symbols). file(GLOB) returns
+    # Skia chrome/m144+ split SkUnicode into libskunicode_core.a (definitions)
+    # and libskunicode_icu.a (uses core symbols). Still split in m149. file(GLOB) returns
     # alphabetical order, so core comes first. With GNU ld's single-pass
     # static-archive resolution, the back-references from icu → core go
     # unresolved and the link fails with hundreds of

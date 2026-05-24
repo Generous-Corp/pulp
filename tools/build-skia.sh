@@ -1,6 +1,8 @@
 #!/bin/bash
 # build-skia.sh — Build Skia Graphite for Pulp
-# Uses olilarkin/skia-builder to produce pre-built static libraries
+# Uses danielraffel/skia-builder (fork of olilarkin/skia-builder) to produce
+# pre-built static libraries. The fork tracks upstream's tag pattern and
+# publishes additional iOS/visionOS/mac-x86_64 slices that upstream omits.
 #
 # Usage:
 #   ./tools/build-skia.sh          # Build for current platform
@@ -17,14 +19,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_BUILDER_DIR="$PULP_ROOT/external/skia-builder"
 SKIA_BUILD_OUTPUT="$PULP_ROOT/external/skia-build"
-SKIA_BUILDER_REF="${SKIA_BUILDER_REF:-7eecb8abf1f77b2a8bac2e81c38e20708cb79c24}"
-SKIA_BRANCH="${SKIA_BRANCH:-chrome/m144}"
+# Default to the fork's chrome/m149 branch HEAD. Override with SKIA_BUILDER_REF
+# to pin to a specific commit (omit to track the fork branch head).
+SKIA_BUILDER_URL="${SKIA_BUILDER_URL:-https://github.com/danielraffel/skia-builder.git}"
+SKIA_BUILDER_REF="${SKIA_BUILDER_REF:-}"
+SKIA_BRANCH="${SKIA_BRANCH:-chrome/m149}"
 
 PLATFORM="${1:-mac}"
 
 echo "=== Pulp Skia Builder ==="
 echo "Platform: $PLATFORM"
-echo "Builder ref: $SKIA_BUILDER_REF"
+echo "Builder URL: $SKIA_BUILDER_URL"
+echo "Builder ref: ${SKIA_BUILDER_REF:-(branch HEAD)}"
 echo "Branch: $SKIA_BRANCH"
 echo "Output: $SKIA_BUILD_OUTPUT"
 echo ""
@@ -32,12 +38,18 @@ echo ""
 # Clone skia-builder if not present
 if [ ! -d "$SKIA_BUILDER_DIR" ]; then
     echo "Cloning skia-builder..."
-    git clone https://github.com/olilarkin/skia-builder.git "$SKIA_BUILDER_DIR"
+    git clone "$SKIA_BUILDER_URL" "$SKIA_BUILDER_DIR"
 fi
 
-echo "Syncing skia-builder to $SKIA_BUILDER_REF..."
-git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BUILDER_REF"
-git -C "$SKIA_BUILDER_DIR" checkout --detach "$SKIA_BUILDER_REF"
+if [ -n "$SKIA_BUILDER_REF" ]; then
+    echo "Syncing skia-builder to $SKIA_BUILDER_REF..."
+    git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BUILDER_REF"
+    git -C "$SKIA_BUILDER_DIR" checkout --detach "$SKIA_BUILDER_REF"
+else
+    echo "Syncing skia-builder to $SKIA_BRANCH HEAD..."
+    git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BRANCH"
+    git -C "$SKIA_BUILDER_DIR" checkout FETCH_HEAD
+fi
 
 # Increase file limit on macOS
 if [ "$(uname)" = "Darwin" ]; then

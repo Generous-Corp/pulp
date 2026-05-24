@@ -149,7 +149,7 @@ endfunction()
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;PRODUCES_MIDI"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT"
         "FORMATS;SOURCES"
         ${ARGN}
     )
@@ -214,6 +214,42 @@ function(pulp_add_plugin target)
             PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
             PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
         )
+    endif()
+
+    # ── Design dimensions (auto-sizing for imported-design plugins) ────
+    # When DESIGN_WIDTH/HEIGHT are supplied, inject them as compile-defs so
+    # `format::Processor::view_size()`'s default returns sensible bounds
+    # (derived min = 2/3 preferred, max = 2x preferred, aspect = W/H).
+    # Plugins still pull this in via target_compile_definitions on Core,
+    # so all linked format adapters see the same defs. Explicit MIN/MAX
+    # args override the derived values. See processor.hpp:view_size() and
+    # the import-design skill. Issue #2784.
+    if(PLUGIN_DESIGN_WIDTH AND PLUGIN_DESIGN_HEIGHT)
+        if(NOT PLUGIN_DESIGN_MIN_WIDTH)
+            set(PLUGIN_DESIGN_MIN_WIDTH 0)
+        endif()
+        if(NOT PLUGIN_DESIGN_MIN_HEIGHT)
+            set(PLUGIN_DESIGN_MIN_HEIGHT 0)
+        endif()
+        if(NOT PLUGIN_DESIGN_MAX_WIDTH)
+            set(PLUGIN_DESIGN_MAX_WIDTH 0)
+        endif()
+        if(NOT PLUGIN_DESIGN_MAX_HEIGHT)
+            set(PLUGIN_DESIGN_MAX_HEIGHT 0)
+        endif()
+        set(_design_defs
+            PULP_PLUGIN_DESIGN_W=${PLUGIN_DESIGN_WIDTH}
+            PULP_PLUGIN_DESIGN_H=${PLUGIN_DESIGN_HEIGHT}
+            PULP_PLUGIN_DESIGN_MIN_W=${PLUGIN_DESIGN_MIN_WIDTH}
+            PULP_PLUGIN_DESIGN_MIN_H=${PLUGIN_DESIGN_MIN_HEIGHT}
+            PULP_PLUGIN_DESIGN_MAX_W=${PLUGIN_DESIGN_MAX_WIDTH}
+            PULP_PLUGIN_DESIGN_MAX_H=${PLUGIN_DESIGN_MAX_HEIGHT}
+        )
+        if(PLUGIN_SOURCES)
+            target_compile_definitions(${target}_Core PUBLIC ${_design_defs})
+        else()
+            target_compile_definitions(${target}_Core INTERFACE ${_design_defs})
+        endif()
     endif()
 
     # ── VST3 ─────────────────────────────────────────────────────────────

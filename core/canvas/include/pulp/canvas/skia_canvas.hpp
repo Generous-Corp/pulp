@@ -161,7 +161,7 @@ public:
                                    const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions, int count) override;
-    /// pulp #1524 — true two-circle radial gradient via SkGradientShader::MakeTwoPointConical.
+    /// pulp #1524 — true two-circle radial gradient via SkShaders::TwoPointConicalGradient.
     void set_fill_gradient_radial_two_circles(
         float x0, float y0, float r0,
         float x1, float y1, float r1,
@@ -172,7 +172,7 @@ public:
 
     // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle = createLinearGradient(...)`
     // (and radial / two-circle / conic counterparts). Routes through
-    // SkGradientShader::Make* and stores the resulting shader on
+    // SkShaders::*Gradient and stores the resulting shader on
     // `stroke_shader_`, which `apply_stroke_state` already attaches to
     // every stroke paint. Mirrors the fill-side surface so the bridge
     // can expose `canvasSetStrokeLinearGradient` etc. without inventing

@@ -101,7 +101,7 @@ void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
 // CoreGraphics has no native conic / sweep shader, so we record the conic
 // parameters here and software-rasterise a CGImage at fill time
 // (paint_conic_into_clip), interpolating colour stops by atan2 angle from
-// (cx, cy). The Skia backend uses SkGradientShader::MakeSweep — same
+// (cx, cy). The Skia backend uses SkShaders::SweepGradient — same
 // visual result, real two-stop+ sweep gradient.
 void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
                                                   float start_angle,

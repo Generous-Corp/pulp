@@ -227,6 +227,116 @@ not this skill.
 
 ## Gotchas
 
+### Missing `vst3_entry.cpp` → no `GetPluginFactory` symbol → silent host reject
+
+`PulpPluginFormats.cmake`'s `_pulp_add_vst3()` only links a user-side
+factory file if `${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp` exists.
+The macro `PULP_VST3_PLUGIN(...)` (from `vst3_entry.hpp`) is what
+expands to Steinberg's `BEGIN_FACTORY_DEF / END_FACTORY` block — and
+that block is where `extern "C" GetPluginFactory()` is **defined**.
+Without `vst3_entry.cpp`, the linked `.vst3` has `bundleEntry` /
+`bundleExit` from `macmain.cpp` but **no `GetPluginFactory`** at all.
+
+`pulp_add_plugin(... FORMATS VST3)` will still build the bundle
+cleanly. CLAP / AU / AUv3 entry files have separate registration
+paths (`PULP_AUV3_PLUGIN`, etc.) — adding only those does **not**
+cover VST3. Hosts call `dlsym(bundle, "GetPluginFactory")`, get NULL,
+and silently drop the plugin during scan. In Reaper that shows up as
+a hash-only `MyPlugin.vst3=<hash>` line in
+`reaper-vstplugins_arm64.ini` (no comma-separated UID/name after the
+hash) — exactly the same surface symptom as the UID-collision case
+below, so check both.
+
+This bit us when porting ChainerSynth to VST3: AU/AUv3/CLAP all
+loaded; VST3 disappeared from Reaper after rescan with no log.
+
+**Diagnostic — verify the symbol exists before debugging anything
+else:**
+
+```bash
+# All factory/bundle symbols (C-linkage, leading underscore on macOS)
+nm -gU MyPlugin.vst3/Contents/MacOS/MyPlugin | grep -v __Z | \
+    grep -iE 'factory|bundle'
+# Expect:  _GetPluginFactory  _bundleEntry  _bundleExit
+# If _GetPluginFactory is missing, you're hitting this gotcha.
+```
+
+A 30-line `dlopen` + `dlsym` probe is the fastest way to confirm a
+silently-broken VST3; reuse the pattern in
+`tools/scripts/probe_vst3_factory.c` (if absent, write a one-off — it
+beats round-tripping through a DAW for every build).
+
+**Fix:** add a `vst3_entry.cpp` next to the plugin sources:
+
+```cpp
+#include "my_plugin.hpp"
+#include <pulp/format/vst3_entry.hpp>
+
+static const Steinberg::FUID MyPluginUID(0x50554C50, 0x...);
+
+PULP_VST3_PLUGIN(MyPluginUID, "MyPlugin",
+                  Steinberg::Vst::PlugType::kInstrumentSynth,
+                  "Vendor", "1.0.0", "https://example.com",
+                  pulp::examples::create_my_plugin)
+```
+
+Then **reconfigure** (`cmake -S . -B build`) — CMake's
+`if(EXISTS ...)` for `vst3_entry.cpp` is evaluated at configure time,
+so a plain `cmake --build` will not pick the new file up.
+
+**Long-term:** `pulp_add_plugin(... FORMATS VST3)` should either
+fail-fast with a clear error at configure time when `vst3_entry.cpp`
+is missing, or auto-synthesize a default factory from the existing
+`PLUGIN_CODE`/`MANUFACTURER_CODE`/`CATEGORY` arguments. Either is
+better than the current silent-drop default.
+
+### Reaper de-dupes VST3s by VST3 UID (and silently rejects collisions)
+
+Reaper's macOS VST3 scanner (`reaper-vstplugins_arm64.ini`) keys plugins
+by VST3 UID. If you install a new `.vst3` whose UID matches an entry
+already in the scan database — even from a `.vst3` no longer on disk —
+Reaper marks the new bundle as **"Plug-ins that failed to scan"** with
+no console output and no crash log. The default Reaper preference
+"Allow multiple plug-ins with the same VST3 UID" is OFF, so two builds
+of the same plugin under different paths (e.g. `ChainerSynth.vst3` and
+`ChainerSynth-m149.vst3`) cannot coexist.
+
+This bit us during the Skia m144 → m149 swap when we installed a
+side-by-side `ChainerSynth-m149.vst3`: Reaper's scan DB still had a
+stale `ChainerSynth.vst3=...` entry from a previous build (file gone,
+entry orphaned), and the new VST3's UID collision triggered the silent
+reject.
+
+**Diagnostics (no log, no crash):**
+
+1. `Reaper → Preferences → Plug-ins → VST → Re-scan… → "Plug-ins that
+   failed to scan"` shows the rejected path.
+2. `grep -i <plugin-name> ~/Library/Application\ Support/REAPER/reaper-vstplugins_arm64.ini`
+   reveals both the orphaned entry (path that no longer exists) and the
+   under-scored failing-scan entry (no plugin metadata after `=`).
+
+**Fix:** delete stale entries from Reaper's scan DB AND install the
+plugin under exactly one path:
+
+```bash
+# Quit Reaper first
+sed -i.bak '/^MyPlugin.*\.vst3=/d' \
+    ~/Library/Application\ Support/REAPER/reaper-vstplugins_arm64.ini
+# Install under one canonical name
+rm -rf ~/Library/Audio/Plug-Ins/VST3/MyPlugin*.vst3
+cp -R build/VST3/MyPlugin.vst3 ~/Library/Audio/Plug-Ins/VST3/MyPlugin.vst3
+# Relaunch Reaper — it will re-scan fresh
+```
+
+Alternatively the user can flip "Allow multiple plug-ins with the same
+VST3 UID" in Reaper Preferences, but the default-off behavior is the
+one most VST3 hosts enforce, so the workflow above is more durable.
+
+**Don't** ship two builds of the same plugin with the same VST3 UID —
+if you need a side-by-side comparison build, bump the VST3 UID's
+SubCategory bytes (last 4 bytes of the 16-byte UID, by convention) so
+the two builds register as separate plugins.
+
 ### `DEVELOPMENT` / `RELEASE` macro must precede the SDK include
 
 VST3 SDK fails to compile unless **exactly one** of `DEVELOPMENT` or

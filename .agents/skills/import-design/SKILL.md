@@ -52,6 +52,74 @@ Detect which design source the user wants by checking:
 
 ## Workflow
 
+### Imported designs: declare dimensions in CMake, never hand-roll `view_size()`
+
+Pulp's SDK auto-sizes plugin editors from a single pair of CMake args, so
+every imported-design plugin opens at the right size in AU / AUv3 / VST3 /
+CLAP / Standalone with no per-format override. **Always use the CMake path
+— don't hand-roll `Processor::view_size()` for imported designs.**
+
+```cmake
+pulp_add_plugin(MyPlugin
+    FORMATS         AU AUv3 VST3 CLAP Standalone
+    ...
+    DESIGN_WIDTH    900     # preferred editor width in logical pixels
+    DESIGN_HEIGHT   520     # preferred editor height in logical pixels
+    # Optional explicit bounds; omit for auto-derivation:
+    #   min  = preferred * 2/3
+    #   max  = preferred * 2
+    #   aspect_ratio = width / height
+    # DESIGN_MIN_WIDTH 700
+    # DESIGN_MIN_HEIGHT 400
+    # DESIGN_MAX_WIDTH 1920
+    # DESIGN_MAX_HEIGHT 1080
+    SOURCES         my_plugin.hpp my_plugin.cpp
+)
+```
+
+Mechanism (issue #2784 stage A):
+
+1. `pulp_add_plugin` injects `PULP_PLUGIN_DESIGN_W/H/MIN_W/...` as
+   `target_compile_definitions` on `${target}_Core` (PUBLIC, so every
+   linked format adapter sees them).
+2. `format::Processor::view_size()`'s default checks for the macros and
+   calls `view_size_from_design(w, h, ...)` to derive the full `ViewSize`.
+3. The derived `min > 0` is what enables CLAP's `gui_can_resize`
+   (`core/format/include/pulp/format/clap_entry.hpp:391`) and prevents
+   the corner-drag-crops-instead-of-resizes regression that landed on the
+   m149 branch and bit us in Reaper.
+
+Symptoms when this is missing (any of these = you forgot the CMake args):
+
+- **CLAP / VST3 corner-drag crops instead of resizes.** Default `min = 0`
+  fails `gui_can_resize`, host treats the editor as non-resizable.
+- **Plugin opens at a random portrait size after re-launch.** With no
+  design-side dimensions and no saved window rect, hosts fall back to
+  the format's default content area (often portrait ~360×480).
+
+How to choose the numbers:
+
+1. Open the imported JSX bundle in `pulp-screenshot --script <bundle.js>`
+   and try `--width / --height` values until the layout looks right with
+   no letterboxing or content clipping. Those become `DESIGN_WIDTH/HEIGHT`.
+2. Trust the auto-derivation for min/max unless you have a specific reason
+   to clamp tighter (e.g., a widget that breaks below 700×400).
+3. The derived `aspect_ratio = width/height` makes the host snap the
+   corner-drag to the design AR (Phase 3 design viewport letterboxes the
+   rest).
+
+Stage B of #2784 — `pulp import-design` auto-emitting a `.size.json`
+sidecar that `pulp_add_plugin` reads, so the dimensions are declared
+**once** at import time — is the immediate follow-up. Until then,
+`DESIGN_WIDTH / DESIGN_HEIGHT` is the codified path; the C++
+`view_size_from_design()` helper is unit-tested in
+`test/test_processor_defaults.cpp`.
+
+**Do not write a `view_size()` override** for an imported-design plugin
+unless you have a runtime-computed dimension (rare; usually a custom
+non-script UI). Hand-rolling reintroduces the per-plugin maintenance
+burden the SDK args were designed to eliminate.
+
 ### DesignIR v1 asset manifest lane
 
 When a user asks for canonical IR or an import pipeline handoff, prefer

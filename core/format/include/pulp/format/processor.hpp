@@ -35,6 +35,40 @@ struct ViewSize {
     double aspect_ratio = 0.0;
 };
 
+/// Build a ViewSize from a design-import preferred size with sensible
+/// derived bounds. Used by `Processor::view_size()`'s default when
+/// `pulp_add_plugin(... DESIGN_WIDTH N DESIGN_HEIGHT N)` is set, and
+/// callable directly by plugins that compute dimensions at runtime.
+///
+/// Derivation rules (only when the corresponding explicit value is 0):
+///   - min = preferred * 2/3
+///   - max = preferred * 2
+///   - aspect_ratio = preferred_width / preferred_height
+///
+/// CLAP's `gui_can_resize` requires min > 0 (see clap_entry.hpp), so
+/// the derived min is what makes corner-drag resize work across all
+/// formats with no per-plugin override. Issue #2784 tracks the
+/// auto-sidecar path that will populate the inputs from
+/// `pulp import-design`.
+constexpr ViewSize view_size_from_design(uint32_t preferred_width,
+                                          uint32_t preferred_height,
+                                          uint32_t min_width = 0,
+                                          uint32_t min_height = 0,
+                                          uint32_t max_width = 0,
+                                          uint32_t max_height = 0) {
+    return ViewSize{
+        preferred_width,
+        preferred_height,
+        min_width > 0 ? min_width : (preferred_width * 2) / 3,
+        min_height > 0 ? min_height : (preferred_height * 2) / 3,
+        max_width > 0 ? max_width : preferred_width * 2,
+        max_height > 0 ? max_height : preferred_height * 2,
+        preferred_height > 0
+            ? static_cast<double>(preferred_width) / static_cast<double>(preferred_height)
+            : 0.0,
+    };
+}
+
 /// Plugin category — determines bus layout expectations and DAW behavior.
 enum class PluginCategory {
     Effect,      ///< Audio effect (takes input, produces output)
@@ -343,12 +377,30 @@ public:
     /// Preferred editor window size in logical pixels.
     virtual std::pair<uint32_t, uint32_t> editor_size() const { return {400, 300}; }
 
-    /// Return the full view size hints (preferred/min/max). Default builds
-    /// a ViewSize from `editor_size()` with no min/max bounds. Override for
-    /// resizable editors that need explicit bounds.
+    /// Return the full view size hints (preferred/min/max).
+    ///
+    /// Resolution order (first non-zero wins):
+    /// 1. `PULP_PLUGIN_DESIGN_W` / `_H` compile-defs injected by
+    ///    `pulp_add_plugin(... DESIGN_WIDTH N DESIGN_HEIGHT N)`. When set,
+    ///    min is derived as preferred * 2/3, max as preferred * 2, and
+    ///    aspect_ratio as W/H — so CLAP's `gui_can_resize` (which requires
+    ///    min > 0) works without per-plugin overrides. Explicit
+    ///    `DESIGN_MIN_*` / `DESIGN_MAX_*` args override the derived values.
+    /// 2. `editor_size()` with no min/max bounds (legacy default).
+    ///
+    /// Override this method when a plugin needs runtime-computed bounds
+    /// (e.g., a dynamically generated UI). Most imported-design plugins
+    /// should use the CMake args instead — see `import-design` skill.
     virtual ViewSize view_size() const {
+#ifdef PULP_PLUGIN_DESIGN_W
+        return view_size_from_design(
+            PULP_PLUGIN_DESIGN_W, PULP_PLUGIN_DESIGN_H,
+            PULP_PLUGIN_DESIGN_MIN_W, PULP_PLUGIN_DESIGN_MIN_H,
+            PULP_PLUGIN_DESIGN_MAX_W, PULP_PLUGIN_DESIGN_MAX_H);
+#else
         auto [w, h] = editor_size();
         return ViewSize{w, h, 0, 0, 0, 0};
+#endif
     }
 
     /// Create a custom view for this processor. Default returns nullptr,

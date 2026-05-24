@@ -252,6 +252,42 @@ TEST_CASE("Processor custom view_size can provide resize bounds and aspect ratio
     REQUIRE(hints.aspect_ratio == 16.0 / 9.0);
 }
 
+TEST_CASE("view_size_from_design derives sensible bounds + aspect from preferred",
+          "[format][processor-defaults][editor][design-import][issue-2784]") {
+    // This is the helper that Processor::view_size()'s default calls when
+    // pulp_add_plugin(... DESIGN_WIDTH N DESIGN_HEIGHT N) is set.
+    SECTION("auto-derived bounds (no explicit min/max)") {
+        const auto hints = pulp::format::view_size_from_design(900, 520);
+        REQUIRE(hints.preferred_width == 900);
+        REQUIRE(hints.preferred_height == 520);
+        // CLAP's gui_can_resize requires min > 0 — the derived 2/3 floor is
+        // exactly what saves plugin authors from per-format min overrides.
+        REQUIRE(hints.min_width == 600);
+        REQUIRE(hints.min_height == 346);
+        REQUIRE(hints.max_width == 1800);
+        REQUIRE(hints.max_height == 1040);
+        REQUIRE(hints.aspect_ratio == 900.0 / 520.0);
+    }
+
+    SECTION("explicit non-zero min/max overrides the derivation") {
+        const auto hints =
+            pulp::format::view_size_from_design(900, 520, 700, 400, 1920, 1080);
+        REQUIRE(hints.min_width == 700);
+        REQUIRE(hints.min_height == 400);
+        REQUIRE(hints.max_width == 1920);
+        REQUIRE(hints.max_height == 1080);
+        // aspect_ratio always tracks preferred — the explicit max doesn't
+        // change what ratio the host snaps the corner-drag to.
+        REQUIRE(hints.aspect_ratio == 900.0 / 520.0);
+    }
+
+    SECTION("zero preferred_height degrades safely (aspect = 0, no /0)") {
+        const auto hints = pulp::format::view_size_from_design(900, 0);
+        REQUIRE(hints.preferred_height == 0);
+        REQUIRE(hints.aspect_ratio == 0.0);
+    }
+}
+
 TEST_CASE("Processor has_editor override can disable default editor contract",
           "[format][processor-defaults][editor][coverage][phase3]") {
     EditorlessProcessor p;

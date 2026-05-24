@@ -383,7 +383,7 @@ public:
     // createLinearGradient(...) | createRadialGradient(...) |
     // createConicGradient(...)`. Defaults degrade to the first-stop
     // colour via `set_stroke_color`, matching the prior pre-Wave-3
-    // behavior; SkiaCanvas overrides with real `SkGradientShader`
+    // behavior; SkiaCanvas overrides with real `SkShaders` gradient shaders
     // shaders stored on `stroke_shader_` so subsequent stroke paths
     // (stroke_rect / stroke_current_path / stroke_text) pick the
     // gradient up via `apply_stroke_state`.

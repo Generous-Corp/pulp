@@ -2,9 +2,12 @@
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG SKIA_RELEASE_TAG=chrome/m144
-ARG SKIA_LINUX_X64_SHA256=bde9977efb2c796e22a71b0086e2b15961b0ccc7dc4de8559b369229e922ce34
-ARG SKIA_LINUX_X64_URL=https://github.com/olilarkin/skia-builder/releases/download/chrome/m144/skia-build-linux-x64-gpu-release.zip
+ARG SKIA_RELEASE_TAG=chrome/m149
+ARG SKIA_LINUX_X64_SHA256=53e2bfb5225148311da9bbcb7e65da4479acf774bc3d40b0341530cdc48e97b6
+ARG SKIA_LINUX_X64_URL=https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-linux-x64-gpu-release.zip
+# skia-python intentionally stays one milestone behind — the PyPI bindings
+# trail the C++ surface, and this smoke is the optional fallback. The C++
+# raster harness is the source of truth for goldens on m149.
 ARG SKIA_PYTHON_VERSION=144.0.post2
 
 ENV SKIA_DIR=/opt/pulp/skia-build

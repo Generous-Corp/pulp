@@ -22,6 +22,7 @@
 #include "modules/skparagraph/include/ParagraphStyle.h"
 #include "modules/skparagraph/include/FontCollection.h"
 #include "modules/skparagraph/include/TextStyle.h"
+#include "skia_unicode.hpp"
 #include "modules/skshaper/include/SkShaper.h"
 #include "include/core/SkFontMgr.h"
 
@@ -721,7 +722,7 @@ struct TextShaper::Impl {
                     tstyle.setFontSize(font_size);
                     pstyle.setTextStyle(tstyle);
                     auto pb = skia::textlayout::ParagraphBuilder::make(
-                        pstyle, fc);
+                        pstyle, fc, shared_sk_unicode());
                     if (pb) {
                         pb->addText(text.c_str(), text.size());
                         auto paragraph = pb->Build();
