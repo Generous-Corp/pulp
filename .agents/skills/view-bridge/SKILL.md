@@ -324,8 +324,14 @@ fresh lib instead of segfaulting at first paint.
    Processor via the format-specific accessor (AU v2 property, AU v3
    ObjC selector, CLAP / VST3 constructor param).
 4. **Hard-coding `editor_size()` when you actually want resize
-   bounds.** Override `view_size()` and return a `ViewSize` with
-   real min/max; hosts use those to constrain user-drag resize.
+   bounds.** Prefer `pulp_add_plugin(... DESIGN_WIDTH N DESIGN_HEIGHT N)`
+   over a per-plugin `view_size()` override for imported-design plugins
+   (issue #2784 stage A) — the macros flow into the default
+   `Processor::view_size()` via `format::view_size_from_design(...)`,
+   which derives `min = preferred * 2/3` and `max = 2 * preferred`. The
+   derived `min > 0` is what makes CLAP's `gui_can_resize` engage.
+   Override `view_size()` directly only when the dimensions are computed
+   at runtime (rare).
 5. **Forgetting that adapters must read `bridge.size_hints().min_*`
    when building the host's `WindowOptions`.** The bridge caches
    `Processor::view_size()` in `size_hints_`, but each adapter is
