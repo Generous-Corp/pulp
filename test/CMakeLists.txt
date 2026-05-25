@@ -2573,6 +2573,13 @@ add_dependencies(pulp-test-design-import-benchmark pulp-design-import-bench)
 catch_discover_tests(pulp-test-design-import-benchmark
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-design-import-benchmark-contracts
+    test_design_import_benchmark_contracts.cpp)
+target_link_libraries(pulp-test-design-import-benchmark-contracts
+    PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-benchmark-contracts
+    PROPERTIES LABELS "parser-import")
+
 add_executable(pulp-test-design-import-screenshot-parity
     test_design_import_screenshot_parity.cpp)
 target_link_libraries(pulp-test-design-import-screenshot-parity
