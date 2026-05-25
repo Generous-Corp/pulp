@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02180"></a>
+## [0.218.0] - 2026-05-25
+
+- fix: Codex P1/P2 round 3 — MidiMessageCollector zero-loss overflow slot + ARA SDK-ON assert non-null ([#2856](https://github.com/danielraffel/pulp/pull/2856))
+- test(format): ARA scaffold validation — default-OFF defaults + SDK-ON conditional (item 3.6) ([#2854](https://github.com/danielraffel/pulp/pull/2854))
+
 <a id="v02170"></a>
 ## [0.217.0] - 2026-05-25
 
@@ -2763,6 +2769,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.218.0]: https://github.com/danielraffel/pulp/releases/tag/v0.218.0
 [0.217.0]: https://github.com/danielraffel/pulp/releases/tag/v0.217.0
 [0.216.0]: https://github.com/danielraffel/pulp/releases/tag/v0.216.0
 [0.215.0]: https://github.com/danielraffel/pulp/releases/tag/v0.215.0
