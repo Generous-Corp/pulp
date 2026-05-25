@@ -48,16 +48,21 @@ std::optional<std::vector<uint8_t>> aes_decrypt(
 
 // ── HMAC (RFC 2104 / RFC 2202 / RFC 4231) ───────────────────────────────
 
-/// Compute HMAC-SHA256(key, data). Returns 32-byte tag.
+/// Compute HMAC-SHA256(key, data). Returns 32-byte tag on success,
+/// `std::nullopt` if the underlying mbedTLS context fails (alloc /
+/// bad input / build-config mismatch — rare in practice).
 /// Vectors: RFC 4231 (HMAC-SHA-256).
-std::vector<uint8_t> hmac_sha256(
+std::optional<std::vector<uint8_t>> hmac_sha256(
     const uint8_t* key, size_t key_size,
     const uint8_t* data, size_t data_size);
-std::vector<uint8_t> hmac_sha256(std::string_view key, std::string_view data);
+std::optional<std::vector<uint8_t>> hmac_sha256(std::string_view key,
+                                                  std::string_view data);
 
-/// Compute HMAC-SHA1(key, data). Returns 20-byte tag.
-/// Vectors: RFC 2202 (HMAC-SHA-1). Legacy use (e.g., AWS Signature v2).
-std::vector<uint8_t> hmac_sha1(
+/// Compute HMAC-SHA1(key, data). Returns 20-byte tag on success,
+/// `std::nullopt` on mbedTLS failure (see hmac_sha256). Legacy use
+/// (e.g., AWS Signature v2).
+/// Vectors: RFC 2202 (HMAC-SHA-1).
+std::optional<std::vector<uint8_t>> hmac_sha1(
     const uint8_t* key, size_t key_size,
     const uint8_t* data, size_t data_size);
 

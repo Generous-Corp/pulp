@@ -146,37 +146,45 @@ std::optional<std::vector<uint8_t>> aes_decrypt(
 // ── HMAC ────────────────────────────────────────────────────────────────
 
 namespace {
-std::vector<uint8_t> hmac_with_md(mbedtls_md_type_t md_type, size_t out_size,
-                                    const uint8_t* key, size_t key_size,
-                                    const uint8_t* data, size_t data_size) {
-    std::vector<uint8_t> tag(out_size, 0);
+std::optional<std::vector<uint8_t>> hmac_with_md(
+    mbedtls_md_type_t md_type, size_t out_size,
+    const uint8_t* key, size_t key_size,
+    const uint8_t* data, size_t data_size) {
     const mbedtls_md_info_t* md = mbedtls_md_info_from_type(md_type);
-    if (md == nullptr) return tag; // never happens for SHA-1/256 in mbedTLS
+    if (md == nullptr) return std::nullopt;
     mbedtls_md_context_t ctx;
     mbedtls_md_init(&ctx);
     if (mbedtls_md_setup(&ctx, md, /*hmac=*/1) != 0) {
         mbedtls_md_free(&ctx);
-        return tag;
+        return std::nullopt;
     }
-    mbedtls_md_hmac_starts(&ctx, key, key_size);
-    mbedtls_md_hmac_update(&ctx, data, data_size);
-    mbedtls_md_hmac_finish(&ctx, tag.data());
+    std::vector<uint8_t> tag(out_size, 0);
+    // Propagate the return code of every HMAC step so an alloc / bad-
+    // input / build-config failure surfaces as nullopt instead of a
+    // silently-zero tag (Codex P1 on #2841).
+    int rc = mbedtls_md_hmac_starts(&ctx, key, key_size);
+    if (rc == 0) rc = mbedtls_md_hmac_update(&ctx, data, data_size);
+    if (rc == 0) rc = mbedtls_md_hmac_finish(&ctx, tag.data());
     mbedtls_md_free(&ctx);
+    if (rc != 0) return std::nullopt;
     return tag;
 }
 } // namespace
 
-std::vector<uint8_t> hmac_sha256(const uint8_t* key, size_t key_size,
-                                   const uint8_t* data, size_t data_size) {
+std::optional<std::vector<uint8_t>> hmac_sha256(
+    const uint8_t* key, size_t key_size,
+    const uint8_t* data, size_t data_size) {
     return hmac_with_md(MBEDTLS_MD_SHA256, 32, key, key_size, data, data_size);
 }
-std::vector<uint8_t> hmac_sha256(std::string_view key, std::string_view data) {
+std::optional<std::vector<uint8_t>> hmac_sha256(std::string_view key,
+                                                  std::string_view data) {
     return hmac_sha256(reinterpret_cast<const uint8_t*>(key.data()), key.size(),
                        reinterpret_cast<const uint8_t*>(data.data()), data.size());
 }
 
-std::vector<uint8_t> hmac_sha1(const uint8_t* key, size_t key_size,
-                                 const uint8_t* data, size_t data_size) {
+std::optional<std::vector<uint8_t>> hmac_sha1(
+    const uint8_t* key, size_t key_size,
+    const uint8_t* data, size_t data_size) {
     return hmac_with_md(MBEDTLS_MD_SHA1, 20, key, key_size, data, data_size);
 }
 

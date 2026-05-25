@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 
 namespace pulp::midi {
 
@@ -84,17 +85,8 @@ public:
         const double block_end_seconds = block_start_seconds + block_duration;
 
         std::size_t drained = 0;
-        while (true) {
-            auto peeked = queue_.try_pop();
-            if (!peeked) break;
-            const auto& entry = *peeked;
-            if (entry.timestamp_seconds >= block_end_seconds) {
-                // This event belongs to a future block. Push it back so
-                // the next drain sees it. SpscQueue is single-reader so
-                // a re-push is safe from the drain thread.
-                queue_.try_push(entry);
-                break;
-            }
+
+        auto deliver = [&](const TimestampedShortMessage& entry) {
             int sample_offset = 0;
             if (entry.timestamp_seconds > block_start_seconds) {
                 const double offset_seconds = entry.timestamp_seconds - block_start_seconds;
@@ -106,12 +98,39 @@ public:
             }
             MidiEvent event{entry.message, sample_offset, entry.timestamp_seconds};
             out.add(event);
+        };
+
+        // Consume the previously-deferred event first if it now fits.
+        // Pending storage lives outside the SPSC queue so the consumer
+        // thread never writes to the queue (Codex P1 on #2843).
+        if (pending_.has_value()) {
+            if (pending_->timestamp_seconds >= block_end_seconds) {
+                // Still in the future — leave it pending.
+                return 0;
+            }
+            deliver(*pending_);
+            pending_.reset();
+            ++drained;
+        }
+
+        while (true) {
+            auto popped = queue_.try_pop();
+            if (!popped) break;
+            const auto& entry = *popped;
+            if (entry.timestamp_seconds >= block_end_seconds) {
+                // Future event — stash in the pending slot for the next
+                // call. The SPSC queue is left untouched by the consumer.
+                pending_ = entry;
+                break;
+            }
+            deliver(entry);
             ++drained;
         }
         return drained;
     }
 
-    /// Approximate number of events currently queued.
+    /// Approximate number of events currently queued (does not count the
+    /// deferred-future event in `pending_`).
     std::size_t size_approx() const { return queue_.size_approx(); }
 
     /// Compile-time capacity.
@@ -119,6 +138,10 @@ public:
 
 private:
     pulp::runtime::SpscQueue<TimestampedShortMessage, Capacity> queue_;
+    /// One-slot lookahead for a popped-but-deferred future event.
+    /// Owned and accessed exclusively by the consumer (audio) thread,
+    /// so writing here doesn't violate the SPSC contract of `queue_`.
+    std::optional<TimestampedShortMessage> pending_;
 };
 
 } // namespace pulp::midi

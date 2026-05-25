@@ -43,7 +43,8 @@ TEST_CASE("HMAC-SHA256 RFC 4231 test case 1", "[runtime][crypto][hmac][rfc]") {
     auto key = from_hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
     auto tag = hmac_sha256(key.data(), key.size(),
                             reinterpret_cast<const uint8_t*>("Hi There"), 8);
-    REQUIRE(to_hex(tag) ==
+    REQUIRE(tag.has_value());
+    REQUIRE(to_hex(*tag) ==
             "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
 }
 
@@ -52,7 +53,8 @@ TEST_CASE("HMAC-SHA256 RFC 4231 test case 2 ('Jefe')",
     auto tag = hmac_sha256(
         reinterpret_cast<const uint8_t*>("Jefe"), 4,
         reinterpret_cast<const uint8_t*>("what do ya want for nothing?"), 28);
-    REQUIRE(to_hex(tag) ==
+    REQUIRE(tag.has_value());
+    REQUIRE(to_hex(*tag) ==
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
 }
 
@@ -61,14 +63,16 @@ TEST_CASE("HMAC-SHA256 RFC 4231 test case 3 (long data + 0xaa key)",
     std::array<uint8_t, 20> key; key.fill(0xaa);
     std::array<uint8_t, 50> data; data.fill(0xdd);
     auto tag = hmac_sha256(key.data(), key.size(), data.data(), data.size());
-    REQUIRE(to_hex(tag) ==
+    REQUIRE(tag.has_value());
+    REQUIRE(to_hex(*tag) ==
             "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe");
 }
 
 TEST_CASE("HMAC-SHA256 string_view overload", "[runtime][crypto][hmac]") {
     auto tag = hmac_sha256(std::string_view("Jefe"),
                             std::string_view("what do ya want for nothing?"));
-    REQUIRE(to_hex(tag) ==
+    REQUIRE(tag.has_value());
+    REQUIRE(to_hex(*tag) ==
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
 }
 
@@ -80,7 +84,8 @@ TEST_CASE("HMAC-SHA1 RFC 2202 test case 1", "[runtime][crypto][hmac][rfc]") {
     auto key = from_hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
     auto tag = hmac_sha1(key.data(), key.size(),
                           reinterpret_cast<const uint8_t*>("Hi There"), 8);
-    REQUIRE(to_hex(tag) == "b617318655057264e28bc0b6fb378c8ef146be00");
+    REQUIRE(tag.has_value());
+    REQUIRE(to_hex(*tag) == "b617318655057264e28bc0b6fb378c8ef146be00");
 }
 
 TEST_CASE("HMAC-SHA1 RFC 2202 test case 2 ('Jefe')",
@@ -88,7 +93,24 @@ TEST_CASE("HMAC-SHA1 RFC 2202 test case 2 ('Jefe')",
     auto tag = hmac_sha1(
         reinterpret_cast<const uint8_t*>("Jefe"), 4,
         reinterpret_cast<const uint8_t*>("what do ya want for nothing?"), 28);
-    REQUIRE(to_hex(tag) == "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
+    REQUIRE(tag.has_value());
+    REQUIRE(to_hex(*tag) == "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
+}
+
+TEST_CASE("HMAC returns optional so callers can detect mbedTLS failure (Codex #2841 P1)",
+          "[runtime][crypto][hmac][regression]") {
+    // Smoke: the success path of every supported MAC must yield a value
+    // of the expected length. Failure-mode (alloc/build-config) is hard
+    // to trigger in a test, but the API change itself is the fix —
+    // callers can no longer treat a silently-zero tag as success.
+    const uint8_t key[] = {0x00};
+    const uint8_t data[] = {0x00};
+    auto s256 = hmac_sha256(key, 1, data, 1);
+    auto s1   = hmac_sha1(key, 1, data, 1);
+    REQUIRE(s256.has_value());
+    REQUIRE(s256->size() == 32);
+    REQUIRE(s1.has_value());
+    REQUIRE(s1->size() == 20);
 }
 
 // ────────────────────────────────────────────────────────────────────────
