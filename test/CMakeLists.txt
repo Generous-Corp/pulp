@@ -2148,6 +2148,9 @@ pulp_add_test_suite(pulp-test-pan-mix-laws LIBRARIES pulp::signal)
 # macOS plan Batch E (partial) — UMP per-note + JR Clock
 pulp_add_test_suite(pulp-test-ump-extensions LIBRARIES pulp::midi)
 
+# macOS plan Batch D (partial) — HMAC + AEAD primitives
+pulp_add_test_suite(pulp-test-hmac-aead LIBRARIES pulp::runtime)
+
 # macOS plan Batch A — Foundations
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
