@@ -9,9 +9,10 @@
 Pulp already has real implementation in each audited capability area, but the
 support is uneven. The strongest foundations are child-process launching,
 thread-backed task dispatch, platform audio I/O backends, WAV/AIFF/FLAC/MP3/Ogg
-read paths, and OSC message transport. The main gaps are higher-level manager
-APIs, native main-thread dispatch, complete read/write coverage, concrete
-non-Apple native embedding, and bundle-aware OSC routing.
+read paths, and OSC message transport. The current closure pass is intentionally
+limited to threads/processes, native main-thread dispatch, OSC, and native window
+embedding; audio format and device-manager gaps remain documented here for the
+larger follow-up audit.
 
 This plan is code-grounded. It treats existing implementation files as the
 source of truth and avoids making product claims based only on planning docs.
@@ -25,8 +26,8 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | Track | Branch target | Worktree target | Status | Done means |
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
-| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Draft PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; hosted-TSan failure fix and local coverage validated in code commit `4953761c6`, hosted checks running | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | Draft PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; hosted Linux/Codecov check sweep pending | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, focused UDP and pure parser tests |
+| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Draft PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; rebased onto `origin/main` at `a0ec980e2`; focused dispatcher/IPC/OSC-bind validation passing; SDK bump refreshed to `0.216.0` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | Draft PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto current `main`; local OSC suite and manual GPU-off diff coverage passing | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | Queued | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
@@ -39,7 +40,8 @@ Validation expectations for each PR:
   docs issues before opening the PR; use Claude as an independent review pass
   and fix actionable findings before submitting.
 - Use the normal Shipyard PR flow so required checks and Codecov comments are
-  recorded before merge.
+  recorded before merge. For this focused pass, do not run SSH Windows/Ubuntu
+  validation lanes; use local/macOS evidence and GitHub-hosted checks.
 - After each PR opens, sweep Shipyard/GitHub review and CI comments, address
   actionable feedback on the same branch, and re-run focused validation before
   moving to the next feature.
@@ -322,6 +324,16 @@ Native event loop local validation:
   `python3 tools/scripts/test_codecov_config.py` — 17 tests, and
   `python3 tools/scripts/test_local_diff_cover.py` — 17 tests.
 - `git diff --check` passed.
+- After the branch was rebased onto `origin/main` at `a0ec980e2`, the stale
+  `0.209.0` version bump was dropped and the required SDK minor bump was
+  refreshed to `0.216.0`. Focused Release/GPU-off validation passed:
+  `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF`,
+  `cmake --build build --target pulp-test-events pulp-test-ipc pulp-test-osc
+  pulp-test-osc-channel -j8`, and
+  `ctest --test-dir build --output-on-failure -R
+  "EventLoop|MainThread|main-thread|dispatcher|IPC|Interprocess|OscChannel|OSC
+  Receiver rejects binding"` 67/67. This explicitly re-ran the two OSC
+  bind-collision cases that failed on the stale hosted Linux merge.
 - Claude and RepoPrompt blocker reviews were run. Claude's P1 findings around
   async exceptions, EventLoop thread-id synchronization, iOS registration
   order, unbounded sync retry, and SDL drain starvation were fixed; the final
