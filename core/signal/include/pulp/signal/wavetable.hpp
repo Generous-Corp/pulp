@@ -75,9 +75,20 @@ public:
         frequency_ = hz;
         const int new_band = select_band_for(frequency_);
         if (new_band != target_band_) {
-            // Begin a crossfade. The previous target becomes the
-            // crossfade source; the new target is what `next()` ramps
-            // toward.
+            // Begin a crossfade. If a previous fade is still in flight,
+            // capture its current source + target + remaining samples
+            // so the new fade can blend FROM the actually-audible mix
+            // rather than jumping back to the previous target (Codex P1
+            // on #2865 — rapid retunes lost continuity, producing the
+            // click the crossfade was meant to prevent).
+            if (crossfade_samples_remaining_ > 0) {
+                in_flight_source_ = crossfade_source_;
+                in_flight_target_ = target_band_;
+                in_flight_remaining_ = crossfade_samples_remaining_;
+                has_in_flight_ = true;
+            } else {
+                has_in_flight_ = false;
+            }
             crossfade_source_ = target_band_;
             target_band_ = new_band;
             crossfade_samples_remaining_ = kCrossfadeSamples;
@@ -88,6 +99,8 @@ public:
         phase_ = 0.0f;
         crossfade_samples_remaining_ = 0;
         crossfade_source_ = target_band_;
+        has_in_flight_ = false;
+        in_flight_remaining_ = 0;
     }
 
     /// Generate the next sample. Returns 0 for an empty wavetable
@@ -100,8 +113,26 @@ public:
         if (crossfade_samples_remaining_ > 0) {
             const float t = 1.0f - (static_cast<float>(crossfade_samples_remaining_)
                                     / static_cast<float>(kCrossfadeSamples));
-            const float old_sample = sample_band(crossfade_source_, phase_);
-            out = old_sample * (1.0f - t) + new_sample * t;
+            // Source for the new fade. If a previous fade was still
+            // in flight when this one started, sample the in-flight
+            // blend at its progress ratio so the new fade begins from
+            // the actually-audible mix instead of the in-flight target
+            // (Codex P1 on #2865).
+            float source_sample;
+            if (has_in_flight_ && in_flight_remaining_ > 0) {
+                const float old_t = 1.0f
+                    - (static_cast<float>(in_flight_remaining_)
+                       / static_cast<float>(kCrossfadeSamples));
+                const float old_src = sample_band(in_flight_source_, phase_);
+                const float old_tgt = sample_band(in_flight_target_, phase_);
+                source_sample = old_src * (1.0f - old_t) + old_tgt * old_t;
+                --in_flight_remaining_;
+                if (in_flight_remaining_ == 0) has_in_flight_ = false;
+            } else {
+                source_sample = sample_band(crossfade_source_, phase_);
+                has_in_flight_ = false;
+            }
+            out = source_sample * (1.0f - t) + new_sample * t;
             --crossfade_samples_remaining_;
         }
 
@@ -160,6 +191,12 @@ private:
     int target_band_ = 0;
     int crossfade_source_ = 0;
     std::size_t crossfade_samples_remaining_ = 0;
+    // Captured in-flight fade state so rapid retunes blend FROM the
+    // actually-audible mix (Codex P1 on #2865).
+    bool has_in_flight_ = false;
+    int in_flight_source_ = 0;
+    int in_flight_target_ = 0;
+    std::size_t in_flight_remaining_ = 0;
 };
 
 /// Linear-interpolated morph across N `Wavetable`s. Position 0..1
@@ -251,6 +288,11 @@ inline std::vector<WavetableEntry> build_wavetable_band_stack(
         float reference_sample_rate,
         HarmonicAmp&& harmonic_amp) {
     if (num_bands == 0) return {};
+    // Codex P2 on #2865 — non-positive sample rates produce
+    // clamped_ceiling <= 0 and then a NaN/-inf in the std::floor →
+    // size_t cast (UB). Public factories accept arbitrary inputs, so
+    // short-circuit on invalid sample rates here.
+    if (!(reference_sample_rate > 0.0f)) return {};
     const float nyquist = reference_sample_rate * 0.5f;
     constexpr float kBaseFreq = 20.0f;
     std::vector<WavetableEntry> bands;
@@ -276,6 +318,10 @@ inline std::vector<WavetableEntry> build_wavetable_band_stack(
 
 inline Wavetable Wavetable::make_sine(std::size_t table_length,
                                        float reference_sample_rate) {
+    // Codex P2 on #2865 — guard against non-positive sample rates so
+    // the returned Wavetable has a well-defined (empty) band stack
+    // rather than a band with a negative ceiling.
+    if (!(reference_sample_rate > 0.0f)) return Wavetable();
     std::vector<WavetableEntry> bands;
     bands.push_back(WavetableEntry{
         detail::generate_wavetable(table_length, /*max_harmonic=*/1,
