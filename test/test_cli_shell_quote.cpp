@@ -18,6 +18,7 @@
 #include "../tools/cli/cli_common.hpp"
 
 #include <filesystem>
+#include <limits>
 
 TEST_CASE("yaml_value reads plain and list-item scalars", "[cli][yaml][docs][issue-643]") {
     REQUIRE(yaml_value("slug: getting-started", "slug") == "getting-started");
@@ -25,6 +26,77 @@ TEST_CASE("yaml_value reads plain and list-item scalars", "[cli][yaml][docs][iss
     REQUIRE(yaml_value("      - name: ship", "name") == "ship");
     REQUIRE(yaml_value("      summary: Sign and package", "summary") == "Sign and package");
     REQUIRE(yaml_value("      - summary: list item", "summary") == "list item");
+}
+
+TEST_CASE("yaml_value rejects mismatched keys and empty values", "[cli][yaml][coverage]") {
+    REQUIRE(yaml_value("slug_name: wrong", "slug").empty());
+    REQUIRE(yaml_value("slug", "slug").empty());
+    REQUIRE(yaml_value("slug:", "slug").empty());
+    REQUIRE(yaml_value("  - slug:", "slug").empty());
+    REQUIRE(yaml_value("name: ship", "slug").empty());
+    REQUIRE(yaml_value("  - name: ship", "slug").empty());
+}
+
+TEST_CASE("cli string helpers preserve command-facing contracts", "[cli][common][coverage]") {
+    REQUIRE(trim("  \tPulp\n") == "Pulp");
+    REQUIRE(strip_quotes("\"quoted value\"") == "quoted value");
+    REQUIRE(strip_quotes("'quoted value'") == "quoted value");
+    REQUIRE(strip_quotes("\"unterminated") == "\"unterminated");
+    REQUIRE(replace_all_str("one two one", "one", "three") == "three two three");
+    REQUIRE(icontains("Audio Plugin Framework", "plugin"));
+    REQUIRE(icontains("Audio Plugin Framework", "PLUGIN"));
+    REQUIRE_FALSE(icontains("Audio Plugin Framework", "video"));
+    REQUIRE(icontains("Audio Plugin Framework", ""));
+    REQUIRE(sanitize_process_output(std::string("ok\0hidden\n", 10)) == "okhidden\n");
+    REQUIRE(truncate_message("short", 10) == "short");
+    REQUIRE(truncate_message("abcdef", 3) == "abc...");
+}
+
+TEST_CASE("parse_size_arg accepts decimal integers without disturbing failures",
+          "[cli][common][coverage]") {
+    std::size_t value = 77;
+    REQUIRE(parse_size_arg("0", "--top", value));
+    REQUIRE(value == 0);
+    REQUIRE(parse_size_arg("42", "--top", value));
+    REQUIRE(value == 42);
+    REQUIRE(parse_size_arg(std::to_string(std::numeric_limits<std::size_t>::max()),
+                           "--top",
+                           value));
+    REQUIRE(value == std::numeric_limits<std::size_t>::max());
+
+    value = 1234;
+    REQUIRE_FALSE(parse_size_arg("", "--top", value));
+    REQUIRE(value == 1234);
+    REQUIRE_FALSE(parse_size_arg("-1", "--top", value));
+    REQUIRE(value == 1234);
+    REQUIRE(parse_size_arg("+1", "--top", value));
+    REQUIRE(value == 1);
+    value = 1234;
+    REQUIRE_FALSE(parse_size_arg("10x", "--top", value));
+    REQUIRE(value == 1234);
+    REQUIRE_FALSE(parse_size_arg("1.5", "--top", value));
+    REQUIRE(value == 1234);
+}
+
+TEST_CASE("parse_double_arg accepts finite decimals and rejects non-finite text",
+          "[cli][common][coverage]") {
+    double value = 9.0;
+    REQUIRE(parse_double_arg("0", "--min-score", value));
+    REQUIRE(value == 0.0);
+    REQUIRE(parse_double_arg("0.75", "--min-score", value));
+    REQUIRE(value == 0.75);
+    REQUIRE(parse_double_arg("-2.5", "--min-score", value));
+    REQUIRE(value == -2.5);
+
+    value = 4.25;
+    REQUIRE_FALSE(parse_double_arg("", "--min-score", value));
+    REQUIRE(value == 4.25);
+    REQUIRE_FALSE(parse_double_arg("nan", "--min-score", value));
+    REQUIRE(value == 4.25);
+    REQUIRE_FALSE(parse_double_arg("inf", "--min-score", value));
+    REQUIRE(value == 4.25);
+    REQUIRE_FALSE(parse_double_arg("0.5x", "--min-score", value));
+    REQUIRE(value == 4.25);
 }
 
 #ifdef _WIN32
