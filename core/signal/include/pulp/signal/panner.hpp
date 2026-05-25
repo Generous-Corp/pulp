@@ -95,8 +95,11 @@ public:
                 r_gain = std::sqrt(position);
                 break;
             case PanLaw::Sqrt4_5dB:
-                l_gain = std::sqrt(1.0f - position) * (1.0f - position * 0.5f);
-                r_gain = std::sqrt(position) * (0.5f + position * 0.5f);
+                // -4.5 dB = geometric mean of -3 dB sqrt and -6 dB linear
+                // → exponent 0.75. At centre yields 0.5^0.75 ≈ 0.5946
+                // ≈ -4.51 dB per channel, matching the documented notch.
+                l_gain = std::pow(1.0f - position, 0.75f);
+                r_gain = std::pow(position, 0.75f);
                 break;
         }
     }

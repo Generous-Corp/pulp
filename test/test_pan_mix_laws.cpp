@@ -114,6 +114,14 @@ TEST_CASE("DryWetMixer Sin6dB has -6dB notch at midpoint", "[signal][mix-laws]")
     REQUIRE(std::abs(half.wet - 0.5f) < 1e-4f);
 }
 
+TEST_CASE("DryWetMixer Sqrt4_5dB has -4.5dB notch at midpoint (Codex #2834 P2 regression)",
+          "[signal][mix-laws][regression]") {
+    auto half = gains(MixCurve::Sqrt4_5dB, 0.5f);
+    // 0.5^0.75 ≈ 0.5946, 20*log10(0.5946) ≈ -4.51 dB.
+    REQUIRE(std::abs(half.dry - 0.594603f) < 1e-3f);
+    REQUIRE(std::abs(half.wet - 0.594603f) < 1e-3f);
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Panner laws
 // ────────────────────────────────────────────────────────────────────────
@@ -191,4 +199,15 @@ TEST_CASE("Panner Sin6dB has -6dB notch at centre", "[signal][pan-law]") {
     p.compute_gains(l, r);
     REQUIRE(std::abs(l - 0.5f) < 1e-4f);
     REQUIRE(std::abs(r - 0.5f) < 1e-4f);
+}
+
+TEST_CASE("Panner Sqrt4_5dB has -4.5dB notch at centre (Codex #2834 P2 regression)",
+          "[signal][pan-law][regression]") {
+    Panner p;
+    p.set_law(PanLaw::Sqrt4_5dB);
+    p.set_pan(0.0f);
+    float l, r;
+    p.compute_gains(l, r);
+    REQUIRE(std::abs(l - 0.594603f) < 1e-3f);
+    REQUIRE(std::abs(r - 0.594603f) < 1e-3f);
 }

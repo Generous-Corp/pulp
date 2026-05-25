@@ -175,8 +175,12 @@ private:
                 wet = std::sqrt(mix_);
                 break;
             case MixCurve::Sqrt4_5dB:
-                dry = std::sqrt(1.0f - mix_) * (1.0f - mix_ * 0.5f);
-                wet = std::sqrt(mix_) * (0.5f + mix_ * 0.5f);
+                // -4.5 dB = geometric mean of -3 dB sqrt (exp 0.5) and
+                // -6 dB linear (exp 1.0) → exponent 0.75. At mix=0.5
+                // produces 0.5^0.75 ≈ 0.5946 per side ≈ -4.51 dB,
+                // matching the documented midpoint notch.
+                dry = std::pow(1.0f - mix_, 0.75f);
+                wet = std::pow(mix_, 0.75f);
                 break;
         }
     }
