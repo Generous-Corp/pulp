@@ -5,8 +5,20 @@
 
 namespace pulp::signal {
 
-// Smoothly interpolates toward a target value over time
-// Real-time safe, no allocations. Use for parameter smoothing.
+/// Linear smoothing for control-rate parameters.
+///
+/// Real-time safe; no allocations. Use for parameter smoothing where the
+/// linear ramp is perceptually correct (gain in linear units, mix, pan
+/// position, etc.).
+///
+/// For parameters where the linear ramp is perceptually wrong — pitch,
+/// frequency, gain in dB — use `LogRampedValue` (in
+/// `core/signal/include/pulp/signal/log_ramped_value.hpp`) which applies
+/// a multiplicative (geometric) per-sample step so equal time produces
+/// equal perceptual change across the range.
+///
+/// The two utilities together cover Pulp's smoothing surface; consumers
+/// pick the curve that matches the parameter's semantics.
 template<typename T = float>
 class SmoothedValue {
 public:
