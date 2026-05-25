@@ -43,6 +43,41 @@ TEST_CASE("UndoManager coalesce_window=0 disables window coalescing",
     REQUIRE(um.undo_count() == 2);
 }
 
+TEST_CASE("UndoManager coalesced perform clears redo stack (Codex P1 regression)",
+          "[state][undo][time-coalesce][regression]") {
+    UndoManager um;
+    um.set_coalesce_window(std::chrono::milliseconds(200));
+    int v = 0;
+    um.perform(UndoAction::create("A", [&] { v = 0; }, [&] { v = 1; }));
+    um.perform(UndoAction::create("B", [&] { v = 1; }, [&] { v = 2; }));
+    REQUIRE(um.undo());
+    REQUIRE(um.can_redo());
+    // A new edit that lands within the coalesce window must INVALIDATE
+    // redo history even when it gets merged into the prior transaction —
+    // otherwise stale redo entries hang around after undo+new-edit.
+    // Wait briefly to ensure we're inside the window relative to first perform.
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    um.perform(UndoAction::create("C", [&] { v = 0; }, [&] { v = 3; }));
+    REQUIRE_FALSE(um.can_redo());
+}
+
+TEST_CASE("UndoManager undo resets coalesce window timestamp (Codex P1 regression)",
+          "[state][undo][time-coalesce][regression]") {
+    UndoManager um;
+    um.set_coalesce_window(std::chrono::milliseconds(200));
+    int v = 0;
+    um.perform(UndoAction::create("A", [&] { v = 0; }, [&] { v = 1; }));
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo());
+    REQUIRE(um.undo_count() == 0);
+    // After undo, the redo stack holds A. A new perform() should NOT
+    // coalesce into the (now-popped) older entry — it should start its
+    // own transaction.
+    um.perform(UndoAction::create("B", [&] { v = 1; }, [&] { v = 2; }));
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo_name() == "B");
+}
+
 TEST_CASE("UndoManager perform and undo", "[state][undo]") {
     UndoManager um;
     int value = 0;

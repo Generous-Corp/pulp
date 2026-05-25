@@ -88,8 +88,13 @@ public:
         const auto now = Clock::now();
         if (coalesce_window_.count() > 0 && !undo_stack_.empty() &&
             (now - last_perform_time_) <= coalesce_window_) {
+            // A new edit invalidates redo history even when it merges into
+            // the prior transaction — otherwise undo+new-edit could leave
+            // stale redo entries that no longer make sense.
+            redo_stack_.clear();
             undo_stack_.back().actions.push_back(std::move(action));
             last_perform_time_ = now;
+            if (on_state_changed) on_state_changed();
             return;
         }
 
@@ -155,6 +160,10 @@ public:
         }
 
         redo_stack_.push_back(std::move(tx));
+        // Reset the coalesce timestamp so the next edit starts a fresh
+        // window — a `perform()` after `undo()` must never merge into
+        // the older entry that's still on the undo stack.
+        last_perform_time_ = Clock::time_point{};
         if (on_state_changed) on_state_changed();
         return true;
     }
@@ -172,6 +181,7 @@ public:
         }
 
         undo_stack_.push_back(std::move(tx));
+        last_perform_time_ = Clock::time_point{};
         if (on_state_changed) on_state_changed();
         return true;
     }
