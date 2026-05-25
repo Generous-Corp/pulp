@@ -1,7 +1,47 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/undo_manager.hpp>
 
+#include <chrono>
+#include <thread>
+
 using namespace pulp::state;
+
+TEST_CASE("UndoManager time-window coalescing merges rapid actions",
+          "[state][undo][time-coalesce]") {
+    UndoManager um;
+    um.set_coalesce_window(std::chrono::milliseconds(200));
+    int v = 0;
+    um.perform(UndoAction::create("Step 1",
+        [&] { v = 0; }, [&] { v = 1; }));
+    um.perform(UndoAction::create("Step 2",
+        [&] { v = 1; }, [&] { v = 2; }));
+    REQUIRE(v == 2);
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo());
+    // Undo reverses both actions (Step 2 first, then Step 1) so v returns to 0.
+    REQUIRE(v == 0);
+}
+
+TEST_CASE("UndoManager time-window expiry keeps actions separate",
+          "[state][undo][time-coalesce]") {
+    UndoManager um;
+    um.set_coalesce_window(std::chrono::milliseconds(10));
+    int v = 0;
+    um.perform(UndoAction::create("A", [&] { v = 0; }, [&] { v = 1; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    um.perform(UndoAction::create("B", [&] { v = 1; }, [&] { v = 2; }));
+    REQUIRE(um.undo_count() == 2);
+}
+
+TEST_CASE("UndoManager coalesce_window=0 disables window coalescing",
+          "[state][undo][time-coalesce]") {
+    UndoManager um;
+    um.set_coalesce_window(std::chrono::milliseconds(0));
+    int v = 0;
+    um.perform(UndoAction::create("A", [&] { v = 0; }, [&] { v = 1; }));
+    um.perform(UndoAction::create("B", [&] { v = 1; }, [&] { v = 2; }));
+    REQUIRE(um.undo_count() == 2);
+}
 
 TEST_CASE("UndoManager perform and undo", "[state][undo]") {
     UndoManager um;

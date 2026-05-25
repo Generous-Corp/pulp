@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -42,26 +43,47 @@ public:
     /// Execute an action and add it to the history.
     /// If coalescing is enabled and the last action has the same description,
     /// replaces it (merging rapid small changes into one undo step).
+    /// If `set_coalesce_window` is set to a non-zero duration, two
+    /// consecutive actions also coalesce when they arrive within that
+    /// window even if their descriptions differ.
     void perform(std::unique_ptr<EditAction> action) {
         action->redo();
         // A new edit invalidates redo history even when it coalesces into
         // the current undo step.
         redo_stack_.clear();
-        // Coalesce: if same description as last action, replace it
-        if (coalesce_ && !undo_stack_.empty() &&
+        const auto now = Clock::now();
+        const bool same_description =
+            coalesce_ && !undo_stack_.empty() &&
             !action->description().empty() &&
-            undo_stack_.back()->description() == action->description()) {
+            undo_stack_.back()->description() == action->description();
+        const bool within_window =
+            coalesce_window_.count() > 0 && !undo_stack_.empty() &&
+            (now - last_perform_time_) <= coalesce_window_;
+        if (same_description || (coalesce_ && within_window)) {
             undo_stack_.back() = std::move(action);
+            last_perform_time_ = now;
             return;
         }
         undo_stack_.push_back(std::move(action));
+        last_perform_time_ = now;
         // Enforce depth limit
         while (undo_stack_.size() > max_depth_)
             undo_stack_.erase(undo_stack_.begin());
     }
 
-    /// Enable/disable coalescing (merge rapid changes with same description).
+    /// Enable/disable description-based coalescing (merge rapid changes
+    /// with same description). Defaults to true.
     void set_coalesce(bool enabled) { coalesce_ = enabled; }
+
+    /// Time-window coalescing. When @p window > 0, two consecutive
+    /// `perform()` calls that arrive within this duration are merged into
+    /// one undo step even if their descriptions differ. Use 0 to disable
+    /// (description-only coalescing). 0 by default to preserve existing
+    /// behavior.
+    void set_coalesce_window(std::chrono::milliseconds window) {
+        coalesce_window_ = window;
+    }
+    std::chrono::milliseconds coalesce_window() const { return coalesce_window_; }
 
     /// Convenience: perform a lambda-based action.
     void perform(std::function<void()> do_fn, std::function<void()> undo_fn,
@@ -113,10 +135,14 @@ public:
     size_t max_depth() const { return max_depth_; }
 
 private:
+    using Clock = std::chrono::steady_clock;
+
     std::vector<std::unique_ptr<EditAction>> undo_stack_;
     std::vector<std::unique_ptr<EditAction>> redo_stack_;
     size_t max_depth_;
     bool coalesce_ = true;  ///< Merge rapid changes with same description
+    std::chrono::milliseconds coalesce_window_{0};
+    Clock::time_point last_perform_time_{};
 };
 
 } // namespace pulp::state

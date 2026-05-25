@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/edit_history.hpp>
 
+#include <chrono>
+#include <thread>
+
 using namespace pulp::state;
 
 TEST_CASE("EditHistory undo/redo", "[state][undo]") {

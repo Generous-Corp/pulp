@@ -3,6 +3,7 @@
 /// @file undo_manager.hpp
 /// Generic undo/redo system with named actions and transaction grouping.
 
+#include <chrono>
 #include <string>
 #include <vector>
 #include <functional>
@@ -70,17 +71,33 @@ class UndoManager {
 public:
     /// Perform an action and add it to the undo history.
     /// The action's redo function is called immediately.
+    ///
+    /// When `set_coalesce_window` is non-zero and this call arrives
+    /// within that window of the previous outside-transaction `perform()`,
+    /// the new action is appended to the previous transaction rather than
+    /// creating a new top-level entry. This produces single-step undo for
+    /// rapid sequences (e.g., a slider drag).
     void perform(std::unique_ptr<UndoAction> action) {
         if (action->redo_fn) action->redo_fn();
 
         if (in_transaction_) {
             current_transaction_->actions.push_back(std::move(action));
-        } else {
-            UndoTransaction tx;
-            tx.name = action->name;
-            tx.actions.push_back(std::move(action));
-            push_undo(std::move(tx));
+            return;
         }
+
+        const auto now = Clock::now();
+        if (coalesce_window_.count() > 0 && !undo_stack_.empty() &&
+            (now - last_perform_time_) <= coalesce_window_) {
+            undo_stack_.back().actions.push_back(std::move(action));
+            last_perform_time_ = now;
+            return;
+        }
+
+        UndoTransaction tx;
+        tx.name = action->name;
+        tx.actions.push_back(std::move(action));
+        push_undo(std::move(tx));
+        last_perform_time_ = now;
     }
 
     /// Perform an action without immediately executing it.
@@ -198,12 +215,26 @@ public:
     /// Called whenever the undo/redo state changes.
     std::function<void()> on_state_changed;
 
+    /// Time-window coalescing. When @p window > 0, two consecutive
+    /// `perform()` calls outside any explicit transaction that arrive
+    /// within this duration are merged into one undo step. 0 disables
+    /// (each `perform()` becomes its own undo step). 0 by default to
+    /// preserve existing behavior.
+    void set_coalesce_window(std::chrono::milliseconds window) {
+        coalesce_window_ = window;
+    }
+    std::chrono::milliseconds coalesce_window() const { return coalesce_window_; }
+
 private:
+    using Clock = std::chrono::steady_clock;
+
     std::vector<UndoTransaction> undo_stack_;
     std::vector<UndoTransaction> redo_stack_;
     int max_history_ = 100;
     bool in_transaction_ = false;
     std::unique_ptr<UndoTransaction> current_transaction_;
+    std::chrono::milliseconds coalesce_window_{0};
+    Clock::time_point last_perform_time_{};
 
     void push_undo(UndoTransaction tx) {
         redo_stack_.clear(); // new action invalidates redo
