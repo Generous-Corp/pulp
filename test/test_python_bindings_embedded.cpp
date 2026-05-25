@@ -112,6 +112,25 @@ import math
 import pulp
 
 assert pulp.__doc__ == "Pulp audio plugin framework — Python bindings"
+assert hasattr(pulp, "ParamRange")
+assert hasattr(pulp, "ParamInfo")
+assert hasattr(pulp, "StateStore")
+assert hasattr(pulp, "PluginDescriptor")
+assert hasattr(pulp, "MidiEvent")
+assert hasattr(pulp, "MidiBuffer")
+assert hasattr(pulp, "HeadlessHost")
+assert pulp.ParamRange.__name__ == "ParamRange"
+assert pulp.ParamInfo.__name__ == "ParamInfo"
+assert pulp.MidiEvent.__name__ == "MidiEvent"
+assert pulp.MidiBuffer.__name__ == "MidiBuffer"
+assert pulp.HeadlessHost.__name__ == "HeadlessHost"
+
+def raises(exc_type, fn):
+    try:
+        fn()
+    except exc_type:
+        return True
+    return False
 
 default_range = pulp.ParamRange()
 assert math.isclose(default_range.min, 0.0)
@@ -125,6 +144,14 @@ assert math.isclose(default_range.denormalize(2.0), 1.0)
 param_range = pulp.ParamRange(0.0, 1.0, 0.5)
 assert math.isclose(param_range.normalize(0.5), 0.5)
 assert math.isclose(param_range.denormalize(0.25), 0.25)
+keyword_range = pulp.ParamRange(min=-2.0, max=2.0, default_val=0.25)
+assert math.isclose(keyword_range.min, -2.0)
+assert math.isclose(keyword_range.max, 2.0)
+assert math.isclose(keyword_range.default_value, 0.25)
+assert math.isclose(keyword_range.normalize(0.0), 0.5)
+assert math.isclose(keyword_range.denormalize(0.75), 1.0)
+assert raises(TypeError, lambda: pulp.ParamRange(min=0.0, max=1.0))
+assert raises(TypeError, lambda: pulp.ParamRange(0.0, 1.0, 0.5, 0.25))
 param_range.min = -60.0
 param_range.max = 24.0
 param_range.default_value = -12.0
@@ -154,6 +181,8 @@ info.range = pulp.ParamRange(-1.0, 1.0, 0.0)
 assert math.isclose(info.range.denormalize(0.75), 0.5)
 info.range.default_value = 0.25
 assert math.isclose(info.range.default_value, 0.25)
+assert raises(TypeError, lambda: setattr(info, "id", "not-an-int"))
+assert raises(TypeError, lambda: setattr(info, "range", 123))
 
 midi = pulp.MidiBuffer()
 assert midi.empty()
@@ -190,14 +219,27 @@ else:
 
 store = pulp._test_state_store
 assert store.param_count() == 2
-assert [param.name for param in store.all_params()] == ["Python Gain", "Python Mix"]
-assert store.info(8201).name == "Python Gain"
+params = store.all_params()
+assert len(params) == 2
+assert [param.name for param in params] == ["Python Gain", "Python Mix"]
+assert [param.id for param in params] == [8201, 8202]
+assert math.isclose(params[0].range.min, -60.0)
+assert math.isclose(params[0].range.max, 24.0)
+assert math.isclose(params[1].range.default_value, 0.5)
+gain_info = store.info(8201)
+mix_info = store.info(8202)
+assert gain_info.name == "Python Gain"
+assert mix_info.name == "Python Mix"
+assert gain_info.id == 8201
+assert mix_info.id == 8202
 assert store.info(999999) is None
 store.set_value(8201, -12.0)
 store.set_normalized(8202, 0.75)
 assert math.isclose(store.get_value(8201), -12.0)
 assert math.isclose(store.get_normalized(8202), 0.75)
 state_blob = bytes(store.serialize())
+assert isinstance(state_blob, bytes)
+assert len(state_blob) > 0
 store.set_value(8201, 999.0)
 store.reset_to_default(8202)
 assert math.isclose(store.get_value(8201), 24.0)
@@ -206,6 +248,13 @@ assert store.deserialize(state_blob)
 assert math.isclose(store.get_value(8201), -12.0)
 assert math.isclose(store.get_normalized(8202), 0.75)
 assert not store.deserialize(b"bad")
+store.reset_to_default(8201)
+store.reset_all_to_defaults()
+assert math.isclose(store.get_value(8201), 0.0)
+assert math.isclose(store.get_value(8202), 0.5)
+assert math.isclose(store.get_default(8201), 0.0)
+assert raises(TypeError, lambda: store.set_value("gain", 0.5))
+assert raises(TypeError, lambda: store.set_normalized(8201, "hot"))
 
 host = pulp._test_host
 host.prepare(48000.0, 16)
@@ -215,6 +264,9 @@ assert descriptor.manufacturer == "PulpTest"
 assert descriptor.bundle_id == "com.pulp.test.bindings-smoke"
 assert descriptor.version == "1.2.3"
 assert descriptor.is_instrument is False
+assert raises(AttributeError, lambda: setattr(descriptor, "name", "Mutable"))
+assert raises(AttributeError, lambda: setattr(descriptor, "is_instrument", True))
+assert raises(AttributeError, lambda: setattr(descriptor, "bundle_id", "mutable"))
 host.release()
 host.release()
 host.prepare(48000.0, 16, input_channels=1, output_channels=1)
@@ -225,10 +277,12 @@ assert math.isclose(host_state.get_default(8101), 0.25)
 host_state.set_normalized(8101, 1.0)
 saved = host.save_state()
 assert isinstance(saved, bytes)
+assert len(saved) > 0
 host_state.set_value(8101, 0.0)
 assert host.load_state(saved)
 assert math.isclose(host_state.get_value(8101), 1.0)
 assert not host.load_state(b"not a valid host state")
+assert raises(TypeError, lambda: host.prepare("48000", 16))
 host.release()
 )PY";
 
