@@ -865,4 +865,72 @@ TEST_CASE("timeout escalates when a POSIX child ignores SIGTERM",
     REQUIRE(result.exit_code == -1);
     REQUIRE(result.stdout_output.find("before-timeout") != std::string::npos);
 }
+
+TEST_CASE("starting a POSIX replacement cancels a still-running child",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start(
+        "/bin/sh",
+        {"-c", "trap '' TERM; printf old-ready; while :; do sleep 1; done"}));
+
+    std::string observed;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (observed.find("old-ready") == std::string::npos
+           && std::chrono::steady_clock::now() < deadline) {
+        observed += cp.read_available_output();
+        if (observed.find("old-ready") == std::string::npos)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    REQUIRE(observed == "old-ready");
+    REQUIRE(cp.is_running());
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf new-ready; exit 4"}, opts));
+
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 4);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.stdout_output == "new-ready");
+}
+
+TEST_CASE("starting a POSIX replacement drains a previously observed exit",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf first; exit 3"}));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (cp.is_running() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE_FALSE(cp.is_running());
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf second; exit 5"}, opts));
+
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 5);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.stdout_output == "second");
+}
+
+TEST_CASE("POSIX wait consumes cached fast-exit status after polling",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf cached-status; exit 9"}));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (cp.is_running() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE_FALSE(cp.is_running());
+
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 9);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.stdout_output == "cached-status");
+}
 #endif
