@@ -26,7 +26,7 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | Track | Branch target | Worktree target | Status | Done means |
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
-| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Draft PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; rebased onto `origin/main` at `a0ec980e2`; focused dispatcher/IPC/OSC-bind validation passing; SDK bump refreshed to `0.216.0` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
+| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Draft PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; rebased onto `origin/main` at `2353f6a7d`; focused dispatcher/IPC/OSC-bind validation passing; SDK bump refreshed to `0.217.0` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
 | OSC | `feature/platform-osc` | `pulp-platform-osc` | Draft PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto current `main`; local OSC suite and manual GPU-off diff coverage passing | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | Queued | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
@@ -324,9 +324,9 @@ Native event loop local validation:
   `python3 tools/scripts/test_codecov_config.py` — 17 tests, and
   `python3 tools/scripts/test_local_diff_cover.py` — 17 tests.
 - `git diff --check` passed.
-- After the branch was rebased onto `origin/main` at `a0ec980e2`, the stale
+- After the branch was rebased onto `origin/main` at `2353f6a7d`, the stale
   `0.209.0` version bump was dropped and the required SDK minor bump was
-  refreshed to `0.216.0`. Focused Release/GPU-off validation passed:
+  refreshed to `0.217.0`. Focused Release/GPU-off validation passed:
   `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF`,
   `cmake --build build --target pulp-test-events pulp-test-ipc pulp-test-osc
   pulp-test-osc-channel -j8`, and
