@@ -234,3 +234,149 @@ TEST_CASE("pulp run --frames default does not appear in launch args",
         REQUIRE(a != "--frames");
     }
 }
+
+TEST_CASE("pulp run keeps last repeated scalar flag values",
+          "[cli][run][coverage]") {
+    auto r = parse_run_options({
+        "--frames", "2",
+        "--screenshot", "/tmp/first.png",
+        "--frames=8",
+        "--screenshot=/tmp/final.png",
+    });
+
+    REQUIRE(r.error.empty());
+    REQUIRE(r.headless);
+    REQUIRE(r.frames == 8);
+    REQUIRE(r.screenshot_path == "/tmp/final.png");
+    REQUIRE(r.user_pass_through.empty());
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{
+        "--headless", "--screenshot", "/tmp/final.png", "--frames", "8",
+    });
+}
+
+TEST_CASE("pulp run preserves pass-through ordering after launcher flags",
+          "[cli][run][coverage]") {
+    auto r = parse_run_options({
+        "demo",
+        "--headless",
+        "--frames", "4",
+        "--unknown",
+        "--",
+        "--runtime", "trace",
+    });
+
+    REQUIRE(r.error.empty());
+    REQUIRE(r.target_name == "demo");
+    REQUIRE(r.headless);
+    REQUIRE(r.frames == 4);
+    REQUIRE(r.user_pass_through == std::vector<std::string>{
+        "--unknown", "--runtime", "trace",
+    });
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{
+        "--headless", "--frames", "4", "--unknown", "--runtime", "trace",
+    });
+}
+
+TEST_CASE("pulp run records launcher flags before a separator only",
+          "[cli][run][coverage]") {
+    auto r = parse_run_options({
+        "--screenshot=/tmp/before.png",
+        "--",
+        "--screenshot=/tmp/after.png",
+        "--watch",
+        "--frames=9",
+    });
+
+    REQUIRE(r.error.empty());
+    REQUIRE(r.headless);
+    REQUIRE(r.screenshot_path == "/tmp/before.png");
+    REQUIRE_FALSE(r.watch);
+    REQUIRE(r.frames == 1);
+    REQUIRE(r.user_pass_through == std::vector<std::string>{
+        "--screenshot=/tmp/after.png", "--watch", "--frames=9",
+    });
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{
+        "--headless",
+        "--screenshot",
+        "/tmp/before.png",
+        "--screenshot=/tmp/after.png",
+        "--watch",
+        "--frames=9",
+    });
+}
+
+TEST_CASE("pulp run help stops before later invalid flags",
+          "[cli][run][coverage]") {
+    auto long_help = parse_run_options({"--help", "--frames", "bad"});
+    REQUIRE(long_help.help);
+    REQUIRE(long_help.error.empty());
+    REQUIRE(long_help.user_pass_through.empty());
+
+    auto short_help = parse_run_options({"-h", "--screenshot"});
+    REQUIRE(short_help.help);
+    REQUIRE(short_help.error.empty());
+    REQUIRE_FALSE(short_help.headless);
+}
+
+TEST_CASE("pulp run reports screenshot path shape errors without consuming later tokens",
+          "[cli][run][coverage]") {
+    auto flag_like = parse_run_options({"--screenshot", "-out.png"});
+    REQUIRE(flag_like.error == "--screenshot requires a path argument");
+    REQUIRE(flag_like.headless);
+    REQUIRE(flag_like.screenshot_path.empty());
+
+    auto empty_equals = parse_run_options({"--screenshot=", "--frames", "2"});
+    REQUIRE(empty_equals.error == "--screenshot= requires a non-empty path");
+    REQUIRE(empty_equals.headless);
+    REQUIRE(empty_equals.frames == 1);
+}
+
+TEST_CASE("pulp run reports frame count shape errors precisely",
+          "[cli][run][coverage]") {
+    auto missing = parse_run_options({"--frames"});
+    REQUIRE(missing.error == "--frames requires an integer argument");
+    REQUIRE(missing.frames == 1);
+
+    auto flag_like = parse_run_options({"--frames", "--watch"});
+    REQUIRE(flag_like.error == "--frames requires an integer argument");
+    REQUIRE_FALSE(flag_like.watch);
+
+    auto zero = parse_run_options({"--frames=0"});
+    REQUIRE(zero.error == "--frames must be > 0");
+    REQUIRE(zero.frames == 1);
+
+    auto malformed = parse_run_options({"--frames=2x"});
+    REQUIRE(malformed.error == "--frames= requires an integer");
+    REQUIRE(malformed.frames == 1);
+}
+
+TEST_CASE("pulp run accepts boundary frame count values",
+          "[cli][run][coverage]") {
+    auto single = parse_run_options({"--frames", "1"});
+    REQUIRE(single.error.empty());
+    REQUIRE(single.frames == 1);
+
+    auto large = parse_run_options({"--frames=2147483647"});
+    REQUIRE(large.error.empty());
+    REQUIRE(large.frames == 2147483647);
+
+    auto args = assemble_launch_args(large);
+    REQUIRE(args == std::vector<std::string>{"--frames", "2147483647"});
+}
+
+TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
+          "[cli][run][coverage]") {
+    auto r = parse_run_options({"--standalone", "demo"});
+    REQUIRE(r.target_name == "demo");
+    REQUIRE(r.user_pass_through == std::vector<std::string>{"--standalone"});
+    REQUIRE_FALSE(r.headless);
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{"--standalone"});
+}
