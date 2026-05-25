@@ -235,7 +235,11 @@ std::string shell_quote(std::string_view text) {
 std::string run_command_capture(const std::string& command, int& exit_code) {
     std::array<char, 4096> buffer{};
     std::string output;
+#if defined(_WIN32)
+    FILE* pipe = _popen(command.c_str(), "r");
+#else
     FILE* pipe = popen(command.c_str(), "r");
+#endif
     if (!pipe) {
         exit_code = -1;
         return {};
@@ -243,10 +247,11 @@ std::string run_command_capture(const std::string& command, int& exit_code) {
     while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
         output += buffer.data();
     }
-    auto status = pclose(pipe);
 #if defined(_WIN32)
+    auto status = _pclose(pipe);
     exit_code = status;
 #else
+    auto status = pclose(pipe);
     if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
     else exit_code = status;
 #endif

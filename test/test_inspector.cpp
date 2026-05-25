@@ -1986,14 +1986,13 @@ TEST_CASE("InspectorWindow drops stale selection across a tree rebuild",
     REQUIRE(has_label_containing(window, "ID: gain"));
 
     // Destroy the selected view (live tree rebuild — e.g. a meter rebuild).
-    // remove_child destroys the unique_ptr, so knob_ptr now dangles. Add a
-    // DIFFERENT child so the structure signature changes and refresh()
-    // takes the rebuild path.
+    // Keep the removed view alive until the replacement child is allocated so
+    // allocators cannot immediately recycle knob_ptr for the new child.
     auto removed = inspected_root.remove_child(knob_ptr);
-    removed.reset();  // free the previously selected view
     auto label = std::make_unique<Label>("fresh");
     label->set_id("fresh");
     inspected_root.add_child(std::move(label));
+    removed.reset();  // free the previously selected view
 
     // refresh() rebuilds the tree; the saved selection (knob_ptr) is no longer
     // found, so selected_view_ must be cleared and the deref skipped. With the
@@ -5716,7 +5715,7 @@ TEST_CASE("InspectorOverlay T2: caret moves with arrows and inserts mid-text",
     REQUIRE(overlay.text_edit_buffer() == "aXbc!");
 }
 
-TEST_CASE("InspectorOverlay T2: Cmd+A selects all, then paste replaces it",
+TEST_CASE("InspectorOverlay T2: primary-select selects all, then paste replaces it",
           "[inspect][overlay][wysiwyg][t2]") {
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -5728,11 +5727,16 @@ TEST_CASE("InspectorOverlay T2: Cmd+A selects all, then paste replaces it",
     overlay.set_tool(InspectorOverlay::Tool::text);
     REQUIRE(overlay.begin_text_edit(label));
 
-    // Cmd+A selects the whole buffer.
+    // The platform-primary modifier selects the whole buffer.
+#if defined(__APPLE__)
+    const auto primary_modifier = pulp::view::kModCmd;
+#else
+    const auto primary_modifier = pulp::view::kModCtrl;
+#endif
     KeyEvent sel_all;
     sel_all.key = KeyCode::a;
     sel_all.is_down = true;
-    sel_all.modifiers = pulp::view::kModCmd;
+    sel_all.modifiers = primary_modifier;
     REQUIRE(overlay.handle_key_event(sel_all));
     REQUIRE(overlay.text_has_selection());
     auto [lo, hi] = overlay.text_selection();
@@ -5744,7 +5748,7 @@ TEST_CASE("InspectorOverlay T2: Cmd+A selects all, then paste replaces it",
     KeyEvent paste;
     paste.key = KeyCode::v;
     paste.is_down = true;
-    paste.modifiers = pulp::view::kModCmd;
+    paste.modifiers = primary_modifier;
     REQUIRE(overlay.handle_key_event(paste));
     REQUIRE(overlay.text_edit_buffer() == "WORLD");
     REQUIRE(label->text() == "WORLD");
