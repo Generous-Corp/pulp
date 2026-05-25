@@ -38,8 +38,19 @@ int main() {
   window_options.height = kWindowHeight;
 
   auto window = WindowHost::create(root, window_options);
-  if (!window || !window->native_content_view_handle()) {
-    std::cerr << "Failed to create Monaco host window\n";
+  if (!window) {
+    if (!WindowHost::has_factory()) {
+      std::cerr << "Failed to create Monaco host window: WindowHost::create "
+                   "returned nullptr and no WindowHost::Factory is registered\n";
+    } else {
+      std::cerr << "Failed to create Monaco host window: registered "
+                   "WindowHost::Factory returned nullptr\n";
+    }
+    return 1;
+  }
+  if (!window->native_content_view_handle()) {
+    std::cerr << "Failed to create Monaco host window: WindowHost does not expose "
+                 "a native content-view handle for child embedding\n";
     return 1;
   }
 
@@ -85,7 +96,9 @@ int main() {
                                                        : static_cast<float>(kWindowHeight);
   if (!window->attach_native_child_view(
           panel->native_handle(), 0, 0, initial_width, initial_height)) {
-    std::cerr << "Failed to attach Monaco WebView\n";
+    std::cerr << "Failed to attach Monaco WebView: WindowHost rejected native "
+                 "child embedding; the concrete host must override "
+                 "attach/bounds/detach for this example\n";
     return 1;
   }
 

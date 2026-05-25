@@ -58,13 +58,14 @@ struct WindowOptions {
 // Native window that hosts a View tree and renders it.
 //
 // Platform support (#299):
-//   - macOS: native NSWindow-backed impl in window_host_mac.mm.
-//   - iOS: native UIWindow-backed impl in window_host_ios.mm.
-//   - Windows/Linux/Android: no built-in impl — the host app or a
-//     future platform module registers a factory via
-//     set_factory(). Without a factory, create() returns nullptr
-//     so callers can surface "platform unsupported" through
-//     has_factory() rather than a silent null.
+//   - macOS: native NSWindow-backed impl in window_host_mac.mm, including
+//     native content handles and child-view attach/bounds/detach.
+//   - iOS: native UIWindow-backed impl in window_host_ios.mm. The standalone
+//     iOS host does not currently expose native child-view embedding.
+//   - Windows/Linux/Android: no built-in impl — the host app or a future
+//     platform module registers a factory via set_factory(). Without a
+//     factory, create() returns nullptr so callers can surface "platform
+//     unsupported" through has_factory() rather than a silent null.
 class WindowHost {
 public:
     struct ContentSize {
@@ -125,8 +126,10 @@ public:
     render::RenderLoop* render_loop() const { return render_loop_; }
 
     // Native host/window handles for embedding child platform views such as
-    // WebViews. Default implementations return nullptr on platforms that do
-    // not expose these seams yet.
+    // WebViews. These are instance capabilities, not platform guarantees:
+    // callers must check for non-null handles before attempting native child
+    // embedding. Default implementations return nullptr on hosts that do not
+    // expose native handles.
     /// Position this window alongside another window.
     /// Places to the right if there's screen space, otherwise to the left.
     virtual void position_beside(WindowHost* other) { (void)other; }
@@ -159,7 +162,10 @@ public:
     virtual ContentSize get_content_size() const;
 
     // Attach/detach a platform-native child view inside this host. Coordinates
-    // use Pulp's top-left origin convention.
+    // use Pulp's top-left origin convention. Returning false is the canonical
+    // unsupported/rejected signal. Non-Apple factory-backed hosts that support
+    // native child embedding must override all three methods and should keep
+    // attachment state in the concrete host.
     virtual bool attach_native_child_view(void* child_view,
                                           float x,
                                           float y,

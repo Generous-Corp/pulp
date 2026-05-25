@@ -46,8 +46,19 @@ int main() {
   main_opts.width = 520;
   main_opts.height = 320;
   auto main_window = WindowHost::create(main_root, main_opts);
-  if (!main_window || !main_window->native_window_handle()) {
-    std::cerr << "Failed to create main host window\n";
+  if (!main_window) {
+    if (!WindowHost::has_factory()) {
+      std::cerr << "Failed to create main host window: WindowHost::create "
+                   "returned nullptr and no WindowHost::Factory is registered\n";
+    } else {
+      std::cerr << "Failed to create main host window: registered "
+                   "WindowHost::Factory returned nullptr\n";
+    }
+    return 1;
+  }
+  if (!main_window->native_window_handle()) {
+    std::cerr << "Failed to create main host window: WindowHost does not expose "
+                 "a native window handle for parented palette creation\n";
     return 1;
   }
 
@@ -63,8 +74,19 @@ int main() {
   palette_opts.window_type = &palette_type;
   palette_opts.parent_native_handle = main_window->native_window_handle();
   auto palette_window = WindowHost::create(palette_root, palette_opts);
-  if (!palette_window || !palette_window->native_content_view_handle()) {
-    std::cerr << "Failed to create palette host window\n";
+  if (!palette_window) {
+    if (!WindowHost::has_factory()) {
+      std::cerr << "Failed to create palette host window: WindowHost::create "
+                   "returned nullptr and no WindowHost::Factory is registered\n";
+    } else {
+      std::cerr << "Failed to create palette host window: registered "
+                   "WindowHost::Factory returned nullptr\n";
+    }
+    return 1;
+  }
+  if (!palette_window->native_content_view_handle()) {
+    std::cerr << "Failed to create palette host window: WindowHost does not expose "
+                 "a native content-view handle for child embedding\n";
     return 1;
   }
 
@@ -100,7 +122,9 @@ int main() {
 
   if (!palette_window->attach_native_child_view(
           palette_panel->native_handle(), 0, 0, palette_opts.width, palette_opts.height)) {
-    std::cerr << "Failed to attach WebView into palette host\n";
+    std::cerr << "Failed to attach WebView into palette host: WindowHost rejected "
+                 "native child embedding; the concrete host must override "
+                 "attach/bounds/detach for this example\n";
     return 1;
   }
 

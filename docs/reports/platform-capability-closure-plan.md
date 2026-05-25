@@ -27,8 +27,8 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
 | Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/danielraffel/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased and locally validated on `origin/main` `b2a5b3f78` after #2970 consumed SDK `0.252.0` and #2939 upstreamed the audit allowlist; SDK version is now `0.253.0`; hosted Ubuntu install-consumer smoke passed on the SheenBidi install fix | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
-| Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; locally rebased/validated; final SDK bump and push pending after #2822 | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | Merged via PR [#2822](https://github.com/danielraffel/pulp/pull/2822) as `bbc1506ed` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
+| Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; local rebase/validation in progress after #2822 merge | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
 - Add or update focused unit tests for every new public behavior.
@@ -452,13 +452,64 @@ The embedding API is present in `WindowHost` and `PluginViewHost`, but built-in
 concrete support is Apple-first. Non-Apple paths rely on host-registered
 factories, and default child-view attachment returns `false`.
 
-Recommended work:
-- Ship first-party Windows and Linux `WindowHost` implementations.
-- Ship first-party Windows and Linux `PluginViewHost` implementations.
-- Implement child-view attach, resize, and detach for platform-native handles.
-- Standardize the plugin editor lifecycle around `HostedEditor`.
-- Add smoke tests for native child attach/detach and bounds updates on each
-  supported desktop platform.
+Closure slice:
+- Make the current support contract explicit in public headers: native child
+  embedding is an instance capability, `attach_native_child_view()` returning
+  `false` is the canonical unsupported/rejected signal, and non-Apple support is
+  supplied by host-registered factories until first-party platform hosts land.
+- Keep the existing Apple built-ins in place: standalone `WindowHost` embedding
+  is built in on macOS; `PluginViewHost` child embedding is built in on macOS
+  and iOS; built-in iOS `WindowHost` does not currently expose the standalone
+  child-view embedding handles.
+- Add all-platform contract tests proving concrete hosts can implement
+  attach/bounds/detach correctly.
+- Add non-Apple factory tests proving `WindowHost::Factory` and
+  `PluginViewHost::Factory` can provide native child embedding and that the
+  default stub/factory path honestly rejects child attachment.
+- Update WebView examples and tests so failures distinguish backend absence,
+  missing host handles, and host rejection of native child attachment.
+- Update `docs/guides/view-bridge.md`, `docs/guides/webview.md`,
+  `docs/reference/capabilities.md`, and `docs/status/support-matrix.yaml` so
+  public docs do not imply first-party non-Apple embedding exists today.
+
+Native-window local validation:
+- Configured Release with WebView enabled and GPU off:
+  `cmake -S . -B build-native-window -DCMAKE_BUILD_TYPE=Release
+  -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
+  -DPULP_BUILD_WEBVIEW=ON`.
+- Built the focused targets: `pulp-test-view-host-bridge`,
+  `pulp-test-webview`, `pulp-webview-palette`, and
+  `PulpWebViewPlugin_Standalone`.
+- `./build-native-window/test/pulp-test-webview --reporter compact` passed
+  with local WebView readiness skips where the host environment never reached
+  callback-ready state.
+- Focused CTest passes covered view-host, native-child, macOS/PulpView, and
+  WebView cases: 13 passed and 2 skipped for local WebView readiness/content
+  limitations.
+- `tools/check-docs.sh` passed with existing repository warnings.
+- `git diff --check` passed.
+- `version_bump_check.py --base origin/main --head HEAD --mode apply` applied
+  the required SDK minor bump to `0.212.0` after the inspector host-factory
+  override made the patch a public header/API change.
+- Coverage note: the behavior-bearing production change is the
+  `InspectorWindow::show()` null-host guard, covered locally through the
+  inspector host-factory override and on hosted non-Apple checks through the
+  no-factory regression test. Other production header changes are contract
+  comments, and examples/docs are excluded by the repo coverage filters.
+- Claude review reported no correctness blockers. RepoPrompt review found a
+  null-host crash in `InspectorWindow::show()`, an overstrict live WebView
+  attach assertion, and a silent plugin-example WebView-backend failure path;
+  all three were fixed and the focused build/test/docs checks were rerun.
+- SSH-backed Windows/Ubuntu testing is intentionally out of scope for this
+  focused closure pass; rely on GitHub-hosted platform checks after PR
+  submission.
+
+Deferred work:
+- First-party Windows/Linux/Android `WindowHost` and `PluginViewHost`
+  implementations remain future platform work. That slice needs real platform
+  handle ownership, child reparenting, resize, focus, lifetime, and runtime
+  smoke validation; it should not be represented as complete by this contract
+  clarification PR.
 
 ### 6. OSC Bundle and Routing Support
 

@@ -40,6 +40,19 @@ This is enough to claim native backend availability behind
 installed. It is not yet a claim that every higher-level WebView workflow has
 identical runtime polish on all three platforms.
 
+Native WebView backend availability is separate from host embedding
+availability. A `WebViewPanel` can exist while the surrounding `WindowHost` or
+`PluginViewHost` cannot accept a native child surface. The current host truth
+is:
+
+- standalone `WindowHost` child embedding is built in on macOS
+- standalone iOS `WindowHost` exists but does not currently expose native
+  child-view embedding handles
+- `PluginViewHost` child embedding is built in on macOS and iOS
+- Windows/Linux/Android embedding is factory-backed: the application or format
+  host registers a concrete `WindowHost::Factory` or `PluginViewHost::Factory`
+  that returns non-null handles and implements attach / resize / detach
+
 ## Build
 
 Enable the optional WebView layer:
@@ -93,6 +106,22 @@ That seam is the current bridge from Pulp's multi-window host layer into an
 embedded native WebView. It is intentionally small: enough to prove palette /
 inspector style embedding without pretending that Phase 7 is already a full
 window-docking system.
+
+Treat those calls as an instance capability, not a platform guarantee. Check
+the host handle, check the WebView child handle, and branch on the boolean
+returned by `attach_native_child_view(...)`:
+
+```cpp
+auto panel = WebViewPanel::create();
+auto host = WindowHost::create(root, options);
+
+if (!panel || !host || !panel->native_handle()
+    || !host->native_content_view_handle()
+    || !host->attach_native_child_view(panel->native_handle(), 0, 0, width, height)) {
+    // Fall back to a native Pulp view, a separate window, or an explicit
+    // unsupported-platform message.
+}
+```
 
 ## Simple HTML
 
@@ -309,8 +338,8 @@ The WebView test target currently proves:
 On some local/headless environments, the live callback readiness probe may skip rather than fail. That is treated as an environment limitation, not a blanket pass for the runtime.
 
 That is the current bar for claiming cross-platform backend availability. Do
-not overstate this as full runtime parity until the platform-specific host
-polish work is actually landed.
+not overstate this as full runtime parity or first-party non-Apple native host
+embedding until the platform-specific host work is actually landed.
 
 ## Future Skill
 

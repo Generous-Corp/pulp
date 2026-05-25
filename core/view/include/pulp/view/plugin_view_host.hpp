@@ -34,11 +34,13 @@ public:
     // Create a plugin view host for the given view tree.
     //
     // Platform support (#299):
-    //   - macOS: NSView-backed impl in plugin_view_host_mac.mm.
-    //   - iOS: UIView-backed impl in plugin_view_host_ios.mm.
-    //   - Windows/Linux/Android: no built-in impl — host app
-    //     registers a factory via set_factory(). Without a
-    //     factory, create() returns nullptr explicitly.
+    //   - macOS: NSView-backed impl in plugin_view_host_mac.mm, including
+    //     native child-view attach/bounds/detach.
+    //   - iOS: UIView-backed impl in plugin_view_host_ios.mm, including
+    //     native child-view attach/bounds/detach.
+    //   - Windows/Linux/Android: no built-in impl — host app registers a
+    //     factory via set_factory(). Without a factory, create() returns
+    //     nullptr explicitly.
     static std::unique_ptr<PluginViewHost> create(View& root, Size size);
     static std::unique_ptr<PluginViewHost> create(View& root, const Options& options);
 
@@ -52,7 +54,9 @@ public:
 
     virtual ~PluginViewHost() = default;
 
-    // Get the native view handle to pass to the DAW host
+    // Get the native view handle to pass to the DAW host. A non-null host view
+    // does not by itself guarantee that this host can also embed other native
+    // child views; callers must branch on attach_native_child_view().
     virtual NativeViewHandle native_handle() = 0;
 
     // Attach this view to a parent native view (the DAW's editor window)
@@ -103,6 +107,9 @@ public:
 
     // Attach/detach a native child view inside the plugin editor host.
     // Coordinates use Pulp's top-left origin convention, matching WindowHost.
+    // Returning false is the canonical unsupported/rejected signal. Non-Apple
+    // factory-backed hosts that support native child embedding must override
+    // all three methods and should keep attachment state in the concrete host.
     virtual bool attach_native_child_view(NativeViewHandle child_view,
                                           float x,
                                           float y,

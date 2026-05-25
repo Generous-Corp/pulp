@@ -122,9 +122,12 @@ WebViewOptions::FetchResource make_webview_directory_resource_fetcher(
     std::filesystem::path root_directory,
     std::string index_filename = "index.html");
 
-// Embedded web view component
-// Create with WebViewPanel::create(), then attach to a parent view or
-// use native_handle() to embed in a native window hierarchy.
+// Embedded web view component.
+// Create with WebViewPanel::create(), then use native_handle() to embed the
+// platform WebView in a WindowHost/PluginViewHost that actually exposes and
+// accepts native child views. WebView backend availability and host embedding
+// availability are separate capabilities; callers must check the host handle
+// and attach_native_child_view() result.
 class WebViewPanel {
 public:
     using JsCallback = std::function<std::string(const std::string& args_json)>;
@@ -146,7 +149,9 @@ public:
     // immediately.
     virtual void set_ready_handler(ReadyHandler handler) = 0;
 
-    // Get the native view handle for embedding (NSView*, HWND, etc.)
+    // Get the native view handle for embedding (NSView*, HWND, etc.). This is
+    // the child surface handle only; successful embedding also requires a host
+    // whose native child-view attach contract returns true.
     virtual NativeViewHandle native_handle() = 0;
 
     // Navigate to a URL

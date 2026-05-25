@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
@@ -138,6 +139,9 @@ public:
         options.initial_html = kWebViewLoadingHtml;
         panel_ = view::WebViewPanel::create(options);
         if (!panel_) {
+            runtime::log_warn(
+                "PulpWebViewPlugin: native WebView backend unavailable; "
+                "editor will use the fallback native background");
             return;
         }
 
@@ -173,6 +177,12 @@ public:
             static_cast<float>(size.height));
         if (attached_) {
             sync_to_host();
+        } else if (!warned_attach_failure_) {
+            warned_attach_failure_ = true;
+            runtime::log_warn(
+                "PulpWebViewPlugin: PluginViewHost rejected native child "
+                "embedding; this platform host must provide attach/bounds/"
+                "detach support for embedded WebViews");
         }
     }
 
@@ -205,6 +215,7 @@ public:
 private:
     std::unique_ptr<view::WebViewPanel> panel_;
     bool attached_ = false;
+    bool warned_attach_failure_ = false;
 };
 
 class WebViewEditorRoot final : public view::View {

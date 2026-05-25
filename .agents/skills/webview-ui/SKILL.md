@@ -116,6 +116,21 @@ Important notes from the working proof:
 
 ## Window Embedding
 
+WebView backend availability and host embedding availability are separate. A
+`WebViewPanel` can exist even when the surrounding `WindowHost` or
+`PluginViewHost` cannot accept a native child surface. Always check:
+- the panel's `native_handle()`
+- the host's native content/view handle where applicable
+- the boolean returned by `attach_native_child_view(...)`
+
+Current host truth:
+- standalone `WindowHost` child embedding is built in on macOS
+- built-in iOS `WindowHost` does not expose standalone child-view embedding
+  handles yet
+- `PluginViewHost` child embedding is built in on macOS and iOS
+- Windows/Linux/Android embedding is factory-backed through
+  `WindowHost::Factory` or `PluginViewHost::Factory`
+
 For palette / inspector style UI:
 - create the parent `WindowHost`
 - create the child/palette `WindowHost`

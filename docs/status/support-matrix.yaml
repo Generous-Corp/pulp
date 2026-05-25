@@ -531,6 +531,35 @@ platform_maturity:
       has_backend(). No native provider ships yet for
       Windows/Linux/Android; callers register their own backend or
       receive explicit no-selection.
+  native_child_view_embedding_window_host:
+    status: partial
+    notes: >-
+      Standalone native child-view embedding is an instance capability, not a
+      blanket platform guarantee. Built-in `WindowHost` embedding is macOS
+      only; built-in iOS `WindowHost` does not currently expose child-view
+      handles. Windows/Linux/Android require a host-registered
+      `WindowHost::Factory` that returns non-null native handles and implements
+      attach/bounds/detach.
+    platforms:
+      macos: usable
+      ios: unsupported
+      windows: partial
+      linux: partial
+      android: partial
+  native_child_view_embedding_plugin_view_host:
+    status: partial
+    notes: >-
+      Plugin editor native child-view embedding is built in on macOS and iOS.
+      Windows/Linux/Android require a host-registered
+      `PluginViewHost::Factory` that returns non-null native handles and
+      implements attach/bounds/detach; no first-party host implementation ships
+      yet for those platforms.
+    platforms:
+      macos: usable
+      ios: usable
+      windows: partial
+      linux: partial
+      android: partial
 
 input:
   pointer_events:

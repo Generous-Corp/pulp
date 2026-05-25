@@ -12,6 +12,7 @@
 #include <pulp/view/split_view.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
+#include <functional>
 #include <memory>
 
 namespace pulp::view {
@@ -39,12 +40,18 @@ private:
 /// of a target view tree in a separate OS window.
 class InspectorWindow {
 public:
+    using HostFactory = std::function<std::unique_ptr<WindowHost>(
+        View& root, const WindowOptions& options)>;
+
     /// Construct an inspector targeting the given root view.
     /// @param target_root  The root of the view tree to inspect.
     /// @param mgr          Optional WindowManager for registration.
     /// @param parent        Optional parent WindowHost (positions relative to it).
+    /// @param host_factory Optional host creation override for tests or embedders
+    ///                     that route inspector windows through a custom host.
     InspectorWindow(View& target_root, WindowManager* mgr = nullptr,
-                    WindowHost* parent = nullptr);
+                    WindowHost* parent = nullptr,
+                    HostFactory host_factory = {});
     ~InspectorWindow();
 
     InspectorWindow(const InspectorWindow&) = delete;
@@ -75,6 +82,7 @@ private:
     View& target_root_;
     WindowManager* manager_ = nullptr;
     WindowHost* parent_host_ = nullptr;
+    HostFactory host_factory_;
 
     // Inspector window's own view tree
     std::unique_ptr<View> inspector_root_;

@@ -1,5 +1,8 @@
 #include <pulp/view/inspector_window.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/runtime/log.hpp>
+
+#include <utility>
 
 namespace pulp::view {
 
@@ -38,10 +41,12 @@ void InspectorHighlight::paint(canvas::Canvas& canvas) {
 // ── InspectorWindow ────────────────────────────────────────────────────────
 
 InspectorWindow::InspectorWindow(View& target_root, WindowManager* mgr,
-                                 WindowHost* parent)
+                                 WindowHost* parent,
+                                 HostFactory host_factory)
     : target_root_(target_root)
     , manager_(mgr)
     , parent_host_(parent)
+    , host_factory_(std::move(host_factory))
 {
     build_ui();
 
@@ -144,7 +149,18 @@ void InspectorWindow::show() {
         if (parent_host_)
             opts.parent_native_handle = parent_host_->native_window_handle();
 
-        window_host_ = WindowHost::create(*inspector_root_, opts);
+        window_host_ = host_factory_
+            ? host_factory_(*inspector_root_, opts)
+            : WindowHost::create(*inspector_root_, opts);
+        if (!window_host_) {
+            runtime::log_warn(
+                "InspectorWindow: WindowHost::create returned nullptr; "
+                "inspector windows require a supported WindowHost implementation");
+            if (highlight_ptr_)
+                highlight_ptr_->set_visible(false);
+            return;
+        }
+
         window_host_->set_close_callback([this]() {
             if (highlight_ptr_)
                 highlight_ptr_->set_visible(false);

@@ -114,28 +114,37 @@ void MyPlugin::on_view_closed(view::View&) {
 detach API, and `View::plugin_view_host()` is populated across the whole
 editor subtree before `on_view_opened()` fires. That means a nested custom
 view can embed a `WebViewPanel` (or any other native child surface) without
-singletons or format-specific hooks:
+singletons or format-specific hooks when the concrete host supports native
+child embedding:
 
 ```cpp
 class WebViewSlot : public view::View {
 public:
   void attach_if_needed() {
     if (attached_ || !plugin_view_host() || !panel_) return;
+    auto child = panel_->native_handle();
+    if (!child) return;
+
     auto size = plugin_view_host()->get_size();
     attached_ = plugin_view_host()->attach_native_child_view(
-        panel_->native_handle(), 0, 0, size.width, size.height);
+        child, 0, 0, size.width, size.height);
   }
 
   void sync_to_host() {
     if (!attached_ || !plugin_view_host() || !panel_) return;
+    auto child = panel_->native_handle();
+    if (!child) return;
+
     auto size = plugin_view_host()->get_size();
     plugin_view_host()->set_native_child_view_bounds(
-        panel_->native_handle(), 0, 0, size.width, size.height);
+        child, 0, 0, size.width, size.height);
   }
 
   void detach_if_needed() {
     if (!attached_ || !plugin_view_host() || !panel_) return;
-    plugin_view_host()->detach_native_child_view(panel_->native_handle());
+    if (auto child = panel_->native_handle()) {
+      plugin_view_host()->detach_native_child_view(child);
+    }
     attached_ = false;
   }
 
@@ -161,6 +170,14 @@ Views added before the host exists still inherit the final
 `PluginViewHost*` when the editor opens, so deeply nested children can call
 `plugin_view_host()` just like children added later. See
 `examples/webview-plugin/` for a complete runnable example.
+
+`plugin_view_host()` being non-null only proves that the editor has a host.
+Native child embedding is an instance capability: the child surface must expose
+a non-null native handle and `attach_native_child_view()` must return true. The
+built-in plugin hosts support that contract on macOS and iOS. On
+Windows/Linux/Android, applications or format hosts provide it by registering a
+`PluginViewHost::Factory`; the default factory/stub path returns false rather
+than pretending native child embedding exists.
 
 ### Multiple views for one processor
 
