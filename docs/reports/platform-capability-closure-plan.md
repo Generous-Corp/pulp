@@ -473,8 +473,8 @@ Closure slice:
   public docs do not imply first-party non-Apple embedding exists today.
 
 Native-window local validation:
-- Rebased onto `origin/main` at `1b12541ae` and refreshed the required SDK
-  minor bump to `0.215.0`.
+- Rebased onto `origin/main` at `65b48dfa6` and refreshed the required SDK
+  minor bump to `0.217.0`.
 - Configured Release with WebView enabled and GPU off:
   `cmake -S . -B build-native-window -DCMAKE_BUILD_TYPE=Release
   -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
@@ -482,18 +482,25 @@ Native-window local validation:
 - Built the focused targets: `pulp-test-view-host-bridge`,
   `pulp-test-webview`, `pulp-webview-palette`, and
   `PulpWebViewPlugin_Standalone`.
+- A rebase sweep exposed an intermittent macOS deferred-click crash in the
+  view-host bridge tests. The queued click block no longer captures/derefs the
+  MRC `PulpView` object after teardown, and the early-teardown regression test
+  now uses a hidden host like the neighboring headless event tests.
+- `./build-native-window/test/pulp-test-view-host-bridge --reporter compact`
+  passed 81/81 assertions across 9 cases; a stress sweep passed 30/30 repeated
+  runs after the deferred-click hardening.
 - `./build-native-window/test/pulp-test-webview --reporter compact` passed
   5/7 test cases, with 2 local WebView readiness skips where the host
   environment never reached callback-ready state, and 84/84 assertions passed.
-- Focused CTest passes covered view-host, native-child, macOS/PulpView, and
-  WebView cases: 14 passed and 2 skipped for local WebView readiness/content
-  limitations.
+- Focused CTest over WebView/native-child attach cases passed 7/7 after
+  excluding generated `_NOT_BUILT` placeholders; 2 live WebView readiness cases
+  skipped in this local environment.
 - `tools/check-docs.sh` passed with existing repository warnings.
 - `git diff --check` passed.
 - `tools/scripts/gates.sh origin/main` passed skill-sync, version-bump,
   compat-sync, node-ABI, and deps-audit gates.
 - `version_bump_check.py --base origin/main --head HEAD --mode apply` applied
-  the required SDK minor bump to `0.215.0` after the inspector host-factory
+  the required SDK minor bump to `0.217.0` after the inspector host-factory
   override made the patch a public header/API change.
 - Coverage note: the stock `tools/scripts/local_diff_cover.sh` wrapper still
   configures the GPU examples path and fails locally without Skia. The same

@@ -767,34 +767,25 @@ static void install_app_menu(NSString* appName) {
                     // `_deferredClickAlive` liveness token (a
                     // `shared_ptr<atomic<bool>>`). The copy keeps the
                     // `atomic<bool>` alive even after the PulpView itself is
-                    // gone. `-prepareForTeardown` — called from the host
-                    // destructor before the bridge/engine can be freed, and
-                    // again from -dealloc — flips the token to false. The
-                    // teardown runs synchronously with no run-loop pump
-                    // between the bridge's destruction and the flip, so every
-                    // still-queued block is defused. A block that drains after
-                    // teardown sees `false` and no-ops WITHOUT touching `self`
-                    // or invoking the captured handlers. `self` is captured
-                    // unretained (this file is compiled MRC); that is safe
-                    // because every `self` deref is gated behind the
-                    // token-is-alive check.
+                    // gone. `-prepareForTeardown` flips the token to false. A
+                    // block that drains after teardown sees `false` and no-ops.
+                    // Do not capture or dereference `self` from this block:
+                    // this file is compiled MRC, and hidden test windows can be
+                    // torn down before AppKit drains every main-queue callback.
+                    // The copied handlers have their own WidgetBridge /
+                    // ScriptEngine liveness guards, and mouseUp already marks
+                    // the view dirty immediately after scheduling the block.
                     std::shared_ptr<std::atomic<bool>> aliveToken = _deferredClickAlive;
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        // Defused after teardown: do not touch `self` or the
-                        // captured `std::function`s — their backing
-                        // WidgetBridge / ScriptEngine may already be freed.
+                        // Defused after teardown: do not invoke handlers whose
+                        // backing WidgetBridge / ScriptEngine may already be
+                        // freed.
                         if (!aliveToken || !aliveToken->load())
                             return;
                         @try {
                             try {
-                                // Token still alive ⇒ the host (and therefore
-                                // this view) has not been torn down. The extra
-                                // rootView guard rejects a detached view tree.
-                                if (self.rootView) {
-                                    if (click_handler) click_handler();
-                                    if (global_click) global_click(clicked_id, modifiers);
-                                    [self setNeedsDisplay:YES];
-                                }
+                                if (click_handler) click_handler();
+                                if (global_click) global_click(clicked_id, modifiers);
                             } catch (const std::exception& e) {
                                 std::cerr << "MacWindowHost deferred click error: " << e.what() << "\n";
                             } catch (...) {

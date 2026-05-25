@@ -487,6 +487,7 @@ TEST_CASE("PulpView deferred click is cancelled when bridge/engine are torn down
             opts.height = 100.0f;
             opts.resizable = false;
             opts.use_gpu = false;
+            opts.initially_hidden = true;
 
             auto host = WindowHost::create(root, opts);
             REQUIRE(host != nullptr);
@@ -508,7 +509,6 @@ TEST_CASE("PulpView deferred click is cancelled when bridge/engine are torn down
             )");
             REQUIRE(bridge.widget("clear") != nullptr);
 
-            host->show();
             auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
             REQUIRE(nswindow != nil);
             auto* contentView = nswindow.contentView;
