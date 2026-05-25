@@ -181,6 +181,103 @@ final class PulpMotionTests: XCTestCase {
         XCTAssertTrue(rec.updateCalls.isEmpty)
     }
 
+    func testGeometryProbeUsesCustomMetricNameForEveryUpdate() {
+        rec.tracingEnabled = true
+        let probe = PulpMotionGeometryProbe(view: "Meter", fps: 48,
+                                            metric: "bounds")
+
+        XCTAssertTrue(probe.isAttached)
+        XCTAssertEqual(probe.name, "Meter")
+        XCTAssertEqual(probe.metricName, "bounds")
+        XCTAssertEqual(rec.registerCalls.count, 1)
+        XCTAssertEqual(rec.registerCalls[0].0, "Meter")
+        XCTAssertEqual(rec.registerCalls[0].1, 48)
+
+        probe.update(minX: 1.5, minY: 2.5, width: 30.25, height: 40.75)
+        probe.update(minX: -3, minY: -4, width: 5, height: 6)
+
+        XCTAssertEqual(rec.updateCalls.count, 2)
+        XCTAssertEqual(rec.updateCalls[0].0, 1)
+        XCTAssertEqual(rec.updateCalls[0].1, "bounds")
+        XCTAssertEqual(rec.updateCalls[0].2, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(rec.updateCalls[0].3, 2.5, accuracy: 1e-9)
+        XCTAssertEqual(rec.updateCalls[0].4, 30.25, accuracy: 1e-9)
+        XCTAssertEqual(rec.updateCalls[0].5, 40.75, accuracy: 1e-9)
+        XCTAssertEqual(rec.updateCalls[1].1, "bounds")
+        XCTAssertEqual(rec.updateCalls[1].2, -3, accuracy: 1e-9)
+        XCTAssertEqual(rec.updateCalls[1].3, -4, accuracy: 1e-9)
+    }
+
+    func testGeometryProbeDoesNotUpdateAfterDetach() {
+        rec.tracingEnabled = true
+        let probe = PulpMotionGeometryProbe(view: "Detached", fps: 12)
+        XCTAssertTrue(probe.isAttached)
+
+        probe.detach()
+        XCTAssertFalse(probe.isAttached)
+        XCTAssertEqual(rec.detachCalls, [1])
+
+        probe.update(minX: 9, minY: 8, width: 7, height: 6)
+        probe.detach()
+
+        XCTAssertTrue(rec.updateCalls.isEmpty)
+        XCTAssertEqual(rec.detachCalls, [1])
+    }
+
+    func testGeometryProbeDeinitDetachesActiveTrace() {
+        rec.tracingEnabled = true
+
+        do {
+            let probe = PulpMotionGeometryProbe(view: "Transient", fps: 15)
+            XCTAssertTrue(probe.isAttached)
+            XCTAssertEqual(rec.registerCalls.count, 1)
+            XCTAssertTrue(rec.detachCalls.isEmpty)
+        }
+
+        XCTAssertEqual(rec.detachCalls, [1])
+    }
+
+    func testGeometryProbeLeavesDetachedWhenBackendDeclinesRegistration() {
+        rec.tracingEnabled = true
+        rec.nextId = 0
+
+        let probe = PulpMotionGeometryProbe(view: "Declined", fps: 24)
+        XCTAssertFalse(probe.isAttached)
+        XCTAssertEqual(rec.registerCalls.count, 1)
+        XCTAssertEqual(rec.registerCalls[0].0, "Declined")
+        XCTAssertEqual(rec.registerCalls[0].1, 24)
+
+        probe.update(minX: 1, minY: 2, width: 3, height: 4)
+        probe.detach()
+
+        XCTAssertTrue(rec.updateCalls.isEmpty)
+        XCTAssertTrue(rec.detachCalls.isEmpty)
+    }
+
+    func testGeometryProbeRegistrationRunsInsideAmbientProvenanceScope() {
+        rec.tracingEnabled = true
+        var observedAmbientDuringRegister: (String, String, String, Int)?
+        var backend = PulpMotionRuntime.backend
+        backend.registerGeometryTrace = { [rec] view, fps in
+            observedAmbientDuringRegister = rec!.ambient
+            rec!.registerCalls.append((view, fps))
+            return 42
+        }
+        PulpMotionRuntime.installTestBackend(backend)
+
+        let probe = PulpMotionGeometryProbe(view: "Scoped", fps: 90)
+
+        XCTAssertTrue(probe.isAttached)
+        XCTAssertEqual(rec.registerCalls.count, 1)
+        XCTAssertEqual(rec.registerCalls[0].0, "Scoped")
+        XCTAssertEqual(rec.registerCalls[0].1, 90)
+        XCTAssertEqual(observedAmbientDuringRegister?.0, "swiftui")
+        XCTAssertEqual(observedAmbientDuringRegister?.1, "Scoped")
+        XCTAssertFalse(observedAmbientDuringRegister?.2.isEmpty ?? true)
+        XCTAssertGreaterThan(observedAmbientDuringRegister?.3 ?? 0, 0)
+        XCTAssertEqual(rec.ambientCleared, 1)
+    }
+
     // MARK: - withAmbientProvenance race-guard (#2150)
     //
     // Pre-#2150, two SwiftUI view bodies in the same runloop tick that
