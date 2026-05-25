@@ -2138,6 +2138,10 @@ pulp_add_test_suite(pulp-test-sprite-strip LIBRARIES pulp::view)
 # Edit history (global undo) tests
 pulp_add_test_suite(pulp-test-edit-history LIBRARIES pulp::state)
 
+# macOS plan Batch P — HostQuirks scaffolding + HostVersion detection
+pulp_add_test_suite(pulp-test-host-version LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-host-quirks LIBRARIES pulp::format)
+
 # macOS plan Batch A — Foundations
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)

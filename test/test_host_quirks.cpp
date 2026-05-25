@@ -1,0 +1,94 @@
+#include <catch2/catch_test_macros.hpp>
+#include <pulp/format/host_quirks.hpp>
+
+using namespace pulp::format;
+
+TEST_CASE("HostQuirks default-construct enables cheap defenses",
+          "[format][host-quirks]") {
+    HostQuirks q;
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.clamp_latency_to_nonneg == true);
+    REQUIRE(q.silence_unsupported_bus_arrangements == true);
+    // Expensive defenses default off.
+    REQUIRE(q.fl_studio_setactive_process_mutex == false);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.reaper_process_while_bypassed == false);
+    REQUIRE(q.logic_au_channel_probe_cap == 64);
+}
+
+TEST_CASE("make_quirks_for unknown host returns cheap-defense defaults",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::Unknown, {});
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.logic_au_channel_probe_cap == 64);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+}
+
+TEST_CASE("make_quirks_for Cubase 10 flips Cubase-10 flags",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::Cubase, HostVersion{10, 0});
+    REQUIRE(q.cubase10_async_view_resize_queue == true);
+    REQUIRE(q.cubase10_param_gesture_ordering == true);
+    REQUIRE(q.cubase10_fractional_scale_correction == true);
+    // Cubase 9 row should NOT fire on Cubase 10.
+    REQUIRE(q.cubase9_state_blob_size_validation == false);
+}
+
+TEST_CASE("make_quirks_for Cubase 9 fires the 9-only state-blob quirk",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::Cubase, HostVersion{9, 5});
+    REQUIRE(q.cubase9_state_blob_size_validation == true);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+}
+
+TEST_CASE("make_quirks_for Logic caps channel probe at 8",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(q.logic_au_channel_probe_cap == 8);
+    REQUIRE(q.logic_au_tail_time_conversion == true);
+    // GarageBand shares the same Logic quirks.
+    auto gb = make_quirks_for(HostType::GarageBand, HostVersion{});
+    REQUIRE(gb.logic_au_channel_probe_cap == 8);
+}
+
+TEST_CASE("make_quirks_for Reaper flips all 6 Reaper flags",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(q.reaper_vst3_gesture_ordering == true);
+    REQUIRE(q.reaper_process_while_bypassed == true);
+    REQUIRE(q.reaper_keyboard_passthrough == true);
+    REQUIRE(q.reaper_permissive_bus_arrangements == true);
+    REQUIRE(q.reaper_anticipative_fx_buffer_variability == true);
+    REQUIRE(q.reaper_midsession_setstate == true);
+}
+
+TEST_CASE("make_quirks_for Bitwig < 6 enables setBusArrangements-while-active workaround",
+          "[format][host-quirks]") {
+    auto old = make_quirks_for(HostType::Bitwig, HostVersion{5, 2});
+    REQUIRE(old.bitwig_vst3_setbusarrangements_while_active == true);
+    auto modern = make_quirks_for(HostType::Bitwig, HostVersion{6, 0});
+    REQUIRE(modern.bitwig_vst3_setbusarrangements_while_active == false);
+    // Linux-repaint always-on (no-op off Linux at adapter call site).
+    REQUIRE(old.bitwig_vst3_linux_repaint_after_resize == true);
+}
+
+TEST_CASE("make_quirks_for Pro Tools flips all 3 AAX flags",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::ProTools, HostVersion{2024, 6});
+    REQUIRE(q.pro_tools_aax_sidechain_negotiation == true);
+    REQUIRE(q.pro_tools_aax_latency_callback_push == true);
+    REQUIRE(q.pro_tools_aax_mono_second_bus == true);
+}
+
+TEST_CASE("make_quirks_for Ableton Live enables canResize workaround",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::AbletonLive, HostVersion{12, 0});
+    REQUIRE(q.live_vst3_canresize_ignore == true);
+    REQUIRE(q.live_vst3_windows_dpi_defer == true);
+}
+
+TEST_CASE("Nuendo treats as Cubase for quirk purposes",
+          "[format][host-quirks]") {
+    auto q = make_quirks_for(HostType::Nuendo, HostVersion{13, 0});
+    REQUIRE(q.cubase10_async_view_resize_queue == true);
+}
