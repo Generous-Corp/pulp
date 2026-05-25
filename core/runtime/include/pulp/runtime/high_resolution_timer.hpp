@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <chrono>
 
@@ -33,6 +34,7 @@ private:
     struct TimerState;
 
     std::atomic<bool> running_{false};
+    std::mutex mutex_;
     std::thread thread_;
     std::shared_ptr<TimerState> state_;
 };
