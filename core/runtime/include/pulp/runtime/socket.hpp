@@ -50,6 +50,9 @@ public:
     /// Close the socket.
     void close();
 
+    /// Interrupt blocking TCP operations without closing the socket handle.
+    void shutdown();
+
     /// Whether the socket is open.
     bool is_open() const;
 

@@ -181,6 +181,12 @@ void Socket::close() {
     }
 }
 
+void Socket::shutdown() {
+    if (fd_ != kInvalidSocketHandle && type_ == SocketType::TCP) {
+        (void)SOCKET_SHUTDOWN(NATIVE_SOCKET(fd_));
+    }
+}
+
 bool Socket::is_open() const {
     return fd_ != kInvalidSocketHandle;
 }

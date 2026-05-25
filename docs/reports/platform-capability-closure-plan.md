@@ -25,7 +25,7 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | Track | Branch target | Worktree target | Status | Done means |
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
-| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Draft PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; local rebase and coverage-gate alignment validated, push/check sweep pending | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
+| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Draft PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; hosted-TSan failure fix and local coverage validated, final sweep/push pending | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
 | OSC | `feature/platform-osc` | `pulp-platform-osc` | Draft PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; hosted Linux/Codecov check sweep pending | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | Queued | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
@@ -257,6 +257,23 @@ Native event loop local implementation status:
   callbacks re-check liveness after user callbacks, and iOS CPU/GPU window
   teardown disconnects retained UIKit callbacks before host-owned state is
   cleared.
+- Hosted TSan then exposed an IPC timing assumption outside the dispatcher
+  surface: `ChildProcessManager wait_all waits for active connected children`
+  relied on 75/150 ms child-process sleeps, which is not stable once process
+  launch is sanitizer-instrumented. The connected-child fixture now supports an
+  explicit parent-driven `exit` message so the test proves cleanup/wait behavior
+  without wall-clock races.
+- The same local TSan sweep found two real IPC socket races that would have
+  become the next sanitizer failures: server stop closed the listening socket
+  before the accept thread joined, and connection disconnect closed a socket
+  while the read thread was still blocked in `receive()`. Server stop now wakes
+  accept before joining and closes after join; connection disconnect now
+  interrupts blocking socket reads with `Socket::shutdown()`, joins the read
+  thread, then closes the handle.
+- Accepted socket connections can publish lambda callbacks through synchronized
+  setter methods before active read-thread callbacks observe them. Direct public
+  callback field assignment remains valid before a connection starts; connected
+  instances should use the setters.
 
 Native event loop local validation:
 - `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF`
@@ -267,15 +284,28 @@ Native event loop local validation:
   assertions in 34 focused test cases.
 - `./build/test/pulp-test-events --durations yes` passed: 259 assertions in
   57 test cases.
+- `./build/test/pulp-test-ipc` passed: 173 assertions in 33 test cases.
+- TSan validation:
+  `cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug
+  -DCMAKE_CXX_FLAGS="-fsanitize=thread" -DCMAKE_C_FLAGS="-fsanitize=thread"
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" -DPULP_BUILD_TESTS=ON
+  -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF`,
+  `cmake --build build-tsan --target pulp-test-ipc pulp-test-events -j8`,
+  `TSAN_OPTIONS="halt_on_error=1:suppressions=$PWD/test/tsan.supp"
+  ./build-tsan/test/pulp-test-ipc` passed: 173 assertions in 33 test cases,
+  `TSAN_OPTIONS="halt_on_error=1:suppressions=$PWD/test/tsan.supp"
+  ./build-tsan/test/pulp-test-events` passed: 259 assertions in 57 test cases,
+  and the focused dispatcher/event-loop CTest subset passed 34/34.
 - Manual GPU-off coverage build:
-  `cmake -S . -B build-cov -DCMAKE_BUILD_TYPE=Debug
+  `cmake -S . -B build-cov-dispatch -DCMAKE_BUILD_TYPE=Debug
   -DPULP_ENABLE_COVERAGE=ON -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF
-  -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++`,
-  `cmake --build build-cov --target pulp-test-events -j8`, then
-  `LLVM_PROFILE_FILE="$PWD/build-cov/profraw/pulp-%p-%m.profraw"
-  ./build-cov/test/pulp-test-events
-  "[events][main_thread_dispatcher],[events][event_loop]"` passed: 168
-  assertions in 34 focused test cases.
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`,
+  `cmake --build build-cov-dispatch --target pulp-test-events
+  pulp-test-ipc -j8`, then
+  `LLVM_PROFILE_FILE="$PWD/build-cov-dispatch/profraw/pulp-%p-%m.profraw"
+  ctest --test-dir build-cov-dispatch --output-on-failure
+  -R 'IPC|ChildProcess|ConnectedChildProcess|MainThread|EventLoop|event
+  loop|dispatcher|Dispatcher'` passed 68/68 tests.
 - Manual diff coverage passed against `origin/main`: 93% diff coverage. The
   per-tier gate also passes after wiring it to the same shared diff-cover
   exclusion set: audio-critical no touched lines, user-facing no counted touched

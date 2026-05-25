@@ -92,23 +92,23 @@ void wait_for_named_pipe_server_ready(const std::string& pipe_name,
 
 struct CapturingServer : InterprocessConnectionServer {
     void client_connected(std::unique_ptr<InterprocessConnection> conn) override {
-        conn->on_message = [this](const void*, size_t size) {
+        conn->set_on_message([this](const void*, size_t size) {
             std::lock_guard<std::mutex> lock(mutex);
             ++binary_messages;
             last_binary_size = size;
             cv.notify_all();
-        };
-        conn->on_text_message = [this](std::string_view message) {
+        });
+        conn->set_on_text_message([this](std::string_view message) {
             std::lock_guard<std::mutex> lock(mutex);
             ++text_messages;
             last_text.assign(message);
             cv.notify_all();
-        };
-        conn->on_disconnected = [this] {
+        });
+        conn->set_on_disconnected([this] {
             std::lock_guard<std::mutex> lock(mutex);
             ++disconnects;
             cv.notify_all();
-        };
+        });
 
         std::lock_guard<std::mutex> lock(mutex);
         accepted = std::move(conn);
@@ -801,6 +801,7 @@ TEST_CASE("ChildProcessManager wait_all waits for active connected children",
 
     ChildProcessManager manager;
     std::mutex mutex;
+    std::condition_variable cv;
     int callback_count = 0;
     bool saw_first = false;
     bool saw_second = false;
@@ -812,18 +813,49 @@ TEST_CASE("ChildProcessManager wait_all waits for active connected children",
         ++callback_count;
         saw_first = saw_first || code == 34;
         saw_second = saw_second || code == 35;
+        cv.notify_all();
     };
 
-    auto* first = manager.launch(fixture, {"--exit-code", "34", "--hold-ms", "75"});
+    auto* first = manager.launch(fixture,
+                                 {"--exit-code", "34",
+                                  "--wait-for-exit-message",
+                                  "--hold-ms", "5000"});
     REQUIRE(first != nullptr);
-    auto* second = manager.launch(fixture, {"--exit-code", "35", "--hold-ms", "150"});
+    auto* second = manager.launch(fixture,
+                                  {"--exit-code", "35",
+                                   "--wait-for-exit-message",
+                                   "--hold-ms", "5000"});
     REQUIRE(second != nullptr);
     REQUIRE(manager.active_count() == 2);
 
+    REQUIRE(first->send_message("exit"));
+    bool sent_second_exit = false;
+    bool saw_first_before_second_release = false;
+    std::thread release_second([&] {
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            saw_first_before_second_release =
+                cv.wait_for(lock, std::chrono::seconds(5), [&] {
+                    return saw_first;
+                });
+        }
+
+        const bool sent = saw_first_before_second_release &&
+                          second->send_message("exit");
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            sent_second_exit = sent;
+            cv.notify_all();
+        }
+    });
+
     manager.wait_all(5000);
+    release_second.join();
     REQUIRE_FALSE(second->is_running());
     {
         std::lock_guard<std::mutex> lock(mutex);
+        REQUIRE(saw_first_before_second_release);
+        REQUIRE(sent_second_exit);
         REQUIRE(callback_count == 2);
         REQUIRE(saw_first);
         REQUIRE(saw_second);
@@ -942,12 +974,12 @@ TEST_CASE("IPC socket server accepts client and exchanges framed messages",
     std::string client_text;
 
     server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> conn) {
-        conn->on_text_message = [&](std::string_view message) {
+        conn->set_on_text_message([&](std::string_view message) {
             std::lock_guard<std::mutex> lock(mutex);
             server_text.assign(message);
             server_received = true;
             cv.notify_all();
-        };
+        });
 
         std::lock_guard<std::mutex> lock(mutex);
         accepted = std::move(conn);

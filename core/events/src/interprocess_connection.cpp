@@ -94,6 +94,13 @@ struct InterprocessConnection::Impl {
         return transport == IpcTransport::NamedPipe ? pipe.is_open() : socket.is_open();
     }
 
+    void interrupt_blocking_io() {
+        if (transport == IpcTransport::NamedPipe)
+            pipe.close();
+        else
+            socket.shutdown();
+    }
+
     void close() {
         pipe.close();
         socket.close();
@@ -104,6 +111,28 @@ struct InterprocessConnection::Impl {
 
 InterprocessConnection::InterprocessConnection() : impl_(std::make_unique<Impl>()) {}
 InterprocessConnection::~InterprocessConnection() { disconnect(); }
+
+void InterprocessConnection::set_on_connected(std::function<void()> callback) {
+    std::lock_guard lock(callback_mutex_);
+    on_connected = std::move(callback);
+}
+
+void InterprocessConnection::set_on_disconnected(std::function<void()> callback) {
+    std::lock_guard lock(callback_mutex_);
+    on_disconnected = std::move(callback);
+}
+
+void InterprocessConnection::set_on_message(
+    std::function<void(const void*, size_t)> callback) {
+    std::lock_guard lock(callback_mutex_);
+    on_message = std::move(callback);
+}
+
+void InterprocessConnection::set_on_text_message(
+    std::function<void(std::string_view)> callback) {
+    std::lock_guard lock(callback_mutex_);
+    on_text_message = std::move(callback);
+}
 
 bool InterprocessConnection::connect(std::string_view name, IpcTransport transport) {
     disconnect();
@@ -128,7 +157,12 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
     if (ok) {
         state_.store(IpcState::Connected);
         connection_made();
-        if (on_connected) on_connected();
+        std::function<void()> connected_callback;
+        {
+            std::lock_guard lock(callback_mutex_);
+            connected_callback = on_connected;
+        }
+        if (connected_callback) connected_callback();
         start_read_thread();
     } else {
         IpcState expected = IpcState::Connecting;
@@ -170,7 +204,12 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
     if (ok) {
         state_.store(IpcState::Connected);
         connection_made();
-        if (on_connected) on_connected();
+        std::function<void()> connected_callback;
+        {
+            std::lock_guard lock(callback_mutex_);
+            connected_callback = on_connected;
+        }
+        if (connected_callback) connected_callback();
         start_read_thread();
     } else {
         IpcState expected = IpcState::Connecting;
@@ -182,17 +221,23 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
 void InterprocessConnection::disconnect() {
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
-    impl_->close();
+    impl_->interrupt_blocking_io();
     if (read_thread_.joinable()) {
         if (read_thread_.get_id() == std::this_thread::get_id())
             read_thread_.detach();
         else
             read_thread_.join();
     }
+    impl_->close();
 
     if (was_connected) {
         connection_lost();
-        if (on_disconnected) on_disconnected();
+        std::function<void()> disconnected_callback;
+        {
+            std::lock_guard lock(callback_mutex_);
+            disconnected_callback = on_disconnected;
+        }
+        if (disconnected_callback) disconnected_callback();
     }
 }
 
@@ -245,7 +290,12 @@ void InterprocessConnection::read_loop() {
         running_.store(false);
         if (state_.exchange(IpcState::Disconnected) == IpcState::Connected) {
             connection_lost();
-            if (on_disconnected) on_disconnected();
+            std::function<void()> disconnected_callback;
+            {
+                std::lock_guard lock(callback_mutex_);
+                disconnected_callback = on_disconnected;
+            }
+            if (disconnected_callback) disconnected_callback();
         }
     };
 
@@ -292,11 +342,18 @@ void InterprocessConnection::read_loop() {
 
         // Dispatch message
         message_received(buffer.data(), msg_len);
-        if (on_message) on_message(buffer.data(), msg_len);
+        std::function<void(const void*, size_t)> message_callback;
+        std::function<void(std::string_view)> text_callback;
+        {
+            std::lock_guard lock(callback_mutex_);
+            message_callback = on_message;
+            text_callback = on_text_message;
+        }
+        if (message_callback) message_callback(buffer.data(), msg_len);
 
         std::string_view text_view(reinterpret_cast<const char*>(buffer.data()), msg_len);
         message_received(text_view);
-        if (on_text_message) on_text_message(text_view);
+        if (text_callback) text_callback(text_view);
     }
 }
 
@@ -348,7 +405,12 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 conn->impl_->socket = std::move(*client_sock);
                 conn->state_.store(IpcState::Connected);
                 conn->connection_made();
-                if (conn->on_connected) conn->on_connected();
+                std::function<void()> connected_callback;
+                {
+                    std::lock_guard lock(conn->callback_mutex_);
+                    connected_callback = conn->on_connected;
+                }
+                if (connected_callback) connected_callback();
 
                 // Start read thread while we still own the connection,
                 // then hand off. This avoids use-after-free if the
@@ -387,8 +449,8 @@ void InterprocessConnectionServer::stop() {
             }
         }
     }
-    server_impl_->listen_socket.close();
     if (accept_thread_.joinable()) accept_thread_.join();
+    server_impl_->listen_socket.close();
     clients_.clear();
 }
 

@@ -1,7 +1,9 @@
 #include <pulp/events/interprocess_connection.hpp>
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,6 +25,7 @@ int main(int argc, char** argv) {
     int exit_code = 0;
     int hold_ms = 0;
     bool abrupt_exit = false;
+    bool wait_for_exit_message = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
@@ -34,22 +37,46 @@ int main(int argc, char** argv) {
             hold_ms = parse_int(argv[++i], hold_ms);
         } else if (arg == "--abrupt-exit") {
             abrupt_exit = true;
+        } else if (arg == "--wait-for-exit-message") {
+            wait_for_exit_message = true;
         }
     }
 
     if (pipe_name.empty()) return 64;
 
+    std::mutex exit_mutex;
+    std::condition_variable exit_cv;
+    bool exit_requested = false;
+
     pulp::events::InterprocessConnection connection;
+    if (wait_for_exit_message) {
+        connection.on_text_message = [&](std::string_view message) {
+            if (message != "exit") return;
+
+            {
+                std::lock_guard<std::mutex> lock(exit_mutex);
+                exit_requested = true;
+            }
+            exit_cv.notify_all();
+        };
+    }
+
     if (!connection.connect(pipe_name, pulp::events::IpcTransport::NamedPipe))
         return 65;
 
     if (!connection.send_message("ready"))
         return 66;
 
-    if (hold_ms > 0)
+    if (wait_for_exit_message) {
+        const auto timeout = std::chrono::milliseconds(hold_ms > 0 ? hold_ms : 5000);
+        std::unique_lock<std::mutex> lock(exit_mutex);
+        if (!exit_cv.wait_for(lock, timeout, [&] { return exit_requested; }))
+            return 67;
+    } else if (hold_ms > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(hold_ms));
-    else
+    } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
 
     if (abrupt_exit)
         std::_Exit(exit_code);

@@ -13,6 +13,7 @@
 #include <memory>
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include <cstdint>
 
 namespace pulp::events {
@@ -79,10 +80,19 @@ public:
     }
 
     /// Lambda-based callbacks (alternative to overriding)
+    ///
+    /// Assign these directly before a connection starts. For already-connected
+    /// instances, use the setter methods so the background read thread sees a
+    /// synchronized callback update.
     std::function<void()> on_connected;
     std::function<void()> on_disconnected;
     std::function<void(const void*, size_t)> on_message;
     std::function<void(std::string_view)> on_text_message;
+
+    void set_on_connected(std::function<void()> callback);
+    void set_on_disconnected(std::function<void()> callback);
+    void set_on_message(std::function<void(const void*, size_t)> callback);
+    void set_on_text_message(std::function<void(std::string_view)> callback);
 
     // No copy
     InterprocessConnection(const InterprocessConnection&) = delete;
@@ -96,6 +106,7 @@ private:
     std::atomic<IpcState> state_{IpcState::Disconnected};
     std::thread read_thread_;
     std::atomic<bool> running_{false};
+    mutable std::mutex callback_mutex_;
 
     void start_read_thread();
     void read_loop();
