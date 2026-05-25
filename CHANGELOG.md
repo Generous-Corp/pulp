@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02190"></a>
+## [0.219.0] - 2026-05-25
+
+- fix(midi+test): collector continue-drain + 64-slot pending ring; audit test uses in-range port id ([#2859](https://github.com/danielraffel/pulp/pull/2859))
+- test(midi): audit MIDI 1.0 backend contract on macOS / cross-platform (item 8.6) ([#2857](https://github.com/danielraffel/pulp/pull/2857))
+
 <a id="v02180"></a>
 ## [0.218.0] - 2026-05-25
 
@@ -2769,6 +2775,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.219.0]: https://github.com/danielraffel/pulp/releases/tag/v0.219.0
 [0.218.0]: https://github.com/danielraffel/pulp/releases/tag/v0.218.0
 [0.217.0]: https://github.com/danielraffel/pulp/releases/tag/v0.217.0
 [0.216.0]: https://github.com/danielraffel/pulp/releases/tag/v0.216.0
