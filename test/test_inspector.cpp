@@ -315,6 +315,114 @@ TEST_CASE("Protocol: decode invalid JSON") {
     REQUIRE_FALSE(decode_message("not json", msg));
 }
 
+TEST_CASE("Protocol: response encoding preserves parseable result JSON",
+          "[inspect][protocol][coverage]") {
+    auto object_response = encode_message(make_response(7, R"({"root":{"id":"gain"},"count":2})"));
+    REQUIRE(object_response.find(R"("id")") != std::string::npos);
+    REQUIRE(object_response.find(R"("result")") != std::string::npos);
+    REQUIRE(object_response.find(R"("gain")") != std::string::npos);
+    REQUIRE(object_response.find(R"("params")") == std::string::npos);
+
+    auto array_response = encode_message(make_response(8, R"([{"id":"gain"},{"id":"mix"}])"));
+    REQUIRE(array_response.find(R"("result")") != std::string::npos);
+    REQUIRE(array_response.find(R"("mix")") != std::string::npos);
+
+    auto scalar_response = encode_message(make_response(9, R"("ready")"));
+    REQUIRE(scalar_response.find(R"("result")") != std::string::npos);
+    REQUIRE(scalar_response.find("ready") != std::string::npos);
+}
+
+TEST_CASE("Protocol: invalid JSON payloads encode as strings",
+          "[inspect][protocol][coverage]") {
+    auto response = encode_message(make_response(10, "{not-json"));
+    REQUIRE(response.find(R"("result")") != std::string::npos);
+    REQUIRE(response.find("{not-json") != std::string::npos);
+
+    auto request = encode_message(make_request(11, "DOM.search", "{not-json"));
+    REQUIRE(request.find(R"("id")") != std::string::npos);
+    REQUIRE(request.find("DOM.search") != std::string::npos);
+    REQUIRE(request.find("{not-json") != std::string::npos);
+
+    auto event = encode_message(make_event("DOM.documentUpdated", "{not-json"));
+    REQUIRE(event.find(R"("id")") == std::string::npos);
+    REQUIRE(event.find("DOM.documentUpdated") != std::string::npos);
+    REQUIRE(event.find("{not-json") != std::string::npos);
+}
+
+TEST_CASE("Protocol: empty response and default params omit payload keys",
+          "[inspect][protocol][coverage]") {
+    auto empty_response = encode_message(make_response(12, ""));
+    REQUIRE(empty_response.find(R"("id")") != std::string::npos);
+    REQUIRE(empty_response.find(R"("result")") == std::string::npos);
+
+    auto empty_object_response = encode_message(make_response(13, "{}"));
+    REQUIRE(empty_object_response.find(R"("result")") == std::string::npos);
+
+    auto default_params_request = encode_message(make_request(14, "Inspector.enable", "{}"));
+    REQUIRE(default_params_request.find("Inspector.enable") != std::string::npos);
+    REQUIRE(default_params_request.find(R"("params")") == std::string::npos);
+
+    auto default_params_event = encode_message(make_event("Inspector.detached", "{}"));
+    REQUIRE(default_params_event.find(R"("id")") == std::string::npos);
+    REQUIRE(default_params_event.find("Inspector.detached") != std::string::npos);
+}
+
+TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
+          "[inspect][protocol][coverage]") {
+    auto encoded = encode_message(make_error(15, "View not found: gain"));
+    REQUIRE(encoded.find(R"("id")") != std::string::npos);
+    REQUIRE(encoded.find(R"("error")") != std::string::npos);
+    REQUIRE(encoded.find("View not found: gain") != std::string::npos);
+
+    InspectorMessage decoded;
+    REQUIRE(decode_message(encoded, decoded));
+    REQUIRE(decoded.id == 15);
+    REQUIRE(decoded.is_error);
+    REQUIRE(decoded.params_json == "View not found: gain");
+
+    InspectorMessage no_message;
+    REQUIRE(decode_message(R"({"id":16,"error":{"code":-32000}})", no_message));
+    REQUIRE(no_message.id == 16);
+    REQUIRE(no_message.is_error);
+}
+
+TEST_CASE("Protocol: decode preserves params, result arrays, and notifications",
+          "[inspect][protocol][coverage]") {
+    InspectorMessage request;
+    REQUIRE(decode_message(R"({"id":17,"method":"DOM.search","params":{"query":"Knob"}})", request));
+    REQUIRE(request.id == 17);
+    REQUIRE(request.method == "DOM.search");
+    REQUIRE(request.params_json.find(R"("query")") != std::string::npos);
+    REQUIRE(request.params_json.find(R"("Knob")") != std::string::npos);
+
+    InspectorMessage response;
+    REQUIRE(decode_message(R"({"id":18,"result":[{"id":"gain"},{"id":"mix"}]})", response));
+    REQUIRE(response.id == 18);
+    REQUIRE(response.params_json.find(R"("gain")") != std::string::npos);
+    REQUIRE(response.params_json.find(R"("mix")") != std::string::npos);
+
+    InspectorMessage notification;
+    REQUIRE(decode_message(R"({"method":"DOM.documentUpdated","params":{"reason":"reload"}})", notification));
+    REQUIRE(notification.id == 0);
+    REQUIRE(notification.method == "DOM.documentUpdated");
+    REQUIRE(notification.params_json.find(R"("reload")") != std::string::npos);
+}
+
+TEST_CASE("Protocol: decode rejects invalid field types without partial output",
+          "[inspect][protocol][coverage]") {
+    InspectorMessage msg;
+    msg.id = 99;
+    msg.method = "stale";
+    msg.params_json = "stale";
+
+    REQUIRE_FALSE(decode_message(R"({"id":"not-an-int","method":"DOM.search"})", msg));
+
+    msg.id = 99;
+    msg.method = "stale";
+    msg.params_json = "stale";
+    REQUIRE_FALSE(decode_message(R"({"id":20,"method":42})", msg));
+}
+
 // ── InspectorOverlay ────────────────────────────────────────────────────────
 
 #include <pulp/inspect/inspector_overlay.hpp>
