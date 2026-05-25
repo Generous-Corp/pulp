@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::audio;
@@ -110,6 +111,37 @@ TEST_CASE("buffer_ops::clip on BufferView clips every channel", "[audio][buffer_
     REQUIRE_THAT(buf.channel(0)[1], WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(buf.channel(1)[1], WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(buf.channel(1)[0], WithinAbs(-1.0f, 1e-6f));
+}
+
+TEST_CASE("buffer_ops::clip sanitizes NaN to lo (Codex P1 on #2864)",
+          "[audio][buffer_ops][regression]") {
+    // The doc contract says NaN inputs become `lo`. The earlier impl
+    // delegated entirely to simd_clamp / std::clamp which propagate
+    // NaN through ordered comparisons, so NaN leaked into downstream
+    // audio. The post-fix impl converts NaN → lo before clamping.
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    // SIMD-multiple length to exercise the vector path.
+    std::vector<float> simd_len(64);
+    for (std::size_t i = 0; i < simd_len.size(); ++i) {
+        simd_len[i] = (i % 7 == 0) ? nan : 0.0f;
+    }
+    ops::clip(std::span<float>{simd_len}, -0.5f, 0.5f);
+    for (std::size_t i = 0; i < simd_len.size(); ++i) {
+        REQUIRE_FALSE(std::isnan(simd_len[i]));
+        if (i % 7 == 0) REQUIRE_THAT(simd_len[i], WithinAbs(-0.5f, 1e-6f));
+    }
+
+    // Short tail (non-SIMD-multiple) — historically the scalar-tail
+    // path was what leaked NaN; pin that here too.
+    std::vector<float> short_tail = {nan, 0.0f, nan, 2.0f, nan};
+    ops::clip(std::span<float>{short_tail}, -1.0f, 1.0f);
+    REQUIRE_THAT(short_tail[0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(short_tail[1], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(short_tail[2], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(short_tail[3], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(short_tail[4], WithinAbs(-1.0f, 1e-6f));
+    for (float v : short_tail) REQUIRE_FALSE(std::isnan(v));
 }
 
 TEST_CASE("buffer_ops::find_min_max scans a span", "[audio][buffer_ops]") {

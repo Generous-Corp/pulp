@@ -42,11 +42,13 @@ void apply_gain_ramp(BufferView<float> buffer, float start_gain, float end_gain)
 
 void clip(std::span<float> samples, float lo, float hi) {
     if (samples.empty()) return;
-    // simd_clamp turns NaN into `lo` because std::min/std::max are
-    // ordered comparisons that return the second arg on NaN inputs in
-    // the Highway implementation Pulp uses. Scalar callers that hit
-    // this path through the buffer overload get the same semantics
-    // courtesy of `simd_clamp`'s scalar tail.
+    // Codex P1 on #2864 — `std::clamp` (Highway's clamp + simd_clamp's
+    // scalar tail) propagates NaN through the ordered comparisons, so
+    // delegating directly would leak NaN into downstream audio.
+    // Sanitize NaN → `lo` ourselves first, then delegate the clamp.
+    for (auto& s : samples) {
+        if (std::isnan(s)) s = lo;
+    }
     pulp::runtime::simd_clamp(samples.data(), lo, hi, samples.data(), samples.size());
 }
 
