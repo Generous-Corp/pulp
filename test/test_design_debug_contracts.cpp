@@ -97,3 +97,18 @@ TEST_CASE("design-debug shell quoting keeps AI command templates inert",
     REQUIRE(shell_quote("can't") == "'can'\"'\"'t'");
     REQUIRE(shell_quote("$(rm -rf /)") == "'$(rm -rf /)'");
 }
+
+TEST_CASE("design-debug command capture preserves stdout and exit status",
+          "[tools][design-debug][coverage]") {
+    int exit_code = -1;
+#if defined(_WIN32)
+    auto output = run_command_capture("cmd /C \"echo design-debug-output& exit /B 7\"",
+                                      exit_code);
+#else
+    auto output = run_command_capture("printf design-debug-output; exit 7",
+                                      exit_code);
+#endif
+
+    REQUIRE(output.find("design-debug-output") != std::string::npos);
+    REQUIRE(exit_code == 7);
+}

@@ -397,6 +397,285 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
                      "Import design defaults: --mode baked (config:import_design.default_mode), --emit ir-json (implied by config:import_design.default_mode)");
 }
 
+TEST_CASE("MCP status resolves import-design defaults from config and env",
+          "[mcp][tools][import-design][codecov]") {
+    ScopedCurrentPath cwd(repo_root_path());
+
+    SECTION("built-ins stay live and js when no config or env is present") {
+        TempDir home;
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("22", "pulp_status"));
+        require_contains(response, "Import design defaults: --mode live (built-in)");
+        require_contains(response, "--emit js (built-in)");
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+        REQUIRE(response.find("implied by") == std::string::npos);
+    }
+
+    SECTION("config emit ir-json implies baked mode") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "# leading comments are ignored\n"
+                << "[other]\n"
+                << "default_emit = 'js'\n"
+                << "[import_design]\n"
+                << "default_emit = 'ir-json' # inline comments are ignored\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("23", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: --mode baked (implied by config:import_design.default_emit)");
+        require_contains(response, "--emit ir-json (config:import_design.default_emit)");
+        REQUIRE(response.find("[other]") == std::string::npos);
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+    }
+
+    SECTION("config baked mode implies ir-json emit") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = \"baked\"\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("24", "pulp_status"));
+        require_contains(response, "--mode baked (config:import_design.default_mode)");
+        require_contains(response,
+                         "--emit ir-json (implied by config:import_design.default_mode)");
+        REQUIRE(response.find("built-in") == std::string::npos);
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+    }
+
+    SECTION("config emit cpp also implies baked mode") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_emit = \"cpp\"\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("25", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: --mode baked (implied by config:import_design.default_emit)");
+        require_contains(response, "--emit cpp (config:import_design.default_emit)");
+        REQUIRE(response.find("--mode live") == std::string::npos);
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+    }
+
+    SECTION("empty env vars are ignored so config still applies") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = 'baked'\n"
+                << "default_emit = 'ir-json'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("26", "pulp_status"));
+        require_contains(response, "--mode baked (config:import_design.default_mode)");
+        require_contains(response, "--emit ir-json (config:import_design.default_emit)");
+        REQUIRE(response.find("env:PULP_IMPORT_DESIGN_DEFAULT_MODE") == std::string::npos);
+        REQUIRE(response.find("env:PULP_IMPORT_DESIGN_DEFAULT_EMIT") == std::string::npos);
+    }
+
+    SECTION("environment values override config and normalize case") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = 'live'\n"
+                << "default_emit = 'js'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "BAKED");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "CPP");
+
+        auto response = handle_request(tool_call("27", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: --mode baked (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(response, "--emit cpp (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
+        REQUIRE(response.find("config:import_design.default_mode") == std::string::npos);
+        REQUIRE(response.find("config:import_design.default_emit") == std::string::npos);
+    }
+
+    SECTION("environment can explicitly pair live mode with ir-json emit") {
+        TempDir home;
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "LIVE");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "IR-JSON");
+
+        auto response = handle_request(tool_call("28", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: --mode live (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(response, "--emit ir-json (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
+        REQUIRE(response.find("implied by") == std::string::npos);
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+    }
+
+    SECTION("environment emit overrides config while config mode still applies") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = 'baked'\n"
+                << "default_emit = 'ir-json'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "js");
+
+        auto response = handle_request(tool_call("34", "pulp_status"));
+        require_contains(response, "--mode baked (config:import_design.default_mode)");
+        require_contains(response, "--emit js (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
+        REQUIRE(response.find("config:import_design.default_emit") == std::string::npos);
+        REQUIRE(response.find("implied by") == std::string::npos);
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+        REQUIRE(response.find("ir-json") == std::string::npos);
+    }
+
+    SECTION("environment mode overrides config while config emit still applies") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = 'baked'\n"
+                << "default_emit = 'cpp'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "live");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("35", "pulp_status"));
+        require_contains(response, "--mode live (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(response, "--emit cpp (config:import_design.default_emit)");
+        REQUIRE(response.find("config:import_design.default_mode") == std::string::npos);
+        REQUIRE(response.find("implied by") == std::string::npos);
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+        REQUIRE(response.find("--mode baked") == std::string::npos);
+    }
+
+    SECTION("config parser trims section names keys values and inline comments") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[ import_design ]\n"
+                << " default_mode = ' BAKED ' # whitespace is trimmed before validation\n"
+                << " default_emit = \" CPP \" # quoted values normalize\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("36", "pulp_status"));
+        require_contains(response, "--mode baked (config:import_design.default_mode)");
+        require_contains(response, "--emit cpp (config:import_design.default_emit)");
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+        REQUIRE(response.find("#") == std::string::npos);
+        REQUIRE(response.find(" BAKED ") == std::string::npos);
+        REQUIRE(response.find(" CPP ") == std::string::npos);
+    }
+
+    SECTION("environment trims quoted defaults before validation") {
+        TempDir home;
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "  'BAKED'  ");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "  \"CPP\"  ");
+
+        auto response = handle_request(tool_call("29", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: --mode baked (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(response, "--emit cpp (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
+        REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
+    }
+
+    SECTION("invalid environment mode reports env source after valid emit") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = 'baked'\n"
+                << "default_emit = 'ir-json'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "native");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "cpp");
+
+        auto response = handle_request(tool_call("30", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: invalid (import_design.default_mode must be one of: live, baked from env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        REQUIRE(response.find("--emit cpp") == std::string::npos);
+        REQUIRE(response.find("config:import_design.default_mode") == std::string::npos);
+    }
+
+    SECTION("invalid emit reports its source before considering mode") {
+        TempDir home;
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "baked");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "python");
+
+        auto response = handle_request(tool_call("31", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: invalid (import_design.default_emit must be one of: js, ir-json, cpp from env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
+        REQUIRE(response.find("--mode baked") == std::string::npos);
+        REQUIRE(response.find("--emit") == std::string::npos);
+        REQUIRE(response.find("config:") == std::string::npos);
+    }
+
+    SECTION("invalid config emit reports config source") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_emit = 'python'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("32", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: invalid (import_design.default_emit must be one of: js, ir-json, cpp from config:import_design.default_emit)");
+        REQUIRE(response.find("--emit python") == std::string::npos);
+        REQUIRE(response.find("env:PULP_IMPORT_DESIGN_DEFAULT_EMIT") == std::string::npos);
+        REQUIRE(response.find("implied by") == std::string::npos);
+    }
+
+    SECTION("invalid mode reports config source when env is absent") {
+        TempDir home;
+        {
+            std::ofstream cfg(home.path / "config.toml");
+            cfg << "[import_design]\n"
+                << "default_mode = 'native'\n"
+                << "default_emit = 'js'\n";
+        }
+        ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+        ScopedEnvVar mode_env("PULP_IMPORT_DESIGN_DEFAULT_MODE", "");
+        ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
+
+        auto response = handle_request(tool_call("33", "pulp_status"));
+        require_contains(response,
+                         "Import design defaults: invalid (import_design.default_mode must be one of: live, baked from config:import_design.default_mode)");
+        require_contains(response, "Pulp Project:");
+        REQUIRE(response.find("--mode native") == std::string::npos);
+        REQUIRE(response.find("env:PULP_IMPORT_DESIGN_DEFAULT_MODE") == std::string::npos);
+    }
+}
+
 // pulp #1997 — gap 1: each of the 11 previously-untested wrapper tools
 // (5 inspector + 4 view/screenshot/validate + 2 docs) reaches its
 // dispatch arm. Hermetic check: from a non-project tempdir, every tool
