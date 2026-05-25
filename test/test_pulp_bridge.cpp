@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 
@@ -167,6 +168,75 @@ TEST_CASE("PulpBridge state serialize and deserialize use the fallback store",
     pulp_free(nullptr);
 }
 
+TEST_CASE("PulpBridge parameter calls fail closed for unknown ids",
+          "[apple][bridge][params][coverage]") {
+    reset_bridge_store();
+    constexpr PulpParamID kMissingParamId = 90909;
+
+    REQUIRE_THAT(pulp_param_get(kMissingParamId), WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get_normalized(kMissingParamId), WithinAbs(0.0f, 0.0001f));
+
+    pulp_param_set(kMissingParamId, 19.0f);
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get(kMissingParamId), WithinAbs(0.0f, 0.0001f));
+
+    pulp_param_set_normalized(kMissingParamId, 0.75f);
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get_normalized(kMissingParamId), WithinAbs(0.0f, 0.0001f));
+    REQUIRE(pulp_param_count() == 1);
+
+    PulpParamInfo info{};
+    REQUIRE(pulp_param_info(0, &info));
+    REQUIRE(info.id == kBridgeParamId);
+    REQUIRE(std::string(info.name) == "Bridge Gain");
+
+    int begin_calls = 0;
+    int end_calls = 0;
+    bridge_store().set_gesture_callbacks(
+        [&](pulp::state::ParamID id) {
+            if (id == kMissingParamId) ++begin_calls;
+        },
+        [&](pulp::state::ParamID id) {
+            if (id == kMissingParamId) ++end_calls;
+        });
+    pulp_param_begin_gesture(kMissingParamId);
+    pulp_param_end_gesture(kMissingParamId);
+    REQUIRE(begin_calls == 1);
+    REQUIRE(end_calls == 1);
+
+    pulp_param_reset(kMissingParamId);
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
+}
+
+TEST_CASE("PulpBridge deserialize rejects malformed state without clobbering values",
+          "[apple][bridge][state][coverage]") {
+    reset_bridge_store();
+    pulp_param_set(kBridgeParamId, 7.25f);
+
+    std::vector<uint8_t> empty;
+    std::vector<uint8_t> bad_magic = {'N', 'O', 'P', 'E'};
+    std::vector<uint8_t> truncated = {'P', 'U', 'L', 'P', 0, 0, 0, 1};
+
+    REQUIRE_FALSE(pulp_state_deserialize(empty.data(), 0));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(7.25f, 0.0001f));
+
+    REQUIRE_FALSE(pulp_state_deserialize(bad_magic.data(), static_cast<int>(bad_magic.size())));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(7.25f, 0.0001f));
+
+    REQUIRE_FALSE(pulp_state_deserialize(truncated.data(), static_cast<int>(truncated.size())));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(7.25f, 0.0001f));
+
+    int size = 0;
+    uint8_t* bytes = pulp_state_serialize(&size);
+    REQUIRE(bytes != nullptr);
+    REQUIRE(size > 0);
+    REQUIRE(size >= 16);
+    REQUIRE(std::memcmp(bytes, "PULP", 4) == 0);
+    REQUIRE(pulp_state_deserialize(bytes, size));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(7.25f, 0.0001f));
+    pulp_free(bytes);
+}
+
 TEST_CASE("PulpBridge plugin info rejects missing factories and null outputs",
           "[apple][bridge][plugin-info]") {
     PulpPluginInfo info{};
@@ -205,4 +275,31 @@ TEST_CASE("PulpBridge plugin info exposes the registered descriptor",
             static_cast<int>(pulp::format::PluginCategory::Instrument));
     REQUIRE(info.accepts_midi);
     REQUIRE_FALSE(info.produces_midi);
+}
+
+TEST_CASE("PulpBridge plugin info string storage survives later descriptor calls",
+          "[apple][bridge][plugin-info][coverage]") {
+    ScopedFactoryRegistration registration(create_test_processor);
+
+    PulpPluginInfo first{};
+    REQUIRE(pulp_plugin_info(&first));
+    REQUIRE(first.name != nullptr);
+    REQUIRE(first.manufacturer != nullptr);
+    REQUIRE(first.version != nullptr);
+    REQUIRE(first.bundle_id != nullptr);
+    REQUIRE(std::string(first.name) == "PulpBridgeTest");
+    REQUIRE(std::string(first.manufacturer) == "Pulp");
+    REQUIRE(std::string(first.version) == "1.2.3");
+    REQUIRE(std::string(first.bundle_id) == "com.pulp.test.bridge");
+
+    PulpPluginInfo second{};
+    REQUIRE(pulp_plugin_info(&second));
+    REQUIRE(second.name != nullptr);
+    REQUIRE(second.manufacturer != nullptr);
+    REQUIRE(second.version != nullptr);
+    REQUIRE(second.bundle_id != nullptr);
+    REQUIRE(std::string(second.name) == "PulpBridgeTest");
+    REQUIRE(std::string(second.manufacturer) == "Pulp");
+    REQUIRE(std::string(second.version) == "1.2.3");
+    REQUIRE(std::string(second.bundle_id) == "com.pulp.test.bridge");
 }
