@@ -40,4 +40,16 @@ bool create_nsis_installer(const InstallerConfig& config);
 // Useful for inspection or manual builds
 std::string generate_nsis_script(const InstallerConfig& config);
 
+// Create Linux package artifacts from a build output directory.
+// create_deb() requires dpkg-deb to be available on PATH.
+bool create_deb(const std::string& plugin_name,
+                const std::string& version,
+                const std::string& build_dir,
+                const std::string& output_path,
+                const std::string& manufacturer);
+
+bool create_tar_gz(const std::string& plugin_name,
+                   const std::string& build_dir,
+                   const std::string& output_path);
+
 } // namespace pulp::ship

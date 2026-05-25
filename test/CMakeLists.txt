@@ -752,6 +752,14 @@ pulp_add_test_suite(pulp-test-v3-gaps LIBRARIES pulp::signal pulp::midi pulp::au
 
 # Codesign tests
 pulp_add_test_suite(pulp-test-codesign LIBRARIES pulp::ship)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(pulp-test-linux-packaging test_linux_packaging.cpp)
+    target_link_libraries(pulp-test-linux-packaging PRIVATE
+        pulp::ship
+        pulp::platform
+        Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-linux-packaging)
+endif()
 
 # Sync primitives tests (SeqLock, TripleBuffer)
 add_executable(pulp-test-sync test_sync_primitives.cpp)
