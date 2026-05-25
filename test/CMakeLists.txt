@@ -1846,6 +1846,13 @@ if(APPLE)
     add_executable(pulp-test-screenshot test_screenshot.cpp)
     target_link_libraries(pulp-test-screenshot PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot)
+
+    add_executable(pulp-test-screenshot-cli-contracts test_screenshot_cli_contracts.cpp)
+    target_link_libraries(pulp-test-screenshot-cli-contracts PRIVATE
+        pulp::view
+        pulp::state
+        Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-screenshot-cli-contracts)
 endif()
 
 # Canvas tests
