@@ -2170,6 +2170,9 @@ pulp_add_test_suite(pulp-test-buffer-ops LIBRARIES pulp::audio pulp::runtime)
 # assignable PNC consumption (item 8.5b)
 pulp_add_test_suite(pulp-test-mpe-tracker-per-note-management LIBRARIES pulp::midi)
 
+# macOS plan Batch G — Wavetable oscillator (item 2.6)
+pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
+
 # macOS plan Batch A — Foundations
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
