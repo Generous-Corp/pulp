@@ -118,6 +118,37 @@ TEST_CASE("MidiMessageCollector survives concurrent producer / consumer",
     REQUIRE(observed == kEvents);
 }
 
+TEST_CASE("MidiMessageCollector deferred-future event stays in pending slot (Codex #2843 P1)",
+          "[midi][collector][regression]") {
+    MidiMessageCollector<32> collector;
+    REQUIRE(collector.push_now(note_on(0, 60, 100), /*ts=*/1.000));
+    REQUIRE(collector.size_approx() == 1);
+
+    // First drain finds the event too late for this block. Old impl
+    // re-pushed into the SPSC queue (consumer-side write → SPSC
+    // violation). New impl stashes it in a consumer-owned `pending_`
+    // slot and leaves the queue empty.
+    MidiBuffer b1;
+    REQUIRE(collector.drain_into(b1, /*start=*/0.000,
+                                       /*samples=*/512, /*sr=*/48000.0) == 0);
+    REQUIRE(b1.size() == 0);
+    REQUIRE(collector.size_approx() == 0);
+
+    // Subsequent drain still too early — pending stays put, queue
+    // remains empty.
+    MidiBuffer b2;
+    REQUIRE(collector.drain_into(b2, /*start=*/0.001,
+                                       /*samples=*/256, /*sr=*/48000.0) == 0);
+    REQUIRE(collector.size_approx() == 0);
+
+    // Drain that crosses the timestamp boundary delivers from pending.
+    MidiBuffer b3;
+    REQUIRE(collector.drain_into(b3, /*start=*/0.999,
+                                       /*samples=*/2048, /*sr=*/48000.0) == 1);
+    REQUIRE(b3.size() == 1);
+    REQUIRE(b3[0].sample_offset == 48); // (1.000 - 0.999) * 48000
+}
+
 TEST_CASE("MidiMessageCollector returns false when queue is full",
           "[midi][collector]") {
     MidiMessageCollector<4> collector;
