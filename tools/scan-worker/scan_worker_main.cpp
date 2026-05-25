@@ -21,17 +21,50 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
+
+std::string json_escape(std::string_view text) {
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (unsigned char c : text) {
+        switch (c) {
+            case '"':  escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\b': escaped += "\\b";  break;
+            case '\f': escaped += "\\f";  break;
+            case '\n': escaped += "\\n";  break;
+            case '\r': escaped += "\\r";  break;
+            case '\t': escaped += "\\t";  break;
+            default:
+                if (c < 0x20) {
+                    char buf[7] = {};
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    escaped += buf;
+                } else {
+                    escaped += static_cast<char>(c);
+                }
+                break;
+        }
+    }
+    return escaped;
+}
 
 void write_json_descriptor(const pulp::host::PluginInfo& info) {
     // Minimal JSON emitter — no nested objects, just the flat shape the
     // parent expects. Keeps this TU free of the full json/value code so
     // the worker binary stays tiny and quick to fork.
+    const auto name = json_escape(info.name);
+    const auto manufacturer = json_escape(info.manufacturer);
+    const auto version = json_escape(info.version);
+    const auto unique_id = json_escape(info.unique_id);
+    const auto path = json_escape(info.path);
     std::printf("{\"name\":\"%s\",\"manufacturer\":\"%s\",\"version\":\"%s\",",
-                info.name.c_str(), info.manufacturer.c_str(), info.version.c_str());
+                name.c_str(), manufacturer.c_str(), version.c_str());
     std::printf("\"unique_id\":\"%s\",\"path\":\"%s\",",
-                info.unique_id.c_str(), info.path.c_str());
+                unique_id.c_str(), path.c_str());
     std::printf("\"is_instrument\":%s,\"is_effect\":%s,",
                 info.is_instrument ? "true" : "false",
                 info.is_effect ? "true" : "false");
@@ -78,6 +111,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "pulp-scan-worker: unsupported bundle extension: %s\n", path.c_str());
         return 3;
     }
+    opts.only_extra_paths = true;
     opts.extra_paths.push_back(dir);
     auto infos = scanner.scan(opts);
     // Keep only the descriptor(s) for our target bundle.
