@@ -943,6 +943,131 @@ TEST_CASE("NoiseGate ignores nonpositive buffer lengths",
     REQUIRE_THAT(samples[2], WithinAbs(-0.001f, 1e-6f));
 }
 
+TEST_CASE("NoiseGate sanitizes invalid params without amplifying quiet input",
+          "[signal][gate][coverage][phase3]") {
+    NoiseGate gate;
+    gate.set_sample_rate(1000.0f);
+    gate.set_params({
+        std::numeric_limits<float>::quiet_NaN(),
+        -4.0f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::quiet_NaN(),
+        12.0f,
+    });
+
+    const float positive = gate.process(0.001f);
+    const float negative = gate.process(-0.001f);
+    const float zero = gate.process(0.0f);
+
+    REQUIRE(std::isfinite(positive));
+    REQUIRE(std::isfinite(negative));
+    REQUIRE_THAT(positive, WithinAbs(0.001f, 1e-7f));
+    REQUIRE_THAT(negative, WithinAbs(-0.001f, 1e-7f));
+    REQUIRE_THAT(zero, WithinAbs(0.0f, 1e-9f));
+}
+
+TEST_CASE("NoiseGate clamps timing and ratio to stable instantaneous behavior",
+          "[signal][gate][coverage][phase3]") {
+    NoiseGate gate;
+    gate.set_sample_rate(1000.0f);
+    gate.set_params({-20.0f, 0.25f, -1.0f, -10.0f, -48.0f});
+
+    const float quiet = 0.01f;
+    const float loud = 0.5f;
+
+    REQUIRE_THAT(gate.process(quiet), WithinAbs(quiet, 1e-7f));
+    REQUIRE_THAT(gate.process(-quiet), WithinAbs(-quiet, 1e-7f));
+    REQUIRE_THAT(gate.process(loud), WithinAbs(loud, 1e-6f));
+    REQUIRE_THAT(gate.process(-loud), WithinAbs(-loud, 1e-6f));
+}
+
+TEST_CASE("NoiseGate invalid sample rates fall back to finite coefficients",
+          "[signal][gate][coverage][phase3]") {
+    NoiseGate gate;
+    gate.set_sample_rate(-1.0f);
+    gate.set_params({-20.0f, 20.0f, 0.5f, 50.0f, -24.0f});
+
+    const auto first = gate.process(0.001f);
+    const auto second = gate.process(0.001f);
+    const auto loud = gate.process(1.0f);
+
+    REQUIRE(std::isfinite(first));
+    REQUIRE(std::isfinite(second));
+    REQUIRE(std::isfinite(loud));
+    REQUIRE(first >= 0.0f);
+    REQUIRE(second >= 0.0f);
+    REQUIRE(loud > 0.0f);
+}
+
+TEST_CASE("NoiseGate null buffers and valid buffers preserve callback safety",
+          "[signal][gate][coverage][phase3]") {
+    NoiseGate gate;
+    gate.set_sample_rate(1000.0f);
+    gate.set_params({-20.0f, 20.0f, 0.0f, 0.0f, -24.0f});
+
+    gate.process(nullptr, 3);
+
+    float samples[] = {0.001f, -0.001f, 1.0f};
+    gate.process(samples, 0);
+    gate.process(samples, -3);
+
+    REQUIRE_THAT(samples[0], WithinAbs(0.001f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-0.001f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(1.0f, 1e-6f));
+
+    gate.process(samples, 3);
+    REQUIRE(std::abs(samples[0]) < 0.001f);
+    REQUIRE(std::abs(samples[1]) < 0.001f);
+    REQUIRE_THAT(samples[2], WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("NoiseGate reset releases held attenuation after sanitized params",
+          "[signal][gate][coverage][phase3]") {
+    NoiseGate gate;
+    gate.set_sample_rate(std::numeric_limits<float>::infinity());
+    gate.set_params({-20.0f, 20.0f, 0.0f, 1000.0f, -18.0f});
+
+    const float quiet = gate.process(0.001f);
+    const float held_loud = gate.process(1.0f);
+    gate.reset();
+    const float reset_loud = gate.process(1.0f);
+
+    REQUIRE(std::abs(quiet) < 0.001f);
+    REQUIRE(held_loud > 0.0f);
+    REQUIRE(held_loud < 1.0f);
+    REQUIRE_THAT(reset_loud, WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("NoiseGate non-finite range falls back to bounded attenuation",
+          "[signal][gate][coverage][phase3]") {
+    NoiseGate gate;
+    gate.set_sample_rate(std::numeric_limits<float>::quiet_NaN());
+    gate.set_params({
+        std::numeric_limits<float>::quiet_NaN(),
+        20.0f,
+        0.0f,
+        0.0f,
+        std::numeric_limits<float>::quiet_NaN(),
+    });
+
+    const float quiet = gate.process(0.001f);
+    const float negative_quiet = gate.process(-0.001f);
+    const float silence = gate.process(0.0f);
+    const float loud = gate.process(1.0f);
+
+    REQUIRE(std::isfinite(quiet));
+    REQUIRE(std::isfinite(negative_quiet));
+    REQUIRE(std::abs(quiet) < 0.001f);
+    REQUIRE(std::abs(negative_quiet) < 0.001f);
+    REQUIRE(quiet > 0.0f);
+    REQUIRE(negative_quiet < 0.0f);
+    REQUIRE_THAT(quiet, WithinAbs(0.001f * 0.0001f, 1e-9f));
+    REQUIRE_THAT(negative_quiet, WithinAbs(-0.001f * 0.0001f, 1e-9f));
+    REQUIRE_THAT(silence, WithinAbs(0.0f, 1e-9f));
+    REQUIRE_THAT(loud, WithinAbs(1.0f, 1e-6f));
+    REQUIRE(loud > std::abs(quiet));
+}
+
 // ── Panner ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Panner center", "[signal][panner]") {

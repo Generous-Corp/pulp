@@ -17,8 +17,21 @@ public:
         float range_db = -80.0f;       // Max attenuation
     };
 
-    void set_params(const Params& p) { params_ = p; }
-    void set_sample_rate(float sr) { sample_rate_ = sr; }
+    void set_params(const Params& p) {
+        params_.threshold_db =
+            std::isfinite(p.threshold_db) ? p.threshold_db : -40.0f;
+        params_.ratio = std::isfinite(p.ratio) ? std::max(1.0f, p.ratio) : 1.0f;
+        params_.attack_ms =
+            std::isfinite(p.attack_ms) ? std::max(0.0f, p.attack_ms) : 0.0f;
+        params_.release_ms =
+            std::isfinite(p.release_ms) ? std::max(0.0f, p.release_ms) : 0.0f;
+        params_.range_db =
+            std::isfinite(p.range_db) ? std::min(0.0f, p.range_db) : -80.0f;
+    }
+
+    void set_sample_rate(float sr) {
+        sample_rate_ = (std::isfinite(sr) && sr > 0.0f) ? sr : 44100.0f;
+    }
 
     float process(float input) {
         float abs_in = std::abs(input);
@@ -52,6 +65,9 @@ public:
     }
 
     void process(float* buffer, int num_samples) {
+        if (buffer == nullptr || num_samples <= 0)
+            return;
+
         for (int i = 0; i < num_samples; ++i)
             buffer[i] = process(buffer[i]);
     }
