@@ -2,6 +2,7 @@
 #include <random>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::midi {
 
@@ -112,9 +113,33 @@ std::vector<uint8_t> CiDiscovery::process_message(const uint8_t* data, size_t si
         case CiMessageType::DiscoveryReply: {
             // Store discovered device
             if (size >= 30) {
+                MUID dest = read_muid(data + 10);
+                if (!dest.is_broadcast() && !(dest == local_info_.muid)) {
+                    return {};
+                }
+
                 CiDeviceInfo info;
                 info.muid = read_muid(data + 6);
                 info.ci_version = data[5];
+                info.manufacturer_id = static_cast<uint32_t>(data[14])
+                    | (static_cast<uint32_t>(data[15]) << 7)
+                    | (static_cast<uint32_t>(data[16]) << 14);
+                info.family_id = static_cast<uint16_t>(data[17])
+                    | (static_cast<uint16_t>(data[18]) << 7);
+                info.model_id = static_cast<uint16_t>(data[19])
+                    | (static_cast<uint16_t>(data[20]) << 7);
+                info.software_version = static_cast<uint32_t>(data[21])
+                    | (static_cast<uint32_t>(data[22]) << 7)
+                    | (static_cast<uint32_t>(data[23]) << 14)
+                    | (static_cast<uint32_t>(data[24]) << 21);
+                uint32_t max_sysex_size =
+                    static_cast<uint32_t>(data[26])
+                    | (static_cast<uint32_t>(data[27]) << 7)
+                    | (static_cast<uint32_t>(data[28]) << 14)
+                    | (static_cast<uint32_t>(data[29]) << 21);
+                info.max_sysex_size = static_cast<uint8_t>(
+                    std::min<uint32_t>(max_sysex_size,
+                                       std::numeric_limits<uint8_t>::max()));
                 discovered_.push_back(info);
                 if (on_device_discovered) on_device_discovered(info);
             }
@@ -180,6 +205,10 @@ std::vector<uint8_t> CiDiscovery::handle_profile_inquiry(const uint8_t* data, si
     MUID inquirer = MUID::broadcast();
     if (size >= 14) {
         inquirer = read_muid(data + 6);
+        MUID destination = read_muid(data + 10);
+        if (!destination.is_broadcast() && !(destination == local_info_.muid)) {
+            return {};
+        }
     }
 
     std::vector<uint8_t> reply;

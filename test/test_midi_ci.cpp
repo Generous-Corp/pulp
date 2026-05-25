@@ -28,11 +28,30 @@ uint32_t read_uint7_at(const std::vector<uint8_t>& msg, std::size_t offset, std:
     return value;
 }
 
+void append_uint7(std::vector<uint8_t>& msg, uint32_t value, std::size_t bytes) {
+    for (std::size_t i = 0; i < bytes; ++i)
+        msg.push_back((value >> (7 * i)) & 0x7F);
+}
+
 std::vector<uint8_t> make_ci_header(CiMessageType type, MUID source, MUID destination) {
     std::vector<uint8_t> msg{0xF0, 0x7E, 0x7F, 0x0D,
                              static_cast<uint8_t>(type), 0x02};
     append_muid(msg, source);
     append_muid(msg, destination);
+    return msg;
+}
+
+std::vector<uint8_t> make_discovery_reply(MUID source,
+                                          MUID destination,
+                                          const CiDeviceInfo& info) {
+    auto msg = make_ci_header(CiMessageType::DiscoveryReply, source, destination);
+    append_uint7(msg, info.manufacturer_id, 3);
+    append_uint7(msg, info.family_id, 2);
+    append_uint7(msg, info.model_id, 2);
+    append_uint7(msg, info.software_version, 4);
+    msg.push_back(0x07);
+    append_uint7(msg, info.max_sysex_size, 4);
+    msg.push_back(0xF7);
     return msg;
 }
 
@@ -291,6 +310,105 @@ TEST_CASE("CiDiscovery stores discovery replies and fires callbacks",
     REQUIRE(callbacks[0].muid.value == responder_info.muid.value);
 }
 
+TEST_CASE("CiDiscovery discovery reply stores identity metadata",
+          "[midi][ci][coverage][phase3-routing]") {
+    CiDiscovery inquirer;
+    CiDeviceInfo local = inquirer.device_info();
+    local.muid = MUID{0x00011111};
+    inquirer.set_device_info(local);
+
+    CiDeviceInfo remote;
+    remote.muid = MUID{0x00022222};
+    remote.manufacturer_id = 0x00123456;
+    remote.family_id = 0x1234;
+    remote.model_id = 0x2345;
+    remote.software_version = 0x03456789;
+    remote.ci_version = 5;
+    remote.max_sysex_size = 96;
+
+    std::vector<CiDeviceInfo> callbacks;
+    inquirer.on_device_discovered = [&](const CiDeviceInfo& info) {
+        callbacks.push_back(info);
+    };
+
+    auto reply = make_discovery_reply(remote.muid, local.muid, remote);
+    reply[5] = remote.ci_version;
+
+    REQUIRE(reply.size() == 31);
+    REQUIRE(reply.front() == 0xF0);
+    REQUIRE(reply.back() == 0xF7);
+    REQUIRE(inquirer.process_message(reply.data(), reply.size()).empty());
+    REQUIRE(inquirer.discovered_devices().size() == 1);
+    const auto& discovered = inquirer.discovered_devices().front();
+    REQUIRE(discovered.muid.value == remote.muid.value);
+    REQUIRE(discovered.ci_version == remote.ci_version);
+    REQUIRE(discovered.manufacturer_id == remote.manufacturer_id);
+    REQUIRE(discovered.family_id == remote.family_id);
+    REQUIRE(discovered.model_id == remote.model_id);
+    REQUIRE(discovered.software_version == remote.software_version);
+    REQUIRE(discovered.max_sysex_size == remote.max_sysex_size);
+    REQUIRE(callbacks.size() == 1);
+    REQUIRE(callbacks.front().manufacturer_id == remote.manufacturer_id);
+    REQUIRE(callbacks.front().software_version == remote.software_version);
+}
+
+TEST_CASE("CiDiscovery clamps oversized discovery max SysEx metadata",
+          "[midi][ci][coverage][phase3-routing]") {
+    CiDiscovery inquirer;
+    CiDeviceInfo local = inquirer.device_info();
+    local.muid = MUID{0x00011111};
+    inquirer.set_device_info(local);
+
+    CiDeviceInfo remote;
+    remote.muid = MUID{0x00022222};
+    auto reply = make_ci_header(CiMessageType::DiscoveryReply,
+                                remote.muid, local.muid);
+    append_uint7(reply, 0x00010203, 3);
+    append_uint7(reply, 0x0102, 2);
+    append_uint7(reply, 0x0203, 2);
+    append_uint7(reply, 0x00030405, 4);
+    reply.push_back(0x07);
+    append_uint7(reply, 1024, 4);
+    reply.push_back(0xF7);
+
+    REQUIRE(inquirer.process_message(reply.data(), reply.size()).empty());
+    REQUIRE(inquirer.discovered_devices().size() == 1);
+    REQUIRE(inquirer.discovered_devices().front().max_sysex_size == 255);
+}
+
+TEST_CASE("CiDiscovery ignores discovery replies addressed to another MUID",
+          "[midi][ci][coverage][phase3-routing]") {
+    CiDiscovery inquirer;
+    CiDeviceInfo local = inquirer.device_info();
+    local.muid = MUID{0x00033333};
+    inquirer.set_device_info(local);
+
+    CiDeviceInfo remote;
+    remote.muid = MUID{0x00044444};
+    remote.manufacturer_id = 0x00010203;
+    remote.family_id = 0x0102;
+    remote.model_id = 0x0203;
+    remote.software_version = 0x00030405;
+    remote.max_sysex_size = 64;
+
+    int callbacks = 0;
+    inquirer.on_device_discovered = [&](const CiDeviceInfo&) {
+        ++callbacks;
+    };
+
+    auto misaddressed = make_discovery_reply(remote.muid, MUID{0x00055555}, remote);
+    auto broadcast = make_discovery_reply(remote.muid, MUID::broadcast(), remote);
+
+    REQUIRE(inquirer.process_message(misaddressed.data(), misaddressed.size()).empty());
+    REQUIRE(inquirer.discovered_devices().empty());
+    REQUIRE(callbacks == 0);
+
+    REQUIRE(inquirer.process_message(broadcast.data(), broadcast.size()).empty());
+    REQUIRE(inquirer.discovered_devices().size() == 1);
+    REQUIRE(inquirer.discovered_devices().front().muid.value == remote.muid.value);
+    REQUIRE(callbacks == 1);
+}
+
 TEST_CASE("CiDiscovery profile management", "[midi][ci]") {
     CiDiscovery ci;
 
@@ -434,6 +552,51 @@ TEST_CASE("CiDiscovery profile inquiry response", "[midi][ci]") {
     auto reply = ci.process_message(inquiry.data(), inquiry.size());
     // Profile inquiry is type 0x24, we handle it
     REQUIRE_FALSE(reply.empty());
+}
+
+TEST_CASE("CiDiscovery profile inquiry only responds to local or broadcast MUID",
+          "[midi][ci][coverage][phase3-routing]") {
+    CiDiscovery responder;
+    CiDeviceInfo local = responder.device_info();
+    local.muid = MUID{0x00066666};
+    responder.set_device_info(local);
+
+    ProfileId profile{0x01, 0x02, 0x03, 0x04, 0x05};
+    responder.add_profile({profile, true, 0});
+
+    MUID peer{0x00077777};
+    auto misaddressed = make_ci_header(CiMessageType::ProfileInquiry,
+                                       peer, MUID{0x00012345});
+    misaddressed.push_back(0xF7);
+    auto direct = make_ci_header(CiMessageType::ProfileInquiry,
+                                 peer, local.muid);
+    direct.push_back(0xF7);
+    auto broadcast = make_ci_header(CiMessageType::ProfileInquiry,
+                                    peer, MUID::broadcast());
+    broadcast.push_back(0xF7);
+
+    auto ignored = responder.process_message(misaddressed.data(), misaddressed.size());
+    REQUIRE(ignored.empty());
+
+    auto direct_reply = responder.process_message(direct.data(), direct.size());
+    REQUIRE_FALSE(direct_reply.empty());
+    REQUIRE(direct_reply.size() == 24);
+    REQUIRE(direct_reply[4] == static_cast<uint8_t>(CiMessageType::ProfileReply));
+    REQUIRE(read_muid_at(direct_reply, 6) == local.muid.value);
+    REQUIRE(read_muid_at(direct_reply, 10) == peer.value);
+    REQUIRE(direct_reply[14] == 1);
+    REQUIRE(direct_reply[15] == 0);
+    REQUIRE(direct_reply[16] == profile.bank);
+    REQUIRE(direct_reply[20] == profile.reserved);
+    REQUIRE(direct_reply[21] == 0);
+    REQUIRE(direct_reply[22] == 0);
+    REQUIRE(direct_reply.back() == 0xF7);
+
+    auto broadcast_reply = responder.process_message(broadcast.data(), broadcast.size());
+    REQUIRE_FALSE(broadcast_reply.empty());
+    REQUIRE(broadcast_reply[4] == static_cast<uint8_t>(CiMessageType::ProfileReply));
+    REQUIRE(read_muid_at(broadcast_reply, 10) == peer.value);
+    REQUIRE(broadcast_reply[14] == 1);
 }
 
 TEST_CASE("CiDiscovery profile inquiry with no profiles reports zero counts",
