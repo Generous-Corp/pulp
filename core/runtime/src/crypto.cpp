@@ -6,6 +6,8 @@
 #include <mbedtls/sha1.h>
 #include <mbedtls/md5.h>
 #include <mbedtls/aes.h>
+#include <mbedtls/gcm.h>
+#include <mbedtls/md.h>
 
 #include <sstream>
 #include <iomanip>
@@ -139,6 +141,113 @@ std::optional<std::vector<uint8_t>> aes_decrypt(
     }
     result.resize(size - pad_val);
     return result;
+}
+
+// ── HMAC ────────────────────────────────────────────────────────────────
+
+namespace {
+std::vector<uint8_t> hmac_with_md(mbedtls_md_type_t md_type, size_t out_size,
+                                    const uint8_t* key, size_t key_size,
+                                    const uint8_t* data, size_t data_size) {
+    std::vector<uint8_t> tag(out_size, 0);
+    const mbedtls_md_info_t* md = mbedtls_md_info_from_type(md_type);
+    if (md == nullptr) return tag; // never happens for SHA-1/256 in mbedTLS
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+    if (mbedtls_md_setup(&ctx, md, /*hmac=*/1) != 0) {
+        mbedtls_md_free(&ctx);
+        return tag;
+    }
+    mbedtls_md_hmac_starts(&ctx, key, key_size);
+    mbedtls_md_hmac_update(&ctx, data, data_size);
+    mbedtls_md_hmac_finish(&ctx, tag.data());
+    mbedtls_md_free(&ctx);
+    return tag;
+}
+} // namespace
+
+std::vector<uint8_t> hmac_sha256(const uint8_t* key, size_t key_size,
+                                   const uint8_t* data, size_t data_size) {
+    return hmac_with_md(MBEDTLS_MD_SHA256, 32, key, key_size, data, data_size);
+}
+std::vector<uint8_t> hmac_sha256(std::string_view key, std::string_view data) {
+    return hmac_sha256(reinterpret_cast<const uint8_t*>(key.data()), key.size(),
+                       reinterpret_cast<const uint8_t*>(data.data()), data.size());
+}
+
+std::vector<uint8_t> hmac_sha1(const uint8_t* key, size_t key_size,
+                                 const uint8_t* data, size_t data_size) {
+    return hmac_with_md(MBEDTLS_MD_SHA1, 20, key, key_size, data, data_size);
+}
+
+// ── AES-256-GCM ─────────────────────────────────────────────────────────
+
+std::optional<GcmOutput> aes_gcm_encrypt(
+    const uint8_t* plaintext, size_t plaintext_size,
+    const uint8_t* key_32,
+    const uint8_t* iv, size_t iv_size,
+    const uint8_t* aad, size_t aad_size) {
+    GcmOutput out;
+    out.ciphertext.resize(plaintext_size);
+    out.tag.resize(16);
+
+    mbedtls_gcm_context ctx;
+    mbedtls_gcm_init(&ctx);
+    if (mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key_32, 256) != 0) {
+        mbedtls_gcm_free(&ctx);
+        return std::nullopt;
+    }
+    int rc = mbedtls_gcm_crypt_and_tag(
+        &ctx, MBEDTLS_GCM_ENCRYPT, plaintext_size,
+        iv, iv_size, aad, aad_size,
+        plaintext,
+        out.ciphertext.empty() ? nullptr : out.ciphertext.data(),
+        out.tag.size(), out.tag.data());
+    mbedtls_gcm_free(&ctx);
+    if (rc != 0) return std::nullopt;
+    return out;
+}
+
+std::optional<std::vector<uint8_t>> aes_gcm_decrypt(
+    const uint8_t* ciphertext, size_t ciphertext_size,
+    const uint8_t* key_32,
+    const uint8_t* iv, size_t iv_size,
+    const uint8_t* aad, size_t aad_size,
+    const uint8_t* tag_16) {
+    std::vector<uint8_t> plaintext(ciphertext_size);
+
+    mbedtls_gcm_context ctx;
+    mbedtls_gcm_init(&ctx);
+    if (mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key_32, 256) != 0) {
+        mbedtls_gcm_free(&ctx);
+        return std::nullopt;
+    }
+    int rc = mbedtls_gcm_auth_decrypt(
+        &ctx, ciphertext_size,
+        iv, iv_size, aad, aad_size,
+        tag_16, 16,
+        ciphertext,
+        plaintext.empty() ? nullptr : plaintext.data());
+    mbedtls_gcm_free(&ctx);
+    if (rc != 0) {
+        // Tag mismatch (MBEDTLS_ERR_GCM_AUTH_FAILED) or other failure;
+        // overwrite the plaintext buffer so partial decryption doesn't
+        // escape (mbedTLS already zeroes it on auth failure, but be
+        // explicit here in case of build-config differences).
+        std::fill(plaintext.begin(), plaintext.end(), uint8_t{0});
+        return std::nullopt;
+    }
+    return plaintext;
+}
+
+// ── Constant-time compare ───────────────────────────────────────────────
+
+bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t size) {
+    // Branchless XOR + accumulate.
+    uint8_t diff = 0;
+    for (size_t i = 0; i < size; ++i)
+        diff = static_cast<uint8_t>(diff | (a[i] ^ b[i]));
+    return diff == 0;
 }
 
 // ── Machine ID ──────────────────────────────────────────────────────────
