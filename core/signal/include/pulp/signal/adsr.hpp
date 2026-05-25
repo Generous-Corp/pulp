@@ -80,6 +80,30 @@ public:
     enum class Stage { idle, attack, decay, sustain, release };
     Stage stage() const { return stage_; }
 
+    /// Multiply @p num_samples of @p buffer (starting at @p start_sample)
+    /// by successive envelope values. Advances the envelope by @p num_samples.
+    /// Real-time safe; no allocations.
+    ///
+    /// @code
+    /// adsr.apply_to_buffer(audio_data, 0, block_size);  // amplitude envelope
+    /// @endcode
+    void apply_to_buffer(float* buffer, int start_sample, int num_samples) {
+        for (int i = 0; i < num_samples; ++i)
+            buffer[start_sample + i] *= next();
+    }
+
+    /// Multiply each channel of a planar multi-channel buffer by the same
+    /// envelope. All channels see the same envelope progression — the
+    /// envelope advances once per sample, not per (sample, channel) pair.
+    void apply_to_buffer(float* const* channels, int num_channels,
+                         int start_sample, int num_samples) {
+        for (int i = 0; i < num_samples; ++i) {
+            const float env = next();
+            for (int ch = 0; ch < num_channels; ++ch)
+                channels[ch][start_sample + i] *= env;
+        }
+    }
+
 private:
     Params params_;
     float sample_rate_ = 44100.0f;
