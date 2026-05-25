@@ -1074,6 +1074,180 @@ TEST_CASE("Chorus dry mix, phase wrap, and reset are deterministic",
     }
 }
 
+TEST_CASE("Chorus is safe before prepare and rejects non-finite mix",
+          "[signal][chorus][coverage][phase3]") {
+    Chorus unprepared;
+    unprepared.set_mix(1.0f);
+    unprepared.set_depth(1.0f);
+
+    for (float input : {1.0f, -0.25f}) {
+        auto out = unprepared.process(input);
+        REQUIRE_THAT(out.left, WithinAbs(input, 1e-6f));
+        REQUIRE_THAT(out.right, WithinAbs(input, 1e-6f));
+    }
+
+    Chorus chorus;
+    chorus.prepare(1000.0f);
+    chorus.set_mix(std::numeric_limits<float>::quiet_NaN());
+    chorus.set_depth(1.0f);
+    chorus.set_delay_ms(2.0f);
+
+    for (float input : {0.5f, -0.75f}) {
+        auto out = chorus.process(input);
+        REQUIRE_THAT(out.left, WithinAbs(input, 1e-6f));
+        REQUIRE_THAT(out.right, WithinAbs(input, 1e-6f));
+    }
+}
+
+TEST_CASE("Chorus wet zero-depth delay is centered and mono-compatible",
+          "[signal][chorus][coverage][phase3]") {
+    Chorus chorus;
+    chorus.prepare(1000.0f);
+    chorus.set_rate(0.0f);
+    chorus.set_depth(0.0f);
+    chorus.set_delay_ms(2.0f);
+    chorus.set_mix(1.0f);
+
+    const std::array<float, 5> input{{1.0f, 0.0f, 0.0f, -0.5f, 0.0f}};
+    std::array<Chorus::StereoSample, input.size()> out{};
+    for (size_t i = 0; i < input.size(); ++i)
+        out[i] = chorus.process(input[i]);
+
+    REQUIRE_THAT(out[0].left, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(out[0].right, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(out[1].left, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(out[1].right, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(out[2].left, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(out[2].right, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(out[4].left, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(out[4].right, WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("Chorus clamps mix and delay to safe callback ranges",
+          "[signal][chorus][coverage][phase3]") {
+    Chorus dry;
+    dry.prepare(1000.0f);
+    dry.set_mix(-1.0f);
+    dry.set_depth(1.0f);
+    dry.set_delay_ms(2.0f);
+
+    for (float input : {0.25f, -0.5f, 0.75f}) {
+        auto out = dry.process(input);
+        REQUIRE_THAT(out.left, WithinAbs(input, 1e-6f));
+        REQUIRE_THAT(out.right, WithinAbs(input, 1e-6f));
+    }
+
+    Chorus immediate_wet;
+    immediate_wet.prepare(1000.0f);
+    immediate_wet.set_mix(2.0f);
+    immediate_wet.set_depth(1.0f);
+    immediate_wet.set_delay_ms(-10.0f);
+
+    auto positive = immediate_wet.process(0.375f);
+    auto negative = immediate_wet.process(-0.625f);
+    REQUIRE_THAT(positive.left, WithinAbs(0.375f, 1e-6f));
+    REQUIRE_THAT(positive.right, WithinAbs(0.375f, 1e-6f));
+    REQUIRE_THAT(negative.left, WithinAbs(-0.625f, 1e-6f));
+    REQUIRE_THAT(negative.right, WithinAbs(-0.625f, 1e-6f));
+}
+
+TEST_CASE("Chorus depth clamps preserve modulation timing bounds",
+          "[signal][chorus][coverage][phase3]") {
+    Chorus limited_depth;
+    limited_depth.prepare(1000.0f);
+    limited_depth.set_rate(0.0f);
+    limited_depth.set_depth(2.0f);
+    limited_depth.set_delay_ms(2.0f);
+    limited_depth.set_mix(1.0f);
+
+    std::array<Chorus::StereoSample, 5> limited{};
+    for (size_t i = 0; i < limited.size(); ++i)
+        limited[i] = limited_depth.process(i == 0 ? 1.0f : 0.0f);
+
+    REQUIRE_THAT(limited[2].left, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(limited[2].right, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(limited[3].left, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(limited[3].right, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(limited[4].right, WithinAbs(0.0f, 1e-6f));
+
+    Chorus no_depth;
+    no_depth.prepare(1000.0f);
+    no_depth.set_rate(0.0f);
+    no_depth.set_depth(-1.0f);
+    no_depth.set_delay_ms(2.0f);
+    no_depth.set_mix(1.0f);
+
+    std::array<Chorus::StereoSample, 3> centered{};
+    for (size_t i = 0; i < centered.size(); ++i)
+        centered[i] = no_depth.process(i == 0 ? -0.5f : 0.0f);
+
+    REQUIRE_THAT(centered[0].left, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(centered[0].right, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(centered[2].left, WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(centered[2].right, WithinAbs(-0.5f, 1e-6f));
+}
+
+TEST_CASE("Chorus reset clears delayed audio and restarts the same response",
+          "[signal][chorus][coverage][phase3]") {
+    Chorus chorus;
+    chorus.prepare(1000.0f);
+    chorus.set_rate(0.0f);
+    chorus.set_depth(0.0f);
+    chorus.set_delay_ms(2.0f);
+    chorus.set_mix(1.0f);
+
+    const std::array<float, 4> impulse{{1.0f, 0.0f, 0.0f, 0.0f}};
+    std::array<Chorus::StereoSample, impulse.size()> first{};
+    std::array<Chorus::StereoSample, impulse.size()> second{};
+    for (size_t i = 0; i < impulse.size(); ++i)
+        first[i] = chorus.process(impulse[i]);
+
+    chorus.reset();
+    auto cleared = chorus.process(0.0f);
+    REQUIRE_THAT(cleared.left, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(cleared.right, WithinAbs(0.0f, 1e-6f));
+
+    chorus.reset();
+    for (size_t i = 0; i < impulse.size(); ++i)
+        second[i] = chorus.process(impulse[i]);
+
+    REQUIRE_THAT(second[0].left, WithinAbs(first[0].left, 1e-6f));
+    REQUIRE_THAT(second[0].right, WithinAbs(first[0].right, 1e-6f));
+    REQUIRE_THAT(second[2].left, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(second[2].right, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(second[3].left, WithinAbs(first[3].left, 1e-6f));
+    REQUIRE_THAT(second[3].right, WithinAbs(first[3].right, 1e-6f));
+}
+
+TEST_CASE("Chorus invalid sample rates and fast modulation stay finite",
+          "[signal][chorus][coverage][phase3]") {
+    Chorus chorus;
+    chorus.prepare(0.0f);
+    chorus.set_rate(std::numeric_limits<float>::infinity());
+    chorus.set_depth(std::numeric_limits<float>::infinity());
+    chorus.set_delay_ms(std::numeric_limits<float>::infinity());
+    chorus.set_mix(1.0f);
+
+    for (float input : {0.25f, -0.25f}) {
+        auto out = chorus.process(input);
+        REQUIRE(std::isfinite(out.left));
+        REQUIRE(std::isfinite(out.right));
+    }
+
+    Chorus fast;
+    fast.prepare(1000.0f);
+    fast.set_rate(3500.0f);
+    fast.set_depth(1.0f);
+    fast.set_delay_ms(1.0f);
+    fast.set_mix(1.0f);
+
+    for (float input : {1.0f, 0.0f}) {
+        auto out = fast.process(input);
+        REQUIRE(std::isfinite(out.left));
+        REQUIRE(std::isfinite(out.right));
+    }
+}
+
 // ── Phaser ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Phaser modifies signal", "[signal][phaser]") {
