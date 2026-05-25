@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02160"></a>
+## [0.216.0] - 2026-05-25
+
+- feat(macos-plan): Batch G (partial) — Compressor sidechain HPF + lookahead (item 2.4) ([#2846](https://github.com/danielraffel/pulp/pull/2846))
+
+<a id="v02150"></a>
+## [0.215.0] - 2026-05-25
+
+- fix(macos-plan): Codex P1 follow-ups — HMAC mbedTLS error propagation + MidiMessageCollector SPSC-safe deferral ([#2845](https://github.com/danielraffel/pulp/pull/2845))
+
 <a id="v02140"></a>
 ## [0.214.0] - 2026-05-25
 
@@ -2747,6 +2757,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.216.0]: https://github.com/danielraffel/pulp/releases/tag/v0.216.0
+[0.215.0]: https://github.com/danielraffel/pulp/releases/tag/v0.215.0
 [0.214.0]: https://github.com/danielraffel/pulp/releases/tag/v0.214.0
 [0.213.0]: https://github.com/danielraffel/pulp/releases/tag/v0.213.0
 [0.212.0]: https://github.com/danielraffel/pulp/releases/tag/v0.212.0
