@@ -3087,6 +3087,13 @@ catch_discover_tests(pulp-test-web-demos)
 # AI Designer: design tool layout/parity tests
 pulp_add_test_suite(pulp-test-design-tool-layout LIBRARIES pulp::view pulp::state)
 
+add_executable(pulp-test-design-debug-contracts test_design_debug_contracts.cpp)
+target_link_libraries(pulp-test-design-debug-contracts PRIVATE
+    pulp::view
+    pulp::state
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-debug-contracts)
+
 # AI Designer: style pack tests
 pulp_add_test_suite(pulp-test-style-pack LIBRARIES pulp::view)
 
