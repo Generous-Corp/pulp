@@ -148,7 +148,7 @@ eval.evaluate("x * 100 + 10");  // 60.0
 | IP Address | `ip_address.hpp` | `local_ipv4_address()`, `hostname()`, `is_valid_ipv4(addr)` |
 | IPC Lock | `inter_process_lock.hpp` | Cross-process mutex via file locks |
 | Memory Map | `memory_mapped_file.hpp` | Zero-copy large file access via mmap |
-| Named Pipes | `named_pipe.hpp` | Cross-platform IPC (mkfifo / CreateNamedPipe) |
+| Named Pipes | `named_pipe.hpp` | Cross-platform IPC (directional paired POSIX FIFOs / CreateNamedPipe) |
 | Primes | `primes.hpp` | `is_prime(97)`, `generate_prime(32)`, `sieve_primes(1000)` |
 | Range | `range.hpp` | `Range<float>(0, 1).contains(0.5)`, intersection, union |
 | Scope Guard | `scope_guard.hpp` | `PULP_ON_SCOPE_EXIT(file.close())` |

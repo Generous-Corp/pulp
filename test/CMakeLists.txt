@@ -1228,7 +1228,14 @@ pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 pulp_add_test_suite(pulp-test-crypto LIBRARIES pulp::runtime)
 
 # IPC (InterprocessConnection) tests
+add_executable(pulp-connected-child-process-fixture
+    fixtures/connected_child_process_fixture.cpp)
+target_link_libraries(pulp-connected-child-process-fixture PRIVATE pulp::events)
+
 pulp_add_test_suite(pulp-test-ipc LIBRARIES pulp::events pulp::runtime)
+add_dependencies(pulp-test-ipc pulp-connected-child-process-fixture)
+target_compile_definitions(pulp-test-ipc PRIVATE
+    "PULP_TEST_CONNECTED_CHILD_FIXTURE=\"$<TARGET_FILE:pulp-connected-child-process-fixture>\"")
 
 pulp_add_test_suite(pulp-test-ipc-endpoints LIBRARIES pulp::events pulp::runtime)
 

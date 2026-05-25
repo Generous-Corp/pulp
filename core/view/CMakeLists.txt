@@ -170,6 +170,22 @@ set(PULP_JS_ENGINE_SOURCES
     src/js_engine_factory.cpp
 )
 
+set(_pulp_ubsan_enabled OFF)
+if(PULP_SANITIZER STREQUAL "undefined"
+        OR CMAKE_CXX_FLAGS MATCHES "(^| )-fsanitize=[^ ]*undefined"
+        OR CMAKE_C_FLAGS MATCHES "(^| )-fsanitize=[^ ]*undefined")
+    set(_pulp_ubsan_enabled ON)
+endif()
+
+if(_pulp_ubsan_enabled AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    # CHOC's header-only QuickJS backend is tracked under #1987 for UBSan-only
+    # exception corruption. Keep UBSan on Pulp's script/runtime code while
+    # compiling only that vendored backend without undefined instrumentation.
+    set_source_files_properties(src/js_quickjs_engine.cpp PROPERTIES
+        COMPILE_OPTIONS "-fno-sanitize=undefined")
+endif()
+unset(_pulp_ubsan_enabled)
+
 # V8 backend (optional, needs external V8)
 if(PULP_JS_ENGINE STREQUAL "v8" OR (PULP_JS_ENGINE STREQUAL "auto" AND DEFINED V8_INCLUDE_DIR))
     if(DEFINED V8_INCLUDE_DIR AND DEFINED V8_LIB_DIR)

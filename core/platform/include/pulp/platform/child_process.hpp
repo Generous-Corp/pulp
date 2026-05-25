@@ -25,9 +25,11 @@ struct ProcessOptions {
     std::string working_directory;
     int timeout_ms = 0;                    ///< 0 = no timeout
     size_t max_output_bytes = 1 << 20;     ///< 1 MB default cap
-    /// Called for each complete line on stdout (from background reader thread).
+    bool capture_stdout = true;
+    bool capture_stderr = true;
+    /// Called for each complete captured line on stdout while output is drained.
     std::function<void(std::string_view line)> on_stdout_line;
-    /// Called for each complete line on stderr (from background reader thread).
+    /// Called for each complete captured line on stderr while output is drained.
     std::function<void(std::string_view line)> on_stderr_line;
 };
 
@@ -56,6 +58,11 @@ public:
 
     /// Check if the started process is still running.
     bool is_running() const;
+
+    /// Return the child process id, or -1 if no process has started.
+    /// After wait() or cancel(), the OS may reuse this id; do not use it to
+    /// signal a completed process.
+    int process_id() const;
 
     /// Request cancellation. Sends SIGTERM (POSIX) or TerminateProcess (Windows),
     /// waits a short grace period, then sends SIGKILL if still alive.

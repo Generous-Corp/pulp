@@ -45,7 +45,7 @@ An in-memory byte buffer that satisfies the `Stream` contract. Useful for tests 
 
 ### `PipeStream`
 
-Wraps `NamedPipe`, which in turn uses `mkfifo` on POSIX and `CreateNamedPipe` on Windows. The pipe is opened by the caller (`create_server` / `connect_client`) and handed to `PipeStream` for the unified interface.
+Wraps `NamedPipe`, which uses directional paired FIFOs under one public pipe name on POSIX and `CreateNamedPipe` on Windows. The pipe is opened by the caller (`create_server` blocks until a peer connects; `connect_client` attaches from the other side) and handed to `PipeStream` for the unified interface. Reads return EOF when the peer closes or exits.
 
 ### `TcpStream`
 

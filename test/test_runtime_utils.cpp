@@ -29,18 +29,6 @@
 #include <memory>
 #include <thread>
 
-#if !defined(_WIN32)
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 using namespace pulp::runtime;
 
 namespace {
@@ -938,6 +926,28 @@ TEST_CASE("run_process captures stdout and stderr from one child",
     REQUIRE(result->stderr_output.find("err-line") != std::string::npos);
 }
 
+TEST_CASE("run_process preserves output beyond the platform child default cap",
+          "[runtime][child_process][coverage][phase3]") {
+    constexpr auto expected_size = (1u << 20) + 4096u;
+
+#ifdef _WIN32
+    auto result = run_process("powershell",
+        {"-NoProfile", "-Command",
+         std::string("$n = ") + std::to_string(expected_size) +
+             "; [Console]::Out.Write(('x' * $n)); [Console]::Error.Write(('y' * $n))"});
+#else
+    auto result = run_process("/bin/sh",
+        {"-c",
+         std::string("yes x | head -c ") + std::to_string(expected_size) +
+             "; yes y | head -c " + std::to_string(expected_size) + " >&2"});
+#endif
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->exit_code == 0);
+    REQUIRE(result->stdout_output.size() == expected_size);
+    REQUIRE(result->stderr_output.size() == expected_size);
+}
+
 TEST_CASE("run_process honors working directory and preserves spaced arguments",
           "[runtime][child_process][coverage][phase3]") {
     TemporaryFile marker(".cwd");
@@ -1014,6 +1024,7 @@ TEST_CASE("run_process terminates POSIX children on timeout",
 
     REQUIRE(result.has_value());
     REQUIRE(result->exit_code == -1);
+    REQUIRE(result->timed_out);
     REQUIRE(elapsed < std::chrono::milliseconds(1500));
 #endif
 }
@@ -1027,47 +1038,9 @@ TEST_CASE("run_process preserves POSIX output captured before timeout",
 
     REQUIRE(result.has_value());
     REQUIRE(result->exit_code == -1);
+    REQUIRE(result->timed_out);
     REQUIRE(result->stdout_output == "ready");
 #endif
-}
-
-TEST_CASE("launch_process starts a POSIX child visible to is_process_running",
-          "[runtime][child_process][coverage][phase3]") {
-#if defined(_WIN32) || defined(__ANDROID__)
-    SUCCEED("POSIX process lifecycle is covered on macOS/Linux");
-#else
-    const int pid = launch_process("/bin/sleep", {"2"});
-    REQUIRE(pid > 0);
-    REQUIRE(is_process_running(pid));
-
-    REQUIRE(kill(static_cast<pid_t>(pid), SIGTERM) == 0);
-    int status = 0;
-    REQUIRE(waitpid(static_cast<pid_t>(pid), &status, 0) == pid);
-    REQUIRE_FALSE(is_process_running(pid));
-#endif
-}
-
-TEST_CASE("launch_process reports failed starts and missing pids",
-          "[runtime][child_process][coverage][phase3]") {
-#ifdef _WIN32
-    REQUIRE(launch_process("C:\\nonexistent_binary_12345.exe") == -1);
-#elif !defined(__ANDROID__)
-    REQUIRE(launch_process("/tmp/nonexistent_binary_12345") == -1);
-#else
-    SUCCEED("Android reports exec failures via child exit status, not launch failure");
-#endif
-    REQUIRE_FALSE(is_process_running(99999999));
-}
-
-TEST_CASE("is_process_running recognizes the current process",
-          "[runtime][child_process][coverage][phase3]") {
-#ifdef _WIN32
-    const int pid = _getpid();
-#else
-    const int pid = static_cast<int>(getpid());
-#endif
-    REQUIRE(pid > 0);
-    REQUIRE(is_process_running(pid));
 }
 
 // ── Stream ──────────────────────────────────────────────────────────────

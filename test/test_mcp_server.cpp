@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -9,6 +10,12 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 // pulp-test-mcp-server compiles only this TU; it does not link the
 // pulp-mcp target's object files. So the test must pull in every
@@ -29,6 +36,16 @@
 
 namespace {
 
+std::atomic<unsigned long long> temp_dir_counter{0};
+
+unsigned long long current_process_id_for_temp_path() {
+#if defined(_WIN32)
+    return static_cast<unsigned long long>(_getpid());
+#else
+    return static_cast<unsigned long long>(getpid());
+#endif
+}
+
 struct ScopedCurrentPath {
     explicit ScopedCurrentPath(const std::filesystem::path& next)
         : previous(std::filesystem::current_path()) {
@@ -46,8 +63,11 @@ struct ScopedCurrentPath {
 struct TempDir {
     TempDir() {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto sequence = temp_dir_counter.fetch_add(1, std::memory_order_relaxed);
         path = std::filesystem::temp_directory_path() /
-               ("pulp-mcp-server-test-" + std::to_string(stamp));
+               ("pulp-mcp-server-test-" +
+                std::to_string(current_process_id_for_temp_path()) + "-" +
+                std::to_string(sequence) + "-" + std::to_string(stamp));
         std::filesystem::create_directories(path);
     }
 

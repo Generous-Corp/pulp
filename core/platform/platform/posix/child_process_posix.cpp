@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <mutex>
 #include <thread>
 
 #include <fcntl.h>
@@ -45,6 +46,7 @@ struct Pipe {
 size_t drain_pipe(int fd, std::string& full_output, std::string& line_buf,
                   size_t max_bytes,
                   const std::function<void(std::string_view)>& line_cb) {
+    if (fd < 0) return 0;
     char chunk[4096];
     size_t total = 0;
     while (true) {
@@ -76,6 +78,7 @@ size_t drain_pipe(int fd, std::string& full_output, std::string& line_buf,
 }  // namespace
 
 struct ChildProcess::Impl {
+    mutable std::recursive_mutex mutex;
     pid_t pid = -1;
     Pipe stdout_pipe;
     Pipe stderr_pipe;
@@ -94,7 +97,8 @@ struct ChildProcess::Impl {
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
-        cancel();
+        if (is_running())
+            cancel();
         wait();
     }
 }
@@ -104,9 +108,12 @@ ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 bool ChildProcess::start(const std::string& command,
                          const std::vector<std::string>& args,
                          const ProcessOptions& options) {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (impl_->started && !impl_->finished) {
-        cancel();
-        wait();
+        if (is_running())
+            cancel();
+        else
+            wait();
     }
 
     impl_->pid = -1;
@@ -121,7 +128,10 @@ bool ChildProcess::start(const std::string& command,
     impl_->cached_exit_status = -1;
     impl_->result = {};
 
-    if (!impl_->stdout_pipe.create() || !impl_->stderr_pipe.create()) {
+    if ((options.capture_stdout && !impl_->stdout_pipe.create()) ||
+        (options.capture_stderr && !impl_->stderr_pipe.create())) {
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
         impl_->result.exit_code = -1;
         return false;
     }
@@ -139,8 +149,24 @@ bool ChildProcess::start(const std::string& command,
     impl_->pid = fork();
     if (impl_->pid == 0) {
         // Child process
-        dup2(impl_->stdout_pipe.write_end(), STDOUT_FILENO);
-        dup2(impl_->stderr_pipe.write_end(), STDERR_FILENO);
+        if (options.capture_stdout) {
+            dup2(impl_->stdout_pipe.write_end(), STDOUT_FILENO);
+        } else {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO);
+                close(devnull);
+            }
+        }
+        if (options.capture_stderr) {
+            dup2(impl_->stderr_pipe.write_end(), STDERR_FILENO);
+        } else {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) {
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+        }
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
         if (!options.working_directory.empty())
@@ -153,10 +179,20 @@ bool ChildProcess::start(const std::string& command,
     // Set up file actions: redirect stdout/stderr to pipes
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_adddup2(&actions, impl_->stdout_pipe.write_end(), STDOUT_FILENO);
-    posix_spawn_file_actions_adddup2(&actions, impl_->stderr_pipe.write_end(), STDERR_FILENO);
-    posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.read_end());
-    posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.read_end());
+    if (options.capture_stdout) {
+        posix_spawn_file_actions_adddup2(&actions, impl_->stdout_pipe.write_end(), STDOUT_FILENO);
+        posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.read_end());
+        posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.write_end());
+    } else {
+        posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    }
+    if (options.capture_stderr) {
+        posix_spawn_file_actions_adddup2(&actions, impl_->stderr_pipe.write_end(), STDERR_FILENO);
+        posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.read_end());
+        posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.write_end());
+    } else {
+        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    }
 
     // Working directory
     // posix_spawn_file_actions_addchdir_np is available on macOS 10.15+
@@ -197,6 +233,7 @@ bool ChildProcess::start(const std::string& command,
 }
 
 bool ChildProcess::is_running() const {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started || impl_->finished) return false;
     if (impl_->exit_cached) return false;
     // Use waitpid WNOHANG to detect exit including zombies.
@@ -209,11 +246,26 @@ bool ChildProcess::is_running() const {
         impl_->exit_cached = true;
         return false;
     }
+    if (rc < 0 && errno == ECHILD) {
+        impl_->cached_exit_status = -1;
+        impl_->exit_cached = true;
+        return false;
+    }
     return rc == 0;
 }
 
+int ChildProcess::process_id() const {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    return impl_->pid > 0 ? static_cast<int>(impl_->pid) : -1;
+}
+
 void ChildProcess::cancel() {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started || impl_->finished) return;
+    if (impl_->exit_cached) {
+        (void)wait();
+        return;
+    }
     kill(impl_->pid, SIGTERM);
     // Grace period
     for (int i = 0; i < 100; ++i) {
@@ -243,6 +295,7 @@ void ChildProcess::cancel() {
 }
 
 ProcessResult ChildProcess::wait() {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started) return impl_->result;
     if (impl_->finished) return impl_->result;
 
@@ -261,11 +314,21 @@ ProcessResult ChildProcess::wait() {
         int status = 0;
         bool exited = false;
         if (impl_->exit_cached) {
+            if (impl_->cached_exit_status < 0) {
+                impl_->finished = true;
+                impl_->result.exit_code = -1;
+                break;
+            }
             status = impl_->cached_exit_status;
             exited = true;
         } else {
             auto rc = waitpid(impl_->pid, &status, WNOHANG);
             exited = (rc > 0);
+            if (rc < 0 && errno == ECHILD) {
+                impl_->finished = true;
+                impl_->result.exit_code = -1;
+                break;
+            }
         }
         if (exited) {
             // Process exited — drain remaining output
@@ -311,6 +374,7 @@ ProcessResult ChildProcess::wait() {
 }
 
 std::string ChildProcess::read_available_output() {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started) return {};
     std::string full, lines;
     drain_pipe(impl_->stdout_pipe.read_end(), full, lines,

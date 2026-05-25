@@ -85,6 +85,23 @@ TEST_CASE("cancel terminates process", "[child_process]") {
     REQUIRE(r.was_cancelled);
 }
 
+TEST_CASE("process_id is available and stable after wait",
+          "[child_process][process-id]") {
+    ChildProcess cp;
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "echo pid"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "echo pid"}));
+#endif
+
+    const int pid = cp.process_id();
+    REQUIRE(pid > 0);
+
+    auto r = cp.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(cp.process_id() == pid);
+}
+
 TEST_CASE("find_on_path finds known binary", "[child_process]") {
 #ifdef _WIN32
     auto p = find_on_path("cmd.exe");
@@ -186,6 +203,31 @@ TEST_CASE("wait and read before start return default results",
     REQUIRE_FALSE(r.was_cancelled);
 }
 
+TEST_CASE("disabled stream capture discards stdout stderr and callbacks",
+          "[child_process][capture]") {
+    int stdout_lines = 0;
+    int stderr_lines = 0;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.capture_stdout = false;
+    opts.capture_stderr = false;
+    opts.on_stdout_line = [&](std::string_view) { ++stdout_lines; };
+    opts.on_stderr_line = [&](std::string_view) { ++stderr_lines; };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd", {"/c", "echo hidden& echo hidden 1>&2"}, opts);
+#else
+    auto r = ChildProcess::run("/bin/sh",
+        {"-c", "printf hidden; printf hidden >&2"}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.empty());
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE(stdout_lines == 0);
+    REQUIRE(stderr_lines == 0);
+}
+
 TEST_CASE("read_available_output drains stdout while process is running",
           "[child_process][edge][issue-640]") {
     ChildProcess cp;
@@ -213,6 +255,28 @@ TEST_CASE("read_available_output drains stdout while process is running",
     REQUIRE(r.exit_code == 0);
     REQUIRE_FALSE(r.timed_out);
     REQUIRE_FALSE(r.was_cancelled);
+}
+
+TEST_CASE("read_available_output is empty when stdout capture is disabled",
+          "[child_process][capture]") {
+    ChildProcess cp;
+    ProcessOptions opts;
+    opts.capture_stdout = false;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd",
+                     {"/c", "<nul set /p dummy=hidden& ping -n 2 127.0.0.1 >nul"},
+                     opts));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf hidden; sleep 1"}, opts));
+#endif
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    REQUIRE(cp.read_available_output().empty());
+
+    auto r = cp.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.empty());
 }
 
 TEST_CASE("run honors working directory",
@@ -435,6 +499,54 @@ TEST_CASE("wait is idempotent after process completion",
     REQUIRE(second.timed_out == first.timed_out);
     REQUIRE(second.was_cancelled == first.was_cancelled);
     REQUIRE(first.stdout_output.find("once") != std::string::npos);
+}
+
+TEST_CASE("start after observed completion waits previous child without cancellation state",
+          "[child_process][edge][process-reuse]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=first"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf first"}));
+#endif
+
+    for (int i = 0; i < 1000 && cp.is_running(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE_FALSE(cp.is_running());
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=second"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf second"}));
+#endif
+
+    auto replacement = cp.wait();
+    REQUIRE(replacement.exit_code == 0);
+    REQUIRE_FALSE(replacement.timed_out);
+    REQUIRE_FALSE(replacement.was_cancelled);
+    REQUIRE(replacement.stdout_output.find("second") != std::string::npos);
+}
+
+TEST_CASE("cancel after natural exit reports completed process result",
+          "[child_process][edge][cancel]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "exit /b 0"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "exit 0"}));
+#endif
+
+    for (int i = 0; i < 1000 && cp.is_running(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE_FALSE(cp.is_running());
+
+    cp.cancel();
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
 }
 
 #ifndef _WIN32
@@ -752,5 +864,73 @@ TEST_CASE("timeout escalates when a POSIX child ignores SIGTERM",
     REQUIRE(result.timed_out);
     REQUIRE(result.exit_code == -1);
     REQUIRE(result.stdout_output.find("before-timeout") != std::string::npos);
+}
+
+TEST_CASE("starting a POSIX replacement cancels a still-running child",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start(
+        "/bin/sh",
+        {"-c", "trap '' TERM; printf old-ready; while :; do sleep 1; done"}));
+
+    std::string observed;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (observed.find("old-ready") == std::string::npos
+           && std::chrono::steady_clock::now() < deadline) {
+        observed += cp.read_available_output();
+        if (observed.find("old-ready") == std::string::npos)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    REQUIRE(observed == "old-ready");
+    REQUIRE(cp.is_running());
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf new-ready; exit 4"}, opts));
+
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 4);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.stdout_output == "new-ready");
+}
+
+TEST_CASE("starting a POSIX replacement drains a previously observed exit",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf first; exit 3"}));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (cp.is_running() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE_FALSE(cp.is_running());
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf second; exit 5"}, opts));
+
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 5);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.stdout_output == "second");
+}
+
+TEST_CASE("POSIX wait consumes cached fast-exit status after polling",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf cached-status; exit 9"}));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (cp.is_running() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE_FALSE(cp.is_running());
+
+    auto result = cp.wait();
+    REQUIRE(result.exit_code == 9);
+    REQUIRE_FALSE(result.was_cancelled);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.stdout_output == "cached-status");
 }
 #endif

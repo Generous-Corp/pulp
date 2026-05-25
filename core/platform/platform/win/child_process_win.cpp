@@ -4,6 +4,7 @@
 #ifdef _WIN32
 
 #include <chrono>
+#include <mutex>
 #include <thread>
 
 #define WIN32_LEAN_AND_MEAN
@@ -31,8 +32,10 @@ struct WinPipe {
     void close_all()   { close_read(); close_write(); }
 };
 
-size_t drain_pipe(HANDLE fd, std::string& buffer, size_t max_bytes,
+size_t drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
+                  size_t max_bytes,
                   const std::function<void(std::string_view)>& line_cb) {
+    if (fd == INVALID_HANDLE_VALUE) return 0;
     size_t total = 0;
     while (true) {
         DWORD avail = 0;
@@ -46,23 +49,25 @@ size_t drain_pipe(HANDLE fd, std::string& buffer, size_t max_bytes,
             break;
 
         total += bytes_read;
-        if (buffer.size() < max_bytes)
-            buffer.append(chunk, std::min<size_t>(bytes_read, max_bytes - buffer.size()));
+        if (full_output.size() < max_bytes)
+            full_output.append(chunk, std::min<size_t>(bytes_read, max_bytes - full_output.size()));
+        if (line_cb && line_buf.size() < max_bytes)
+            line_buf.append(chunk, std::min<size_t>(bytes_read, max_bytes - line_buf.size()));
     }
 
-    if (line_cb) {
+    if (line_cb && !line_buf.empty()) {
         size_t pos = 0;
-        while (pos < buffer.size()) {
-            auto nl = buffer.find('\n', pos);
+        while (pos < line_buf.size()) {
+            auto nl = line_buf.find('\n', pos);
             if (nl == std::string::npos) break;
-            auto line = std::string_view(buffer).substr(pos, nl - pos);
+            auto line = std::string_view(line_buf).substr(pos, nl - pos);
             // Strip trailing \r
             if (!line.empty() && line.back() == '\r')
                 line = line.substr(0, line.size() - 1);
             line_cb(line);
             pos = nl + 1;
         }
-        if (pos > 0) buffer.erase(0, pos);
+        if (pos > 0) line_buf.erase(0, pos);
     }
     return total;
 }
@@ -98,13 +103,26 @@ std::string quote_windows_arg(const std::string& arg) {
     return quoted;
 }
 
+bool is_valid_handle(HANDLE handle) {
+    return handle != nullptr && handle != INVALID_HANDLE_VALUE;
+}
+
+HANDLE open_null_device(DWORD access, SECURITY_ATTRIBUTES& sa) {
+    return CreateFileA("NUL", access, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
 }  // namespace
 
 struct ChildProcess::Impl {
+    mutable std::recursive_mutex mutex;
     HANDLE process = INVALID_HANDLE_VALUE;
+    DWORD process_id = 0;
     WinPipe stdout_pipe;
     WinPipe stderr_pipe;
     ProcessOptions options;
+    std::string stdout_full;
+    std::string stderr_full;
     std::string stdout_lines_buf;
     std::string stderr_lines_buf;
     bool started = false;
@@ -115,7 +133,8 @@ struct ChildProcess::Impl {
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
-        cancel();
+        if (is_running())
+            cancel();
         wait();
     }
 }
@@ -125,12 +144,31 @@ ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 bool ChildProcess::start(const std::string& command,
                          const std::vector<std::string>& args,
                          const ProcessOptions& options) {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->started && !impl_->finished) {
+        if (is_running())
+            cancel();
+        else
+            wait();
+    }
+
+    impl_->process = INVALID_HANDLE_VALUE;
+    impl_->process_id = 0;
     impl_->options = options;
+    impl_->stdout_full.clear();
+    impl_->stderr_full.clear();
     impl_->stdout_lines_buf.clear();
     impl_->stderr_lines_buf.clear();
+    impl_->started = false;
     impl_->finished = false;
+    impl_->result = {};
 
-    if (!impl_->stdout_pipe.create() || !impl_->stderr_pipe.create()) return false;
+    if ((options.capture_stdout && !impl_->stdout_pipe.create()) ||
+        (options.capture_stderr && !impl_->stderr_pipe.create())) {
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
+        return false;
+    }
 
     // Build command line with platform-appropriate quoting.
     // Special case: cmd.exe /c passes everything after /c to the shell,
@@ -152,9 +190,44 @@ bool ChildProcess::start(const std::string& command,
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = impl_->stdout_pipe.write_end;
-    si.hStdError = impl_->stderr_pipe.write_end;
+
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE null_stdin = INVALID_HANDLE_VALUE;
+    HANDLE null_stdout = INVALID_HANDLE_VALUE;
+    HANDLE null_stderr = INVALID_HANDLE_VALUE;
+
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (!is_valid_handle(si.hStdInput)) {
+        null_stdin = open_null_device(GENERIC_READ, sa);
+        si.hStdInput = null_stdin;
+    }
+
+    if (options.capture_stdout) {
+        si.hStdOutput = impl_->stdout_pipe.write_end;
+    } else {
+        null_stdout = open_null_device(GENERIC_WRITE, sa);
+        si.hStdOutput = null_stdout;
+    }
+    if (options.capture_stderr) {
+        si.hStdError = impl_->stderr_pipe.write_end;
+    } else {
+        null_stderr = open_null_device(GENERIC_WRITE, sa);
+        si.hStdError = null_stderr;
+    }
+
+    if (!is_valid_handle(si.hStdInput) ||
+        !is_valid_handle(si.hStdOutput) ||
+        !is_valid_handle(si.hStdError)) {
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
+        if (is_valid_handle(null_stdin)) CloseHandle(null_stdin);
+        if (is_valid_handle(null_stdout)) CloseHandle(null_stdout);
+        if (is_valid_handle(null_stderr)) CloseHandle(null_stderr);
+        impl_->result.exit_code = -1;
+        return false;
+    }
 
     PROCESS_INFORMATION pi{};
     BOOL ok = CreateProcessA(
@@ -169,6 +242,9 @@ bool ChildProcess::start(const std::string& command,
 
     impl_->stdout_pipe.close_write();
     impl_->stderr_pipe.close_write();
+    if (is_valid_handle(null_stdin)) CloseHandle(null_stdin);
+    if (is_valid_handle(null_stdout)) CloseHandle(null_stdout);
+    if (is_valid_handle(null_stderr)) CloseHandle(null_stderr);
 
     if (!ok) {
         impl_->stdout_pipe.close_all();
@@ -178,30 +254,47 @@ bool ChildProcess::start(const std::string& command,
     }
 
     impl_->process = pi.hProcess;
+    impl_->process_id = pi.dwProcessId;
     CloseHandle(pi.hThread);
     impl_->started = true;
     return true;
 }
 
 bool ChildProcess::is_running() const {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started || impl_->finished) return false;
     return WaitForSingleObject(impl_->process, 0) == WAIT_TIMEOUT;
 }
 
+int ChildProcess::process_id() const {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    return impl_->process_id != 0 ? static_cast<int>(impl_->process_id) : -1;
+}
+
 void ChildProcess::cancel() {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started || impl_->finished) return;
+    if (!is_running()) {
+        (void)wait();
+        return;
+    }
     TerminateProcess(impl_->process, 1);
     WaitForSingleObject(impl_->process, 1000);
     DWORD code = 1;
     GetExitCodeProcess(impl_->process, &code);
+    impl_->stdout_pipe.close_read();
+    impl_->stderr_pipe.close_read();
     CloseHandle(impl_->process);
     impl_->process = INVALID_HANDLE_VALUE;
     impl_->finished = true;
     impl_->result.was_cancelled = true;
     impl_->result.exit_code = static_cast<int>(code);
+    impl_->result.stdout_output = std::move(impl_->stdout_full);
+    impl_->result.stderr_output = std::move(impl_->stderr_full);
 }
 
 ProcessResult ChildProcess::wait() {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started) return impl_->result;
     if (impl_->finished) return impl_->result;
 
@@ -209,16 +302,20 @@ ProcessResult ChildProcess::wait() {
     auto max_bytes = impl_->options.max_output_bytes;
 
     while (true) {
-        drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_lines_buf,
+        drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
+                   impl_->stdout_lines_buf,
                    max_bytes, impl_->options.on_stdout_line);
-        drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_lines_buf,
+        drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
+                   impl_->stderr_lines_buf,
                    max_bytes, impl_->options.on_stderr_line);
 
         if (WaitForSingleObject(impl_->process, 0) != WAIT_TIMEOUT) {
             // Final drain
-            drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_lines_buf,
+            drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
+                       impl_->stdout_lines_buf,
                        max_bytes, impl_->options.on_stdout_line);
-            drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_lines_buf,
+            drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
+                       impl_->stderr_lines_buf,
                        max_bytes, impl_->options.on_stderr_line);
 
             DWORD code = 0;
@@ -251,18 +348,20 @@ ProcessResult ChildProcess::wait() {
     impl_->stdout_pipe.close_read();
     impl_->stderr_pipe.close_read();
 
-    impl_->result.stdout_output = std::move(impl_->stdout_lines_buf);
-    impl_->result.stderr_output = std::move(impl_->stderr_lines_buf);
+    impl_->result.stdout_output = std::move(impl_->stdout_full);
+    impl_->result.stderr_output = std::move(impl_->stderr_full);
 
     return impl_->result;
 }
 
 std::string ChildProcess::read_available_output() {
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started) return {};
-    std::string buf;
-    drain_pipe(impl_->stdout_pipe.read_end, buf,
+    std::string full;
+    std::string lines;
+    drain_pipe(impl_->stdout_pipe.read_end, full, lines,
                impl_->options.max_output_bytes, nullptr);
-    return buf;
+    return full;
 }
 
 ProcessResult ChildProcess::run(const std::string& command,

@@ -3,8 +3,8 @@
 // ConnectedChildProcess — launch a child process with an IPC channel.
 // ChildProcessManager — manage a pool of child processes (for plugin scanning etc.)
 
-#include <pulp/runtime/child_process.hpp>
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,6 +13,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 
 namespace pulp::events {
 
@@ -32,7 +33,7 @@ public:
     bool is_running() const { return running_.load(); }
 
     /// Get the child's PID.
-    int pid() const { return pid_; }
+    int pid() const { return pid_.load(); }
 
     /// Send a message to the child.
     bool send_message(std::string_view message);
@@ -44,6 +45,8 @@ public:
     int wait_for_exit(int timeout_ms = 0);
 
     /// Called when a message is received from the child.
+    /// The ConnectedChildProcess object must outlive this callback; destroying
+    /// the object from inside the callback is unsupported.
     std::function<void(std::string_view)> on_message;
 
     /// Called when the child process exits.
@@ -57,11 +60,33 @@ public:
     ConnectedChildProcess& operator=(const ConnectedChildProcess&) = delete;
 
 private:
+    bool join_monitor_thread(bool detach_current_thread);
+    bool begin_message_callback();
+    void end_message_callback();
+    void stop_accepting_message_callbacks();
+    void wait_for_message_callbacks();
+
     InterprocessConnection connection_;
+    pulp::platform::ChildProcess process_;
     std::string pipe_name_;
-    int pid_ = -1;
+    std::atomic<int> pid_{-1};
     std::atomic<bool> running_{false};
+    bool cancel_requested_ = false;
+    bool exit_ready_ = false;
+    int exit_code_ = -1;
+    std::mutex state_mutex_;
+    std::condition_variable exit_cv_;
+    std::mutex monitor_mutex_;
+    std::condition_variable monitor_cv_;
+    bool monitor_launch_pending_ = false;
+    bool monitor_join_in_progress_ = false;
+    std::thread::id monitor_thread_id_;
     std::thread monitor_thread_;
+    std::mutex message_callback_mutex_;
+    std::condition_variable message_callback_cv_;
+    int active_message_callbacks_ = 0;
+    // Closed only by the destructor; normal kill/relaunch keeps callbacks armed.
+    bool accepting_message_callbacks_ = true;
 };
 
 /// Manages a pool of child processes.
@@ -97,7 +122,7 @@ public:
     ChildProcessManager& operator=(const ChildProcessManager&) = delete;
 
 private:
-    std::vector<std::unique_ptr<ConnectedChildProcess>> children_;
+    std::vector<std::shared_ptr<ConnectedChildProcess>> children_;
     mutable std::mutex mutex_;
 };
 

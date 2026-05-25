@@ -25,6 +25,31 @@ hierarchy is the sanctioned path; do not add new `Socket::send` /
 | RPC-style request/response over any transport | `JsonRpcPeer` wrapping any `MessageChannel` |
 | In-process message bridge (tests, inspector) | `MemoryMessageChannel::make_pair()` |
 
+## NamedPipe / PipeStream gotchas
+
+On POSIX, `NamedPipe` presents one public pipe name but uses paired FIFOs
+internally so bidirectional users cannot read back their own writes. Keep
+that invariant when changing `NamedPipe`: a single `O_RDWR` FIFO looks
+convenient, but `InterprocessConnection` read threads can consume outbound
+frames from the same process and make child-process IPC flaky.
+
+The paired FIFOs must stay directional after connection: server reads the
+public FIFO and writes the `.reply` FIFO; the client does the opposite.
+Do not keep a local writer open just to simplify setup, because EOF/HUP
+then stops representing peer death. On macOS, protect FIFO write descriptors
+with `F_SETNOSIGPIPE`; otherwise killing a connected child can terminate the
+parent with `SIGPIPE`.
+
+`NamedPipe::read()` also has to unblock promptly when `close()` is called
+from another thread. Use bounded polling or an equivalent wakeup path; do
+not leave a background IPC reader stuck in a blocking FIFO read while
+`InterprocessConnection::disconnect()` is trying to join it.
+
+`InterprocessConnection` treats transport EOF as the normal disconnect signal.
+Directional POSIX FIFOs let a bare `NamedPipe::read()` report EOF when the
+peer closes or exits without sending protocol data; keep raw peer-close and
+abrupt child-exit regression tests in place.
+
 ## AsyncStream — the patterns that actually work
 
 ### 1. Dispatch callbacks onto your own loop

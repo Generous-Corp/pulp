@@ -12,6 +12,16 @@ using namespace pulp::runtime;
 
 namespace {
 
+constexpr uint32_t kDisconnectFrame = 0xFFFFFFFFu;
+constexpr uint32_t kMaxMessageBytes = 64u * 1024u * 1024u;
+
+void encode_u32_le(uint32_t value, uint8_t* out) {
+    out[0] = static_cast<uint8_t>(value & 0xFF);
+    out[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    out[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    out[3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
 std::optional<uint16_t> parse_port(std::string_view text) {
     if (text.empty()) return std::nullopt;
 
@@ -121,7 +131,8 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
         if (on_connected) on_connected();
         start_read_thread();
     } else {
-        state_.store(IpcState::Error);
+        IpcState expected = IpcState::Connecting;
+        state_.compare_exchange_strong(expected, IpcState::Error);
     }
     return ok;
 }
@@ -162,37 +173,39 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
         if (on_connected) on_connected();
         start_read_thread();
     } else {
-        state_.store(IpcState::Error);
+        IpcState expected = IpcState::Connecting;
+        state_.compare_exchange_strong(expected, IpcState::Error);
     }
     return ok;
 }
 
 void InterprocessConnection::disconnect() {
+    const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
     impl_->close();
-    if (read_thread_.joinable()) read_thread_.join();
+    if (read_thread_.joinable()) {
+        if (read_thread_.get_id() == std::this_thread::get_id())
+            read_thread_.detach();
+        else
+            read_thread_.join();
+    }
 
-    if (state_.load() == IpcState::Connected) {
-        state_.store(IpcState::Disconnected);
+    if (was_connected) {
         connection_lost();
         if (on_disconnected) on_disconnected();
     }
-    state_.store(IpcState::Disconnected);
 }
 
 bool InterprocessConnection::send_message(const void* data, size_t size) {
     if (!is_connected()) return false;
+    if (size > kMaxMessageBytes) return false;
 
     std::lock_guard<std::mutex> lock(impl_->write_mutex);
 
     // Write 4-byte little-endian length header
     uint32_t len = static_cast<uint32_t>(size);
-    uint8_t header[4] = {
-        static_cast<uint8_t>(len & 0xFF),
-        static_cast<uint8_t>((len >> 8) & 0xFF),
-        static_cast<uint8_t>((len >> 16) & 0xFF),
-        static_cast<uint8_t>((len >> 24) & 0xFF)
-    };
+    uint8_t header[4];
+    encode_u32_le(len, header);
 
     // Write header with retry for short writes
     size_t header_sent = 0;
@@ -228,36 +241,53 @@ void InterprocessConnection::start_read_thread() {
 
 void InterprocessConnection::read_loop() {
     std::vector<uint8_t> buffer;
+    auto notify_lost = [this]() {
+        running_.store(false);
+        if (state_.exchange(IpcState::Disconnected) == IpcState::Connected) {
+            connection_lost();
+            if (on_disconnected) on_disconnected();
+        }
+    };
+
+    auto read_exact = [this](uint8_t* dst, size_t size) {
+        size_t read_so_far = 0;
+        while (read_so_far < size && running_.load()) {
+            int got = impl_->raw_read(dst + read_so_far, size - read_so_far);
+            if (got <= 0)
+                return false;
+            read_so_far += static_cast<size_t>(got);
+        }
+        return read_so_far == size;
+    };
 
     while (running_.load()) {
         // Read 4-byte length header
         uint8_t header[4];
-        int n = impl_->raw_read(header, 4);
-        if (n <= 0) {
-            if (running_.load()) {
-                state_.store(IpcState::Disconnected);
-                connection_lost();
-                if (on_disconnected) on_disconnected();
-            }
+        if (!read_exact(header, 4)) {
+            if (running_.load())
+                notify_lost();
             return;
         }
-        if (n != 4) continue;
 
-        uint32_t msg_len = header[0] | (header[1] << 8) | (header[2] << 16) | (header[3] << 24);
-        if (msg_len > 64 * 1024 * 1024) continue;  // Sanity: max 64MB
+        uint32_t msg_len = static_cast<uint32_t>(header[0]) |
+                           (static_cast<uint32_t>(header[1]) << 8) |
+                           (static_cast<uint32_t>(header[2]) << 16) |
+                           (static_cast<uint32_t>(header[3]) << 24);
+        if (msg_len == kDisconnectFrame) {
+            notify_lost();
+            return;
+        }
+        if (msg_len > kMaxMessageBytes) {
+            notify_lost();
+            return;
+        }
 
         // Read payload
         buffer.resize(msg_len);
-        size_t read_so_far = 0;
-        while (read_so_far < msg_len && running_.load()) {
-            int got = impl_->raw_read(buffer.data() + read_so_far, msg_len - read_so_far);
-            if (got <= 0) {
-                state_.store(IpcState::Disconnected);
-                connection_lost();
-                if (on_disconnected) on_disconnected();
-                return;
-            }
-            read_so_far += static_cast<size_t>(got);
+        if (!read_exact(buffer.data(), msg_len)) {
+            if (running_.load())
+                notify_lost();
+            return;
         }
 
         // Dispatch message

@@ -5,12 +5,25 @@
 #include <pulp/runtime/stream.hpp>
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
+#include <thread>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 using pulp::runtime::FileStream;
 using pulp::runtime::HttpStream;
@@ -25,10 +38,57 @@ using pulp::runtime::TcpStream;
 namespace {
 
 std::filesystem::path make_temp_path(const char* stem) {
+    static std::atomic<unsigned long long> counter{0};
+#ifdef _WIN32
+    const auto process_id = _getpid();
+#else
+    const auto process_id = getpid();
+#endif
+
     auto dir = std::filesystem::temp_directory_path();
-    auto name = std::string(stem) + "_" + std::to_string(std::rand()) + ".bin";
+    auto name = std::string(stem) + "_" + std::to_string(process_id) + "_" +
+                std::to_string(counter.fetch_add(1, std::memory_order_relaxed)) +
+                "_" + std::to_string(std::rand()) + ".bin";
     return dir / name;
 }
+
+#ifndef _WIN32
+struct NamedPipePair {
+    std::unique_ptr<NamedPipe> server;
+    std::unique_ptr<NamedPipe> client;
+};
+
+NamedPipePair open_named_pipe_pair(const std::filesystem::path& path) {
+    auto server = std::make_unique<NamedPipe>();
+    auto client = std::make_unique<NamedPipe>();
+    std::atomic<bool> server_done{false};
+    bool server_ok = false;
+
+    std::thread server_thread([&] {
+        server_ok = server->create_server(path.string());
+        server_done.store(true);
+    });
+
+    const auto reply = std::filesystem::path(path.string() + ".reply");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((!std::filesystem::exists(path) || !std::filesystem::exists(reply)) &&
+           !server_done.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool client_ok = false;
+    if (std::filesystem::exists(path) && std::filesystem::exists(reply))
+        client_ok = client->connect_client(path.string());
+
+    if (!client_ok)
+        server->close();
+    server_thread.join();
+
+    REQUIRE(client_ok);
+    REQUIRE(server_ok);
+    return {std::move(server), std::move(client)};
+}
+#endif
 
 }  // namespace
 
@@ -861,13 +921,10 @@ TEST_CASE("PipeStream POSIX FIFO round-trips bytes",
     auto path = make_temp_path("pulp_pipe_stream_roundtrip");
     std::filesystem::remove(path);
 
-    auto server_pipe = std::make_unique<NamedPipe>();
-    REQUIRE(server_pipe->create_server(path.string()));
-    auto client_pipe = std::make_unique<NamedPipe>();
-    REQUIRE(client_pipe->connect_client(path.string()));
+    auto pair = open_named_pipe_pair(path);
 
-    PipeStream server(std::move(server_pipe));
-    PipeStream client(std::move(client_pipe));
+    PipeStream server(std::move(pair.server));
+    PipeStream client(std::move(pair.client));
     REQUIRE(server.is_open());
     REQUIRE(client.is_open());
 
@@ -894,13 +951,13 @@ TEST_CASE("NamedPipe POSIX FIFO round-trips bytes and unlinks on close",
     auto path = make_temp_path("pulp_named_pipe_roundtrip");
     std::filesystem::remove(path);
 
-    NamedPipe server;
-    REQUIRE(server.create_server(path.string()));
+    auto pair = open_named_pipe_pair(path);
+    auto& server = *pair.server;
+    auto& client = *pair.client;
     REQUIRE(server.is_open());
     REQUIRE(std::filesystem::exists(path));
+    REQUIRE(std::filesystem::exists(path.string() + ".reply"));
 
-    NamedPipe client;
-    REQUIRE(client.connect_client(path.string()));
     REQUIRE(client.is_open());
 
     REQUIRE(server.write(std::string_view{"ping"}) == 4);
@@ -922,6 +979,82 @@ TEST_CASE("NamedPipe POSIX FIFO round-trips bytes and unlinks on close",
     server.close();
     REQUIRE_FALSE(server.is_open());
     REQUIRE_FALSE(std::filesystem::exists(path));
+    REQUIRE_FALSE(std::filesystem::exists(path.string() + ".reply"));
+}
+
+TEST_CASE("NamedPipe POSIX read observes peer close",
+          "[stream][named_pipe]") {
+    auto path = make_temp_path("pulp_named_pipe_peer_close");
+    std::filesystem::remove(path);
+
+    auto pair = open_named_pipe_pair(path);
+    pair.client->close();
+
+    std::uint8_t byte = 0;
+    REQUIRE(pair.server->read(&byte, 1) == 0);
+
+    pair.server->close();
+}
+
+TEST_CASE("NamedPipe POSIX client read waits through initial reply EOF",
+          "[stream][named_pipe]") {
+    auto path = make_temp_path("pulp_named_pipe_reply_handshake");
+    auto reply = std::filesystem::path(path.string() + ".reply");
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
+
+    REQUIRE(::mkfifo(path.c_str(), 0666) == 0);
+    REQUIRE(::mkfifo(reply.c_str(), 0666) == 0);
+
+    int public_reader = ::open(path.c_str(), O_RDONLY | O_NONBLOCK);
+    REQUIRE(public_reader >= 0);
+
+    NamedPipe client;
+    REQUIRE(client.connect_client(path.string()));
+    REQUIRE(client.is_open());
+
+    std::atomic<bool> read_done{false};
+    int read_result = -1;
+    std::uint8_t received = 0;
+    std::thread read_thread([&] {
+        read_result = client.read(&received, 1);
+        read_done.store(true);
+    });
+
+    const auto early_deadline = std::chrono::steady_clock::now() +
+                                std::chrono::milliseconds(50);
+    while (!read_done.load() && std::chrono::steady_clock::now() < early_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool returned_before_reply_writer = read_done.load();
+
+    int reply_writer = -1;
+    const auto writer_deadline = std::chrono::steady_clock::now() +
+                                 std::chrono::seconds(2);
+    while (reply_writer < 0 && std::chrono::steady_clock::now() < writer_deadline) {
+        reply_writer = ::open(reply.c_str(), O_WRONLY | O_NONBLOCK);
+        if (reply_writer < 0 && errno == ENXIO)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        else
+            break;
+    }
+    std::uint8_t payload = 'r';
+    const ssize_t write_result =
+        reply_writer >= 0 ? ::write(reply_writer, &payload, 1) : -1;
+    if (write_result != 1)
+        client.close();
+
+    read_thread.join();
+    REQUIRE(reply_writer >= 0);
+    REQUIRE(write_result == 1);
+    CHECK_FALSE(returned_before_reply_writer);
+    REQUIRE(read_result == 1);
+    REQUIRE(received == payload);
+
+    client.close();
+    ::close(reply_writer);
+    ::close(public_reader);
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
 }
 
 TEST_CASE("PipeStream forwards reads and writes over a connected POSIX FIFO",
@@ -929,14 +1062,10 @@ TEST_CASE("PipeStream forwards reads and writes over a connected POSIX FIFO",
     auto path = make_temp_path("pulp_pipe_stream_roundtrip");
     std::filesystem::remove(path);
 
-    auto server = std::make_unique<NamedPipe>();
-    REQUIRE(server->create_server(path.string()));
+    auto pair = open_named_pipe_pair(path);
 
-    auto client = std::make_unique<NamedPipe>();
-    REQUIRE(client->connect_client(path.string()));
-
-    PipeStream server_stream(std::move(server));
-    PipeStream client_stream(std::move(client));
+    PipeStream server_stream(std::move(pair.server));
+    PipeStream client_stream(std::move(pair.client));
     REQUIRE(server_stream.is_open());
     REQUIRE(client_stream.is_open());
     REQUIRE(server_stream.pipe() != nullptr);
@@ -981,28 +1110,30 @@ TEST_CASE("NamedPipe POSIX move transfers FIFO cleanup ownership",
     std::filesystem::remove(first);
     std::filesystem::remove(second);
 
-    NamedPipe original;
-    REQUIRE(original.create_server(first.string()));
+    auto first_pair = open_named_pipe_pair(first);
     REQUIRE(std::filesystem::exists(first));
 
-    NamedPipe moved(std::move(original));
-    REQUIRE_FALSE(original.is_open());
+    NamedPipe moved(std::move(*first_pair.server));
+    REQUIRE_FALSE(first_pair.server->is_open());
     REQUIRE(moved.is_open());
     REQUIRE(std::filesystem::exists(first));
 
-    NamedPipe replacement;
-    REQUIRE(replacement.create_server(second.string()));
+    auto second_pair = open_named_pipe_pair(second);
     REQUIRE(std::filesystem::exists(second));
 
-    moved = std::move(replacement);
-    REQUIRE_FALSE(replacement.is_open());
+    moved = std::move(*second_pair.server);
+    REQUIRE_FALSE(second_pair.server->is_open());
     REQUIRE(moved.is_open());
     REQUIRE_FALSE(std::filesystem::exists(first));
+    REQUIRE_FALSE(std::filesystem::exists(first.string() + ".reply"));
     REQUIRE(std::filesystem::exists(second));
 
+    first_pair.client->close();
+    second_pair.client->close();
     moved.close();
     REQUIRE_FALSE(moved.is_open());
     REQUIRE_FALSE(std::filesystem::exists(second));
+    REQUIRE_FALSE(std::filesystem::exists(second.string() + ".reply"));
 }
 
 TEST_CASE("NamedPipe POSIX create failure leaves pipe closed",
@@ -1020,5 +1151,116 @@ TEST_CASE("NamedPipe POSIX create failure leaves pipe closed",
     REQUIRE(pipe.write(buf, sizeof(buf)) == -1);
     pipe.close();
     std::filesystem::remove(directory);
+}
+
+TEST_CASE("NamedPipe POSIX create_server waits for a client",
+          "[stream][named_pipe]") {
+    auto path = make_temp_path("pulp_named_pipe_waits_for_client");
+    std::filesystem::remove(path);
+    std::filesystem::remove(path.string() + ".reply");
+
+    NamedPipe server;
+    std::atomic<bool> server_done{false};
+    bool server_ok = false;
+    std::thread server_thread([&] {
+        server_ok = server.create_server(path.string());
+        server_done.store(true);
+    });
+
+    const auto reply = std::filesystem::path(path.string() + ".reply");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((!std::filesystem::exists(path) || !std::filesystem::exists(reply)) &&
+           !server_done.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    REQUIRE(std::filesystem::exists(path));
+    REQUIRE(std::filesystem::exists(reply));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    REQUIRE_FALSE(server_done.load());
+
+    NamedPipe client;
+    REQUIRE(client.connect_client(path.string()));
+    server_thread.join();
+    REQUIRE(server_ok);
+
+    client.close();
+    server.close();
+}
+
+TEST_CASE("NamedPipe POSIX client retries until server read side is ready",
+          "[stream][named_pipe]") {
+    auto path = make_temp_path("pulp_named_pipe_client_retry");
+    auto reply = std::filesystem::path(path.string() + ".reply");
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
+    REQUIRE(::mkfifo(path.c_str(), 0666) == 0);
+    REQUIRE(::mkfifo(reply.c_str(), 0666) == 0);
+
+    std::atomic<bool> stop{false};
+    bool server_ok = false;
+    std::thread server_thread([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        int read_fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK);
+        if (read_fd < 0)
+            return;
+
+        int write_fd = -1;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(2);
+        while (!stop.load() && std::chrono::steady_clock::now() < deadline) {
+            write_fd = ::open(reply.c_str(), O_WRONLY | O_NONBLOCK);
+            if (write_fd >= 0)
+                break;
+            if (errno != ENXIO && errno != EINTR)
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        server_ok = write_fd >= 0;
+        if (write_fd >= 0)
+            ::close(write_fd);
+        ::close(read_fd);
+    });
+
+    NamedPipe client;
+    const bool client_ok = client.connect_client(path.string());
+    if (!client_ok)
+        stop.store(true);
+    server_thread.join();
+
+    REQUIRE(client_ok);
+    REQUIRE(server_ok);
+    REQUIRE(client.is_open());
+
+    client.close();
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
+}
+
+TEST_CASE("NamedPipe POSIX reply path collision does not clobber regular files",
+          "[stream][named_pipe]") {
+    auto path = make_temp_path("pulp_named_pipe_reply_collision");
+    auto reply = std::filesystem::path(path.string() + ".reply");
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
+
+    {
+        std::ofstream out(reply);
+        out << "keep";
+    }
+
+    NamedPipe pipe;
+    REQUIRE_FALSE(pipe.create_server(path.string()));
+    REQUIRE_FALSE(pipe.is_open());
+    REQUIRE(std::filesystem::exists(reply));
+
+    std::ifstream in(reply);
+    std::string contents;
+    in >> contents;
+    REQUIRE(contents == "keep");
+
+    std::filesystem::remove(path);
+    std::filesystem::remove(reply);
 }
 #endif
