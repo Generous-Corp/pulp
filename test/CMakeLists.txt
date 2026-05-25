@@ -2187,6 +2187,11 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-atlas-viewer
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspector-server test_inspector_server.cpp)
+    target_link_libraries(pulp-test-inspector-server PRIVATE pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-server
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     # P11-5 (#2647): three more concern-scoped sibling TUs carved verbatim out
     # of test_inspector.cpp to bring the 3,126-line parent under the 2,000-line
     # target (now 1,859). Same registration as pulp-test-inspector.
