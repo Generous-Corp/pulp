@@ -2163,6 +2163,9 @@ pulp_add_test_suite(pulp-test-ara-scaffold LIBRARIES pulp::format)
 # macOS plan Batch E remainder — MIDI 1.0 backend audit (item 8.6)
 pulp_add_test_suite(pulp-test-midi1-backend-audit LIBRARIES pulp::midi)
 
+# macOS plan Batch C — BufferOps SIMD helpers (item 1.6)
+pulp_add_test_suite(pulp-test-buffer-ops LIBRARIES pulp::audio pulp::runtime)
+
 # macOS plan Batch A — Foundations
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
