@@ -346,16 +346,31 @@ void MpeVoiceTracker::apply_per_note_timbre(uint8_t ch, uint8_t note, float timb
 
 void MpeVoiceTracker::apply_per_note_management(uint8_t ch, uint8_t note, uint8_t flags) {
     // UMP Per-Note Management has two bit flags:
-    //   bit 0 (kPerNoteResetControllers) — return per-note expression
-    //     values to spec defaults (0 for pitch bend, pressure, timbre).
-    //   bit 1 (kPerNoteDetachControllers) — channel-level controller
-    //     updates no longer propagate to this note; per-note targeted
-    //     messages (status 0x60 / 0x00 / 0x10) still apply.
+    //   bit 0 (kPerNoteResetControllers, S) — reset per-note expression.
+    //   bit 1 (kPerNoteDetachControllers, D) — detach channel-level
+    //     controllers from the currently sounding note (its expression
+    //     state is frozen for the rest of its lifecycle).
+    //
+    // The flag-combination semantics per the UMP spec
+    // (Codex P1 on #2860, MIDI 2.0 spec § Per-Note Management):
+    //   S alone   → reset the currently sounding note immediately
+    //   D alone   → detach, leave expression untouched
+    //   D + S     → detach takes effect on the currently sounding note
+    //               (its state is preserved for its remaining lifecycle);
+    //               reset arms for FUTURE notes at the same (channel,
+    //               note) index. Pulp does not yet maintain the
+    //               armed-for-future-note memory — D+S degrades to
+    //               detach-only on the live note here, which matches
+    //               the spec for the sounding note. The "arm reset for
+    //               future" slice is tracked as a deferred follow-up
+    //               in the macOS plan; see SKILL.md "UMP per-note
+    //               management" gotchas.
     const bool reset_controllers = (flags & UmpPacket::kPerNoteResetControllers) != 0;
     const bool detach_controllers = (flags & UmpPacket::kPerNoteDetachControllers) != 0;
+    const bool reset_live_note = reset_controllers && !detach_controllers;
     for (auto& s : notes_) {
         if (!s.active || s.channel != ch || s.note != note) continue;
-        if (reset_controllers) {
+        if (reset_live_note) {
             s.pitch_bend_semitones = 0.0f;
             s.pressure = 0.0f;
             s.timbre = 0.0f;

@@ -152,13 +152,20 @@ TEST_CASE("MpeVoiceTracker note-on retrigger clears detach state (item 8.5b)",
     REQUIRE(tracker.find(1, 60)->pitch_bend_semitones > 0.0f);
 }
 
-TEST_CASE("MpeVoiceTracker per-note management reset+detach in one message (item 8.5b)",
-          "[midi][mpe][per-note-management]") {
+TEST_CASE("MpeVoiceTracker D+S per-note management preserves live note state (Codex #2860 P1)",
+          "[midi][mpe][per-note-management][regression]") {
+    // Per the MIDI 2.0 UMP spec § Per-Note Management, when both detach
+    // and reset bits are set, detach takes effect on the currently
+    // sounding note (its controller state is preserved for the rest of
+    // its lifecycle) and reset arms for future note-ons at this index.
+    // Earlier impl zeroed expression on the live note, breaking the
+    // expressive playback the D+S note-rotation flow depends on.
     MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
     REQUIRE(tracker.process(note_on(/*ch=*/2, /*note=*/64)));
     REQUIRE(tracker.process(UmpPacket::per_note_pitch_bend(
         /*group=*/0, /*channel=*/2, /*note=*/64, /*value=*/0xFFFFFFFFu)));
-    REQUIRE(tracker.find(2, 64)->pitch_bend_semitones > 0.0f);
+    const float live_pitch_bend = tracker.find(2, 64)->pitch_bend_semitones;
+    REQUIRE(live_pitch_bend > 0.0f);
 
     auto combo = UmpPacket::per_note_management(
         /*group=*/0, /*channel=*/2, /*note=*/64,
@@ -169,8 +176,14 @@ TEST_CASE("MpeVoiceTracker per-note management reset+detach in one message (item
 
     const auto* n = tracker.find(2, 64);
     REQUIRE(n != nullptr);
-    REQUIRE(n->pitch_bend_semitones == 0.0f);
+    // D+S: live note state PRESERVED + detach applied.
+    REQUIRE(n->pitch_bend_semitones == live_pitch_bend);
     REQUIRE(n->detached);
+
+    // Channel-level pitch bend updates still skip the detached note.
+    REQUIRE(tracker.process(UmpPacket::pitch_bend_2(
+        /*group=*/0, /*channel=*/2, /*value=*/0u))); // bend toward 0
+    REQUIRE(tracker.find(2, 64)->pitch_bend_semitones == live_pitch_bend);
 }
 
 TEST_CASE("MpeVoiceTracker per-note management only targets the matching note (item 8.5b)",

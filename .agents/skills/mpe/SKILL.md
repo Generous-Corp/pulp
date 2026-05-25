@@ -156,6 +156,15 @@ surface:
   (status 0x00) still routes to timbre regardless.
 - **Retrigger semantics**: a note-on while the slot is still active
   clears `detached` (re-attaches the slot to channel-level controllers).
+- **D+S flag combination**: when detach and reset bits arrive in the
+  same management packet, detach takes effect on the currently
+  sounding note (state preserved for its lifecycle); reset is *armed*
+  for the next note-on at the same (channel, note) index. Pulp does
+  not yet maintain the armed-reset memory — D+S currently degrades to
+  detach-only on the live note (matches spec for the sounding note,
+  Codex P1 on #2860). The armed-future-reset slice is deferred
+  follow-up work; if you need the full D+S note-rotation flow, file
+  an issue with a controller reproducer.
 
 If you're routing UMP into the tracker, use the factories on
 `UmpPacket`: `per_note_management(group, channel, note, flags)`,
