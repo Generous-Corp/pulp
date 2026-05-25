@@ -27,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 
 namespace pulp::midi {
 
@@ -46,6 +47,13 @@ struct MpeNoteState {
     float timbre = 0.0f;           ///< CC 74 (0..1); same value as `slide`
     uint32_t note_id = 0;          ///< Monotonic id assigned on note-on (never 0)
     bool is_upper_zone = false;    ///< true if this note lives in the upper zone
+    /// True after a UMP Per-Note Management message with the "detach
+    /// controllers" flag landed on this note: subsequent channel-level
+    /// controller updates (pitch bend, pressure, CC74 on the member
+    /// channel) no longer write into this note. Per-note targeted
+    /// messages (status 0x60 / 0x00 / 0x10) still apply. Cleared when
+    /// the slot is reused for a fresh note-on (retrigger included).
+    bool detached = false;
 };
 
 /// Tracks MPE voice state across channels.
@@ -76,6 +84,21 @@ public:
     void set_manager_bend_range(float semitones);
     float member_bend_range() const { return member_bend_semi_; }
     float manager_bend_range() const { return manager_bend_semi_; }
+
+    /// Bind a MIDI 2.0 Assignable Per-Note Controller index (status
+    /// 0x10) to per-note timbre. The assignable PNC space is host-
+    /// configured per the UMP spec; this hook lets a Pulp plugin
+    /// advertise which assignable index it accepts as timbre. Pass
+    /// `std::nullopt` to disable assignable-PNC routing entirely
+    /// (registered PNC 74, status 0x00, continues to route to timbre
+    /// regardless). Range: 0-127.
+    void set_assignable_timbre_index(std::optional<uint8_t> cc_index) {
+        if (cc_index) assignable_timbre_index_ = static_cast<uint8_t>(*cc_index & 0x7F);
+        else assignable_timbre_index_.reset();
+    }
+    std::optional<uint8_t> assignable_timbre_index() const {
+        return assignable_timbre_index_;
+    }
 
     // ── Event ingestion ────────────────────────────────────────────────────
 
@@ -148,6 +171,10 @@ private:
     // member-channel cache, so they only update that one note.
     void apply_per_note_pitch_bend(uint8_t ch, uint8_t note, float semitones);
     void apply_per_note_timbre(uint8_t ch, uint8_t note, float timbre);
+    // UMP Per-Note Management (status 0xF0): `flags` bit-0 resets per-note
+    // controllers to their defaults, bit-1 detaches channel-level
+    // controllers from the note (`MpeNoteState::detached`).
+    void apply_per_note_management(uint8_t ch, uint8_t note, uint8_t flags);
 
     static float ump_bend_normalised(uint32_t v32);
 
@@ -161,6 +188,7 @@ private:
     float member_bend_semi_ = kDefaultMemberBendSemitones;
     float manager_bend_semi_ = kDefaultManagerBendSemitones;
     uint32_t next_note_id_ = 1;
+    std::optional<uint8_t> assignable_timbre_index_;
 };
 
 } // namespace pulp::midi

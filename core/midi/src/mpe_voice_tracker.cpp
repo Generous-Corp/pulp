@@ -151,6 +151,24 @@ bool MpeVoiceTracker::process(const UmpPacket& p) {
             }
             return true;
         }
+        case 0x10: {  // Assignable per-note CC
+            // The assignable PNC controller index is host-defined; only
+            // route to timbre when the plugin has bound an index via
+            // set_assignable_timbre_index().
+            if (assignable_timbre_index_.has_value()) {
+                const uint8_t cc = static_cast<uint8_t>(p.words[0] & 0x7F);
+                if (cc == *assignable_timbre_index_) {
+                    apply_per_note_timbre(ch, p.note_number(),
+                                          static_cast<float>(p.data_32()) / 4294967295.0f);
+                }
+            }
+            return true;
+        }
+        case 0xF0: {  // Per-note management — reset + detach flags
+            const uint8_t flags = static_cast<uint8_t>(p.words[0] & 0xFF);
+            apply_per_note_management(ch, p.note_number(), flags);
+            return true;
+        }
         default:
             return true;  // belongs to zone but we don't map this status
     }
@@ -200,12 +218,14 @@ void MpeVoiceTracker::reset() {
 // ── Private helpers ────────────────────────────────────────────────────────
 
 void MpeVoiceTracker::add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool upper) {
-    // Reuse existing slot if one matches (retrigger).
+    // Reuse existing slot if one matches (retrigger). Re-attach the
+    // slot so channel-level controllers resume affecting it.
     for (auto& s : notes_) {
         if (s.active && s.channel == ch && s.note == note) {
             s.velocity = velocity;
             s.note_id = next_note_id_++;
             s.is_upper_zone = upper;
+            s.detached = false;
             if (on_note_on) on_note_on(s);
             return;
         }
@@ -246,9 +266,12 @@ void MpeVoiceTracker::remove_note(uint8_t ch, uint8_t note) {
 }
 
 void MpeVoiceTracker::update_channel_pitch_bend(uint8_t ch, float semitones, bool upper) {
+    // The per-channel cache is updated regardless of detach so that
+    // *fresh* notes added to the same channel after a detach still
+    // inherit the running channel state (add_note seeds from it).
     channel_pitch_bend_[ch] = semitones;
     for (auto& s : notes_) {
-        if (!s.active || s.channel != ch) continue;
+        if (!s.active || s.channel != ch || s.detached) continue;
         s.pitch_bend_semitones = semitones;
         if (on_pitch_bend) on_pitch_bend(s);
     }
@@ -258,7 +281,7 @@ void MpeVoiceTracker::update_channel_pitch_bend(uint8_t ch, float semitones, boo
 void MpeVoiceTracker::update_channel_pressure(uint8_t ch, float pressure, bool upper) {
     channel_pressure_[ch] = pressure;
     for (auto& s : notes_) {
-        if (!s.active || s.channel != ch) continue;
+        if (!s.active || s.channel != ch || s.detached) continue;
         s.pressure = pressure;
         if (on_pressure) on_pressure(s);
     }
@@ -268,7 +291,7 @@ void MpeVoiceTracker::update_channel_pressure(uint8_t ch, float pressure, bool u
 void MpeVoiceTracker::update_channel_timbre(uint8_t ch, float timbre, bool upper) {
     channel_timbre_[ch] = timbre;
     for (auto& s : notes_) {
-        if (!s.active || s.channel != ch) continue;
+        if (!s.active || s.channel != ch || s.detached) continue;
         s.timbre = timbre;
         if (on_timbre) on_timbre(s);
     }
@@ -318,6 +341,46 @@ void MpeVoiceTracker::apply_per_note_timbre(uint8_t ch, uint8_t note, float timb
         if (!s.active || s.channel != ch || s.note != note) continue;
         s.timbre = timbre;
         if (on_timbre) on_timbre(s);
+    }
+}
+
+void MpeVoiceTracker::apply_per_note_management(uint8_t ch, uint8_t note, uint8_t flags) {
+    // UMP Per-Note Management has two bit flags:
+    //   bit 0 (kPerNoteResetControllers, S) — reset per-note expression.
+    //   bit 1 (kPerNoteDetachControllers, D) — detach channel-level
+    //     controllers from the currently sounding note (its expression
+    //     state is frozen for the rest of its lifecycle).
+    //
+    // The flag-combination semantics per the UMP spec
+    // (Codex P1 on #2860, MIDI 2.0 spec § Per-Note Management):
+    //   S alone   → reset the currently sounding note immediately
+    //   D alone   → detach, leave expression untouched
+    //   D + S     → detach takes effect on the currently sounding note
+    //               (its state is preserved for its remaining lifecycle);
+    //               reset arms for FUTURE notes at the same (channel,
+    //               note) index. Pulp does not yet maintain the
+    //               armed-for-future-note memory — D+S degrades to
+    //               detach-only on the live note here, which matches
+    //               the spec for the sounding note. The "arm reset for
+    //               future" slice is tracked as a deferred follow-up
+    //               in the macOS plan; see SKILL.md "UMP per-note
+    //               management" gotchas.
+    const bool reset_controllers = (flags & UmpPacket::kPerNoteResetControllers) != 0;
+    const bool detach_controllers = (flags & UmpPacket::kPerNoteDetachControllers) != 0;
+    const bool reset_live_note = reset_controllers && !detach_controllers;
+    for (auto& s : notes_) {
+        if (!s.active || s.channel != ch || s.note != note) continue;
+        if (reset_live_note) {
+            s.pitch_bend_semitones = 0.0f;
+            s.pressure = 0.0f;
+            s.timbre = 0.0f;
+            if (on_pitch_bend) on_pitch_bend(s);
+            if (on_pressure) on_pressure(s);
+            if (on_timbre) on_timbre(s);
+        }
+        if (detach_controllers) {
+            s.detached = true;
+        }
     }
 }
 
