@@ -404,6 +404,75 @@ TEST_CASE("BufferView slice clamps starts past the end to empty views",
     REQUIRE(buffer.channel(1)[3] == 13.0f);
 }
 
+TEST_CASE("BufferView nested slices accumulate offsets into the same storage",
+          "[audio][buffer][slice][coverage]") {
+    Buffer<float> buffer(2, 8);
+    for (std::size_t i = 0; i < 8; ++i) {
+        buffer.channel(0)[i] = static_cast<float>(i);
+        buffer.channel(1)[i] = static_cast<float>(100 + i);
+    }
+
+    auto nested = buffer.view().slice(2, 5).slice(2, 2);
+    REQUIRE(nested.num_channels() == 2);
+    REQUIRE(nested.num_samples() == 2);
+    REQUIRE_FALSE(nested.empty());
+    REQUIRE(nested.channel_ptr(0) == buffer.channel(0).data() + 4);
+    REQUIRE(nested.channel_ptr(1) == buffer.channel(1).data() + 4);
+    REQUIRE(nested.channel(0)[0] == 4.0f);
+    REQUIRE(nested.channel(0)[1] == 5.0f);
+    REQUIRE(nested.channel(1)[0] == 104.0f);
+    REQUIRE(nested.channel(1)[1] == 105.0f);
+
+    nested.channel(0)[1] = -5.0f;
+    REQUIRE(buffer.channel(0)[5] == -5.0f);
+}
+
+TEST_CASE("BufferView zero-length slices keep channel offsets and clear as no-op",
+          "[audio][buffer][slice][coverage]") {
+    Buffer<float> buffer(2, 5);
+    for (std::size_t i = 0; i < 5; ++i) {
+        buffer.channel(0)[i] = static_cast<float>(i + 1);
+        buffer.channel(1)[i] = static_cast<float>(10 + i);
+    }
+
+    auto middle_empty = buffer.view().slice(3, 0);
+    REQUIRE(middle_empty.num_channels() == 2);
+    REQUIRE(middle_empty.num_samples() == 0);
+    REQUIRE(middle_empty.empty());
+    REQUIRE(middle_empty.channel_ptr(0) == buffer.channel(0).data() + 3);
+    REQUIRE(middle_empty.channel_ptr(1) == buffer.channel(1).data() + 3);
+
+    middle_empty.clear();
+    REQUIRE(buffer.channel(0)[2] == 3.0f);
+    REQUIRE(buffer.channel(0)[3] == 4.0f);
+    REQUIRE(buffer.channel(1)[2] == 12.0f);
+    REQUIRE(buffer.channel(1)[3] == 13.0f);
+}
+
+TEST_CASE("BufferView slices produced from const views still alias source storage",
+          "[audio][buffer][slice][coverage]") {
+    Buffer<float> buffer(1, 4);
+    buffer.channel(0)[0] = 1.0f;
+    buffer.channel(0)[1] = 2.0f;
+    buffer.channel(0)[2] = 3.0f;
+    buffer.channel(0)[3] = 4.0f;
+
+    auto view = buffer.view();
+    const BufferView<float>& const_view = view;
+    auto slice = const_view.slice(1, 2);
+    REQUIRE(slice.num_channels() == 1);
+    REQUIRE(slice.num_samples() == 2);
+    REQUIRE(slice.channel_ptr(0) == buffer.channel(0).data() + 1);
+    REQUIRE(slice.channel(0)[0] == 2.0f);
+    REQUIRE(slice.channel(0)[1] == 3.0f);
+
+    slice.clear();
+    REQUIRE(buffer.channel(0)[0] == 1.0f);
+    REQUIRE(buffer.channel(0)[1] == 0.0f);
+    REQUIRE(buffer.channel(0)[2] == 0.0f);
+    REQUIRE(buffer.channel(0)[3] == 4.0f);
+}
+
 TEST_CASE("Buffer self assignment preserves storage and channel pointers",
           "[audio][buffer][coverage][phase3]") {
     Buffer<float> buffer(2, 3);
@@ -443,6 +512,39 @@ TEST_CASE("Buffer rejects dimensions that overflow sample storage",
     REQUIRE(buf.num_channels() == 1);
     REQUIRE(buf.num_samples() == 2);
     REQUIRE(buf.channel(0)[0] == 0.25f);
+    REQUIRE(buf.channel(0).data() != nullptr);
+    REQUIRE(buf.view().channel_ptr(0) == buf.channel(0).data());
+    REQUIRE(buf.view().num_channels() == 1);
+    REQUIRE(buf.view().num_samples() == 2);
+}
+
+TEST_CASE("Buffer move leaves source empty and rebinds destination views",
+          "[audio][buffer][coverage]") {
+    Buffer<float> source(2, 3);
+    source.channel(0)[2] = 0.75f;
+    source.channel(1)[0] = -0.5f;
+
+    Buffer<float> moved(std::move(source));
+    REQUIRE(source.num_channels() == 0);
+    REQUIRE(source.num_samples() == 0);
+    REQUIRE(source.view().empty());
+    REQUIRE(moved.num_channels() == 2);
+    REQUIRE(moved.num_samples() == 3);
+    REQUIRE(moved.channel(0)[2] == 0.75f);
+    REQUIRE(moved.channel(1)[0] == -0.5f);
+    REQUIRE(moved.view().channel_ptr(0) == moved.channel(0).data());
+    REQUIRE(moved.view().channel_ptr(1) == moved.channel(1).data());
+
+    Buffer<float> assigned(1, 1);
+    assigned = std::move(moved);
+    REQUIRE(moved.num_channels() == 0);
+    REQUIRE(moved.num_samples() == 0);
+    REQUIRE(assigned.num_channels() == 2);
+    REQUIRE(assigned.num_samples() == 3);
+    REQUIRE(assigned.channel(0)[2] == 0.75f);
+    REQUIRE(assigned.channel(1)[0] == -0.5f);
+    REQUIRE(assigned.view().channel_ptr(0) == assigned.channel(0).data());
+    REQUIRE(assigned.view().channel_ptr(1) == assigned.channel(1).data());
 }
 
 TEST_CASE("AudioFileData reports shape from first channel",
