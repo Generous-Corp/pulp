@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02110"></a>
+## [0.211.0] - 2026-05-25
+
+- feat(macos-plan): Batch B (mixers) — DryWetMixer + Panner pan-law expansion (item 2.9) ([#2834](https://github.com/danielraffel/pulp/pull/2834))
+
 <a id="v02100"></a>
 ## [0.210.0] - 2026-05-25
 
@@ -2724,6 +2729,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.211.0]: https://github.com/danielraffel/pulp/releases/tag/v0.211.0
 [0.210.0]: https://github.com/danielraffel/pulp/releases/tag/v0.210.0
 [0.209.0]: https://github.com/danielraffel/pulp/releases/tag/v0.209.0
 [0.208.0]: https://github.com/danielraffel/pulp/releases/tag/v0.208.0
