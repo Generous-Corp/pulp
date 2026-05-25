@@ -137,6 +137,33 @@ responsible for incrementing on note-on and decrementing on note-off,
 **including the steal path** — see the test "MpeVoiceAllocator steal
 path decrements glide refcount" for the invariant.
 
+### UMP per-note management + assignable PNC (post #2860)
+
+`MpeVoiceTracker` consumes the full MIDI 2.0 per-note expression
+surface:
+
+- **Status 0xF0 — Per-Note Management**: `kPerNoteResetControllers`
+  bit returns per-note expression (pitch bend / pressure / timbre) to
+  spec defaults (0); `kPerNoteDetachControllers` bit sets
+  `MpeNoteState::detached`, after which channel-level controllers
+  (status 0xE0 / 0xD0 / 0xB0) skip that note. Per-note targeted
+  messages (0x60 per-note pitch bend, 0x00 registered PNC, 0x10
+  assignable PNC) still apply to detached notes.
+- **Status 0x10 — Assignable Per-Note CC**: the index is host-defined
+  per the UMP spec, so the tracker only routes when the plugin binds
+  one via `set_assignable_timbre_index(uint8_t)`. Unbound by default —
+  unbound assignable PNC is silently ignored. Registered PNC 74
+  (status 0x00) still routes to timbre regardless.
+- **Retrigger semantics**: a note-on while the slot is still active
+  clears `detached` (re-attaches the slot to channel-level controllers).
+
+If you're routing UMP into the tracker, use the factories on
+`UmpPacket`: `per_note_management(group, channel, note, flags)`,
+`assignable_per_note_cc(...)`, `registered_per_note_cc(...)`,
+`per_note_pitch_bend(...)`. Channel-level cache stays updated even
+for detached notes so freshly-added notes on the same channel still
+inherit running state via `add_note`.
+
 ### Format adapter coverage
 
 As of the MPE Phase 1–3 merge (PR #135, #138), the CLAP adapter
