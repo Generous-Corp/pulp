@@ -15,6 +15,10 @@ target_sources(pulp-format PRIVATE
     src/validation_harness.cpp
     src/aax_model.cpp
     src/host_type.cpp
+    src/host_version.cpp
+    $<$<PLATFORM_ID:Darwin>:src/host_version_mac.mm>
+    $<$<PLATFORM_ID:Windows>:src/host_version_win.cpp>
+    src/host_quirks.cpp
     src/ara.cpp
     src/ara_factory.cpp
     src/ios_audio_session.cpp

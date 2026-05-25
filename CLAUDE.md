@@ -636,6 +636,21 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 | Skill update   | `Skill-Update: skip skill=<name> reason="..."`                  |
 | Auto-release   | `Release: skip reason="..."`                                     |
 
+**Reference-Lineage trailer** (required on any commit touching
+`core/format/host_quirks.cpp` or `core/format/include/pulp/format/host_quirks/`):
+
+| Trailer                                                                                  |
+|------------------------------------------------------------------------------------------|
+| `Reference-Lineage: cleanroom reproducer=#<issue> docs=<url>`                           |
+
+DAW-quirk fixes must be reached independently from host vendor docs + a
+reproducer Pulp issue — never by transcribing the reference framework's
+workaround. The trailer is the audit trail that proves the
+implementation is clean-room. See
+`planning/2026-05-24-daw-host-quirks-inheritance.md` for the
+license-hygiene contract and the catalog of accommodations the
+HostQuirks struct dispatches.
+
 Codex picks this policy up via the existing `AGENTS.md → CLAUDE.md` pointer; `AGENTS.md` intentionally stays a thin redirect so the two never drift. Full design: [docs/guides/versioning.md](docs/guides/versioning.md).
 
 ### Release Watchdog
