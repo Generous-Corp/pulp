@@ -473,6 +473,8 @@ Closure slice:
   public docs do not imply first-party non-Apple embedding exists today.
 
 Native-window local validation:
+- Rebased onto `origin/main` at `1b12541ae` and refreshed the required SDK
+  minor bump to `0.215.0`.
 - Configured Release with WebView enabled and GPU off:
   `cmake -S . -B build-native-window -DCMAKE_BUILD_TYPE=Release
   -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
@@ -481,17 +483,25 @@ Native-window local validation:
   `pulp-test-webview`, `pulp-webview-palette`, and
   `PulpWebViewPlugin_Standalone`.
 - `./build-native-window/test/pulp-test-webview --reporter compact` passed
-  with local WebView readiness skips where the host environment never reached
-  callback-ready state.
+  5/7 test cases, with 2 local WebView readiness skips where the host
+  environment never reached callback-ready state, and 84/84 assertions passed.
 - Focused CTest passes covered view-host, native-child, macOS/PulpView, and
-  WebView cases: 13 passed and 2 skipped for local WebView readiness/content
+  WebView cases: 14 passed and 2 skipped for local WebView readiness/content
   limitations.
 - `tools/check-docs.sh` passed with existing repository warnings.
 - `git diff --check` passed.
+- `tools/scripts/gates.sh origin/main` passed skill-sync, version-bump,
+  compat-sync, node-ABI, and deps-audit gates.
 - `version_bump_check.py --base origin/main --head HEAD --mode apply` applied
-  the required SDK minor bump to `0.212.0` after the inspector host-factory
+  the required SDK minor bump to `0.215.0` after the inspector host-factory
   override made the patch a public header/API change.
-- Coverage note: the behavior-bearing production change is the
+- Coverage note: the stock `tools/scripts/local_diff_cover.sh` wrapper still
+  configures the GPU examples path and fails locally without Skia. The same
+  coverage pipeline was run manually with `PULP_ENABLE_COVERAGE=ON` and
+  `PULP_ENABLE_GPU=OFF` in `build-cov-native-window`; focused coverage CTest
+  passed the three native-window contract tests and diff-cover reports 100%
+  for `core/view/src/inspector_window.cpp` against `origin/main` (12 changed
+  production lines, 0 missing). The behavior-bearing production change is the
   `InspectorWindow::show()` null-host guard, covered locally through the
   inspector host-factory override and on hosted non-Apple checks through the
   no-factory regression test. Other production header changes are contract
