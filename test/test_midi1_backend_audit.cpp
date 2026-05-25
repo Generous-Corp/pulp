@@ -74,16 +74,21 @@ TEST_CASE("MIDI 1.0 backend: open() with bogus port id fails gracefully",
 
     auto input = system->create_input();
     REQUIRE(input != nullptr);
+    // Codex P1 on #2857 — the Windows backend parses port_id via
+    // std::stoul into a UINT (uint32_t). Use a value that is numeric,
+    // in-range for uint32_t, and very unlikely to match a real device
+    // id so all backends reject it cleanly (CoreMIDI / ALSA do string
+    // compares against enumerate output; mmeapi looks up by UINT).
     // No callback is required to fail-open, but registering one
     // exercises the std::function move path in the backend.
-    const bool ok = input->open("99999999999999",
+    const bool ok = input->open("987654321",
                                   [](const MidiEvent&) {});
     REQUIRE(ok == false);
     REQUIRE(input->is_open() == false);
 
     auto output = system->create_output();
     REQUIRE(output != nullptr);
-    const bool ok2 = output->open("99999999999999");
+    const bool ok2 = output->open("987654321");
     REQUIRE(ok2 == false);
     REQUIRE(output->is_open() == false);
 }

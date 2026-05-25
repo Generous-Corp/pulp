@@ -220,26 +220,25 @@ TEST_CASE("MidiMessageCollector pending ring handles multiple out-of-order futur
     REQUIRE(b4[0].message.getNoteNumber() == 60);
 }
 
-TEST_CASE("MidiMessageCollector survives >ring-capacity future bursts without loss (Codex #2853 P1)",
+TEST_CASE("MidiMessageCollector absorbs realistic future bursts within pending ring (Codex #2853 P1)",
           "[midi][collector][regression]") {
     MidiMessageCollector<128> collector;
-    // Push 24 events all in the future — more than the 8-slot pending
-    // ring + the 1-slot consumer overflow can hold. Earlier impl would
-    // silently drop the late entries; new impl keeps the unstashable
-    // events in the producer SPSC queue until the ring has room.
+    // Push 24 events all in the future — well within the 64-slot
+    // pending ring. Earlier impl variants either silently dropped late
+    // entries or starved later in-block events; current impl stashes
+    // every future event in the consumer-owned ring with zero loss.
     constexpr int kEvents = 24;
     for (int i = 0; i < kEvents; ++i) {
         REQUIRE(collector.push_now(note_on(0, static_cast<uint8_t>(60 + i), 100),
                                     /*ts=*/10.0 + double(i) * 0.001));
     }
 
-    // First drain at t=0: nothing fits the block. 8 in ring, 1 parked
-    // in overflow, remaining 15 stay in the SPSC queue. Critically: no
-    // event is lost — they're all preserved across the producer queue
-    // + pending ring + overflow slot.
+    // First drain at t=0: nothing fits. All 24 events land in the
+    // pending ring with no loss because 24 <= pending_capacity() (64).
     MidiBuffer b1;
     REQUIRE(collector.drain_into(b1, /*start=*/0.0,
                                        /*samples=*/256, /*sr=*/48000.0) == 0);
+    REQUIRE(collector.dropped_future() == 0);
 
     // Drain across multiple subsequent blocks until everything lands.
     int total_delivered = 0;
@@ -252,6 +251,74 @@ TEST_CASE("MidiMessageCollector survives >ring-capacity future bursts without lo
     }
     // Zero loss — all events eventually delivered.
     REQUIRE(total_delivered == kEvents);
+    REQUIRE(collector.dropped_future() == 0);
+}
+
+TEST_CASE("MidiMessageCollector keeps draining queue for in-block events even after a stash (Codex #2856 P1)",
+          "[midi][collector][regression]") {
+    MidiMessageCollector<128> collector;
+
+    // Push 10 FUTURE events first, then 1 IN-BLOCK event behind them in
+    // FIFO order. Earlier impl `break`-ed after a stash failure (which
+    // was easy to hit with the 8-slot ring), starving the in-block
+    // event. With the larger ring AND continue-drain semantics, every
+    // future event stashes cleanly and the in-block event still gets
+    // delivered in the SAME block.
+    for (int i = 0; i < 10; ++i) {
+        REQUIRE(collector.push_now(note_on(0, static_cast<uint8_t>(60 + i), 100),
+                                    /*ts=*/10.0 + double(i) * 0.001));
+    }
+    REQUIRE(collector.push_now(note_on(0, 42, 100), /*ts=*/0.001));
+
+    MidiBuffer b;
+    auto drained = collector.drain_into(b, /*start=*/0.0,
+                                          /*samples=*/256, /*sr=*/48000.0);
+    REQUIRE(drained == 1);
+    REQUIRE(b.size() == 1);
+    REQUIRE(b[0].message.getNoteNumber() == 42);
+    REQUIRE(b[0].sample_offset == 48); // (0.001 - 0.0) * 48000
+    REQUIRE(collector.dropped_future() == 0);
+
+    // Drain later blocks — all 10 future events should land.
+    int delivered = 0;
+    for (int i = 0; i < 8 && delivered < 10; ++i) {
+        MidiBuffer extra;
+        delivered += static_cast<int>(
+            collector.drain_into(extra, /*start=*/10.0,
+                                         /*samples=*/static_cast<int>(0.5 * 48000),
+                                         /*sr=*/48000.0));
+    }
+    REQUIRE(delivered == 10);
+    REQUIRE(collector.dropped_future() == 0);
+}
+
+TEST_CASE("MidiMessageCollector drops surplus future events when pending ring is genuinely saturated",
+          "[midi][collector][regression]") {
+    MidiMessageCollector<256> collector;
+    // Push enough future events to overflow the 64-slot pending ring.
+    constexpr int kRingPlusOne = 65;
+    for (int i = 0; i < kRingPlusOne; ++i) {
+        REQUIRE(collector.push_now(note_on(0, static_cast<uint8_t>(i & 0x7F), 100),
+                                    /*ts=*/10.0 + double(i) * 0.001));
+    }
+
+    MidiBuffer b;
+    REQUIRE(collector.drain_into(b, /*start=*/0.0,
+                                       /*samples=*/256, /*sr=*/48000.0) == 0);
+    REQUIRE(b.size() == 0);
+    REQUIRE(collector.dropped_future() == 1); // exactly one beyond ring capacity
+
+    // The 64 events that fit the ring should be deliverable.
+    int delivered = 0;
+    for (int i = 0; i < 8 && delivered < 64; ++i) {
+        MidiBuffer extra;
+        delivered += static_cast<int>(
+            collector.drain_into(extra, /*start=*/10.0,
+                                         /*samples=*/static_cast<int>(0.5 * 48000),
+                                         /*sr=*/48000.0));
+    }
+    REQUIRE(delivered == 64);
+    REQUIRE(collector.dropped_future() == 1); // counter monotonic
 }
 
 TEST_CASE("MidiMessageCollector returns false when queue is full",

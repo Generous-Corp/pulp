@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -115,27 +116,21 @@ public:
             }
         }
 
-        // Drain the queue without losing future events. Events that
-        // fit the current block are delivered immediately; future events
-        // are stashed in the pending ring. When the ring is full, the
-        // popped future event is parked in a single consumer-side
-        // lookahead slot (`overflow_`) and the drain stops — so the
-        // *remaining* queue items stay in the SPSC FIFO untouched and
-        // get retried on the next drain when the ring has room.
-        // Zero data loss; no consumer-side write to the SPSC queue
-        // (Codex P1 on #2843, #2845, #2853).
+        // Drain the queue. Events that fit the current block are
+        // delivered immediately; future events are stashed in the
+        // consumer-owned pending ring. We KEEP draining even after a
+        // future event lands so later in-block events still get
+        // delivered this block (Codex P1 on #2856 — earlier
+        // break-after-stash starved out-of-order in-block items).
         //
-        // The next-event source is either the consumer-side overflow
-        // slot (carried from the previous drain) or a fresh pop.
-        while (true) {
-            std::optional<TimestampedShortMessage> next;
-            if (overflow_.has_value()) {
-                next = std::move(overflow_);
-                overflow_.reset();
-            } else {
-                next = queue_.try_pop();
-            }
-            if (!next.has_value()) break;
+        // The pending ring is sized (`kPendingSlots`) to absorb the
+        // realistic Pulp workloads in one drain: UI clicks, scripting
+        // schedulers with look-ahead, MIDI file playback. When the
+        // ring is genuinely saturated, additional FUTURE events have
+        // nowhere to live and are dropped — observable via the atomic
+        // `dropped_future_` counter so callers can detect pathological
+        // back-pressure.
+        while (auto next = queue_.try_pop()) {
             const auto& entry = *next;
             if (entry.timestamp_seconds < block_end_seconds) {
                 deliver(entry);
@@ -144,15 +139,23 @@ public:
             }
             // Future event: try to stash in the pending ring.
             if (stash_pending(entry)) {
-                continue; // ring had room — keep draining
+                continue;
             }
-            // Ring full: park in the consumer-side overflow slot and
-            // stop draining so the remaining queue items survive to
-            // the next drain.
-            overflow_ = entry;
-            break;
+            // Ring genuinely saturated. Drop with atomic counter.
+            dropped_future_.fetch_add(1, std::memory_order_relaxed);
         }
         return drained;
+    }
+
+    /// Number of FUTURE events the consumer dropped because the pending
+    /// ring was saturated at the moment they were popped. Monotonic,
+    /// atomic, never reset. A non-zero value means producers buffered
+    /// more events than `pending_capacity()` can carry across drains;
+    /// either reduce producer-side look-ahead or pick a larger
+    /// `Capacity` so the producer SPSC queue itself absorbs more
+    /// in-flight events.
+    std::size_t dropped_future() const {
+        return dropped_future_.load(std::memory_order_relaxed);
     }
 
     /// Approximate number of events currently queued (does NOT count
@@ -163,25 +166,24 @@ public:
     /// Compile-time capacity of the producer queue.
     static constexpr std::size_t capacity() { return Capacity; }
 
-    /// Compile-time size of the consumer-owned pending ring. Large
-    /// enough to absorb out-of-order producer bursts in practical
-    /// usage (UI + scripting timing). If a workload routinely fills
-    /// the ring, picking a larger value reduces per-drain overhead
-    /// (extra ring slots get scanned first instead of going through
-    /// the overflow lookahead path).
+    /// Compile-time size of the consumer-owned pending ring. Sized to
+    /// absorb realistic Pulp producer bursts (UI input + scripting
+    /// look-ahead + MIDI file playback) within a single drain. A
+    /// workload that exceeds this in one drain will see drops counted
+    /// via `dropped_future()`; raising `Capacity` lets the producer
+    /// queue itself absorb more in-flight events before they reach the
+    /// consumer ring.
     static constexpr std::size_t pending_capacity() { return kPendingSlots; }
 
 private:
-    static constexpr std::size_t kPendingSlots = 8;
+    static constexpr std::size_t kPendingSlots = 64;
 
     pulp::runtime::SpscQueue<TimestampedShortMessage, Capacity> queue_;
-    /// Consumer-owned pending ring for popped-but-future events.
-    /// Linear scan; N=8 keeps the per-drain overhead negligible.
+    /// Consumer-owned pending ring for popped-but-future events. Linear
+    /// scan; N=64 keeps the per-drain overhead small while absorbing
+    /// realistic scripting / playback bursts without consumer-side drops.
     std::array<std::optional<TimestampedShortMessage>, kPendingSlots> pending_{};
-    /// One-slot lookahead for a future event the ring couldn't store —
-    /// carried into the next drain so no event is ever silently dropped
-    /// on the consumer side.
-    std::optional<TimestampedShortMessage> overflow_;
+    std::atomic<std::size_t> dropped_future_{0};
 
     /// Place @p entry in an empty pending slot. Returns true if
     /// @p entry was stored, false if all slots are occupied. Eviction
