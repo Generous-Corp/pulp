@@ -4,8 +4,9 @@
 // Template that wraps a mono DSP processor and applies it independently
 // to each channel of a multi-channel buffer.
 
+#include <algorithm>
+#include <cstddef>
 #include <vector>
-#include <memory>
 
 namespace pulp::signal {
 
@@ -22,7 +23,7 @@ public:
 
     /// Prepare for processing with the given number of channels
     void prepare(int num_channels, float sample_rate) {
-        processors_.resize(static_cast<size_t>(num_channels));
+        processors_.resize(static_cast<std::size_t>(std::max(0, num_channels)));
         for (auto& p : processors_) {
             p.set_sample_rate(sample_rate);
         }
@@ -33,8 +34,14 @@ public:
     /// num_channels: number of channels
     /// num_samples: samples per channel
     void process(float* const* channels, int num_channels, int num_samples) {
+        if (channels == nullptr || num_channels <= 0 || num_samples <= 0)
+            return;
+
         int count = std::min(num_channels, static_cast<int>(processors_.size()));
         for (int ch = 0; ch < count; ++ch) {
+            if (channels[ch] == nullptr)
+                continue;
+
             for (int i = 0; i < num_samples; ++i) {
                 channels[ch][i] = processors_[ch].process(channels[ch][i]);
             }
@@ -43,7 +50,9 @@ public:
 
     /// Process a single channel
     void process_channel(float* buffer, int channel, int num_samples) {
-        if (channel < 0 || channel >= static_cast<int>(processors_.size())) return;
+        if (buffer == nullptr || num_samples <= 0 ||
+            channel < 0 || channel >= static_cast<int>(processors_.size())) return;
+
         for (int i = 0; i < num_samples; ++i) {
             buffer[i] = processors_[channel].process(buffer[i]);
         }

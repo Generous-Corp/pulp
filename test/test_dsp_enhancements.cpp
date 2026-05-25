@@ -295,6 +295,23 @@ struct StatefulGain {
     void reset() { reset_called = true; }
 };
 
+struct CountingGain {
+    float gain = 1.0f;
+    float sample_rate = 0.0f;
+    int processed = 0;
+    int reset_count = 0;
+
+    void set_sample_rate(float sr) { sample_rate = sr; }
+    float process(float x) {
+        ++processed;
+        return x * gain;
+    }
+    void reset() {
+        ++reset_count;
+        processed = 0;
+    }
+};
+
 TEST_CASE("ProcessorDuplicator applies to all channels", "[dsp][duplicator]") {
     ProcessorDuplicator<TestGain> dup;
     dup.prepare(2, 44100.0f);
@@ -358,6 +375,140 @@ TEST_CASE("ProcessorDuplicator bounds channels and exposes channel state",
 
     dup.reset();
     REQUIRE(dup[0].reset_called);
+}
+
+TEST_CASE("ProcessorDuplicator treats nonpositive channel prepares as empty",
+          "[dsp][duplicator][coverage][phase3]") {
+    ProcessorDuplicator<CountingGain> dup;
+    dup.prepare(-2, 44100.0f);
+
+    float ch0[] = {1.0f, 2.0f};
+    float* channels[] = {ch0};
+    dup.process(channels, 1, 2);
+    dup.process_channel(ch0, 0, 2);
+
+    REQUIRE(dup.num_channels() == 0);
+    REQUIRE_THAT(ch0[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(ch0[1], WithinAbs(2.0f, 1e-6f));
+
+    dup.prepare(0, 48000.0f);
+    ch0[0] = 3.0f;
+    ch0[1] = 4.0f;
+    dup.process(channels, 1, 2);
+
+    REQUIRE(dup.num_channels() == 0);
+    REQUIRE_THAT(ch0[0], WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(ch0[1], WithinAbs(4.0f, 1e-6f));
+}
+
+TEST_CASE("ProcessorDuplicator skips null channels without disturbing neighbors",
+          "[dsp][duplicator][coverage][phase3]") {
+    ProcessorDuplicator<CountingGain> dup;
+    dup.prepare(3, 44100.0f);
+    dup.for_each([](CountingGain& g) { g.gain = 2.0f; });
+
+    float ch0[] = {1.0f, -2.0f};
+    float ch2[] = {0.25f, -0.5f};
+    float extra[] = {9.0f, 10.0f};
+    float* channels[] = {ch0, nullptr, ch2, extra};
+
+    dup.process(channels, 4, 2);
+
+    REQUIRE_THAT(ch0[0], WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(ch0[1], WithinAbs(-4.0f, 1e-6f));
+    REQUIRE_THAT(ch2[0], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(ch2[1], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(extra[0], WithinAbs(9.0f, 1e-6f));
+    REQUIRE_THAT(extra[1], WithinAbs(10.0f, 1e-6f));
+    REQUIRE(dup[0].processed == 2);
+    REQUIRE(dup[1].processed == 0);
+    REQUIRE(dup[2].processed == 2);
+}
+
+TEST_CASE("ProcessorDuplicator ignores null and nonpositive single-channel work",
+          "[dsp][duplicator][coverage][phase3]") {
+    ProcessorDuplicator<CountingGain> dup;
+    dup.prepare(2, 48000.0f);
+    dup[0].gain = 3.0f;
+    dup[1].gain = 4.0f;
+
+    float samples[] = {1.0f, -1.0f, 0.5f};
+    dup.process_channel(nullptr, 0, 3);
+    dup.process_channel(samples, 0, 0);
+    dup.process_channel(samples, 1, -8);
+
+    REQUIRE_THAT(samples[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(0.5f, 1e-6f));
+    REQUIRE(dup[1].processed == 0);
+
+    dup.process_channel(samples, 1, 3);
+
+    REQUIRE_THAT(samples[0], WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-4.0f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(2.0f, 1e-6f));
+    REQUIRE(dup[1].processed == 3);
+}
+
+TEST_CASE("ProcessorDuplicator reapplies channel layout and sample rate on prepare",
+          "[dsp][duplicator][coverage][phase3]") {
+    ProcessorDuplicator<CountingGain> dup;
+    dup.prepare(2, 44100.0f);
+    dup[0].gain = 0.5f;
+    dup[1].gain = 0.25f;
+
+    REQUIRE(dup.num_channels() == 2);
+    REQUIRE_THAT(dup[0].sample_rate, WithinAbs(44100.0f, 1e-6f));
+    REQUIRE_THAT(dup[1].sample_rate, WithinAbs(44100.0f, 1e-6f));
+
+    dup.prepare(4, 96000.0f);
+
+    REQUIRE(dup.num_channels() == 4);
+    REQUIRE_THAT(dup[0].sample_rate, WithinAbs(96000.0f, 1e-6f));
+    REQUIRE_THAT(dup[1].sample_rate, WithinAbs(96000.0f, 1e-6f));
+    REQUIRE_THAT(dup[2].sample_rate, WithinAbs(96000.0f, 1e-6f));
+    REQUIRE_THAT(dup[3].sample_rate, WithinAbs(96000.0f, 1e-6f));
+
+    float ch0[] = {2.0f};
+    float ch1[] = {4.0f};
+    float ch2[] = {6.0f};
+    float ch3[] = {8.0f};
+    float* channels[] = {ch0, ch1, ch2, ch3};
+    dup.process(channels, 4, 1);
+
+    REQUIRE_THAT(ch0[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(ch1[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(ch2[0], WithinAbs(6.0f, 1e-6f));
+    REQUIRE_THAT(ch3[0], WithinAbs(8.0f, 1e-6f));
+    REQUIRE(dup[0].processed == 1);
+    REQUIRE(dup[1].processed == 1);
+    REQUIRE(dup[2].processed == 1);
+    REQUIRE(dup[3].processed == 1);
+}
+
+TEST_CASE("ProcessorDuplicator reset visits every prepared channel",
+          "[dsp][duplicator][coverage][phase3]") {
+    ProcessorDuplicator<CountingGain> dup;
+    dup.prepare(3, 48000.0f);
+
+    float ch0[] = {1.0f};
+    float ch1[] = {2.0f};
+    float ch2[] = {3.0f};
+    float* channels[] = {ch0, ch1, ch2};
+    dup.process(channels, 3, 1);
+
+    REQUIRE(dup[0].processed == 1);
+    REQUIRE(dup[1].processed == 1);
+    REQUIRE(dup[2].processed == 1);
+
+    dup.reset();
+
+    REQUIRE(dup[0].processed == 0);
+    REQUIRE(dup[1].processed == 0);
+    REQUIRE(dup[2].processed == 0);
+    REQUIRE(dup[0].reset_count == 1);
+    REQUIRE(dup[1].reset_count == 1);
+    REQUIRE(dup[2].reset_count == 1);
 }
 
 // ── Matrix ──────────────────────────────────────────────────────────────
