@@ -203,6 +203,11 @@ PR1 submit and review sweep:
   translation unit without UBSan instrumentation while keeping Pulp's script and
   view code instrumented. The previously failing Figma, Stitch, Pencil, and
   baked-native materialization cases now pass locally under UBSan.
+- GitHub-hosted Linux CI surfaced a latent OSC UDP portability gap: `Receiver`
+  enabled `SO_REUSEADDR`, which lets Linux bind multiple receivers to the same
+  UDP port and breaks the existing exclusive-listener contract. `Receiver` now
+  binds exclusively; the public API can add an explicit shared-port mode later
+  if a real use case needs it.
 
 ### 2. Main-Thread Dispatch and Native Event Loop
 

@@ -193,16 +193,14 @@ bool Receiver::listen(uint16_t port, MessageHandler handler) {
     impl_->sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (impl_->sock == kInvalidSocket) return false;
 
-    // Allow address reuse
-    int opt = 1;
-    setsockopt(impl_->sock, SOL_SOCKET, SO_REUSEADDR,
-               reinterpret_cast<const char*>(&opt), sizeof(opt));
-
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
 
+    // Keep receivers exclusive. Linux permits multiple UDP binds when all
+    // participants opt into SO_REUSEADDR, which makes packet delivery
+    // ambiguous for this one-handler Receiver API.
     if (bind(impl_->sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         close_socket(impl_->sock);
         impl_->sock = kInvalidSocket;
