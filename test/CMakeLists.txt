@@ -2151,6 +2151,9 @@ pulp_add_test_suite(pulp-test-ump-extensions LIBRARIES pulp::midi)
 # macOS plan Batch D (partial) — HMAC + AEAD primitives
 pulp_add_test_suite(pulp-test-hmac-aead LIBRARIES pulp::runtime)
 
+# macOS plan Batch C (partial) — MidiMessageCollector (UI→audio MIDI hub)
+pulp_add_test_suite(pulp-test-midi-message-collector LIBRARIES pulp::midi)
+
 # macOS plan Batch A — Foundations
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
