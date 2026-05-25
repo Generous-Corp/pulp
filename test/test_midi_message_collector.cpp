@@ -200,7 +200,6 @@ TEST_CASE("MidiMessageCollector pending ring handles multiple out-of-order futur
     MidiBuffer b1;
     REQUIRE(collector.drain_into(b1, /*start=*/0.0,
                                        /*samples=*/256, /*sr=*/48000.0) == 0);
-    REQUIRE(collector.dropped_overflow() == 0);
 
     // Drain at t=3.0: only the ts=3.0 event fits.
     MidiBuffer b2;
@@ -219,6 +218,40 @@ TEST_CASE("MidiMessageCollector pending ring handles multiple out-of-order futur
     REQUIRE(collector.drain_into(b4, /*start=*/5.0,
                                        /*samples=*/256, /*sr=*/48000.0) == 1);
     REQUIRE(b4[0].message.getNoteNumber() == 60);
+}
+
+TEST_CASE("MidiMessageCollector survives >ring-capacity future bursts without loss (Codex #2853 P1)",
+          "[midi][collector][regression]") {
+    MidiMessageCollector<128> collector;
+    // Push 24 events all in the future — more than the 8-slot pending
+    // ring + the 1-slot consumer overflow can hold. Earlier impl would
+    // silently drop the late entries; new impl keeps the unstashable
+    // events in the producer SPSC queue until the ring has room.
+    constexpr int kEvents = 24;
+    for (int i = 0; i < kEvents; ++i) {
+        REQUIRE(collector.push_now(note_on(0, static_cast<uint8_t>(60 + i), 100),
+                                    /*ts=*/10.0 + double(i) * 0.001));
+    }
+
+    // First drain at t=0: nothing fits the block. 8 in ring, 1 parked
+    // in overflow, remaining 15 stay in the SPSC queue. Critically: no
+    // event is lost — they're all preserved across the producer queue
+    // + pending ring + overflow slot.
+    MidiBuffer b1;
+    REQUIRE(collector.drain_into(b1, /*start=*/0.0,
+                                       /*samples=*/256, /*sr=*/48000.0) == 0);
+
+    // Drain across multiple subsequent blocks until everything lands.
+    int total_delivered = 0;
+    for (int i = 0; i < 8 && total_delivered < kEvents; ++i) {
+        MidiBuffer extra;
+        total_delivered += static_cast<int>(
+            collector.drain_into(extra, /*start=*/10.0,
+                                         /*samples=*/static_cast<int>(0.5 * 48000),
+                                         /*sr=*/48000.0));
+    }
+    // Zero loss — all events eventually delivered.
+    REQUIRE(total_delivered == kEvents);
 }
 
 TEST_CASE("MidiMessageCollector returns false when queue is full",

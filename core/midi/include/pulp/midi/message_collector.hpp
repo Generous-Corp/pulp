@@ -115,46 +115,60 @@ public:
             }
         }
 
-        // Always drain the queue regardless of whether pending events
-        // remain in the future — the queue may hold *earlier-than-pending*
-        // events when the producer pushes out of timestamp order, and
-        // those must not be starved (Codex P1 on #2845).
+        // Drain the queue without losing future events. Events that
+        // fit the current block are delivered immediately; future events
+        // are stashed in the pending ring. When the ring is full, the
+        // popped future event is parked in a single consumer-side
+        // lookahead slot (`overflow_`) and the drain stops — so the
+        // *remaining* queue items stay in the SPSC FIFO untouched and
+        // get retried on the next drain when the ring has room.
+        // Zero data loss; no consumer-side write to the SPSC queue
+        // (Codex P1 on #2843, #2845, #2853).
+        //
+        // The next-event source is either the consumer-side overflow
+        // slot (carried from the previous drain) or a fresh pop.
         while (true) {
-            auto popped = queue_.try_pop();
-            if (!popped) break;
-            const auto& entry = *popped;
+            std::optional<TimestampedShortMessage> next;
+            if (overflow_.has_value()) {
+                next = std::move(overflow_);
+                overflow_.reset();
+            } else {
+                next = queue_.try_pop();
+            }
+            if (!next.has_value()) break;
+            const auto& entry = *next;
             if (entry.timestamp_seconds < block_end_seconds) {
                 deliver(entry);
                 ++drained;
                 continue;
             }
-            // Future event: stash in the consumer-owned pending ring.
-            if (!stash_pending(entry)) {
-                // Ring overflow — record + drop. Producer should slow
-                // down or grow the pending ring.
-                ++dropped_overflow_;
+            // Future event: try to stash in the pending ring.
+            if (stash_pending(entry)) {
+                continue; // ring had room — keep draining
             }
+            // Ring full: park in the consumer-side overflow slot and
+            // stop draining so the remaining queue items survive to
+            // the next drain.
+            overflow_ = entry;
+            break;
         }
         return drained;
     }
 
     /// Approximate number of events currently queued (does NOT count
-    /// the deferred-future entries in the pending ring).
+    /// the deferred-future entries in the pending ring or the
+    /// consumer-side overflow slot).
     std::size_t size_approx() const { return queue_.size_approx(); }
-
-    /// Number of future events the consumer has dropped because the
-    /// pending ring overflowed. Monotonically increasing; useful as
-    /// a diagnostic counter. Reset to 0 only by `reset_dropped_overflow()`.
-    std::size_t dropped_overflow() const { return dropped_overflow_; }
-    void reset_dropped_overflow() { dropped_overflow_ = 0; }
 
     /// Compile-time capacity of the producer queue.
     static constexpr std::size_t capacity() { return Capacity; }
 
     /// Compile-time size of the consumer-owned pending ring. Large
     /// enough to absorb out-of-order producer bursts in practical
-    /// usage (UI + scripting timing). If a workload routinely overflows,
-    /// pick a larger value at instantiation.
+    /// usage (UI + scripting timing). If a workload routinely fills
+    /// the ring, picking a larger value reduces per-drain overhead
+    /// (extra ring slots get scanned first instead of going through
+    /// the overflow lookahead path).
     static constexpr std::size_t pending_capacity() { return kPendingSlots; }
 
 private:
@@ -164,37 +178,24 @@ private:
     /// Consumer-owned pending ring for popped-but-future events.
     /// Linear scan; N=8 keeps the per-drain overhead negligible.
     std::array<std::optional<TimestampedShortMessage>, kPendingSlots> pending_{};
-    std::size_t dropped_overflow_ = 0;
+    /// One-slot lookahead for a future event the ring couldn't store —
+    /// carried into the next drain so no event is ever silently dropped
+    /// on the consumer side.
+    std::optional<TimestampedShortMessage> overflow_;
 
-    /// Place @p entry in an empty pending slot. If all slots are
-    /// occupied, evict the slot with the LARGEST timestamp (latest
-    /// future event) so the ring keeps the soonest-due events. Returns
-    /// true if @p entry was stored; false if the ring already held
-    /// only earlier-due events and @p entry was rejected.
+    /// Place @p entry in an empty pending slot. Returns true if
+    /// @p entry was stored, false if all slots are occupied. Eviction
+    /// is deliberately not performed here — overflow events stay in
+    /// the consumer-side `overflow_` slot or the producer queue so
+    /// the contract is zero data loss.
     bool stash_pending(const TimestampedShortMessage& entry) {
-        // First pass: empty slot.
         for (auto& slot : pending_) {
             if (!slot.has_value()) {
                 slot = entry;
                 return true;
             }
         }
-        // All occupied — find the latest-due slot.
-        std::size_t latest_idx = 0;
-        double latest_ts = pending_[0]->timestamp_seconds;
-        for (std::size_t i = 1; i < pending_.size(); ++i) {
-            if (pending_[i]->timestamp_seconds > latest_ts) {
-                latest_ts = pending_[i]->timestamp_seconds;
-                latest_idx = i;
-            }
-        }
-        // If the new entry is sooner than the latest pending, evict.
-        if (entry.timestamp_seconds < latest_ts) {
-            pending_[latest_idx] = entry;
-            // The evicted (later) entry is the one we lose.
-            return false; // signals an overflow drop
-        }
-        return false; // new entry rejected entirely (it's the latest)
+        return false; // all slots full
     }
 };
 
