@@ -27,7 +27,7 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
 | Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/danielraffel/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto `origin/main` at `acf025a`; local post-rebase/audit validation passing; SDK version is `0.245.0` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto `origin/main` at `ebf75ab`; local post-rebase/audit validation passing; SDK version is `0.246.0` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; locally rebased/validated; final SDK bump and push pending after #2822 | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
@@ -670,6 +670,15 @@ PR2 validation and PR state:
   build -R '^(OscChannel|OSC|IPC|EventLoop)' --output-on-failure` 132/132,
   version-bump report for SDK `0.245.0`, `tools/check-docs.sh` with 76 existing
   warnings, and `git diff --check`.
+- `main` advanced again to `ebf75ab` through #2934 and consumed SDK `0.245.0`
+  while #2822 hosted checks were starting. The stale bump was dropped during
+  rebase and a fresh required SDK bump to `0.246.0` was applied. Local
+  validation passed again: `python3 tools/scripts/test_audit_top_level.py`
+  10/10, `python3 tools/audit.py --`, `cmake --build build --target
+  pulp-test-osc pulp-test-osc-channel pulp-test-events pulp-test-ipc -j8`,
+  `ctest --test-dir build -R '^(OscChannel|OSC|IPC|EventLoop)'
+  --output-on-failure` 132/132, version-bump report for SDK `0.246.0`,
+  `tools/check-docs.sh` with 76 existing warnings, and `git diff --check`.
 - `tools/scripts/local_diff_cover.sh` hits the local GPU/Skia configure gate in
   this worktree, so the same coverage pipeline was run manually in
   `build-cov` with `PULP_ENABLE_COVERAGE=ON`, `PULP_ENABLE_GPU=OFF`, the OSC
