@@ -134,10 +134,24 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 
     runtime::log_info("VST3: initialized '{}' with {} parameters",
                       desc.name, store_.param_count());
+
+    // Item 6.4b — opt this plugin instance into the process-wide
+    // MainThreadDispatcher backend. On macOS this installs (or refcount-
+    // bumps) a Cocoa backend posting to `dispatch_get_main_queue`, so
+    // host-callback dispatches and any view-side code can post work to
+    // the DAW's main thread via `pulp::events::MainThreadDispatcher::call_async`.
+    main_thread_token_ = pulp::events::register_plugin_backend();
+
     return kResultOk;
 }
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
+    // Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
+    // installed in initialize().
+    if (main_thread_token_ != 0) {
+        pulp::events::unregister_plugin_backend(main_thread_token_);
+        main_thread_token_ = 0;
+    }
     processor_.reset();
     return SingleComponentEffect::terminate();
 }

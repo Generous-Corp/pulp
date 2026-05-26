@@ -45,6 +45,15 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
 
+    // Item 6.4b — opt this plugin instance into the process-wide
+    // MainThreadDispatcher backend. On macOS this installs (or refcount-
+    // bumps) a Cocoa backend posting to `dispatch_get_main_queue`, so any
+    // `MainThreadDispatcher::call_async` posted while a Pulp CLAP plugin
+    // is loaded inside the DAW reaches the host's main thread. On non-mac
+    // platforms this is a no-op (returns 0) and the dispatcher stays in
+    // "no backend" state until a platform-specific path lands.
+    self->main_thread_token = pulp::events::register_plugin_backend();
+
     // Create PresetManager from plugin descriptor
     auto desc = self->processor->descriptor();
     self->preset_manager = std::make_unique<state::PresetManager>(
@@ -72,6 +81,12 @@ bool clap_init(const clap_plugin_t* plugin) {
 
 void clap_destroy(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    // Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
+    // installed in clap_init().
+    if (self->main_thread_token != 0) {
+        pulp::events::unregister_plugin_backend(self->main_thread_token);
+        self->main_thread_token = 0;
+    }
     delete self;
 }
 

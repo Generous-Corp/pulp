@@ -31,6 +31,7 @@ target_sources(pulp-format PRIVATE
 target_link_libraries(pulp-format
     PUBLIC
         pulp::audio
+        pulp::events
         pulp::midi
         pulp::state
         pulp::view

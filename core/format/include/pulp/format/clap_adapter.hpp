@@ -7,6 +7,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include <clap/clap.h>
@@ -88,6 +89,13 @@ struct PulpClapPlugin {
     // on `ProcessContext`. Default-constructed (no previous block) so
     // the first process() call after activation reports no changes.
     detail::PlayheadSnapshot playhead_prev{};
+
+    // Item 6.4b — process-wide MainThreadDispatcher backend token. Acquired
+    // in clap_init() so adapter callsites (e.g. host-callback dispatches
+    // posted via `clap_host->request_callback()`) and any view-side code
+    // can use `pulp::events::MainThreadDispatcher::call_async` to marshal
+    // work onto the DAW's main thread. Released in clap_destroy().
+    pulp::events::MainThreadDispatcher::Token main_thread_token = 0;
 };
 
 // CLAP entry point and factory

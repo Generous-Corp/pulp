@@ -18,6 +18,17 @@ target_sources(pulp-events PRIVATE
     src/service_discovery.cpp
 )
 
+# Item 6.4b — plugin-mode main-thread cooperation. macOS gets a Cocoa
+# (`dispatch_get_main_queue`) backend so plugin adapters can opt the
+# process into MainThreadDispatcher without owning a Pulp WindowHost.
+# Other platforms get a no-op stub; their own message-loop integration
+# lands later (gap-doc Phase 1).
+if(APPLE)
+    target_sources(pulp-events PRIVATE src/plugin_main_thread_mac.mm)
+else()
+    target_sources(pulp-events PRIVATE src/plugin_main_thread_stub.cpp)
+endif()
+
 # Phase 2 (gap-doc 2026-05-24): platform mDNS backends for
 # NetworkServiceDiscovery. macOS / iOS get a real Bonjour backend
 # linked against the system DNS-SD APIs (exported from CoreServices
