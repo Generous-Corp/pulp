@@ -21,6 +21,19 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     out << bytes;
 }
 
+ScreenshotCliOptions parse_args(std::initializer_list<const char*> args) {
+    std::vector<std::string> storage;
+    storage.reserve(args.size() + 1);
+    storage.emplace_back("pulp-screenshot");
+    for (const char* arg : args) storage.emplace_back(arg);
+
+    std::vector<char*> argv;
+    argv.reserve(storage.size());
+    for (auto& arg : storage) argv.push_back(arg.data());
+
+    return parse_options(static_cast<int>(argv.size()), argv.data());
+}
+
 }  // namespace
 
 TEST_CASE("pulp-screenshot base64 encoder handles RFC 4648 padding cases",
@@ -106,4 +119,104 @@ TEST_CASE("pulp-screenshot read_file preserves script bytes and fails closed",
     std::filesystem::remove(path);
     REQUIRE(read_file(path.string()).empty());
     REQUIRE(read_file((path.parent_path() / "missing.js").string()).empty());
+}
+
+TEST_CASE("pulp-screenshot option parser preserves documented defaults",
+          "[tools][screenshot][coverage]") {
+    auto options = parse_args({});
+
+    REQUIRE(options.script_path.empty());
+    REQUIRE(options.output_path == "screenshot.png");
+    REQUIRE(options.width == 400);
+    REQUIRE(options.height == 300);
+    REQUIRE(options.backend_was_defaulted);
+    REQUIRE_FALSE(options.output_base64);
+    REQUIRE_FALSE(options.demo);
+    REQUIRE_FALSE(options.help);
+#ifdef PULP_HAS_SKIA
+    REQUIRE(options.backend_name == "skia");
+#else
+    REQUIRE(options.backend_name == "coregraphics");
+#endif
+    REQUIRE(normalize_backend(options));
+    REQUIRE_FALSE(options.backend_name.empty());
+}
+
+TEST_CASE("pulp-screenshot option parser accepts explicit render settings",
+          "[tools][screenshot][coverage]") {
+    auto options = parse_args({
+        "--script", "ui.js",
+        "--output", "render.png",
+        "--width", "1280",
+        "--height", "720",
+        "--scale", "1.5",
+        "--theme", "pro_audio",
+        "--backend", "coregraphics",
+        "--base64"
+    });
+
+    REQUIRE(options.script_path == "ui.js");
+    REQUIRE(options.output_path == "render.png");
+    REQUIRE(options.width == 1280);
+    REQUIRE(options.height == 720);
+    REQUIRE(options.scale == 1.5f);
+    REQUIRE(options.theme_name == "pro_audio");
+    REQUIRE(options.backend_name == "coregraphics");
+    REQUIRE_FALSE(options.backend_was_defaulted);
+    REQUIRE(options.output_base64);
+    REQUIRE(normalize_backend(options));
+    REQUIRE(options.backend_name == "coregraphics");
+}
+
+TEST_CASE("pulp-screenshot option parser handles aliases and last value wins",
+          "[tools][screenshot][coverage]") {
+    auto options = parse_args({
+        "--demo",
+        "--script", "first.js",
+        "--script", "second.js",
+        "--width", "100",
+        "--width", "640",
+        "--height", "50",
+        "--height", "480",
+        "--scale", "1",
+        "--scale", "2.25",
+        "--theme", "light",
+        "--backend", "cg"
+    });
+
+    REQUIRE(options.demo);
+    REQUIRE(options.script_path == "second.js");
+    REQUIRE(options.width == 640);
+    REQUIRE(options.height == 480);
+    REQUIRE(options.scale == 2.25f);
+    REQUIRE(options.theme_name == "light");
+    REQUIRE(options.backend_name == "cg");
+    REQUIRE_FALSE(options.backend_was_defaulted);
+    REQUIRE_FALSE(options.output_base64);
+    REQUIRE_FALSE(options.help);
+    REQUIRE(normalize_backend(options));
+    REQUIRE(options.backend_name == "cg");
+}
+
+TEST_CASE("pulp-screenshot backend normalization rejects unavailable explicit Skia",
+          "[tools][screenshot][coverage]") {
+    auto explicit_skia = parse_args({"--demo", "--backend", "skia"});
+    REQUIRE(explicit_skia.backend_name == "skia");
+    REQUIRE_FALSE(explicit_skia.backend_was_defaulted);
+#ifdef PULP_HAS_SKIA
+    REQUIRE(normalize_backend(explicit_skia));
+    REQUIRE(explicit_skia.backend_name == "skia");
+#else
+    REQUIRE_FALSE(normalize_backend(explicit_skia));
+    REQUIRE(explicit_skia.backend_name == "skia");
+#endif
+
+    auto default_backend = parse_args({"--demo"});
+    REQUIRE(default_backend.backend_was_defaulted);
+    REQUIRE(normalize_backend(default_backend));
+#ifdef PULP_HAS_SKIA
+    REQUIRE(default_backend.backend_name == "skia");
+#else
+    REQUIRE(default_backend.backend_name == "coregraphics");
+#endif
 }

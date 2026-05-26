@@ -82,20 +82,46 @@ static std::string base64_encode(const std::vector<uint8_t>& data) {
     return out;
 }
 
-int main(int argc, char* argv[]) {
+struct ScreenshotCliOptions {
     std::string script_path;
     std::string output_path = "screenshot.png";
-    uint32_t width = 400, height = 300;
+    uint32_t width = 400;
+    uint32_t height = 300;
     float scale = 2.0f;
     std::string theme_name = "dark";
-    // pulp #1899 — default the screenshot backend to Skia. Skia is what
-    // Pulp's live-host render pipeline uses (Skia Graphite + Dawn), and
-    // it's also what Chrome uses to render the locked webview baseline
-    // we diff against. Picking Skia by default means harness comparisons
-    // are apples-to-apples with the product render path. CoreGraphics is
-    // still available as `--backend coregraphics` for cases where a
-    // caller specifically wants the macOS-native AppKit-shaped output.
-    //
+#ifdef PULP_HAS_SKIA
+    std::string backend_name = "skia";
+#else
+    std::string backend_name = "coregraphics";
+#endif
+    bool backend_was_defaulted = true;
+    bool output_base64 = false;
+    bool demo = false;
+    bool help = false;
+};
+
+static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
+    ScreenshotCliOptions options;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--script" && i + 1 < argc) options.script_path = argv[++i];
+        else if (arg == "--output" && i + 1 < argc) options.output_path = argv[++i];
+        else if (arg == "--width" && i + 1 < argc) options.width = static_cast<uint32_t>(std::stoi(argv[++i]));
+        else if (arg == "--height" && i + 1 < argc) options.height = static_cast<uint32_t>(std::stoi(argv[++i]));
+        else if (arg == "--scale" && i + 1 < argc) options.scale = std::stof(argv[++i]);
+        else if (arg == "--theme" && i + 1 < argc) options.theme_name = argv[++i];
+        else if (arg == "--backend" && i + 1 < argc) {
+            options.backend_name = argv[++i];
+            options.backend_was_defaulted = false;
+        }
+        else if (arg == "--base64") options.output_base64 = true;
+        else if (arg == "--demo") options.demo = true;
+        else if (arg == "--help" || arg == "-h") options.help = true;
+    }
+    return options;
+}
+
+static bool normalize_backend(ScreenshotCliOptions& options) {
     // pulp #1919 (Codex P2) — only default to Skia when the build
     // actually compiled it in. Otherwise the CLI would report
     // `backend=skia` while silently producing CoreGraphics output.
@@ -104,31 +130,29 @@ int main(int argc, char* argv[]) {
     // "falling back" line.
 #ifdef PULP_HAS_SKIA
     constexpr bool kHasSkia = true;
-    std::string backend_name = "skia";
 #else
     constexpr bool kHasSkia = false;
-    std::string backend_name = "coregraphics";
 #endif
-    bool backend_was_defaulted = true;
-    bool output_base64 = false;
-    bool demo = false;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--script" && i + 1 < argc) script_path = argv[++i];
-        else if (arg == "--output" && i + 1 < argc) output_path = argv[++i];
-        else if (arg == "--width" && i + 1 < argc) width = std::stoi(argv[++i]);
-        else if (arg == "--height" && i + 1 < argc) height = std::stoi(argv[++i]);
-        else if (arg == "--scale" && i + 1 < argc) scale = std::stof(argv[++i]);
-        else if (arg == "--theme" && i + 1 < argc) theme_name = argv[++i];
-        else if (arg == "--backend" && i + 1 < argc) {
-            backend_name = argv[++i];
-            backend_was_defaulted = false;
+    if (!kHasSkia && options.backend_name == "skia") {
+        if (options.backend_was_defaulted) {
+            // Defaulted to skia at compile-time, but Skia is absent —
+            // downgrade silently-ish to CoreGraphics with a one-line warning.
+            std::cerr << "Skia not compiled — falling back to CoreGraphics. "
+                         "Build with -DPULP_HAS_SKIA=1 to enable Skia.\n";
+            options.backend_name = "coregraphics";
+            return true;
         }
-        else if (arg == "--base64") output_base64 = true;
-        else if (arg == "--demo") demo = true;
-        else if (arg == "--help" || arg == "-h") { print_usage(); return 0; }
+
+        std::cerr << "Error: --backend=skia requested but Skia is not compiled in. "
+                     "Build with -DPULP_HAS_SKIA=1 to enable Skia.\n";
+        return false;
     }
+    return true;
+}
+
+int main(int argc, char* argv[]) {
+    auto options = parse_options(argc, argv);
+    if (options.help) { print_usage(); return 0; }
 
     // pulp #1919 (Codex P2) — refuse a silent downgrade. If the caller
     // explicitly asked for Skia but Skia isn't compiled in, fail loudly
@@ -137,34 +161,22 @@ int main(int argc, char* argv[]) {
     // TODO: pin in #1919 test — add CLI-shellout test covering both the
     // "no PULP_HAS_SKIA, default" warning path and the explicit-skia
     // exit-code-2 error path.
-    if (!kHasSkia && (backend_name == "skia")) {
-        if (backend_was_defaulted) {
-            // Defaulted to skia at compile-time, but Skia is absent —
-            // downgrade silently-ish to CoreGraphics with a one-line warning.
-            std::cerr << "Skia not compiled — falling back to CoreGraphics. "
-                         "Build with -DPULP_HAS_SKIA=1 to enable Skia.\n";
-            backend_name = "coregraphics";
-        } else {
-            std::cerr << "Error: --backend=skia requested but Skia is not compiled in. "
-                         "Build with -DPULP_HAS_SKIA=1 to enable Skia.\n";
-            return 2;
-        }
-    }
+    if (!normalize_backend(options)) return 2;
 
     ScreenshotBackend backend = ScreenshotBackend::skia;
-    if (backend_name == "coregraphics" || backend_name == "cg") {
+    if (options.backend_name == "coregraphics" || options.backend_name == "cg") {
         backend = ScreenshotBackend::coregraphics;
-    } else if (backend_name == "skia") {
+    } else if (options.backend_name == "skia") {
         backend = ScreenshotBackend::skia;
-    } else if (backend_name == "default") {
+    } else if (options.backend_name == "default") {
         backend = ScreenshotBackend::default_backend;
     } else {
-        std::cerr << "Error: unknown --backend '" << backend_name
+        std::cerr << "Error: unknown --backend '" << options.backend_name
                   << "' (valid: skia, coregraphics, default)\n";
         return 1;
     }
 
-    if (!demo && script_path.empty()) {
+    if (!options.demo && options.script_path.empty()) {
         std::cerr << "Error: --script or --demo required\n";
         print_usage();
         return 1;
@@ -175,8 +187,8 @@ int main(int argc, char* argv[]) {
 
     // Create root view with theme
     View root;
-    if (theme_name == "light") root.set_theme(Theme::light());
-    else if (theme_name == "pro_audio") root.set_theme(Theme::pro_audio());
+    if (options.theme_name == "light") root.set_theme(Theme::light());
+    else if (options.theme_name == "pro_audio") root.set_theme(Theme::pro_audio());
     else root.set_theme(Theme::dark());
 
     // pulp #1899 — apply --width/--height to the root's bounds BEFORE
@@ -187,11 +199,11 @@ int main(int argc, char* argv[]) {
     // canonical "fill containing block" CSS pattern). First surfaced
     // via Spectr's editor.generated.tsx: Editor / FilterBank / canvas /
     // Chrome hierarchy is exactly this chain.
-    root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+    root.set_bounds({0, 0, static_cast<float>(options.width), static_cast<float>(options.height)});
 
     root.flex().direction = FlexDirection::column;
     // Only set padding/gap for demo mode — scripts manage their own layout
-    if (demo) {
+    if (options.demo) {
         root.flex().padding = 16;
         root.flex().gap = 8;
     }
@@ -208,7 +220,7 @@ int main(int argc, char* argv[]) {
     // raison d'etre includes capturing React-driven imports.
     bridge.install_runtime_import_handlers();
 
-    if (demo) {
+    if (options.demo) {
         // Built-in demo UI
         bridge.load_script(R"(
             createLabel('title', 'Pulp Plugin Demo', 0, 0, 300, 24);
@@ -222,7 +234,7 @@ int main(int argc, char* argv[]) {
         engine.evaluate("setValue('volume', 0.7)");
     } else {
         // Load library JS files from the same directory
-        auto js_dir = std::filesystem::path(script_path).parent_path();
+        auto js_dir = std::filesystem::path(options.script_path).parent_path();
         for (auto& lib : {"oklch.js"}) {
             auto lib_path = js_dir / lib;
             if (std::filesystem::exists(lib_path)) {
@@ -230,9 +242,9 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        auto code = read_file(script_path);
+        auto code = read_file(options.script_path);
         if (code.empty()) {
-            std::cerr << "Error: could not read " << script_path << "\n";
+            std::cerr << "Error: could not read " << options.script_path << "\n";
             return 1;
         }
         bridge.load_script(code);
@@ -244,7 +256,7 @@ int main(int argc, char* argv[]) {
         // root_, because runtime-import adapters (Spectr's dom-adapter
         // at tsx:440-441) propagate the hardcoded oversize through
         // multiple intermediate wrappers.
-        pulp::view::reconcile_oversize_absolute_subtree(root, width, height);
+        pulp::view::reconcile_oversize_absolute_subtree(root, options.width, options.height);
     }
 
     // pulp #1899 — drain React's useEffect callbacks, requestAnimationFrame
@@ -261,8 +273,8 @@ int main(int argc, char* argv[]) {
     bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
 
     // Render
-    if (output_base64) {
-        auto png = render_to_png(root, width, height, scale, backend);
+    if (options.output_base64) {
+        auto png = render_to_png(root, options.width, options.height, options.scale, backend);
         if (png.empty()) {
             std::cerr << "Error: rendering failed\n";
             return 1;
@@ -270,12 +282,12 @@ int main(int argc, char* argv[]) {
         std::cout << base64_encode(png);
         return 0;
     } else {
-        bool ok = render_to_file(root, width, height, output_path, scale, backend);
+        bool ok = render_to_file(root, options.width, options.height, options.output_path, options.scale, backend);
         if (!ok) {
             std::cerr << "Error: rendering failed\n";
             return 1;
         }
-        std::cout << "Screenshot saved to " << output_path << " (" << width << "x" << height << " @" << scale << "x, backend=" << backend_name << ")\n";
+        std::cout << "Screenshot saved to " << options.output_path << " (" << options.width << "x" << options.height << " @" << options.scale << "x, backend=" << options.backend_name << ")\n";
         return 0;
     }
 }
