@@ -3193,6 +3193,20 @@ add_executable(pulp-test-extensions-visitor test_extensions_visitor.cpp)
 target_link_libraries(pulp-test-extensions-visitor PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-extensions-visitor)
 
+# Item 4.2 — opt-in real-plugin integration runner. Builds only when
+# PULP_REAL_PLUGIN_TESTS=ON. Even when built, individual TEST_CASEs SKIP
+# (via WARN + return) when their fixture binary is not on disk, so the
+# binary is safe to run on machines that haven't populated the cache.
+# Drive the cache with: python3 tools/scripts/fetch_real_plugins.py
+if(PULP_REAL_PLUGIN_TESTS)
+    add_executable(pulp-test-real-plugins integration/real_plugin_runner.cpp)
+    target_link_libraries(pulp-test-real-plugins
+        PRIVATE pulp::host Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-real-plugins PRIVATE
+        PULP_REAL_PLUGINS_TOML="${CMAKE_CURRENT_SOURCE_DIR}/integration/real_plugins.toml")
+    catch_discover_tests(pulp-test-real-plugins)
+endif()
+
 # Host regression coverage (#52) — end-to-end scan / load / process /
 # unload lifecycle, scanner failure modes (moduleinfo.json + manifest.ttl),
 # state round-trip, and hot-reload race-cleanliness. Separate binary so a
