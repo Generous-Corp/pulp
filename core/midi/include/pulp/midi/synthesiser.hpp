@@ -82,8 +82,13 @@ public:
     /// Begin release. Subclasses typically schedule envelope release
     /// here; when the envelope tail completes they should call
     /// `mark_inactive()` so the synth's free-voice scan can reclaim
-    /// the slot.
-    virtual void on_note_off() { releasing_ = true; }
+    /// the slot. Keeps `note_.releasing` in sync with the `releasing_`
+    /// member so subclasses reading either path see the same state
+    /// (Codex P2 on #2870).
+    virtual void on_note_off() {
+        releasing_ = true;
+        note_.releasing = true;
+    }
 
     /// Channel-level pitch bend (semitones, already scaled by the
     /// configured bend range). Default no-op — override to apply.
