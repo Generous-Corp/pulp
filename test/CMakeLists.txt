@@ -487,6 +487,23 @@ target_link_libraries(pulp-test-cli-validator-discovery PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-validator-discovery)
 
+# Phase 5 mac runtime validators (chainer plan
+# planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md):
+# hermetic tests for `pulp validate --target {standalone|auv3|macho}`
+# that stub the shell-out and filesystem probes via MacValidatorEnv,
+# so the tests run on any host (including Linux CI legs) without
+# needing real .app / .appex / auval.
+add_executable(pulp-test-cli-mac-runtime-validators
+    test_cli_mac_runtime_validators.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/mac_runtime_validators.cpp
+)
+target_include_directories(pulp-test-cli-mac-runtime-validators PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-mac-runtime-validators PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-mac-runtime-validators)
+
 # CLI projects registry (#499 / #552 Slice 1b): pure-logic tests for
 # the ~/.pulp/projects.json read/write surface and the opt-in
 # parent-directory scan. projects_registry is deliberately free of

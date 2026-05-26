@@ -88,6 +88,7 @@ add_executable(pulp-cli
     update_mode.cpp
     migration_runtime.cpp
     validator_discovery.cpp
+    mac_runtime_validators.cpp
     install_paths_mac.cpp
     "${_pulp_migration_index_src}")
 # Phase 8 binary swap (#767 / #686): the C++ CLI was historically the

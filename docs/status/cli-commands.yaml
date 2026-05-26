@@ -56,6 +56,9 @@ commands:
       - name: --report
         kind: option
         description: Write JSON validation report to the given file path
+      - name: --target
+        kind: option
+        description: "Run a macOS runtime validator on an explicit bundle path (standalone | auv3 | macho | all). Used by the Linux→macOS cross-build chainer plan Phase 5; positional bundle paths follow."
     docs: reference/cli.md#validate
 
   - name: ship

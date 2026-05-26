@@ -1,6 +1,7 @@
 // cmd_validate.cpp — pulp validate command
 
 #include "cli_common.hpp"
+#include "mac_runtime_validators.hpp"
 #include "validator_discovery.hpp"
 
 #include <fstream>
@@ -23,6 +24,12 @@ int cmd_validate(const std::vector<std::string>& args) {
     bool screenshot = false;
     bool strict = false;   // #51: skipped-because-missing-tool ⇒ fail
     std::string report_path;
+    // Phase 5 (chainer plan, planning/2026-05-24-…): `--target` selects
+    // the macOS runtime validator(s) to run against a passed bundle.
+    // When set, we bypass the build-dir-walking format flow and run
+    // the targeted validators on the explicit bundle argument(s).
+    std::string target_name;
+    std::vector<std::string> positional;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--all") run_all = true;
         else if (args[i] == "--json") json_output = true;
@@ -35,12 +42,126 @@ int cmd_validate(const std::vector<std::string>& args) {
             }
             report_path = args[++i];
         }
+        else if (args[i] == "--target") {
+            if (i + 1 >= args.size() || args[i + 1].empty()) {
+                std::cerr << "pulp validate: --target requires a name "
+                             "(standalone|auv3|macho|all)\n";
+                return 2;
+            }
+            target_name = args[++i];
+        }
         else if (args[i].size() >= 2 && args[i].substr(0, 2) == "--") {
             std::cerr << "pulp validate: unknown flag: " << args[i] << "\n";
             std::cerr << "Known flags: --all --json --screenshot --strict "
-                         "--report <path>\n";
+                         "--report <path> --target "
+                         "<standalone|auv3|macho|all>\n";
             return 2;
         }
+        else {
+            // First non-flag positional is a bundle path for --target.
+            positional.push_back(args[i]);
+        }
+    }
+
+    // ── --target dispatch (Phase 5 macOS runtime validators) ───────────
+    //
+    // When --target is set, we run the requested validator(s) on the
+    // bundle path(s) supplied as positional args and exit. We do NOT
+    // fall through into the normal format-walk flow because (a) the
+    // bundle isn't necessarily inside `build/` and (b) the targets are
+    // meant for chainer-plan operators who already know which bundle
+    // they want validated.
+    if (!target_name.empty()) {
+        namespace mr = pulp::cli::mac_runtime;
+        auto targets = mr::expand_target_name(target_name);
+        if (targets.empty()) {
+            std::cerr << "pulp validate: unknown --target value: "
+                      << target_name
+                      << " (expected standalone|auv3|macho|all)\n";
+            return 2;
+        }
+        if (positional.empty()) {
+            std::cerr << "pulp validate --target " << target_name
+                      << ": requires a bundle path argument\n";
+            return 2;
+        }
+        auto env = mr::make_default_env();
+        std::vector<mr::ValidatorResult> results;
+        for (const auto& bundle_str : positional) {
+            fs::path bundle = bundle_str;
+            for (const auto& t : targets) {
+                if (t == "standalone")
+                    results.push_back(mr::run_standalone_validator(bundle, env));
+                else if (t == "auv3")
+                    results.push_back(mr::run_auv3_validator(bundle, env));
+                else if (t == "macho")
+                    results.push_back(mr::run_macho_validator(bundle, env));
+            }
+        }
+        int fail_count = 0;
+        int skip_count = 0;
+        for (const auto& r : results) {
+            std::cout << "[" << r.target << "] "
+                      << fs::path(r.bundle).filename().string()
+                      << " (" << r.tool << ") "
+                      << (r.status == "pass" ? "PASSED"
+                          : r.status == "fail" ? "FAILED"
+                          : "SKIPPED");
+            if (!r.summary.empty())
+                std::cout << " — " << r.summary;
+            std::cout << "\n";
+            if (r.status == "fail") ++fail_count;
+            else if (r.status == "skip") ++skip_count;
+        }
+        if (json_output || !report_path.empty()) {
+            std::ostringstream report;
+            report << "{\n  \"version\": 1,\n  \"target\": \""
+                   << target_name << "\",\n  \"results\": [\n";
+            for (size_t i = 0; i < results.size(); ++i) {
+                const auto& r = results[i];
+                report << "    {\"target\": \"" << r.target << "\", "
+                       << "\"tool\": \"" << r.tool << "\", "
+                       << "\"bundle\": \"" << r.bundle << "\", "
+                       << "\"status\": \"" << r.status << "\", "
+                       << "\"exit_code\": " << r.exit_code;
+                if (!r.summary.empty()) {
+                    // crude JSON-escape — newlines + quotes; sufficient
+                    // for stdout/stderr surfaces produced by the
+                    // validators we shell out to. Don't recreate a
+                    // full json encoder here; the contract is "report
+                    // is parseable", and the macOS validators emit
+                    // plain ASCII in practice.
+                    std::string esc;
+                    esc.reserve(r.summary.size());
+                    for (char c : r.summary) {
+                        if (c == '"') esc += "\\\"";
+                        else if (c == '\\') esc += "\\\\";
+                        else if (c == '\n') esc += "\\n";
+                        else if (c == '\r') esc += "\\r";
+                        else if (c == '\t') esc += "\\t";
+                        else esc += c;
+                    }
+                    report << ", \"summary\": \"" << esc << "\"";
+                }
+                report << "}";
+                if (i + 1 < results.size()) report << ",";
+                report << "\n";
+            }
+            report << "  ]\n}\n";
+            if (json_output) std::cout << "\n" << report.str();
+            if (!report_path.empty()) {
+                std::ofstream f(report_path);
+                if (f.good()) {
+                    f << report.str();
+                    std::cout << "Report written to " << report_path << "\n";
+                } else {
+                    std::cerr << "Failed to write report to "
+                              << report_path << "\n";
+                }
+            }
+        }
+        const bool strict_fail_target = strict && skip_count > 0;
+        return (fail_count > 0 || strict_fail_target) ? 1 : 0;
     }
 
     auto root = resolve_active_project_root(nullptr);
