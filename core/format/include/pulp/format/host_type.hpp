@@ -17,6 +17,7 @@ enum class HostType {
     ProTools,
     Cubase,
     Nuendo,
+    Wavelab,
     StudioOne,
     FLStudio,
     Bitwig,

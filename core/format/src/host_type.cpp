@@ -48,6 +48,11 @@ HostType host_type_from_process_name(std::string_view process_name) {
     if (name.find("ableton") != std::string::npos || name.find("live") != std::string::npos) return HostType::AbletonLive;
     if (name.find("reaper") != std::string::npos) return HostType::Reaper;
     if (name.find("protools") != std::string::npos || name.find("pro tools") != std::string::npos) return HostType::ProTools;
+    // Wavelab must be checked before Cubase / Nuendo because the
+    // Steinberg Wavelab executable does NOT contain "cubase" but the
+    // overlap-check still keeps Wavelab as its own classifier rather
+    // than folding it into the Cubase family — its quirks diverge.
+    if (name.find("wavelab") != std::string::npos) return HostType::Wavelab;
     if (name.find("cubase") != std::string::npos) return HostType::Cubase;
     if (name.find("nuendo") != std::string::npos) return HostType::Nuendo;
     if (name.find("studio one") != std::string::npos || name.find("studioone") != std::string::npos) return HostType::StudioOne;
@@ -74,6 +79,7 @@ std::string host_type_name(HostType type) {
         case HostType::ProTools: return "Pro Tools";
         case HostType::Cubase: return "Cubase";
         case HostType::Nuendo: return "Nuendo";
+        case HostType::Wavelab: return "WaveLab";
         case HostType::StudioOne: return "Studio One";
         case HostType::FLStudio: return "FL Studio";
         case HostType::Bitwig: return "Bitwig Studio";
