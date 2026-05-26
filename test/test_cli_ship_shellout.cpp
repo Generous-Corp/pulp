@@ -103,6 +103,12 @@ bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
+std::string read_text_file(const fs::path& path) {
+    std::ifstream in(path);
+    REQUIRE(in.good());
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
 fs::path make_fake_project(std::string_view name, bool with_build_cache) {
     auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     auto root = fs::temp_directory_path()
@@ -416,6 +422,131 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast appends local artifact metadata",
+                 "[cli][shellout][ship][appcast][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("appcast-local", true);
+    auto feed = root / "artifacts" / "updates.xml";
+    auto artifact = root / "artifacts" / "FakeShipPlugin-3.0.0.pkg";
+    fs::create_directories(artifact.parent_path());
+    {
+        std::ofstream out(artifact, std::ios::binary);
+        out << "pkgdata";
+    }
+    REQUIRE(fs::file_size(artifact) == 7);
+
+    auto first = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", artifact.string(),
+         "--version", "3.0.0",
+         "--notes", "local artifact",
+         "--title", "Local Feed",
+         "--min-os", "14.0",
+         "--output", feed.string()});
+    REQUIRE_FALSE(first.timed_out);
+    REQUIRE(first.exit_code == 0);
+    REQUIRE(contains(first.stdout_output, "(1 items)"));
+    REQUIRE(fs::exists(feed));
+
+    auto first_xml = read_text_file(feed);
+    REQUIRE(contains(first_xml, "Local Feed"));
+    REQUIRE(contains(first_xml, "Version 3.0.0"));
+    REQUIRE(contains(first_xml, "<sparkle:shortVersionString>3.0.0</sparkle:shortVersionString>"));
+    REQUIRE(contains(first_xml, "<p>local artifact</p>"));
+    REQUIRE(contains(first_xml, "<sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>"));
+    REQUIRE(contains(first_xml, "length=\"7\""));
+    REQUIRE(contains(first_xml, artifact.string()));
+    REQUIRE_FALSE(contains(first_xml, "sparkle:edSignature"));
+
+    auto second = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", "https://example.com/FakeShipPlugin-3.1.0.pkg",
+         "--version", "3.1.0",
+         "--notes", "remote artifact",
+         "--output", feed.string()});
+    REQUIRE_FALSE(second.timed_out);
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(contains(second.stdout_output, "(2 items)"));
+
+    auto second_xml = read_text_file(feed);
+    REQUIRE(contains(second_xml, "Version 3.1.0"));
+    REQUIRE(contains(second_xml, "Version 3.0.0"));
+    REQUIRE(second_xml.find("Version 3.1.0") < second_xml.find("Version 3.0.0"));
+    REQUIRE(contains(second_xml, "https://example.com/FakeShipPlugin-3.1.0.pkg"));
+    REQUIRE(contains(second_xml, artifact.string()));
+    REQUIRE(contains(second_xml, "length=\"0\""));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast fails closed on invalid local signing keys",
+                 "[cli][shellout][ship][appcast][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("appcast-bad-sign", true);
+    auto artifact = root / "artifacts" / "FakeShipPlugin-4.0.0.pkg";
+    auto feed = root / "artifacts" / "signed.xml";
+    fs::create_directories(artifact.parent_path());
+    {
+        std::ofstream out(artifact, std::ios::binary);
+        out << "pkgdata";
+    }
+    REQUIRE(fs::file_size(artifact) == 7);
+
+    auto bad_sign = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", artifact.string(),
+         "--version", "4.0.0",
+         "--sign-key", "not-base64",
+         "--output", feed.string()});
+    REQUIRE_FALSE(bad_sign.timed_out);
+    REQUIRE(bad_sign.exit_code != 0);
+    REQUIRE(contains(bad_sign.stdout_output + bad_sign.stderr_output,
+                     "Ed25519 signing failed"));
+    REQUIRE_FALSE(fs::exists(feed));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship android check tolerates empty artifacts directory",
+                 "[cli][shellout][ship][android][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("android-empty-artifacts", true);
+    fs::create_directories(root / "artifacts");
+    {
+        std::ofstream out(root / "artifacts" / "readme.txt");
+        out << "not an Android artifact";
+    }
+
+    auto r = run_pulp_in(root, {"ship", "check", "--target", "android"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("readme.txt") == std::string::npos);
+    REQUIRE(r.stderr_output.empty());
+
+    fs::remove_all(root);
+}
+
+#ifndef _WIN32
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package with no plugin bundles reports zero artifacts",
+                 "[cli][shellout][ship][package][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("package-empty", true);
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "Created 0 .pkg and 0 .dmg artifacts"));
+    REQUIRE(fs::exists(root / "artifacts"));
+    REQUIRE(fs::is_empty(root / "artifacts"));
+
+    fs::remove_all(root);
+}
+#endif
 
 // Item 7.5 (macos-plugin-authoring-plan): per-artifact .pkg / .dmg
 // selection. The parser-level checks belong here next to the other
