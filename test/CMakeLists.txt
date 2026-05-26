@@ -1569,6 +1569,9 @@ pulp_add_test_suite(pulp-test-runtime LIBRARIES pulp::runtime)
 # AbstractFifo (index-pair SPSC FIFO management)
 pulp_add_test_suite(pulp-test-abstract-fifo LIBRARIES pulp::runtime)
 
+# FileSearchPath (ordered directory search list)
+pulp_add_test_suite(pulp-test-file-search-path LIBRARIES pulp::runtime)
+
 # Sync-primitive hammer (TSan-focused, #412 step 4).
 # Runs under the tag-scoped TSan subset via the [concurrent][race]
 # tags embedded in each TEST_CASE (matches the 'Race|Concurrent'
