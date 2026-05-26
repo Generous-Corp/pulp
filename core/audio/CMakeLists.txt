@@ -24,6 +24,7 @@ target_sources(pulp-audio PRIVATE
     src/buffer_ops.cpp
     src/audio_thumbnail.cpp
     src/wav_metadata.cpp
+    src/audio_device_manager.cpp
 )
 
 # CoreAudioFormat reader (macOS only — AAC, ALAC, CAF via ExtAudioFile)
@@ -61,7 +62,7 @@ if(TARGET alac)
     message(STATUS "Pulp: ALAC write enabled (Apple ALAC — Apache 2.0)")
 endif()
 
-target_link_libraries(pulp-audio PUBLIC pulp::runtime)
+target_link_libraries(pulp-audio PUBLIC pulp::runtime pulp::midi pulp::state)
 
 # CHOC headers (audio file I/O)
 target_include_directories(pulp-audio PRIVATE

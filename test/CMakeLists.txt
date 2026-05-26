@@ -1340,6 +1340,11 @@ pulp_add_test_suite(pulp-test-code-editor LIBRARIES pulp::view)
 # PropertiesFile JSON persistence tests
 pulp_add_test_suite(pulp-test-properties SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
 
+# AudioDeviceManager — persistence + MIDI hub (macOS plan item 1.2a)
+pulp_add_test_suite(pulp-test-audio-device-manager
+    SOURCES test_audio_device_manager.cpp
+    LIBRARIES pulp::audio pulp::midi pulp::state pulp::runtime)
+
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
 pulp_add_test_suite(pulp-test-dsp-enhancements LIBRARIES pulp::signal)
 
