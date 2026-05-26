@@ -1460,6 +1460,9 @@ pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio)
 # Links pulp::view so the WaveformView integration smoke compiles.
 pulp_add_test_suite(pulp-test-audio-thumbnail LIBRARIES pulp::audio pulp::view)
 
+# WAV metadata round-trip tests (BWAV / iXML / ASWG / ACID — item 6.11)
+pulp_add_test_suite(pulp-test-wav-metadata LIBRARIES pulp::audio)
+
 pulp_add_test_suite(pulp-test-offline-processor-edges LIBRARIES pulp::audio)
 
 pulp_add_test_suite(pulp-test-ogg-reader LIBRARIES pulp::audio)
