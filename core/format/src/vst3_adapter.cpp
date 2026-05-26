@@ -5,6 +5,7 @@
 
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/ara.hpp>
@@ -449,14 +450,77 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     ctx.sample_rate = processSetup.sampleRate;
     ctx.num_samples = num_samples;
     if (data.processContext) {
-        ctx.is_playing = (data.processContext->state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
-        ctx.tempo_bpm = data.processContext->tempo;
-        ctx.position_samples = data.processContext->projectTimeSamples;
-        if (data.processContext->state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
-            ctx.time_sig_numerator = data.processContext->timeSigNumerator;
-            ctx.time_sig_denominator = data.processContext->timeSigDenominator;
+        const auto* pc = data.processContext;
+        const uint32_t state = pc->state;
+        ctx.is_playing = (state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
+        ctx.is_recording = (state & Steinberg::Vst::ProcessContext::kRecording) != 0;
+        ctx.position_samples = pc->projectTimeSamples;
+        if (state & Steinberg::Vst::ProcessContext::kTempoValid) {
+            ctx.tempo_bpm = pc->tempo;
         }
+        if (state & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid) {
+            ctx.position_beats = pc->projectTimeMusic;
+        }
+        if (state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
+            ctx.time_sig_numerator = pc->timeSigNumerator;
+            ctx.time_sig_denominator = pc->timeSigDenominator;
+        }
+
+        // Item 1.3 — cycle / loop. kCycleValid covers cycleStartMusic +
+        // cycleEndMusic; kCycleActive indicates the host is currently
+        // looping. Both must be set for the loop range to be meaningful.
+        ctx.is_looping = (state & Steinberg::Vst::ProcessContext::kCycleActive) != 0;
+        if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
+            ctx.loop_start_beats = pc->cycleStartMusic;
+            ctx.loop_end_beats = pc->cycleEndMusic;
+        }
+
+        // Item 1.3 — host clock for video sync.
+        if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
+            ctx.host_time_ns = pc->systemTime;
+        }
+
+        // Item 1.3 — SMPTE frame rate enum. VST3 reports it as an
+        // integer framesPerSecond plus pulldown / drop flags. Map the
+        // documented combinations from the FrameRate doc comment in
+        // ivstprocesscontext.h onto Pulp's FrameRate enum.
+        if (state & Steinberg::Vst::ProcessContext::kSmpteValid) {
+            const auto fps = pc->frameRate.framesPerSecond;
+            const auto fr_flags = pc->frameRate.flags;
+            const bool pulldown =
+                (fr_flags & Steinberg::Vst::FrameRate::kPullDownRate) != 0;
+            const bool drop =
+                (fr_flags & Steinberg::Vst::FrameRate::kDropRate) != 0;
+            using FR = pulp::format::FrameRate;
+            // VST3 doc: 23.976 = 24 + pulldown; 29.97 = 30 + pulldown;
+            // 29.97 drop = 30 + pulldown + drop; 30 drop = 30 + drop;
+            // 59.94 = 60 + pulldown; integer rates have flags == 0.
+            if (fps == 24 && pulldown) ctx.frame_rate = FR::fps_24; // 23.976 ≈ 24 in our enum
+            else if (fps == 24) ctx.frame_rate = FR::fps_24;
+            else if (fps == 25) ctx.frame_rate = FR::fps_25;
+            else if (fps == 30 && pulldown && drop) ctx.frame_rate = FR::fps_29_97_drop;
+            else if (fps == 30 && pulldown) ctx.frame_rate = FR::fps_29_97;
+            else if (fps == 30 && drop) ctx.frame_rate = FR::fps_30_drop;
+            else if (fps == 30) ctx.frame_rate = FR::fps_30;
+            else if (fps == 60) ctx.frame_rate = FR::fps_60;
+            // Other rates (50, 60+pulldown=59.94) fall through to the
+            // default FrameRate::unknown — Pulp's enum does not enumerate
+            // every SMPTE rate, only the seven the spec lists.
+        }
+
+        // Item 1.3 — bar index. Derive from position_beats + time-sig.
+        // VST3 also exposes `barPositionMusic` directly when
+        // kBarPositionValid is set, but it's the quarter-note position
+        // of the last bar start, not a bar *index* — so deriving
+        // matches the documented `ProcessContext::bar` contract and
+        // stays consistent with the AU/CLAP paths that have no
+        // host-precomputed bar.
+        pulp::format::detail::derive_bar_from_beats(ctx);
     }
+
+    // Item 1.3 — diff against the previous block to populate the three
+    // change flags. Stateful; updates `playhead_prev_` in place.
+    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
 
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording

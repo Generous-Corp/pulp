@@ -24,6 +24,7 @@
 #include <pluginterfaces/base/ibstream.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <pluginterfaces/gui/iplugview.h>
@@ -99,6 +100,12 @@ private:
     // parameter (the one we tag with kIsBypass in initialize()). 0 when
     // none — process() then never short-circuits.
     state::ParamID bypass_param_id_ = 0;
+
+    // Item 1.3 — previous-block transport snapshot used to derive the
+    // `tempo_changed` / `time_sig_changed` / `transport_changed` flags
+    // on `ProcessContext`. Default-constructed (no previous block) so
+    // the first process() call after construction reports no changes.
+    detail::PlayheadSnapshot playhead_prev_{};
 };
 
 } // namespace pulp::format::vst3
