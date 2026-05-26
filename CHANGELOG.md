@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02280"></a>
+## [0.228.0] - 2026-05-25
+
+- feat(cli): pulp identity record + build --check-identity (item 3.12) ([#2882](https://github.com/danielraffel/pulp/pull/2882))
+- feat(signal): Convolver background IR swap (item 2.3 Slice A) ([#2881](https://github.com/danielraffel/pulp/pull/2881))
+- feat(signal): Chebyshev I/II IIR filter design via biquad cascades (item 2.1) ([#2880](https://github.com/danielraffel/pulp/pull/2880))
+
+<a id="v02260"></a>
+## [0.226.0] - 2026-05-25
+
+- feat(signal): polyphase-FIR Resampler with Kaiser-window prototype (item 1.7) ([#2879](https://github.com/danielraffel/pulp/pull/2879))
+
 <a id="v02250"></a>
 ## [0.225.0] - 2026-05-25
 
@@ -2816,6 +2828,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.228.0]: https://github.com/danielraffel/pulp/releases/tag/v0.228.0
+[0.226.0]: https://github.com/danielraffel/pulp/releases/tag/v0.226.0
 [0.225.0]: https://github.com/danielraffel/pulp/releases/tag/v0.225.0
 [0.224.1]: https://github.com/danielraffel/pulp/releases/tag/v0.224.1
 [0.224.0]: https://github.com/danielraffel/pulp/releases/tag/v0.224.0
