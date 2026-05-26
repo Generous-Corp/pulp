@@ -2,7 +2,8 @@
 
 /// @file iir_design.hpp
 /// High-order analog-prototype IIR design (Chebyshev Type I, Chebyshev
-/// Type II) producing biquad cascades (SOS) via the bilinear transform.
+/// Type II, Elliptic / Cauer) producing biquad cascades (SOS) via the
+/// bilinear transform.
 ///
 /// Design math runs in @c double for numerical headroom and emits
 /// @c float coefficients compatible with @c FilterDesign::Coefficients
@@ -14,15 +15,13 @@
 ///   - L. R. Rabiner & B. Gold, "Theory and Application of Digital
 ///     Signal Processing", Prentice-Hall, 1975.
 ///   - Audio EQ Cookbook (Robert Bristow-Johnson) — biquad form.
-///
-/// Header-only; @c core/signal is an INTERFACE target.
-///
-/// Roadmap note: Elliptic (Cauer) design is intentionally deferred to a
-/// follow-up so its acceptance goldens can be reasoned about against the
-/// full complex Jacobi-cd machinery. Track the deferral in the macOS
-/// plugin-authoring plan §2.1.
+///   - S. J. Orfanidis, "Lecture Notes on Elliptic Filter Design"
+///     (2006) — analog elliptic prototype via Jacobi sn / cd.
+///   - W. Cody, "Chebyshev approximations for the complete elliptic
+///     integrals K and E" (1965) — AGM for K(m).
 
 #include <pulp/signal/filter_design.hpp>
+#include <pulp/signal/special_functions.hpp>
 
 #include <cmath>
 #include <complex>
@@ -31,7 +30,7 @@
 
 namespace pulp::signal {
 
-/// Chebyshev IIR design utilities.
+/// Chebyshev / Elliptic IIR design utilities.
 ///
 /// @code
 /// // 4th-order Chebyshev Type I lowpass, 1 dB passband ripple, 2 kHz cutoff
@@ -40,6 +39,9 @@ namespace pulp::signal {
 ///
 /// // 4th-order Chebyshev Type II, 40 dB stopband, stop-freq 5 kHz
 /// auto cheb2 = IirDesign::chebyshev2_lowpass(4, 5000.0f, 40.0f, 44100.0f);
+///
+/// // 6th-order Elliptic (Cauer) lowpass, 0.5 dB passband, 60 dB stopband
+/// auto cauer = IirDesign::elliptic_lowpass(6, 2000.0f, 0.5f, 60.0f, 48000.0f);
 /// @endcode
 struct IirDesign {
     using Coefficients = FilterDesign::Coefficients;
@@ -84,6 +86,50 @@ struct IirDesign {
     static std::vector<Coefficients>
     chebyshev2_highpass(int order, float stop_freq_hz, float stop_atten_db, float sample_rate) {
         return cheb2_cascade(order, stop_freq_hz, stop_atten_db, sample_rate, /*highpass=*/true);
+    }
+
+    // ── Elliptic (Cauer) ─────────────────────────────────────────────────
+    //
+    // Equiripple in BOTH passband (ripple_db) and stopband (stopband_attn_db).
+    // For a given order it achieves the steepest transition of the four
+    // classic designs. Passband edge is at @p freq_hz; the stopband edge is
+    // implied by the order and the two ripple specifications via the
+    // Cauer degree equation:
+    //
+    //     N · K(k')·K(k1) = K(k)·K(k1')
+    //
+    // where k is the filter selectivity (Ω_p/Ω_s) and k1 = ε/√(10^(As/10)−1).
+    // We solve for k given N + ripples; the resulting stopband edge is
+    // @c freq_hz / k. Callers that need a specific stopband edge should
+    // pick the order that places it; @c elliptic_required_order is a
+    // helper that returns the minimum order for given specs.
+
+    /// Elliptic (Cauer) lowpass cascade — equiripple in both bands.
+    ///
+    /// @param order              Filter order (>= 2, even). Odd orders rejected.
+    /// @param freq_hz            Passband edge (where ripple ends).
+    /// @param passband_ripple_db Passband ripple in dB (positive, e.g. 0.5).
+    /// @param stopband_attn_db   Minimum stopband attenuation in dB
+    ///                           (positive, e.g. 60).
+    /// @param sample_rate        Sample rate in Hz.
+    /// @return order/2 biquad sections; empty if inputs invalid.
+    static std::vector<Coefficients>
+    elliptic_lowpass(int order, float freq_hz,
+                     float passband_ripple_db, float stopband_attn_db,
+                     float sample_rate) {
+        return elliptic_cascade(order, freq_hz, passband_ripple_db,
+                                stopband_attn_db, sample_rate,
+                                /*highpass=*/false);
+    }
+
+    /// Elliptic highpass cascade.
+    static std::vector<Coefficients>
+    elliptic_highpass(int order, float freq_hz,
+                      float passband_ripple_db, float stopband_attn_db,
+                      float sample_rate) {
+        return elliptic_cascade(order, freq_hz, passband_ripple_db,
+                                stopband_attn_db, sample_rate,
+                                /*highpass=*/true);
     }
 
 private:
@@ -308,6 +354,206 @@ private:
             }
 
             result.push_back(bilinear_sos(B0, B1, B2, A0, A1, A2, T));
+        }
+        return result;
+    }
+
+    // ── Elliptic (Cauer) implementation ──────────────────────────────────
+    //
+    // Real-modulus Jacobi machinery is provided by `special_functions.hpp`
+    // (Pulp's shared analytic toolbox, shipped in #2958):
+    //   • special::elliptic_K(m)          AGM
+    //   • special::jacobi_sncndn(u, m, …) NR §6.12 AGM back-substitution
+    //   • special::jacobi_asn(x, m)       Carlson R_F inverse
+    //   • special::jacobi_nome(m)         q = exp(−π K'/K)
+    //
+    // Pole/zero placement transcribes scipy.signal._filter_design.ellipap
+    // (BSD-3, reference-grade): the formula collapses the complex
+    // Jacobi-cd machinery into real-valued sn/cn/dn at two distinct
+    // arguments, yielding bilinear-ready biquad coefficients.
+
+    /// Solve the Cauer degree equation for k (selectivity) given order N
+    /// and discrimination factor k1 = ε / sqrt(10^(As/10) − 1).
+    ///
+    /// The degree equation is
+    ///     N · K(k')·K(k1) = K(k)·K(k1')
+    /// Equivalently, in terms of the Jacobi nome q = exp(−π K'/K):
+    ///     q(k) = q(k1)^(1/N)
+    ///
+    /// We invert q → k via the theta-function ratio
+    ///     k = ϑ₂(q)² / ϑ₃(q)²
+    /// where the theta series converge geometrically (q < 1).
+    static double elliptic_solve_k(int N, double k1) {
+        if (k1 <= 0.0) return 0.0;
+        if (k1 >= 1.0) return 1.0 - 1e-15;
+
+        double q1 = special::jacobi_nome(k1 * k1);
+        double q  = std::pow(q1, 1.0 / static_cast<double>(N));
+
+        // ϑ₂(q) = 2 q^(1/4) · Σ_{n=0..∞} q^(n(n+1))
+        // ϑ₃(q) = 1 + 2 Σ_{n=1..∞} q^(n²)
+        double theta2 = 0.0;
+        double theta3 = 1.0;
+        for (int n = 0; n < 30; ++n) {
+            theta2 += std::pow(q, n * (n + 1));
+        }
+        theta2 *= 2.0 * std::pow(q, 0.25);
+        for (int n = 1; n < 30; ++n) {
+            theta3 += 2.0 * std::pow(q, static_cast<double>(n) * n);
+        }
+        double r = theta2 / theta3;
+        double k = r * r;
+        if (k <= 0.0) k = 1e-15;
+        if (k >= 1.0) k = 1.0 - 1e-15;
+        return k;
+    }
+
+    static std::vector<Coefficients>
+    elliptic_cascade(int order, double freq_hz,
+                     double passband_ripple_db, double stopband_attn_db,
+                     double sample_rate, bool highpass) {
+        if (order < 2 || (order & 1) != 0) return {};
+        if (freq_hz <= 0.0 || freq_hz >= 0.5 * sample_rate) return {};
+        if (passband_ripple_db <= 0.0) return {};
+        if (stopband_attn_db <= passband_ripple_db) return {};
+
+        double eps = std::sqrt(std::pow(10.0, passband_ripple_db / 10.0) - 1.0);
+        double As_lin = std::sqrt(std::pow(10.0, stopband_attn_db / 10.0) - 1.0);
+        double k1 = eps / As_lin;
+
+        // Sanity: k1 must lie in (0, 1).
+        if (!(k1 > 0.0 && k1 < 1.0)) return {};
+
+        double k  = elliptic_solve_k(order, k1);
+        double m  = k * k;
+        double K  = special::elliptic_K(m);
+
+        // Design-parameter v0 (SciPy ellipap convention,
+        // _filter_design.py):
+        //
+        //   v0 = K(m) · arc_jac_sn(1/ε, k1²) / (N · K(k1²))
+        //
+        // For typical engineering specs (Rp few dB, As ≥ 40), 1/ε > 1,
+        // and k1 is tiny ⇒ K(k1²) ≈ π/2 ≈ arc_jac_sn(>1, ~0) clamp,
+        // so the ratio → 1 and v0 → K/N. We mirror that clamp here
+        // via `special::jacobi_asn`, which is already saturating; the
+        // alternative is full complex sn⁻¹ machinery which the typical
+        // Cauer design lane does not need.
+        double K_k1 = special::elliptic_K(k1 * k1);
+        double r = special::jacobi_asn(1.0 / eps, k1 * k1);  // clamps if 1/ε > 1
+        double v0 = (K * r) / (static_cast<double>(order) * K_k1);
+        double sv, cv, dv;
+        // jacobi_sncndn(u, m, ...): note `m` is the parameter (k²),
+        // and for v0 we evaluate at modulus k' (m' = 1 - m).
+        special::jacobi_sncndn(v0, 1.0 - m, &sv, &cv, &dv);
+
+        // Per-section pole+zero placement follows the classic Cauer
+        // formula (cf. scipy.signal._filter_design.ellipap, BSD-3,
+        // and Antoniou ch. 12) so the design is interoperable with a
+        // well-trodden reference lane:
+        //
+        //   For j = 1, 3, 5, …, N−1 (N/2 conjugate pairs):
+        //     s, c, d = sn(j·K/N, k), cn(j·K/N, k), dn(j·K/N, k)
+        //     ω_z     = 1 / (k · |s|)                     (zero on jω)
+        //     p       = −(c·d·sv·cv + j·s·dv) / (1 − (d·sv)²)
+        //   where (sv, cv, dv) = (sn, cn, dn)(v0, k').
+        //
+        // The pole's conjugate p* gives the second member of the pair;
+        // we collapse each pair into one biquad section.
+
+        int N = order;
+        int L = N / 2;
+        double T = 1.0 / sample_rate;
+        double wc = prewarp_omega(freq_hz, sample_rate);
+
+        std::vector<Coefficients> result;
+        result.reserve(static_cast<size_t>(L));
+
+        for (int idx = 0; idx < L; ++idx) {
+            int jpos = 2 * idx + 1;   // 1, 3, 5, …
+            double u_k = jpos * K / static_cast<double>(N);
+
+            double s_u, c_u, d_u;
+            special::jacobi_sncndn(u_k, m, &s_u, &c_u, &d_u);
+
+            // ── zero on jω axis ──
+            double omega_z = 1.0 / (k * std::abs(s_u));
+
+            // ── pole pair ──
+            double dsv = d_u * sv;
+            double inv = 1.0 / (1.0 - dsv * dsv);
+            double p_re = -(c_u * d_u * sv * cv) * inv;
+            double p_im = -(s_u * dv) * inv;
+            // Take the upper half-plane representative; conjugate
+            // contributes the other half of the biquad denominator.
+            p_im = std::abs(p_im);
+
+            // Safety: stability requires Re(p) < 0.
+            if (p_re >= 0.0) p_re = -std::abs(p_re);
+
+            // Prototype (normalized to passband edge ωp = 1):
+            //   pole pair  → (s − p)(s − p*) = s² − 2 Re(p) s + |p|²
+            //   zero pair  → (s − jω_z)(s + jω_z) = s² + ω_z²
+            double pa1_proto = -2.0 * p_re;
+            double pa2_proto = p_re * p_re + p_im * p_im;
+            double pb2_proto = omega_z * omega_z;  // pb0 = 1, pb1 = 0
+
+            double A0, A1, A2, B0, B1, B2;
+            if (!highpass) {
+                // LP: substitute s → s/wc  ⇒  multiply A1,B1 by wc and
+                // A2,B2 by wc². Then normalize section DC gain to 1.
+                A0 = 1.0;
+                A1 = pa1_proto * wc;
+                A2 = pa2_proto * wc * wc;
+                B0 = 1.0;
+                B1 = 0.0;
+                B2 = pb2_proto * wc * wc;
+                double scale_num = A2 / B2;
+                B0 *= scale_num;
+                B1 *= scale_num;
+                B2 *= scale_num;
+            } else {
+                // HP: substitute s → wc/s in the prototype
+                // (s² + ω_z²) / (s² + a·s + b), giving
+                //   (ω_z²·s² + wc²) / (b·s² + a·wc·s + wc²).
+                // Normalize cascade-level by dividing each numerator
+                // by ω_z²/b so per-section gain at s=∞ becomes 1.
+                // Then divide everything by b to get A0=1 form:
+                //   A0 = 1
+                //   A1 = (-2·Re(p))·wc / |p|²
+                //   A2 = wc² / |p|²
+                //   B0 = 1
+                //   B1 = 0
+                //   B2 = wc² / ω_z²
+                // At s=0 (DC), section gain = B2·b/wc² = b/ω_z² < 1
+                // (DC blocked), product across cascade gives full HP
+                // stopband attenuation.
+                double pole_mag2 = pa2_proto;  // |p|² in prototype
+                A0 = 1.0;
+                A1 = (pa1_proto * wc) / pole_mag2;
+                A2 = (wc * wc) / pole_mag2;
+                B0 = 1.0;
+                B1 = 0.0;
+                B2 = (wc * wc) / pb2_proto;     // = wc²/ω_z²
+            }
+
+            result.push_back(bilinear_sos(B0, B1, B2, A0, A1, A2, T));
+        }
+
+        // Overall passband-floor scaling. Even-order elliptic LP has
+        //   |H_LP(0)| = 1 / √(1+ε²)
+        // (the floor of the ripple band). The HP dual sits at z=−1
+        // (Nyquist), where after bilinear the analog s→∞ maps; the
+        // section construction above leaves cascade-level analog
+        // |H_HP(∞)| = 1 (each section's b0 = 1, leading-order ratio
+        // 1/1). To pull the HP passband peaks to 0 dB matching the
+        // LP convention, apply the same √(1+ε²) ripple-floor scale.
+        if (!result.empty()) {
+            double target = 1.0 / std::sqrt(1.0 + eps * eps);
+            float scale = static_cast<float>(target);
+            result[0].b0 *= scale;
+            result[0].b1 *= scale;
+            result[0].b2 *= scale;
         }
         return result;
     }

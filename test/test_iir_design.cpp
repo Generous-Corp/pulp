@@ -10,9 +10,10 @@
 //     monotonic ~flat passband (no ripple)
 //   - All: cascade is BIBO stable (every section's poles |z|<1)
 //
-// Elliptic (Cauer) is intentionally deferred — its acceptance goldens
-// need the full complex Jacobi-cd machinery, tracked in the macOS
-// plugin-authoring plan §2.1 as a follow-up.
+// Elliptic (Cauer) acceptance goldens cover passband ripple ≤ Rp,
+// stopband attenuation ≥ As (within tolerance), BIBO stability, and
+// the equiripple notch signature in the stopband. Jacobi machinery
+// lives in `pulp::signal::special` (see special_functions.hpp).
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -190,6 +191,137 @@ TEST_CASE("IirDesign chebyshev2 rejects invalid inputs",
     REQUIRE(IirDesign::chebyshev2_lowpass(4, 0.0f, 40.0f, 48000.0f).empty());
     REQUIRE(IirDesign::chebyshev2_lowpass(4, 24000.0f, 40.0f, 48000.0f).empty());
     REQUIRE(IirDesign::chebyshev2_lowpass(4, 5000.0f, 0.0f, 48000.0f).empty());
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Elliptic (Cauer)
+// ─────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("IirDesign elliptic_lowpass produces correct section count",
+          "[signal][iir_design][elliptic]") {
+    auto sos2 = IirDesign::elliptic_lowpass(2, 1000.0f, 1.0f, 40.0f, 48000.0f);
+    REQUIRE(sos2.size() == 1);
+    auto sos4 = IirDesign::elliptic_lowpass(4, 1000.0f, 1.0f, 40.0f, 48000.0f);
+    REQUIRE(sos4.size() == 2);
+    auto sos8 = IirDesign::elliptic_lowpass(8, 1000.0f, 1.0f, 60.0f, 48000.0f);
+    REQUIRE(sos8.size() == 4);
+}
+
+TEST_CASE("IirDesign elliptic_lowpass cascade is stable",
+          "[signal][iir_design][elliptic]") {
+    for (int N : {2, 4, 6, 8}) {
+        for (float ripple : {0.1f, 0.5f, 1.0f}) {
+            for (float As : {40.0f, 60.0f, 80.0f}) {
+                auto sos = IirDesign::elliptic_lowpass(N, 2000.0f,
+                                                       ripple, As, 48000.0f);
+                INFO("N=" << N << " Rp=" << ripple << " As=" << As);
+                REQUIRE_FALSE(sos.empty());
+                REQUIRE(cascade_is_stable(sos));
+            }
+        }
+    }
+}
+
+TEST_CASE("IirDesign elliptic_lowpass passband ripple matches spec",
+          "[signal][iir_design][elliptic]") {
+    // Equiripple in the passband: peak-to-trough span should match Rp
+    // within a small tolerance.
+    const double fs = 48000.0;
+    const double fc = 2000.0;
+    const double Rp = 1.0;
+    const double As = 60.0;
+    auto sos = IirDesign::elliptic_lowpass(6,
+        static_cast<float>(fc), static_cast<float>(Rp),
+        static_cast<float>(As), static_cast<float>(fs));
+    REQUIRE_FALSE(sos.empty());
+
+    double max_db = -1e9, min_db = 1e9;
+    for (int i = 1; i <= 400; ++i) {
+        double f = fc * static_cast<double>(i) / 400.0;
+        double db = cascade_db_at_hz(sos, f, fs);
+        max_db = std::max(max_db, db);
+        min_db = std::min(min_db, db);
+    }
+    INFO("max " << max_db << " min " << min_db);
+    REQUIRE((max_db - min_db) <= Rp + 0.5);
+}
+
+TEST_CASE("IirDesign elliptic_lowpass meets stopband attenuation",
+          "[signal][iir_design][elliptic]") {
+    // The stopband edge sits at fc / k where k is the selectivity
+    // determined by the degree equation. For N=8, Rp=0.5, As=60 the
+    // transition is steep; well past the stopband edge we should see
+    // attenuation no worse than -As + tolerance.
+    const double fs = 48000.0;
+    const double fc = 2000.0;
+    const double Rp = 0.5;
+    const double As = 60.0;
+    auto sos = IirDesign::elliptic_lowpass(8,
+        static_cast<float>(fc), static_cast<float>(Rp),
+        static_cast<float>(As), static_cast<float>(fs));
+    REQUIRE_FALSE(sos.empty());
+
+    // For a comfortable margin, probe at 2× and 3× the passband edge.
+    // (Stopband edge is closer than that for these specs.)
+    double db_2x = cascade_db_at_hz(sos, fc * 2.0, fs);
+    double db_3x = cascade_db_at_hz(sos, fc * 3.0, fs);
+    INFO("2x = " << db_2x << " dB, 3x = " << db_3x << " dB");
+    REQUIRE(db_2x <= -As + 5.0);
+    REQUIRE(db_3x <= -As + 5.0);
+}
+
+TEST_CASE("IirDesign elliptic_lowpass equiripple shape — multiple notches in stopband",
+          "[signal][iir_design][elliptic]") {
+    // Elliptic filters have zeros on the jω axis ⇒ notches in the
+    // stopband. An Nth order LP has N/2 zero pairs, giving N/2 notches
+    // (transmission zeros) above the cutoff. We don't measure exact
+    // positions; we just confirm the response dips below the local
+    // stopband level multiple times — a signature elliptic feature.
+    const double fs = 48000.0;
+    const double fc = 1000.0;
+    auto sos = IirDesign::elliptic_lowpass(6, static_cast<float>(fc),
+                                            0.5f, 60.0f,
+                                            static_cast<float>(fs));
+    REQUIRE_FALSE(sos.empty());
+
+    // Sample magnitude beyond cutoff; count direction-changes (peaks).
+    std::vector<double> db_curve;
+    for (int i = 1; i <= 800; ++i) {
+        double f = fc * (1.0 + static_cast<double>(i) / 200.0); // fc..5fc
+        if (f >= 0.5 * fs) break;
+        db_curve.push_back(cascade_db_at_hz(sos, f, fs));
+    }
+    int extrema = 0;
+    for (size_t i = 1; i + 1 < db_curve.size(); ++i) {
+        bool up_then_down = db_curve[i] > db_curve[i - 1] && db_curve[i] > db_curve[i + 1];
+        bool down_then_up = db_curve[i] < db_curve[i - 1] && db_curve[i] < db_curve[i + 1];
+        if (up_then_down || down_then_up) ++extrema;
+    }
+    INFO("extrema = " << extrema);
+    // For N=6 we expect at least 2 distinct notch valleys in the
+    // stopband (3 zero pairs, but the highest can pile up near Nyquist).
+    REQUIRE(extrema >= 2);
+}
+
+TEST_CASE("IirDesign elliptic_highpass blocks DC and passes high freqs",
+          "[signal][iir_design][elliptic]") {
+    auto sos = IirDesign::elliptic_highpass(4, 2000.0f, 0.5f, 60.0f, 48000.0f);
+    REQUIRE_FALSE(sos.empty());
+    REQUIRE(cascade_is_stable(sos));
+    double db_dc = cascade_db_at_hz(sos, 1.0, 48000.0);
+    REQUIRE(db_dc < -50.0);
+    double db_high = cascade_db_at_hz(sos, 8000.0, 48000.0);
+    REQUIRE(db_high > -1.5);
+}
+
+TEST_CASE("IirDesign elliptic rejects invalid inputs",
+          "[signal][iir_design][elliptic]") {
+    REQUIRE(IirDesign::elliptic_lowpass(3, 1000.0f, 1.0f, 40.0f, 48000.0f).empty());
+    REQUIRE(IirDesign::elliptic_lowpass(0, 1000.0f, 1.0f, 40.0f, 48000.0f).empty());
+    REQUIRE(IirDesign::elliptic_lowpass(4, 1000.0f, -1.0f, 40.0f, 48000.0f).empty());
+    REQUIRE(IirDesign::elliptic_lowpass(4, 22050.0f, 1.0f, 40.0f, 44100.0f).empty());
+    // As <= Rp is nonsensical.
+    REQUIRE(IirDesign::elliptic_lowpass(4, 1000.0f, 10.0f, 5.0f, 48000.0f).empty());
 }
 
 // ─────────────────────────────────────────────────────────────────────────
