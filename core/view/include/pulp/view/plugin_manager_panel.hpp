@@ -38,6 +38,39 @@ struct PluginManagerRow {
     std::string path;                 ///< Absolute path to the plugin bundle/binary
     std::string reason;               ///< For failed/blacklisted rows: why
     std::int64_t last_scan_unix = 0;  ///< Seconds-since-epoch; 0 = "never"
+
+    // ── Item 4.3 — drag-add identity ─────────────────────────────────────
+    // The fields below are populated by the model so a drag-add into a
+    // SignalGraph can synthesize the PluginInfo without having to re-scan
+    // or look the row up by path. They are intentionally optional — older
+    // models that pre-date item 4.3 leave them at defaults and the
+    // resulting drop produces an "unresolved" graph node (PluginSlot::load
+    // is still attempted via `to_plugin_info`).
+    std::string manufacturer;
+    std::string version;
+    std::string unique_id;
+    int num_inputs = 2;
+    int num_outputs = 2;
+    bool is_instrument = false;
+    bool is_effect = true;
+
+    /// Convert this row back into a `pulp::host::PluginInfo` suitable for
+    /// SignalGraph::add_plugin_node(). Lossy by construction — only the
+    /// fields the manager panel tracks survive.
+    pulp::host::PluginInfo to_plugin_info() const {
+        pulp::host::PluginInfo info;
+        info.name = name;
+        info.manufacturer = manufacturer;
+        info.version = version;
+        info.path = path;
+        info.unique_id = unique_id;
+        info.format = format;
+        info.is_instrument = is_instrument;
+        info.is_effect = is_effect;
+        info.num_inputs = num_inputs;
+        info.num_outputs = num_outputs;
+        return info;
+    }
 };
 
 /// Which bucket a row belongs to.
@@ -473,6 +506,84 @@ public:
         }
     }
 
+    // ── Drag-add into a SignalGraph (item 4.3) ───────────────────────────
+    //
+    // The panel itself is rendering-only — it does not know what surface
+    // (graph editor, mixer column, etc.) the user is dropping onto. We
+    // emit a `on_row_drag_start` callback when the user presses on a
+    // scanned row and drags past `drag_threshold_px_`. The host is
+    // responsible for taking the row's `PluginInfo` and adding the node
+    // to whichever `SignalGraph` the drop landed on (see
+    // `pulp::host::add_plugin_node_from_row`).
+    //
+    // The drag callback fires only for rows in the `scanned` bucket —
+    // dragging a failed or blacklisted entry into the graph would create
+    // a node that can never load, so the panel suppresses it.
+
+    void on_mouse_down(Point pos) override {
+        drag_origin_ = pos;
+        drag_origin_set_ = true;
+        drag_started_ = false;
+        drag_row_ = identify_row_at(pos);
+    }
+    void on_mouse_drag(Point pos) override {
+        if (drag_origin_set_ && !drag_started_ && drag_row_.has_value()) {
+            const float dx = pos.x - drag_origin_.x;
+            const float dy = pos.y - drag_origin_.y;
+            if (dx * dx + dy * dy >= drag_threshold_px_ * drag_threshold_px_) {
+                drag_started_ = true;
+                if (on_row_drag_start && drag_row_->first == PluginManagerBucket::scanned) {
+                    on_row_drag_start(drag_row_->first, drag_row_->second, pos);
+                }
+            }
+        }
+    }
+    void on_mouse_up(Point pos) override {
+        if (drag_started_ && drag_row_.has_value() && on_row_drag_end) {
+            on_row_drag_end(drag_row_->first, drag_row_->second, pos);
+        }
+        drag_origin_set_ = false;
+        drag_started_ = false;
+        drag_row_.reset();
+    }
+
+    /// Programmatic drag — bypasses the per-frame mouse plumbing so a
+    /// host or test can fire the drag-add callback for a specific row
+    /// without synthesising motion events. The row is looked up by its
+    /// path. Returns true when a matching row was found and a non-empty
+    /// `on_row_drag_start` callback fired; false otherwise.
+    bool simulate_row_drag(PluginManagerBucket bucket,
+                           const std::string& path,
+                           Point drop_position = {0, 0})
+    {
+        const auto& rows_vec = visible(bucket);
+        for (const auto& r : rows_vec) {
+            if (r.path == path) {
+                if (bucket == PluginManagerBucket::scanned && on_row_drag_start) {
+                    on_row_drag_start(bucket, r, drop_position);
+                }
+                if (on_row_drag_end) {
+                    on_row_drag_end(bucket, r, drop_position);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Pixel threshold a drag must exceed before `on_row_drag_start` fires.
+    /// Defaults to 4 px to match common desktop conventions.
+    float drag_threshold_px() const { return drag_threshold_px_; }
+    void set_drag_threshold_px(float px) { drag_threshold_px_ = px; }
+
+    /// Fired once per drag, when the user has moved past
+    /// `drag_threshold_px()` after pressing on a scanned row.
+    std::function<void(PluginManagerBucket, const PluginManagerRow&, Point)> on_row_drag_start;
+
+    /// Fired on mouse-up after a drag started. Hosts that build a live
+    /// drop-target preview tear it down here.
+    std::function<void(PluginManagerBucket, const PluginManagerRow&, Point)> on_row_drag_end;
+
     bool on_key_event(const KeyEvent& event) override {
         if (!event.is_down) return false;
         // Type-to-filter: printable keys land in `on_text_input` on most
@@ -511,6 +622,37 @@ private:
     PluginManagerBucket context_menu_bucket_ = PluginManagerBucket::scanned;
 
     float row_height_ = 22.0f;
+
+    // Drag-add state (item 4.3)
+    Point drag_origin_{0, 0};
+    bool drag_origin_set_ = false;
+    bool drag_started_ = false;
+    std::optional<std::pair<PluginManagerBucket, PluginManagerRow>> drag_row_;
+    float drag_threshold_px_ = 4.0f;
+
+    std::optional<std::pair<PluginManagerBucket, PluginManagerRow>>
+    identify_row_at(Point pos) const {
+        const auto b = local_bounds();
+        const float toolbar_h = 28.0f;
+        if (pos.y < toolbar_h) return std::nullopt;
+
+        const float col_w = (b.width - 16.0f) / 3.0f;
+        const int col_idx = static_cast<int>((pos.x - 4.0f) / col_w);
+        const PluginManagerBucket bucket = col_idx <= 0
+            ? PluginManagerBucket::scanned
+            : col_idx == 1
+                ? PluginManagerBucket::failed
+                : PluginManagerBucket::blacklisted;
+
+        const float header_h = 20.0f;
+        const float row_y = pos.y - toolbar_h - 4.0f - header_h;
+        if (row_y < 0) return std::nullopt;
+
+        const auto& rows_vec = visible(bucket);
+        const int row = static_cast<int>(row_y / row_height_);
+        if (row < 0 || row >= static_cast<int>(rows_vec.size())) return std::nullopt;
+        return std::make_pair(bucket, rows_vec[static_cast<size_t>(row)]);
+    }
 
     const std::vector<PluginManagerRow>& visible(PluginManagerBucket b) const {
         switch (b) {

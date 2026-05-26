@@ -1207,4 +1207,26 @@ float SignalGraph::node_gain(NodeId id) const {
     return n->gain;
 }
 
+// ── Drag-add helper (item 4.3) ──────────────────────────────────────────
+NodeId add_plugin_node_from_drop(SignalGraph& graph,
+                                 const PluginInfo& info,
+                                 bool* loaded_out)
+{
+    // Try the live-load path first. add_plugin_node calls PluginSlot::load,
+    // which may return null when the bundle is missing or refuses to load.
+    const NodeId id = graph.add_plugin_node(info);
+    if (auto* n = graph.node(id); n && n->plugin) {
+        if (loaded_out) *loaded_out = true;
+        return id;
+    }
+
+    // Live-load failed — remove the half-loaded node and create an
+    // unresolved placeholder so the graph still carries the user's intent.
+    graph.remove_node(id);
+    if (loaded_out) *loaded_out = false;
+    return graph.add_unresolved_plugin_node(
+        info, info.num_inputs, info.num_outputs,
+        info.name.empty() ? info.path : info.name);
+}
+
 } // namespace pulp::host

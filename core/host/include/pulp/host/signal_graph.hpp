@@ -416,4 +416,26 @@ private:
                                        const std::vector<Connection>& connections);
 };
 
+// ── Drag-add helper (item 4.3) ──────────────────────────────────────────
+//
+// `add_plugin_node_from_drop` is the host-side companion to
+// `pulp::view::PluginManagerPanel::on_row_drag_start`. It attempts to
+// load the plugin in the supplied `PluginInfo`; if PluginSlot::load
+// returns null (plugin missing on this machine, ABI mismatch, scanner
+// gave us a stale path, etc.) it falls back to
+// `add_unresolved_plugin_node` so the topology survives a serialize +
+// reload pass and the user can resolve the plugin later.
+//
+// `loaded_out`, if non-null, is set to true when a live PluginSlot
+// attached or false when the node landed unresolved — useful for
+// driving the drop-target UI (e.g. ghost-vs-solid node rendering).
+//
+// The function takes the graph by reference; it is the caller's
+// responsibility to call `graph.prepare(...)` afterwards before the
+// next audio block. We do NOT do that here because real hosts batch
+// drops and prepare once at the end of the UI tick.
+NodeId add_plugin_node_from_drop(SignalGraph& graph,
+                                 const PluginInfo& info,
+                                 bool* loaded_out = nullptr);
+
 } // namespace pulp::host
