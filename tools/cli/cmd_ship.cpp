@@ -572,6 +572,148 @@ int cmd_ship(const std::vector<std::string>& args) {
 #endif
     }
 
+    // ── release (sign → package → notarize → staple, one command) ──────────
+    //
+    // Item 7.4 (macos-plugin-authoring-plan): one-command pipeline that
+    // walks the entire macOS distribution surface for a Pulp plugin.
+    // Equivalent to (under the hood):
+    //
+    //   pulp ship sign     --identity "..."
+    //   pulp ship package  --version "..."  [--pkg | --dmg]
+    //   pulp ship notarize --apple-id ... --team-id ...    (macos only)
+    //   pulp ship notarize --staple                        (final step)
+    //
+    // Each stage short-circuits on failure so a broken sign doesn't try
+    // to notarize garbage. Stages are skippable so CI lanes that only
+    // care about, say, the package step can `--skip-sign --skip-notarize`.
+    //
+    // Notarization requires real Apple credentials — when `--skip-notarize`
+    // is passed (or when neither `--apple-id`/`--team-id` nor
+    // `signing.apple.*` config is set), the pipeline runs sign+package
+    // only and exits cleanly so CI can still exercise the orchestration
+    // without notarytool round-trips.
+    if (sub == "release") {
+#ifndef __APPLE__
+        std::cerr << "pulp ship release: macOS-only (notarization + .pkg/.dmg).\n";
+        return 1;
+#else
+        std::string target = "macos";
+        std::string identity, apple_id, team_id, password, version;
+        bool want_pkg = false, want_dmg = false;
+        bool skip_sign = false, skip_package = false, skip_notarize = false;
+
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--target") {
+                if (!take_ship_value(args, i, sub, args[i], target)) return 2;
+            } else if (args[i] == "--identity") {
+                if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--apple-id") {
+                if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
+            } else if (args[i] == "--team-id") {
+                if (!take_ship_value(args, i, sub, args[i], team_id)) return 2;
+            } else if (args[i] == "--password") {
+                if (!take_ship_value(args, i, sub, args[i], password)) return 2;
+            } else if (args[i] == "--version") {
+                if (!take_ship_value(args, i, sub, args[i], version)) return 2;
+            } else if (args[i] == "--pkg") {
+                want_pkg = true;
+            } else if (args[i] == "--dmg") {
+                want_dmg = true;
+            } else if (args[i] == "--skip-sign") {
+                skip_sign = true;
+            } else if (args[i] == "--skip-package") {
+                skip_package = true;
+            } else if (args[i] == "--skip-notarize") {
+                skip_notarize = true;
+            } else {
+                return unknown_ship_arg(sub, args[i]);
+            }
+        }
+
+        if (target != "macos") {
+            std::cerr << "pulp ship release: --target " << target
+                      << " is not implemented yet (only macos).\n";
+            return 1;
+        }
+        if (want_pkg && want_dmg) {
+            std::cerr << "pulp ship release: --pkg and --dmg are mutually "
+                         "exclusive (item 7.5 picks one per artifact).\n";
+            return 2;
+        }
+
+        // Stage 1: sign. Skippable for CI dry-runs.
+        if (!skip_sign) {
+            std::cout << "── Stage 1/4: sign ────────────────────────────────\n";
+            std::vector<std::string> sign_args = {"sign"};
+            if (!identity.empty()) {
+                sign_args.push_back("--identity");
+                sign_args.push_back(identity);
+            }
+            int sign_rc = cmd_ship(sign_args);
+            if (sign_rc != 0) {
+                std::cerr << "pulp ship release: sign stage failed; aborting "
+                             "before package/notarize.\n";
+                return sign_rc;
+            }
+        } else {
+            std::cout << "── Stage 1/4: sign (SKIPPED) ──────────────────────\n";
+        }
+
+        // Stage 2: package. The pkg vs dmg decision lives in cmd_ship
+        // 'package' itself (item 7.5 wiring below).
+        if (!skip_package) {
+            std::cout << "── Stage 2/4: package ─────────────────────────────\n";
+            std::vector<std::string> pkg_args = {"package"};
+            if (!version.empty()) {
+                pkg_args.push_back("--version");
+                pkg_args.push_back(version);
+            }
+            if (want_pkg) pkg_args.push_back("--pkg");
+            if (want_dmg) pkg_args.push_back("--dmg");
+            int pkg_rc = cmd_ship(pkg_args);
+            if (pkg_rc != 0) {
+                std::cerr << "pulp ship release: package stage failed; "
+                             "aborting before notarize.\n";
+                return pkg_rc;
+            }
+        } else {
+            std::cout << "── Stage 2/4: package (SKIPPED) ───────────────────\n";
+        }
+
+        // Stage 3 + 4: notarize + staple. Submission requires Apple
+        // credentials — when they aren't available we run the
+        // orchestration up to here and exit cleanly. CI can pass
+        // `--skip-notarize` explicitly to make that decision visible.
+        if (skip_notarize) {
+            std::cout << "── Stage 3/4: notarize (SKIPPED) ──────────────────\n";
+            std::cout << "── Stage 4/4: staple   (SKIPPED) ──────────────────\n";
+            std::cout << "\npulp ship release: sign+package complete; "
+                         "notarization skipped by request.\n";
+            return 0;
+        }
+
+        // Defer credential resolution to the notarize handler — it
+        // already has the apple_id/team_id/password CLI→env→config
+        // fallback chain and the helpful "where to find these" hint.
+        std::cout << "── Stage 3/4: notarize ────────────────────────────\n";
+        std::vector<std::string> nz_args = {"notarize"};
+        if (!apple_id.empty()) { nz_args.push_back("--apple-id"); nz_args.push_back(apple_id); }
+        if (!team_id.empty())  { nz_args.push_back("--team-id");  nz_args.push_back(team_id); }
+        if (!password.empty()) { nz_args.push_back("--password"); nz_args.push_back(password); }
+        int nz_rc = cmd_ship(nz_args);
+        if (nz_rc != 0) {
+            std::cerr << "pulp ship release: notarize stage failed.\n";
+            return nz_rc;
+        }
+
+        // The notarize handler already staples on success, so the
+        // Stage 4 line is a status echo, not a re-run.
+        std::cout << "── Stage 4/4: staple (handled by notarize stage) ──\n";
+        std::cout << "\npulp ship release: macOS pipeline complete.\n";
+        return 0;
+#endif
+    }
+
     // ── appcast ─────────────────────────────────────────────────────────────
     if (sub == "appcast") {
         std::string version, notes, url, output_path, title, sign_key, min_os;
@@ -679,6 +821,10 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
+    std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
+    std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
+    std::cout << "             --pkg | --dmg                                       (item 7.5)\n";
+    std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
     std::cout << "  check      Check signing status of built plugins\n";

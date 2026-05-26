@@ -437,6 +437,73 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
+// Item 7.4 (macos-plugin-authoring-plan): `pulp ship release` orchestrates
+// sign → package → notarize → staple as one command. The shellout
+// covers argv parsing and the macOS-only guard; the real signing /
+// notarization round-trip lives on the self-hosted Mac runner because
+// it needs Apple credentials.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship release argv parsing surfaces flag errors before side effects",
+                 "[cli][shellout][ship][release][macos-7.4]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("release-parse", true);
+
+    // Unknown flag — must fail with exit 2 before any pkgbuild invocation.
+    auto bogus = run_pulp_in(root, {"ship", "release", "--bogus"});
+    REQUIRE_FALSE(bogus.timed_out);
+    REQUIRE(bogus.exit_code != 0);
+    auto bogus_combined = bogus.stdout_output + bogus.stderr_output;
+    REQUIRE(contains(bogus_combined, "unknown argument"));
+
+    // --pkg and --dmg are mutually exclusive at the release level too.
+    auto conflict = run_pulp_in(root,
+        {"ship", "release", "--target", "macos", "--pkg", "--dmg"});
+    REQUIRE_FALSE(conflict.timed_out);
+    REQUIRE(conflict.exit_code != 0);
+    REQUIRE(contains(conflict.stdout_output + conflict.stderr_output,
+                     "mutually exclusive"));
+
+    // Unsupported --target → fail loudly. Only macos is wired for now.
+    auto unsupported = run_pulp_in(root,
+        {"ship", "release", "--target", "windows"});
+    REQUIRE_FALSE(unsupported.timed_out);
+    REQUIRE(unsupported.exit_code != 0);
+
+    fs::remove_all(root);
+}
+
+// Item 7.4 acceptance: when sign + notarize stages can be skipped, the
+// `release` orchestration completes without Apple credentials so CI
+// can verify the wiring even on hosts that have no signing identity.
+// We don't have built plugin bundles in this fake project, so we use
+// --skip-sign and --skip-package as well to confirm the orchestration
+// short-circuits cleanly. The real e2e runs on the Mac runner.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship release --skip-{sign,package,notarize} runs orchestration to clean exit",
+                 "[cli][shellout][ship][release][macos-7.4]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("release-skip-all", true);
+
+    auto r = run_pulp_in(root, {"ship", "release", "--target", "macos",
+                                "--skip-sign", "--skip-package",
+                                "--skip-notarize"});
+    REQUIRE_FALSE(r.timed_out);
+    // On macOS this should succeed; on non-Apple the orchestration
+    // refuses with a clear error. Either is acceptable here — we just
+    // need to confirm the argv was parsed and the stages were reached.
+    auto combined = r.stdout_output + r.stderr_output;
+#ifdef __APPLE__
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(combined, "Stage 1/4"));
+    REQUIRE(contains(combined, "SKIPPED"));
+#else
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(combined, "macOS"));
+#endif
+
+    fs::remove_all(root);
+}
+
 // Item 7.4b (macos-plugin-authoring-plan): `pulp build --install` exists
 // and rejects invalid flag combinations before touching the filesystem.
 // The end-to-end install path is unit-tested via install_paths_mac;
