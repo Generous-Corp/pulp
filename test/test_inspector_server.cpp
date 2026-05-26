@@ -148,11 +148,32 @@ struct RecordingClient {
         REQUIRE(ok);
         return messages[index];
     }
+
+    bool wait_for_message_count(std::size_t expected,
+                                std::chrono::milliseconds timeout = std::chrono::milliseconds(250)) {
+        std::unique_lock<std::mutex> lock(mutex);
+        return cv.wait_for(lock, timeout, [&] {
+            return messages.size() >= expected;
+        });
+    }
+
+    std::size_t message_count() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return messages.size();
+    }
 };
 
 bool wait_for_client_count(InspectorServer& server, int expected) {
     for (int i = 0; i < 100; ++i) {
         if (server.client_count() == expected) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+bool wait_for_disconnect(InterprocessConnection& conn) {
+    for (int i = 0; i < 100; ++i) {
+        if (!conn.is_connected()) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     return false;
@@ -291,6 +312,117 @@ TEST_CASE("InspectorServer dispatches requests through the configured handler",
     server.stop();
 }
 
+TEST_CASE("InspectorServer can refresh its discovery file after startup",
+          "[inspect][server]") {
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     ("pulp-inspector-refresh-test-" + std::to_string(socket_port_seed()));
+    std::filesystem::create_directories(tmp);
+    ScopedEnv tmpdir(discovery_env_name());
+    tmpdir.set(tmp.string());
+
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+    REQUIRE(server.port() == *port);
+
+    const auto file = inspector_port_file(tmp);
+    REQUIRE(std::filesystem::exists(file));
+    std::filesystem::remove(file);
+    REQUIRE_FALSE(std::filesystem::exists(file));
+
+    server.advertise_port();
+    REQUIRE(std::filesystem::exists(file));
+    std::ifstream in(file);
+    std::string contents;
+    in >> contents;
+    REQUIRE(contents == std::to_string(*port));
+
+    server.stop();
+    std::filesystem::remove_all(tmp);
+}
+
+TEST_CASE("InspectorServer suppresses empty handler responses",
+          "[inspect][server]") {
+    InspectorServer server;
+    std::atomic<int> handled{0};
+    std::string seen_method;
+    std::mutex seen_mutex;
+
+    server.set_request_handler([&](const InspectorMessage& request) {
+        std::lock_guard<std::mutex> lock(seen_mutex);
+        ++handled;
+        seen_method = request.method;
+        return InspectorMessage{};
+    });
+
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    RecordingClient client;
+    REQUIRE(client.connect(*port));
+    REQUIRE(wait_for_client_count(server, 1));
+    REQUIRE(client.conn.send_message(encode_message(
+        make_request(77, "Inspector.observeOnly", R"({"silent":true})"))));
+
+    for (int i = 0; i < 100 && handled.load() == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    REQUIRE(handled.load() == 1);
+    {
+        std::lock_guard<std::mutex> lock(seen_mutex);
+        REQUIRE(seen_method == "Inspector.observeOnly");
+    }
+    REQUIRE_FALSE(client.wait_for_message_count(1));
+    REQUIRE(client.message_count() == 0);
+
+    client.conn.disconnect();
+    REQUIRE(wait_for_client_count(server, 0));
+    server.stop();
+}
+
+TEST_CASE("InspectorServer can send handler-produced events",
+          "[inspect][server]") {
+    InspectorServer server;
+    std::atomic<int> handled{0};
+    std::mutex seen_mutex;
+    int seen_id = 0;
+    std::string seen_method;
+
+    server.set_request_handler([&](const InspectorMessage& request) {
+        std::lock_guard<std::mutex> lock(seen_mutex);
+        ++handled;
+        seen_id = request.id;
+        seen_method = request.method;
+        return make_event("Inspector.subscriptionReady", R"({"channel":"dom","ready":true})");
+    });
+
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    RecordingClient client;
+    REQUIRE(client.connect(*port));
+    REQUIRE(wait_for_client_count(server, 1));
+    REQUIRE(client.conn.send_message(encode_message(
+        make_request(5, "Inspector.subscribe", R"({"channel":"dom"})"))));
+
+    InspectorMessage event;
+    REQUIRE(decode_message(client.wait_for_message(0), event));
+    REQUIRE(handled.load() == 1);
+    {
+        std::lock_guard<std::mutex> lock(seen_mutex);
+        REQUIRE(seen_id == 5);
+        REQUIRE(seen_method == "Inspector.subscribe");
+    }
+    REQUIRE(event.method == "Inspector.subscriptionReady");
+    const auto event_json = choc::json::parse(event.params_json);
+    REQUIRE(std::string(event_json["channel"].getString()) == "dom");
+    REQUIRE(event_json["ready"].getBool());
+
+    client.conn.disconnect();
+    server.stop();
+}
+
 TEST_CASE("InspectorServer returns protocol errors for invalid JSON frames",
           "[inspect][server]") {
     InspectorServer server;
@@ -344,4 +476,63 @@ TEST_CASE("InspectorServer broadcasts events to every connected client",
     first.conn.disconnect();
     second.conn.disconnect();
     server.stop();
+}
+
+TEST_CASE("InspectorServer prunes disconnected clients before later broadcasts",
+          "[inspect][server]") {
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    RecordingClient first;
+    RecordingClient second;
+    REQUIRE(first.connect(*port));
+    REQUIRE(second.connect(*port));
+    REQUIRE(wait_for_client_count(server, 2));
+
+    server.broadcast(make_event("Inspector.first", R"({"sequence":1})"));
+    InspectorMessage first_initial;
+    InspectorMessage second_initial;
+    REQUIRE(decode_message(first.wait_for_message(0), first_initial));
+    REQUIRE(decode_message(second.wait_for_message(0), second_initial));
+    REQUIRE(first_initial.method == "Inspector.first");
+
+    first.conn.disconnect();
+    REQUIRE(wait_for_client_count(server, 1));
+
+    server.broadcast(make_event("Inspector.second", R"({"sequence":2})"));
+    InspectorMessage second_later;
+    REQUIRE(decode_message(second.wait_for_message(1), second_later));
+    REQUIRE(second_later.method == "Inspector.second");
+    const auto later_json = choc::json::parse(second_later.params_json);
+    REQUIRE(static_cast<int>(later_json["sequence"].getInt64()) == 2);
+    REQUIRE_FALSE(first.wait_for_message_count(2));
+
+    second.conn.disconnect();
+    REQUIRE(wait_for_client_count(server, 0));
+    server.stop();
+}
+
+TEST_CASE("InspectorServer stop disconnects clients and is idempotent after activity",
+          "[inspect][server]") {
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    RecordingClient client;
+    REQUIRE(client.connect(*port));
+    REQUIRE(wait_for_client_count(server, 1));
+
+    server.broadcast(make_event("Inspector.beforeStop", R"({"active":true})"));
+    InspectorMessage event;
+    REQUIRE(decode_message(client.wait_for_message(0), event));
+    REQUIRE(event.method == "Inspector.beforeStop");
+
+    server.stop();
+    REQUIRE(server.client_count() == 0);
+    REQUIRE(wait_for_disconnect(client.conn));
+
+    server.stop();
+    REQUIRE(server.client_count() == 0);
+    REQUIRE(server.port() == *port);
 }
