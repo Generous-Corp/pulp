@@ -1,10 +1,47 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #define main pulp_design_debug_main_for_test
 #include "../tools/design/pulp_design_debug.cpp"
 #undef main
+
+namespace {
+
+struct CurrentPathGuard {
+    std::filesystem::path previous = std::filesystem::current_path();
+
+    ~CurrentPathGuard() {
+        std::error_code ec;
+        std::filesystem::current_path(previous, ec);
+    }
+};
+
+std::filesystem::path make_temp_dir(std::string_view name) {
+    auto base = std::filesystem::temp_directory_path() /
+                ("pulp-design-debug-" + std::string(name) + "-" + now_stamp());
+    for (int i = 0; i < 100; ++i) {
+        auto candidate = base;
+        if (i != 0) candidate += "-" + std::to_string(i);
+        std::error_code ec;
+        if (std::filesystem::create_directories(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return base;
+}
+
+int run_design_debug(std::vector<std::string> args) {
+    std::vector<char*> argv;
+    argv.reserve(args.size());
+    for (auto& arg : args) argv.push_back(arg.data());
+    return pulp_design_debug_main_for_test(static_cast<int>(argv.size()), argv.data());
+}
+
+} // namespace
 
 TEST_CASE("design-debug JSON escaping preserves report syntax",
           "[tools][design-debug][coverage]") {
@@ -15,6 +52,33 @@ TEST_CASE("design-debug JSON escaping preserves report syntax",
     REQUIRE(json_escape("tab\tstop") == "tab\\tstop");
     REQUIRE(json_escape(std::string("nul\0byte", 8)) == "nul byte");
     REQUIRE(json_escape(std::string("unit") + static_cast<char>(0x1f)) == "unit ");
+}
+
+TEST_CASE("design-debug file helpers round-trip text and binary artifacts",
+          "[tools][design-debug][coverage]") {
+    auto temp = make_temp_dir("files");
+    auto text_path = temp / "nested" / "artifact.txt";
+    auto binary_path = temp / "artifact.bin";
+    auto missing_path = temp / "missing" / "artifact.txt";
+
+    REQUIRE(read_file(text_path).empty());
+    REQUIRE_FALSE(write_text_file(text_path, "not-created"));
+    REQUIRE_FALSE(append_text_file(text_path, "not-created"));
+
+    REQUIRE(std::filesystem::create_directories(text_path.parent_path()));
+    REQUIRE(write_text_file(text_path, "prompt"));
+    REQUIRE(read_file(text_path) == "prompt");
+    REQUIRE(append_text_file(text_path, "\nresponse"));
+    REQUIRE(read_file(text_path) == "prompt\nresponse");
+
+    const std::vector<uint8_t> bytes = {0x00, 0x7f, 0x80, 0xff};
+    REQUIRE(write_binary_file(binary_path, bytes));
+    REQUIRE(read_binary_file(binary_path) == bytes);
+    REQUIRE(read_binary_file(missing_path).empty());
+    REQUIRE_FALSE(write_binary_file(temp / "missing" / "artifact.bin", bytes));
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
 }
 
 TEST_CASE("design-debug slugifies artifact stems deterministically",
@@ -34,6 +98,42 @@ TEST_CASE("design-debug slugifies artifact stems deterministically",
     auto boundary_slug = slugify("12345678901234567890123456789012345678901234567!");
     REQUIRE(boundary_slug.size() == 47);
     REQUIRE(boundary_slug.back() == '7');
+}
+
+TEST_CASE("design-debug repo discovery finds the design tool from nested directories",
+          "[tools][design-debug][coverage]") {
+    auto temp = make_temp_dir("repo-root");
+    auto repo = temp / "repo";
+    auto design_dir = repo / "examples" / "design-tool";
+    auto build_dir = repo / "build" / "examples" / "design-tool";
+    REQUIRE(std::filesystem::create_directories(design_dir));
+    REQUIRE(std::filesystem::create_directories(build_dir));
+    REQUIRE(write_text_file(repo / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.22)\n"));
+    REQUIRE(write_text_file(design_dir / kDesignToolEntry, "globalThis.__loaded = true;\n"));
+    REQUIRE(write_text_file(build_dir / "pulp-design-tool", "binary placeholder\n"));
+
+    auto nested = repo / "tools" / "design" / "contracts";
+    REQUIRE(std::filesystem::create_directories(nested));
+
+    CurrentPathGuard guard;
+    std::filesystem::current_path(nested);
+
+    auto found = find_repo_root();
+    REQUIRE(std::filesystem::equivalent(found, repo));
+    REQUIRE(std::filesystem::equivalent(find_default_script(found),
+                                        design_dir / kDesignToolEntry));
+    REQUIRE(std::filesystem::equivalent(find_default_design_tool_bin(found),
+                                        build_dir / "pulp-design-tool"));
+
+    std::filesystem::remove(design_dir / kDesignToolEntry);
+    REQUIRE(find_repo_root().empty());
+    REQUIRE(find_default_script(repo).empty());
+
+    std::filesystem::remove(build_dir / "pulp-design-tool");
+    REQUIRE(find_default_design_tool_bin(repo).empty());
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
 }
 
 TEST_CASE("design-debug capture metadata matches backend behavior",
@@ -89,6 +189,25 @@ TEST_CASE("design-debug target bounds parser accepts debug state shape",
     REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":{"x":1,"y":2,"width":3}})JSON").valid);
 }
 
+TEST_CASE("design-debug target bounds parser rejects incompatible JSON shapes",
+          "[tools][design-debug][coverage]") {
+    REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":null})JSON").valid);
+    REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":[]})JSON").valid);
+    REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":{"x":"1","y":2,"width":3,"height":4}})JSON").valid);
+    REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":{"x":1,"y":2,"width":3,"height":4,"extra":5}})JSON").valid);
+    REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":{"x":1e1,"y":2,"width":3,"height":4}})JSON").valid);
+    REQUIRE_FALSE(parse_target_bounds(R"JSON({"targetBounds":{"x":+1,"y":2,"width":3,"height":4}})JSON").valid);
+
+    auto negative = parse_target_bounds(R"JSON({"targetBounds":{"x":-1.5,"y":-2.25,"width":3.5,"height":4.75}})JSON");
+    REQUIRE(negative.valid);
+    REQUIRE(negative.x == -1.5f);
+    REQUIRE(negative.y == -2.25f);
+    REQUIRE(negative.width == 3.5f);
+    REQUIRE(negative.height == 4.75f);
+
+    REQUIRE_THROWS(parse_target_bounds(R"JSON({"targetBounds":{"x":-,"y":2,"width":3,"height":4}})JSON"));
+}
+
 TEST_CASE("design-debug shell quoting keeps AI command templates inert",
           "[tools][design-debug][coverage]") {
     REQUIRE(shell_quote("plain") == "'plain'");
@@ -111,4 +230,36 @@ TEST_CASE("design-debug command capture preserves stdout and exit status",
 
     REQUIRE(output.find("design-debug-output") != std::string::npos);
     REQUIRE(exit_code == 7);
+}
+
+TEST_CASE("design-debug option validation fails before expensive render setup",
+          "[tools][design-debug][coverage]") {
+    auto temp = make_temp_dir("options");
+    auto script = temp / "script.js";
+    auto response = temp / "response.txt";
+    REQUIRE(write_text_file(script, "globalThis.__loaded = true;\n"));
+
+    CurrentPathGuard guard;
+    std::filesystem::current_path(temp);
+
+    REQUIRE(run_design_debug({"pulp-design-debug", "--help"}) == 0);
+    REQUIRE(run_design_debug({"pulp-design-debug"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--unknown"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--capture-backend", "unknown"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", (temp / "missing.js").string()}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", script.string(),
+                              "--response-file", (temp / "missing-response.txt").string()}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", script.string(),
+                              "--capture-backend", "live-gpu",
+                              "--design-tool-bin", (temp / "missing-bin").string()}) == 1);
+
+    REQUIRE(write_text_file(response, "ok"));
+    REQUIRE(read_file(response) == "ok");
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
 }
