@@ -15,6 +15,7 @@ target_sources(pulp-format PRIVATE
     src/validation_harness.cpp
     src/aax_model.cpp
     src/host_type.cpp
+    $<$<PLATFORM_ID:Darwin>:src/host_type_mac.mm>
     src/host_version.cpp
     $<$<PLATFORM_ID:Darwin>:src/host_version_mac.mm>
     $<$<PLATFORM_ID:Windows>:src/host_version_win.cpp>

@@ -75,7 +75,49 @@ HostType host_type_from_process_name(std::string_view process_name) {
     return HostType::Unknown;
 }
 
+HostType host_type_from_auv3_wrapper(std::string_view wrapper_identifier) {
+    if (wrapper_identifier.empty()) return HostType::Unknown;
+    std::string id = to_lower(wrapper_identifier);
+
+    // Logic Pro family — bundle ids + XPC wrapper names. MainStage
+    // historically shares the Logic Pro DAW-quirk family (auv3 cross-host
+    // row 21 dual-tracked bypass, channel-strip plumbing), so we fold it
+    // into HostType::LogicPro rather than introducing a separate enum.
+    if (id.find("com.apple.logic") != std::string::npos) return HostType::LogicPro;
+    if (id.find("com.apple.mainstage") != std::string::npos) return HostType::LogicPro;
+    if (id.find("auhostingservicexpc_arrow") != std::string::npos) return HostType::LogicPro;
+    // GarageBand 10+ uses bundle id `com.apple.garageband10`.
+    if (id.find("com.apple.garageband") != std::string::npos) return HostType::GarageBand;
+    // Reuse the executable-path classifier for anything else — many
+    // wrapper identifiers happen to share the same substrings (`reaper`,
+    // `cubase`, `ableton`, etc.) when the host advertises through
+    // `NSExtensionContext`. The classifier already handles those.
+    HostType derived = host_type_from_process_name(id);
+    if (derived != HostType::Unknown) return derived;
+
+    // Apple's generic `AUHostingService` shows up when an unspecified
+    // wrapper hosts an AU v3 extension and no host bundle id is
+    // advertised. Treat as Unknown so the caller falls back to its
+    // executable-path heuristic.
+    return HostType::Unknown;
+}
+
+#ifndef __APPLE__
+std::string current_auv3_wrapper_identifier() { return {}; }
+#endif
+
 HostType detect_host_type() {
+#ifdef __APPLE__
+    // DAW-quirks row 22 — when running as an AU v3 extension prefer the
+    // wrapper-reported identifier (`detect_host_type` on iOS / sandboxed
+    // macOS extensions will otherwise classify our own `.appex`
+    // executable name as Unknown).
+    auto wrapper_id = current_auv3_wrapper_identifier();
+    if (!wrapper_id.empty()) {
+        HostType wrapped = host_type_from_auv3_wrapper(wrapper_id);
+        if (wrapped != HostType::Unknown) return wrapped;
+    }
+#endif
     return host_type_from_process_name(get_process_name());
 }
 

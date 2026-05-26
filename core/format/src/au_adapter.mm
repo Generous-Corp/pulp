@@ -1,6 +1,49 @@
 // Audio Unit v3 adapter for Pulp
 // Implements AUAudioUnit wrapping a Pulp Processor
 // Built from Apple AudioToolbox documentation
+//
+// ─────────────────────────────────────────────────────────────────────────
+// Per-method audit checklist (macOS plan item 3.1)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Each `PulpAudioUnit` override below is audited against three axes:
+//   • returns — what the AU v3 host reads from the call site
+//   • thread — which thread Apple's framework may invoke it from
+//   • allocates — whether the body is allowed to heap-allocate (NO for
+//     anything reachable from the audio-render path; YES otherwise)
+//
+// Pinned by `test_au_plugin_state.mm — "AU v3 per-method audit invariants"`.
+// When you add a new override below, add a row here AND a regression
+// assertion in that test so the no-op stays a no-op.
+//
+//  ┌──────────────────────────────────────────┬───────────┬──────────────┬──────────────┐
+//  │ method                                   │ returns   │ thread       │ allocates    │
+//  ├──────────────────────────────────────────┼───────────┼──────────────┼──────────────┤
+//  │ initWithComponentDescription:options:    │ self/nil  │ main (init)  │ YES (init)   │
+//  │ outputBusses / inputBusses               │ NSArray   │ main + audio │ NO (cached)  │
+//  │ latency                                  │ seconds   │ KVO/main     │ NO           │
+//  │ tailTime                                 │ seconds   │ KVO/main     │ NO           │
+//  │ supportsUserPresets                      │ BOOL=NO   │ main         │ NO (const)   │
+//  │ canProcessInPlace                        │ BOOL=YES  │ main + audio │ NO (const)   │
+//  │ parameterTree                            │ AUParam…  │ main         │ YES (per call) │
+//  │ shouldBypassEffect                       │ BOOL      │ main + audio │ NO (atomic)  │
+//  │ setShouldBypassEffect:                   │ void      │ main + audio │ NO (RT-safe) │
+//  │ allocateRenderResourcesAndReturnError:   │ BOOL      │ main         │ YES (init)   │
+//  │ deallocateRenderResources                │ void      │ main         │ YES (release)│
+//  │ internalRenderBlock                      │ block     │ main         │ YES (block)  │
+//  │   └─ render block body                   │ OSStatus  │ AUDIO        │ NO           │
+//  │ fullState                                │ NSDict    │ main         │ YES (serdes) │
+//  │ setFullState:                            │ void      │ main         │ YES (serdes) │
+//  │ audioUnitARAFactory                      │ void*     │ KVO/main     │ NO (cached)  │
+//  │ supportedViewConfigurations:             │ NSIndexS… │ main         │ YES (NSSet)  │
+//  │ selectViewConfiguration:                 │ void      │ main         │ NO (log only)│
+//  └──────────────────────────────────────────┴───────────┴──────────────┴──────────────┘
+//
+// Pulp-private accessors used by tests (NOT AUAudioUnit overrides):
+//   • pulpProcessor / pulpStore — main-thread, read-only.
+//   • pulpBypassParameterId   — main-thread, read-only.
+//   • pulpLastParameterEvent* — main-thread, read-only snapshots of the
+//     last block's param-event queue (sample-offset, ramp duration, etc).
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
