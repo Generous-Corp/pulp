@@ -1440,6 +1440,11 @@ pulp_add_test_suite(pulp-test-convolver LIBRARIES pulp::signal)
 # thread → audio thread, including a concurrent stage/swap hammer test.
 pulp_add_test_suite(pulp-test-convolver-bg-swap LIBRARIES pulp::signal pulp::runtime)
 
+# Non-uniform partitioned convolver tests (macOS plugin authoring plan
+# item 2.3, Slice B). Two-stage Gardner-style head (small block) +
+# tail (K× larger block) with zero-latency mixing.
+pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 
