@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02552"></a>
+## [0.255.2] - 2026-05-26
+
+- test(mcp): cover command contract edges ([#2995](https://github.com/danielraffel/pulp/pull/2995))
+- fix(ios+cmake): unblock iOS Simulator AUv3 build (Phase iOS-A) ([#2994](https://github.com/danielraffel/pulp/pull/2994))
+- test(design): cover debug helper edge contracts ([#2983](https://github.com/danielraffel/pulp/pull/2983))
+- Fix macOS WebGPU runtime rpath ([#2981](https://github.com/danielraffel/pulp/pull/2981))
+
 <a id="v02551"></a>
 ## [0.255.1] - 2026-05-26
 
@@ -2978,6 +2986,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.255.2]: https://github.com/danielraffel/pulp/releases/tag/v0.255.2
 [0.255.1]: https://github.com/danielraffel/pulp/releases/tag/v0.255.1
 [0.255.0]: https://github.com/danielraffel/pulp/releases/tag/v0.255.0
 [0.254.1]: https://github.com/danielraffel/pulp/releases/tag/v0.254.1
