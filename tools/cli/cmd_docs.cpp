@@ -3,6 +3,7 @@
 #include "cli_common.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -10,9 +11,17 @@
 
 // ── Docs helpers ────────────────────────────────────────────────────────────
 
+static std::string read_docs_file(const fs::path& path) {
+    try {
+        return read_file_contents(path);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 static int docs_index(const fs::path& docs_dir) {
     auto index_path = docs_dir / "status" / "docs-index.yaml";
-    std::string content = read_file_contents(index_path);
+    std::string content = read_docs_file(index_path);
     if (content.empty()) {
         std::cerr << "Error: docs index not found at " << index_path.string() << "\n";
         std::cerr << "Hint: the docs/ tree may not be set up yet.\n";
@@ -155,7 +164,7 @@ static int docs_open(const fs::path& docs_dir, const std::string& slug) {
     }
 
     auto index_path = docs_dir / "status" / "docs-index.yaml";
-    std::string index_content = read_file_contents(index_path);
+    std::string index_content = read_docs_file(index_path);
     if (index_content.empty()) {
         std::cerr << "Error: docs index not found at " << index_path.string() << "\n";
         return 1;
@@ -190,7 +199,7 @@ static int docs_open(const fs::path& docs_dir, const std::string& slug) {
     }
 
     auto file_path = docs_dir / current_path;
-    std::string content = read_file_contents(file_path);
+    std::string content = read_docs_file(file_path);
     if (content.empty()) {
         std::cerr << "Error: file not found at " << file_path.string() << "\n";
         return 1;
@@ -207,7 +216,7 @@ static int docs_show_support(const fs::path& docs_dir, const std::string& thing)
     }
 
     auto matrix_path = docs_dir / "status" / "support-matrix.yaml";
-    std::string content = read_file_contents(matrix_path);
+    std::string content = read_docs_file(matrix_path);
     if (content.empty()) {
         std::cerr << "Error: support matrix not found at " << matrix_path.string() << "\n";
         return 1;
@@ -346,7 +355,7 @@ static int docs_show_command(const fs::path& docs_dir, const std::string& name) 
     }
 
     auto cmd_path = docs_dir / "status" / "cli-commands.yaml";
-    std::string content = read_file_contents(cmd_path);
+    std::string content = read_docs_file(cmd_path);
     if (content.empty()) {
         std::cerr << "Error: CLI commands manifest not found at " << cmd_path.string() << "\n";
         return 1;
@@ -483,7 +492,7 @@ static int docs_show_cmake(const fs::path& docs_dir, const std::string& name) {
     }
 
     auto cmake_path = docs_dir / "status" / "cmake-functions.yaml";
-    std::string content = read_file_contents(cmake_path);
+    std::string content = read_docs_file(cmake_path);
     if (content.empty()) {
         std::cerr << "Error: CMake functions manifest not found at " << cmake_path.string() << "\n";
         return 1;
@@ -524,7 +533,7 @@ static int docs_show_cmake(const fs::path& docs_dir, const std::string& name) {
 
 static int docs_show_style(const fs::path& docs_dir) {
     auto style_path = docs_dir / "status" / "style-rules.yaml";
-    std::string content = read_file_contents(style_path);
+    std::string content = read_docs_file(style_path);
     if (content.empty()) {
         std::cerr << "Error: style rules not found at " << style_path.string() << "\n";
         return 1;

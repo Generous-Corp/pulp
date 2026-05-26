@@ -359,6 +359,27 @@ target_link_libraries(pulp-test-cli-shell-quote PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-shell-quote)
 
+add_executable(pulp-test-cli-docs-command
+    test_cli_docs_command.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cmd_docs.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+)
+target_include_directories(pulp-test-cli-docs-command PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-docs-command PRIVATE
+    pulp::runtime
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-docs-command)
+
 # Plugin ↔ CLI skew banner helper (#551 Slice 6): shells out to bash
 # with a staged `pulp` shim and asserts the banner copy + once-per-
 # session semantics of `.agents/skills/_common/cli_version_check.sh`.
