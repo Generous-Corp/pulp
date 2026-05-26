@@ -1266,6 +1266,129 @@ TEST_CASE("excerpt find deterministic scores use a stable hash", "[audio][tools]
     REQUIRE(result.results.front().score == Catch::Approx(expected));
 }
 
+TEST_CASE("excerpt find dry-run returns ranked metadata without bundle writes",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = install_active_clap_model(temp);
+    auto input = temp.path / "dry-run.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 96000)));
+
+    ExcerptFindRequest request;
+    request.text = "dry run texture";
+    request.input_path = input;
+    request.top_k = 2;
+    request.window_ms = 500;
+    request.hop_ms = 500;
+    request.max_candidates_per_file = 4;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.bundle_path.empty());
+    REQUIRE(result.resolved_checkpoint_path == checkpoint);
+    REQUIRE(result.scanned_file_count == 1);
+    REQUIRE(result.skipped_files.empty());
+    REQUIRE(result.results.size() == 2);
+    REQUIRE(result.results[0].rank == 1);
+    REQUIRE(result.results[1].rank == 2);
+    REQUIRE(result.results[0].source_file == input.string());
+    REQUIRE(result.results[0].source_duration_ms == Catch::Approx(500.0));
+    REQUIRE(result.results[0].end_ms > result.results[0].start_ms);
+    REQUIRE(result.results[0].excerpt_file.empty());
+}
+
+TEST_CASE("excerpt find explicit model id overrides unrelated active state",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_installed_model_metadata(temp.path, checkpoint);
+    write_text(temp.path / "audio" / "model-state.json", R"JSON({
+  "active_model_id": "unknown_active_model"
+}
+)JSON");
+    auto input = temp.path / "explicit.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.text = "explicit model";
+    request.input_path = input;
+    request.model_id = "clap_music_audioset_v1";
+    request.top_k = 1;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 1;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.requested_model_id == "clap_music_audioset_v1");
+    REQUIRE(result.loaded_model_id == "clap_music_audioset_v1");
+    REQUIRE(result.resolved_checkpoint_path == checkpoint);
+    REQUIRE(result.results.size() == 1);
+}
+
+TEST_CASE("excerpt find nonrecursive directories ignore nested WAV-only inputs",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    install_active_clap_model(temp);
+    fs::create_directories(temp.path / "nested");
+    REQUIRE(pulp::audio::write_wav_file(
+        (temp.path / "nested" / "only-nested.wav").string(),
+        make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.text = "nested texture";
+    request.input_path = temp.path;
+    request.recursive = false;
+    request.top_k = 1;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 1;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "no supported WAV inputs found");
+    REQUIRE(result.scanned_file_count == 0);
+    REQUIRE(result.results.empty());
+    REQUIRE(result.skipped_files.empty());
+}
+
+TEST_CASE("excerpt find applies per-file candidate caps before global ranking",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    install_active_clap_model(temp);
+    auto first = temp.path / "first.wav";
+    auto second = temp.path / "second.wav";
+    REQUIRE(pulp::audio::write_wav_file(first.string(), make_audio(48000, 144000)));
+    REQUIRE(pulp::audio::write_wav_file(second.string(), make_audio(48000, 144000)));
+
+    ExcerptFindRequest request;
+    request.text = "ranked texture";
+    request.input_path = temp.path;
+    request.top_k = 4;
+    request.window_ms = 500;
+    request.hop_ms = 500;
+    request.max_candidates_per_file = 1;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.scanned_file_count == 2);
+    REQUIRE(result.results.size() == 2);
+    REQUIRE(result.results[0].rank == 1);
+    REQUIRE(result.results[1].rank == 2);
+    REQUIRE(result.results[0].score >= result.results[1].score);
+    REQUIRE(result.results[0].source_file != result.results[1].source_file);
+    REQUIRE(result.results[0].start_ms >= 0.0);
+    REQUIRE(result.results[1].end_ms > result.results[1].start_ms);
+}
+
 TEST_CASE("excerpt find validates request guard fields before model resolution",
           "[audio][tools][issue-643]") {
     TempDir temp;
