@@ -1573,6 +1573,17 @@ if(PULP_HAS_CLAP)
     add_executable(pulp-test-clap-midi-events test_clap_midi_events.cpp)
     target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-clap-midi-events)
+
+    # Item 3.4 (macOS plan) — pin the CLAP host-facing API contract that
+    # Bitwig / Reaper / FL Studio / Studio One depend on. Re-compiles the
+    # adapter TU into its own executable so the test owns the
+    # PULP_CLAP_PLUGIN(...) entry-symbol generator.
+    add_executable(pulp-test-clap-host-validation test_clap_host_validation.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+    )
+    target_link_libraries(pulp-test-clap-host-validation PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-host-validation PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-host-validation)
 endif()
 
 if(PULP_HAS_VST3)

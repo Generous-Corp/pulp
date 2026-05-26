@@ -449,6 +449,27 @@ with `PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`.
 Under those guards, Pulp hides `CLAP_EXT_GUI` from `get_extension()` and
 the GUI callbacks fail closed if a host cached the extension pointer.
 
+## Host-API contract pinned by `test/test_clap_host_validation.cpp`
+
+Real-DAW validation (Bitwig, Reaper, FL Studio, Studio One) requires
+a license + manual install, so the CI proxy is
+`test/test_clap_host_validation.cpp` (item 3.4 of the macOS plugin
+authoring plan). It pins the four contracts hosts have historically
+broken on:
+
+1. Plugin id + parameter id + range stability across instances.
+2. `CLAP_EVENT_PARAM_MOD` does NOT bleed across blocks — the adapter
+   calls `store.reset_all_mod()` at the top of every `process()`.
+3. Non-core event spaces (`hdr->space_id != CLAP_CORE_EVENT_SPACE_ID`)
+   are ignored, matching `clap-validator`'s
+   `param-set-wrong-namespace` expectation.
+4. `state.save` → `state.load` → `state.save` produces byte-equivalent
+   output (Studio One project-recall determinism).
+
+When changing the adapter's event dispatch or param surface, run
+`pulp-test-clap-host-validation` first — it will catch the regression
+before a host scan does.
+
 ## Cross-references
 
 - `.agents/skills/view-bridge/SKILL.md` — editor open / attach /
