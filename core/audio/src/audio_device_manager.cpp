@@ -227,8 +227,13 @@ DeviceConfig AudioDeviceManager::selection_to_config(
 
 MidiSubscriptionToken AudioDeviceManager::subscribe_midi(MidiHandler handler) {
     if (!handler) return {};
+    // Allocate the id BEFORE taking midi_mu_. Token ids are globally
+    // unique across every subscription map on this manager — see the
+    // comment on next_token_id_ in the header. Doing it outside the
+    // lock keeps the critical section minimal and means a hypothetical
+    // future reordering of subscribe calls can never reuse an id.
+    const uint64_t id = next_token_id_.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(midi_mu_);
-    const uint64_t id = next_midi_id_++;
     midi_subs_.emplace(id, std::move(handler));
     return MidiSubscriptionToken(
         std::weak_ptr<void>(lifetime_),
@@ -352,8 +357,13 @@ void AudioDeviceManager::DeviceChangeToken::reset() noexcept {
 AudioDeviceManager::DeviceChangeToken
 AudioDeviceManager::subscribe_device_changes(DeviceChangeHandler handler) {
     if (!handler) return {};
+    // Shared counter — see next_token_id_ comment in the header.
+    // DeviceChangeToken routes to its own unsubscribe path, so this
+    // particular allocation can't currently collide with MIDI, but
+    // using the shared counter guarantees future-proofing if any
+    // unsubscribe path ever probes additional maps.
+    const uint64_t id = next_token_id_.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(device_change_mu_);
-    const uint64_t id = next_device_change_id_++;
     device_change_subs_.emplace(id, std::move(handler));
     return DeviceChangeToken(
         std::weak_ptr<void>(lifetime_),
@@ -479,8 +489,13 @@ void AudioDeviceManager::reset_xrun_counter() {
 MidiSubscriptionToken AudioDeviceManager::subscribe_midi_endpoints(
     MidiEndpointChangeHandler handler) {
     if (!handler) return {};
+    // Globally unique across midi_subs_ AND midi_ep_subs_; see
+    // next_token_id_ comment in the header. This is what stops
+    // unsubscribe_midi() from erasing the wrong subscriber when a
+    // MIDI handler and an endpoint handler happen to share an id
+    // (previously both counters started at 1).
+    const uint64_t id = next_token_id_.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(midi_ep_mu_);
-    const uint64_t id = next_midi_ep_id_++;
     midi_ep_subs_.emplace(id, std::move(handler));
     // Reuse MidiSubscriptionToken; its unsubscribe routes via
     // unsubscribe_midi_endpoint() because we mark the id with the

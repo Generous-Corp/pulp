@@ -412,13 +412,21 @@ private:
     /// this; destruction marks the manager dead.
     std::shared_ptr<void>                        lifetime_;
 
+    /// Single monotonic counter shared by every subscription API on
+    /// this manager (MIDI events, MIDI endpoints, device-change). The
+    /// unsubscribe path is allowed to probe multiple maps with the
+    /// same id, so the id must be globally unique across all maps —
+    /// otherwise destroying one subscription token can erase an
+    /// unrelated subscription that happens to share the numeric id
+    /// (see issue #2976 / PR #2970 Codex finding). Atomic so callers
+    /// don't need to hold any particular mutex to allocate one.
+    std::atomic<uint64_t>                        next_token_id_{1};
+
     mutable std::mutex                           midi_mu_;
     std::unordered_map<uint64_t, MidiHandler>    midi_subs_;
-    uint64_t                                     next_midi_id_ = 1;
 
     mutable std::mutex                                          device_change_mu_;
     std::unordered_map<uint64_t, DeviceChangeHandler>           device_change_subs_;
-    uint64_t                                                    next_device_change_id_ = 1;
 
     mutable std::mutex                              default_dev_mu_;
     DefaultDeviceChangeHandler                      default_dev_handler_;
@@ -432,7 +440,6 @@ private:
 
     mutable std::mutex                                                midi_ep_mu_;
     std::unordered_map<uint64_t, MidiEndpointChangeHandler>           midi_ep_subs_;
-    uint64_t                                                          next_midi_ep_id_ = 1;
     std::vector<MidiEndpoint>                                         midi_endpoints_;
 
     AudioSystem*                                    attached_system_ = nullptr;

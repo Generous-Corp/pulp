@@ -507,6 +507,120 @@ TEST_CASE("AudioDeviceManager MIDI endpoint delta tracking fires per change",
     REQUIRE(mgr.midi_endpoints()[0].id == "ep:mini");
 }
 
+// Regression for issue #2976 / PR #2970 Codex P1 finding:
+// subscribe_midi() and subscribe_midi_endpoints() previously used two
+// independent counters that both started at 1. unsubscribe_midi()
+// erases by id from BOTH maps, so destroying the endpoint token (id=1)
+// would erase the unrelated MIDI subscriber (also id=1) and leave the
+// endpoint subscriber alive. The fix is a single monotonic counter
+// shared across all subscription maps so ids never collide.
+TEST_CASE("AudioDeviceManager MIDI and endpoint token ids do not collide",
+          "[audio][audio-device-manager][midi][issue-2976][issue-2970]") {
+    AudioDeviceManager mgr;
+
+    std::atomic<int> midi_calls{0};
+    std::atomic<int> ep_calls{0};
+
+    // Subscribe order matters: this is the order that previously
+    // produced id=1 on both maps under the old counter scheme.
+    auto midi_tok = mgr.subscribe_midi(
+        [&](const pulp::midi::MidiEvent&) { ++midi_calls; });
+    auto ep_tok = mgr.subscribe_midi_endpoints(
+        [&](const AudioDeviceManager::MidiEndpointChange&) { ++ep_calls; });
+
+    REQUIRE(mgr.midi_subscriber_count() == 1);
+    REQUIRE(mgr.midi_endpoint_subscriber_count() == 1);
+
+    // Destroy the endpoint token first. Under the bug, this routed
+    // through unsubscribe_midi(), which probed midi_subs_ first, found
+    // a matching id, and erased the MIDI subscriber by mistake. The
+    // endpoint subscriber stayed live.
+    ep_tok.reset();
+
+    // Post-condition the bug violated:
+    //   - the MIDI subscriber must still be live
+    //   - the endpoint subscriber must be gone
+    REQUIRE(mgr.midi_subscriber_count() == 1);
+    REQUIRE(mgr.midi_endpoint_subscriber_count() == 0);
+
+    // Functional confirmation: dispatch hits MIDI (still alive) and
+    // does NOT hit endpoints.
+    mgr.dispatch_midi_event(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    REQUIRE(midi_calls.load() == 1);
+
+    AudioDeviceManager::MidiEndpoint ep;
+    ep.id = "ep:new";
+    ep.name = "New Device";
+    ep.is_input = true;
+    mgr.set_midi_endpoints({ep});
+    REQUIRE(ep_calls.load() == 0);
+}
+
+// Stress regression: many register/unregister cycles for both MIDI and
+// endpoint hubs interleaved across multiple threads. Under the old
+// per-map counters, destroying an endpoint token could erase the
+// wrong MIDI subscriber (same numeric id), so subscriber counts would
+// drift away from what the test explicitly held. With the shared
+// monotonic counter, post-condition counts match the held tokens
+// exactly.
+TEST_CASE("AudioDeviceManager subscriptions stay globally consistent under load",
+          "[audio][audio-device-manager][midi][issue-2976][issue-2970]") {
+    AudioDeviceManager mgr;
+
+    constexpr int kPerThread = 64;
+    constexpr int kThreads   = 4;
+
+    std::mutex hold_mu;
+    std::vector<MidiSubscriptionToken> midi_hold;
+    std::vector<MidiSubscriptionToken> ep_hold;
+    midi_hold.reserve(kThreads * kPerThread);
+    ep_hold.reserve(kThreads * kPerThread);
+
+    auto worker = [&](bool use_endpoints) {
+        std::vector<MidiSubscriptionToken> local;
+        local.reserve(kPerThread);
+        for (int i = 0; i < kPerThread; ++i) {
+            auto tok = use_endpoints
+                ? mgr.subscribe_midi_endpoints(
+                    [](const AudioDeviceManager::MidiEndpointChange&) {})
+                : mgr.subscribe_midi([](const pulp::midi::MidiEvent&) {});
+            REQUIRE(tok.active());
+            local.push_back(std::move(tok));
+        }
+        std::lock_guard<std::mutex> lk(hold_mu);
+        auto& dest = use_endpoints ? ep_hold : midi_hold;
+        for (auto& t : local) dest.push_back(std::move(t));
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        // Half the threads subscribe MIDI events, half subscribe
+        // endpoints. The bug surfaced when both sides issued the same
+        // low ids (1, 2, 3, …) and destruction order crossed maps.
+        threads.emplace_back(worker, /*use_endpoints=*/(t % 2 == 0));
+    }
+    for (auto& th : threads) th.join();
+
+    const int midi_threads = (kThreads + 1) / 2;
+    const int ep_threads   = kThreads - midi_threads;
+    REQUIRE(mgr.midi_subscriber_count() ==
+            static_cast<size_t>(midi_threads * kPerThread));
+    REQUIRE(mgr.midi_endpoint_subscriber_count() ==
+            static_cast<size_t>(ep_threads * kPerThread));
+
+    // Now drop all endpoint tokens. If destroying one could erase the
+    // wrong subscriber (the bug), the MIDI count would visibly drift.
+    ep_hold.clear();
+    REQUIRE(mgr.midi_endpoint_subscriber_count() == 0);
+    REQUIRE(mgr.midi_subscriber_count() ==
+            static_cast<size_t>(midi_threads * kPerThread));
+
+    // Drop the remaining MIDI tokens; counters return to zero.
+    midi_hold.clear();
+    REQUIRE(mgr.midi_subscriber_count() == 0);
+}
+
 TEST_CASE("AudioDeviceManager latch_close drops subsequent dispatches",
           "[audio][audio-device-manager][lifecycle][shutdown][issue-2935]") {
     AudioDeviceManager mgr;
