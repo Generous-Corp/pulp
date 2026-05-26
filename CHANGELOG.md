@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02551"></a>
+## [0.255.1] - 2026-05-26
+
+- fix: bundle 8 P2 Codex findings from #2976 (auv3 bundle path, coreaudio wg, vst3 59.94, clap lifecycle, ship, audio cache, midi-ci, screenshot) ([#2991](https://github.com/danielraffel/pulp/pull/2991))
+
 <a id="v02550"></a>
 ## [0.255.0] - 2026-05-26
 
@@ -2973,6 +2978,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.255.1]: https://github.com/danielraffel/pulp/releases/tag/v0.255.1
 [0.255.0]: https://github.com/danielraffel/pulp/releases/tag/v0.255.0
 [0.254.1]: https://github.com/danielraffel/pulp/releases/tag/v0.254.1
 [0.254.0]: https://github.com/danielraffel/pulp/releases/tag/v0.254.0
