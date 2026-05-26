@@ -858,6 +858,9 @@ pulp_add_test_suite(pulp-test-ara LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-clap-ara-extension LIBRARIES pulp::format)
 # Processor ARA hook (workstream 06 slice 6.3a)
 pulp_add_test_suite(pulp-test-processor-ara-hook LIBRARIES pulp::format)
+# Processor bus-layout validation + processBlock precision contract +
+# latency / tail change notification (workstream 03 items 3.7, 3.8, 3.11).
+pulp_add_test_suite(pulp-test-processor-layout-latency LIBRARIES pulp::format)
 # Processor and descriptor default contracts
 pulp_add_test_suite(pulp-test-processor-defaults LIBRARIES pulp::format)
 # TableModel data/sort layer (workstream 07 slice 7.3)

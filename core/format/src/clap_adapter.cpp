@@ -590,6 +590,18 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
     }
 
+    // Item 3.11 — if the processor flagged a latency / tail change
+    // during this block, ask the host to schedule a main-thread
+    // callback. The actual `clap_host_latency->changed()` /
+    // `clap_host_tail->changed()` push runs from clap_on_main_thread()
+    // so we never call host APIs from process(). Peek (don't consume)
+    // so the on_main_thread handler still sees the same edge.
+    if (self->host && self->host->request_callback && self->processor &&
+        (self->processor->latency_change_pending() ||
+         self->processor->tail_change_pending())) {
+        self->host->request_callback(self->host);
+    }
+
     return CLAP_PROCESS_CONTINUE;
 }
 
@@ -639,6 +651,30 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
     return nullptr;
 }
 
-void clap_on_main_thread(const clap_plugin_t*) {}
+void clap_on_main_thread(const clap_plugin_t* plugin) {
+    // Item 3.11 — drain RT-safe pending flags the processor may have
+    // set during process() and republish to the host on the main
+    // thread. CLAP hosts call request_callback() in response to the
+    // process_status flag we set when a flag becomes pending, and
+    // this entrypoint runs on the main thread.
+    auto* self = get_self(plugin);
+    if (!self || !self->processor || !self->host) return;
+
+    const bool latency_changed =
+        self->processor->consume_latency_changed_flag();
+    const bool tail_changed =
+        self->processor->consume_tail_changed_flag();
+
+    if (latency_changed) {
+        auto* ext = static_cast<const clap_host_latency_t*>(
+            self->host->get_extension(self->host, CLAP_EXT_LATENCY));
+        if (ext && ext->changed) ext->changed(self->host);
+    }
+    if (tail_changed) {
+        auto* ext = static_cast<const clap_host_tail_t*>(
+            self->host->get_extension(self->host, CLAP_EXT_TAIL));
+        if (ext && ext->changed) ext->changed(self->host);
+    }
+}
 
 } // namespace pulp::format::clap_adapter

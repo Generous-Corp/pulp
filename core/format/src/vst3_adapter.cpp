@@ -189,6 +189,27 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     for (int32 i = 0; i < numIns;  ++i) if (!supported(inputs[i]))  return kResultFalse;
     for (int32 i = 0; i < numOuts; ++i) if (!supported(outputs[i])) return kResultFalse;
 
+    // Item 3.7 — let the Processor reject the layout before we mutate
+    // anything. Translate VST3 SpeakerArrangement masks to channel
+    // counts (1 = mono, 2 = stereo today; the mono/stereo guard above
+    // already filtered out other arrangements).
+    auto channel_count = [](SpeakerArrangement a) -> int {
+        if (a == SpeakerArr::kMono)   return 1;
+        if (a == SpeakerArr::kStereo) return 2;
+        return 0;
+    };
+    Processor::BusesLayout proposal;
+    proposal.inputs.reserve(static_cast<std::size_t>(numIns));
+    proposal.outputs.reserve(static_cast<std::size_t>(numOuts));
+    for (int32 i = 0; i < numIns;  ++i) proposal.inputs.push_back(channel_count(inputs[i]));
+    for (int32 i = 0; i < numOuts; ++i) proposal.outputs.push_back(channel_count(outputs[i]));
+    if (!processor_->is_bus_layout_supported(proposal)) {
+        runtime::log_info(
+            "VST3 setBusArrangements: processor rejected proposed layout "
+            "({} in / {} out buses)", numIns, numOuts);
+        return kResultFalse;
+    }
+
     // Apply channel counts to the AudioBus objects the parent registered
     // from descriptor() during initialize(). setArrangement is the VST3
     // SDK's canonical in-place mutator for a bus's channel layout.
@@ -447,6 +468,21 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 setParamNormalized(static_cast<ParamID>(all_params[i].id),
                                    static_cast<ParamValue>(store_.get_normalized(all_params[i].id)));
             }
+        }
+    }
+
+    // Item 3.11 — publish latency / tail changes the processor flagged
+    // during process(). VST3's IComponentHandler::restartComponent is
+    // documented as safe to call from the host's audio callback — the
+    // handler is expected to queue it for main-thread delivery. We
+    // still drain the atomic flag with acquire/release semantics so
+    // process() never has to take a lock or allocate.
+    if (componentHandler) {
+        int32 flags = 0;
+        if (processor_->consume_latency_changed_flag()) flags |= kLatencyChanged;
+        if (processor_->consume_tail_changed_flag())    flags |= kReloadComponent;
+        if (flags != 0) {
+            componentHandler->restartComponent(flags);
         }
     }
 

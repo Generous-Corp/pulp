@@ -8,6 +8,7 @@
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#include <atomic>
 #include <memory>
 #include <span>
 #include <string>
@@ -477,6 +478,97 @@ public:
     /// linear-phase EQs). Hosts use this for delay compensation.
     virtual int latency_samples() const { return 0; }
 
+    /// Proposed bus layout passed to is_bus_layout_supported().
+    ///
+    /// Each entry's index matches the descriptor's input_buses /
+    /// output_buses index, and each value is the number of channels the
+    /// host is proposing for that bus. Sidechain buses appear at index 1
+    /// (input side) when the descriptor declared one. Empty per-side
+    /// vectors mean "the host did not propose buses on that side"
+    /// (rare; treat as 'no opinion').
+    ///
+    /// Workstream 03 item 3.7. Format adapters call this on the host
+    /// thread before applying the layout. Returning false rejects the
+    /// proposal and the adapter is expected to refuse the host's
+    /// `setBusArrangements` / equivalent call.
+    struct BusesLayout {
+        std::vector<int> inputs;
+        std::vector<int> outputs;
+    };
+
+    /// Validate a proposed bus layout. Default acceptance policy:
+    ///
+    ///   * Per-side bus count matches the descriptor.
+    ///   * Each proposed channel count is in {1, 2} (mono / stereo).
+    ///
+    /// Override for plugins that need a tighter contract (e.g. an
+    /// instrument that only renders stereo out, a sidechain compressor
+    /// that requires sidechain channels == main channels, surround
+    /// processors that accept >2 channels). The format adapter MUST
+    /// call this on the host thread — never from process().
+    ///
+    /// Adapters fall back to the descriptor's declared bus count + the
+    /// mono/stereo policy when a plugin doesn't override this hook,
+    /// which preserves the pre-item-3.7 behaviour exactly.
+    virtual bool is_bus_layout_supported(const BusesLayout& layout) const {
+        const auto desc = descriptor();
+        if (!layout.inputs.empty() &&
+            layout.inputs.size() != desc.input_buses.size())
+            return false;
+        if (!layout.outputs.empty() &&
+            layout.outputs.size() != desc.output_buses.size())
+            return false;
+        auto channels_ok = [](int n) { return n == 1 || n == 2; };
+        for (int n : layout.inputs)  if (!channels_ok(n)) return false;
+        for (int n : layout.outputs) if (!channels_ok(n)) return false;
+        return true;
+    }
+
+    /// Item 3.11 — cross-adapter latency / tail change notifications.
+    ///
+    /// Called from `process()` on the audio thread when a plugin's
+    /// latency or tail length changes mid-render (e.g. a linear-phase
+    /// EQ flipping between FIR taps, a reverb extending its decay).
+    /// The Processor sets an `std::atomic<bool>` pending-flag; the
+    /// format adapter polls the flag on the host / main thread and
+    /// pushes the notification to the host (`restartComponent` for
+    /// VST3, `kAudioUnitProperty_LatencySamples` for AU,
+    /// `clap_host_latency->changed()` for CLAP, `SetSignalLatency` for
+    /// AAX).
+    ///
+    /// **Audio-thread-safe.** Never call a host API from `process()`.
+    ///
+    /// Workstream 03 item 3.11.
+    void flag_latency_changed() noexcept {
+        latency_changed_.store(true, std::memory_order_release);
+    }
+    void flag_tail_changed() noexcept {
+        tail_changed_.store(true, std::memory_order_release);
+    }
+
+    /// Adapter-side polling helper. Returns true exactly once per
+    /// `flag_*_changed()` call. The adapter calls this on the
+    /// host / main thread; on `true` it must republish the latest
+    /// `latency_samples()` / `tail_samples` to the host.
+    bool consume_latency_changed_flag() noexcept {
+        return latency_changed_.exchange(false, std::memory_order_acq_rel);
+    }
+    bool consume_tail_changed_flag() noexcept {
+        return tail_changed_.exchange(false, std::memory_order_acq_rel);
+    }
+
+    /// Non-mutating peek used by adapters that need to decide whether
+    /// to ping the host for a main-thread callback without losing the
+    /// pending edge (e.g. CLAP's `request_callback`). Does not clear
+    /// the flag; the host-thread callback must still call
+    /// `consume_*_changed_flag()` to drain it.
+    bool latency_change_pending() const noexcept {
+        return latency_changed_.load(std::memory_order_acquire);
+    }
+    bool tail_change_pending() const noexcept {
+        return tail_changed_.load(std::memory_order_acquire);
+    }
+
     /// Process one buffer of audio. Called on the real-time audio thread.
     ///
     /// @param audio_output  Output buffer to fill (main bus)
@@ -619,6 +711,10 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
+    // Item 3.11 — RT-safe pending flags published from process() and
+    // consumed by adapters on the host / main thread.
+    std::atomic<bool> latency_changed_{false};
+    std::atomic<bool> tail_changed_{false};
 };
 
 /// Factory function type — plugins provide this to create processor instances.
