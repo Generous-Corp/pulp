@@ -30,8 +30,15 @@ set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-format
     pulp-canvas pulp-view-core pulp-view-script pulp-view
-    pulp-host pulp-standalone pulp-dsl
+    pulp-standalone pulp-dsl
 )
+
+# pulp-host is platform-conditional: iOS skips the subdirectory entirely
+# (no plugin hosting on iOS), so only include it in the SDK export set on
+# platforms that actually built it.
+if(TARGET pulp-host)
+    list(APPEND PULP_SDK_TARGETS pulp-host)
+endif()
 
 if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
