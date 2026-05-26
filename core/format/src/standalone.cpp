@@ -4,7 +4,11 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/state/properties_file.hpp>
 #include <pulp/view/window_host.hpp>
+
+#include <charconv>
+#include <string_view>
 
 // WYSIWYG P6 FIX 5 — the dev inspector (Cmd+I overlay) is gated behind the
 // PULP_ENABLE_INSPECTOR compile flag (root CMake option, default ON for
@@ -127,13 +131,30 @@ bool StandaloneApp::start() {
         audio::BufferView<float>& output,
         const audio::CallbackContext& ctx)
     {
-        // Collect pending MIDI
+        // Collect pending MIDI from the hardware input thread (mutex-guarded
+        // accumulator). UI / virtual-keyboard / scripting MIDI is delivered
+        // separately via `ui_midi_collector_` (item 3.5 — pulp::midi::
+        // MidiMessageCollector) which is lock-free and sample-accurate
+        // within the current block.
         midi::MidiBuffer midi_in, midi_out;
         {
             std::lock_guard lock(midi_mutex_);
             midi_in = std::move(pending_midi_);
             pending_midi_.clear();
         }
+
+        // Item 3.5 — drain UI-thread MIDI into this block at the correct
+        // sample offsets. The standalone host treats its own audio clock
+        // as the master timeline: block_start_seconds is
+        // `transport_position_samples / sample_rate`.
+        const int64_t block_start_samples =
+            transport_position_samples_.load(std::memory_order_relaxed);
+        const double block_start_seconds =
+            ctx.sample_rate > 0.0
+                ? static_cast<double>(block_start_samples) / ctx.sample_rate
+                : 0.0;
+        ui_midi_collector_.drain_into(midi_in, block_start_seconds,
+                                      ctx.buffer_size, ctx.sample_rate);
 
         // Determine actual input: test signal overrides hardware input
         const audio::BufferView<const float>* actual_input = &input;
@@ -168,12 +189,52 @@ bool StandaloneApp::start() {
                 ctx.buffer_size);
         }
 
+        // Item 3.5 / item 1.3 — populate the transport-related fields on
+        // ProcessContext from the standalone's built-in tempo source.
+        // The driver has no DAW providing transport, so it behaves like
+        // one: tempo + time-signature are the user-chosen config values,
+        // `position_beats` advances from the rolling sample clock at the
+        // configured tempo, and `is_playing` mirrors the user's
+        // play/stop toggle.
         ProcessContext proc_ctx;
         proc_ctx.sample_rate = ctx.sample_rate;
         proc_ctx.num_samples = ctx.buffer_size;
-        proc_ctx.position_samples = static_cast<int64_t>(ctx.sample_position);
+        proc_ctx.position_samples = block_start_samples;
+        proc_ctx.is_playing = config_.transport_playing;
+        proc_ctx.is_recording = false;
+        proc_ctx.tempo_bpm = config_.tempo_bpm;
+        proc_ctx.time_sig_numerator = config_.time_sig_numerator;
+        proc_ctx.time_sig_denominator = config_.time_sig_denominator;
+        if (config_.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
+            const double seconds_per_beat = 60.0 / config_.tempo_bpm;
+            const double samples_per_beat = seconds_per_beat * ctx.sample_rate;
+            if (samples_per_beat > 0.0) {
+                proc_ctx.position_beats =
+                    static_cast<double>(block_start_samples) / samples_per_beat;
+            }
+        }
+        // Derive `bar` so processors that branch on it (e.g. metronome
+        // accents) don't re-compute per block. Mirrors the
+        // ProcessContext doc-comment derivation.
+        if (config_.time_sig_numerator > 0 && config_.time_sig_denominator > 0) {
+            const double beats_per_bar =
+                static_cast<double>(config_.time_sig_numerator) *
+                (4.0 / static_cast<double>(config_.time_sig_denominator));
+            if (beats_per_bar > 0.0) {
+                proc_ctx.bar = static_cast<int64_t>(
+                    proc_ctx.position_beats / beats_per_bar);
+            }
+        }
 
         processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
+
+        // Advance the rolling sample clock so the next block reads a
+        // monotonic timeline. Done after process() so the in-block
+        // transport state is consistent with what the plugin saw.
+        if (config_.transport_playing) {
+            transport_position_samples_.fetch_add(
+                ctx.buffer_size, std::memory_order_relaxed);
+        }
     });
 
     if (!ok) {
@@ -419,6 +480,75 @@ void StandaloneApp::stop() {
         processor_->release();
         processor_.reset();
     }
+}
+
+// ── Item 3.5 — persisted-config helpers ────────────────────────────────────
+//
+// Keys live under the `standalone.*` namespace in the user properties file so
+// they don't collide with plugin-owned state. The format is the simple
+// scalar-per-key shape the existing PropertiesFile API supports — we don't
+// need nested JSON for these handful of fields.
+
+namespace {
+
+constexpr std::string_view kKeyAudioDevice    = "standalone.audio_device_id";
+constexpr std::string_view kKeyMidiInput      = "standalone.midi_input_id";
+constexpr std::string_view kKeySampleRate     = "standalone.sample_rate";
+constexpr std::string_view kKeyBufferSize     = "standalone.buffer_size";
+constexpr std::string_view kKeyOutputChannels = "standalone.output_channels";
+constexpr std::string_view kKeyInputChannels  = "standalone.input_channels";
+constexpr std::string_view kKeyTempo          = "standalone.tempo_bpm";
+constexpr std::string_view kKeyTimeSigNum     = "standalone.time_sig_num";
+constexpr std::string_view kKeyTimeSigDen     = "standalone.time_sig_den";
+constexpr std::string_view kKeyPlaying        = "standalone.transport_playing";
+
+}  // namespace
+
+StandaloneConfig StandaloneApp::load_persisted_config(std::string_view app_name) {
+    StandaloneConfig cfg;  // defaults
+    if (app_name.empty()) return cfg;
+
+    state::ApplicationProperties props(app_name);
+    props.load();
+    const auto& user = props.user_settings();
+
+    if (auto v = user.get_string(kKeyAudioDevice))    cfg.audio_device_id = *v;
+    if (auto v = user.get_string(kKeyMidiInput))      cfg.midi_input_id   = *v;
+    if (auto v = user.get_double(kKeySampleRate))     cfg.sample_rate     = *v;
+    if (auto v = user.get_int(kKeyBufferSize))        cfg.buffer_size     = static_cast<int>(*v);
+    if (auto v = user.get_int(kKeyOutputChannels))    cfg.output_channels = static_cast<int>(*v);
+    if (auto v = user.get_int(kKeyInputChannels))     cfg.input_channels  = static_cast<int>(*v);
+    if (auto v = user.get_double(kKeyTempo))          cfg.tempo_bpm       = *v;
+    if (auto v = user.get_int(kKeyTimeSigNum))        cfg.time_sig_numerator   = static_cast<int>(*v);
+    if (auto v = user.get_int(kKeyTimeSigDen))        cfg.time_sig_denominator = static_cast<int>(*v);
+    if (auto v = user.get_bool(kKeyPlaying))          cfg.transport_playing    = *v;
+    return cfg;
+}
+
+bool StandaloneApp::save_persisted_config(std::string_view app_name,
+                                          const StandaloneConfig& config) {
+    if (app_name.empty()) return false;
+
+    state::ApplicationProperties props(app_name);
+    props.load();  // start from the existing file so we preserve unrelated keys
+    auto& user = props.user_settings();
+
+    user.set_string(kKeyAudioDevice, config.audio_device_id);
+    user.set_string(kKeyMidiInput, config.midi_input_id);
+    user.set_double(kKeySampleRate, config.sample_rate);
+    user.set_int(kKeyBufferSize, config.buffer_size);
+    user.set_int(kKeyOutputChannels, config.output_channels);
+    user.set_int(kKeyInputChannels, config.input_channels);
+    user.set_double(kKeyTempo, config.tempo_bpm);
+    user.set_int(kKeyTimeSigNum, config.time_sig_numerator);
+    user.set_int(kKeyTimeSigDen, config.time_sig_denominator);
+    user.set_bool(kKeyPlaying, config.transport_playing);
+
+    // ApplicationProperties::save() walks both user + common files and
+    // returns void; check the user file's persisted path is non-empty as
+    // a proxy for "the platform let us pick a location to write to".
+    props.save();
+    return !user.path().empty();
 }
 
 } // namespace pulp::format

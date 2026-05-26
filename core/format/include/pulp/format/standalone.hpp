@@ -5,9 +5,11 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/message_collector.hpp>
 #include <pulp/view/audio_bridge.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,6 +39,18 @@ struct StandaloneConfig {
     // Frames to wait before capture. Default 30 (~0.5s @60fps) gives the
     // first React-driven layout + effects pass time to settle.
     int screenshot_frame_delay = 30;
+
+    // Item 3.5 (macOS plan) — built-in tempo source. The standalone host has
+    // no DAW providing transport, so it acts as one: it surfaces
+    // `tempo_bpm` / time signature on every ProcessContext block, and
+    // advances `position_beats` from `position_samples` when the transport
+    // is rolling. Plugins that branch on `is_playing` or read
+    // `position_beats` therefore behave the same way in `pulp run` as they
+    // do in a host (item 1.3 wiring) without any per-plugin glue.
+    double tempo_bpm = 120.0;
+    int time_sig_numerator = 4;
+    int time_sig_denominator = 4;
+    bool transport_playing = true;  // default-on so MIDI/tempo plugins are immediately useful
 };
 
 class StandaloneApp {
@@ -63,6 +77,22 @@ public:
     audio::AudioSystem* audio_system() { return audio_system_.get(); }
     midi::MidiSystem* midi_system() { return midi_system_.get(); }
 
+    // Item 3.5 — UI-thread MIDI injection. Virtual-keyboard widgets, scripting
+    // hooks, and test harnesses push MIDI events through this collector;
+    // the audio callback drains them into each block's MidiBuffer at the
+    // correct sample offsets. Identical thread-safety surface that
+    // pulp::midi::MidiMessageCollector documents — push_now is non-blocking.
+    midi::MidiMessageCollector<>& ui_midi_collector() { return ui_midi_collector_; }
+
+    // Item 3.5 — Persist + restore StandaloneConfig under
+    // ApplicationProperties so `pulp run` opens the user's last device,
+    // sample-rate, buffer-size, MIDI input, and built-in transport
+    // settings on the next launch. Returns false when the storage layer
+    // failed to write (e.g. read-only profile, missing app name).
+    static StandaloneConfig load_persisted_config(std::string_view app_name);
+    static bool save_persisted_config(std::string_view app_name,
+                                      const StandaloneConfig& config);
+
 private:
     // Tear down the audio + MIDI devices but KEEP the processor instance alive.
     // apply_config() uses this so a settings change does not recreate the
@@ -81,7 +111,16 @@ private:
 
     midi::MidiBuffer pending_midi_;
     std::mutex midi_mutex_;
+    midi::MidiMessageCollector<> ui_midi_collector_;
     std::atomic<bool> running_{false};
+
+    // Item 3.5 — built-in transport state (the standalone "host").
+    // `transport_position_samples_` advances atomically on the audio
+    // thread; `transport_block_time_seconds_` is derived by the audio
+    // callback (`position_samples / sample_rate`) and is what
+    // `MidiMessageCollector::drain_into` uses to align UI MIDI events
+    // to sample offsets within the current block.
+    std::atomic<int64_t> transport_position_samples_{0};
 
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;

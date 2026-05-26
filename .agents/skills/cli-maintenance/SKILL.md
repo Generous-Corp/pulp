@@ -1244,3 +1244,42 @@ Gotchas (lessons from the slice):
   --check-identity`. Keep them in lockstep — the orchestrate path
   re-uses `cmd::identity::run(Check)` rather than re-implementing the
   comparison.
+
+## Standalone host transport + MIDI + persistence (item 3.5)
+
+`StandaloneApp` is the user-facing surface behind `pulp run`. As of
+the 3.5 wiring it consumes three Pulp subsystems the way a DAW would
+consume the equivalent host APIs:
+
+- **`pulp::midi::MidiMessageCollector` (item 1.9)** — `ui_midi_collector()`
+  is the lock-free SPSC path for UI / virtual-keyboard / scripting
+  MIDI. The audio callback drains it into each block's `MidiBuffer`
+  at the correct sample offsets via `drain_into(block_start_seconds,
+  ctx.buffer_size, ctx.sample_rate)`. Hardware MIDI still goes
+  through the mutex-guarded `pending_midi_` accumulator on the
+  input-thread callback.
+- **Built-in transport (item 1.3)** — `StandaloneConfig` carries
+  `tempo_bpm`, `time_sig_numerator`, `time_sig_denominator`, and
+  `transport_playing`. The audio callback populates
+  `ProcessContext::tempo_bpm`, `position_beats`, `bar`, and
+  `is_playing` from those values; `position_samples` advances on a
+  rolling atomic counter so plugins read a monotonic timeline.
+- **`pulp::state::ApplicationProperties` (item 1.2)** —
+  `StandaloneApp::{save,load}_persisted_config(app_name)` round-trip
+  the entire `StandaloneConfig` through the platform user-properties
+  file. Keys are namespaced under `standalone.*` so they don't collide
+  with plugin-owned state. Empty `app_name` is the documented
+  "persistence disabled" sentinel — callers can opt out by passing
+  `""`.
+
+When extending the standalone surface (new `StandaloneConfig` field,
+new transport field, new persisted key), update **both**:
+
+1. The audio callback's `ProcessContext` population in
+   `core/format/src/standalone.cpp` (so plugins see the new value
+   immediately).
+2. `save_persisted_config` / `load_persisted_config` (so the value
+   survives a `pulp run` restart).
+
+Test coverage lives in `test/test_standalone_transport_midi.cpp` —
+add a case there when you extend either surface.
