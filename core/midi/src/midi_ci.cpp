@@ -1,4 +1,5 @@
 #include <pulp/midi/midi_ci.hpp>
+#include <pulp/midi/midi_ci_pe.hpp>
 #include <random>
 #include <cstring>
 #include <algorithm>
@@ -34,6 +35,30 @@ static MUID read_muid(const uint8_t* data) {
 
 CiDiscovery::CiDiscovery() {
     local_info_.muid = MUID::generate();
+}
+
+CiDiscovery::~CiDiscovery() = default;
+
+PeSubscriptionManager& CiDiscovery::subscription_manager() {
+    if (!sub_mgr_) sub_mgr_ = std::make_unique<PeSubscriptionManager>();
+    return *sub_mgr_;
+}
+
+const PeSubscriptionManager& CiDiscovery::subscription_manager() const {
+    if (!sub_mgr_) sub_mgr_ = std::make_unique<PeSubscriptionManager>();
+    return *sub_mgr_;
+}
+
+std::size_t CiDiscovery::notify(std::string_view resource,
+                                std::string_view header_json,
+                                const std::vector<uint8_t>& payload) {
+    auto subscribers = subscription_manager().subscribers_of(resource);
+    if (on_pe_notify) {
+        for (const auto& sub : subscribers) {
+            on_pe_notify(sub.subscriber, resource, header_json, payload);
+        }
+    }
+    return subscribers.size();
 }
 
 std::vector<uint8_t> CiDiscovery::create_discovery_inquiry() const {
@@ -147,6 +172,11 @@ std::vector<uint8_t> CiDiscovery::process_message(const uint8_t* data, size_t si
         }
         case CiMessageType::ProfileInquiry:
             return handle_profile_inquiry(data, size);
+        case CiMessageType::PropertySubscribeInquiry:
+            return handle_subscribe(data, size);
+        case CiMessageType::PropertyNotify:
+            handle_notify(data, size);
+            return {};
         default:
             return {};
     }
@@ -283,6 +313,72 @@ std::optional<std::string> CiDiscovery::get_property(std::string_view resource) 
     auto it = properties_.find(resource);
     if (it != properties_.end()) return it->second;
     return std::nullopt;
+}
+
+// ── PE Subscribe / Notify dispatcher (macOS plan §8.4) ──────────────────
+//
+// Subscribe Inquiry → register the source MUID against the resource named
+// in the PE JSON header → reply with a Subscribe Reply carrying the
+// allocated subscription id (echoed back in the same JSON header).
+// Notify → look up subscribers by resource and fan out via on_pe_notify.
+
+std::vector<uint8_t> CiDiscovery::handle_subscribe(const uint8_t* data, size_t size) {
+    auto chunk = pe_parse_message(data, size);
+    if (!chunk) return {};
+    // PE message header lives at data[6..9] (source MUID) and data[10..13]
+    // (destination MUID). Only respond when addressed to us (or broadcast).
+    MUID source = read_muid(data + 6);
+    MUID dest = read_muid(data + 10);
+    if (!dest.is_broadcast() && !(dest == local_info_.muid)) return {};
+
+    std::string resource, command;
+    int status = 200;
+    pe_header_parse(chunk->header_json, &resource, &command, &status);
+    if (resource.empty()) return {};
+
+    const std::string sub_id = subscription_manager().subscribe(resource, source);
+
+    // Build Subscribe Reply: echo resource + add subscribeId to JSON header.
+    // Header form: {"resource":"<r>","command":"<c>","subscribeId":"<id>","status":200}
+    std::string reply_header;
+    reply_header.reserve(64 + resource.size() + sub_id.size());
+    reply_header += "{\"resource\":\"";
+    reply_header += resource;
+    reply_header += "\",\"subscribeId\":\"";
+    reply_header += sub_id;
+    reply_header += "\",\"status\":200}";
+
+    return pe_build_message(PeMessageType::SubscribeReply,
+                            local_info_.ci_version,
+                            local_info_.muid,
+                            source,
+                            chunk->request_id,
+                            reply_header,
+                            /*total_chunks=*/1,
+                            /*chunk_number=*/1,
+                            chunk->payload.data(),
+                            chunk->payload.size());
+}
+
+void CiDiscovery::handle_notify(const uint8_t* data, size_t size) {
+    auto chunk = pe_parse_message(data, size);
+    if (!chunk) return;
+    // Notify is one-way — server → subscribers. We may receive it as a
+    // client (then `on_pe_notify` is the application's hook) or, when
+    // routing through a session, as a relay (the fan-out path is
+    // `notify()` on the producing side; this handler covers the
+    // consumer side).
+    if (!on_pe_notify) return;
+
+    std::string resource, command;
+    int status = 200;
+    pe_header_parse(chunk->header_json, &resource, &command, &status);
+    if (resource.empty()) return;
+
+    // Source MUID identifies who emitted the notification — pass that
+    // up so the application can disambiguate multi-publisher topics.
+    MUID source = read_muid(data + 6);
+    on_pe_notify(source, resource, chunk->header_json, chunk->payload);
 }
 
 }  // namespace pulp::midi

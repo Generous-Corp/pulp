@@ -7,11 +7,15 @@
 #include <string_view>
 #include <vector>
 #include <map>
+#include <memory>
 #include <functional>
 #include <cstdint>
 #include <optional>
 
 namespace pulp::midi {
+
+class PeSubscriptionManager;  // defined in midi_ci_pe.hpp
+struct PeSubscription;
 
 /// MIDI-CI message types (sub-IDs)
 enum class CiMessageType : uint8_t {
@@ -26,6 +30,9 @@ enum class CiMessageType : uint8_t {
     PropertyGetReply     = 0x35,
     PropertySetInquiry   = 0x36,
     PropertySetReply     = 0x37,
+    PropertySubscribeInquiry = 0x38,
+    PropertySubscribeReply   = 0x39,
+    PropertyNotify           = 0x3F,
     ProcessInquiry       = 0x40,
     ProcessReply         = 0x41
 };
@@ -39,6 +46,16 @@ struct MUID {
     bool is_broadcast() const { return value == 0x0FFFFFFF; }
     bool operator==(const MUID& o) const { return value == o.value; }
 };
+
+/// Notify callback — fires when a Subscribe peer should be notified of a
+/// resource change. `subscriber_muid` is the bound peer; `header_json`
+/// and `payload` echo the Notify PE message body. The transport layer
+/// (the caller of CiDiscovery) is responsible for actually building +
+/// sending the Notify wire bytes — this callback just tells you who.
+using PeNotifyCallback = std::function<void(MUID subscriber_muid,
+                                            std::string_view resource,
+                                            std::string_view header_json,
+                                            const std::vector<uint8_t>& payload)>;
 
 /// CI device identity (from discovery)
 struct CiDeviceInfo {
@@ -75,6 +92,7 @@ struct ProfileState {
 class CiDiscovery {
 public:
     CiDiscovery();
+    ~CiDiscovery();
 
     /// Set this device's identity info
     void set_device_info(const CiDeviceInfo& info) { local_info_ = info; }
@@ -112,14 +130,37 @@ public:
     std::function<void(const CiDeviceInfo&)> on_device_discovered;
     std::function<void(const ProfileId&, bool enabled)> on_profile_changed;
 
+    /// Fires when a Subscribe peer should receive a Notify. Set this
+    /// to wire the manager's fan-out to the actual MIDI transport.
+    /// macOS plan §8.4 — Subscribe/Notify dispatcher.
+    PeNotifyCallback on_pe_notify;
+
+    /// Direct access to the subscription registry for callers that
+    /// want to inspect / mutate it outside the wire-message handlers
+    /// (test fixtures, programmatic subscription, etc.). Lazily
+    /// constructed on first use.
+    PeSubscriptionManager& subscription_manager();
+    const PeSubscriptionManager& subscription_manager() const;
+
+    /// Programmatic Notify entry point — used by application code that
+    /// has changed a resource and wants every subscriber to be told.
+    /// Looks up subscribers via the manager and invokes `on_pe_notify`
+    /// once per binding. Returns the number of subscribers notified.
+    std::size_t notify(std::string_view resource,
+                       std::string_view header_json,
+                       const std::vector<uint8_t>& payload);
+
 private:
     CiDeviceInfo local_info_;
     std::vector<CiDeviceInfo> discovered_;
     std::vector<ProfileState> profiles_;
     std::map<std::string, std::string, std::less<>> properties_;
+    mutable std::unique_ptr<PeSubscriptionManager> sub_mgr_;
 
     std::vector<uint8_t> handle_discovery(const uint8_t* data, size_t size);
     std::vector<uint8_t> handle_profile_inquiry(const uint8_t* data, size_t size);
+    std::vector<uint8_t> handle_subscribe(const uint8_t* data, size_t size);
+    void handle_notify(const uint8_t* data, size_t size);
 };
 
 }  // namespace pulp::midi
