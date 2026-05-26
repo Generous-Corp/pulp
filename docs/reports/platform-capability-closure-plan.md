@@ -27,8 +27,8 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
 | Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/danielraffel/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto `origin/main` at `6125c235a`; local post-rebase validation passing; SDK version is `0.240.0` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
-| Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; rebase/validation pending after #2822 | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto `origin/main` at `2d8f004a`; local post-rebase validation passing; SDK version is `0.241.0` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
+| Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; locally rebased/validated; final SDK bump and push pending after #2822 | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
 - Add or update focused unit tests for every new public behavior.
@@ -523,9 +523,9 @@ PR2 implementation scope:
 
 PR2 validation and PR state:
 - PR #2822: https://github.com/danielraffel/pulp/pull/2822
-- The branch is rebased onto `origin/main` at `6125c235a` after #2825, #2905,
-  #2900, #2909, #2906, #2914, and #2908 landed. The fresh required SDK bump is
-  `0.240.0`.
+- The branch is rebased onto `origin/main` at `2d8f004a` after #2825, #2905,
+  #2900, #2909, #2906, #2914, #2908, and #2898 landed. The fresh required SDK
+  bump is `0.241.0`.
 - Initial PR review-comment and issue-comment sweep found no comments to
   address. The first CI failure was the version-bump commit-shape guard; it was
   fixed by splitting the `0.209.0` API bump into the canonical
@@ -584,6 +584,15 @@ PR2 validation and PR state:
   154/154. `python3 tools/scripts/version_bump_check.py --mode=report
   --accept-intent-trailers` passes for SDK `0.240.0`, and `git diff --check`
   passes.
+- After the `2d8f004a` rebase, local post-rebase validation passed:
+  `cmake --build build --target pulp-test-osc pulp-test-osc-channel
+  pulp-test-events pulp-test-ipc -j8` and
+  `ctest --test-dir build --output-on-failure -R
+  'OSC|OscChannel|EventLoop|MainThread|main-thread|dispatcher|IPC|Interprocess'`
+  154/154. `python3 tools/scripts/version_bump_check.py --base origin/main
+  --config tools/scripts/versioning.json --mode=report
+  --require-bump-for-fix-feat --accept-intent-trailers` passes for SDK
+  `0.241.0`, and `git diff --check` passes.
 - `tools/scripts/local_diff_cover.sh` hits the local GPU/Skia configure gate in
   this worktree, so the same coverage pipeline was run manually in
   `build-cov` with `PULP_ENABLE_COVERAGE=ON`, `PULP_ENABLE_GPU=OFF`, the OSC
