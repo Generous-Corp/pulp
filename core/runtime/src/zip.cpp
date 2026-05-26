@@ -326,4 +326,36 @@ std::optional<std::vector<uint8_t>> deflate_decompress(const uint8_t* data, size
     return inflate_raw(data, size);
 }
 
+// ── zlib (RFC 1950) compression ─────────────────────────────────────────
+//
+// Use miniz's positive window-bits mode (`+MZ_DEFAULT_WINDOW_BITS`) so
+// it emits a real RFC 1950 stream with CMF/FLG header and Adler-32
+// trailer. `gzip_decompress()` already accepts zlib input on the
+// inflate side, so a single mz_uncompress equivalent round-trips.
+std::optional<std::vector<uint8_t>> zlib_compress(const uint8_t* data, size_t size, int level) {
+    if (data == nullptr && size != 0) return std::nullopt;
+    mz_ulong comp_size = mz_deflateBound(nullptr, static_cast<mz_ulong>(size));
+    std::vector<uint8_t> result(comp_size);
+
+    mz_stream stream{};
+    stream.next_in = data;
+    stream.avail_in = static_cast<unsigned int>(size);
+    stream.next_out = result.data();
+    stream.avail_out = static_cast<unsigned int>(result.size());
+
+    // Positive window_bits -> zlib (RFC 1950) wrapper.
+    if (mz_deflateInit2(&stream, level, MZ_DEFLATED, MZ_DEFAULT_WINDOW_BITS,
+                        9, MZ_DEFAULT_STRATEGY) != MZ_OK)
+        return std::nullopt;
+
+    int status = mz_deflate(&stream, MZ_FINISH);
+    mz_deflateEnd(&stream);
+
+    if (status != MZ_STREAM_END)
+        return std::nullopt;
+
+    result.resize(stream.total_out);
+    return result;
+}
+
 }  // namespace pulp::runtime

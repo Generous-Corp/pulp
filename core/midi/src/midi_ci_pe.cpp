@@ -1,5 +1,6 @@
 #include <pulp/midi/midi_ci_pe.hpp>
 #include <pulp/midi/mcoded7.hpp>
+#include <pulp/runtime/zip.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -345,6 +346,18 @@ bool pe_header_parse(std::string_view json,
         *status = s.value_or(200);
     }
     return r.has_value() || c.has_value() || s.has_value();
+}
+
+// ── zlib payload encoding (MIDI-CI 1.2 §6.3) ────────────────────────────
+
+std::optional<std::vector<uint8_t>> pe_compress(const uint8_t* data, std::size_t size) {
+    return pulp::runtime::zlib_compress(data, size);
+}
+
+std::optional<std::vector<uint8_t>> pe_decompress(const uint8_t* data, std::size_t size) {
+    // gzip_decompress() already accepts zlib (RFC 1950) input on the
+    // inflate side — see core/runtime/include/pulp/runtime/zip.hpp.
+    return pulp::runtime::gzip_decompress(data, size);
 }
 
 // ── PeSubscriptionManager ───────────────────────────────────────────────

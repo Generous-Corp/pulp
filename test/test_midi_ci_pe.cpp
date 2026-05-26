@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/midi/mcoded7.hpp>
+#include <pulp/midi/midi_ci.hpp>
 #include <pulp/midi/midi_ci_pe.hpp>
 
 #include <numeric>
@@ -394,4 +395,165 @@ TEST_CASE("PE chunked Get round-trips against an in-process virtual responder",
     REQUIRE(pe_header_parse(done->header_json, &r, &c, &status));
     REQUIRE(r == "/Patch/Current");
     REQUIRE(status == 200);
+}
+
+// ── pe_compress / pe_decompress (macOS plan §8.4, zlib payload) ─────────
+
+TEST_CASE("pe_compress round-trips random payloads",
+          "[midi][ci][pe][zlib][issue-84]") {
+    std::mt19937 rng(0xC0FFEEu);
+    std::uniform_int_distribution<int> byte_dist(0, 255);
+    for (std::size_t n : {0u, 1u, 16u, 64u, 1024u, 4096u}) {
+        std::vector<uint8_t> payload(n);
+        for (std::size_t i = 0; i < n; ++i)
+            payload[i] = static_cast<uint8_t>(byte_dist(rng));
+
+        auto compressed = pe_compress(payload);
+        REQUIRE(compressed.has_value());
+        // RFC 1950 zlib header CMF byte: low nibble must be 8 (deflate).
+        if (n > 0) {
+            REQUIRE_FALSE(compressed->empty());
+            REQUIRE((compressed->at(0) & 0x0F) == 0x08);
+        }
+        auto decompressed = pe_decompress(*compressed);
+        REQUIRE(decompressed.has_value());
+        REQUIRE(*decompressed == payload);
+    }
+}
+
+TEST_CASE("pe_compress shrinks highly compressible payload",
+          "[midi][ci][pe][zlib][issue-84]") {
+    // Highly repetitive input — zlib should achieve > 10x compression.
+    std::vector<uint8_t> payload(4096, 0x42);
+    auto compressed = pe_compress(payload);
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() < payload.size() / 4);
+    auto decompressed = pe_decompress(*compressed);
+    REQUIRE(decompressed.has_value());
+    REQUIRE(*decompressed == payload);
+}
+
+TEST_CASE("pe_decompress rejects garbage input",
+          "[midi][ci][pe][zlib][issue-84]") {
+    std::vector<uint8_t> garbage = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
+    auto out = pe_decompress(garbage);
+    REQUIRE_FALSE(out.has_value());
+}
+
+// ── CiDiscovery Subscribe/Notify dispatcher (macOS plan §8.4) ────────────
+
+TEST_CASE("CiDiscovery wires Subscribe to PeSubscriptionManager",
+          "[midi][ci][pe][subscribe][issue-84]") {
+    // Server side.
+    CiDiscovery server;
+    CiDeviceInfo srv_info;
+    srv_info.muid = {0x11111};
+    server.set_device_info(srv_info);
+
+    // Client builds a Subscribe Inquiry for resource "/Patch".
+    MUID client_muid{0x22222};
+    auto subscribe_msg = pe_build_message(
+        PeMessageType::SubscribeInquiry, /*ci_version=*/2,
+        client_muid, srv_info.muid,
+        /*request_id=*/7,
+        pe_header_make("/Patch", "start", 200),
+        /*total_chunks=*/1, /*chunk_number=*/1,
+        nullptr, 0);
+
+    auto reply = server.process_message(subscribe_msg.data(), subscribe_msg.size());
+    REQUIRE_FALSE(reply.empty());
+
+    // The Subscribe registered.
+    REQUIRE(server.subscription_manager().all().size() == 1);
+    REQUIRE(server.subscription_manager().all()[0].resource == "/Patch");
+    REQUIRE(server.subscription_manager().all()[0].subscriber == client_muid);
+
+    // The reply parses as a SubscribeReply and contains the
+    // server-assigned subscribeId in its header.
+    auto parsed_reply = pe_parse_message(reply.data(), reply.size());
+    REQUIRE(parsed_reply.has_value());
+    REQUIRE(parsed_reply->header_json.find("subscribeId") != std::string::npos);
+    REQUIRE(parsed_reply->header_json.find("/Patch") != std::string::npos);
+}
+
+TEST_CASE("CiDiscovery.notify fans out to subscribers via callback",
+          "[midi][ci][pe][notify][issue-84]") {
+    CiDiscovery server;
+    CiDeviceInfo srv_info;
+    srv_info.muid = {0xABCDE};
+    server.set_device_info(srv_info);
+
+    // Register two subscribers programmatically.
+    MUID sub_a{0x10001};
+    MUID sub_b{0x10002};
+    server.subscription_manager().subscribe("/State", sub_a);
+    server.subscription_manager().subscribe("/State", sub_b);
+    // A third subscriber on a *different* resource — must not fire.
+    server.subscription_manager().subscribe("/Other", {0x10003});
+
+    std::vector<MUID> notified;
+    std::vector<std::string> resources;
+    server.on_pe_notify = [&](MUID m, std::string_view r, std::string_view,
+                              const std::vector<uint8_t>&) {
+        notified.push_back(m);
+        resources.emplace_back(r);
+    };
+
+    std::vector<uint8_t> payload = {1, 2, 3, 4};
+    std::size_t n = server.notify("/State",
+                                  pe_header_make("/State", "notify"),
+                                  payload);
+    REQUIRE(n == 2);
+    REQUIRE(notified.size() == 2);
+    REQUIRE(((notified[0] == sub_a && notified[1] == sub_b)
+          || (notified[0] == sub_b && notified[1] == sub_a)));
+    REQUIRE(resources[0] == "/State");
+}
+
+TEST_CASE("CiDiscovery routes incoming PropertyNotify to on_pe_notify",
+          "[midi][ci][pe][notify][issue-84]") {
+    CiDiscovery client;
+    CiDeviceInfo info;
+    info.muid = {0xDEADBE};
+    client.set_device_info(info);
+
+    bool fired = false;
+    MUID seen_source{0};
+    std::string seen_resource;
+    std::vector<uint8_t> seen_payload;
+    client.on_pe_notify = [&](MUID m, std::string_view r, std::string_view,
+                              const std::vector<uint8_t>& payload) {
+        fired = true;
+        seen_source = m;
+        seen_resource = std::string(r);
+        seen_payload = payload;
+    };
+
+    MUID publisher{0x55555};
+    std::vector<uint8_t> payload = {9, 8, 7};
+    auto notify_msg = pe_build_message(
+        PeMessageType::Notify, /*ci_version=*/2,
+        publisher, info.muid,
+        /*request_id=*/3,
+        pe_header_make("/Topic", "notify"),
+        /*total_chunks=*/1, /*chunk_number=*/1,
+        payload.data(), payload.size());
+
+    auto reply = client.process_message(notify_msg.data(), notify_msg.size());
+    REQUIRE(reply.empty());  // Notify is one-way.
+    REQUIRE(fired);
+    REQUIRE(seen_source == publisher);
+    REQUIRE(seen_resource == "/Topic");
+    REQUIRE(seen_payload == payload);
+}
+
+TEST_CASE("CiDiscovery.notify with no subscribers is a no-op",
+          "[midi][ci][pe][notify][issue-84]") {
+    CiDiscovery server;
+    int fires = 0;
+    server.on_pe_notify = [&](MUID, std::string_view, std::string_view,
+                              const std::vector<uint8_t>&) { ++fires; };
+    std::size_t n = server.notify("/nothing", "{}", {});
+    REQUIRE(n == 0);
+    REQUIRE(fires == 0);
 }

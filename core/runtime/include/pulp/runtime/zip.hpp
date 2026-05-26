@@ -45,4 +45,19 @@ std::optional<std::vector<uint8_t>> deflate_compress(const uint8_t* data, size_t
 /// Decompress raw deflate data.
 std::optional<std::vector<uint8_t>> deflate_decompress(const uint8_t* data, size_t size);
 
+// ── zlib (RFC 1950) compression ─────────────────────────────────────────
+//
+// zlib_compress emits a real RFC 1950 zlib stream:
+//
+//   CMF(1) FLG(1) || raw deflate || Adler32(big-endian, 4)
+//
+// Used for the MIDI-CI 1.2 Property Exchange `zlib+Mcoded7` payload
+// encoding (PE spec §6.3). For symmetry with gzip_compress this
+// emits a self-contained stream; gzip_decompress() already accepts
+// zlib input on the inflate side.
+
+/// Compress data into an RFC 1950 zlib stream.
+std::optional<std::vector<uint8_t>> zlib_compress(const uint8_t* data, size_t size,
+                                                  int level = 6);
+
 }  // namespace pulp::runtime

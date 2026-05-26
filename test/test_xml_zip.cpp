@@ -326,6 +326,23 @@ TEST_CASE("deflate compress/decompress round-trip", "[runtime][zip]") {
     REQUIRE(result == original);
 }
 
+TEST_CASE("zlib (RFC 1950) compress + gzip_decompress round-trip", "[runtime][zip]") {
+    // macOS plan §8.4 — zlib_compress drives the MIDI-CI PE payload path.
+    std::string original = "Zlib test payload — must round-trip via gzip_decompress.";
+    auto data = reinterpret_cast<const uint8_t*>(original.data());
+
+    auto compressed = pulp::runtime::zlib_compress(data, original.size());
+    REQUIRE(compressed.has_value());
+    REQUIRE_FALSE(compressed->empty());
+    // RFC 1950 CMF byte low nibble = 8 (deflate compression method).
+    REQUIRE((compressed->at(0) & 0x0F) == 0x08);
+
+    auto decompressed = gzip_decompress(compressed->data(), compressed->size());
+    REQUIRE(decompressed.has_value());
+    std::string result(decompressed->begin(), decompressed->end());
+    REQUIRE(result == original);
+}
+
 TEST_CASE("gzip binary data round-trip", "[runtime][zip]") {
     // Generate binary data
     std::vector<uint8_t> data(1000);

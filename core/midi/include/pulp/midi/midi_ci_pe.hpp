@@ -133,6 +133,27 @@ private:
     std::unordered_map<uint8_t, Slot> slots_;
 };
 
+// ── zlib payload encoding (MIDI-CI 1.2 §6.3) ────────────────────────────
+//
+// PE payloads may be zlib-wrapped (RFC 1950) prior to Mcoded7 encoding
+// when the JSON header advertises `"compressed": "zlib"`. Both helpers
+// are payload-only — they do not touch the SysEx envelope or the
+// Mcoded7 framing.
+
+/// Compress a PE payload using zlib (RFC 1950). Returns nullopt on failure.
+std::optional<std::vector<uint8_t>> pe_compress(const uint8_t* data, std::size_t size);
+
+inline std::optional<std::vector<uint8_t>> pe_compress(const std::vector<uint8_t>& payload) {
+    return pe_compress(payload.data(), payload.size());
+}
+
+/// Decompress a zlib-wrapped PE payload. Returns nullopt on failure.
+std::optional<std::vector<uint8_t>> pe_decompress(const uint8_t* data, std::size_t size);
+
+inline std::optional<std::vector<uint8_t>> pe_decompress(const std::vector<uint8_t>& blob) {
+    return pe_decompress(blob.data(), blob.size());
+}
+
 /// Builds a minimal PE JSON header. Plenty of producers will want to
 /// build their own, but this covers the common "resource + status" case
 /// and keeps tests from depending on a JSON library at the surface.
