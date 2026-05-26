@@ -408,6 +408,20 @@ if(PULP_BUILD_WEBVIEW)
     endif()
 endif()
 
+# Backend detection TUs — always compiled into pulp-view-core regardless
+# of PULP_BUILD_WEBVIEW so callers can distinguish "this build excluded
+# WebView" from "this OS has no usable WebView backend installed".
+# `web_view_backend.cpp` owns the symbol on Apple / Android / generic
+# OSes; the Windows + Linux per-platform TUs own it on their OS so the
+# runtime probe (LoadLibrary / dlopen) can run before the answer is
+# returned.
+target_sources(pulp-view-core PRIVATE src/web_view_backend.cpp)
+if(WIN32)
+    target_sources(pulp-view-core PRIVATE platform/win/webview2_backend.cpp)
+elseif(UNIX AND NOT APPLE AND NOT ANDROID)
+    target_sources(pulp-view-core PRIVATE platform/linux/webkitgtk_backend.cpp)
+endif()
+
 # CHOC headers (JS engine, utilities)
 foreach(_pulp_view_target pulp-view-core pulp-view-script)
     target_include_directories(${_pulp_view_target} PUBLIC

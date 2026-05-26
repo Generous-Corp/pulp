@@ -122,6 +122,24 @@ WebViewOptions::FetchResource make_webview_directory_resource_fetcher(
     std::filesystem::path root_directory,
     std::string index_filename = "index.html");
 
+/// Identifies the live WebView backend on this platform / build.
+///
+/// Returned values:
+///   * `"wkwebview"`   — macOS / iOS (`WebKit.framework`).
+///   * `"webview2"`    — Windows (Microsoft Edge WebView2 runtime).
+///   * `"webkitgtk"`   — Linux (WebKitGTK via `libwebkit2gtk-4.1.so.0`).
+///   * `"chromium"`    — Android (system WebView).
+///   * `"none"`        — `PULP_BUILD_WEBVIEW=OFF` or no runtime backend
+///                       resolved on this OS at process start.
+///
+/// Useful for the gap-doc audit (which backends actually wire up on the
+/// platforms Pulp ships to) and for callers that need to surface a clear
+/// "no embedded browser available on this OS" message.
+std::string detect_webview_backend();
+
+/// Returns true if the host process has a usable WebView backend.
+bool webview_backend_available();
+
 // Embedded web view component.
 // Create with WebViewPanel::create(), then use native_handle() to embed the
 // platform WebView in a WindowHost/PluginViewHost that actually exposes and

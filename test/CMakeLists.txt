@@ -1600,6 +1600,10 @@ pulp_add_test_suite(pulp-test-events LIBRARIES pulp::events)
 
 pulp_add_test_suite(pulp-test-events-async-helpers LIBRARIES pulp::events)
 
+# PushNotifications cross-platform smoke + headless-mock coverage
+# (gap-doc 2026-05-24 row "PushNotifications (local + remote)").
+pulp_add_test_suite(pulp-test-push-notifications LIBRARIES pulp::events)
+
 add_executable(pulp-test-events-timer-helpers test_events_timer_helpers.cpp)
 target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2::Catch2WithMain)
 # `slow` (#1589): Timer hammer + UAF-free destroy-while-dispatched
@@ -3299,6 +3303,13 @@ if(PULP_BUILD_WEBVIEW)
     target_link_libraries(pulp-test-webview PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-webview)
 endif()
+
+# WebView backend detection smoke — always built. Validates that
+# `pulp::view::detect_webview_backend()` returns one of the documented
+# identifiers ("wkwebview", "webview2", "webkitgtk", "chromium", "none")
+# on every supported OS. Gap-doc 2026-05-24 row "WebBrowserComponent
+# (per-platform: WKWebView/WebView2/WebKitGTK/Chromium)".
+pulp_add_test_suite(pulp-test-webview-backend-detect LIBRARIES pulp::view)
 
 # MIDI 2.0 UMP/MPE tests
 pulp_add_test_suite(pulp-test-ump-mpe LIBRARIES pulp::midi)
