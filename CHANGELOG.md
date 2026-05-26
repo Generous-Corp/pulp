@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02221"></a>
+## [0.222.1] - 2026-05-25
+
+- fix(audio): buffer_ops::clip sanitizes NaN before clamp (Codex P1 on #2864) ([#2866](https://github.com/danielraffel/pulp/pull/2866))
+
+<a id="v02220"></a>
+## [0.222.0] - 2026-05-25
+
+- feat(signal): Wavetable oscillator with band-switching + WavetableBank morph (item 2.6) ([#2865](https://github.com/danielraffel/pulp/pull/2865))
+
 <a id="v02210"></a>
 ## [0.221.0] - 2026-05-25
 
@@ -2785,6 +2795,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.222.1]: https://github.com/danielraffel/pulp/releases/tag/v0.222.1
+[0.222.0]: https://github.com/danielraffel/pulp/releases/tag/v0.222.0
 [0.221.0]: https://github.com/danielraffel/pulp/releases/tag/v0.221.0
 [0.220.0]: https://github.com/danielraffel/pulp/releases/tag/v0.220.0
 [0.219.0]: https://github.com/danielraffel/pulp/releases/tag/v0.219.0
