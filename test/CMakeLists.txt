@@ -2173,6 +2173,9 @@ pulp_add_test_suite(pulp-test-mpe-tracker-per-note-management LIBRARIES pulp::mi
 # macOS plan Batch G — Wavetable oscillator (item 2.6)
 pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
 
+# macOS plan Batch G — Generic Synthesiser polyphony (item 2.5)
+pulp_add_test_suite(pulp-test-synthesiser LIBRARIES pulp::midi)
+
 # macOS plan Batch A — Foundations
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
