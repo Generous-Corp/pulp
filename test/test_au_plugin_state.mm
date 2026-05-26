@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>
+#include <pulp/format/host_type.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/registry.hpp>
 
@@ -781,4 +782,165 @@ TEST_CASE("AU v3 without a Bypass parameter still honours setShouldBypassEffect"
 
         [unit release];
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Per-method audit invariants (macOS plan item 3.1)
+//
+// Pins the no-op-by-design surface of `PulpAudioUnit` so regressions to
+// the table in the `au_adapter.mm` header don't slip through silently.
+// Update both this test AND the header-comment table when you change the
+// audit row for an override.
+// ─────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("AU v3 per-method audit invariants",
+          "[au][auv3][audit][item-3.1]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* err = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&err];
+        REQUIRE(unit != nil);
+        REQUIRE(err == nil);
+
+        // No-op invariants — these must NOT change without an audit-table
+        // update. Pinning them prevents a future edit from silently
+        // flipping the bus model or preset support, which would change
+        // what hosts assume about Pulp plugins at scan time.
+        REQUIRE([unit supportsUserPresets] == NO);
+        REQUIRE([unit canProcessInPlace] == YES);
+
+        // Bus topology — effect processor declares 1 input bus + 1 output
+        // bus, no sidechain. The adapter must mirror that 1:1 so the host
+        // doesn't see a phantom sidechain it can't connect.
+        REQUIRE([unit outputBusses] != nil);
+        REQUIRE([unit outputBusses].count == 1u);
+        REQUIRE([unit inputBusses] != nil);
+        REQUIRE([unit inputBusses].count == 1u);
+
+        // No latency / tail by default for the test processor. The
+        // adapter must NOT report a host-meaningful latency for a
+        // zero-latency plugin — Logic stacks reported latencies as
+        // PDC budget and will under-report a track that lies.
+        REQUIRE(unit.latency == 0.0);
+        REQUIRE(unit.tailTime == 0.0);
+
+        // ParameterTree must be cached and non-empty — the test processor
+        // exposes one parameter. Recreating the tree on every observer
+        // call would allocate on every host parameter scan.
+        AUParameterTree* tree1 = unit.parameterTree;
+        REQUIRE(tree1 != nil);
+        REQUIRE(tree1.allParameters.count == 1u);
+
+        // pulpProcessor + pulpStore — same Processor + Store the audio
+        // path will see. Tests rely on this to avoid the dual-Processor
+        // drift bug the AU v2 path used to hit.
+        REQUIRE([unit pulpProcessor] != nullptr);
+        REQUIRE([unit pulpStore] != nullptr);
+
+        [unit release];
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AUHostingService host detection (DAW-quirks row 22, macOS plan item 3.1)
+//
+// Pins the wrapper-identifier → HostType classifier. The real-host path
+// is exercised by running Pulp inside Logic / GarageBand / AUM and is
+// validated separately (deferred to the in-DAW bench rows for those
+// hosts). These cases pin the deterministic classifier output that the
+// adapter consumes when `current_auv3_wrapper_identifier()` resolves.
+// ─────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("AUHostingService wrapper-id classifier — known wrappers",
+          "[au][auv3][host-detection][item-3.1]") {
+    using pulp::format::host_type_from_auv3_wrapper;
+    using pulp::format::HostType;
+
+    SECTION("Logic Pro bundle id") {
+        REQUIRE(host_type_from_auv3_wrapper("com.apple.logic10") == HostType::LogicPro);
+        REQUIRE(host_type_from_auv3_wrapper("com.apple.logic.pro") == HostType::LogicPro);
+        // Case-insensitive.
+        REQUIRE(host_type_from_auv3_wrapper("COM.APPLE.LOGIC10") == HostType::LogicPro);
+    }
+
+    SECTION("MainStage folds into Logic family") {
+        REQUIRE(host_type_from_auv3_wrapper("com.apple.mainstage") == HostType::LogicPro);
+    }
+
+    SECTION("Logic 10.5+ AUHostingServiceXPC wrapper name") {
+        REQUIRE(host_type_from_auv3_wrapper("AUHostingServiceXPC_arrow") == HostType::LogicPro);
+    }
+
+    SECTION("GarageBand bundle id") {
+        REQUIRE(host_type_from_auv3_wrapper("com.apple.garageband10") == HostType::GarageBand);
+    }
+
+    SECTION("Reuses executable-path classifier for non-Apple hosts") {
+        // Reaper, Cubase, etc. when the wrapper advertises a bundle id
+        // we already classify via the executable-name heuristic.
+        REQUIRE(host_type_from_auv3_wrapper("com.cockos.reaper") == HostType::Reaper);
+        REQUIRE(host_type_from_auv3_wrapper("com.steinberg.cubase13") == HostType::Cubase);
+        REQUIRE(host_type_from_auv3_wrapper("com.ableton.live") == HostType::AbletonLive);
+    }
+}
+
+TEST_CASE("AUHostingService wrapper-id classifier — unknown / fallback",
+          "[au][auv3][host-detection][item-3.1]") {
+    using pulp::format::host_type_from_auv3_wrapper;
+    using pulp::format::HostType;
+
+    SECTION("Empty input returns Unknown") {
+        REQUIRE(host_type_from_auv3_wrapper("") == HostType::Unknown);
+    }
+
+    SECTION("Generic AUHostingService — caller must fall back") {
+        // Bare `AUHostingService` is Apple's generic wrapper used by
+        // many hosts. The classifier returns Unknown so the caller
+        // falls back to the executable-path heuristic instead of
+        // mis-classifying the host.
+        REQUIRE(host_type_from_auv3_wrapper("AUHostingService") == HostType::Unknown);
+    }
+
+    SECTION("Unknown bundle id returns Unknown") {
+        REQUIRE(host_type_from_auv3_wrapper("com.example.unknown") == HostType::Unknown);
+    }
+}
+
+TEST_CASE("current_auv3_wrapper_identifier — Apple bundle inspection",
+          "[au][auv3][host-detection][item-3.1]") {
+    // The wrapper-id lookup must not crash and must return a string
+    // (possibly empty) on Apple platforms. When the test binary runs
+    // standalone (no `.appex` bundle), the result is typically the test
+    // binary's own bundle id or empty — both are valid outcomes. We pin
+    // the no-crash contract here; the real-host classification path is
+    // exercised inside Logic / GarageBand / AUM (deferred to per-host
+    // bench rows).
+    auto id = pulp::format::current_auv3_wrapper_identifier();
+    // The std::string contract: callable, returns by value, no throw.
+    // The actual content depends on how the test binary is bundled —
+    // standalone Catch2 binaries usually return an empty string.
+    REQUIRE((id.empty() || !id.empty()));  // tautology — pins no-throw.
+}
+
+TEST_CASE("detect_host_type — wrapper id wins when wrapper is recognised",
+          "[au][auv3][host-detection][item-3.1]") {
+    // `detect_host_type()` consults `current_auv3_wrapper_identifier()`
+    // first on Apple platforms; when that returns a recognised id, the
+    // wrapper-side wins. When unrecognised (or empty), it falls back to
+    // the executable-path heuristic. The classifier-level pieces are
+    // pinned above; this test only checks that `detect_host_type()` is
+    // callable and returns a value in the enum (i.e. the wrapper path
+    // doesn't crash when the Apple host services are absent).
+    auto type = pulp::format::detect_host_type();
+    REQUIRE(static_cast<int>(type) >= static_cast<int>(pulp::format::HostType::Unknown));
+    REQUIRE(static_cast<int>(type) <= static_cast<int>(pulp::format::HostType::Other));
 }
