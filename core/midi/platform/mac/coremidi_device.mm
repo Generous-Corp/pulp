@@ -100,15 +100,30 @@ public:
             return false;
         }
 
-        // Connect to the specified source
-        auto source_id = static_cast<MIDIObjectRef>(std::stoul(port_id));
-        // Find the source endpoint matching this ID
         ItemCount source_count = MIDIGetNumberOfSources();
+        if (port_id.empty() || port_id == "0") {
+            if (source_count > 0) {
+                status = MIDIPortConnectSource(port_, MIDIGetSource(0), nullptr);
+                is_open_ = (status == noErr);
+            }
+            if (!is_open_) close();
+            return is_open_;
+        }
+
+        SInt32 source_id = 0;
+        try {
+            source_id = static_cast<SInt32>(std::stol(port_id));
+        } catch (...) {
+            close();
+            return false;
+        }
+
+        // Find the source endpoint matching this ID.
         for (ItemCount i = 0; i < source_count; ++i) {
             MIDIEndpointRef src = MIDIGetSource(i);
             SInt32 unique_id = 0;
             MIDIObjectGetIntegerProperty(src, kMIDIPropertyUniqueID, &unique_id);
-            if (static_cast<MIDIObjectRef>(unique_id) == source_id) {
+            if (unique_id == source_id) {
                 status = MIDIPortConnectSource(port_, src, nullptr);
                 if (status == noErr) {
                     is_open_ = true;
@@ -117,13 +132,8 @@ public:
             }
         }
 
-        // If port_id is "0" or empty, connect to first available source
-        if (source_count > 0) {
-            status = MIDIPortConnectSource(port_, MIDIGetSource(0), nullptr);
-            is_open_ = (status == noErr);
-        }
-
-        return is_open_;
+        close();
+        return false;
     }
 
     void close() override {
@@ -172,7 +182,13 @@ public:
             if (port_id.empty() || port_id == "0") {
                 dest_ = MIDIGetDestination(0);
             } else {
-                auto target_id = std::stoi(port_id);
+                SInt32 target_id = 0;
+                try {
+                    target_id = static_cast<SInt32>(std::stol(port_id));
+                } catch (...) {
+                    close();
+                    return false;
+                }
                 for (ItemCount i = 0; i < dest_count; ++i) {
                     SInt32 unique_id = 0;
                     MIDIObjectGetIntegerProperty(MIDIGetDestination(i), kMIDIPropertyUniqueID, &unique_id);
@@ -185,6 +201,7 @@ public:
         }
 
         is_open_ = (dest_ != 0);
+        if (!is_open_) close();
         return is_open_;
     }
 
