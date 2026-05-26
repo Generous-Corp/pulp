@@ -1,5 +1,6 @@
 #include <pulp/format/host_quirks.hpp>
 
+#include <pulp/format/host_quirks/ableton_live.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
 #include <pulp/format/host_version.hpp>
 
@@ -16,11 +17,6 @@ namespace {
 // header) must be backed by a host vendor doc + a reproducer Pulp
 // issue. See the catalog at
 // `planning/2026-05-24-daw-host-quirks-inheritance.md`.
-
-void apply_ableton_live_quirks(HostQuirks& q, HostVersion /*v*/) {
-    q.live_vst3_canresize_ignore = true;
-    q.live_vst3_windows_dpi_defer = true; // No-op on macOS/Linux.
-}
 
 void apply_bitwig_quirks(HostQuirks& q, HostVersion v) {
     q.bitwig_vst3_linux_repaint_after_resize = true; // No-op off Linux.
@@ -56,7 +52,7 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
     switch (type) {
         case HostType::Cubase:
         case HostType::Nuendo:        host_quirks::apply_cubase(q, version); break;
-        case HostType::AbletonLive:   apply_ableton_live_quirks(q, version); break;
+        case HostType::AbletonLive:   host_quirks::apply_ableton_live(q, version); break;
         case HostType::Bitwig:        apply_bitwig_quirks(q, version); break;
         case HostType::Reaper:        apply_reaper_quirks(q, version); break;
         case HostType::LogicPro:

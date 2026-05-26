@@ -129,3 +129,18 @@ TEST_CASE("make_quirks_for Cubase with unknown version stays defensive-default",
     REQUIRE(q.synthesize_bypass_parameter == true);
     REQUIRE(q.clamp_latency_to_nonneg == true);
 }
+
+// ── macOS plan item 5.4 — Ableton Live header extraction. Factory at
+//    `core/format/include/pulp/format/host_quirks/ableton_live.hpp`. ──
+
+TEST_CASE("make_quirks_for Ableton Live leaves Cubase / Wavelab flags off",
+          "[format][host-quirks][isolation]") {
+    auto q = make_quirks_for(HostType::AbletonLive, HostVersion{11, 0});
+    REQUIRE(q.live_vst3_canresize_ignore == true);
+    REQUIRE(q.live_vst3_windows_dpi_defer == true);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.cubase9_state_blob_size_validation == false);
+    REQUIRE(q.wavelab_vst3_defer_activation == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+    REQUIRE(q.reaper_process_while_bypassed == false);
+}
