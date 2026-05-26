@@ -19,6 +19,8 @@ target_include_directories(pulp-midi PUBLIC
 target_sources(pulp-midi PRIVATE
     src/midi_file.cpp
     src/midi_ci.cpp
+    src/midi_ci_pe.cpp
+    src/mcoded7.cpp
     src/mpe_voice_tracker.cpp
     src/running_status.cpp
 )

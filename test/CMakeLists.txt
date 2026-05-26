@@ -779,6 +779,9 @@ pulp_add_test_suite(pulp-test-license LIBRARIES pulp::runtime)
 # MIDI CI tests
 pulp_add_test_suite(pulp-test-midi-ci LIBRARIES pulp::midi)
 
+# MIDI CI Property Exchange (PE) tests — issue-84, plan item 8.4
+pulp_add_test_suite(pulp-test-midi-ci-pe LIBRARIES pulp::midi)
+
 # AU v2 effect adapter MIDI-input tests — guards the 2026-04-22 fix that
 # wired HandleMIDIEvent / HandleSysEx into `PulpAUEffect` and flipped the
 # component type from aufx to aumf for descriptor.accepts_midi=true.
