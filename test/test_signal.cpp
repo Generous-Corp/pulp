@@ -6,11 +6,18 @@
 #include <cmath>
 #include <complex>
 #include <limits>
+#include <numbers>
 #include <utility>
 #include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+constexpr float kPi = std::numbers::pi_v<float>;
+
+} // namespace
 
 // ── DelayLine ────────────────────────────────────────────────────────────────
 
@@ -687,7 +694,7 @@ TEST_CASE("Oversampler polyphase_iir round-trip preserves passband sine",
 
     double rms_in = 0.0, rms_out = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
-        float x = std::sin(2.0f * static_cast<float>(M_PI) * f *
+        float x = std::sin(2.0f * kPi * f *
                            static_cast<float>(i) / fs);
         float y = os.process(x, passthrough);
         if (i >= warmup) {
@@ -713,7 +720,7 @@ TEST_CASE("Oversampler polyphase_iir x4 cascade is finite and bounded",
 
     const std::size_t n = 1024;
     for (std::size_t i = 0; i < n; ++i) {
-        float x = 0.5f * std::sin(2.0f * static_cast<float>(M_PI) *
+        float x = 0.5f * std::sin(2.0f * kPi *
                                   static_cast<float>(i) / 64.0f);
         float y = os.process(x, pass);
         REQUIRE(std::isfinite(y));
@@ -757,7 +764,7 @@ TEST_CASE("Oversampler polyphase_iir vs fir_biquad both reject stopband",
         // Drive a clean low-frequency input — saturator generates
         // harmonics, anti-aliasing must keep the output finite and
         // bounded for both lanes.
-        float x = 0.7f * std::sin(2.0f * static_cast<float>(M_PI) *
+        float x = 0.7f * std::sin(2.0f * kPi *
                                   static_cast<float>(i) / 32.0f);
         float yf = os_fir.process(x, sat);
         float yi = os_iir.process(x, sat);
