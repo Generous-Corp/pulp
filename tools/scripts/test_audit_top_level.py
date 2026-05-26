@@ -139,6 +139,55 @@ class AuditTopLevelTests(unittest.TestCase):
         joined = "\n".join(errors)
         self.assertIn("other/pro_tools.hpp", joined)
 
+    # Regression: #2939 / Codex comment 3302833422 — vendor-name allowlist
+    # must not follow symlinks. The defensive `is_symlink()` rejection in
+    # is_allowed_vendor_name_source() prevents any future regression to
+    # `Path.resolve()` (which follows symlinks) from re-introducing the
+    # bypass. We test the helper directly here to pin the contract.
+    @unittest.skipIf(
+        not hasattr(pathlib.Path, "symlink_to"),
+        "pathlib symlink support unavailable",
+    )
+    def test_is_allowed_vendor_name_source_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            header = (
+                root
+                / "core"
+                / "format"
+                / "include"
+                / "pulp"
+                / "format"
+                / "host_quirks"
+                / "pro_tools.hpp"
+            )
+            header.parent.mkdir(parents=True)
+            header.write_text("#pragma once\n", encoding="utf-8")
+
+            # The canonical header is allowlisted.
+            self.assertTrue(audit.is_allowed_vendor_name_source(header, root))
+
+            # A symlink at a forbidden path that targets the allowlisted
+            # canonical entry must NOT be allowlisted, even though `resolve()`
+            # would map it to the allowlisted path.
+            link = root / "other" / "pro_tools.hpp"
+            link.parent.mkdir()
+            try:
+                link.symlink_to(header)
+            except OSError as exc:
+                self.skipTest(f"symlink unavailable: {exc}")
+            self.assertFalse(audit.is_allowed_vendor_name_source(link, root))
+
+            # Same for a symlink placed at the allowlisted path (e.g. someone
+            # replaces the canonical file with a symlink to a vendor blob).
+            real_canonical_dir = root / "canonical"
+            real_canonical_dir.mkdir()
+            vendor_blob = real_canonical_dir / "vendor_pro_tools.hpp"
+            vendor_blob.write_text("// vendor SDK\n", encoding="utf-8")
+            header.unlink()
+            header.symlink_to(vendor_blob)
+            self.assertFalse(audit.is_allowed_vendor_name_source(header, root))
+
     def test_walk_fallback_yields_os_walk_entries(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
