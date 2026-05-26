@@ -878,17 +878,68 @@ TEST_CASE("install_default_backend reports platform support honestly",
     NetworkServiceDiscovery nsd;
     const bool installed = pulp::events::install_default_backend(nsd);
 #if defined(__APPLE__)
-    // Apple platforms must always install a working Bonjour backend.
+    // Apple platforms must always install a working Bonjour backend —
+    // CoreServices DNS-SD is part of the OS, never optional.
     REQUIRE(installed);
     REQUIRE(nsd.has_backend());
 #else
-    // Linux + Windows: deferred to a follow-up. The API must report
-    // false rather than silently install a no-op so callers can decide
-    // how to degrade.
-    REQUIRE_FALSE(installed);
-    REQUIRE_FALSE(nsd.has_backend());
+    // Linux (Avahi via libavahi-client.so.3) and Windows (Bonjour SDK
+    // via dnssd.dll) resolve their backends at run-time. When the
+    // host runtime library is present `installed` must be true; when
+    // it isn't, `installed` must be false (honest no-mDNS, never a
+    // silent no-op). Either way the dispatcher state must match the
+    // return value — installed=true must mean has_backend()=true.
+    REQUIRE(installed == nsd.has_backend());
 #endif
 }
+
+// ── Linux Avahi + Windows Bonjour factory contracts ─────────────────────
+// The platform-specific make_*_backend() factories are honest about
+// runtime availability: if the host's mDNS library is installed they
+// return a working backend; if not, they return nullptr so the
+// dispatcher can degrade explicitly. These tests pin the contract on
+// the host platform they target — both gated to their respective OS
+// so the symbols are actually defined.
+
+#if defined(__linux__)
+namespace pulp::events {
+std::unique_ptr<NetworkServiceDiscovery::Backend> make_avahi_backend();
+}
+TEST_CASE("Avahi backend factory returns nullptr or working backend",
+          "[events][service-discovery][avahi][platform]") {
+    // make_avahi_backend() runtime-loads libavahi-client.so.3. On
+    // boxes without the library installed it must return nullptr —
+    // never a half-initialized backend. When it does return a backend
+    // the dispatcher must accept install_backend cleanly.
+    auto backend = pulp::events::make_avahi_backend();
+    if (!backend) {
+        SUCCEED("libavahi-client.so.3 not present on this host; "
+                "make_avahi_backend honestly returned nullptr.");
+        return;
+    }
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::move(backend));
+    REQUIRE(nsd.has_backend());
+}
+#endif  // __linux__
+
+#if defined(_WIN32)
+namespace pulp::events {
+std::unique_ptr<NetworkServiceDiscovery::Backend> make_windows_bonjour_backend();
+}
+TEST_CASE("Windows Bonjour factory returns nullptr or working backend",
+          "[events][service-discovery][bonjour][platform]") {
+    auto backend = pulp::events::make_windows_bonjour_backend();
+    if (!backend) {
+        SUCCEED("dnssd.dll not present on this host; "
+                "make_windows_bonjour_backend honestly returned nullptr.");
+        return;
+    }
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::move(backend));
+    REQUIRE(nsd.has_backend());
+}
+#endif  // _WIN32
 
 #if defined(__APPLE__)
 #include <unistd.h>  // ::getpid for unique smoke-test service name

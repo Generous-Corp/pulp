@@ -6,8 +6,18 @@
 namespace pulp::events {
 
 #if defined(__APPLE__)
-// Implemented in platform/mac/bonjour_backend.mm.
+// Implemented in platform/mac/bonjour_backend.cpp.
 std::unique_ptr<NetworkServiceDiscovery::Backend> make_bonjour_backend();
+#elif defined(__linux__)
+// Implemented in platform/linux/avahi_backend.cpp.
+// Returns nullptr when libavahi-client.so.3 isn't installed; caller
+// degrades to the "no mDNS available" path.
+std::unique_ptr<NetworkServiceDiscovery::Backend> make_avahi_backend();
+#elif defined(_WIN32)
+// Implemented in platform/win/bonjour_backend.cpp.
+// Returns nullptr when dnssd.dll isn't installed; caller degrades to
+// the "no mDNS available" path.
+std::unique_ptr<NetworkServiceDiscovery::Backend> make_windows_bonjour_backend();
 #endif
 
 bool install_default_backend(NetworkServiceDiscovery& nsd) {
@@ -16,13 +26,25 @@ bool install_default_backend(NetworkServiceDiscovery& nsd) {
     if (!backend) return false;
     nsd.install_backend(std::move(backend));
     return true;
+#elif defined(__linux__)
+    // Avahi backend uses runtime dlopen of libavahi-client.so.3. When
+    // the daemon isn't installed (minimal containers, dev workstations
+    // without avahi-daemon) we honestly report no backend rather than
+    // silently faking discovery.
+    auto backend = make_avahi_backend();
+    if (!backend) return false;
+    nsd.install_backend(std::move(backend));
+    return true;
+#elif defined(_WIN32)
+    // Bonjour SDK for Windows ships `dnssd.dll`; we resolve it at
+    // runtime. Returns false on stock Windows boxes that have never
+    // had the SDK installed — same honest contract as Linux without
+    // avahi-daemon.
+    auto backend = make_windows_bonjour_backend();
+    if (!backend) return false;
+    nsd.install_backend(std::move(backend));
+    return true;
 #else
-    // Linux (Avahi) and Windows (Bonjour SDK / WinRT NsdManager)
-    // backends are deferred — see
-    // planning/2026-05-24-reference-framework-gap-analysis.md row
-    // "NetworkServiceDiscovery (mDNS-lite)". A future PR will install
-    // those via runtime dlopen so the build doesn't hard-fail when the
-    // host doesn't have the libraries.
     (void)nsd;
     return false;
 #endif
