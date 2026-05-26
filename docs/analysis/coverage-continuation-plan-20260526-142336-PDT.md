@@ -46,6 +46,8 @@ Deleted merged local branch:
 - Worktree: `/private/tmp/pulp-coverage-cli-command-contracts-20260526`
 - Branch: `feature/coverage-cli-command-contracts-20260526`
 - Base: `origin/main` at `bbcdea0fa`
+- Commit: `501df8532047cf040cf01386cc4fe4fd8aae3893`
+- PR: https://github.com/danielraffel/pulp/pull/2998
 - Current scope: `tools/cli/cmd_version.cpp` and `test/test_cli_shellout.cpp`
 - Codecov evidence: latest Codecov main report was stale relative to `origin/main` during this pass. The `tools/cli` path was at 35.51% coverage with `cmd_version.cpp` at 2.44% coverage.
 
@@ -91,61 +93,60 @@ The branch was then rebased from `c18cd2747` to `bbcdea0fa` and the focused vali
 All tests passed (135 assertions in 9 test cases)
 ```
 
-## Required Next Steps For This PR
+Additional gates run successfully before PR creation:
 
-1. Finish the focused build/test:
+```bash
+git diff --check origin/main...HEAD
+python3 tools/scripts/skill_sync_check.py --base origin/main
+python3 tools/scripts/version_bump_check.py --base origin/main --mode=report
+python3 tools/scripts/docs_sync_check.py --base origin/main
+python3 tools/scripts/test_run_coverage.py
+python3 tools/scripts/test_workflow_lint.py
+```
 
-   ```bash
-   cmake --build build --target pulp-cli -j$(sysctl -n hw.ncpu)
-   (cd build/test && ./pulp-test-cli-shellout "[cli][shellout][version]")
-   ```
+`shipyard pr` initially failed during the local `git push` pre-push diff-cover hook because the hook's fresh configure hit a FetchContent checkout failure for pinned mbedTLS. The branch's focused tests and lightweight gates were clean, so the PR was retried with only the local diff-cover hook demoted:
 
-2. Verify Release status:
+```bash
+PULP_DISABLE_PREPUSH_DIFF_COVER=1 shipyard pr
+```
 
-   ```bash
-   grep '^CMAKE_BUILD_TYPE' build/CMakeCache.txt
-   grep '^CXX_FLAGS ' build/test/CMakeFiles/pulp-test-cli-shellout.dir/flags.make
-   ```
+This opened PR #2998. At handoff time, Shipyard was still running its orchestrated local macOS validation from the current shell process, with `cmake --build build --parallel` active under the Shipyard `shipyard pr` process. If that process is gone or the session has changed, resume/check with:
 
-3. Run hygiene and repo gates:
+```bash
+cd /private/tmp/pulp-coverage-cli-command-contracts-20260526
+shipyard ship-state show 2998
+shipyard ship --resume
+```
 
-   ```bash
-   git diff --check origin/main...HEAD
-   python3 tools/scripts/skill_sync_check.py --base origin/main
-   python3 tools/scripts/version_bump_check.py --base origin/main --mode=report
-   python3 tools/scripts/docs_sync_check.py --base origin/main
-   python3 tools/scripts/test_run_coverage.py
-   python3 tools/scripts/test_workflow_lint.py
-   ```
+Do not use routine direct SSH for Windows/Ubuntu. Let Shipyard/GitHub runners handle those lanes.
 
-4. Fetch and rebase before opening the PR:
+## Required Next Steps For PR #2998
 
-   ```bash
-   git fetch origin main --prune
-   git rebase origin/main
-   ```
-
-5. Commit as:
-
-   ```text
-   test(cli): cover version command contracts
-   ```
-
-   Add required gate trailers if the scripts request them. A likely skill trailer is:
-
-   ```text
-   Skill-Update: skip skill=cli-maintenance reason="version command tests and option guard only; no CLI maintenance workflow guidance changed"
-   ```
-
-6. Open through Shipyard:
+1. Monitor Shipyard/GitHub checks for PR #2998:
 
    ```bash
-   shipyard pr
+   shipyard ship-state show 2998
+   gh pr checks 2998
    ```
 
-   If Shipyard tries routine local SSH Windows/Ubuntu validation, skip those targets and let Shipyard/GitHub runners handle them.
+2. Sweep comments/review threads shortly after checks start and again after they complete:
 
-7. Sweep comments/checks shortly after PR creation. Address actionable P0/P1/P2 feedback in the same PR, rerun focused validation, and push.
+   ```bash
+   gh pr view 2998 --json comments,reviews,reviewThreads,statusCheckRollup
+   ```
+
+3. Address actionable P0/P1/P2 feedback in the same PR, rerun focused validation, and push follow-up commits.
+
+4. If PR #2998 merges, clean the worktree and local branch:
+
+   ```bash
+   cd /Users/danielraffel/Code/pulp
+   git worktree remove /private/tmp/pulp-coverage-cli-command-contracts-20260526
+   git branch -d feature/coverage-cli-command-contracts-20260526
+   ```
+
+5. Start the next coverage batch from fresh latest `origin/main` in a new worktree.
+
 
 ## Next Coverage Targets After This PR
 
