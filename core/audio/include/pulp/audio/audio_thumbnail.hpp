@@ -18,10 +18,13 @@
 //     handful of peaks.
 //   * AudioThumbnailCache is a tiny LRU keyed by source path. Eviction is
 //     by configurable maximum entry count.
-//   * On-disk persistence is intentionally deferred — see PR body /
-//     follow-up note. The in-memory cache covers the warm-cache acceptance
-//     criterion already (re-opening the same path in the same process is
-//     instant).
+//   * Optional on-disk persistence — call `set_disk_cache_dir(path)` to
+//     point the cache at a directory. After that, `get_or_build()` first
+//     consults the disk cache (keyed by SHA-256 of "<source-path>|<mtime>")
+//     and writes a `.thumb` file on every cache insert. Re-opening Pulp
+//     finds cached thumbnails instantly without re-decoding the source.
+//     Disk cache files are versioned with a magic header so old / corrupt
+//     entries are silently ignored.
 //
 // Wired into core/view::WaveformView so that callers may pass either a raw
 // sample buffer (existing behaviour) or an AudioThumbnail* (new behaviour
@@ -125,6 +128,20 @@ public:
 
     bool empty() const noexcept { return levels_.empty(); }
 
+    // Internal: rebuild a thumbnail from a serialized blob. Public so the
+    // free-function `deserialize_thumbnail()` (defined in the .cpp) can
+    // construct one without becoming a friend. Returns nullopt on malformed
+    // input. Not part of the supported API surface — call
+    // `deserialize_thumbnail()` instead.
+    static std::optional<AudioThumbnail> from_serialized_levels(
+        uint32_t num_channels,
+        uint64_t num_source_frames,
+        uint32_t sample_rate,
+        uint32_t num_levels,
+        const uint8_t* data,
+        std::size_t size,
+        std::size_t offset);
+
 private:
     std::vector<ThumbnailLevel> levels_;
     uint32_t num_channels_ = 0;
@@ -132,8 +149,20 @@ private:
     uint32_t sample_rate_ = 0;
 };
 
+// Serialize/deserialize a thumbnail to a versioned blob. The on-disk
+// format is intentionally simple — `magic(4) version(2) num_channels(4)
+// num_source_frames(8) sample_rate(4) num_levels(4) [per-level:
+// samples_per_peak(4) peaks_per_channel(4) channels * peaks * AudioPeak]`
+// — little-endian. The version field is bumped only when the layout
+// changes; `deserialize_thumbnail()` rejects mismatched versions and
+// returns nullopt.
+std::vector<uint8_t> serialize_thumbnail(const AudioThumbnail& t);
+std::optional<AudioThumbnail> deserialize_thumbnail(const uint8_t* data,
+                                                    std::size_t size);
+
 // ─────────────────────────────────────────────────────────────────────────
-// AudioThumbnailCache — in-memory LRU of thumbnails keyed by source path.
+// AudioThumbnailCache — in-memory LRU of thumbnails keyed by source path,
+// with optional on-disk persistence layer.
 //
 // Thread-safe. Used by widgets that may rebuild the same waveform many
 // times (e.g. WaveformView opened repeatedly with the same sample).
@@ -145,6 +174,8 @@ struct AudioThumbnailCacheStats {
     std::size_t evictions = 0;
     std::size_t entries = 0;
     std::size_t capacity = 0;
+    std::size_t disk_hits = 0;    ///< get_or_build → loaded from disk
+    std::size_t disk_writes = 0;  ///< put → wrote to disk
 };
 
 class AudioThumbnailCache {
@@ -182,6 +213,16 @@ public:
     // entries to fit.
     void set_capacity(std::size_t max_entries);
 
+    // Point the cache at a directory for on-disk thumbnail persistence.
+    // Pass an empty path to disable disk caching. The directory is
+    // created on demand. Idempotent — safe to call repeatedly.
+    void set_disk_cache_dir(const std::string& dir);
+    const std::string& disk_cache_dir() const noexcept { return disk_dir_; }
+
+    // Best-effort: drop every `.thumb` file under the disk cache dir.
+    // Does nothing if no dir is configured.
+    void clear_disk_cache();
+
 private:
     struct Entry {
         std::string key;
@@ -195,15 +236,25 @@ private:
     void touch_locked(Map::iterator it);
     void evict_to_capacity_locked();
 
+    // Disk-cache helpers — return nullptr / false on any I/O failure.
+    // Both are safe to call with disk_dir_ empty; they no-op silently.
+    std::shared_ptr<const AudioThumbnail> load_from_disk(const std::string& path) const;
+    bool write_to_disk(const std::string& path,
+                       const AudioThumbnail& thumbnail) const;
+    std::string disk_path_for(const std::string& source_path) const;
+
     mutable std::mutex mtx_;
     List list_;
     Map  index_;
     std::size_t capacity_;
+    std::string disk_dir_;  // empty == disk caching disabled
 
     // Stats — relaxed atomics; reads can race with writes harmlessly.
     std::atomic<std::size_t> hits_{0};
     std::atomic<std::size_t> misses_{0};
     std::atomic<std::size_t> evictions_{0};
+    std::atomic<std::size_t> disk_hits_{0};
+    std::atomic<std::size_t> disk_writes_{0};
 };
 
 }  // namespace pulp::audio
