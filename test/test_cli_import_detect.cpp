@@ -144,6 +144,76 @@ TEST_CASE("parse_compat_json keeps optional format metadata and skips bad shapes
     CHECK(fmt.fingerprint[1].kind == det::FingerprintClause::Kind::filename);
 }
 
+TEST_CASE("parse_compat_json ignores malformed optional fields without dropping formats",
+          "[cli][import-detect][coverage]") {
+    auto manifest = det::parse_compat_json(R"({
+  "compat-schema-version": 3,
+  "imports": {
+    "demo": {
+      "parser-version": 7,
+      "detected-formats": [
+        {
+          "format-version": 2026,
+          "introduced": false,
+          "deprecated": null,
+          "notes": [],
+          "match": {},
+          "min-confidence-pct": "90",
+          "fingerprint": [
+            {"kind": "frontmatter-key", "required": "name"},
+            {"kind": "tailwind-config-token", "any-of": ["surface", 4]},
+            {"kind": "new-future-kind", "value": "x"}
+          ]
+        }
+      ]
+    }
+  }
+})");
+
+    REQUIRE(manifest.has_value());
+    CHECK(manifest->compat_schema_version.empty());
+    REQUIRE(manifest->sources.size() == 1);
+    const auto& source = manifest->sources.front();
+    CHECK(source.source == "demo");
+    CHECK(source.parser_version.empty());
+    REQUIRE(source.formats.size() == 1);
+    const auto& fmt = source.formats.front();
+    CHECK(fmt.parser_version.empty());
+    CHECK(fmt.format_version.empty());
+    CHECK(fmt.introduced.empty());
+    CHECK(fmt.deprecated.empty());
+    CHECK(fmt.notes.empty());
+    CHECK(fmt.match.empty());
+    CHECK(fmt.min_confidence_pct == 0);
+    REQUIRE(fmt.fingerprint.size() == 3);
+    CHECK(fmt.fingerprint[0].kind == det::FingerprintClause::Kind::frontmatter_key);
+    CHECK(fmt.fingerprint[0].required == "name");
+    CHECK(fmt.fingerprint[1].any_of == std::vector<std::string>{"surface"});
+    CHECK(fmt.fingerprint[2].kind == det::FingerprintClause::Kind::unknown);
+    CHECK(fmt.fingerprint[2].raw_kind == "new-future-kind");
+}
+
+TEST_CASE("find_compat_json walks parents and reports absence",
+          "[cli][import-detect][coverage]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-compat-walk";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "repo" / "nested" / "child");
+
+    const auto compat = dir / "repo" / "compat.json";
+    {
+        std::ofstream f(compat);
+        f << "{\"imports\":{}}";
+    }
+
+    CHECK(det::find_compat_json(dir / "repo" / "nested" / "child") == compat);
+    CHECK(det::find_compat_json(dir / "repo") == compat);
+
+    fs::remove(compat);
+    CHECK(det::find_compat_json(dir / "repo" / "nested" / "child").empty());
+
+    fs::remove_all(dir);
+}
+
 TEST_CASE("clause matcher honors the fingerprint vocabulary", "[cli][import-detect][issue-1031]") {
     det::InputSnapshot snap;
     snap.is_directory = true;
@@ -414,6 +484,69 @@ TEST_CASE("snapshot_input extracts Markdown frontmatter only from markdown files
     cleanup();
 }
 
+TEST_CASE("snapshot_input accepts CRLF frontmatter and filters invalid top-level keys",
+          "[cli][import-detect][coverage]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-frontmatter-crlf";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    auto md = dir / "design.md";
+    {
+        std::ofstream f(md, std::ios::binary);
+        f << "---\r\n"
+          << "name: Demo\r\n"
+          << "_private: ok\r\n"
+          << "color-set: ok\r\n"
+          << "2bad: ignored\r\n"
+          << "nested:\r\n"
+          << "  child: ignored\r\n"
+          << "# comment: ignored\r\n"
+          << "---   \r\n"
+          << "body: not-frontmatter\r\n";
+    }
+
+    auto snap = det::snapshot_input(md);
+    CHECK(snap.has_frontmatter_fence);
+    CHECK(snap.frontmatter_keys == std::vector<std::string>{"name", "_private", "color-set", "nested"});
+
+    det::FingerprintClause required;
+    required.kind = det::FingerprintClause::Kind::frontmatter_key;
+    required.required = "color-set";
+    CHECK(det::match_clause(required, snap));
+
+    required.required = "child";
+    CHECK_FALSE(det::match_clause(required, snap));
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("snapshot_input rejects incomplete frontmatter fences",
+          "[cli][import-detect][coverage]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-frontmatter-reject";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    auto no_newline = dir / "no-newline.md";
+    {
+        std::ofstream f(no_newline);
+        f << "---name: Demo\n---\n";
+    }
+    auto no_newline_snap = det::snapshot_input(no_newline);
+    CHECK_FALSE(no_newline_snap.has_frontmatter_fence);
+    CHECK(no_newline_snap.frontmatter_keys.empty());
+
+    auto no_close = dir / "no-close.md";
+    {
+        std::ofstream f(no_close);
+        f << "---\nname: Demo\n";
+    }
+    auto no_close_snap = det::snapshot_input(no_close);
+    CHECK_FALSE(no_close_snap.has_frontmatter_fence);
+    CHECK(no_close_snap.frontmatter_keys.empty());
+
+    fs::remove_all(dir);
+}
+
 TEST_CASE("snapshot_input prefers index html when code html is absent",
           "[cli][import-detect][coverage]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-index-html";
@@ -611,6 +744,26 @@ TEST_CASE("new-format reports cap unknown tailwind tokens and keep fallbacks sta
     auto fallback = det::build_new_format_report(manifest, {}, none);
     CHECK(fallback.candidate_format_version == "TODO-set-version");
     CHECK(fallback.additions.empty());
+}
+
+TEST_CASE("render_new_format_json includes removals and empty additions",
+          "[cli][import-detect][coverage]") {
+    det::NewFormatReport report;
+    report.candidate_source = "stitch";
+    report.candidate_format_version = "2026.06";
+    report.based_on_source = "stitch";
+    report.based_on_format_version = "2026.05";
+    report.removals = {"old-token", "legacy-script"};
+
+    auto json = det::render_new_format_json(report);
+    CHECK(json.find("\"candidate-source\": \"stitch\"") != std::string::npos);
+    CHECK(json.find("\"candidate-format-version\": \"2026.06\"") != std::string::npos);
+    CHECK(json.find("\"fingerprint-additions\": []") != std::string::npos);
+    CHECK(json.find("\"fingerprint-removals\": [") != std::string::npos);
+    CHECK(json.find("\"old-token\"") != std::string::npos);
+    CHECK(json.find("\"legacy-script\"") != std::string::npos);
+    CHECK(json.find("\"based-on\": {\"source\": \"stitch\", \"format-version\": \"2026.05\"}") !=
+          std::string::npos);
 }
 
 TEST_CASE("detect picks the highest-confidence format", "[cli][import-detect][issue-1031]") {
