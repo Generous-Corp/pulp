@@ -2181,6 +2181,9 @@ pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
 # macOS plan Batch C — Resampler (item 1.7)
 pulp_add_test_suite(pulp-test-resampler LIBRARIES pulp::signal)
 
+# macOS plan Batch B — Polyphase IIR half-band filter (item 2.2)
+pulp_add_test_suite(pulp-test-halfband-iir LIBRARIES pulp::signal)
+
 # macOS plan Batch G — Generic Synthesiser polyphony (item 2.5)
 pulp_add_test_suite(pulp-test-synthesiser LIBRARIES pulp::midi)
 
