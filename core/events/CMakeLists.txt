@@ -32,9 +32,11 @@ endif()
 # Phase 2 (gap-doc 2026-05-24): platform mDNS backends for
 # NetworkServiceDiscovery. macOS / iOS get a real Bonjour backend
 # linked against the system DNS-SD APIs (exported from CoreServices
-# on macOS, libsystem on iOS). Linux (Avahi) and Windows (Bonjour
-# SDK / WinRT NsdManager) backends are deferred to a follow-up PR;
-# install_default_backend() returns false on those platforms today.
+# on macOS, libsystem on iOS). Linux + Windows resolve their stacks
+# at run-time via `pulp::runtime::DynamicLibrary` so the build never
+# hard-fails on machines that don't have avahi-daemon / the Bonjour
+# SDK installed; `install_default_backend()` reports false when the
+# runtime library isn't there so callers can degrade explicitly.
 if(APPLE)
     target_sources(pulp-events PRIVATE
         platform/mac/bonjour_backend.cpp
@@ -44,6 +46,12 @@ if(APPLE)
             "-framework CoreServices"
         )
     endif()
+elseif(UNIX AND NOT APPLE)
+    # Linux Avahi backend — runtime-dlopen libavahi-client.so.3; no
+    # build-time dependency on the Avahi headers or libs.
+    target_sources(pulp-events PRIVATE
+        platform/linux/avahi_backend.cpp
+    )
 endif()
 
 target_link_libraries(pulp-events PUBLIC pulp::runtime)
