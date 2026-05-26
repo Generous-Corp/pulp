@@ -164,6 +164,128 @@ class LogParseTests(unittest.TestCase):
             log = _write(tmp, "random-other-file.txt", "garbage\n")
             self.assertEqual(pqt.parse_log_results(log), {})
 
+    # Regression: #2971 / Codex comment 3305857871 — filename regex used to
+    # reject host segments containing spaces, so real bench output from
+    # `FL Studio`, `Ableton Live`, `Logic Pro`, `Studio One`, `Bitwig Studio`,
+    # and `Pro Tools` was silently skipped (the bench plugin writes filenames
+    # directly from `pulp::format::host_type_name()`).
+    def test_log_filename_accepts_spaces_in_host_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            for name in (
+                "FL Studio-VST3-20260526T120000Z-pid1.log",
+                "Ableton Live-VST3-20260526T120000Z-pid2.log",
+                "Logic Pro-AU-20260526T120000Z-pid3.log",
+                "Studio One-VST3-20260526T120000Z-pid4.log",
+                "Bitwig Studio-VST3-20260526T120000Z-pid5.log",
+                "Pro Tools-AAX-20260526T120000Z-pid6.log",
+            ):
+                log = self._make_log(tmp, name, ["session_start", "prepare"])
+                # Should at minimum hit the wildcard `prepare` rule.
+                self.assertEqual(
+                    pqt.parse_log_results(log).get("clamp_latency_to_nonneg"),
+                    pqt.STATUS_CONFIRMED,
+                    f"filename {name!r} should parse",
+                )
+
+    # Regression: #2971 / Codex comment 3305857884 — host names emitted by
+    # `host_type_name()` (e.g. "REAPER", "WaveLab", "Logic Pro", "FL Studio")
+    # never matched rule keys like `Reaper`/`Wavelab`/`LogicPro`. Without
+    # normalization, only the `*` rule fired and host-specific promotions
+    # silently dropped.
+    def test_real_daw_filenames_trigger_host_specific_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+
+            # REAPER (uppercase) → should match `Reaper` rules.
+            reaper = self._make_log(
+                tmp,
+                "REAPER-VST3-20260526T120000Z-pid42.log",
+                ["session_start", "prepare", "bus_layout_proposal",
+                 "deserialize_plugin_state"],
+            )
+            got = pqt.parse_log_results(reaper)
+            self.assertEqual(
+                got.get("reaper_permissive_bus_arrangements"),
+                pqt.STATUS_CONFIRMED,
+            )
+            self.assertEqual(
+                got.get("reaper_midsession_setstate"),
+                pqt.STATUS_CONFIRMED,
+            )
+
+            # "FL Studio" (with space) → should match `FLStudio` rules.
+            fl = self._make_log(
+                tmp,
+                "FL Studio-VST3-20260526T120000Z-pid7.log",
+                ["session_start", "prepare", "process_without_prepare",
+                 "deserialize_plugin_state"],
+            )
+            got = pqt.parse_log_results(fl)
+            self.assertEqual(
+                got.get("fl_studio_setactive_process_mutex"),
+                pqt.STATUS_CONFIRMED,
+            )
+            self.assertEqual(
+                got.get("fl_studio_state_reader_skip"),
+                pqt.STATUS_CONFIRMED,
+            )
+
+            # "Logic Pro" (with space) → should match `LogicPro` rules.
+            logic = self._make_log(
+                tmp,
+                "Logic Pro-AU-20260526T120000Z-pid8.log",
+                ["session_start", "prepare"],
+            )
+            got = pqt.parse_log_results(logic)
+            self.assertEqual(
+                got.get("logic_au_tail_time_conversion"),
+                pqt.STATUS_CONFIRMED,
+            )
+
+            # "WaveLab" mixed case → should match `Wavelab` rules.
+            wl = self._make_log(
+                tmp,
+                "WaveLab-VST3-20260526T120000Z-pid9.log",
+                ["session_start", "prepare", "deserialize_plugin_state",
+                 "bus_layout_proposal"],
+            )
+            got = pqt.parse_log_results(wl)
+            self.assertEqual(
+                got.get("wavelab_state_blob_fallback"),
+                pqt.STATUS_CONFIRMED,
+            )
+            self.assertEqual(
+                got.get("wavelab_vst3_defer_activation"),
+                pqt.STATUS_CONFIRMED,
+            )
+
+            # "Bitwig Studio" (with space) → should match `BitwigStudio` rules.
+            bw = self._make_log(
+                tmp,
+                "Bitwig Studio-VST3-20260526T120000Z-pid10.log",
+                ["session_start", "prepare", "bus_layout_proposal"],
+            )
+            got = pqt.parse_log_results(bw)
+            self.assertEqual(
+                got.get("bitwig_vst3_setbusarrangements_while_active"),
+                pqt.STATUS_CONFIRMED,
+            )
+
+    def test_normalize_host_name_aliases(self) -> None:
+        # Display strings from `host_type_name()` → rule keys.
+        self.assertEqual(pqt.normalize_host_name("REAPER"), "Reaper")
+        self.assertEqual(pqt.normalize_host_name("FL Studio"), "FLStudio")
+        self.assertEqual(pqt.normalize_host_name("Logic Pro"), "LogicPro")
+        self.assertEqual(pqt.normalize_host_name("Ableton Live"), "AbletonLive")
+        self.assertEqual(pqt.normalize_host_name("Studio One"), "StudioOne")
+        self.assertEqual(pqt.normalize_host_name("WaveLab"), "Wavelab")
+        self.assertEqual(pqt.normalize_host_name("Pro Tools"), "ProTools")
+        self.assertEqual(pqt.normalize_host_name("Bitwig Studio"), "BitwigStudio")
+        # Unknown hosts pass through with spaces collapsed.
+        self.assertEqual(pqt.normalize_host_name("SomeNewDAW"), "SomeNewDAW")
+        self.assertEqual(pqt.normalize_host_name("Some New DAW"), "SomeNewDAW")
+
 
 class PromoteMetaTests(unittest.TestCase):
     def test_promotes_speculative_only_for_confirmed_flags(self) -> None:
