@@ -11,6 +11,12 @@ target_sources(pulp-canvas PRIVATE
     src/color.cpp
     src/recording_canvas.cpp
     src/svg.cpp
+    # Pulp #6.1 / 2026-05-24 macOS plugin-authoring plan — retained
+    # VectorScene + SceneNode subtree built on top of `core/canvas::Path`
+    # + the existing SkiaCanvas. Lets custom-paint widgets / SVG imports
+    # mutate a child and have the host repaint only that sub-tree's
+    # bounding box. Pulp-native names (no reference-framework lineage).
+    src/scene.cpp
     src/effects.cpp
     src/text_layout.cpp
     src/attributed_string.cpp

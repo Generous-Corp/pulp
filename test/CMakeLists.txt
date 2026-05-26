@@ -1334,6 +1334,13 @@ pulp_add_test_suite(pulp-test-osc-bundle LIBRARIES pulp::osc)
 # SVG tests
 pulp_add_test_suite(pulp-test-svg LIBRARIES pulp::canvas)
 
+# VectorScene retained scene graph (item 6.1 of the macOS plugin-authoring
+# plan, 2026-05-24). Pulp-native names; covers SceneRect/SceneTransform
+# math, every SceneNode kind's local_bounds + paint command stream, SVG
+# ingest into a SceneGroup, and the dirty-rect contract (mutating one
+# child's opacity reports a rect bounded by that sub-tree only).
+pulp_add_test_suite(pulp-test-vector-scene LIBRARIES pulp::canvas)
+
 # Effects tests
 pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
