@@ -1,6 +1,7 @@
 #include <pulp/format/host_quirks.hpp>
 
 #include <pulp/format/host_quirks/ableton_live.hpp>
+#include <pulp/format/host_quirks/bitwig.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
 #include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
@@ -18,13 +19,6 @@ namespace {
 // header) must be backed by a host vendor doc + a reproducer Pulp
 // issue. See the catalog at
 // `planning/2026-05-24-daw-host-quirks-inheritance.md`.
-
-void apply_bitwig_quirks(HostQuirks& q, HostVersion v) {
-    q.bitwig_vst3_linux_repaint_after_resize = true; // No-op off Linux.
-    if (v.is_before(6, 0)) {
-        q.bitwig_vst3_setbusarrangements_while_active = true;
-    }
-}
 
 void apply_reaper_quirks(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_vst3_gesture_ordering = true;
@@ -55,7 +49,7 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
         case HostType::Nuendo:        host_quirks::apply_cubase(q, version); break;
         case HostType::AbletonLive:   host_quirks::apply_ableton_live(q, version); break;
         case HostType::Wavelab:       host_quirks::apply_wavelab(q, version); break;
-        case HostType::Bitwig:        apply_bitwig_quirks(q, version); break;
+        case HostType::Bitwig:        host_quirks::apply_bitwig(q, version); break;
         case HostType::Reaper:        apply_reaper_quirks(q, version); break;
         case HostType::LogicPro:
         case HostType::GarageBand:    apply_logic_pro_quirks(q, version); break;

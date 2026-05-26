@@ -182,3 +182,33 @@ TEST_CASE("make_quirks_for Wavelab unknown version keeps state-blob fallback on,
     REQUIRE(q.wavelab_state_blob_fallback == true);
     REQUIRE(q.wavelab_vst3_defer_activation == false);
 }
+
+// ── macOS plan item 5.5 — Bitwig dispatch (DAW-quirks rows 8 + 9).
+//    Factory extracted to `core/format/include/pulp/format/host_quirks/bitwig.hpp`. ──
+
+TEST_CASE("make_quirks_for Bitwig unknown version treats as legacy (workaround on)",
+          "[format][host-quirks][bitwig]") {
+    // HostVersion{} defaults to {0,0,0}, which is_before(6,0) → true,
+    // so the conservative workaround stays on for a misdetected older
+    // Bitwig. Linux-repaint flag is always on (no-op off Linux).
+    auto q = make_quirks_for(HostType::Bitwig, HostVersion{});
+    REQUIRE(q.bitwig_vst3_linux_repaint_after_resize == true);
+    REQUIRE(q.bitwig_vst3_setbusarrangements_while_active == true);
+}
+
+TEST_CASE("make_quirks_for Bitwig 6+ drops setBusArrangements workaround",
+          "[format][host-quirks][bitwig]") {
+    auto q = make_quirks_for(HostType::Bitwig, HostVersion{6, 5});
+    REQUIRE(q.bitwig_vst3_setbusarrangements_while_active == false);
+    REQUIRE(q.bitwig_vst3_linux_repaint_after_resize == true);
+}
+
+TEST_CASE("make_quirks_for Bitwig leaves Cubase / Live / FL flags off",
+          "[format][host-quirks][bitwig][isolation]") {
+    auto q = make_quirks_for(HostType::Bitwig, HostVersion{5, 2});
+    REQUIRE(q.bitwig_vst3_setbusarrangements_while_active == true);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.fl_studio_setactive_process_mutex == false);
+    REQUIRE(q.logic_au_channel_probe_cap == 64);
+}
