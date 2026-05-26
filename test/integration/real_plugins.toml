@@ -1,0 +1,144 @@
+# Real-plugin integration test fixture set.
+#
+# This file enumerates the free, freely-redistributable third-party plugins
+# the `real_plugin_runner` integration suite drives end-to-end through
+# Pulp's host stack (Scanner → PluginSlot::load → prepare → process →
+# state round-trip → release).
+#
+# Tests are OPT-IN: they only build when CMake is configured with
+# `-DPULP_REAL_PLUGIN_TESTS=ON`, and they only RUN when:
+#   1. The binary exists at the resolved cache path AND
+#   2. Its sha256 matches the pin recorded below.
+#
+# The actual binaries are NOT committed to the repo. Use
+#   python3 tools/scripts/fetch_real_plugins.py
+# to populate `~/.cache/pulp/real-plugins/<id>/<bundle>` from the URLs
+# below; the script verifies sha256 before unpacking.
+#
+# Adding a plugin
+# ---------------
+# Free + redistributable matters: the suite must remain runnable on a clean
+# developer machine and on CI without anyone agreeing to a EULA at install
+# time. Surge XT, Vital, OB-Xd, and Dexed all meet that bar today (GPL3 /
+# free-tier installer / open-source). Plugins that require a paid license
+# (Diva, Pro-Q4, Serum) belong in a separate developer-supplied lane that
+# reads paths from the environment, not from this manifest.
+#
+# Each entry MUST specify:
+#   - id                   : short kebab-case identifier (used as cache dir)
+#   - display_name         : human-readable name for test diagnostics
+#   - format               : "vst3" | "au" | "clap"
+#   - is_instrument        : true for synths, false for effects
+#   - expected_name        : the descriptor name PluginScanner should surface
+#   - expected_manufacturer: descriptor manufacturer field (loose match — OK
+#                            if empty in the manifest entry)
+#   - bundle_relpath       : path inside the cache dir to the .vst3/.component/.clap
+#   - platforms.<os>.url   : download URL per platform
+#   - platforms.<os>.sha256: sha256 of the downloaded archive
+#   - platforms.<os>.archive_kind: "dmg" | "zip" | "tar.gz" | "pkg" | "raw"
+#
+# The runner picks the entry whose `platforms.<os>` matches the running OS.
+
+# ── Free plugin set (canonical) ────────────────────────────────────────────
+#
+# URLs and sha256 values below are PLACEHOLDERS — they pass the file's
+# self-validation (script + runner read them) but the actual downloader
+# treats sha256 == "TBD" as "no fixture available yet" and the runner
+# treats the test as `SKIP: fixture not provisioned`. A follow-up PR
+# fills these in alongside the first real downloader run.
+
+[[plugins]]
+id              = "surge-xt"
+display_name    = "Surge XT"
+format          = "clap"
+is_instrument   = true
+expected_name   = "Surge XT"
+expected_manufacturer = "Surge Synth Team"
+bundle_relpath  = "Surge XT.clap"
+
+  [plugins.platforms.macos]
+  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-macos-1.3.4.dmg"
+  sha256         = "TBD"
+  archive_kind   = "dmg"
+
+  [plugins.platforms.linux]
+  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-linux-x64-1.3.4.tar.gz"
+  sha256         = "TBD"
+  archive_kind   = "tar.gz"
+
+  [plugins.platforms.windows]
+  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4.zip"
+  sha256         = "TBD"
+  archive_kind   = "zip"
+
+[[plugins]]
+id              = "vital"
+display_name    = "Vital"
+format          = "vst3"
+is_instrument   = true
+expected_name   = "Vital"
+expected_manufacturer = "Matt Tytel"
+bundle_relpath  = "Vital.vst3"
+
+  [plugins.platforms.macos]
+  url            = "https://account.vital.audio/builds/1.5.5/VitalInstaller.dmg"
+  sha256         = "TBD"
+  archive_kind   = "dmg"
+
+  [plugins.platforms.linux]
+  url            = "https://account.vital.audio/builds/1.5.5/VitalInstaller.zip"
+  sha256         = "TBD"
+  archive_kind   = "zip"
+
+  [plugins.platforms.windows]
+  url            = "https://account.vital.audio/builds/1.5.5/VitalInstaller.exe"
+  sha256         = "TBD"
+  archive_kind   = "raw"
+
+[[plugins]]
+id              = "obxd"
+display_name    = "OB-Xd"
+format          = "vst3"
+is_instrument   = true
+expected_name   = "OB-Xd"
+expected_manufacturer = "discoDSP"
+bundle_relpath  = "OB-Xd.vst3"
+
+  [plugins.platforms.macos]
+  url            = "https://www.discodsp.com/download/ob-xd/OB-Xd_3.4_Mac.zip"
+  sha256         = "TBD"
+  archive_kind   = "zip"
+
+  [plugins.platforms.linux]
+  url            = "https://www.discodsp.com/download/ob-xd/OB-Xd_3.4_Linux.zip"
+  sha256         = "TBD"
+  archive_kind   = "zip"
+
+  [plugins.platforms.windows]
+  url            = "https://www.discodsp.com/download/ob-xd/OB-Xd_3.4_Win.zip"
+  sha256         = "TBD"
+  archive_kind   = "zip"
+
+[[plugins]]
+id              = "dexed"
+display_name    = "Dexed"
+format          = "vst3"
+is_instrument   = true
+expected_name   = "Dexed"
+expected_manufacturer = "Digital Suburban"
+bundle_relpath  = "Dexed.vst3"
+
+  [plugins.platforms.macos]
+  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/dexed-0.9.9-mac.dmg"
+  sha256         = "TBD"
+  archive_kind   = "dmg"
+
+  [plugins.platforms.linux]
+  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/dexed-0.9.9-linux-x64.tar.gz"
+  sha256         = "TBD"
+  archive_kind   = "tar.gz"
+
+  [plugins.platforms.windows]
+  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/dexed-0.9.9-win64.zip"
+  sha256         = "TBD"
+  archive_kind   = "zip"

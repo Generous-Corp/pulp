@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.245.0
+    VERSION 0.246.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -82,6 +82,13 @@ option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters (Slice 0 of #516
 if(PULP_BENCHMARK)
     add_compile_definitions(PULP_BENCHMARK)
 endif()
+# Item 4.2 — opt-in suite that drives real third-party plugin binaries
+# (Surge XT / Vital / OB-Xd / Dexed) through the host stack. OFF by default
+# so the public CI matrix never depends on third-party download mirrors;
+# developers and dedicated lanes flip it on with
+#   cmake -DPULP_REAL_PLUGIN_TESTS=ON ...
+# and populate the fixture cache with tools/scripts/fetch_real_plugins.py.
+option(PULP_REAL_PLUGIN_TESTS "Build the opt-in real-plugin integration suite (item 4.2)" OFF)
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
 set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
 set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")
