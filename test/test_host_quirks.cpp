@@ -92,3 +92,40 @@ TEST_CASE("Nuendo treats as Cubase for quirk purposes",
     auto q = make_quirks_for(HostType::Nuendo, HostVersion{13, 0});
     REQUIRE(q.cubase10_async_view_resize_queue == true);
 }
+
+// ── macOS plan items 5.2 / 5.3 — Cubase header extraction. The Cubase
+//    factory lives at `core/format/include/pulp/format/host_quirks/cubase.hpp`;
+//    these isolation tests pin that Cubase doesn't fire other hosts'
+//    flags, and that the version bands behave as documented. ──
+
+TEST_CASE("make_quirks_for Cubase 10 does not fire Live / Wavelab / Bitwig flags",
+          "[format][host-quirks][isolation]") {
+    auto q = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(q.cubase10_async_view_resize_queue == true);
+    // Live / Wavelab / Bitwig flags must stay default-false.
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.live_vst3_windows_dpi_defer == false);
+    REQUIRE(q.wavelab_vst3_defer_activation == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+    REQUIRE(q.bitwig_vst3_linux_repaint_after_resize == false);
+}
+
+TEST_CASE("make_quirks_for Cubase 9 leaves Cubase 10 flags off",
+          "[format][host-quirks][isolation]") {
+    auto q = make_quirks_for(HostType::Cubase, HostVersion{9, 0});
+    REQUIRE(q.cubase9_state_blob_size_validation == true);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.cubase10_param_gesture_ordering == false);
+    REQUIRE(q.cubase10_fractional_scale_correction == false);
+}
+
+TEST_CASE("make_quirks_for Cubase with unknown version stays defensive-default",
+          "[format][host-quirks][isolation]") {
+    // Unknown HostVersion (all zeros) — no version-keyed quirk should fire.
+    auto q = make_quirks_for(HostType::Cubase, HostVersion{});
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.cubase9_state_blob_size_validation == false);
+    // Cheap defenses still on.
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.clamp_latency_to_nonneg == true);
+}
