@@ -15,6 +15,81 @@ using namespace pulp::platform;
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
 
+namespace {
+
+class ScopedCurrentPath {
+public:
+    explicit ScopedCurrentPath(const fs::path& next)
+        : previous_(fs::current_path()) {
+        fs::current_path(next);
+    }
+
+    ~ScopedCurrentPath() {
+        std::error_code ec;
+        fs::current_path(previous_, ec);
+    }
+
+    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
+    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
+
+private:
+    fs::path previous_;
+};
+
+std::string repo_project_version_for_shellout_tests() {
+    const auto repo_root = fs::weakly_canonical(fs::current_path() / ".." / "..");
+    auto cmake = read_file(repo_root / "CMakeLists.txt");
+    auto project = cmake.find("project(Pulp");
+    REQUIRE(project != std::string::npos);
+    const std::string needle = "VERSION ";
+    auto pos = cmake.find(needle, project);
+    REQUIRE(pos != std::string::npos);
+    pos += needle.size();
+    auto end = cmake.find_first_of(" \r\n\t)", pos);
+    REQUIRE(end != std::string::npos);
+    return cmake.substr(pos, end - pos);
+}
+
+fs::path write_version_project_fixture(const std::string& prefix,
+                                       const std::string& project_version,
+                                       const std::string& plugin_version = "1.2.3",
+                                       const std::string& marketplace_version = "1.2.3",
+                                       const std::string& marketplace_plugin_version = "1.2.3",
+                                       const std::string& changelog_version = "1.2.3",
+                                       bool hardcoded_au_version = false) {
+    auto root = unique_temp_dir(prefix);
+    write_text(root / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\n"
+               "project(VersionFixture VERSION " + project_version + ")\n"
+               "pulp_add_plugin(Fixture VERSION \"" + plugin_version + "\")\n");
+    fs::create_directories(root / "core");
+    write_text(root / "CHANGELOG.md", "## [" + changelog_version + "]\n\nfixture\n");
+    write_text(root / "tools" / "cmake" / "PulpInfoPlist.au.in",
+               hardcoded_au_version
+                   ? "<plist><integer>65536</integer></plist>\n"
+                   : "<plist><integer>@PULP_BUNDLE_VERSION_INT@</integer></plist>\n");
+    write_text(root / ".claude-plugin" / "plugin.json",
+               "{\n  \"name\": \"pulp\",\n  \"version\": \"" + plugin_version + "\"\n}\n");
+    write_text(root / ".claude-plugin" / "marketplace.json",
+               "{\n"
+               "  \"version\": \"" + marketplace_version + "\",\n"
+               "  \"plugins\": [{\"name\": \"pulp\", \"version\": \"" +
+                   marketplace_plugin_version + "\"}]\n"
+               "}\n");
+    return root;
+}
+
+ProcessResult run_pulp_in_directory(const fs::path& dir,
+                                    const std::vector<std::string>& args,
+                                    int timeout_ms = 10000) {
+    const auto bin = fs::absolute(pulp_binary());
+    REQUIRE(fs::exists(bin));
+    ScopedCurrentPath cwd(dir);
+    return exec(bin.string(), args, timeout_ms);
+}
+
+}  // namespace
+
 TEST_CASE("pulp help exits 0 with a usage banner on stdout",
           "[cli][shellout]") {
     if (!binary_exists()) {
@@ -482,6 +557,235 @@ TEST_CASE("pulp version check exits 0 on a clean tree and mentions SDK/plugin/ma
     REQUIRE((combined.find("sdk") != std::string::npos ||
              combined.find("SDK") != std::string::npos ||
              combined.find("CMakeLists.txt") != std::string::npos));
+}
+
+TEST_CASE("pulp version outside a project reports SDK but check fails clearly",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    auto outside = unique_temp_dir("pulp-version-outside");
+    fs::create_directories(outside);
+
+    auto show = run_pulp_in_directory(outside, {"version"});
+    REQUIRE_FALSE(show.timed_out);
+    REQUIRE(show.exit_code == 0);
+    REQUIRE(show.stdout_output.find("Pulp SDK version:") != std::string::npos);
+    REQUIRE(show.stdout_output.find("Project version:") == std::string::npos);
+    REQUIRE(show.stderr_output.empty());
+
+    auto check = run_pulp_in_directory(outside, {"version", "check"});
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code == 1);
+    REQUIRE(check.stderr_output.find("not in a Pulp project directory") !=
+            std::string::npos);
+
+    fs::remove_all(outside);
+}
+
+TEST_CASE("pulp version check accepts a complete matching project fixture",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    const auto sdk_version = repo_project_version_for_shellout_tests();
+    auto project = write_version_project_fixture("pulp-version-clean",
+                                                sdk_version,
+                                                "1.2.3",
+                                                "1.2.3",
+                                                "1.2.3",
+                                                sdk_version);
+
+    auto check = run_pulp_in_directory(project, {"version", "check"});
+    INFO(check.stdout_output);
+    INFO(check.stderr_output);
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code == 0);
+    REQUIRE(check.stderr_output.empty());
+    REQUIRE(check.stdout_output.find("SDK version consistent: " + sdk_version) !=
+            std::string::npos);
+    REQUIRE(check.stdout_output.find("AU Info.plist uses computed version integer") !=
+            std::string::npos);
+    REQUIRE(check.stdout_output.find("CHANGELOG latest version matches (" +
+                                     sdk_version + ")") != std::string::npos);
+    REQUIRE(check.stdout_output.find("Claude plugin version: 1.2.3") !=
+            std::string::npos);
+    REQUIRE(check.stdout_output.find("marketplace.json version matches plugin.json") !=
+            std::string::npos);
+    REQUIRE(check.stdout_output.find("marketplace.json plugins[0].version matches plugin.json") !=
+            std::string::npos);
+
+    fs::remove_all(project);
+}
+
+TEST_CASE("pulp version check reports every version drift surface",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    auto project = write_version_project_fixture("pulp-version-drift",
+                                                "0.0.1",
+                                                "not-semver",
+                                                "9.9.9",
+                                                "8.8.8",
+                                                "7.7.7",
+                                                true);
+
+    auto check = run_pulp_in_directory(project, {"version", "check"});
+    const auto combined = check.stdout_output + check.stderr_output;
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code == 1);
+    REQUIRE(combined.find("SDK version mismatch: CMakeLists.txt=0.0.1") !=
+            std::string::npos);
+    REQUIRE(combined.find("AU Info.plist has hardcoded version integer") !=
+            std::string::npos);
+    REQUIRE(combined.find("CHANGELOG latest (7.7.7) differs from CMakeLists.txt (0.0.1)") !=
+            std::string::npos);
+    REQUIRE(combined.find("plugin.json version is not semver: not-semver") !=
+            std::string::npos);
+    REQUIRE(combined.find("marketplace.json version (9.9.9) differs from plugin.json (not-semver)") !=
+            std::string::npos);
+    REQUIRE(combined.find("marketplace.json plugins[0].version (8.8.8) differs from plugin.json (not-semver)") !=
+            std::string::npos);
+
+    fs::remove_all(project);
+}
+
+TEST_CASE("pulp version check rejects unknown options before running checks",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    const auto sdk_version = repo_project_version_for_shellout_tests();
+    auto project = write_version_project_fixture("pulp-version-unknown-option",
+                                                sdk_version,
+                                                "1.2.3",
+                                                "1.2.3",
+                                                "1.2.3",
+                                                sdk_version);
+
+    auto check = run_pulp_in_directory(project, {"version", "check", "--surprise"});
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code == 2);
+    REQUIRE(check.stderr_output.find("unknown version check option: --surprise") !=
+            std::string::npos);
+    REQUIRE(check.stdout_output.find("SDK version consistent") == std::string::npos);
+
+    fs::remove_all(project);
+}
+
+TEST_CASE("pulp version bump updates project version and changelog guidance",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    auto project = write_version_project_fixture("pulp-version-bump",
+                                                "1.2.3",
+                                                "4.5.6",
+                                                "4.5.6",
+                                                "4.5.6",
+                                                "1.2.3");
+
+    auto bump = run_pulp_in_directory(project, {"version", "bump", "patch"});
+    REQUIRE_FALSE(bump.timed_out);
+    REQUIRE(bump.exit_code == 0);
+    REQUIRE(bump.stderr_output.empty());
+    REQUIRE(bump.stdout_output.find("Version bumped: 1.2.3 -> 1.2.4") !=
+            std::string::npos);
+    REQUIRE(bump.stdout_output.find("Added CHANGELOG.md entry for 1.2.4") !=
+            std::string::npos);
+    REQUIRE(bump.stdout_output.find("Tag with: git tag v1.2.4") !=
+            std::string::npos);
+
+    auto cmake = read_file(project / "CMakeLists.txt");
+    auto changelog = read_file(project / "CHANGELOG.md");
+    REQUIRE(cmake.find("project(VersionFixture VERSION 1.2.4)") !=
+            std::string::npos);
+    REQUIRE(cmake.find("pulp_add_plugin(Fixture VERSION \"4.5.6\")") !=
+            std::string::npos);
+    REQUIRE(changelog.find("## [1.2.4]\n\n## [1.2.3]") != std::string::npos);
+
+    fs::remove_all(project);
+}
+
+TEST_CASE("pulp version bump --plugin only updates pulp_add_plugin version",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    auto project = write_version_project_fixture("pulp-version-plugin-bump",
+                                                "1.2.3",
+                                                "4.5.6",
+                                                "4.5.6",
+                                                "4.5.6",
+                                                "1.2.3");
+
+    auto bump = run_pulp_in_directory(project,
+                                      {"version", "bump", "major", "--plugin"});
+    REQUIRE_FALSE(bump.timed_out);
+    REQUIRE(bump.exit_code == 0);
+    REQUIRE(bump.stderr_output.empty());
+    REQUIRE(bump.stdout_output.find("Version bumped: 4.5.6 -> 5.0.0") !=
+            std::string::npos);
+    REQUIRE(bump.stdout_output.find("Added CHANGELOG.md entry") == std::string::npos);
+    REQUIRE(bump.stdout_output.find("Tag with: git tag") == std::string::npos);
+
+    auto cmake = read_file(project / "CMakeLists.txt");
+    auto changelog = read_file(project / "CHANGELOG.md");
+    REQUIRE(cmake.find("project(VersionFixture VERSION 1.2.3)") !=
+            std::string::npos);
+    REQUIRE(cmake.find("pulp_add_plugin(Fixture VERSION \"5.0.0\")") !=
+            std::string::npos);
+    REQUIRE(changelog.find("## [5.0.0]") == std::string::npos);
+
+    fs::remove_all(project);
+}
+
+TEST_CASE("pulp version bump rejects missing and invalid components",
+          "[cli][shellout][version][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    updates.set("1");
+
+    auto project = write_version_project_fixture("pulp-version-bump-invalid",
+                                                "1.2.3",
+                                                "4.5.6",
+                                                "4.5.6",
+                                                "4.5.6",
+                                                "1.2.3");
+
+    auto missing = run_pulp_in_directory(project, {"version", "bump"});
+    REQUIRE_FALSE(missing.timed_out);
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE(missing.stderr_output.find("Usage: pulp version bump") !=
+            std::string::npos);
+
+    auto invalid = run_pulp_in_directory(project, {"version", "bump", "tiny"});
+    REQUIRE_FALSE(invalid.timed_out);
+    REQUIRE(invalid.exit_code == 1);
+    REQUIRE(invalid.stderr_output.find("component must be major, minor, or patch") !=
+            std::string::npos);
+
+    auto cmake = read_file(project / "CMakeLists.txt");
+    REQUIRE(cmake.find("project(VersionFixture VERSION 1.2.3)") !=
+            std::string::npos);
+    REQUIRE(cmake.find("pulp_add_plugin(Fixture VERSION \"4.5.6\")") !=
+            std::string::npos);
+
+    fs::remove_all(project);
 }
 
 // pulp #709 / #468 — `pulp import-design --from claude` ingests a

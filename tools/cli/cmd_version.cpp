@@ -32,11 +32,13 @@ static bool write_cmake_project_version(const fs::path& cmake_path,
     auto content = read_file_contents(cmake_path);
     if (plugin_only) {
         // Only replace the version inside pulp_add_plugin(...VERSION "x.y.z"...)
-        std::regex re(R"((pulp_add_plugin\s*\([^)]*VERSION\s+"))" + std::string(old_ver) + R"(")");
-        std::string replacement = "$1" + new_ver + "\"";
-        auto result = std::regex_replace(content, re, replacement, std::regex_constants::format_first_only);
-        if (result == content) return false;  // no match
-        content = result;
+        std::regex re(R"((pulp_add_plugin\s*\([^)]*VERSION\s+")()" +
+                      std::string(old_ver) + R"()("))");
+        std::smatch m;
+        if (!std::regex_search(content, m, re)) return false;
+        content.replace(static_cast<size_t>(m.position(2)),
+                        static_cast<size_t>(m.length(2)),
+                        new_ver);
     } else {
         auto pos = content.find(old_ver);
         if (pos == std::string::npos) return false;
@@ -327,7 +329,12 @@ int cmd_version(const std::vector<std::string>& args) {
     if (args[0] == "check") {
         bool with_bump = false;
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--with-bump-check") with_bump = true;
+            if (args[i] == "--with-bump-check") {
+                with_bump = true;
+            } else {
+                std::cerr << "Error: unknown version check option: " << args[i] << "\n";
+                return 2;
+            }
         }
         return version_check_inner(with_bump);
     }
