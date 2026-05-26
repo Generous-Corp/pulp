@@ -2,7 +2,19 @@
 #include <pulp/runtime/log.hpp>
 #include <CoreAudio/CoreAudio.h>
 
+#include <cstring>
+
 namespace pulp::audio::mac {
+
+namespace {
+
+// kAudioDevicePropertyIOThreadOSWorkgroup is declared in the macOS 11+
+// SDK but Apple's docs only guarantee a usable workgroup on macOS 13 /
+// iOS 16+. Phase B floor follows that guarantee.
+constexpr AudioObjectPropertySelector kIOThreadWorkgroupSelector =
+    kAudioDevicePropertyIOThreadOSWorkgroup;
+
+}  // namespace
 
 // ── CoreAudioDevice ────────────────────────────────────────────────────────
 
@@ -14,6 +26,36 @@ CoreAudioDevice::CoreAudioDevice(AudioDeviceID device_id)
 CoreAudioDevice::~CoreAudioDevice() {
     if (is_running_) stop();
     if (is_open_) close();
+}
+
+void CoreAudioDevice::query_callback_workgroup() {
+#if defined(__APPLE__)
+    workgroup_ = nullptr;
+    if (__builtin_available(macOS 13.0, iOS 16.0, *)) {
+        AudioObjectPropertyAddress prop{};
+        prop.mSelector = kIOThreadWorkgroupSelector;
+        prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        prop.mElement  = kAudioObjectPropertyElementMain;
+
+        os_workgroup_t wg = nullptr;
+        UInt32 size = sizeof(wg);
+        OSStatus status = AudioObjectGetPropertyData(
+            device_id_, &prop, 0, nullptr, &size, &wg);
+        if (status == noErr && wg != nullptr) {
+            workgroup_ = wg;
+            runtime::log_info(
+                "CoreAudio: extracted IO-thread workgroup for device {}",
+                static_cast<unsigned>(device_id_));
+        } else if (status != noErr) {
+            // Device does not publish a workgroup. The render
+            // callback's first entry falls back to Mach RT priority.
+            runtime::log_debug(
+                "CoreAudio: device {} has no IO workgroup (status {})",
+                static_cast<unsigned>(device_id_),
+                static_cast<int>(status));
+        }
+    }
+#endif
 }
 
 bool CoreAudioDevice::open(const DeviceConfig& config) {
@@ -153,6 +195,34 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         return false;
     }
 
+    // Query the IO-thread workgroup and arm wg_join_ before the callback
+    // starts firing. First callback entry joins on the audio thread.
+    query_callback_workgroup();
+#if defined(__APPLE__)
+    if (workgroup_) {
+        wg_join_.set_workgroup(workgroup_);
+    }
+#endif
+
+    // Install a device-overload listener so we can count xruns. The
+    // notification fires on a CoreAudio thread; we only increment an
+    // atomic, so it's safe.
+    {
+        AudioObjectPropertyAddress overload_prop{};
+        overload_prop.mSelector = kAudioDeviceProcessorOverload;
+        overload_prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        overload_prop.mElement  = kAudioObjectPropertyElementMain;
+        OSStatus overload_status = AudioObjectAddPropertyListener(
+            device_id_, &overload_prop, overload_listener, this);
+        overload_listener_installed_ = (overload_status == noErr);
+        if (!overload_listener_installed_) {
+            runtime::log_debug(
+                "CoreAudio: device {} did not accept overload listener ({})",
+                static_cast<unsigned>(device_id_),
+                static_cast<int>(overload_status));
+        }
+    }
+
     is_open_ = true;
     runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch",
         info().name, config_.sample_rate, config_.buffer_size,
@@ -161,11 +231,32 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
 }
 
 void CoreAudioDevice::close() {
+    // Tear the callback path down first. AudioUnitUninitialize blocks
+    // until any in-flight render_callback returns — combined with
+    // is_running_ being cleared in stop(), this gives the manager's
+    // "callback won't re-fire after close()" guarantee.
+    if (overload_listener_installed_) {
+        AudioObjectPropertyAddress overload_prop{};
+        overload_prop.mSelector = kAudioDeviceProcessorOverload;
+        overload_prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        overload_prop.mElement  = kAudioObjectPropertyElementMain;
+        AudioObjectRemovePropertyListener(
+            device_id_, &overload_prop, overload_listener, this);
+        overload_listener_installed_ = false;
+    }
     if (audio_unit_) {
         AudioUnitUninitialize(audio_unit_);
         AudioComponentInstanceDispose(audio_unit_);
         audio_unit_ = nullptr;
     }
+    // Leave the workgroup (no-op if never joined). After
+    // AudioUnitUninitialize returns no callback can still be in
+    // flight, so this is race-free.
+    wg_join_.leave();
+    wg_joined_.store(false, std::memory_order_relaxed);
+#if defined(__APPLE__)
+    workgroup_ = nullptr;
+#endif
     if (input_buffer_list_) {
         std::free(input_buffer_list_);
         input_buffer_list_ = nullptr;
@@ -192,6 +283,9 @@ bool CoreAudioDevice::start(AudioCallback callback) {
 
 void CoreAudioDevice::stop() {
     if (audio_unit_ && is_running_) {
+        // AudioOutputUnitStop blocks until the I/O thread observes
+        // the stop request. Subsequent callbacks observe
+        // `is_running_ == false` and bail before invoking `callback_`.
         AudioOutputUnitStop(audio_unit_);
     }
     is_running_ = false;
@@ -211,6 +305,19 @@ OSStatus CoreAudioDevice::render_callback(
     AudioBufferList* ioData)
 {
     auto* self = static_cast<CoreAudioDevice*>(inRefCon);
+
+    // First-entry: join the audio device's workgroup on the render
+    // thread. acquire/release on `wg_joined_` keeps the join visible
+    // to subsequent renders without a CAS hot path. The boolean also
+    // means join is at most once per render thread.
+    if (!self->wg_joined_.load(std::memory_order_acquire)) {
+        // join_from_audio_thread() returns immediately if there's no
+        // workgroup set; it falls back to Mach realtime priority in
+        // that case so the thread is still RT-tagged.
+        self->wg_join_.join_from_audio_thread();
+        self->wg_joined_.store(true, std::memory_order_release);
+    }
+
     if (!self->callback_) {
         // Silence
         for (UInt32 i = 0; i < ioData->mNumberBuffers; ++i) {
@@ -262,7 +369,22 @@ OSStatus CoreAudioDevice::render_callback(
     return noErr;
 }
 
+OSStatus CoreAudioDevice::overload_listener(
+    AudioObjectID /*inObjectID*/,
+    UInt32 /*inNumberAddresses*/,
+    const AudioObjectPropertyAddress* /*inAddresses*/,
+    void* inClientData)
+{
+    auto* self = static_cast<CoreAudioDevice*>(inClientData);
+    if (self) {
+        self->xrun_counter_.fetch_add(1, std::memory_order_relaxed);
+    }
+    return noErr;
+}
+
 // ── CoreAudioSystem ────────────────────────────────────────────────────────
+
+CoreAudioSystem::CoreAudioSystem() = default;
 
 CoreAudioSystem::~CoreAudioSystem() {
     if (listener_installed_) {
@@ -273,10 +395,27 @@ CoreAudioSystem::~CoreAudioSystem() {
         AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &prop,
                                           device_list_changed, this);
     }
+    if (default_listener_installed_) {
+        AudioObjectPropertyAddress out_prop{};
+        out_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+        out_prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        out_prop.mElement  = kAudioObjectPropertyElementMain;
+        AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &out_prop,
+                                          default_device_changed, this);
+
+        AudioObjectPropertyAddress in_prop = out_prop;
+        in_prop.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+        AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &in_prop,
+                                          default_device_changed, this);
+    }
 }
 
 void CoreAudioSystem::set_device_change_callback(DeviceChangeCallback cb) {
     device_change_cb_ = std::move(cb);
+    // Also store the callback in the base class so
+    // `AudioSystem::fire_device_change()` finds it for cross-backend
+    // helpers (e.g. AudioDeviceManager wiring).
+    AudioSystem::set_device_change_callback(device_change_cb_);
 
     if (device_change_cb_ && !listener_installed_) {
         AudioObjectPropertyAddress prop{};
@@ -291,6 +430,28 @@ void CoreAudioSystem::set_device_change_callback(DeviceChangeCallback cb) {
     }
 }
 
+void CoreAudioSystem::set_default_device_change_callback(DefaultDeviceChangeCallback cb) {
+    default_device_change_cb_ = std::move(cb);
+
+    if (default_device_change_cb_ && !default_listener_installed_) {
+        AudioObjectPropertyAddress out_prop{};
+        out_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+        out_prop.mScope    = kAudioObjectPropertyScopeGlobal;
+        out_prop.mElement  = kAudioObjectPropertyElementMain;
+        OSStatus s1 = AudioObjectAddPropertyListener(
+            kAudioObjectSystemObject, &out_prop, default_device_changed, this);
+
+        AudioObjectPropertyAddress in_prop = out_prop;
+        in_prop.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+        OSStatus s2 = AudioObjectAddPropertyListener(
+            kAudioObjectSystemObject, &in_prop, default_device_changed, this);
+
+        if (s1 == noErr || s2 == noErr) {
+            default_listener_installed_ = true;
+        }
+    }
+}
+
 OSStatus CoreAudioSystem::device_list_changed(
     AudioObjectID, UInt32,
     const AudioObjectPropertyAddress*, void* inClientData)
@@ -299,6 +460,26 @@ OSStatus CoreAudioSystem::device_list_changed(
     if (self->device_change_cb_) {
         self->device_change_cb_();
     }
+    return noErr;
+}
+
+OSStatus CoreAudioSystem::default_device_changed(
+    AudioObjectID,
+    UInt32 nAddresses,
+    const AudioObjectPropertyAddress* addresses,
+    void* inClientData)
+{
+    auto* self = static_cast<CoreAudioSystem*>(inClientData);
+    if (!self || !self->default_device_change_cb_) return noErr;
+
+    bool is_input = false;
+    for (UInt32 i = 0; i < nAddresses; ++i) {
+        if (addresses[i].mSelector == kAudioHardwarePropertyDefaultInputDevice) {
+            is_input = true;
+            break;
+        }
+    }
+    self->default_device_change_cb_(is_input);
     return noErr;
 }
 

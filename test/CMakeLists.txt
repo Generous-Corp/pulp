@@ -3087,6 +3087,11 @@ pulp_add_test_suite(pulp-test-buffering-reader LIBRARIES pulp::audio)
 # AudioWorkgroup tests
 pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
 
+# AudioWorkgroup ↔ AudioDevice wiring (macOS plan item 1.1)
+pulp_add_test_suite(pulp-test-audio-workgroup-wiring
+    SOURCES test_audio_workgroup_wiring.cpp
+    LIBRARIES pulp::audio)
+
 # Plugin matrix tests (sample rate/buffer size/edge case sweep)
 add_executable(pulp-test-matrix test_plugin_matrix.cpp)
 target_link_libraries(pulp-test-matrix PRIVATE pulp::format Catch2::Catch2WithMain)

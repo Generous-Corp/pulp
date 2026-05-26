@@ -62,6 +62,32 @@ public:
     virtual DeviceInfo info() const = 0;
     virtual double sample_rate() const = 0;
     virtual int buffer_size() const = 0;
+
+    /// Opaque handle to the OS-supplied real-time workgroup associated
+    /// with this device's I/O thread, or `nullptr` if the platform does
+    /// not expose one. On macOS 13+ / iOS 16+ this returns the
+    /// `os_workgroup_t` queried via `kAudioDevicePropertyIOThreadOSWorkgroup`;
+    /// on older Apple targets and on non-Apple platforms this returns
+    /// `nullptr` and callers fall back to
+    /// `AudioWorkgroup::set_realtime_priority()`.
+    ///
+    /// The returned pointer is owned by the device and remains valid
+    /// for the lifetime of the open device. Callers must not free it.
+    /// Pass it to `AudioWorkgroup::set_workgroup(static_cast<os_workgroup_t>(...))`
+    /// before joining from the audio thread.
+    ///
+    /// Default returns `nullptr` so non-Apple backends inherit the
+    /// best-effort priority fallback for free.
+    virtual void* callback_workgroup() const { return nullptr; }
+
+    /// Cumulative xrun (overload/underrun) count since `start()` or
+    /// the last `reset_xrun_counter()`. CoreAudio devices increment on
+    /// every `kAudioDeviceProcessorOverload` notification; backends
+    /// that do not surface overload events stay at 0.
+    virtual std::uint64_t xrun_count() const { return 0; }
+
+    /// Reset the xrun counter to 0. Safe from any thread.
+    virtual void reset_xrun_counter() {}
 };
 
 // Audio system — enumerates devices and creates device instances
