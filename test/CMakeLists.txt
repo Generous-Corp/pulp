@@ -2914,6 +2914,9 @@ pulp_add_test_suite(pulp-test-load-measurer LIBRARIES pulp::audio)
 # FilterDesign tests
 pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
 
+# IIR design tests (Chebyshev I/II, Elliptic)
+pulp_add_test_suite(pulp-test-iir-design LIBRARIES pulp::signal)
+
 # TreeView tests
 pulp_add_test_suite(pulp-test-tree-view LIBRARIES pulp::view)
 
