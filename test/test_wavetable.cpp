@@ -247,6 +247,67 @@ TEST_CASE("Wavetable explicit band construction with empty samples is rejected",
     REQUIRE_NOTHROW(wt.next());
 }
 
+TEST_CASE("Wavetable rapid retune preserves crossfade continuity (Codex #2865 P1)",
+          "[signal][wavetable][regression]") {
+    auto wt = Wavetable::make_saw(/*bands=*/10);
+    wt.set_sample_rate(48000.0f);
+    wt.set_frequency(110.0f);
+    // Drain any initial-state crossfade.
+    for (std::size_t i = 0; i < Wavetable::kCrossfadeSamples + 4; ++i) (void)wt.next();
+
+    // First retune — triggers crossfade.
+    wt.set_frequency(880.0f);
+    // Render only HALF the crossfade window…
+    for (std::size_t i = 0; i < Wavetable::kCrossfadeSamples / 2; ++i) (void)wt.next();
+    REQUIRE(wt.is_crossfading());
+
+    // …then retune again before the first fade finishes. Earlier impl
+    // captured `crossfade_source = target_band` (the in-flight target,
+    // not the actually-audible mix), causing the new fade to JUMP from
+    // the audible sample to the in-flight target → click. Fix blends
+    // FROM the in-flight mix.
+    const float sample_before_second_retune = wt.next();
+    wt.set_frequency(7000.0f);
+
+    float max_delta = 0.0f;
+    float prev = sample_before_second_retune;
+    for (std::size_t i = 0; i < Wavetable::kCrossfadeSamples + 32; ++i) {
+        const float s = wt.next();
+        max_delta = std::max(max_delta, std::fabs(s - prev));
+        prev = s;
+    }
+    // The unit-waveform sawtooth has a natural ~2.0 discontinuity per
+    // cycle, so bound at < 2.0 (a real click during the fade would sit
+    // on top of that discontinuity and push us above).
+    REQUIRE(max_delta < 2.0f);
+}
+
+TEST_CASE("Wavetable factories reject non-positive reference sample rate (Codex #2865 P2)",
+          "[signal][wavetable][regression]") {
+    // Earlier impl passed `reference_sample_rate <= 0` through to
+    // std::floor(nyquist / clamped_ceiling) and then size_t-cast the
+    // result, which is undefined for negative / NaN floats. Fix
+    // short-circuits to an empty Wavetable.
+    auto sine_zero = Wavetable::make_sine(/*table_length=*/64, /*sr=*/0.0f);
+    REQUIRE(sine_zero.band_count() == 0);
+    REQUIRE(sine_zero.next() == 0.0f);
+
+    auto sine_neg = Wavetable::make_sine(/*table_length=*/64, /*sr=*/-1.0f);
+    REQUIRE(sine_neg.band_count() == 0);
+
+    auto saw_zero = Wavetable::make_saw(/*bands=*/5, /*table_length=*/64, /*sr=*/0.0f);
+    REQUIRE(saw_zero.band_count() == 0);
+
+    auto saw_neg = Wavetable::make_saw(/*bands=*/5, /*table_length=*/64, /*sr=*/-100.0f);
+    REQUIRE(saw_neg.band_count() == 0);
+
+    auto sq_neg = Wavetable::make_square(/*bands=*/5, /*table_length=*/64, -1.0f);
+    REQUIRE(sq_neg.band_count() == 0);
+
+    auto tri_neg = Wavetable::make_triangle(/*bands=*/5, /*table_length=*/64, -1.0f);
+    REQUIRE(tri_neg.band_count() == 0);
+}
+
 TEST_CASE("Wavetable explicit band construction sorts by ascending ceiling",
           "[signal][wavetable]") {
     std::vector<WavetableEntry> bands;
