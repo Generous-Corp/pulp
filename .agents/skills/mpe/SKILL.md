@@ -203,6 +203,30 @@ still works if you extract per-note data from `MidiBuffer` yourself.
 - Hosting MPE plugins (MPE output, dispatching MPE into a loaded
   plugin) — covered by the SignalGraph hosting work, not this skill.
 
+### UMP sysex7 reassembly (post macOS-plan 8.2)
+
+UMP type-0x3 sysex7 reassembly is **not part of MpeVoiceTracker** —
+it's a separate per-stream state machine shared across every Pulp
+UMP backend, exposed as `pulp::midi::UmpSysex7Reassembler` in
+`core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp`. Each
+input port / source owns one instance (the reassembler is not
+thread-safe; that's by design, since CoreMIDI / AUv3 callbacks are
+already single-threaded per port).
+
+Touching anything in `core/midi/include/**/*ump*` triggers this
+skill via `tools/scripts/skill_path_map.json`. When you add a new
+UMP-aware backend (WinRT MIDI 2.0, ALSA UMP, iOS CoreMIDI 2.0),
+delegate sysex7 reassembly to `UmpSysex7Reassembler` rather than
+re-implementing the start / continue / end state machine inline —
+the AUv3 and macOS CoreMIDI backends do exactly that, and any drift
+between the two backends used to cause the `#239` / `#292` family
+of bugs.
+
+The reassembler's `feed_packet` is a function-pointer-callback
+API so it stays RT-safe in the audio render block; the
+`feed_collect` convenience wrapper allocates and is meant for
+tests / cold paths only.
+
 ## Implementation note: where MpeVoiceTracker bodies live
 
 As of companion-track U-9 (2026-05-19), `MpeVoiceTracker`'s method bodies live in `core/midi/src/mpe_voice_tracker.cpp`, not inline in `core/midi/include/pulp/midi/mpe_voice_tracker.hpp`. The header keeps the class declaration + trivial inline getters; non-trivial methods (`process`, `set_config`, `reset`, `add_note`, `remove_note`, etc.) link from the .cpp.

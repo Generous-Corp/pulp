@@ -507,18 +507,41 @@ status == 0x2  → continue
 status == 0x3  → end
 ```
 
-`au_adapter.mm` accumulates start → continue → end spans into one
-`add_sysex` call (`#292` / `#288`). Two hard-learned P1 lessons:
+As of macOS plan item 8.2, the sysex7 reassembly state machine no
+longer lives inline in `au_adapter.mm` — it now delegates to the
+shared `pulp::midi::UmpSysex7Reassembler`
+(`core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp`) so the
+same battle-tested implementation backs every UMP-aware Pulp backend
+(AUv3, CoreMIDI device input, and any future Win/Linux UMP path).
+`au_adapter.mm` only owns the AURenderEventMIDIEventList walk, the
+word-cursor advance, and the per-MIDIEventList `EmitCtx` that tags
+the assembled sysex with `event->head.eventSampleTime`.
+
+When touching the AUv3 sysex path: prefer fixes inside the shared
+reassembler (and `test/test_ump_sysex7_reassembler.cpp`) over
+adapter-local patches. Two P1 invariants the adapter still owns
+itself remain unchanged and important:
 
 1. **Advance the word cursor by `ump_words`, not by 1.** A type-3
    message is 2 UMP words long; advancing by 1 makes the second
-   word's header nibble look like a new message header (P1).
-2. **Sysex7 size is 0..6 bytes per 2-word packet.** Extract bytes
-   from word0 bits 15..0 + word1 bits 31..0, clamped to `size` and to
-   6 (#292 P2 — preserve message boundaries).
+   word's header nibble look like a new message header (`#292` P1).
+   This lives in the `switch (mt)` block above the call to
+   `reassembler.feed_packet`.
+2. **`reassembler.feed_packet` expects an already-type-3 packet** —
+   the adapter checks `mt == 0x3` before calling. Don't push the
+   type check into the reassembler; both call sites already need the
+   nibble for cursor advance and re-checking would be redundant in
+   the hot path.
 
-Both are tested by `test/test_ump_*.cpp`. Touch the accumulator → add
-a test that exercises the boundary.
+Sysex7 size is still 0..6 bytes per 2-word packet (#292 P2 —
+preserve message boundaries); the reassembler clamps to 6
+defensively.
+
+Both invariants are tested by
+`test/test_ump_sysex7_reassembler.cpp` (the `#292 P1` test feeds a
+contrived packet whose word1 begins with a nibble matching sysex7
+to prove word1 is never reparsed as a fresh word0). Touch the
+reassembler → add a test that exercises the boundary.
 
 ### Short-MIDI length must be validated
 

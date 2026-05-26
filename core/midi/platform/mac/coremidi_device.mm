@@ -1,6 +1,7 @@
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_conversion.hpp>
+#include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/log.hpp>
 #include <CoreMIDI/CoreMIDI.h>
 
@@ -61,73 +62,29 @@ public:
                             }
                         } else if (type == 0x03) {
                             // SysEx7 (UMP type 3) — reassemble multi-
-                            // packet payloads into a single sysex
-                            // callback. Status nibble (bits 20-23 of
-                            // word 0) indicates which packet of the
-                            // logical message this is:
-                            //   0x0 = complete single-packet sysex
-                            //   0x1 = start
-                            //   0x2 = continue
-                            //   0x3 = end
-                            // Mirrors the AU adapter's in-process
-                            // reassembler (#239 / #292). Without this,
-                            // sysex from a CoreMIDI device source
-                            // (Pulp standalone or DAW host on macOS)
-                            // would be silently dropped.
+                            // packet payloads via the shared
+                            // UmpSysex7Reassembler. macOS plan 8.2
+                            // extracted the previously inline #292 fix
+                            // to a single, tested class shared with
+                            // the AUv3 adapter; reassembler state
+                            // lives on this CoreMidiInput so a
+                            // multi-packet sysex spanning callback
+                            // invocations accumulates correctly.
                             const uint32_t word1 =
                                 packet->words[wordIdx + 1];
-                            const uint8_t status =
-                                static_cast<uint8_t>((word >> 20) & 0x0F);
-                            const uint32_t size  =
-                                static_cast<uint32_t>((word >> 16) & 0x0F);
-                            const double ts_sec =
-                                static_cast<double>(packet->timeStamp) / 1e9;
-
-                            auto extract = [](uint32_t w0, uint32_t w1,
-                                              uint32_t sz,
-                                              std::vector<uint8_t>& out) {
-                                const uint8_t buf[6] = {
-                                    static_cast<uint8_t>((w0 >>  8) & 0xFF),
-                                    static_cast<uint8_t>((w0 >>  0) & 0xFF),
-                                    static_cast<uint8_t>((w1 >> 24) & 0xFF),
-                                    static_cast<uint8_t>((w1 >> 16) & 0xFF),
-                                    static_cast<uint8_t>((w1 >>  8) & 0xFF),
-                                    static_cast<uint8_t>((w1 >>  0) & 0xFF),
-                                };
-                                for (uint32_t e = 0; e < sz && e < 6; ++e)
-                                    out.push_back(buf[e]);
+                            struct EmitCtx {
+                                MidiSysexCallback* cb;
+                                double ts_sec;
                             };
-
-                            if (status == 0x0) {
-                                std::vector<uint8_t> p;
-                                extract(word, word1, size, p);
-                                if (!p.empty() && this->sysex_callback_) {
-                                    this->sysex_callback_(p, ts_sec);
-                                }
-                            } else if (status == 0x1) {
-                                this->sysex_payload_.clear();
-                                extract(word, word1, size,
-                                        this->sysex_payload_);
-                                this->sysex_in_progress_ = true;
-                            } else if (status == 0x2
-                                       && this->sysex_in_progress_) {
-                                extract(word, word1, size,
-                                        this->sysex_payload_);
-                            } else if (status == 0x3
-                                       && this->sysex_in_progress_) {
-                                extract(word, word1, size,
-                                        this->sysex_payload_);
-                                if (!this->sysex_payload_.empty()
-                                    && this->sysex_callback_) {
-                                    this->sysex_callback_(
-                                        this->sysex_payload_, ts_sec);
-                                }
-                                this->sysex_payload_.clear();
-                                this->sysex_in_progress_ = false;
-                            }
-                            // 0x2 / 0x3 without an earlier 0x1 means we
-                            // missed the start; drop silently rather
-                            // than emit a corrupt sysex (#292 P2).
+                            EmitCtx ctx{&this->sysex_callback_,
+                                        static_cast<double>(packet->timeStamp) / 1e9};
+                            auto emit = [](const std::vector<uint8_t>& p,
+                                           void* user) {
+                                auto* c = static_cast<EmitCtx*>(user);
+                                if (*c->cb) (*c->cb)(p, c->ts_sec);
+                            };
+                            this->sysex_reassembler_.feed_packet(
+                                word, word1, emit, &ctx);
                         }
                         // Other UMP types (utility, system, SysEx8,
                         // stream, flex) intentionally skipped this slice.
@@ -172,6 +129,9 @@ public:
     void close() override {
         if (port_) { MIDIPortDispose(port_); port_ = 0; }
         if (client_) { MIDIClientDispose(client_); client_ = 0; }
+        // Drop any in-progress sysex so a reopened port starts fresh
+        // and never emits a stale partial payload.
+        sysex_reassembler_.reset();
         is_open_ = false;
     }
 
@@ -186,12 +146,12 @@ private:
     MIDIPortRef port_ = 0;
     MidiInputCallback callback_;
     MidiSysexCallback sysex_callback_;
-    // SysEx7 (UMP type 0x03) reassembly state. The OS callback fires
-    // once per MIDIEventList delivery, so a multi-packet sysex (start
-    // → continue* → end) spans callback invocations and accumulates
-    // here.
-    std::vector<uint8_t> sysex_payload_;
-    bool sysex_in_progress_ = false;
+    // SysEx7 (UMP type 0x03) reassembly state — shared implementation
+    // in core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp. The
+    // OS callback fires once per MIDIEventList delivery, so a multi-
+    // packet sysex (start → continue* → end) spans callback invocations
+    // and the reassembler keeps the partial payload between deliveries.
+    UmpSysex7Reassembler sysex_reassembler_;
     bool is_open_ = false;
 };
 

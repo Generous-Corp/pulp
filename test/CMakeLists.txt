@@ -716,6 +716,10 @@ pulp_add_test_suite(pulp-test-frame-fill LIBRARIES pulp::audio)
 # machine shared by Android/ALSA/Windows/iOS MIDI backends. Header-only.
 pulp_add_test_suite(pulp-test-sysex-accumulator LIBRARIES pulp::midi)
 
+# macOS plan 8.2: UmpSysex7Reassembler — shared UMP type-0x3 reassembler
+# extracted from the inline AUv3 / CoreMIDI state machines. Header-only.
+pulp_add_test_suite(pulp-test-ump-sysex7-reassembler LIBRARIES pulp::midi)
+
 # AsyncStream tests (Phase 2)
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 
