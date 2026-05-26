@@ -49,6 +49,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreAudioKit/CoreAudioKit.h>
 #import <mach/mach_time.h>
+#include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
@@ -164,6 +165,10 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
     AUAudioUnitBus *_outputBus;
     AUAudioUnitBusArray *_inputBusArray;
     AUAudioUnitBusArray *_outputBusArray;
+    // Item 6.4b — MainThreadDispatcher backend token. Held for the lifetime
+    // of this plugin instance so DAW-hosted code can post work to the
+    // main thread via pulp::events::MainThreadDispatcher::call_async().
+    pulp::events::MainThreadDispatcher::Token _mainThreadToken;
 }
 
 /// Raw pointer to the host-owned Processor + StateStore. Used by the
@@ -205,6 +210,14 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
                                        options:options
                                          error:outError];
     if (!self) return nil;
+
+    // Item 6.4b — opt this plugin instance into the process-wide
+    // MainThreadDispatcher backend. On macOS this installs (or refcount-
+    // bumps) a Cocoa backend posting to `dispatch_get_main_queue`, so
+    // KVO publishes (e.g. the `latency` / `tailTime` dispatch_async at
+    // line ~801) and any future view-side code reaches the host's main
+    // thread without needing its own per-callsite dispatch_async.
+    _mainThreadToken = pulp::events::register_plugin_backend();
 
     // Get processor factory from global registry
     auto factory = pulp::format::registered_factory();
@@ -446,6 +459,16 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 - (void)deallocateRenderResources {
     if (_bridge.processor) _bridge.processor->release();
     [super deallocateRenderResources];
+}
+
+// Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
+// installed in init.
+- (void)dealloc {
+    if (_mainThreadToken != 0) {
+        pulp::events::unregister_plugin_backend(_mainThreadToken);
+        _mainThreadToken = 0;
+    }
+    [super dealloc];
 }
 
 // ── Render block ───────────────────────────────────────────────────────────

@@ -342,6 +342,7 @@ target_sources(pulp-view-core PRIVATE
     src/inspector_window.cpp
     src/command_registry.cpp
     src/key_mapping_editor.cpp
+    src/window_classes.cpp
 )
 
 target_sources(pulp-view-script PRIVATE

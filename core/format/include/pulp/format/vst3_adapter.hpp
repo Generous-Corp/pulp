@@ -23,6 +23,7 @@
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/base/ibstream.h>
 
+#include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -106,6 +107,12 @@ private:
     // on `ProcessContext`. Default-constructed (no previous block) so
     // the first process() call after construction reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+
+    // Item 6.4b — MainThreadDispatcher backend token. Acquired in
+    // initialize(), released in terminate(). On macOS this lets adapter-
+    // side and view-side code marshal work onto the DAW's main thread via
+    // `pulp::events::MainThreadDispatcher::call_async`.
+    pulp::events::MainThreadDispatcher::Token main_thread_token_ = 0;
 };
 
 } // namespace pulp::format::vst3
