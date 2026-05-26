@@ -304,6 +304,48 @@ created with null slots so connection ids stay stable. `GraphNode`
 gained a `plugin_info` member that survives a failed slot load so
 re-saving an unresolved-plugin node preserves its identity.
 
+## Crash-isolated scanning (`IsolatedPluginScanner`, item 4.1)
+
+`pulp::host::IsolatedPluginScanner` (in
+`core/host/include/pulp/host/isolated_scanner.hpp`) is the high-level
+wrapper around the long-standing `pulp-scan-worker` binary. Construct
+it with a path to the worker, then call `scan(bundle_path, timeout_ms)`
+to scan a single bundle in a child process via
+`pulp::platform::ChildProcess::run()`. A crash, hang, or malformed
+descriptor is reported as a `ScanResult { status, descriptor,
+exit_code, error_message }` instead of taking down the host.
+
+`ScanStatus` classifications:
+
+| Status          | Trigger                                          | Caller action                |
+|-----------------|--------------------------------------------------|------------------------------|
+| `Ok`            | exit 0 + parseable JSON descriptor on stdout     | use `result.descriptor`      |
+| `Crash`         | exit ≠ 0,2,3 OR exit 0 with unparseable stdout   | `ScanBlacklist::blacklist()` |
+| `Timeout`       | worker exceeded `timeout_ms`                      | blacklist as soft crash      |
+| `FormatError`   | worker exit 3 (unsupported bundle extension)     | skip (not a plugin format)   |
+| `NotPlugin`     | worker exit 0 with empty stdout                  | skip                          |
+| `WorkerMissing` | configured `worker_path` doesn't exist           | operational error — surface  |
+
+Gotchas:
+
+- The worker's exit-code surface is frozen: 0 = success, 2 = usage
+  error, 3 = unsupported extension. Anything else is treated as a
+  crash. If you grow the worker's exit semantics, update the parent's
+  classifier in `core/host/src/isolated_scanner.cpp` AND the test
+  matrix in `test/test_isolated_scanner.cpp` in the same commit.
+- The descriptor parser is a flat string-search, not a full JSON
+  parser — it relies on the worker's `write_json_descriptor()` schema
+  being stable. If you add nested objects to the worker output, swap
+  to `choc::json` here instead of extending the string search.
+- `ChildProcess::exec_code` is `-1` for any signal-kill on POSIX (the
+  Crash branch covers this) and an OS exception code on Windows
+  (also Crash). Don't try to disambiguate further; the only signal
+  the parent has is "did the worker exit 0 with valid JSON or not".
+- Tests use a small `fixtures/isolated_scanner_crash_helper.cpp`
+  binary that segfaults / hangs / emits garbage on demand. Pattern is
+  reusable for any future ChildProcess-based isolation work — give
+  the helper a mode argv and exec it from the parent.
+
 ## Scanner identity rules (issue #491 P2)
 
 `PluginScanner` produces `PluginInfo::unique_id` values that

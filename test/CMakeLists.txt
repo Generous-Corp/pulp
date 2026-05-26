@@ -922,6 +922,30 @@ target_link_libraries(pulp-test-scan-blacklist PRIVATE pulp::host Catch2::Catch2
 # `slow` (#1589): file-mtime sleep loops (rebuilt-plugin-not-blacklisted
 # flow waits on filesystem timestamp resolution). Each test ~1s.
 catch_discover_tests(pulp-test-scan-blacklist PROPERTIES LABELS slow)
+# Crash-isolated scanner (macOS plan item 4.1). Skipped on iOS/Android
+# where pulp-scan-worker isn't built (sandboxed platforms can't fork).
+if(NOT IOS AND NOT ANDROID)
+    add_executable(pulp-isolated-scanner-crash-helper
+        fixtures/isolated_scanner_crash_helper.cpp)
+    set_target_properties(pulp-isolated-scanner-crash-helper PROPERTIES
+        OUTPUT_NAME "pulp-isolated-scanner-crash-helper")
+
+    add_executable(pulp-test-isolated-scanner test_isolated_scanner.cpp)
+    # pulp::platform comes transitively via pulp::host (it's a PRIVATE
+    # dep there, but the static-archive link still pulls in the symbols
+    # the test needs through pulp::host's USAGE side). We only have to
+    # list Catch2 + the public dep.
+    target_link_libraries(pulp-test-isolated-scanner PRIVATE
+        pulp::host
+        Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-isolated-scanner PRIVATE
+        PULP_ISOLATED_SCANNER_REAL_WORKER="$<TARGET_FILE:pulp-scan-worker>"
+        PULP_ISOLATED_SCANNER_CRASH_HELPER="$<TARGET_FILE:pulp-isolated-scanner-crash-helper>")
+    add_dependencies(pulp-test-isolated-scanner
+        pulp-scan-worker
+        pulp-isolated-scanner-crash-helper)
+    catch_discover_tests(pulp-test-isolated-scanner)
+endif()
 # Hosted editor API (workstream 03 slice 3.4)
 pulp_add_test_suite(pulp-test-hosted-editor LIBRARIES pulp::host)
 # Accessibility announcements (workstream 04 slice 4.3)

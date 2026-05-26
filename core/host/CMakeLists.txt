@@ -15,9 +15,11 @@ target_sources(pulp-host PRIVATE
     src/scan_blacklist.cpp
     src/scan_cache.cpp
     src/background_scanner.cpp
+    src/isolated_scanner.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::midi pulp::runtime pulp::state)
+target_link_libraries(pulp-host PRIVATE pulp::platform)
 
 # CLAP plugin loader + scanner (requires CLAP SDK)
 if(PULP_HAS_CLAP)
