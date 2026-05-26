@@ -863,6 +863,11 @@ pulp_add_test_suite(pulp-test-processor-ara-hook LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-processor-layout-latency LIBRARIES pulp::format)
 # Processor and descriptor default contracts
 pulp_add_test_suite(pulp-test-processor-defaults LIBRARIES pulp::format)
+# Item 1.3 AudioPlayHead transport-extension helpers used by every
+# format adapter (VST3, AU v2 / v3, CLAP) to derive `ProcessContext::bar`
+# and the three change flags (tempo_changed / time_sig_changed /
+# transport_changed) once per block.
+pulp_add_test_suite(pulp-test-playhead-diff LIBRARIES pulp::format)
 # TableModel data/sort layer (workstream 07 slice 7.3)
 pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
 # ModulationMatrix data model (workstream 07 slice 7.1)
