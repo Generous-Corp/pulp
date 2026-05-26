@@ -206,6 +206,65 @@ TEST_CASE("ProcessContext defaults represent stopped 4/4 playback at 120 BPM",
     REQUIRE(c.position_samples == 0);
     REQUIRE(c.time_sig_numerator == 4);
     REQUIRE(c.time_sig_denominator == 4);
+
+    // Item 1.3 extensions — every new field defaults to the documented
+    // "host did not provide" sentinel so existing adapters that don't
+    // populate them keep their pre-extension behaviour.
+    REQUIRE(c.bar == 0);
+    REQUIRE_FALSE(c.is_looping);
+    REQUIRE(c.loop_start_beats == 0.0);
+    REQUIRE(c.loop_end_beats == 0.0);
+    REQUIRE(c.host_time_ns == 0);
+    REQUIRE(c.frame_rate == FrameRate::unknown);
+    REQUIRE_FALSE(c.tempo_changed);
+    REQUIRE_FALSE(c.time_sig_changed);
+    REQUIRE_FALSE(c.transport_changed);
+}
+
+TEST_CASE("ProcessContext carries item 1.3 playhead extensions independently",
+          "[format][processor-defaults][context][issue-1003][playhead]") {
+    ProcessContext c;
+
+    c.is_looping = true;
+    c.loop_start_beats = 16.0;
+    c.loop_end_beats = 32.5;
+    c.bar = 7;
+    c.host_time_ns = 1'234'567'890LL;
+    c.frame_rate = FrameRate::fps_29_97_drop;
+    c.tempo_changed = true;
+    c.time_sig_changed = true;
+    c.transport_changed = true;
+
+    REQUIRE(c.is_looping);
+    REQUIRE(c.loop_start_beats == 16.0);
+    REQUIRE(c.loop_end_beats == 32.5);
+    REQUIRE(c.bar == 7);
+    REQUIRE(c.host_time_ns == 1'234'567'890LL);
+    REQUIRE(c.frame_rate == FrameRate::fps_29_97_drop);
+    REQUIRE(c.tempo_changed);
+    REQUIRE(c.time_sig_changed);
+    REQUIRE(c.transport_changed);
+
+    // Defaulted legacy fields should not be disturbed when only the
+    // 1.3 extensions are touched.
+    REQUIRE(c.tempo_bpm == 120.0);
+    REQUIRE(c.time_sig_numerator == 4);
+    REQUIRE(c.time_sig_denominator == 4);
+    REQUIRE_FALSE(c.is_playing);
+    REQUIRE_FALSE(c.is_recording);
+}
+
+TEST_CASE("FrameRate enum exposes the SMPTE rates adapters must surface",
+          "[format][processor-defaults][context][playhead][frame-rate]") {
+    // Adapters map host frame-rate values onto this enum. The exact
+    // enumerators below are the contract; reordering them would silently
+    // break per-block transport push from VST3/AU/AAX.
+    REQUIRE(static_cast<int>(FrameRate::unknown) == 0);
+    REQUIRE(FrameRate::fps_24 != FrameRate::fps_25);
+    REQUIRE(FrameRate::fps_29_97 != FrameRate::fps_29_97_drop);
+    REQUIRE(FrameRate::fps_30 != FrameRate::fps_30_drop);
+    REQUIRE(FrameRate::fps_60 != FrameRate::fps_30);
+    REQUIRE(FrameRate::unknown != FrameRate::fps_24);
 }
 
 TEST_CASE("Processor default editor contract is auto UI with free-resize hints",
@@ -368,6 +427,16 @@ TEST_CASE("Processor process receives the exact transport context",
     context.position_samples = 123456;
     context.time_sig_numerator = 7;
     context.time_sig_denominator = 8;
+    // Item 1.3 extensions also round-trip through process() so adapters
+    // that populate the new fields land them at the plugin verbatim.
+    context.bar = 4;
+    context.is_looping = true;
+    context.loop_start_beats = 8.0;
+    context.loop_end_beats = 24.0;
+    context.host_time_ns = 9'876'543'210LL;
+    context.frame_rate = FrameRate::fps_24;
+    context.tempo_changed = true;
+    context.transport_changed = true;
 
     p.process(output, input, midi_in, midi_out, context);
 
@@ -381,6 +450,15 @@ TEST_CASE("Processor process receives the exact transport context",
     REQUIRE(p.last_process.position_samples == 123456);
     REQUIRE(p.last_process.time_sig_numerator == 7);
     REQUIRE(p.last_process.time_sig_denominator == 8);
+    REQUIRE(p.last_process.bar == 4);
+    REQUIRE(p.last_process.is_looping);
+    REQUIRE(p.last_process.loop_start_beats == 8.0);
+    REQUIRE(p.last_process.loop_end_beats == 24.0);
+    REQUIRE(p.last_process.host_time_ns == 9'876'543'210LL);
+    REQUIRE(p.last_process.frame_rate == FrameRate::fps_24);
+    REQUIRE(p.last_process.tempo_changed);
+    REQUIRE_FALSE(p.last_process.time_sig_changed);
+    REQUIRE(p.last_process.transport_changed);
 }
 
 TEST_CASE("Processor state-store pointer wiring exposes the exact store",

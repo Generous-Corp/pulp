@@ -198,10 +198,61 @@ struct PrepareContext {
     int output_channels = 2;
 };
 
+/// SMPTE video frame rate (item 1.3 macOS plan).
+///
+/// Used by `ProcessContext::frame_rate` so plugins that drive video sync
+/// or display SMPTE timecode can format positions correctly. `unknown` is
+/// the documented sentinel for hosts that do not provide a frame rate
+/// (e.g. CLAP `clap_event_transport` has no frame-rate field; AU
+/// `kAudioUnitProperty_HostCallbacks` only exposes it inside
+/// `HostCallback_GetTransportState2`'s `outCurrentSampleInTimeLine`
+/// indirectly via the project session — adapters report `unknown` if
+/// the host does not surface it).
+enum class FrameRate {
+    unknown = 0,
+    fps_24,           ///< Film. VST3 `kFrameRate24fps`.
+    fps_25,           ///< PAL. VST3 `kFrameRate25fps`.
+    fps_29_97,        ///< NTSC non-drop. VST3 `kFrameRate2997fps`.
+    fps_29_97_drop,   ///< NTSC drop-frame. VST3 `kFrameRate2997DropFps`.
+    fps_30,           ///< NTSC integer. VST3 `kFrameRate30fps`.
+    fps_30_drop,      ///< 30 drop-frame. VST3 `kFrameRate30DropFps`.
+    fps_60,           ///< High-rate. VST3 `kFrameRate60fps`.
+};
+
 /// Process context — passed every audio callback with transport state.
 ///
 /// Fields are populated by the host. Not all hosts provide all fields —
 /// check is_playing before using position data.
+///
+/// Adapter sourcing (item 1.3 of the macOS plan; struct-only slice
+/// landed first, adapter wiring deferred to cross-cuts J / K / L / M):
+///
+/// - VST3 — `Vst::ProcessContext` (`SystemTime` →
+///   `host_time_ns`, `ProjectTimeMusic` → `position_beats`,
+///   `CycleStartMusic` / `CycleEndMusic` → `loop_start_beats` /
+///   `loop_end_beats`, `kCycleActive` → `is_looping`,
+///   `frameRate.framesPerSecond` → `frame_rate`).
+/// - AU v3 / v2 — `kAudioUnitProperty_HostCallbacks` (HostBeatAndTempo
+///   → `tempo_bpm` / `position_beats`; HostTransport →
+///   `is_playing` / `is_recording` / `is_looping` /
+///   `loop_start_beats` / `loop_end_beats`; MusicalTimeLocation →
+///   `time_sig_numerator` / `time_sig_denominator`; `mach_absolute_time`
+///   → `host_time_ns`). AU has no frame-rate field; `frame_rate`
+///   stays `FrameRate::unknown`.
+/// - CLAP — `clap_event_transport` (`flags` for is_playing /
+///   is_recording / is_looping; `loop_start_beats` /
+///   `loop_end_beats` directly; `tsig_num` / `tsig_denom` for time
+///   signature). CLAP does not provide frame rate; `frame_rate`
+///   stays `FrameRate::unknown`.
+/// - AAX (optional Avid SDK) — `IACFTransport` (`GetCurrentTickPosition`
+///   for beats; `GetCurrentLoopPosition` for loop range; transport
+///   state flags). Frame rate via `IACFTransport::GetTimeCodeInfo`
+///   when present, else `FrameRate::unknown`.
+///
+/// Change-flags (`tempo_changed`, `time_sig_changed`,
+/// `transport_changed`) are computed by the adapter once per block by
+/// diffing against the previous block's snapshot, so processors can
+/// branch on transitions only without re-reading every field.
 struct ProcessContext {
     double sample_rate = 0;
     int num_samples = 0;
@@ -212,6 +263,82 @@ struct ProcessContext {
     int64_t position_samples = 0;
     int time_sig_numerator = 4;
     int time_sig_denominator = 4;
+
+    // --- item 1.3 extensions (struct-only; adapter wiring deferred to
+    // J/K/L/M cross-cut). New fields default to "host did not provide"
+    // sentinels so existing adapters that don't populate them keep the
+    // pre-extension behaviour exactly. ---
+
+    /// Bar index derived from `position_beats` + the active time
+    /// signature. Hosts may already publish a precomputed bar (VST3
+    /// `Vst::ProcessContext::barPositionMusic`) — in that case the
+    /// adapter uses the host value directly. Otherwise the adapter
+    /// derives `bar = floor(position_beats * (time_sig_denominator /
+    /// 4) / time_sig_numerator)` and writes it here so processors that
+    /// just need "what bar am I in" do not recompute it per block.
+    /// Default 0 matches a stopped-at-origin playhead.
+    int64_t bar = 0;
+
+    /// True when the host's transport is in cycle/loop mode. VST3
+    /// exposes this as the `kCycleActive` flag on `ProcessContext`;
+    /// AU surfaces it via `HostTransport`'s `outIsCycling`; CLAP via
+    /// the `CLAP_TRANSPORT_IS_LOOP_ACTIVE` bit on
+    /// `clap_event_transport::flags`; AAX via `IACFTransport`'s loop
+    /// state. Default false (no loop).
+    bool is_looping = false;
+
+    /// Loop start in quarter notes, only meaningful when `is_looping`
+    /// is true. Mirrors `position_beats`'s PPQ convention. Sources:
+    /// VST3 `Vst::ProcessContext::cycleStartMusic`; AU
+    /// `HostTransport::outCycleStartBeat`; CLAP
+    /// `clap_event_transport::loop_start_beats` (converted from CLAP's
+    /// fixed-point `clap_beattime`); AAX
+    /// `IACFTransport::GetCurrentLoopPosition`. Default 0.
+    double loop_start_beats = 0.0;
+
+    /// Loop end in quarter notes, only meaningful when `is_looping`
+    /// is true. Same source list as `loop_start_beats`. Default 0
+    /// (loop_start == loop_end => no loop range yet).
+    double loop_end_beats = 0.0;
+
+    /// Host clock timestamp matching the start of this block, in
+    /// nanoseconds since an epoch the host chooses. Used for video
+    /// sync against the OS clock. Sources:
+    /// VST3 `Vst::ProcessContext::systemTime` (already nanoseconds on
+    /// Apple; otherwise host-defined); AU `mach_absolute_time()`
+    /// converted via `mach_timebase_info` (the AU adapter performs the
+    /// conversion before writing here); CLAP has no host-time field
+    /// today, so the adapter leaves the value at 0 (sentinel = "not
+    /// provided"); AAX `IACFTransport`'s sample-position only — host
+    /// time is unavailable, so leave at 0.
+    int64_t host_time_ns = 0;
+
+    /// SMPTE frame rate when the host exposes one. Default
+    /// `FrameRate::unknown` is the documented sentinel meaning "host
+    /// did not provide" — plugins must check before using.
+    FrameRate frame_rate = FrameRate::unknown;
+
+    /// True when the host's reported `tempo_bpm` differs from the
+    /// previous block. Lets processors recompute tempo-dependent
+    /// derived state (sample-domain envelope rates, delay-line beat
+    /// lengths) only on transitions instead of every block. Computed
+    /// by the adapter as `current.tempo_bpm != previous.tempo_bpm`.
+    /// Default false (no change relative to a hypothetical previous
+    /// block, which matches the initial-state contract).
+    bool tempo_changed = false;
+
+    /// True when the host's reported time signature
+    /// (`time_sig_numerator` or `time_sig_denominator`) differs from
+    /// the previous block. Lets processors rebuild bar-grid state on
+    /// transitions only. Default false.
+    bool time_sig_changed = false;
+
+    /// True when any transport state field (`is_playing`,
+    /// `is_recording`, `is_looping`) flipped since the previous
+    /// block. Lets processors reset playback-only DSP state (e.g.
+    /// flush a reverb tail when transport stops) on transitions only.
+    /// Default false.
+    bool transport_changed = false;
 };
 
 /// The plugin processor interface.
