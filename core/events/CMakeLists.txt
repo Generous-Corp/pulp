@@ -16,6 +16,7 @@ target_sources(pulp-events PRIVATE
     src/child_process_manager.cpp
     src/volume_detector.cpp
     src/service_discovery.cpp
+    src/push_notifications.cpp
 )
 
 # Item 6.4b — plugin-mode main-thread cooperation. macOS gets a Cocoa
@@ -40,23 +41,41 @@ endif()
 if(APPLE)
     target_sources(pulp-events PRIVATE
         platform/mac/bonjour_backend.cpp
+        platform/mac/user_notifications_backend.mm
     )
     if(NOT IOS)
         target_link_libraries(pulp-events PRIVATE
             "-framework CoreServices"
         )
     endif()
+    # UserNotifications.framework: PushNotifications local-notification
+    # backend. Same framework on macOS (10.14+) and iOS (10+); no
+    # runtime fallback because every supported Apple OS ships it.
+    target_link_libraries(pulp-events PRIVATE
+        "-framework UserNotifications"
+    )
 elseif(UNIX AND NOT APPLE)
     # Linux Avahi backend — runtime-dlopen libavahi-client.so.3; no
     # build-time dependency on the Avahi headers or libs.
     target_sources(pulp-events PRIVATE
         platform/linux/avahi_backend.cpp
     )
+    # Linux libnotify backend for PushNotifications — runtime-dlopen
+    # libnotify.so.4; no build-time dependency on libnotify headers.
+    target_sources(pulp-events PRIVATE
+        platform/linux/libnotify_backend.cpp
+    )
 elseif(WIN32)
     # Windows Bonjour SDK backend — runtime-LoadLibrary dnssd.dll;
     # no build-time dependency on the Bonjour SDK headers or libs.
     target_sources(pulp-events PRIVATE
         platform/win/bonjour_backend.cpp
+    )
+    # Windows toast notification backend — runtime-LoadLibrary
+    # combase.dll. Scaffold-only; full WinRT toast posting requires
+    # MSIX packaging or a transient COM activator (deferred).
+    target_sources(pulp-events PRIVATE
+        platform/win/winrt_toast_backend.cpp
     )
     # ws2_32 supplies select / htons / ntohs / getaddrinfo. iphlpapi
     # is harmless to link and matches the existing socket-shaped code
