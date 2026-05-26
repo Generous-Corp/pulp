@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #define main pulp_design_import_benchmark_main_for_test
@@ -34,6 +36,35 @@ std::optional<Config> parse_args_vec(std::vector<std::string> args) {
     auto argv = argv_from(args);
     return parse_args(static_cast<int>(argv.size()), argv.data());
 }
+
+const IRNode* find_ir_node(const IRNode& node, std::string_view id) {
+    if (node.stable_anchor_id == id) return &node;
+    for (const auto& child : node.children) {
+        if (const auto* found = find_ir_node(child, id)) return found;
+    }
+    return nullptr;
+}
+
+class CountingFixture final : public BenchmarkFixture {
+public:
+    CountingFixture() {
+        root_.set_id("counting-root");
+        root_.set_bounds({0, 0, 12, 12});
+    }
+
+    View& root() override { return root_; }
+
+    void step(int frame) override {
+        ++steps;
+        last_frame = frame;
+    }
+
+    int js_evaluation_count() const override { return steps + 10; }
+
+    View root_;
+    int steps = 0;
+    int last_frame = -1;
+};
 
 }  // namespace
 
@@ -153,4 +184,94 @@ TEST_CASE("design-import benchmark write_file handles stdout sentinel and nested
     REQUIRE(read_text(nested) == "payload");
 
     std::filesystem::remove_all(nested.parent_path());
+}
+
+TEST_CASE("design-import benchmark metric helpers handle edge inputs",
+          "[design-import][benchmark][coverage]") {
+    REQUIRE(percentile({}, 50.0) == 0.0);
+    REQUIRE(percentile({5.0}, 99.0) == 5.0);
+    REQUIRE(percentile({30.0, 10.0, 20.0}, 50.0) == 20.0);
+    REQUIRE(percentile({0.0, 100.0}, 25.0) == 25.0);
+
+    REQUIRE(cpu_clock_delta_ms(static_cast<std::clock_t>(-1), 10) == 0.0);
+    REQUIRE(cpu_clock_delta_ms(20, static_cast<std::clock_t>(-1)) == 0.0);
+    REQUIRE(cpu_clock_delta_ms(20, 10) == 0.0);
+    REQUIRE(cpu_clock_delta_ms(0, CLOCKS_PER_SEC) == Catch::Approx(1000.0));
+}
+
+TEST_CASE("design-import benchmark baked IR fixture carries expected controls",
+          "[design-import][benchmark][coverage]") {
+    const auto ir = build_baked_ir();
+
+    REQUIRE(ir.source == DesignSource::jsx);
+    REQUIRE(ir.source_adapter == "phase5-benchmark-fixture");
+    REQUIRE(ir.root.stable_anchor_id == "bench-root");
+    REQUIRE(ir.root.children.size() == 1);
+
+    const auto* panel = find_ir_node(ir.root, "bench-panel");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->children.size() == 9);
+    REQUIRE(panel->style.background_color == "#1f2030");
+    REQUIRE(panel->style.overflow == "hidden");
+
+    const auto* drive = find_ir_node(ir.root, "drive");
+    REQUIRE(drive != nullptr);
+    REQUIRE(drive->audio_widget == AudioWidgetType::knob);
+    REQUIRE(drive->audio_label == "Drive");
+    REQUIRE(drive->audio_default == Catch::Approx(0.64f));
+
+    const auto* shape = find_ir_node(ir.root, "shape");
+    REQUIRE(shape != nullptr);
+    REQUIRE(shape->audio_widget == AudioWidgetType::xy_pad);
+    REQUIRE(shape->attributes.at("x") == "0.35");
+
+    const auto* viewport = find_ir_node(ir.root, "preset-viewport");
+    REQUIRE(viewport != nullptr);
+    REQUIRE(viewport->style.overflow == "scroll");
+
+    const auto* content = find_ir_node(ir.root, "preset-content");
+    REQUIRE(content != nullptr);
+    REQUIRE(content->children.size() == 14);
+    REQUIRE(content->children.front().text_content.find("Preset 01") != std::string::npos);
+    REQUIRE(content->children.back().text_content.find("Preset 14") != std::string::npos);
+}
+
+TEST_CASE("design-import benchmark fixture factory and render path are deterministic",
+          "[design-import][benchmark][coverage]") {
+    REQUIRE(make_fixture("missing") == nullptr);
+
+    auto fixture = make_fixture("baked-cpp");
+    REQUIRE(fixture != nullptr);
+    REQUIRE(fixture->root().id() == "bench-root");
+
+    const auto initial_commands = render_frame(fixture->root());
+    REQUIRE(initial_commands > 0);
+
+    fixture->step(8);
+    REQUIRE(fixture->js_evaluation_count() == 0);
+    REQUIRE(render_frame(fixture->root()) == initial_commands);
+}
+
+TEST_CASE("design-import benchmark run_phase records idle and interactive contracts",
+          "[design-import][benchmark][coverage]") {
+    CountingFixture fixture;
+
+    const auto zero = run_phase(fixture, 0, 60, true);
+    REQUIRE(zero.duration_ms == 0);
+    REQUIRE(zero.samples == 0);
+    REQUIRE(zero.cpu_ms == 0.0);
+    REQUIRE(zero.paint_commands_last == 0);
+    REQUIRE(fixture.steps == 0);
+
+    const auto idle = run_phase(fixture, 2, 10000, false);
+    REQUIRE(idle.duration_ms == 2);
+    REQUIRE(idle.samples > 0);
+    REQUIRE(idle.js_evaluations == 10);
+    REQUIRE(fixture.steps == 0);
+
+    const auto interactive = run_phase(fixture, 2, 10000, true);
+    REQUIRE(interactive.duration_ms == 2);
+    REQUIRE(interactive.samples > 0);
+    REQUIRE(fixture.steps == interactive.samples);
+    REQUIRE(fixture.last_frame == interactive.samples - 1);
 }
