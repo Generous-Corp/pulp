@@ -27,7 +27,7 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
 | Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/danielraffel/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto `origin/main` at `90a21146f`; local post-rebase validation passing; SDK version is `0.242.0` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased onto `origin/main` at `ad72d830`; local post-rebase validation passing; SDK version is `0.242.0` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; locally rebased/validated; final SDK bump and push pending after #2822 | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
@@ -523,9 +523,10 @@ PR2 implementation scope:
 
 PR2 validation and PR state:
 - PR #2822: https://github.com/danielraffel/pulp/pull/2822
-- The branch is rebased onto `origin/main` at `90a21146f` after #2825, #2905,
+- The branch is rebased onto `origin/main` at `ad72d830` after #2825, #2905,
   #2900, #2909, #2906, #2914, #2908, #2898, #2913, the regenerated v0.238.0
-  changelog, and #2901 landed. The fresh required SDK bump is `0.242.0`.
+  changelog, #2901, and #2902 landed. The fresh required SDK bump is
+  `0.242.0`.
 - Initial PR review-comment and issue-comment sweep found no comments to
   address. The first CI failure was the version-bump commit-shape guard; it was
   fixed by splitting the `0.209.0` API bump into the canonical
@@ -613,6 +614,16 @@ PR2 validation and PR state:
   `0.241.0`, `tools/check-docs.sh` passes with 76 existing warnings, and
   `git diff --check` passes.
 - After the `90a21146f` rebase, local post-rebase validation passed:
+  `cmake --build build --target pulp-test-osc pulp-test-osc-channel
+  pulp-test-events pulp-test-ipc -j8` and
+  `ctest --test-dir build --output-on-failure -R
+  'OSC|OscChannel|EventLoop|MainThread|main-thread|dispatcher|IPC|Interprocess'`
+  154/154. `python3 tools/scripts/version_bump_check.py --base origin/main
+  --config tools/scripts/versioning.json --mode=report
+  --require-bump-for-fix-feat --accept-intent-trailers` passes for SDK
+  `0.242.0`, `tools/check-docs.sh` passes with 76 existing warnings, and
+  `git diff --check` passes.
+- After the `ad72d830` rebase, local post-rebase validation passed:
   `cmake --build build --target pulp-test-osc pulp-test-osc-channel
   pulp-test-events pulp-test-ipc -j8` and
   `ctest --test-dir build --output-on-failure -R
