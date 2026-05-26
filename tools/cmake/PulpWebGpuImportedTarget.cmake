@@ -72,6 +72,18 @@ if(NOT TARGET webgpu
 endif()
 
 if(NOT COMMAND target_copy_webgpu_binaries)
+    function(_pulp_target_append_unique_property target property value)
+        get_target_property(_pulp_existing_values ${target} ${property})
+        if(NOT _pulp_existing_values OR _pulp_existing_values STREQUAL "_pulp_existing_values-NOTFOUND")
+            set(_pulp_existing_values "")
+        endif()
+
+        list(FIND _pulp_existing_values "${value}" _pulp_value_index)
+        if(_pulp_value_index EQUAL -1)
+            set_property(TARGET ${target} APPEND PROPERTY ${property} "${value}")
+        endif()
+    endfunction()
+
     function(target_copy_webgpu_binaries target)
         if(TARGET webgpu AND EXISTS "${_pulp_webgpu_runtime}")
             add_custom_command(
@@ -82,6 +94,19 @@ if(NOT COMMAND target_copy_webgpu_binaries)
                     $<TARGET_FILE_DIR:${target}>
                 COMMENT "Copying WebGPU runtime next to ${target}"
             )
+
+            if(APPLE)
+                # wgpu-native's macOS dylib uses @rpath. Since this helper
+                # copies the runtime next to the consuming binary/framework,
+                # the binary should resolve it from its bundle, not from the
+                # SDK install prefix used at build time. This keeps signed
+                # Developer ID bundles compatible with library validation.
+                set_target_properties(${target} PROPERTIES
+                    BUILD_WITH_INSTALL_RPATH TRUE
+                    MACOSX_RPATH TRUE
+                )
+                _pulp_target_append_unique_property(${target} INSTALL_RPATH "@loader_path")
+            endif()
         endif()
     endfunction()
 endif()
