@@ -6,6 +6,7 @@
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/detail/vst3_frame_rate.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/ara.hpp>
@@ -491,21 +492,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 (fr_flags & Steinberg::Vst::FrameRate::kPullDownRate) != 0;
             const bool drop =
                 (fr_flags & Steinberg::Vst::FrameRate::kDropRate) != 0;
-            using FR = pulp::format::FrameRate;
-            // VST3 doc: 23.976 = 24 + pulldown; 29.97 = 30 + pulldown;
-            // 29.97 drop = 30 + pulldown + drop; 30 drop = 30 + drop;
-            // 59.94 = 60 + pulldown; integer rates have flags == 0.
-            if (fps == 24 && pulldown) ctx.frame_rate = FR::fps_24; // 23.976 ≈ 24 in our enum
-            else if (fps == 24) ctx.frame_rate = FR::fps_24;
-            else if (fps == 25) ctx.frame_rate = FR::fps_25;
-            else if (fps == 30 && pulldown && drop) ctx.frame_rate = FR::fps_29_97_drop;
-            else if (fps == 30 && pulldown) ctx.frame_rate = FR::fps_29_97;
-            else if (fps == 30 && drop) ctx.frame_rate = FR::fps_30_drop;
-            else if (fps == 30) ctx.frame_rate = FR::fps_30;
-            else if (fps == 60) ctx.frame_rate = FR::fps_60;
-            // Other rates (50, 60+pulldown=59.94) fall through to the
-            // default FrameRate::unknown — Pulp's enum does not enumerate
-            // every SMPTE rate, only the seven the spec lists.
+            // Mapping table is extracted to vst3_frame_rate.hpp so it is
+            // unit-testable without pulling the Steinberg VST3 SDK into
+            // the test binary. Critically, 59.94 (= 60 + pulldown) MUST
+            // NOT map to fps_60 — that bug broke SMPTE math in plugins
+            // that trust ctx.frame_rate. (Regression: #2963 / Codex
+            // comment 3305434120.)
+            ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
+                static_cast<int>(fps), pulldown, drop);
         }
 
         // Item 1.3 — bar index. Derive from position_beats + time-sig.

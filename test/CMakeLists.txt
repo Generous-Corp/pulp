@@ -904,6 +904,9 @@ pulp_add_test_suite(pulp-test-processor-defaults LIBRARIES pulp::format)
 # and the three change flags (tempo_changed / time_sig_changed /
 # transport_changed) once per block.
 pulp_add_test_suite(pulp-test-playhead-diff LIBRARIES pulp::format)
+# VST3 SMPTE → FrameRate mapping (pure helper, no Steinberg SDK
+# dependency). Pins the #2963 59.94 vs 60 regression among others.
+pulp_add_test_suite(pulp-test-vst3-frame-rate LIBRARIES pulp::format)
 # TableModel data/sort layer (workstream 07 slice 7.3)
 pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
 # ModulationMatrix data model (workstream 07 slice 7.1)
