@@ -38,6 +38,18 @@ VENDOR_FILE_PATTERNS = [
 SKIP_DIRS = {'build', 'build-asan', 'build-xcode', 'external', '.git',
              'node_modules', '.planning-repo', '.private', 'planning'}
 SOURCE_EXTENSIONS = {'.cpp', '.hpp', '.h', '.mm', '.c', '.m'}
+PULP_SOURCE_VENDOR_NAME_ALLOWLIST = {
+    Path('core/format/include/pulp/format/host_quirks/pro_tools.hpp'),
+}
+
+
+def is_allowed_vendor_name_source(path, root):
+    """Return true for Pulp-owned source files whose names mention hosts."""
+    try:
+        rel = Path(path).absolute().relative_to(Path(root).absolute())
+    except ValueError:
+        return False
+    return rel in PULP_SOURCE_VENDOR_NAME_ALLOWLIST and Path(path).suffix in SOURCE_EXTENSIONS
 
 
 def check_vendor_files(root):
@@ -47,8 +59,9 @@ def check_vendor_files(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for pattern in VENDOR_FILE_PATTERNS:
             for fname in filenames:
-                if pattern.search(fname):
-                    errors.append(f"Vendor file found: {Path(dirpath) / fname}")
+                path = Path(dirpath) / fname
+                if pattern.search(fname) and not is_allowed_vendor_name_source(path, root):
+                    errors.append(f"Vendor file found: {path}")
             for dname in list(dirnames):
                 if pattern.search(dname):
                     errors.append(f"Vendor directory found: {Path(dirpath) / dname}")

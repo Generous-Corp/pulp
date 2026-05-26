@@ -84,6 +84,61 @@ class AuditTopLevelTests(unittest.TestCase):
         self.assertNotIn("build/aax-validator", joined)
         self.assertNotIn("external/ASIOSDK", joined)
 
+    def test_vendor_scan_allows_pulp_owned_pro_tools_host_quirks_header(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            header = (
+                root
+                / "core"
+                / "format"
+                / "include"
+                / "pulp"
+                / "format"
+                / "host_quirks"
+                / "pro_tools.hpp"
+            )
+            header.parent.mkdir(parents=True)
+            header.write_text("#pragma once\n", encoding="utf-8")
+            (root / "other" / "pro_tools.hpp").parent.mkdir()
+            (root / "other" / "pro_tools.hpp").write_text("#pragma once\n", encoding="utf-8")
+
+            errors = audit.check_vendor_files(root)
+
+        joined = "\n".join(errors)
+        self.assertNotIn(str(header), joined)
+        self.assertIn("other/pro_tools.hpp", joined)
+
+    @unittest.skipIf(
+        not hasattr(pathlib.Path, "symlink_to"),
+        "pathlib symlink support unavailable",
+    )
+    def test_vendor_scan_does_not_follow_symlink_into_allowlisted_header(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            header = (
+                root
+                / "core"
+                / "format"
+                / "include"
+                / "pulp"
+                / "format"
+                / "host_quirks"
+                / "pro_tools.hpp"
+            )
+            header.parent.mkdir(parents=True)
+            header.write_text("#pragma once\n", encoding="utf-8")
+            link = root / "other" / "pro_tools.hpp"
+            link.parent.mkdir()
+            try:
+                link.symlink_to(header)
+            except OSError as exc:
+                self.skipTest(f"symlink unavailable: {exc}")
+
+            errors = audit.check_vendor_files(root)
+
+        joined = "\n".join(errors)
+        self.assertIn("other/pro_tools.hpp", joined)
+
     def test_walk_fallback_yields_os_walk_entries(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
