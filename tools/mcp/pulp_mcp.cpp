@@ -48,6 +48,7 @@ using pulp_mcp::handle_compat;
 // mcp_tools.{hpp,cpp} in the Phase 6 (B4) refactor.
 using pulp_mcp::exec;
 using pulp_mcp::find_project_root;
+using pulp_mcp::shell_quote;
 using pulp_mcp::handle_build;
 using pulp_mcp::handle_test;
 using pulp_mcp::handle_status;
@@ -212,16 +213,16 @@ static std::string handle_request_raw(const std::string& json) {
                 if (name == "pulp_screenshot") {
                     auto demo = extract_string(args_json, "demo");
                     auto script = extract_string(args_json, "script");
-                    std::string cmd = screenshot_bin.string() + " --base64";
-                    if (!script.empty()) cmd += " --script " + script;
+                    std::string cmd = shell_quote(screenshot_bin.string()) + " --base64";
+                    if (!script.empty()) cmd += " --script " + shell_quote(script);
                     else cmd += " --demo";
                     auto theme = extract_string(args_json, "theme");
-                    if (!theme.empty()) cmd += " --theme " + theme;
+                    if (!theme.empty()) cmd += " --theme " + shell_quote(theme);
                     auto output = exec(cmd + " 2>/dev/null");
                     result = "{\"content\":[{\"type\":\"image\",\"data\":\"" + output + "\",\"mimeType\":\"image/png\"}]}";
                 } else {
                     // simulate_click and get_view_tree: run screenshot in demo mode, capture view tree
-                    std::string cmd = screenshot_bin.string() + " --demo --output /dev/null 2>/dev/null";
+                    std::string cmd = shell_quote(screenshot_bin.string()) + " --demo --output /dev/null 2>/dev/null";
                     exec(cmd);
                     result = "{\"content\":[{\"type\":\"text\",\"text\":\"View tree and event simulation available via pulp-screenshot --demo\"}]}";
                 }
@@ -238,10 +239,10 @@ static std::string handle_request_raw(const std::string& json) {
                 if (plugin_name.empty()) {
                     result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: name is required\"}]}";
                 } else {
-                    std::string cmd = "python3 " + (root / "tools" / "create-project.py").string();
-                    cmd += " \"" + plugin_name + "\"";
-                    if (!plugin_type.empty()) cmd += " --type " + plugin_type;
-                    if (!manufacturer.empty()) cmd += " --manufacturer \"" + manufacturer + "\"";
+                    std::string cmd = "python3 " + shell_quote((root / "tools" / "create-project.py").string());
+                    cmd += " " + shell_quote(plugin_name);
+                    if (!plugin_type.empty()) cmd += " --type " + shell_quote(plugin_type);
+                    if (!manufacturer.empty()) cmd += " --manufacturer " + shell_quote(manufacturer);
                     auto output = exec(cmd + " 2>&1");
                     result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
                 }
@@ -252,7 +253,7 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto output = exec("bash " + (root / "tools" / "check-docs.sh").string() + " 2>&1");
+                auto output = exec("bash " + shell_quote((root / "tools" / "check-docs.sh").string()) + " 2>&1");
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
@@ -264,7 +265,8 @@ static std::string handle_request_raw(const std::string& json) {
             } else if (query.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: query is required\"}]}";
             } else {
-                auto output = exec((root / "build" / "tools" / "cli" / "pulp").string() + " docs search \"" + query + "\" 2>&1");
+                auto output = exec(shell_quote((root / "build" / "tools" / "cli" / "pulp").string()) +
+                                   " docs search " + shell_quote(query) + " 2>&1");
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }

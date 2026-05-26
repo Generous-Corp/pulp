@@ -68,8 +68,9 @@ inline std::string extract_string(const std::string& json, const std::string& ke
     auto colon = json.find(':', key_pos + key.size() + 2);
     if (colon == std::string::npos) return {};
 
-    auto start = json.find('"', colon + 1);
-    if (start == std::string::npos) return {};
+    auto start = colon + 1;
+    while (start < json.size() && std::isspace(static_cast<unsigned char>(json[start]))) ++start;
+    if (start >= json.size() || json[start] != '"') return {};
 
     auto end = json.find('"', start + 1);
     while (end != std::string::npos && json[end - 1] == '\\') {

@@ -38,6 +38,26 @@ inline std::string exec(const std::string& cmd) {
     return result;
 }
 
+inline std::string shell_quote(const std::string& value) {
+#if defined(_WIN32)
+    std::string out = "\"";
+    for (char c : value) {
+        if (c == '"') out += "\\\"";
+        else out += c;
+    }
+    out += "\"";
+    return out;
+#else
+    std::string out = "'";
+    for (char c : value) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    out += "'";
+    return out;
+#endif
+}
+
 // Walk up from the current directory to the nearest Pulp source tree
 // (a directory with both CMakeLists.txt and core/). Empty path if none.
 inline std::filesystem::path find_project_root() {

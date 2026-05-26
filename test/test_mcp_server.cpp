@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -37,6 +38,21 @@
 namespace {
 
 std::atomic<unsigned long long> temp_dir_counter{0};
+
+class ScopedStreamRedirect {
+public:
+    ScopedStreamRedirect(std::ostream& stream, std::streambuf* replacement)
+        : stream_(stream), original_(stream.rdbuf(replacement)) {}
+
+    ~ScopedStreamRedirect() { stream_.rdbuf(original_); }
+
+    ScopedStreamRedirect(const ScopedStreamRedirect&) = delete;
+    ScopedStreamRedirect& operator=(const ScopedStreamRedirect&) = delete;
+
+private:
+    std::ostream& stream_;
+    std::streambuf* original_;
+};
 
 unsigned long long current_process_id_for_temp_path() {
 #if defined(_WIN32)
@@ -181,6 +197,52 @@ void require_contains(const std::string& response, const std::string& needle) {
     REQUIRE(response.find(needle) != std::string::npos);
 }
 
+std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
+    const auto cli = root / "build" / "tools" / "cli" / "pulp";
+    std::filesystem::create_directories(cli.parent_path());
+    std::ofstream script(cli);
+#if defined(_WIN32)
+    script << "@echo off\r\n"
+           << "echo fake-pulp";
+#else
+    script << "#!/bin/sh\n"
+           << "printf 'fake-pulp'\n"
+           << "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n";
+#endif
+    script.close();
+    std::filesystem::permissions(
+        cli,
+        std::filesystem::perms::owner_exec |
+            std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+    return cli;
+}
+
+std::filesystem::path make_fake_command(const std::filesystem::path& dir,
+                                        const std::string& name,
+                                        const std::string& label) {
+    std::filesystem::create_directories(dir);
+    const auto command = dir / name;
+    std::ofstream script(command);
+#if defined(_WIN32)
+    script << "@echo off\r\n"
+           << "echo " << label;
+#else
+    script << "#!/bin/sh\n"
+           << "printf '" << label << "'\n"
+           << "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n";
+#endif
+    script.close();
+    std::filesystem::permissions(
+        command,
+        std::filesystem::perms::owner_exec |
+            std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+    return command;
+}
+
 } // namespace
 
 TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
@@ -223,6 +285,60 @@ TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
     REQUIRE(extract_bool(payload, "nil", true));
 }
 
+TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
+          "[mcp][json][coverage]") {
+    const std::string payload =
+        "{"
+        "\"message\":\"hello \\\"pulp\\\"\","
+        "\"negative\":-12,\"positive\":+7,"
+        "\"floatExp\":6.25e-2,\"badFloat\":6.25e-2x,"
+        "\"truthy\":true,\"falsy\":false,"
+        "\"word\":\"true\",\"array\":[1,2],"
+        "\"spaced\":  5 \n,"
+        "\"tabbed\":\t9\t"
+        "}";
+
+    REQUIRE(extract_string(payload, "message") == R"(hello \"pulp\")");
+    REQUIRE(extract_string(payload, "negative").empty());
+    REQUIRE(extract_raw(payload, "message") == R"("hello \"pulp\"")");
+    REQUIRE(extract_raw(payload, "negative") == "-12");
+    REQUIRE(extract_raw(payload, "positive") == "+7");
+    REQUIRE(extract_raw(payload, "floatExp") == "6.25e-2");
+    REQUIRE(extract_raw(payload, "truthy") == "true");
+    REQUIRE(extract_raw(payload, "falsy") == "false");
+    REQUIRE(extract_raw(payload, "missing").empty());
+
+    REQUIRE(extract_int(payload, "negative", 0) == -12);
+    REQUIRE(extract_int(payload, "positive", 0) == 7);
+    REQUIRE(extract_int(payload, "spaced", 0) == 5);
+    REQUIRE(extract_int(payload, "tabbed", 0) == 9);
+    REQUIRE(extract_int(payload, "floatExp", 99) == 99);
+    REQUIRE(extract_int(payload, "array", 99) == 99);
+
+    REQUIRE(extract_double(payload, "negative", 0.0) == -12.0);
+    REQUIRE(extract_double(payload, "floatExp", 0.0) == 0.0625);
+    REQUIRE(extract_double(payload, "badFloat", 1.5) == 1.5);
+    REQUIRE(extract_double(payload, "array", 1.5) == 1.5);
+
+    REQUIRE(extract_bool(payload, "truthy", false));
+    REQUIRE_FALSE(extract_bool(payload, "falsy", true));
+    REQUIRE(extract_bool(payload, "word", true));
+    REQUIRE_FALSE(extract_bool(payload, "array", false));
+}
+
+TEST_CASE("MCP shell_quote keeps shell arguments atomic",
+          "[mcp][shell][coverage]") {
+#if defined(_WIN32)
+    REQUIRE(shell_quote(R"(C:\Program Files\Pulp\pulp.exe)") ==
+            R"("C:\Program Files\Pulp\pulp.exe")");
+    REQUIRE(shell_quote(R"(say "hi")") == R"("say \"hi\"")");
+#else
+    REQUIRE(shell_quote("/tmp/Pulp Project/build") == "'/tmp/Pulp Project/build'");
+    REQUIRE(shell_quote("MCP protocol's edge") == "'MCP protocol'\\''s edge'");
+    REQUIRE(shell_quote("") == "''");
+#endif
+}
+
 TEST_CASE("MCP protocol handles initialize ping notification and unknown methods",
           "[mcp][protocol]") {
     auto initialize = handle_request(R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON");
@@ -247,6 +363,43 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     require_contains(unknown, R"JSON("id":3)JSON");
     require_contains(unknown, R"JSON("code":-32601)JSON");
     require_contains(unknown, "Method not found: nope");
+}
+
+TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
+          "[mcp][main][coverage]") {
+    std::ostringstream out;
+    std::ostringstream err;
+    ScopedStreamRedirect capture_out(std::cout, out.rdbuf());
+    ScopedStreamRedirect capture_err(std::cerr, err.rdbuf());
+
+    char program[] = "pulp-mcp";
+    char version[] = "--version";
+    char help[] = "--help";
+    char unknown[] = "--bad";
+
+    char* version_argv[] = {program, version};
+    REQUIRE(pulp_mcp_main_for_test(2, version_argv) == 0);
+    require_contains(out.str(), std::string("pulp-mcp ") + PULP_MCP_SERVER_VERSION);
+    REQUIRE(err.str().empty());
+
+    out.str("");
+    out.clear();
+    err.str("");
+    err.clear();
+    char* help_argv[] = {program, help};
+    REQUIRE(pulp_mcp_main_for_test(2, help_argv) == 0);
+    require_contains(out.str(), "MCP (Model Context Protocol) server for Pulp.");
+    require_contains(out.str(), "--version, -V");
+    REQUIRE(err.str().empty());
+
+    out.str("");
+    out.clear();
+    err.str("");
+    err.clear();
+    char* unknown_argv[] = {program, unknown};
+    REQUIRE(pulp_mcp_main_for_test(2, unknown_argv) == 2);
+    REQUIRE(out.str().empty());
+    require_contains(err.str(), "unknown flag '--bad'");
 }
 
 // MCP spec (JSON-RPC over stdio) requires that response messages not
@@ -378,6 +531,79 @@ TEST_CASE("MCP project-root dependent tools reject non-project directories", "[m
 
     auto response = handle_request(tool_call("20", "pulp_status"));
     require_contains(response, "Error: not in a Pulp project");
+}
+
+TEST_CASE("MCP build and test handlers quote project paths and filters",
+          "[mcp][tools][shell][coverage]") {
+#if defined(_WIN32)
+    SKIP("PATH-injected POSIX fake tools are only used on non-Windows");
+#else
+    TempDir scratch;
+    const auto project = scratch.path / "Project With Spaces";
+    std::filesystem::create_directories(project / "core");
+    std::filesystem::create_directories(project / "build");
+    std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+
+    TempDir fake_bin;
+    make_fake_command(fake_bin.path, "cmake", "fake-cmake");
+    make_fake_command(fake_bin.path, "ctest", "fake-ctest");
+    const char* old_path = std::getenv("PATH");
+    ScopedEnvVar path_env("PATH", fake_bin.path.string() + ":" + (old_path ? old_path : ""));
+    ScopedCurrentPath cwd(project);
+    const auto canonical_build = normalize_path(project / "build").string();
+
+    auto build_response = handle_request(tool_call("41", "pulp_build"));
+    require_contains(build_response, R"JSON("id":41)JSON");
+    require_contains(build_response, "fake-cmake [--build] [" + canonical_build + "]");
+    REQUIRE(build_response.find("[Project]") == std::string::npos);
+    REQUIRE(build_response.find("[With]") == std::string::npos);
+    REQUIRE(build_response.find("[Spaces/build]") == std::string::npos);
+
+    auto test_response = handle_request(tool_call(
+        "42", "pulp_test", R"JSON({"filter":"MCP protocol's edge"})JSON"));
+    require_contains(test_response, R"JSON("id":42)JSON");
+    require_contains(test_response, "fake-ctest [--test-dir] [" + canonical_build + "]");
+    require_contains(test_response, "[--output-on-failure] [-R] [MCP protocol's edge]");
+    REQUIRE(test_response.find("[MCP] [protocol") == std::string::npos);
+#endif
+}
+
+TEST_CASE("MCP docs_search and create quote user arguments",
+          "[mcp][tools][shell][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir scratch;
+    const auto project = scratch.path / "Project With Spaces";
+    std::filesystem::create_directories(project / "core");
+    std::filesystem::create_directories(project / "tools");
+    std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    make_fake_pulp_cli(project);
+
+    const auto create_project = project / "tools" / "create-project.py";
+    {
+        std::ofstream script(create_project);
+        script << "#!/usr/bin/env python3\n"
+               << "import sys\n"
+               << "print('fake-create' + ''.join(f' [{arg}]' for arg in sys.argv[1:]))\n";
+    }
+
+    ScopedCurrentPath cwd(project);
+
+    auto docs_search = handle_request(tool_call(
+        "43", "pulp_docs_search", R"JSON({"query":"gain staging's guide"})JSON"));
+    require_contains(docs_search, R"JSON("id":43)JSON");
+    require_contains(docs_search, "fake-pulp [docs] [search] [gain staging's guide]");
+    REQUIRE(docs_search.find("[gain] [staging") == std::string::npos);
+
+    auto create = handle_request(tool_call(
+        "44", "pulp_create",
+        R"JSON({"name":"Tape Echo","type":"effect","manufacturer":"ACME Audio"})JSON"));
+    require_contains(create, R"JSON("id":44)JSON");
+    require_contains(create, "fake-create [Tape Echo] [--type] [effect] [--manufacturer] [ACME Audio]");
+    REQUIRE(create.find("[Tape] [Echo]") == std::string::npos);
+    REQUIRE(create.find("[ACME] [Audio]") == std::string::npos);
+#endif
 }
 
 TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
@@ -733,6 +959,42 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
         require_contains(response, "Error: not in a Pulp project");
         REQUIRE(response.find("Unknown tool") == std::string::npos);
     }
+}
+
+TEST_CASE("MCP validate only passes --all for the explicit all flag",
+          "[mcp][tools][validate][coverage]") {
+#if defined(_WIN32)
+    SKIP("fake extensionless pulp CLI is only executable through popen on POSIX");
+#else
+    TempDir project;
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    std::filesystem::create_directories(project.path / "core");
+    make_fake_pulp_cli(project.path);
+
+    ScopedCurrentPath cwd(project.path);
+
+    auto default_response = handle_request(tool_call("50", "pulp_validate"));
+    require_contains(default_response, R"JSON("id":50)JSON");
+    require_contains(default_response, "fake-pulp [validate] [--json]");
+    REQUIRE(default_response.find("[--all]") == std::string::npos);
+
+    auto all_response = handle_request(tool_call(
+        "51", "pulp_validate", R"JSON({"all":true})JSON"));
+    require_contains(all_response, R"JSON("id":51)JSON");
+    require_contains(all_response, "fake-pulp [validate] [--json] [--all]");
+
+    auto false_with_other_true = handle_request(tool_call(
+        "52", "pulp_validate", R"JSON({"all":false,"json":true})JSON"));
+    require_contains(false_with_other_true, R"JSON("id":52)JSON");
+    require_contains(false_with_other_true, "fake-pulp [validate] [--json]");
+    REQUIRE(false_with_other_true.find("[--all]") == std::string::npos);
+
+    auto string_true = handle_request(tool_call(
+        "53", "pulp_validate", R"JSON({"all":"true"})JSON"));
+    require_contains(string_true, R"JSON("id":53)JSON");
+    require_contains(string_true, "fake-pulp [validate] [--json]");
+    REQUIRE(string_true.find("[--all]") == std::string::npos);
+#endif
 }
 
 // pulp #1997 — gap 1: pulp_audio_model_list goes straight through to

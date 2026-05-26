@@ -166,9 +166,10 @@ std::string handle_build(const std::string& /*params_json*/) {
     std::string output;
 
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
-        output += exec("cmake -B " + build_dir.string() + " -S " + root.string() + " 2>&1");
+        output += exec("cmake -B " + shell_quote(build_dir.string()) +
+                       " -S " + shell_quote(root.string()) + " 2>&1");
     }
-    output += exec("cmake --build " + build_dir.string() + " 2>&1");
+    output += exec("cmake --build " + shell_quote(build_dir.string()) + " 2>&1");
 
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
 }
@@ -178,10 +179,10 @@ std::string handle_test(const std::string& params_json) {
     if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
 
     auto build_dir = root / "build";
-    std::string cmd = "ctest --test-dir " + build_dir.string() + " --output-on-failure";
+    std::string cmd = "ctest --test-dir " + shell_quote(build_dir.string()) + " --output-on-failure";
 
     auto filter = extract_string(params_json, "filter");
-    if (!filter.empty()) cmd += " -R " + filter;
+    if (!filter.empty()) cmd += " -R " + shell_quote(filter);
 
     auto output = exec(cmd + " 2>&1");
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
@@ -224,9 +225,9 @@ std::string handle_validate(const std::string& params_json) {
     auto root = find_project_root();
     if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
 
-    std::string cmd = root.string() + "/build/tools/cli/pulp validate --json";
-    if (params_json.find("\"all\"") != std::string::npos &&
-        params_json.find("true") != std::string::npos) {
+    std::string cmd = shell_quote((root / "build" / "tools" / "cli" / "pulp").string()) +
+        " validate --json";
+    if (extract_bool(params_json, "all", false)) {
         cmd += " --all";
     }
     cmd += " 2>&1";
