@@ -1869,6 +1869,36 @@ TEST_CASE("CollapsableSection toggles content from header clicks", "[inspect][wi
     REQUIRE(section.content()->visible());
 }
 
+TEST_CASE("CollapsableSection collapsed default paints and toggles predictably",
+          "[inspect][window][coverage][headers]") {
+    CollapsableSection section("Theme Colors", false);
+    section.set_bounds({0, 0, 220, 120});
+    section.layout_children();
+
+    REQUIRE_FALSE(section.is_expanded());
+    REQUIRE(section.content() != nullptr);
+    REQUIRE_FALSE(section.content()->visible());
+
+    section.set_expanded(false);
+    REQUIRE_FALSE(section.is_expanded());
+    REQUIRE_FALSE(section.content()->visible());
+
+    pulp::canvas::RecordingCanvas collapsed_canvas;
+    section.paint(collapsed_canvas);
+    REQUIRE(collapsed_canvas.command_count() > 0);
+
+    MouseEvent header_click;
+    header_click.position = {8, 8};
+    header_click.is_down = true;
+    section.on_mouse_event(header_click);
+    REQUIRE(section.is_expanded());
+    REQUIRE(section.content()->visible());
+
+    pulp::canvas::RecordingCanvas expanded_canvas;
+    section.paint(expanded_canvas);
+    REQUIRE(expanded_canvas.command_count() >= collapsed_canvas.command_count());
+}
+
 TEST_CASE("InspectorWindow builds tabs and updates element properties", "[inspect][window][issue-641]") {
     View inspected_root;
     inspected_root.set_id("root");
@@ -1955,6 +1985,103 @@ TEST_CASE("InspectorWindow builds tabs and updates element properties", "[inspec
 
     window.refresh();
     REQUIRE(tree->find_node_by_user_data(knob_ptr) != nullptr);
+}
+
+TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
+          "[inspect][window][coverage][headers]") {
+    InspectorWindow window;
+    REQUIRE(window.child_count() == 2);
+    REQUIRE(window.active_tool() == 0);
+
+    window.set_active_tool(1);
+    REQUIRE(window.active_tool() == 1);
+    window.set_active_tool(42);
+    REQUIRE(window.active_tool() == 0);
+    window.set_active_tool(-7);
+    REQUIRE(window.active_tool() == 0);
+
+    auto* tabs = first_view_of_type<TabPanel>(window);
+    REQUIRE(tabs != nullptr);
+    REQUIRE(tabs->tab_count() == 4);
+    REQUIRE(tabs->active_tab() == 0);
+    REQUIRE_NOTHROW(window.refresh());
+
+    tabs->set_active_tab(1);
+    REQUIRE_NOTHROW(window.refresh());
+    REQUIRE(collect_views_of_type<ConsoleEntryView>(*tabs->child_at(1)).empty());
+
+    tabs->set_active_tab(2);
+    REQUIRE_NOTHROW(window.refresh());
+    REQUIRE(has_label_containing(*tabs->child_at(2), "FPS: (no data)"));
+
+    tabs->set_active_tab(3);
+    REQUIRE_NOTHROW(window.refresh());
+    REQUIRE_FALSE(has_label_containing(*tabs->child_at(3), "Range: ["));
+
+    bool selected_callback_called = false;
+    window.on_view_selected = [&](View*) { selected_callback_called = true; };
+    window.reflect_selection(nullptr);
+    REQUIRE_FALSE(selected_callback_called);
+    window.select_view(nullptr);
+    REQUIRE(selected_callback_called);
+}
+
+TEST_CASE("InspectorWindow rebuilds tree and theme sections only from live roots",
+          "[inspect][window][coverage][headers]") {
+    View first_root;
+    first_root.set_id("first-root");
+    first_root.set_bounds({0, 0, 480, 320});
+
+    Theme theme;
+    theme.colors["accent.primary"] = Color::rgba8(10, 20, 30);
+    theme.colors["meter.warn"] = Color::rgba8(200, 120, 40);
+    first_root.set_theme(theme);
+
+    auto first_label = std::make_unique<Label>("First");
+    first_label->set_id("first-label");
+    auto* first_label_ptr = first_label.get();
+    first_root.add_child(std::move(first_label));
+
+    InspectorWindow window(first_root);
+    auto* tabs = first_view_of_type<TabPanel>(window);
+    REQUIRE(tabs != nullptr);
+    auto* tree = first_view_of_type<TreeView>(*tabs->child_at(0));
+    REQUIRE(tree != nullptr);
+    REQUIRE(tree->find_node_by_user_data(&first_root) != nullptr);
+    REQUIRE(tree->find_node_by_user_data(first_label_ptr) != nullptr);
+    REQUIRE(has_label_containing(window, "accent.primary"));
+    REQUIRE(has_label_containing(window, "meter.warn"));
+
+    auto sections = collect_views_of_type<CollapsableSection>(window);
+    REQUIRE(sections.size() >= 5);
+    REQUIRE_FALSE(sections.back()->is_expanded());
+    REQUIRE(sections.back()->content() != nullptr);
+    REQUIRE_FALSE(sections.back()->content()->visible());
+
+    View second_root;
+    second_root.set_id("second-root");
+    second_root.set_bounds({0, 0, 360, 240});
+    auto second_label = std::make_unique<Label>("Second");
+    second_label->set_id("second-label");
+    auto* second_label_ptr = second_label.get();
+    second_root.add_child(std::move(second_label));
+
+    window.set_inspected_root(&second_root);
+    REQUIRE(tree->find_node_by_user_data(&second_root) != nullptr);
+    REQUIRE(tree->find_node_by_user_data(second_label_ptr) != nullptr);
+    REQUIRE(tree->find_node_by_user_data(&first_root) == nullptr);
+    REQUIRE(tree->find_node_by_user_data(first_label_ptr) == nullptr);
+
+    bool callback_seen = false;
+    window.on_view_selected = [&](View* view) {
+        callback_seen = (view == second_label_ptr);
+    };
+    window.reflect_selection(second_label_ptr);
+    REQUIRE_FALSE(callback_seen);
+    REQUIRE(has_label_containing(window, "ID: second-label"));
+
+    window.select_view(second_label_ptr);
+    REQUIRE(callback_seen);
 }
 
 // WYSIWYG P4 FIX 3 — a structural rebuild that drops the selected view must
