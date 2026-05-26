@@ -430,6 +430,46 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
     std::filesystem::remove_all(cache_dir, ec);
 }
 
+// Regression: #2966 / Codex comment 3305530564 — clear_disk_cache() is
+// documented as best-effort/no-op but the range-for over
+// `directory_iterator(dir, ec)` still used the THROWING increment path,
+// so a permission error or concurrent filesystem change mid-iteration
+// could escape as filesystem_error. We pin REQUIRE_NOTHROW for the
+// happy path (empty dir, missing dir, nonexistent dir) and for an
+// extra-file-mid-iteration case.
+TEST_CASE("AudioThumbnailCache::clear_disk_cache is non-throwing",
+          "[audio][thumbnail][cache][persist][issue-2966]") {
+    AudioThumbnailCache cache(2);
+
+    // Case 1: no disk dir set — early return, no throw.
+    REQUIRE_NOTHROW(cache.clear_disk_cache());
+
+    // Case 2: dir is set but does not exist — early return, no throw.
+    cache.set_disk_cache_dir("/this/path/definitely/does/not/exist/pulp-test");
+    REQUIRE_NOTHROW(cache.clear_disk_cache());
+
+    // Case 3: dir exists but is empty — iterates zero times, no throw.
+    const auto empty_dir = unique_cache_dir();
+    std::filesystem::create_directories(empty_dir);
+    cache.set_disk_cache_dir(empty_dir.string());
+    REQUIRE_NOTHROW(cache.clear_disk_cache());
+
+    // Case 4: dir has a mix of .thumb files and unrelated files — should
+    // clean only the .thumb files and never throw on the unrelated ones.
+    {
+        std::ofstream(empty_dir / "a.thumb").put('x');
+        std::ofstream(empty_dir / "b.thumb").put('x');
+        std::ofstream(empty_dir / "notes.txt").put('x');
+        REQUIRE_NOTHROW(cache.clear_disk_cache());
+        REQUIRE_FALSE(std::filesystem::exists(empty_dir / "a.thumb"));
+        REQUIRE_FALSE(std::filesystem::exists(empty_dir / "b.thumb"));
+        REQUIRE(std::filesystem::exists(empty_dir / "notes.txt"));
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(empty_dir, ec);
+}
+
 // Regression: #2966 / Codex comment 3305530560 — load_from_disk() used to
 // trust the .thumb file size and allocate a `std::vector<uint8_t>` of that
 // exact size with no upper bound. A corrupt or hostile oversized cache

@@ -516,10 +516,24 @@ void AudioThumbnailCache::clear_disk_cache() {
     if (dir.empty()) return;
     std::error_code ec;
     if (!std::filesystem::is_directory(dir, ec)) return;
-    for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+    // Documented contract: best-effort, never throws. A range-for over
+    // `std::filesystem::directory_iterator(dir, ec)` would still use the
+    // THROWING increment path internally, so permission errors or
+    // concurrent filesystem changes mid-iteration could escape as
+    // `filesystem_error`. We drive the iterator manually and pass `ec`
+    // to `increment()` to keep the function truly noexcept-in-practice.
+    // Regression: #2966 / Codex comment 3305530564.
+    auto it = std::filesystem::directory_iterator(dir, ec);
+    const auto end = std::filesystem::directory_iterator{};
+    while (!ec && it != end) {
+        const auto& entry = *it;
         if (entry.path().extension() == ".thumb") {
-            std::filesystem::remove(entry.path(), ec);
+            std::error_code rm_ec;
+            std::filesystem::remove(entry.path(), rm_ec);
+            // Ignore rm_ec — best-effort cleanup; a leftover .thumb is
+            // not a crisis (the cache key construction tolerates it).
         }
+        it.increment(ec);
     }
 }
 
