@@ -1,11 +1,13 @@
 #include <pulp/format/host_quirks.hpp>
 
 #include <pulp/format/host_quirks/ableton_live.hpp>
+#include <pulp/format/host_quirks/ardour.hpp>
 #include <pulp/format/host_quirks/auv3_cross_host.hpp>
 #include <pulp/format/host_quirks/bitwig.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
 #include <pulp/format/host_quirks/fl_studio.hpp>
 #include <pulp/format/host_quirks/logic_pro.hpp>
+#include <pulp/format/host_quirks/reaper.hpp>
 #include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
 
@@ -23,19 +25,28 @@ namespace {
 // issue. See the catalog at
 // `planning/2026-05-24-daw-host-quirks-inheritance.md`.
 
-void apply_reaper_quirks(HostQuirks& q, HostVersion /*v*/) {
+void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
     q.reaper_vst3_gesture_ordering = true;
     q.reaper_process_while_bypassed = true;
     q.reaper_keyboard_passthrough = true;
     q.reaper_permissive_bus_arrangements = true;
     q.reaper_anticipative_fx_buffer_variability = true;
     q.reaper_midsession_setstate = true;
+    // Layer the keyboard-only-space flag on top via the per-host header
+    // so the dispatch table doesn't grow further.
+    host_quirks::apply_reaper_keyboard(q, v);
 }
 
 void apply_pro_tools_quirks(HostQuirks& q, HostVersion /*v*/) {
     q.pro_tools_aax_sidechain_negotiation = true;
     q.pro_tools_aax_latency_callback_push = true;
     q.pro_tools_aax_mono_second_bus = true;
+    // Pro Tools' AAX wrapper does not surface a reliable vendor version
+    // through the AAX spec, so version-gated decisions for this host
+    // must be skipped entirely. Adapters should branch on this flag
+    // rather than `HostVersion` when deciding Pro Tools-specific
+    // behavior.
+    q.aax_vendor_version_unknown = true;
 }
 
 // Tier filtering. A single helper reduces a (status-tag, current value)
@@ -106,14 +117,19 @@ void apply_filter(HostQuirks& q, QuirkFilter filter) {
     // Ableton Live
     PULP_QUIRK_FILTER_FIELD(live_vst3_canresize_ignore);
     PULP_QUIRK_FILTER_FIELD(live_vst3_windows_dpi_defer);
+    PULP_QUIRK_FILTER_FIELD(double_string_buffer_for_live_10_1_13);
 
     // Bitwig
     PULP_QUIRK_FILTER_FIELD(bitwig_vst3_linux_repaint_after_resize);
     PULP_QUIRK_FILTER_FIELD(bitwig_vst3_setbusarrangements_while_active);
 
+    // Ardour family (Ardour + Mixbus 32C)
+    PULP_QUIRK_FILTER_FIELD(skip_bus_arrangement_call);
+
     // Wavelab
     PULP_QUIRK_FILTER_FIELD(wavelab_vst3_defer_activation);
     PULP_QUIRK_FILTER_FIELD(wavelab_state_blob_fallback);
+    PULP_QUIRK_FILTER_FIELD(tolerate_state_read_nontrue_status);
 
     // FL Studio
     PULP_QUIRK_FILTER_FIELD(fl_studio_setactive_process_mutex);
@@ -126,11 +142,13 @@ void apply_filter(HostQuirks& q, QuirkFilter filter) {
     PULP_QUIRK_FILTER_FIELD(reaper_permissive_bus_arrangements);
     PULP_QUIRK_FILTER_FIELD(reaper_anticipative_fx_buffer_variability);
     PULP_QUIRK_FILTER_FIELD(reaper_midsession_setstate);
+    PULP_QUIRK_FILTER_FIELD(reaper_keyboard_only_space);
 
     // Pro Tools
     PULP_QUIRK_FILTER_FIELD(pro_tools_aax_sidechain_negotiation);
     PULP_QUIRK_FILTER_FIELD(pro_tools_aax_latency_callback_push);
     PULP_QUIRK_FILTER_FIELD(pro_tools_aax_mono_second_bus);
+    PULP_QUIRK_FILTER_FIELD(aax_vendor_version_unknown);
 
     // Logic Pro AU (one int field — same machinery)
     PULP_QUIRK_FILTER_FIELD(logic_au_channel_probe_cap);
@@ -164,6 +182,8 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
             host_quirks::apply_auv3_cross_host(q, version);
             break;
         case HostType::ProTools:      apply_pro_tools_quirks(q, version); break;
+        case HostType::Ardour:        host_quirks::apply_ardour(q, version); break;
+        case HostType::Mixbus32C:     host_quirks::apply_mixbus32c(q, version); break;
         // StudioOne / DigitalPerformer / etc. land their flags here
         // when the per-host fixes ship in later batches.
         default: break;

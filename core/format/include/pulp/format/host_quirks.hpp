@@ -84,14 +84,37 @@ struct HostQuirks {
     // Ableton Live
     bool live_vst3_canresize_ignore = false;           ///< row 5
     bool live_vst3_windows_dpi_defer = false;          ///< row 6 (Windows-only)
+    /// Ableton Live 10.1.13 has a string-length parsing bug where the
+    /// `IInfoListener::getString` callbacks for channel name, channel
+    /// UID, and index-namespace queries write past the spec-required
+    /// buffer length, corrupting adjacent memory. Adapters must allocate
+    /// those buffers at twice the spec size when this flag is on. Only
+    /// the 10.1.13 build is affected; the flag stays off on every other
+    /// Live version.
+    bool double_string_buffer_for_live_10_1_13 = false;
 
     // Bitwig
     bool bitwig_vst3_linux_repaint_after_resize = false; ///< row 8 (Linux-only)
     bool bitwig_vst3_setbusarrangements_while_active = false; ///< row 9
 
+    // Ardour family (Ardour + Harrison Mixbus 32C)
+    /// Ardour and its Mixbus 32C derivative ship a `setBusArrangements`
+    /// implementation that returns success without applying the request,
+    /// and may corrupt subsequent layout state if the plugin calls it.
+    /// VST3 adapters must skip the call on these hosts and accept the
+    /// host-published default arrangement instead.
+    bool skip_bus_arrangement_call = false;
+
     // Wavelab
     bool wavelab_vst3_defer_activation = false;        ///< row 10
     bool wavelab_state_blob_fallback = false;          ///< row 11
+    /// Wavelab's `IBStream::read` may return a non-`kResultTrue` status
+    /// at end-of-stream while still having populated the supplied buffer.
+    /// Strict callers reject the load and lose the parameter set; the
+    /// VST3 adapter must accept the populated buffer when the read count
+    /// matches the requested byte count even if the status is not
+    /// `kResultTrue`.
+    bool tolerate_state_read_nontrue_status = false;
 
     // FL Studio
     bool fl_studio_setactive_process_mutex = false;    ///< row 13
@@ -104,11 +127,23 @@ struct HostQuirks {
     bool reaper_permissive_bus_arrangements = false;   ///< row R3
     bool reaper_anticipative_fx_buffer_variability = false; ///< row R4
     bool reaper_midsession_setstate = false;           ///< row R6
+    /// REAPER's VST2/VST3 keyboard pipeline only delivers a well-formed
+    /// `keyMsg` payload for the Space key (VKEY_SPACE); other keys arrive
+    /// with malformed key state and cannot be parsed reliably. Editors
+    /// that route keyboard input must reject non-Space keys when this
+    /// flag is set rather than acting on garbage data.
+    bool reaper_keyboard_only_space = false;
 
     // Pro Tools (AAX, opt-in)
     bool pro_tools_aax_sidechain_negotiation = false;  ///< row 16
     bool pro_tools_aax_latency_callback_push = false;  ///< row 17
     bool pro_tools_aax_mono_second_bus = false;        ///< row 18
+    /// Pro Tools' AAX wrapper does not reliably surface its host vendor
+    /// version through the AAX specification — querying it can return
+    /// zero or stale data. Adapters and quirks must treat the Pro Tools
+    /// version as unknown and avoid version-gated branching for this
+    /// host. (Always-true on Pro Tools, off elsewhere.)
+    bool aax_vendor_version_unknown = false;
 
     // Logic Pro AU
     int logic_au_channel_probe_cap = 64;               ///< row 19 (Logic = 8)
@@ -148,6 +183,10 @@ struct HostQuirksMeta {
 
     QuirkStatus live_vst3_canresize_ignore = QuirkStatus::Speculative;
     QuirkStatus live_vst3_windows_dpi_defer = QuirkStatus::Speculative;
+    // iPlug2-audit lesson (2026-05-25): exact-version Live 10.1.13
+    // getString buffer-doubling — documented from release notes +
+    // reproducer notes, no in-tree bench yet → LessonOnly.
+    QuirkStatus double_string_buffer_for_live_10_1_13 = QuirkStatus::LessonOnly;
 
     // Bitwig + FL Studio + Logic + AU v3 cross-host all have per-host
     // headers under `host_quirks/<host>.hpp` (items 5.5 / 5.7 / 5.10 /
@@ -156,8 +195,16 @@ struct HostQuirksMeta {
     QuirkStatus bitwig_vst3_linux_repaint_after_resize = QuirkStatus::Speculative;
     QuirkStatus bitwig_vst3_setbusarrangements_while_active = QuirkStatus::Speculative;
 
+    // iPlug2-audit lesson (2026-05-25): Ardour + Mixbus 32C
+    // setBusArrangements bypass — documented from Ardour docs +
+    // reproducer notes, no in-tree bench yet → LessonOnly.
+    QuirkStatus skip_bus_arrangement_call = QuirkStatus::LessonOnly;
+
     QuirkStatus wavelab_vst3_defer_activation = QuirkStatus::Speculative;
     QuirkStatus wavelab_state_blob_fallback = QuirkStatus::Speculative;
+    // iPlug2-audit lessons (2026-05-25): documented from Steinberg
+    // spec + reproducer notes, no in-tree bench yet → LessonOnly.
+    QuirkStatus tolerate_state_read_nontrue_status = QuirkStatus::LessonOnly;
 
     QuirkStatus fl_studio_setactive_process_mutex = QuirkStatus::Speculative;
     QuirkStatus fl_studio_state_reader_skip = QuirkStatus::Speculative;
@@ -171,12 +218,18 @@ struct HostQuirksMeta {
     QuirkStatus reaper_permissive_bus_arrangements = QuirkStatus::LessonOnly;
     QuirkStatus reaper_anticipative_fx_buffer_variability = QuirkStatus::LessonOnly;
     QuirkStatus reaper_midsession_setstate = QuirkStatus::LessonOnly;
+    // iPlug2-audit lesson (2026-05-25): REAPER keyboard only-Space —
+    // documented across 5.x–7.x line, no in-tree bench yet → LessonOnly.
+    QuirkStatus reaper_keyboard_only_space = QuirkStatus::LessonOnly;
 
     // Pro Tools AAX rows are gated on the developer-supplied Avid SDK
     // (item 5.9). Catalog entries until the AAX lane lands a header.
     QuirkStatus pro_tools_aax_sidechain_negotiation = QuirkStatus::LessonOnly;
     QuirkStatus pro_tools_aax_latency_callback_push = QuirkStatus::LessonOnly;
     QuirkStatus pro_tools_aax_mono_second_bus = QuirkStatus::LessonOnly;
+    // iPlug2-audit lesson (2026-05-25): Pro Tools AAX vendor-version
+    // unreliability — documented via Avid AAX docs, no bench → LessonOnly.
+    QuirkStatus aax_vendor_version_unknown = QuirkStatus::LessonOnly;
 
     QuirkStatus logic_au_channel_probe_cap = QuirkStatus::Speculative;
     QuirkStatus logic_au_tail_time_conversion = QuirkStatus::Speculative;

@@ -422,6 +422,129 @@ TEST_CASE("cross-format defensive defaults are the only flags on for Unknown hos
     REQUIRE(q.logic_au_tail_time_conversion == false);
     REQUIRE(q.au_v3_bypass_dual_tracking == false);
     REQUIRE(q.au_v3_host_id_from_wrapper == false);
+    // iPlug2-audit flags also stay off on the Unknown lane.
+    REQUIRE(q.skip_bus_arrangement_call == false);
+    REQUIRE(q.tolerate_state_read_nontrue_status == false);
+    REQUIRE(q.double_string_buffer_for_live_10_1_13 == false);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+    REQUIRE(q.aax_vendor_version_unknown == false);
+}
+
+// ── iPlug2-quirks-audit-2026-05-25 lessons — new flags layered on top
+//    of the existing host catalog. Each test pins exactly one quirk
+//    behavior so a regression localizes immediately. ──
+
+TEST_CASE("HostQuirks default-construct leaves iplug2-audit flags off",
+          "[format][host-quirks]") {
+    HostQuirks q;
+    REQUIRE(q.skip_bus_arrangement_call == false);
+    REQUIRE(q.tolerate_state_read_nontrue_status == false);
+    REQUIRE(q.double_string_buffer_for_live_10_1_13 == false);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+    REQUIRE(q.aax_vendor_version_unknown == false);
+}
+
+TEST_CASE("make_quirks_for Ardour skips setBusArrangements",
+          "[format][host-quirks][ardour]") {
+    auto q = make_quirks_for(HostType::Ardour, HostVersion{8, 0});
+    REQUIRE(q.skip_bus_arrangement_call == true);
+    // No cross-host bleed.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+}
+
+TEST_CASE("make_quirks_for Mixbus32C skips setBusArrangements",
+          "[format][host-quirks][mixbus32c]") {
+    auto q = make_quirks_for(HostType::Mixbus32C, HostVersion{10, 0});
+    REQUIRE(q.skip_bus_arrangement_call == true);
+    // Mixbus32C is its own host, not Ardour — should not pick up
+    // unrelated flags from anywhere else either.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+}
+
+TEST_CASE("make_quirks_for Ardour with unknown version still skips bus arrangement",
+          "[format][host-quirks][ardour]") {
+    // Version-invariant: Ardour's setBusArrangements bug is documented
+    // across every vintage and the fix is host-agnostic.
+    auto q = make_quirks_for(HostType::Ardour, HostVersion{});
+    REQUIRE(q.skip_bus_arrangement_call == true);
+}
+
+TEST_CASE("make_quirks_for Wavelab enables state-read tolerance flag",
+          "[format][host-quirks][wavelab]") {
+    auto q = make_quirks_for(HostType::Wavelab, HostVersion{11, 1});
+    REQUIRE(q.tolerate_state_read_nontrue_status == true);
+    // Other hosts should not pick up the Wavelab-specific tolerance.
+    auto cubase = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(cubase.tolerate_state_read_nontrue_status == false);
+    auto live = make_quirks_for(HostType::AbletonLive, HostVersion{12, 0});
+    REQUIRE(live.tolerate_state_read_nontrue_status == false);
+}
+
+TEST_CASE("make_quirks_for Live 10.1.13 doubles getString buffer",
+          "[format][host-quirks][live]") {
+    auto q = make_quirks_for(HostType::AbletonLive, HostVersion{10, 1, 13});
+    REQUIRE(q.double_string_buffer_for_live_10_1_13 == true);
+    // Cheap row-5/6 defenses still on.
+    REQUIRE(q.live_vst3_canresize_ignore == true);
+}
+
+TEST_CASE("make_quirks_for Live 10.1.12 leaves buffer-doubling off",
+          "[format][host-quirks][live]") {
+    // Exact version gate — 10.1.12 does NOT trigger.
+    auto q = make_quirks_for(HostType::AbletonLive, HostVersion{10, 1, 12});
+    REQUIRE(q.double_string_buffer_for_live_10_1_13 == false);
+    REQUIRE(q.live_vst3_canresize_ignore == true);
+}
+
+TEST_CASE("make_quirks_for Live 10.1.14 leaves buffer-doubling off",
+          "[format][host-quirks][live]") {
+    // Build after the broken one — fix landed, no doubling needed.
+    auto q = make_quirks_for(HostType::AbletonLive, HostVersion{10, 1, 14});
+    REQUIRE(q.double_string_buffer_for_live_10_1_13 == false);
+}
+
+TEST_CASE("make_quirks_for Live 11.x and 12.x leave buffer-doubling off",
+          "[format][host-quirks][live]") {
+    auto l11 = make_quirks_for(HostType::AbletonLive, HostVersion{11, 3, 25});
+    REQUIRE(l11.double_string_buffer_for_live_10_1_13 == false);
+    auto l12 = make_quirks_for(HostType::AbletonLive, HostVersion{12, 0});
+    REQUIRE(l12.double_string_buffer_for_live_10_1_13 == false);
+}
+
+TEST_CASE("make_quirks_for Reaper enables keyboard-only-space flag",
+          "[format][host-quirks][reaper]") {
+    auto q = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(q.reaper_keyboard_only_space == true);
+    // Existing Reaper flags still fire.
+    REQUIRE(q.reaper_vst3_gesture_ordering == true);
+    REQUIRE(q.reaper_keyboard_passthrough == true);
+    // Non-Reaper host stays clean.
+    auto cubase = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(cubase.reaper_keyboard_only_space == false);
+}
+
+TEST_CASE("make_quirks_for Pro Tools enables aax-vendor-version-unknown flag",
+          "[format][host-quirks][protools]") {
+    auto q = make_quirks_for(HostType::ProTools, HostVersion{2024, 6});
+    REQUIRE(q.aax_vendor_version_unknown == true);
+    // Existing Pro Tools AAX flags still fire.
+    REQUIRE(q.pro_tools_aax_sidechain_negotiation == true);
+    REQUIRE(q.pro_tools_aax_latency_callback_push == true);
+    // Non-Pro-Tools host stays clean.
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.aax_vendor_version_unknown == false);
+}
+
+TEST_CASE("make_quirks_for Pro Tools with unknown version still sets the version-unknown flag",
+          "[format][host-quirks][protools]") {
+    // The whole point of aax_vendor_version_unknown is that callers
+    // should NOT branch on HostVersion for Pro Tools. Verify it fires
+    // regardless of what version was (mis)reported.
+    auto q = make_quirks_for(HostType::ProTools, HostVersion{});
+    REQUIRE(q.aax_vendor_version_unknown == true);
 }
 
 // ── Validation-tier API (2026-05-25, item 5.15) ──
@@ -487,6 +610,53 @@ TEST_CASE("kHostQuirksMeta tags Reaper / Pro Tools rows as LessonOnly",
                    == QuirkStatus::LessonOnly);
     STATIC_REQUIRE(kHostQuirksMeta.pro_tools_aax_mono_second_bus
                    == QuirkStatus::LessonOnly);
+}
+
+TEST_CASE("kHostQuirksMeta tags iPlug2-audit 2026-05-25 rows as LessonOnly",
+          "[format][host-quirks][tiers]") {
+    // New 2026-05-25 lessons — documented from vendor docs +
+    // reproducer notes, no in-tree bench yet. Promote to Speculative
+    // (or Validated) when the bench evidence ships.
+    STATIC_REQUIRE(kHostQuirksMeta.skip_bus_arrangement_call
+                   == QuirkStatus::LessonOnly);
+    STATIC_REQUIRE(kHostQuirksMeta.tolerate_state_read_nontrue_status
+                   == QuirkStatus::LessonOnly);
+    STATIC_REQUIRE(kHostQuirksMeta.double_string_buffer_for_live_10_1_13
+                   == QuirkStatus::LessonOnly);
+    STATIC_REQUIRE(kHostQuirksMeta.reaper_keyboard_only_space
+                   == QuirkStatus::LessonOnly);
+    STATIC_REQUIRE(kHostQuirksMeta.aax_vendor_version_unknown
+                   == QuirkStatus::LessonOnly);
+}
+
+TEST_CASE("apply_filter validated-only strips iPlug2-audit lessons",
+          "[format][host-quirks][tiers]") {
+    // All 5 new flags are LessonOnly — the validated-only filter must
+    // zero every one of them on the affected hosts.
+    auto ardour = make_quirks_for(HostType::Ardour, HostVersion{8, 0});
+    REQUIRE(ardour.skip_bus_arrangement_call == true);
+    apply_filter(ardour, kQuirkFilterValidatedOnly);
+    REQUIRE(ardour.skip_bus_arrangement_call == false);
+
+    auto wavelab = make_quirks_for(HostType::Wavelab, HostVersion{11, 1});
+    REQUIRE(wavelab.tolerate_state_read_nontrue_status == true);
+    apply_filter(wavelab, kQuirkFilterValidatedOnly);
+    REQUIRE(wavelab.tolerate_state_read_nontrue_status == false);
+
+    auto live = make_quirks_for(HostType::AbletonLive, HostVersion{10, 1, 13});
+    REQUIRE(live.double_string_buffer_for_live_10_1_13 == true);
+    apply_filter(live, kQuirkFilterValidatedOnly);
+    REQUIRE(live.double_string_buffer_for_live_10_1_13 == false);
+
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.reaper_keyboard_only_space == true);
+    apply_filter(reaper, kQuirkFilterValidatedOnly);
+    REQUIRE(reaper.reaper_keyboard_only_space == false);
+
+    auto pt = make_quirks_for(HostType::ProTools, HostVersion{2024, 6});
+    REQUIRE(pt.aax_vendor_version_unknown == true);
+    apply_filter(pt, kQuirkFilterValidatedOnly);
+    REQUIRE(pt.aax_vendor_version_unknown == false);
 }
 
 TEST_CASE("apply_filter validated-only strips Speculative + LessonOnly flags",

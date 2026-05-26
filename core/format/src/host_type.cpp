@@ -60,6 +60,15 @@ HostType host_type_from_process_name(std::string_view process_name) {
     if (name.find("bitwig") != std::string::npos) return HostType::Bitwig;
     if (name.find("maschine") != std::string::npos) return HostType::Maschine;
     if (name.find("audacity") != std::string::npos || name.find("tenacity") != std::string::npos) return HostType::AudacityTenacity;
+    // Mixbus32C must be checked before Ardour: Harrison Mixbus 32C is an
+    // Ardour derivative whose process name carries the "mixbus" /
+    // "mixbus 32c" / "mixbus32c" substring while sometimes also retaining
+    // the "ardour" lineage. The quirks diverge enough (Mixbus inherits
+    // the same setBusArrangements bug *plus* additional Harrison-side
+    // behavior) that we classify it separately.
+    if (name.find("mixbus32c") != std::string::npos
+        || name.find("mixbus 32c") != std::string::npos
+        || name.find("mixbus") != std::string::npos) return HostType::Mixbus32C;
     if (name.find("ardour") != std::string::npos) return HostType::Ardour;
     if (name.find("pulp") != std::string::npos) return HostType::Standalone;
 
@@ -86,6 +95,7 @@ std::string host_type_name(HostType type) {
         case HostType::Maschine: return "Maschine";
         case HostType::AudacityTenacity: return "Audacity/Tenacity";
         case HostType::Ardour: return "Ardour";
+        case HostType::Mixbus32C: return "Harrison Mixbus 32C";
         case HostType::Standalone: return "Pulp Standalone";
         case HostType::Other: return "Other";
         case HostType::Unknown: return "Unknown";

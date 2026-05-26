@@ -24,6 +24,7 @@ enum class HostType {
     Maschine,
     AudacityTenacity,
     Ardour,
+    Mixbus32C,   // Harrison Mixbus 32C — Ardour derivative with separate quirk profile
     Standalone,  // Pulp standalone host
     Other
 };

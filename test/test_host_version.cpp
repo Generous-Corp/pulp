@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/format/host_type.hpp>
 #include <pulp/format/host_version.hpp>
 
 using namespace pulp::format;
@@ -61,4 +62,27 @@ TEST_CASE("detect_host_info returns coherent HostType + HostVersion",
     REQUIRE(info.version.major >= 0);
     REQUIRE(info.version.minor >= 0);
     REQUIRE(info.version.patch >= 0);
+}
+
+// ── iPlug2-quirks-audit-2026-05-25 — Ardour family classifier coverage.
+//    Mixbus 32C is an Ardour derivative whose process name carries
+//    "mixbus" (and sometimes "mixbus 32c" / "mixbus32c"); we classify
+//    it before Ardour so the dedicated quirk profile applies. ──
+
+TEST_CASE("host_type_from_process_name classifies Mixbus 32C variants",
+          "[format][host-type][mixbus32c]") {
+    REQUIRE(host_type_from_process_name("Mixbus32C") == HostType::Mixbus32C);
+    REQUIRE(host_type_from_process_name("/Applications/Mixbus 32C.app/Mixbus 32C")
+            == HostType::Mixbus32C);
+    REQUIRE(host_type_from_process_name("mixbus") == HostType::Mixbus32C);
+}
+
+TEST_CASE("host_type_from_process_name still classifies vanilla Ardour as Ardour",
+          "[format][host-type][ardour]") {
+    REQUIRE(host_type_from_process_name("Ardour") == HostType::Ardour);
+    REQUIRE(host_type_from_process_name("/usr/bin/ardour8") == HostType::Ardour);
+}
+
+TEST_CASE("host_type_name covers Mixbus32C", "[format][host-type][mixbus32c]") {
+    REQUIRE(host_type_name(HostType::Mixbus32C) == "Harrison Mixbus 32C");
 }

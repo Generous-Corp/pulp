@@ -18,6 +18,15 @@
 ///     worked and present a clean parameter set.
 ///   * row 12 (VST2 editor-thread dispatch) is in Pulp's Deferred list.
 ///
+/// Additional VST3 state-read tolerance:
+///   Wavelab's `IBStream::read` can return a non-`kResultTrue` status at
+///   end-of-stream while still having populated the supplied buffer.
+///   Strict callers that propagate the status reject the load and lose
+///   the parameter set. The VST3 adapter accepts the populated buffer
+///   when the read count matches the request even if the status is not
+///   `kResultTrue`. Version-invariant across the Wavelab versions Pulp
+///   targets.
+///
 /// Version handling: row 10 is documented as Wavelab 11.1+. We fire
 /// it on `major >= 11` (the underlying re-entrancy was observed
 /// throughout the 11.x line; minor 11.0 is also affected per the
@@ -44,6 +53,9 @@ inline void apply_wavelab(HostQuirks& q, HostVersion v) {
     // invariant: the divergence exists across the Wavelab versions
     // Pulp targets and there's no fixed release on the horizon.
     q.wavelab_state_blob_fallback = true;
+    // Wavelab IBStream::read returns non-kResultTrue at end-of-stream
+    // even when the buffer is fully populated. Version-invariant.
+    q.tolerate_state_read_nontrue_status = true;
 }
 
 }  // namespace pulp::format::host_quirks
