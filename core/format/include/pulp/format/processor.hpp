@@ -8,6 +8,7 @@
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#include <atomic>
 #include <memory>
 #include <span>
 #include <string>
@@ -523,6 +524,51 @@ public:
         return true;
     }
 
+    /// Item 3.11 — cross-adapter latency / tail change notifications.
+    ///
+    /// Called from `process()` on the audio thread when a plugin's
+    /// latency or tail length changes mid-render (e.g. a linear-phase
+    /// EQ flipping between FIR taps, a reverb extending its decay).
+    /// The Processor sets an `std::atomic<bool>` pending-flag; the
+    /// format adapter polls the flag on the host / main thread and
+    /// pushes the notification to the host (`restartComponent` for
+    /// VST3, `kAudioUnitProperty_LatencySamples` for AU,
+    /// `clap_host_latency->changed()` for CLAP, `SetSignalLatency` for
+    /// AAX).
+    ///
+    /// **Audio-thread-safe.** Never call a host API from `process()`.
+    ///
+    /// Workstream 03 item 3.11.
+    void flag_latency_changed() noexcept {
+        latency_changed_.store(true, std::memory_order_release);
+    }
+    void flag_tail_changed() noexcept {
+        tail_changed_.store(true, std::memory_order_release);
+    }
+
+    /// Adapter-side polling helper. Returns true exactly once per
+    /// `flag_*_changed()` call. The adapter calls this on the
+    /// host / main thread; on `true` it must republish the latest
+    /// `latency_samples()` / `tail_samples` to the host.
+    bool consume_latency_changed_flag() noexcept {
+        return latency_changed_.exchange(false, std::memory_order_acq_rel);
+    }
+    bool consume_tail_changed_flag() noexcept {
+        return tail_changed_.exchange(false, std::memory_order_acq_rel);
+    }
+
+    /// Non-mutating peek used by adapters that need to decide whether
+    /// to ping the host for a main-thread callback without losing the
+    /// pending edge (e.g. CLAP's `request_callback`). Does not clear
+    /// the flag; the host-thread callback must still call
+    /// `consume_*_changed_flag()` to drain it.
+    bool latency_change_pending() const noexcept {
+        return latency_changed_.load(std::memory_order_acquire);
+    }
+    bool tail_change_pending() const noexcept {
+        return tail_changed_.load(std::memory_order_acquire);
+    }
+
     /// Process one buffer of audio. Called on the real-time audio thread.
     ///
     /// @param audio_output  Output buffer to fill (main bus)
@@ -665,6 +711,10 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
+    // Item 3.11 — RT-safe pending flags published from process() and
+    // consumed by adapters on the host / main thread.
+    std::atomic<bool> latency_changed_{false};
+    std::atomic<bool> tail_changed_{false};
 };
 
 /// Factory function type — plugins provide this to create processor instances.

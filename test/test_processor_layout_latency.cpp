@@ -1,7 +1,6 @@
-// Tests for Workstream 03 items 3.7 and 3.8 — bus-layout validation
-// and the processBlock precision contract. Item 3.11 (latency / tail
-// change notifications) lands in a follow-up commit and reuses this
-// file.
+// Tests for Workstream 03 items 3.7, 3.8, and 3.11 — bus-layout
+// validation, processBlock precision contract, and the cross-adapter
+// RT-safe latency / tail change notification pattern.
 //
 // These tests exercise the Processor-side API surface only. Adapter-
 // specific wiring (VST3 setBusArrangements, AU PropertyChanged, CLAP
@@ -15,6 +14,8 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 
+#include <atomic>
+#include <thread>
 #include <type_traits>
 
 using namespace pulp::format;
@@ -178,5 +179,78 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     SUCCEED("process() ran with float buffers");
 }
 
-// Item 3.11 — latency / tail change notifications land in a follow-up
-// commit and append their cases below.
+// ── Item 3.11 — latency / tail change notifications (RT-safe) ─────────────
+
+TEST_CASE("flag_latency_changed / consume_latency_changed_flag round-trip "
+          "yields exactly one consume per flag",
+          "[processor][latency][item-3.11]") {
+    StereoEffect p;
+    REQUIRE_FALSE(p.consume_latency_changed_flag());
+    p.flag_latency_changed();
+    REQUIRE(p.consume_latency_changed_flag());
+    // Edge has been drained.
+    REQUIRE_FALSE(p.consume_latency_changed_flag());
+}
+
+TEST_CASE("flag_tail_changed / consume_tail_changed_flag round-trip "
+          "yields exactly one consume per flag",
+          "[processor][latency][item-3.11]") {
+    StereoEffect p;
+    REQUIRE_FALSE(p.consume_tail_changed_flag());
+    p.flag_tail_changed();
+    REQUIRE(p.consume_tail_changed_flag());
+    REQUIRE_FALSE(p.consume_tail_changed_flag());
+}
+
+TEST_CASE("latency_change_pending / tail_change_pending peek does not "
+          "drain the flag",
+          "[processor][latency][item-3.11]") {
+    StereoEffect p;
+    p.flag_latency_changed();
+    p.flag_tail_changed();
+    REQUIRE(p.latency_change_pending());
+    REQUIRE(p.tail_change_pending());
+    // Peek twice — still pending, still pending.
+    REQUIRE(p.latency_change_pending());
+    REQUIRE(p.tail_change_pending());
+    // Consume drains.
+    REQUIRE(p.consume_latency_changed_flag());
+    REQUIRE(p.consume_tail_changed_flag());
+    REQUIRE_FALSE(p.latency_change_pending());
+    REQUIRE_FALSE(p.tail_change_pending());
+}
+
+TEST_CASE("flag_*_changed -> consume_*_changed_flag is data-race-free "
+          "when the flag is set from one thread and drained from another",
+          "[processor][latency][item-3.11][threading]") {
+    // Hammer the flag from an "audio" thread and drain from a "main"
+    // thread. The contract: every drain that observes `true` corresponds
+    // to at least one preceding set, and we never observe undefined
+    // behaviour. This is the minimal smoke we need to gate the
+    // RT-safety claim; a TSan run extends it.
+    StereoEffect p;
+    std::atomic<bool> stop{false};
+    std::atomic<int> seen{0};
+
+    std::thread audio([&]{
+        for (int i = 0; i < 100000 && !stop.load(); ++i) {
+            p.flag_latency_changed();
+        }
+    });
+    std::thread main_t([&]{
+        // Drain until audio thread is done plus a tail drain.
+        while (!stop.load()) {
+            if (p.consume_latency_changed_flag()) ++seen;
+        }
+        // Final drain to catch any remaining edge.
+        if (p.consume_latency_changed_flag()) ++seen;
+    });
+
+    audio.join();
+    stop.store(true);
+    main_t.join();
+
+    // At least one set was observed.
+    REQUIRE(seen.load() >= 1);
+    REQUIRE_FALSE(p.consume_latency_changed_flag());
+}

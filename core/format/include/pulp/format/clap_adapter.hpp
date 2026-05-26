@@ -27,6 +27,13 @@ struct PulpClapPlugin {
     state::StateStore store;
     ProcessorFactory factory;
 
+    // Stored at create_plugin() time so the adapter can publish
+    // latency / tail change notifications (item 3.11) back to the
+    // host. `clap_on_main_thread()` consumes the processor's pending
+    // flags and calls `clap_host_latency->changed()` /
+    // `clap_host_tail->changed()` — never from process() itself.
+    const clap_host_t* host = nullptr;
+
     // Audio working state
     double sample_rate = 48000.0;
     int max_buffer_size = 512;

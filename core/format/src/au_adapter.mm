@@ -550,6 +550,38 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         bridge->processor->set_param_events(&bridge->param_events);
         bridge->processor->process(output_view, input_view, midi_in, midi_out, ctx);
 
+        // Item 3.11 — drain RT-safe pending flags the processor may have
+        // set during process() and publish them via KVO. AUAudioUnit
+        // exposes `latency` and `tailTime` as KVO-able read-only
+        // properties; an AU v3 host observes them and re-queries.
+        // dispatch_async (vs the synchronous KVO call) keeps the audio
+        // thread out of Foundation's KVO machinery, matching the spec
+        // for #3.11 ("no host calls from process()").
+        const bool publish_latency =
+            bridge->processor->consume_latency_changed_flag();
+        const bool publish_tail =
+            bridge->processor->consume_tail_changed_flag();
+        if (publish_latency || publish_tail) {
+            // File is built without ARC (see AudioUnitSDK lane). We
+            // cannot take a __weak ref; instead retain self for the
+            // duration of the dispatch and release inside the block.
+            // The block runs on the main queue so KVO observers see
+            // willChange/didChange there, not on the audio thread.
+            PulpAudioUnit *retainedSelf = self;
+            [retainedSelf retain];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (publish_latency) {
+                    [retainedSelf willChangeValueForKey:@"latency"];
+                    [retainedSelf didChangeValueForKey:@"latency"];
+                }
+                if (publish_tail) {
+                    [retainedSelf willChangeValueForKey:@"tailTime"];
+                    [retainedSelf didChangeValueForKey:@"tailTime"];
+                }
+                [retainedSelf release];
+            });
+        }
+
         // Forward any MIDI the Processor emitted to the host via the
         // AUv3 MIDIOutputEventBlock. The block is installed by the host
         // on an ARC-managed retained property; we capture it via `self`

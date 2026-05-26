@@ -373,6 +373,21 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         AUEventListenerNotify(nullptr, nullptr, &event);
     }
 
+    // Item 3.11 — push latency / tail change notifications the processor
+    // flagged during process(). AU v2 hosts watch
+    // kAudioUnitProperty_Latency and kAudioUnitProperty_TailTime via
+    // PropertyListeners; PropertyChanged is the canonical SDK call
+    // that wakes them. Safe to call from the render callback (AU SDK
+    // marshals through the host's property-listener queue).
+    if (processor_->consume_latency_changed_flag()) {
+        PropertyChanged(kAudioUnitProperty_Latency,
+                        kAudioUnitScope_Global, 0);
+    }
+    if (processor_->consume_tail_changed_flag()) {
+        PropertyChanged(kAudioUnitProperty_TailTime,
+                        kAudioUnitScope_Global, 0);
+    }
+
     return noErr;
 }
 

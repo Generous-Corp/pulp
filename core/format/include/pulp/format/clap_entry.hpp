@@ -578,12 +578,15 @@ inline const void* get_extension(const clap_plugin_t*, const char* id) {
 
 // ── Plugin creation ────────────────────────────────────────────────────
 inline const clap_plugin_t* create_plugin(const clap_plugin_factory_t*,
-                                           const clap_host_t*,
+                                           const clap_host_t* host,
                                            const char* plugin_id) {
     if (strcmp(plugin_id, g_clap_desc.id) != 0) return nullptr;
 
     auto* instance = new clap_adapter::PulpClapPlugin();
     instance->factory = g_factory;
+    // Item 3.11 — keep the host pointer so clap_on_main_thread() can
+    // republish latency / tail changes the processor flagged.
+    instance->host = host;
     instance->plugin = {
         .desc = &g_clap_desc,
         .plugin_data = instance,

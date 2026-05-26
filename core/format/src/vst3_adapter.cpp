@@ -471,6 +471,21 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
+    // Item 3.11 — publish latency / tail changes the processor flagged
+    // during process(). VST3's IComponentHandler::restartComponent is
+    // documented as safe to call from the host's audio callback — the
+    // handler is expected to queue it for main-thread delivery. We
+    // still drain the atomic flag with acquire/release semantics so
+    // process() never has to take a lock or allocate.
+    if (componentHandler) {
+        int32 flags = 0;
+        if (processor_->consume_latency_changed_flag()) flags |= kLatencyChanged;
+        if (processor_->consume_tail_changed_flag())    flags |= kReloadComponent;
+        if (flags != 0) {
+            componentHandler->restartComponent(flags);
+        }
+    }
+
     // Write MIDI output
     if (data.outputEvents && !midi_out.empty()) {
         for (const auto& me : midi_out) {
