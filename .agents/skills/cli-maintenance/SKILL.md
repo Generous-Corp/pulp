@@ -1199,6 +1199,64 @@ Notes for CLI maintenance:
   logs `build=debug|release` on the `[plugin-gpu-host]` adapter line and warns
   once on Debug, so a host log immediately shows which build was loaded.
 
+## `pulp build --install` + `--skip-validation` (PR #2932, items 7.4 / 7.4b / 7.5)
+
+The documented `build → validate → install` pipeline now exists as
+real CLI flags rather than implied tooling. `tools/cli/cmd_build.cpp`
+gained:
+
+- `--install` — after a successful build, copy each format bundle to
+  its per-format system folder (`~/Library/Audio/Plug-Ins/Components`
+  for AU, `~/Library/Audio/Plug-Ins/VST3/` for VST3,
+  `~/Library/Audio/Plug-Ins/CLAP/` for CLAP). The install runs the
+  `cmd_validate(["--strict"])` gate first; a failing validator
+  refuses to copy anything to the user's system tree.
+- `--skip-validation` — debug-only escape hatch for adapter work. It
+  is **only valid when paired with `--install`** (using it alone is
+  rejected at parse time so users can't accidentally disable
+  validation on a normal build). `--install + --watch` is also
+  rejected — repeated installs from a watch loop would race the host.
+
+Implementation lives in `tools/cli/install_paths_mac.{hpp,cpp}` and is
+mediated through an `InstallEnv` interface so the 14 Catch2 cases in
+`pulp-test-cli-install-paths-mac` can verify the mkdir → rm → cp
+ordering, idempotency, and failure cases without writing to a real
+`~/Library` tree. CLI-surface contract is pinned by 2 shellout cases
+in `pulp-test-cli-ship-shellout`.
+
+Gotchas:
+
+- **rm comes before cp**, not the other way around. A leftover bundle
+  with stale Info.plist can confuse the AU registrar even after a
+  fresh copy. Tests pin this order.
+- **Relative `$HOME` is rejected.** The destination resolver refuses
+  any path that's not absolute under `$HOME/Library/Audio/Plug-Ins/`.
+- **Plugin Install Policy applies.** See CLAUDE.md "Plugin Install
+  Policy" — a plugin that crashes a DAW during scan is worse than no
+  plugin at all. The validation gate is non-optional in normal use.
+
+## `pulp ship auv3-xcodeproj` (PR #2938, item 3.10)
+
+Thin wrapper over `cmake -G Xcode` that generates an Xcode project
+for an AUv3 target without disturbing the user's regular Ninja /
+Makefile build dir. Surface:
+
+```bash
+pulp ship auv3-xcodeproj <target>                    # iphonesimulator (default)
+pulp ship auv3-xcodeproj <target> --sdk iphoneos     # device
+pulp ship auv3-xcodeproj <target> --sdk macosx       # macOS lane
+pulp ship auv3-xcodeproj <target> --output build/xcode/MyPlugin
+pulp ship auv3-xcodeproj <target> --open             # open in Xcode after gen
+pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation only
+```
+
+Default output dir is `build/xcode/<target>-<sdk>`. iOS SDKs include
+`tools/cmake/ios.toolchain.cmake` with the correct `IOS_PLATFORM`
+(OS for device, SIMULATOR64 for simulator). The full Xcode-project
+generation flow plus device entitlement templates live in the `auv3`
+skill — this section just pins the CLI surface so the slash command,
+docs, and skill stay in lockstep.
+
 ## `pulp identity` — committed plugin identity lockfile
 
 Track 3.12 (macOS plugin-authoring plan) introduced a Rust-side surface

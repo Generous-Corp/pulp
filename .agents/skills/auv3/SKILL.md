@@ -581,6 +581,34 @@ Pulp's `descriptor().tail_samples` is an integer sample count;
 return `0` — a `0` tail tells the host "this plugin emits nothing
 after input stops" and delay/reverb tails get chopped.
 
+### Bypass routing — auto-detected Bypass parameter (PR #2937)
+
+`initialize` auto-detects a plugin-declared "Bypass" parameter and
+routes both AU v3 bypass surfaces (the host's `bypass` AUValue and
+the plugin's automation lane) through the **same StateStore atomic**
+so they stay in lockstep (DAW quirks row 21). When no Bypass param
+exists the bridge falls back to a local atomic so the contract still
+holds for plugins that don't declare one.
+
+`internalRenderBlock` short-circuits to pass-through audio when
+bypassed (in→out for effects, silence for instruments) and never
+calls `Processor::process`. **MIDI output stays empty** so bypassed
+MIDI FX don't leak notes. Diagnostic: read `pulpBypassParameterId`
+on `PulpAudioUnit` (also exposed from the shared `au_audio_unit.h`
+header) to confirm which ParamID got picked up.
+
+### Latency / tail change notifications (PR #2934, item 3.11)
+
+A Processor flags a mid-render latency or tail change via
+`flag_latency_changed()` / `flag_tail_changed()` (RT-safe atomic
+store-release). The adapter drains those edges post-process and
+`dispatch_async`s to the main queue → KVO `willChange/didChange` for
+`latency` / `tailTime`. The file is built **without ARC** because of
+the C++ `_bridge` struct, so the dispatch path uses MRC-safe
+retain/release rather than ARC capture semantics. Tests are in
+`pulp-test-processor-layout-latency` (round-trip × 2, two-thread
+hammer for data-race freedom).
+
 ### Sidechain pull uses its **own** `AudioBufferList`
 
 Aliasing the main `input_abl` into the sidechain pull corrupts the
@@ -759,6 +787,29 @@ The AU v3 packaging shape is **three distinct targets**, dispatched by
    detects the Simulator via `CMAKE_OSX_SYSROOT` matching
    `Simulator|iphonesimulator`. Mac Catalyst is **deliberately
    excluded** (macOS plan 3.10 — "Catalyst is deferred post-MVP").
+
+### Xcode-project generation: `pulp ship auv3-xcodeproj` (PR #2938, item 3.10)
+
+Once `pulp_add_plugin(... FORMATS AUv3)` is wired, the developer
+flow for iterating on the AUv3 target in Xcode (instruments,
+debugger, simulator profiles) is:
+
+```bash
+pulp ship auv3-xcodeproj <target>                    # iphonesimulator (default)
+pulp ship auv3-xcodeproj <target> --sdk iphoneos     # device
+pulp ship auv3-xcodeproj <target> --sdk macosx       # macOS lane
+pulp ship auv3-xcodeproj <target> --output build/xcode/MyPlugin
+pulp ship auv3-xcodeproj <target> --open             # open in Xcode after gen
+pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation only
+```
+
+The wrapper runs `cmake -G Xcode -DPULP_AUV3_TARGET=<name>` against
+a **separate build dir** (default `build/xcode/<target>-<sdk>`) so
+it doesn't collide with the user's normal Ninja/Makefile cache. iOS
+SDKs pull in `tools/cmake/ios.toolchain.cmake` with the correct
+`IOS_PLATFORM` (OS for device, SIMULATOR64 for simulator). This is
+the closeout for item 3.10's deferred Xcode-project generation —
+the entitlement templates landed earlier in the same PR series.
 
 ### Install + cache-clear gotcha
 

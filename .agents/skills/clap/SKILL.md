@@ -249,6 +249,43 @@ companion factory pointer. Only instantiates when the Processor
 overrode `create_ara_document_controller()` — plugins that don't
 participate in ARA return `nullptr` naturally. See the `ara` skill.
 
+### Bypass routing — auto-detected (PR #2937)
+
+CLAP doesn't model "bypass" as a first-class extension the way VST3
+(`kIsBypass`) or AU v3 (`AUAudioUnitBypass`) do — hosts treat a
+plugin-declared `"Bypass"` parameter as the on/off lane. The adapter
+auto-detects that parameter at `clap_init` and short-circuits
+`clap_process` to pass-through (in→out for effects, zero-fill for
+instruments) when the cached parameter's current value is `>= 0.5`,
+without invoking `Processor::process`. MIDI output stays empty so
+bypassed MIDI FX don't leak notes — same contract the VST3 and AU v3
+adapters honour.
+
+### Latency / tail change notifications (PR #2934, item 3.11)
+
+A Processor flags a mid-render latency or tail change via
+`flag_latency_changed()` / `flag_tail_changed()` (RT-safe atomic
+store-release). Don't call `clap_host_latency->changed()` from
+`process()` directly — the spec requires that on the main thread.
+
+CLAP wiring (the most involved of the four adapters):
+
+1. `create_plugin()` captures the `clap_host_t*` pointer for later
+   `request_callback()` use.
+2. `process()` peeks via `latency_change_pending()` /
+   `tail_change_pending()` (non-mutating — does NOT drain the edge)
+   and, if either is set, calls `host->request_callback()` to ask
+   the host for a main-thread callback.
+3. `clap_on_main_thread()` then drains via
+   `consume_latency_changed_flag()` / `consume_tail_changed_flag()`
+   and calls `clap_host_latency->changed()` /
+   `clap_host_tail->changed()`.
+
+The peek-vs-consume split exists specifically for CLAP — VST3 / AU
+v3 / AU v2 drain in-line because their host APIs are safe from the
+audio callback path. Don't collapse the two helpers into one if you
+add another adapter that needs the same edge.
+
 ### Preset loading
 
 `clap_plugin_preset_load` is exposed only when the Processor builds a

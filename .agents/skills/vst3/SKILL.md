@@ -89,15 +89,21 @@ the full story.
 ### Bus arrangement negotiation
 
 `setBusArrangements(inputs, numIns, outputs, numOuts)` is **not** a
-pass-through to the base class. Pulp's implementation:
+pass-through to the base class. As of PR #2934 (item 3.7) the adapter
+delegates the accept/reject decision to
+`Processor::is_bus_layout_supported(BusesLayout)` — the cross-adapter
+virtual hook that lets a plugin enforce tighter layout contracts
+(linked sidechain, surround, instrument-only output, etc.) without
+overriding `setBusArrangements` directly. The default policy still
+matches the descriptor's per-side bus count and only accepts mono /
+stereo per channel.
 
-1. Rejects with `kResultFalse` if `numIns`/`numOuts` don't match the
-   descriptor's declared bus counts.
-2. Rejects if any requested speaker arrangement is neither `kMono` nor
-   `kStereo` — negotiation is currently limited to those two.
-3. Otherwise updates each `AudioBus` via
-   `bus->setArrangement(arrangement)` in place, then re-propagates to
-   `SingleComponentEffect::setBusArrangements`.
+Order matters: **call the hook before mutating `audioInputs` /
+`audioOutputs`**. A rejected proposal returns `kResultFalse` and the
+host falls back to the default arrangement, matching Steinberg's
+spec — if you mutate first, the rejected reply leaves the bus state
+diverged from `descriptor()`. The AU v3 / AU v2 / CLAP adapters carry
+the same hook for the day they grow dynamic layout negotiation.
 
 Why: hosts swap project channel layouts (load a stereo session over a
 mono plugin slot) and expect the plugin's `descriptor()` view to
@@ -155,6 +161,39 @@ Parameters flow both ways:
 `kIsBypass` is auto-set on any parameter named `"Bypass"` whose range
 is `[0,1]` with `step >= 1` — Steinberg requires exactly one bypass
 parameter per plugin for the host bypass control to work.
+
+### Bypass routing — cached ParamID + render short-circuit (PR #2937)
+
+`initialize()` caches the `ParamID` of the kIsBypass-tagged parameter
+in `bypass_param_id_`; the value is exposed via
+`bypass_parameter_id()` for tests and diagnostics. Inside `process()`,
+when the cached parameter's current value is `>= 0.5`, the adapter
+short-circuits to processBlockBypassed-style pass-through — copies the
+main input to the main output (or zero-fills for instrument
+descriptors), drops the sidechain, and returns **without invoking
+`Processor::process`**.
+
+Why cache the ID: hosts hit `process()` thousands of times per second
+and walking the parameter table to find the bypass slot on every
+block is a non-trivial cost. The cache is set once at `initialize()`
+and never mutated. When a plugin has no Bypass parameter the adapter
+falls back to "always render" — no synthetic atomic.
+
+### Latency / tail change notifications (PR #2934, item 3.11)
+
+A Processor can flag a mid-render latency or tail change from the
+audio thread via `flag_latency_changed()` / `flag_tail_changed()`
+(RT-safe atomic store-release). Never call host APIs from `process()`
+directly — the format adapter owns the host-thread publish path.
+
+VST3 wiring (post-process): the adapter checks
+`consume_latency_changed_flag()` / `consume_tail_changed_flag()` and
+calls `componentHandler->restartComponent(kLatencyChanged |
+kReloadComponent)`. Steinberg documents `restartComponent` as safe
+from the audio callback (the handler queues main-thread delivery), so
+no extra dispatch is needed on the VST3 side. Tests in
+`pulp-test-processor-layout-latency` pin the round-trip and the
+two-thread hammer for data-race freedom.
 
 ### MIDI events
 

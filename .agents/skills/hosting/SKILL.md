@@ -346,6 +346,53 @@ Gotchas:
   reusable for any future ChildProcess-based isolation work — give
   the helper a mode argv and exec it from the parent.
 
+## PluginManagerPanel drag-add (PR #2929, item 4.3)
+
+Users now drag a row out of `PluginManagerPanel` and drop it onto a
+graph editor surface to add a plugin node. The panel itself stays
+surface-agnostic — it emits `on_row_drag_start` / `on_row_drag_end`
+callbacks with the row payload, and hosts wire the drop into whichever
+graph the cursor landed on.
+
+What changed in the panel:
+
+- `PluginManagerRow` gained the identity fields needed to round-trip
+  into a `PluginInfo` (`manufacturer`, `version`, `unique_id`,
+  `num_inputs`, `num_outputs`, `is_instrument`, `is_effect`) plus a
+  `to_plugin_info()` helper. All defaulted so older models keep
+  working.
+- The panel tracks press → drag-threshold → drag start, emits drag
+  callbacks only for `scanned` bucket rows (failed and blacklisted
+  rows are suppressed because they cannot load anyway), and exposes
+  `simulate_row_drag()` so tests and hosts can drive the callback
+  without synthesising motion events.
+
+Host-side: `pulp::host::add_plugin_node_from_drop(graph, info,
+&loaded)` attempts a live `PluginSlot::load` via `add_plugin_node`
+and falls back to `add_unresolved_plugin_node` when the bundle can't
+load — preserving user intent across save/reload. Don't bypass this
+helper and call `add_plugin_node` directly; the unresolved-fallback
+path is what keeps `.pulpgraph` round-trips honest when a plugin
+binary disappears between sessions.
+
+## ExtensionsVisitor — typed access to format-specific extensions (PR #2892, items 4.5/4.6/4.7)
+
+Hosts that need to reach a format-specific extension (CLAP note ports,
+VST3 IMidiMapping, AU AudioUnit property, LV2 instance) now subclass
+`ExtensionsVisitor`, override the `visit_*` methods they care about,
+and call `slot.accept(visitor)`. Default `visit_*` fall through to
+`visit_unknown` so a visitor that only cares about one format ignores
+the rest automatically. The base `PluginSlot` dispatches to
+`visit_unknown` for placeholder / unresolved slots so they degrade
+gracefully.
+
+Format-specific `*Extension` structs deliberately expose handles as
+`void*` so they don't pull SDK headers into client code. Callers that
+*do* link the SDK `static_cast` back to the concrete type. Wired in
+`ClapSlot`, `Vst3Slot`, `AuSlot`, `Lv2Slot`. Tests in
+`pulp-test-extensions-visitor` pin the visit dispatch + the
+`ExtensionFormat` enumerator values (the latter is a reorder-detector).
+
 ## Scanner identity rules (issue #491 P2)
 
 `PluginScanner` produces `PluginInfo::unique_id` values that
