@@ -116,7 +116,10 @@ static ScreenshotCliOptions parse_options(int argc, char* argv[]) {
         }
         else if (arg == "--base64") options.output_base64 = true;
         else if (arg == "--demo") options.demo = true;
-        else if (arg == "--help" || arg == "-h") options.help = true;
+        else if (arg == "--help" || arg == "-h") {
+            options.help = true;
+            return options;
+        }
     }
     return options;
 }
