@@ -746,6 +746,22 @@ all copies or substantial portions of the Software.
 
 ---
 
+## TweetNaCl
+
+TweetNaCl (version 20140427) is a self-contained public-domain C library
+implementing the NaCl cryptographic primitives by Daniel J. Bernstein,
+Bernard van Gastel, Wesley Janssen, Tanja Lange, Peter Schwabe, and
+Sjaak Smetsers.
+
+Public domain (the TweetNaCl authors disclaim all copyright; see
+https://tweetnacl.cr.yp.to/). Used for Ed25519 sign/verify per RFC 8032,
+wired into `pulp::runtime::ed25519_*` for Sparkle appcast signatures
+and future v2 license-key payloads. `randombytes()` is supplied by
+`core/runtime/src/crypto.cpp` and routes to the runtime's mbedTLS
+CTR-DRBG instance.
+
+---
+
 ## VST3 SDK
 
 Copyright (c) 2024 Steinberg Media Technologies GmbH

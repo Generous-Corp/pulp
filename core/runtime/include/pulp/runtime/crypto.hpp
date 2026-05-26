@@ -103,6 +103,54 @@ std::optional<std::vector<uint8_t>> aes_gcm_decrypt(
 /// — `std::memcmp` short-circuits and leaks timing information.
 bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t size);
 
+// ── Ed25519 (RFC 8032) ──────────────────────────────────────────────────
+//
+// Detached EdDSA signing over the Ed25519 curve. Used by:
+//   - Sparkle appcast `edSignature` (macOS auto-update)
+//   - Future v2 license-key payloads (post-RSA migration)
+//
+// Implementation: vendored TweetNaCl reference (public domain, RFC 8032
+// compliant). TweetNaCl exposes a combined sign-and-message API; the
+// wrappers here expose a detached 64-byte signature for direct
+// interoperability with Sparkle and most ecosystem tools.
+
+/// Ed25519 key sizes (RFC 8032 §5.1).
+inline constexpr size_t ed25519_public_key_size = 32;
+inline constexpr size_t ed25519_private_key_size = 64;  // seed (32) + public key (32)
+inline constexpr size_t ed25519_seed_size = 32;
+inline constexpr size_t ed25519_signature_size = 64;
+
+/// Ed25519 keypair (NaCl convention: secret key contains seed || public key).
+struct Ed25519KeyPair {
+    std::vector<uint8_t> public_key;   ///< 32 bytes
+    std::vector<uint8_t> private_key;  ///< 64 bytes (seed || public_key)
+};
+
+/// Generate a fresh Ed25519 keypair using mbedTLS CTR-DRBG for entropy.
+/// Returns std::nullopt on RNG failure (rare; reserved for hardware-RNG
+/// failure on locked-down platforms).
+std::optional<Ed25519KeyPair> ed25519_keypair_generate();
+
+/// Derive a deterministic Ed25519 keypair from a 32-byte seed.
+/// Useful for test vectors and for reproducing a key from a backed-up seed.
+std::optional<Ed25519KeyPair> ed25519_keypair_from_seed(
+    const uint8_t* seed_32, size_t seed_size);
+
+/// Sign a message with an Ed25519 private key (64-byte NaCl-form).
+/// Returns the 64-byte detached signature, or std::nullopt on input
+/// size validation failure.
+std::optional<std::vector<uint8_t>> ed25519_sign(
+    const uint8_t* private_key_64, size_t private_key_size,
+    const uint8_t* message, size_t message_size);
+
+/// Verify a 64-byte detached signature against a message + 32-byte public key.
+/// Returns true iff the signature is authentic. Returns false on any input-
+/// size mismatch (defence in depth — callers should still range-check).
+bool ed25519_verify(
+    const uint8_t* public_key_32, size_t public_key_size,
+    const uint8_t* signature_64, size_t signature_size,
+    const uint8_t* message, size_t message_size);
+
 // ── Machine ID ──────────────────────────────────────────────────────────
 
 /// Generate a machine-specific fingerprint (deterministic per machine).

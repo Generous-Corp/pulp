@@ -1266,6 +1266,9 @@ pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 # Crypto tests (SHA-256, MD5, AES, machine ID)
 pulp_add_test_suite(pulp-test-crypto LIBRARIES pulp::runtime)
 
+# Ed25519 (RFC 8032) — macOS plan item 7.1b
+pulp_add_test_suite(pulp-test-ed25519 LIBRARIES pulp::runtime)
+
 # IPC (InterprocessConnection) tests
 add_executable(pulp-connected-child-process-fixture
     fixtures/connected_child_process_fixture.cpp)

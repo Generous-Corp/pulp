@@ -590,6 +590,23 @@
       ]
     },
     {
+      "name": "TweetNaCl",
+      "category": "runtime",
+      "license": "Public domain",
+      "version": "20140427",
+      "source_kind": "vendored",
+      "repository": "https://tweetnacl.cr.yp.to/",
+      "upstream": { "kind": "url-snapshot", "ref": "https://tweetnacl.cr.yp.to/20140427/tweetnacl.c" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and future v2 license-key payloads. `randombytes()` supplied by core/runtime/src/crypto.cpp via mbedTLS CTR-DRBG.",
+      "source_files": [
+        "external/tweetnacl/tweetnacl.c",
+        "external/tweetnacl/tweetnacl.h",
+        "core/runtime/CMakeLists.txt"
+      ]
+    },
+    {
       "name": "VST3 SDK",
       "category": "format-sdk",
       "license": "MIT",

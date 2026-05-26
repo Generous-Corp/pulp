@@ -120,6 +120,10 @@ target_sources(pulp-runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_tdef.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_tinfl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_zip.c
+    # TweetNaCl (public domain) — Ed25519 sign/verify per RFC 8032.
+    # `randombytes()` is supplied by core/runtime/src/crypto.cpp,
+    # wired to the runtime's mbedTLS CTR-DRBG instance.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/tweetnacl/tweetnacl.c
 )
 
 # Highway's foreach_target.h uses #include HWY_TARGET_INCLUDE to re-include
@@ -131,6 +135,7 @@ target_include_directories(pulp-runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/cpp-httplib
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external
 )
 
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
