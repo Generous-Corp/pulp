@@ -168,9 +168,17 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
 
         # Platform frameworks
         if(APPLE)
+            # Dawn's Metal archive contains Objective-C++ objects even when
+            # final targets only link from C++ sources. Explicitly linking
+            # `objc` lets osxcross/ld64.lld resolve the Objective-C runtime
+            # selectors emitted by those archives during Linux-hosted darwin
+            # cross builds. The native macOS toolchain auto-links libobjc
+            # via clang's driver, so adding it here is a no-op for native
+            # builds and a fix for the cross lane.
+            # See planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
             set_property(TARGET skia::skia APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES
-                    "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOKit;-framework IOSurface;-framework QuartzCore"
+                    "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOKit;-framework IOSurface;-framework QuartzCore;objc"
             )
         elseif(ANDROID)
             set_property(TARGET skia::skia APPEND PROPERTY

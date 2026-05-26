@@ -123,6 +123,22 @@ function(_pulp_icon_configure_macos target source_path)
     find_program(_pulp_sips sips)
     find_program(_pulp_iconutil iconutil)
     if(NOT _pulp_sips OR NOT _pulp_iconutil)
+        # Linux-hosted macOS cross builds do not have `sips`/`iconutil`.
+        # PULP_MACOS_CROSS_ALLOW_MISSING_ICON_TOOLS lets the configure
+        # step keep moving while still recording the requested icon
+        # source on the target so a later packaging step (or a portable
+        # `.icns` generator) can finish the job. This is a prototype
+        # escape hatch — production cross artifacts must ship a real
+        # `.icns` before publication. See
+        # planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
+        if(PULP_MACOS_CROSS_ALLOW_MISSING_ICON_TOOLS)
+            message(WARNING
+                "pulp_app_icon(${target}): macOS icon generation requires "
+                "`sips` and `iconutil`; keeping the selected icon source "
+                "recorded for Linux-hosted macOS cross packaging.")
+            set_property(TARGET ${target} PROPERTY PULP_MACOS_APP_ICON "${source_path}")
+            return()
+        endif()
         message(FATAL_ERROR
             "pulp_app_icon(${target}): macOS icon generation requires both "
             "`sips` and `iconutil`.")

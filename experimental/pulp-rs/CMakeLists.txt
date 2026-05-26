@@ -72,12 +72,26 @@ endif()
 set(PULP_RUST_CLI_PROFILE "release" CACHE STRING
     "Cargo profile for pulp-rs (release|debug)")
 
+# Optional Cargo target triple for cross-building the Rust CLI. The
+# Linux-hosted macOS arm64 cross lane sets this to
+# `aarch64-apple-darwin` so Cargo emits Mach-O binaries instead of the
+# host's native ELF/PE. Native builds leave this empty and Cargo picks
+# the host triple automatically.
+# See planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
+set(PULP_RUST_CLI_TARGET "" CACHE STRING
+    "Optional Cargo target triple for pulp-rs cross builds")
+
 if(PULP_RUST_CLI_PROFILE STREQUAL "debug")
     set(_pulp_rs_cargo_args "")
     set(_pulp_rs_target_subdir "debug")
 else()
     set(_pulp_rs_cargo_args "--release")
     set(_pulp_rs_target_subdir "release")
+endif()
+
+if(PULP_RUST_CLI_TARGET)
+    list(APPEND _pulp_rs_cargo_args "--target" "${PULP_RUST_CLI_TARGET}")
+    set(_pulp_rs_target_subdir "${PULP_RUST_CLI_TARGET}/${_pulp_rs_target_subdir}")
 endif()
 
 # Cargo writes binaries to `target/<profile>/<bin>[.exe]`. Pin the

@@ -92,6 +92,21 @@ Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
 wait unless a check has actually failed.
 
+### Advisory cross-lane workflow: `macos-cross-advisory.yml`
+
+`.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory
+job for the Linux-hosted macOS arm64 cross lane (Phase 5 scaffolding,
+see `planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md`). It
+runs on `ubuntu-latest`, does **not** bootstrap osxcross, and does
+**not** download a macOS SDK — it only confirms the Pulp-side cross
+scaffolding (`tools/cmake/toolchains/macos-arm64-osxcross.cmake`,
+`tools/scripts/verify_macos_cross_artifacts.py`, the
+`PULP_RUST_CLI_TARGET` / `PULP_MACOS_CROSS_ALLOW_MISSING_ICON_TOOLS` /
+`OTOOL` / `INSTALL_NAME_TOOL` hooks) stays wired and that the verifier
+unit tests still pass. It is non-gating by design; do not promote it to
+a required check until a self-hosted Linux runner with pinned osxcross
++ private SDK is provisioned and the matching full-build job lands.
+
 ## PR Review Thread Hygiene
 
 Before opening a follow-up PR or declaring a phase complete, sweep review

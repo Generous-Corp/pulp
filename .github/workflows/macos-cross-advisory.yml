@@ -1,0 +1,135 @@
+name: macOS Cross (advisory)
+
+# Advisory CI scaffold for the Linux-hosted macOS arm64 cross lane.
+#
+# The actual osxcross-based cross build runs in a private infra repo
+# (pulp-macos-cross-infra) on a Linux host with an Apple SDK sysroot
+# already materialized. That build cannot be reproduced from public
+# CI without re-publishing the SDK, which is licensing-disallowed.
+#
+# This workflow exists so the Pulp-side scaffolding (CMake toolchain
+# file, verifier script, cross-compatible package_cli.py overrides, the
+# Linux-hosted macOS cross lane plan itself) is exercised on every PR
+# that touches it. It is intentionally non-gating and runs on the
+# default ubuntu runner.
+#
+# What it checks (free, fast, no SDK required):
+#  1. The CMake toolchain file exists and contains the documented hooks.
+#  2. The Pulp-owned verifier script imports cleanly and its unit tests
+#     pass under the host's `python3`.
+#  3. The plan doc and the toolchain file stay in sync (the doc still
+#     references the toolchain file path).
+#
+# What it deliberately does NOT do:
+#  - Bootstrap osxcross.
+#  - Materialize an Apple SDK.
+#  - Build any Mach-O binaries.
+#  - Validate signatures.
+#
+# These steps require either licensed Apple inputs (SDK) or a real Mac
+# (`codesign`, AU registration, `auval`). Promotion to a full advisory
+# build job (Phase 5 step 3 in the plan) is gated on standing up a
+# self-hosted Linux runner that already has the private SDK and
+# osxcross prefix on disk. When that runner exists, add a second
+# `cross-build` job that calls into the private infra repo's scripts;
+# do not inline the bootstrap here.
+#
+# Plan: planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md
+# Phase: 5 — CI and artifact publication (scaffold step).
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cmake/toolchains/macos-arm64-osxcross.cmake'
+      - 'tools/cmake/PulpAppIcon.cmake'
+      - 'tools/cmake/FindSkia.cmake'
+      - 'tools/scripts/verify_macos_cross_artifacts.py'
+      - 'tools/scripts/test_verify_macos_cross_artifacts.py'
+      - 'tools/scripts/package_cli.py'
+      - 'experimental/pulp-rs/CMakeLists.txt'
+      - 'planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md'
+      - '.github/workflows/macos-cross-advisory.yml'
+  workflow_dispatch:
+
+# Non-blocking signal — never cancel a sibling workflow_run on
+# concurrency conflict, and do not contribute to required checks.
+concurrency:
+  group: macos-cross-advisory-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scaffold-check:
+    runs-on: ubuntu-latest
+    name: Cross-lane scaffold check (advisory)
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm CMake toolchain file is present
+        run: |
+          set -euo pipefail
+          toolchain=tools/cmake/toolchains/macos-arm64-osxcross.cmake
+          test -f "$toolchain"
+          grep -q 'CMAKE_SYSTEM_NAME Darwin' "$toolchain"
+          grep -q 'CMAKE_SYSTEM_PROCESSOR arm64' "$toolchain"
+          grep -q 'PULP_MACOS_SDK_ROOT' "$toolchain"
+          grep -q 'PULP_MACOS_CROSS' "$toolchain"
+          echo "ok: $toolchain has the documented hook variables"
+
+      - name: Confirm Pulp-side cross hooks are wired
+        run: |
+          set -euo pipefail
+          grep -q 'PULP_MACOS_CROSS_ALLOW_MISSING_ICON_TOOLS' \
+            tools/cmake/PulpAppIcon.cmake
+          grep -q 'PULP_RUST_CLI_TARGET' \
+            experimental/pulp-rs/CMakeLists.txt
+          grep -q '"OTOOL"' tools/scripts/package_cli.py
+          grep -q '"INSTALL_NAME_TOOL"' tools/scripts/package_cli.py
+          # FindSkia ships the explicit `objc` link interface so
+          # osxcross/ld64.lld can resolve Dawn's Metal Objective-C++
+          # archives on Linux-hosted cross builds.
+          grep -q ';objc"' tools/cmake/FindSkia.cmake
+          echo "ok: cross-lane hooks present"
+
+      - name: Confirm plan doc references the toolchain file
+        run: |
+          set -euo pipefail
+          plan=planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md
+          if [ -f "$plan" ]; then
+            grep -q 'tools/cmake/toolchains/macos-arm64-osxcross.cmake' "$plan"
+            echo "ok: plan doc references the toolchain file"
+          else
+            echo "note: planning submodule not checked out; skipping plan-doc check"
+          fi
+
+      - name: Run Pulp-owned verifier unit tests
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/test_verify_macos_cross_artifacts.py
+
+      - name: Sanity-check verifier --help
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/verify_macos_cross_artifacts.py --help > /dev/null
+          echo "ok: verifier script imports and --help works"
+
+      - name: Summarize advisory status
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## macOS Cross (advisory)
+
+          This workflow checks the Pulp-side scaffolding for the
+          Linux-hosted macOS arm64 cross lane. It does **not** perform
+          a real cross build — that requires a licensed Apple SDK and
+          an osxcross prefix, which live in a private infra repo and
+          on the private Linux host.
+
+          Promotion path (planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md):
+          1. **(this job)** scaffold check, advisory.
+          2. Self-hosted Linux runner with pinned osxcross + private
+             SDK calls into the private infra scripts.
+          3. Upload `pulp-darwin-arm64.tar.gz` and
+             `pulp-sdk-darwin-arm64.tar.gz` to the private assets repo.
+          4. Native macOS relay validates the cross artifacts.
+          5. Required CI only after repeated parity passes.
+          EOF

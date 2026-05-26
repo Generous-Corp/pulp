@@ -129,9 +129,21 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
 
 
 def fix_rpath_macos(binary: Path) -> None:
-    """Drop every absolute LC_RPATH and add @loader_path."""
+    """Drop every absolute LC_RPATH and add @loader_path.
+
+    Honors `OTOOL` and `INSTALL_NAME_TOOL` environment overrides so
+    Linux-hosted darwin cross builds can run this packager with the
+    osxcross/LLVM equivalents (e.g. ``x86_64-apple-darwin24-otool`` and
+    ``x86_64-apple-darwin24-install_name_tool``) instead of the native
+    macOS tools that don't exist on Linux. Native builds leave both env
+    vars unset and inherit the historical hard-coded ``otool`` /
+    ``install_name_tool`` from PATH.
+    See planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
+    """
+    otool = os.environ.get("OTOOL", "otool")
+    install_name_tool = os.environ.get("INSTALL_NAME_TOOL", "install_name_tool")
     out = subprocess.check_output(
-        ["otool", "-l", str(binary)], text=True)
+        [otool, "-l", str(binary)], text=True)
     bad_rpaths: list[str] = []
     in_rpath = False
     for line in out.splitlines():
@@ -153,13 +165,13 @@ def fix_rpath_macos(binary: Path) -> None:
     for rp in bad_rpaths:
         print(f"  removing rpath: {rp}", flush=True)
         subprocess.check_call(
-            ["install_name_tool", "-delete_rpath", rp, str(binary)])
+            [install_name_tool, "-delete_rpath", rp, str(binary)])
 
     print("  adding rpath: @loader_path", flush=True)
     # Idempotent: if @loader_path is already present, install_name_tool
     # exits with an error; suppress and continue.
     subprocess.run(
-        ["install_name_tool", "-add_rpath", "@loader_path", str(binary)],
+        [install_name_tool, "-add_rpath", "@loader_path", str(binary)],
         check=False,
     )
 
