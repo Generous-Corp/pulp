@@ -2543,6 +2543,12 @@ pulp_add_test_suite(pulp-test-svg-rect-widget LIBRARIES pulp::view)
 # ScrollView tests
 pulp_add_test_suite(pulp-test-scroll-view LIBRARIES pulp::view)
 
+# Standalone ScrollBar widget tests (macos plugin-authoring item 6.3)
+pulp_add_test_suite(pulp-test-scroll-bar LIBRARIES pulp::view)
+
+# SidePanel slide-in animation tests (macos plugin-authoring item 6.3)
+pulp_add_test_suite(pulp-test-side-panel LIBRARIES pulp::view)
+
 # ComboBox dropdown interaction tests
 pulp_add_test_suite(pulp-test-combo-dropdown LIBRARIES pulp::view)
 
