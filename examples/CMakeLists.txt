@@ -10,6 +10,10 @@ endif()
 # Phase 2-3: PulpGain (trivial gain plugin)
 add_subdirectory(pulp-gain)
 
+# DAW bench harness — load in real DAWs to graduate host-quirk rows from
+# Speculative → Validated. See docs/validation/daw-bench/.
+add_subdirectory(host-bench-plugin)
+
 # Phase 4: PulpTone (oscillator synth + musical typing)
 add_subdirectory(pulp-tone)
 
