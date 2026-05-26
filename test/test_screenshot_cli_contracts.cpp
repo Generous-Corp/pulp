@@ -198,6 +198,23 @@ TEST_CASE("pulp-screenshot option parser handles aliases and last value wins",
     REQUIRE(options.backend_name == "cg");
 }
 
+TEST_CASE("pulp-screenshot help option stops parsing later malformed flags",
+          "[tools][screenshot][coverage]") {
+    ScreenshotCliOptions options;
+    REQUIRE_NOTHROW(options = parse_args({
+        "--script", "before-help.js",
+        "--help",
+        "--width", "not-a-number",
+        "--height", "also-bad"
+    }));
+
+    REQUIRE(options.help);
+    REQUIRE(options.script_path == "before-help.js");
+    REQUIRE(options.width == 400);
+    REQUIRE(options.height == 300);
+    REQUIRE(options.backend_was_defaulted);
+}
+
 TEST_CASE("pulp-screenshot backend normalization rejects unavailable explicit Skia",
           "[tools][screenshot][coverage]") {
     auto explicit_skia = parse_args({"--demo", "--backend", "skia"});
