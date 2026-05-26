@@ -50,7 +50,18 @@ endif()
 message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
 
 # ── Options ─────────────────────────────────────────────────────────────────
-option(PULP_BUILD_TESTS "Build unit tests" ON)
+# Tests default OFF on iOS and Android: both mobile targets ship plugins or
+# apps, not a CTest harness, and many tests depend on desktop-only libraries
+# (pulp::host, the CLI binary, plugin scanners) that we deliberately skip on
+# mobile. Forcing tests OFF on iOS also prevents downstream example
+# CMakeLists from invoking `catch_discover_tests` when the Catch2 include
+# was never loaded for that target. See 2026-05-24 AUv3 iOS validation plan
+# Phase iOS-A.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
+    option(PULP_BUILD_TESTS "Build unit tests" OFF)
+else()
+    option(PULP_BUILD_TESTS "Build unit tests" ON)
+endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 # SDK-release safety net for pulp #1817. When ON, configure FAILS if
@@ -163,7 +174,16 @@ if(PULP_ENABLE_GPU)
 endif()
 add_subdirectory(core/view)
 add_subdirectory(core/osc)
-add_subdirectory(core/host)
+# pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen
+# of arbitrary third-party plugins, so iOS builds don't ship hosting at all.
+# Skipping the subdirectory also dodges a libc++ availability error on the
+# iPhoneSimulator SDK: `scanner_clap.cpp` calls `runtime::log_warn(...)`,
+# which `std::format`-instantiates over arithmetic types — including
+# `long double to_chars`, marked unavailable on iOS. Tracked in the
+# 2026-05-24 AUv3 iOS validation plan (Phase iOS-A blocker).
+if(NOT IOS)
+    add_subdirectory(core/host)
+endif()
 add_subdirectory(core/dsl)
 
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
@@ -199,7 +219,12 @@ add_subdirectory(ship)
 add_subdirectory(tools/audio)
 
 # ── Testing ─────────────────────────────────────────────────────────────────
-if(PULP_BUILD_TESTS AND NOT ANDROID)
+# Tests are not built on iOS or Android — they assume a desktop POSIX shell,
+# linkable hosting libraries (pulp::host scans VST3/CLAP plugins on disk),
+# and a CTest harness that doesn't run inside a sandboxed iOS .app. Mobile
+# CI runs the test suite on macOS / Linux runners and the configure smoke
+# (Phase iOS-A) on the iPhoneSimulator SDK.
+if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     enable_testing()
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)

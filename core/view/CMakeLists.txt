@@ -416,7 +416,19 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script)
 endforeach()
 unset(_pulp_view_target)
 
-target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::host)
+target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform)
+# pulp::host is iOS-restricted: iOS sandbox disallows dlopen of arbitrary
+# third-party plugins (no VST3 / CLAP / LV2 hosting), and pulling host into
+# the link line on iOS surfaces a `long double to_chars` libc++ availability
+# error via `scanner_clap.cpp` → `runtime::log_warn` → `std::format`. The
+# header-only `plugin_manager_panel.hpp` lives in pulp-view and includes
+# `pulp/host/scanner.hpp`, so consumers that instantiate it on desktop still
+# need the symbol — link there. iOS AUv3 .appex bundles never instantiate
+# the panel, so dropping the PUBLIC dep there is safe and unblocks the
+# 2026-05-24 iOS AUv3 validation Phase iOS-A build smoke.
+if(NOT IOS)
+    target_link_libraries(pulp-view-core PUBLIC pulp::host)
+endif()
 target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 # pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
