@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.239.0
+    VERSION 0.240.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -81,35 +81,6 @@ option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source 
 option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters (Slice 0 of #516). Tooling-only; OFF by default so production builds see zero overhead." OFF)
 if(PULP_BENCHMARK)
     add_compile_definitions(PULP_BENCHMARK)
-endif()
-
-# DAW host-quirks default policy. Selects what `pulp::format::detect_quirks()`
-# returns by default — plugin authors can always override at runtime by
-# building a `HostQuirks` themselves and feeding it to the adapter.
-#
-#   all              — every detected quirk fires regardless of validation
-#                      tier (matches pre-2026-05-25 behavior; matches what
-#                      Pulp shipped before the tiered API).
-#   validated_only   — only `QuirkStatus::Validated` accommodations fire;
-#                      `Speculative` and `LessonOnly` are zeroed.
-#   off              — every accommodation (including cheap defenses) is
-#                      zeroed. Intended for fully-spec-compliant diagnostic
-#                      builds — use with care.
-#
-# See `docs/reference/host-quirks-policy.md` for the full opt-in / opt-out
-# story.
-set(PULP_HOST_QUIRKS_DEFAULT_POLICY "all" CACHE STRING
-    "Default policy applied by pulp::format::detect_quirks() (all | validated_only | off)")
-set_property(CACHE PULP_HOST_QUIRKS_DEFAULT_POLICY PROPERTY STRINGS
-    "all" "validated_only" "off")
-if(PULP_HOST_QUIRKS_DEFAULT_POLICY STREQUAL "validated_only")
-    add_compile_definitions(PULP_HOST_QUIRKS_DEFAULT_POLICY_VALIDATED_ONLY=1)
-elseif(PULP_HOST_QUIRKS_DEFAULT_POLICY STREQUAL "off")
-    add_compile_definitions(PULP_HOST_QUIRKS_DEFAULT_POLICY_OFF=1)
-elseif(NOT PULP_HOST_QUIRKS_DEFAULT_POLICY STREQUAL "all")
-    message(FATAL_ERROR
-        "PULP_HOST_QUIRKS_DEFAULT_POLICY must be one of: all, validated_only, off "
-        "(got '${PULP_HOST_QUIRKS_DEFAULT_POLICY}')")
 endif()
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
 set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
