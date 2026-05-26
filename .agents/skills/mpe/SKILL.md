@@ -227,6 +227,39 @@ API so it stays RT-safe in the audio render block; the
 `feed_collect` convenience wrapper allocates and is meant for
 tests / cold paths only.
 
+### UMP Session / Endpoint / VirtualEndpoint (post macOS-plan 8.1)
+
+Pulp now exposes a Pulp-native UMP transport surface in
+`core/midi/include/pulp/midi/`:
+
+- `UmpEndpoint` (abstract) — id + direction (`can_receive` /
+  `can_send`) + `send(UmpPacket)` + `set_receive_callback(...)`.
+  Concrete subclasses are platform-specific (CoreMIDI 2.0 on
+  macOS) or in-process (`VirtualUmpEndpoint`).
+- `UmpSession` — one per app/plugin; owns the OS MIDI client and a
+  registry of virtual endpoints. `enumerate_endpoints()` merges
+  OS-discovered and virtual entries; `open_endpoint(id, &status)`
+  returns a borrowed pointer (session owns lifetime).
+- `VirtualUmpEndpoint` — purely in-process, loopback-optional,
+  `send()` and `deliver()` counters. The only safe surface for
+  headless tests because CoreMIDI 2.0 connections require a real
+  MIDI Studio. `UmpSession::wire_virtual_loopback("from", "to")`
+  threads two virtual endpoints together for round-trip fixtures.
+
+When you add a new OS backend (WinRT MIDI 2.0, ALSA UMP), do NOT
+write a parallel session abstraction — implement the
+`OsBackendVTable` declared in `core/midi/src/ump_session_backend.hpp`
+and register it from a static initialiser in the platform
+TU. The cross-platform `ump_session.cpp` patches the vtable at
+load time; if no platform backend is linked, the session reports
+`os_backend_active() == false` and operates virtual-only (this is
+exactly what the test target exercises everywhere).
+
+Lifetime invariant: the input-port block on macOS captures the
+endpoint's raw pointer. The endpoint is `unique_ptr` inside
+`OsState::endpoints` — never reseat or move it after the block
+is installed, or the block's captured pointer dangles.
+
 ## Implementation note: where MpeVoiceTracker bodies live
 
 As of companion-track U-9 (2026-05-19), `MpeVoiceTracker`'s method bodies live in `core/midi/src/mpe_voice_tracker.cpp`, not inline in `core/midi/include/pulp/midi/mpe_voice_tracker.hpp`. The header keeps the class declaration + trivial inline getters; non-trivial methods (`process`, `set_config`, `reset`, `add_note`, `remove_note`, etc.) link from the .cpp.

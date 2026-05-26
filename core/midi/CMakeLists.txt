@@ -23,11 +23,16 @@ target_sources(pulp-midi PRIVATE
     src/mcoded7.cpp
     src/mpe_voice_tracker.cpp
     src/running_status.cpp
+    # macOS plan 8.1 — UMP Session + Endpoint + VirtualEndpoint.
+    # Cross-platform virtual-endpoint registry; platform .mm/.cpp adds
+    # the OS-backed half via a static-init registrar.
+    src/ump_session.cpp
 )
 
 if(APPLE AND NOT IOS)
     target_sources(pulp-midi PRIVATE
         platform/mac/coremidi_device.mm
+        platform/mac/ump_session_coremidi.mm
     )
     target_link_libraries(pulp-midi PRIVATE
         "-framework CoreMIDI"

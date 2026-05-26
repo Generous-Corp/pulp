@@ -720,6 +720,12 @@ pulp_add_test_suite(pulp-test-sysex-accumulator LIBRARIES pulp::midi)
 # extracted from the inline AUv3 / CoreMIDI state machines. Header-only.
 pulp_add_test_suite(pulp-test-ump-sysex7-reassembler LIBRARIES pulp::midi)
 
+# macOS plan 8.1: UmpSession + UmpEndpoint + VirtualUmpEndpoint —
+# headless tests for the cross-platform session + virtual-endpoint
+# registry. The macOS .mm path is exercised opportunistically; the
+# suite runs on every platform via the virtual-endpoint half.
+pulp_add_test_suite(pulp-test-ump-session LIBRARIES pulp::midi)
+
 # AsyncStream tests (Phase 2)
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 
