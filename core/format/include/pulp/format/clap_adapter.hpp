@@ -6,6 +6,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include <clap/clap.h>
@@ -81,6 +82,12 @@ struct PulpClapPlugin {
     std::unique_ptr<view::PluginViewHost> editor_host;
 #endif
     bool editor_visible = false;
+
+    // Item 1.3 — previous-block transport snapshot used to derive the
+    // `tempo_changed` / `time_sig_changed` / `transport_changed` flags
+    // on `ProcessContext`. Default-constructed (no previous block) so
+    // the first process() call after activation reports no changes.
+    detail::PlayheadSnapshot playhead_prev{};
 };
 
 // CLAP entry point and factory

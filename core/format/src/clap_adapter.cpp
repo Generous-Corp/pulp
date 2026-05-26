@@ -3,6 +3,7 @@
 
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -420,16 +421,55 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     ctx.sample_rate = self->sample_rate;
     ctx.num_samples = static_cast<int>(num_samples);
     if (process->transport) {
-        ctx.is_playing = (process->transport->flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
-        ctx.tempo_bpm = process->transport->tempo;
-        if (process->transport->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            ctx.position_beats = static_cast<double>(process->transport->song_pos_beats) / CLAP_BEATTIME_FACTOR;
+        const auto* tr = process->transport;
+        const uint32_t flags = tr->flags;
+
+        ctx.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
+        ctx.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
+        if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
+            ctx.tempo_bpm = tr->tempo;
         }
-        if (process->transport->flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
-            ctx.time_sig_numerator = static_cast<int>(process->transport->tsig_num);
-            ctx.time_sig_denominator = static_cast<int>(process->transport->tsig_denom);
+        if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+            ctx.position_beats =
+                static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
         }
+        if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
+            ctx.time_sig_numerator = static_cast<int>(tr->tsig_num);
+            ctx.time_sig_denominator = static_cast<int>(tr->tsig_denom);
+        }
+
+        // Item 1.3 — cycle / loop range. CLAP gates this on
+        // CLAP_TRANSPORT_IS_LOOP_ACTIVE; loop_start_beats /
+        // loop_end_beats are CLAP fixed-point `clap_beattime` so they
+        // convert through the same factor as song_pos_beats.
+        ctx.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
+        if (ctx.is_looping) {
+            ctx.loop_start_beats =
+                static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
+            ctx.loop_end_beats =
+                static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
+        }
+
+        // Item 1.3 — bar index. CLAP exposes `bar_number` directly
+        // (bar at song pos 0 has bar 0), so prefer that over deriving
+        // from beats. Hosts that don't supply a beats timeline leave
+        // `bar_number` at 0, which matches the documented default.
+        if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+            ctx.bar = static_cast<int64_t>(tr->bar_number);
+        } else {
+            pulp::format::detail::derive_bar_from_beats(ctx);
+        }
+
+        // Item 1.3 — host clock / SMPTE frame rate are intentionally
+        // left at the documented "host did not provide" sentinels:
+        // CLAP 1.2.2's `clap_event_transport` carries neither field.
+        // `ctx.host_time_ns` stays 0, `ctx.frame_rate` stays
+        // FrameRate::unknown — plugin authors must check before use.
     }
+
+    // Item 1.3 — diff against the previous block to populate the three
+    // change flags. Stateful; updates `self->playhead_prev` in place.
+    pulp::format::detail::compute_playhead_changes(ctx, self->playhead_prev);
 
     // Snapshot parameter values to detect plugin-side changes
     auto all_params = self->store.all_params();

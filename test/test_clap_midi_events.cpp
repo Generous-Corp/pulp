@@ -636,7 +636,11 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
 
     clap_event_transport_t transport{};
     transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    // Item 1.3 — adapter now gates `tempo_bpm` on CLAP_TRANSPORT_HAS_TEMPO
+    // per the CLAP spec contract (transport.tempo is only valid when the
+    // HAS_TEMPO flag is set; pre-1.3 code read it unconditionally).
     transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_TEMPO
                     | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
                     | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
     transport.tempo = 132.25;
@@ -657,6 +661,92 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);
     REQUIRE(g_capturing->captured_context.time_sig_denominator == 8);
     REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
+}
+
+TEST_CASE("CLAP item-1.3 transport extensions land on ProcessContext",
+          "[clap][transport][item-13]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_IS_RECORDING
+                    | CLAP_TRANSPORT_IS_LOOP_ACTIVE
+                    | CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
+                    | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    transport.tempo = 100.0;
+    transport.song_pos_beats = 8 * CLAP_BEATTIME_FACTOR;       // beat 8
+    transport.loop_start_beats = 4 * CLAP_BEATTIME_FACTOR;     // beat 4
+    transport.loop_end_beats = 12 * CLAP_BEATTIME_FACTOR;      // beat 12
+    transport.bar_number = 2;
+    transport.tsig_num = 4;
+    transport.tsig_denom = 4;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+
+    const auto& ctx = g_capturing->captured_context;
+    REQUIRE(ctx.is_playing);
+    REQUIRE(ctx.is_recording);
+    REQUIRE(ctx.is_looping);
+    REQUIRE(ctx.loop_start_beats == 4.0);
+    REQUIRE(ctx.loop_end_beats == 12.0);
+    REQUIRE(ctx.bar == 2);
+    // CLAP carries neither host_time_ns nor frame_rate — the adapter
+    // leaves the documented sentinels alone.
+    REQUIRE(ctx.host_time_ns == 0);
+    REQUIRE(ctx.frame_rate == pulp::format::FrameRate::unknown);
+    // First block raises no change flags (no previous-block snapshot).
+    REQUIRE_FALSE(ctx.tempo_changed);
+    REQUIRE_FALSE(ctx.time_sig_changed);
+    REQUIRE_FALSE(ctx.transport_changed);
+}
+
+TEST_CASE("CLAP item-1.3 change flags flip on the second block",
+          "[clap][transport][item-13][change-flags]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t initial{};
+    initial.header = make_header(sizeof(initial), CLAP_EVENT_TRANSPORT, 0);
+    initial.flags = CLAP_TRANSPORT_HAS_TEMPO | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    initial.tempo = 100.0;
+    initial.tsig_num = 4;
+    initial.tsig_denom = 4;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames, &initial) == CLAP_PROCESS_CONTINUE);
+
+    // First block — no previous snapshot — never raises change flags.
+    REQUIRE_FALSE(g_capturing->captured_context.tempo_changed);
+
+    clap_event_transport_t bumped{};
+    bumped.header = make_header(sizeof(bumped), CLAP_EVENT_TRANSPORT, 0);
+    bumped.flags = CLAP_TRANSPORT_IS_PLAYING
+                 | CLAP_TRANSPORT_HAS_TEMPO
+                 | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    bumped.tempo = 180.0;        // changed
+    bumped.tsig_num = 7;         // changed
+    bumped.tsig_denom = 8;       // changed
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames, &bumped) == CLAP_PROCESS_CONTINUE);
+
+    const auto& ctx = g_capturing->captured_context;
+    REQUIRE(ctx.tempo_changed);
+    REQUIRE(ctx.time_sig_changed);
+    REQUIRE(ctx.transport_changed);  // is_playing flipped false → true
 }
 
 TEST_CASE("CLAP emits parameter event when processor changes automatable state",
