@@ -38,6 +38,45 @@ TEST_CASE("AudioWorkgroup join without workgroup uses fallback", "[audio][workgr
     }
 }
 
+// Regression: #2970 / Codex comment 3305855151 — the CoreAudio render
+// callback used to set `wg_joined_` to true UNCONDITIONALLY, even if
+// `join_from_audio_thread()` returned false (a transient failure on the
+// first render call). After that, every later render skipped the join,
+// permanently leaving the audio thread without workgroup membership /
+// RT-priority fallback for the rest of the session.
+//
+// The fix at coreaudio_device.mm:313 uses the join return value to gate
+// the flag flip. We mirror the call-site pattern here so future refactors
+// of the workgroup contract can't silently regress the device side:
+// AudioWorkgroup::join_from_audio_thread() must always return the actual
+// success/failure of the join attempt (NOT "true if attempted"), and
+// is_joined() must stay false until a join actually succeeds.
+TEST_CASE("AudioWorkgroup join_from_audio_thread reports actual success/failure",
+          "[audio][workgroup][issue-2970]") {
+    AudioWorkgroup wg;
+
+    // Contract 1: a fresh workgroup is not joined.
+    REQUIRE_FALSE(wg.is_joined());
+
+    // Contract 2: the return value of join_from_audio_thread() must equal
+    // the resulting is_joined() state. The CoreAudio device callback relies
+    // on this to decide whether to flip wg_joined_ — if the return drifted
+    // out of sync with is_joined(), the device-level retry loop would
+    // either spin forever or, like the bug, stop retrying prematurely.
+    bool result = wg.join_from_audio_thread();
+    REQUIRE(result == wg.is_joined());
+
+    if (result) {
+        // Contract 3 (on success): a second join is idempotent.
+        REQUIRE(wg.join_from_audio_thread());
+        REQUIRE(wg.is_joined());
+        wg.leave();
+        REQUIRE_FALSE(wg.is_joined());
+        // Contract 4: after leave, a subsequent join attempt is allowed.
+        REQUIRE(wg.join_from_audio_thread() == wg.is_joined());
+    }
+}
+
 #if !defined(__APPLE__)
 TEST_CASE("AudioWorkgroup non-Apple fallback join is idempotent",
           "[audio][workgroup][issue-640]") {

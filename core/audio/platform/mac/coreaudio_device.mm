@@ -314,8 +314,17 @@ OSStatus CoreAudioDevice::render_callback(
         // join_from_audio_thread() returns immediately if there's no
         // workgroup set; it falls back to Mach realtime priority in
         // that case so the thread is still RT-tagged.
-        self->wg_join_.join_from_audio_thread();
-        self->wg_joined_.store(true, std::memory_order_release);
+        //
+        // Only flip `wg_joined_` when the join (or fallback RT-priority
+        // bump) actually succeeded. The previous unconditional store
+        // permanently disabled all future join attempts after the first
+        // transient failure (e.g. workgroup setup hadn't completed yet
+        // on the first render), so the audio thread could run the entire
+        // session without workgroup membership or any RT priority bump.
+        // (Codex #2970 / 3305855151.)
+        if (self->wg_join_.join_from_audio_thread()) {
+            self->wg_joined_.store(true, std::memory_order_release);
+        }
     }
 
     if (!self->callback_) {
