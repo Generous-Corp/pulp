@@ -4,6 +4,7 @@
 #include <pulp/format/host_quirks/bitwig.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
 #include <pulp/format/host_quirks/fl_studio.hpp>
+#include <pulp/format/host_quirks/logic_pro.hpp>
 #include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
 
@@ -30,11 +31,6 @@ void apply_reaper_quirks(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_midsession_setstate = true;
 }
 
-void apply_logic_pro_quirks(HostQuirks& q, HostVersion /*v*/) {
-    q.logic_au_channel_probe_cap = 8; // row 19 — Logic hangs above 8.
-    q.logic_au_tail_time_conversion = true;
-}
-
 void apply_pro_tools_quirks(HostQuirks& q, HostVersion /*v*/) {
     q.pro_tools_aax_sidechain_negotiation = true;
     q.pro_tools_aax_latency_callback_push = true;
@@ -54,7 +50,7 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
         case HostType::FLStudio:      host_quirks::apply_fl_studio(q, version); break;
         case HostType::Reaper:        apply_reaper_quirks(q, version); break;
         case HostType::LogicPro:
-        case HostType::GarageBand:    apply_logic_pro_quirks(q, version); break;
+        case HostType::GarageBand:    host_quirks::apply_logic_pro(q, version); break;
         case HostType::ProTools:      apply_pro_tools_quirks(q, version); break;
         // StudioOne / DigitalPerformer / etc. land their flags here
         // when the per-host fixes ship in later batches.

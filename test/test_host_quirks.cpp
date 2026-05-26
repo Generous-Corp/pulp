@@ -242,3 +242,39 @@ TEST_CASE("make_quirks_for FL Studio leaves other hosts' flags off",
     REQUIRE(q.logic_au_channel_probe_cap == 64);
     REQUIRE(q.au_v3_bypass_dual_tracking == false);
 }
+
+// ── macOS plan item 5.10 — Logic Pro AU dispatch (DAW-quirks rows
+//    19 + 20). Factory extracted to
+//    `core/format/include/pulp/format/host_quirks/logic_pro.hpp`. ──
+
+TEST_CASE("make_quirks_for Logic Pro keeps channel cap + tail-time conversion on",
+          "[format][host-quirks][logic]") {
+    // Pre-existing "Logic caps channel probe at 8" already covers the
+    // happy path; this case pins that the extracted header keeps the
+    // same flags on across the modern Logic releases.
+    auto q = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(q.logic_au_channel_probe_cap == 8);
+    REQUIRE(q.logic_au_tail_time_conversion == true);
+    auto modern = make_quirks_for(HostType::LogicPro, HostVersion{12, 0});
+    REQUIRE(modern.logic_au_channel_probe_cap == 8);
+    REQUIRE(modern.logic_au_tail_time_conversion == true);
+}
+
+TEST_CASE("make_quirks_for GarageBand inherits Logic AU quirks via shared header",
+          "[format][host-quirks][logic]") {
+    auto q = make_quirks_for(HostType::GarageBand, HostVersion{10, 4});
+    REQUIRE(q.logic_au_channel_probe_cap == 8);
+    REQUIRE(q.logic_au_tail_time_conversion == true);
+}
+
+TEST_CASE("make_quirks_for Logic Pro leaves other hosts' flags off",
+          "[format][host-quirks][logic][isolation]") {
+    auto q = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(q.logic_au_channel_probe_cap == 8);
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+    REQUIRE(q.bitwig_vst3_linux_repaint_after_resize == false);
+    REQUIRE(q.fl_studio_setactive_process_mutex == false);
+    REQUIRE(q.reaper_process_while_bypassed == false);
+}
