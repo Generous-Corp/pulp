@@ -9,6 +9,7 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <cmath>
@@ -463,47 +464,37 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
                     midi_in.add(me);
                 }
             } else if (event->head.eventType == AURenderEventMIDIEventList) {
-                // AUMIDIEventList delivers UMP-encoded events. For
-                // sysex the UMP type-3 (7-bit Data Messages) stream
-                // carries the F0..F7 payload spread across 8-byte
-                // (2-word) packets. Each word's top nibble identifies
-                // the UMP message type; nibble 0x3 = sysex7.
+                // AUMIDIEventList delivers UMP-encoded events. The
+                // UMP message-type nibble (bits 28-31 of word 0)
+                // identifies the message class; nibble 0x3 is sysex7
+                // and reassembly is delegated to the shared
+                // UmpSysex7Reassembler in core/midi (macOS plan 8.2 —
+                // extracts the previously inline #292 fix to a
+                // single, tested implementation shared with the
+                // CoreMIDI device backend).
                 //
-                // Each sysex7 UMP also carries a 4-bit status in
-                // bits 20-23 of word 0:
-                //   0x0 = complete (single-packet sysex)
-                //   0x1 = start
-                //   0x2 = continue
-                //   0x3 = end
-                //
-                // We accumulate start→continue→end spans into one
-                // payload and emit a single add_sysex per logical
-                // sysex message (#292 P2 — preserve boundaries).
-                //
-                // Each type-3 message is 2 UMP words, so the cursor
-                // must advance by 2 per message — not 1 — otherwise
-                // the second word's payload nibble can masquerade as
-                // a new message header (#292 P1 — advance by size).
+                // The reassembler emits each completed logical sysex
+                // exactly once; we tag the resulting payload with the
+                // surrounding MIDIEventList's event sample time.
                 const auto& elist = event->MIDIEventsList;
                 const MIDIEventList* packets = &elist.eventList;
                 if (packets) {
-                    std::vector<uint8_t> payload;
-                    bool in_progress = false;
-                    const MIDIEventPacket* pkt = &packets->packet[0];
-
-                    auto extract_bytes = [&](uint32_t w0, uint32_t w1,
-                                             uint32_t size, std::vector<uint8_t>& out) {
-                        const uint8_t buf[6] = {
-                            static_cast<uint8_t>((w0 >>  8) & 0xFF),
-                            static_cast<uint8_t>((w0 >>  0) & 0xFF),
-                            static_cast<uint8_t>((w1 >> 24) & 0xFF),
-                            static_cast<uint8_t>((w1 >> 16) & 0xFF),
-                            static_cast<uint8_t>((w1 >>  8) & 0xFF),
-                            static_cast<uint8_t>((w1 >>  0) & 0xFF),
-                        };
-                        for (uint32_t e = 0; e < size && e < 6; ++e)
-                            out.push_back(buf[e]);
+                    struct EmitCtx {
+                        pulp::midi::MidiBuffer* sink;
+                        int32_t sample_offset;
                     };
+                    EmitCtx ctx{
+                        &midi_in,
+                        static_cast<int32_t>(event->head.eventSampleTime),
+                    };
+                    auto emit = [](const std::vector<uint8_t>& payload,
+                                   void* user) {
+                        auto* c = static_cast<EmitCtx*>(user);
+                        c->sink->add_sysex(payload, c->sample_offset, 0.0);
+                    };
+
+                    pulp::midi::UmpSysex7Reassembler reassembler;
+                    const MIDIEventPacket* pkt = &packets->packet[0];
 
                     for (UInt32 i = 0; i < packets->numPackets; ++i) {
                         UInt32 w = 0;
@@ -514,6 +505,10 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
                             // UMP message word length by type. Types
                             // not listed default to 1 so we still
                             // advance past unknown messages safely.
+                            // Each type-3 message is 2 UMP words; the
+                            // cursor advances by `ump_words`, not 1,
+                            // so word1 cannot masquerade as a fresh
+                            // message header (#292 P1).
                             UInt32 ump_words = 1;
                             switch (mt) {
                                 case 0x0: case 0x1: case 0x2:
@@ -531,41 +526,8 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
                             if (w + ump_words > pkt->wordCount) break;
 
                             if (mt == 0x3) {
-                                const uint8_t status = (word0 >> 20) & 0x0F;
-                                const uint32_t size   = (word0 >> 16) & 0x0F;
                                 const uint32_t word1 = pkt->words[w + 1];
-
-                                if (status == 0x0) {
-                                    // Complete single-packet sysex
-                                    std::vector<uint8_t> p;
-                                    extract_bytes(word0, word1, size, p);
-                                    if (!p.empty()) {
-                                        midi_in.add_sysex(std::move(p),
-                                            static_cast<int32_t>(event->head.eventSampleTime),
-                                            0.0);
-                                    }
-                                } else if (status == 0x1) {
-                                    // Start — reset accumulator
-                                    payload.clear();
-                                    extract_bytes(word0, word1, size, payload);
-                                    in_progress = true;
-                                } else if (status == 0x2 && in_progress) {
-                                    extract_bytes(word0, word1, size, payload);
-                                } else if (status == 0x3 && in_progress) {
-                                    extract_bytes(word0, word1, size, payload);
-                                    if (!payload.empty()) {
-                                        midi_in.add_sysex(std::move(payload),
-                                            static_cast<int32_t>(event->head.eventSampleTime),
-                                            0.0);
-                                    }
-                                    payload.clear();
-                                    in_progress = false;
-                                }
-                                // status 0x2/0x3 without in_progress
-                                // arriving first means we missed a
-                                // start; drop silently — corrupting
-                                // the Processor's view is worse than
-                                // dropping one malformed sysex.
+                                reassembler.feed_packet(word0, word1, emit, &ctx);
                             }
 
                             w += ump_words;
