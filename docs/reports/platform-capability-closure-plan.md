@@ -27,7 +27,7 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
 | Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/danielraffel/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased and locally validated on `origin/main` `e68b1cbd` after main consumed SDK `0.249.0`; SDK version is `0.250.0`; hosted Ubuntu install-consumer smoke passed on the SheenBidi install fix | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open; rebased and locally validated on `origin/main` `a7e223f8` after main consumed SDK `0.250.0`; SDK version is `0.251.0`; hosted Ubuntu install-consumer smoke passed on the SheenBidi install fix | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; locally rebased/validated; final SDK bump and push pending after #2822 | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
@@ -769,6 +769,22 @@ PR2 validation and PR state:
   --mode report`, `python3 tools/scripts/version_bump_check.py --base
   origin/main --config tools/scripts/versioning.json --mode=report
   --require-bump-for-fix-feat --accept-intent-trailers` for SDK `0.250.0`,
+  Release/GPU-off configure and build of `pulp-test-osc`,
+  `pulp-test-osc-channel`, `pulp-test-events`, and `pulp-test-ipc`,
+  `ctest --test-dir build -R '^(OscChannel|OSC|IPC|EventLoop)'
+  --output-on-failure` 132/132, Release flag verification for
+  `pulp-test-osc`, `tools/check-docs.sh` with the existing 76 warnings, and
+  diff hygiene.
+- While the refreshed `27bacda5c` checks were running, `main` advanced through
+  #2966/#2967 and consumed SDK `0.250.0`. The branch was rebased again onto
+  `origin/main` at `a7e223f8`; the now-upstream `0.250.0` bump was dropped
+  during rebase, and a fresh SDK bump to `0.251.0` was applied. Local
+  validation passed again: `python3 tools/scripts/test_audit_top_level.py`
+  10/10, `python3 tools/audit.py --`, `python3
+  tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode
+  report`, `python3 tools/scripts/version_bump_check.py --base origin/main
+  --config tools/scripts/versioning.json --mode=report
+  --require-bump-for-fix-feat --accept-intent-trailers` for SDK `0.251.0`,
   Release/GPU-off configure and build of `pulp-test-osc`,
   `pulp-test-osc-channel`, `pulp-test-events`, and `pulp-test-ipc`,
   `ctest --test-dir build -R '^(OscChannel|OSC|IPC|EventLoop)'
