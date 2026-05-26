@@ -18,6 +18,7 @@ using Catch::Matchers::WithinAbs;
 namespace {
 
 constexpr PulpParamID kBridgeParamId = 101;
+constexpr PulpParamID kSecondBridgeParamId = 202;
 
 class TestBridgeProcessor : public pulp::format::Processor {
 public:
@@ -45,8 +46,37 @@ public:
                  const pulp::format::ProcessContext&) override {}
 };
 
+class EffectBridgeProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "PulpBridgeEffect",
+            .manufacturer = "Pulp Labs",
+            .bundle_id = "com.pulp.test.bridge-effect",
+            .version = "2.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+            .accepts_midi = false,
+            .produces_midi = true,
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+};
+
 std::unique_ptr<pulp::format::Processor> create_test_processor() {
     return std::make_unique<TestBridgeProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_effect_processor() {
+    return std::make_unique<EffectBridgeProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_null_processor() {
@@ -76,6 +106,12 @@ pulp::state::StateStore& bridge_store() {
             .unit = "dB",
             .range = {-60.0f, 24.0f, 0.0f, 0.1f},
         });
+        store.add_parameter({
+            .id = kSecondBridgeParamId,
+            .name = "Bridge Mix",
+            .unit = "%",
+            .range = {0.0f, 100.0f, 50.0f, 1.0f},
+        });
         initialized = true;
     }
     return store;
@@ -97,17 +133,29 @@ TEST_CASE("PulpBridge fallback store parameter APIs are deterministic",
     const auto* param = store.info(kBridgeParamId);
     REQUIRE(param != nullptr);
 
-    REQUIRE(pulp_param_count() == 1);
+    REQUIRE(pulp_param_count() == 2);
 
     PulpParamInfo info{};
     REQUIRE_FALSE(pulp_param_info(-1, &info));
-    REQUIRE_FALSE(pulp_param_info(1, &info));
+    REQUIRE_FALSE(pulp_param_info(2, &info));
     REQUIRE_FALSE(pulp_param_info(0, nullptr));
     REQUIRE(pulp_param_info(0, &info));
     REQUIRE(info.id == kBridgeParamId);
     REQUIRE(std::string(info.name) == "Bridge Gain");
     REQUIRE(std::string(info.unit) == "dB");
+    REQUIRE_THAT(info.min_value, WithinAbs(-60.0f, 0.0001f));
+    REQUIRE_THAT(info.max_value, WithinAbs(24.0f, 0.0001f));
     REQUIRE_THAT(info.default_value, WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(info.step, WithinAbs(0.1f, 0.0001f));
+
+    REQUIRE(pulp_param_info(1, &info));
+    REQUIRE(info.id == kSecondBridgeParamId);
+    REQUIRE(std::string(info.name) == "Bridge Mix");
+    REQUIRE(std::string(info.unit) == "%");
+    REQUIRE_THAT(info.min_value, WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(info.max_value, WithinAbs(100.0f, 0.0001f));
+    REQUIRE_THAT(info.default_value, WithinAbs(50.0f, 0.0001f));
+    REQUIRE_THAT(info.step, WithinAbs(1.0f, 0.0001f));
 
     REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
 
@@ -149,6 +197,7 @@ TEST_CASE("PulpBridge state serialize and deserialize use the fallback store",
           "[apple][bridge][state]") {
     reset_bridge_store();
     pulp_param_set(kBridgeParamId, -12.5f);
+    pulp_param_set(kSecondBridgeParamId, 75.0f);
 
     REQUIRE(pulp_state_serialize(nullptr) == nullptr);
 
@@ -159,10 +208,12 @@ TEST_CASE("PulpBridge state serialize and deserialize use the fallback store",
     REQUIRE(std::memcmp(bytes, "PULP", 4) == 0);
 
     pulp_param_set(kBridgeParamId, 9.0f);
+    pulp_param_set(kSecondBridgeParamId, 12.0f);
     REQUIRE_FALSE(pulp_state_deserialize(nullptr, size));
     REQUIRE_FALSE(pulp_state_deserialize(bytes, 0));
     REQUIRE(pulp_state_deserialize(bytes, size));
     REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(-12.5f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get(kSecondBridgeParamId), WithinAbs(75.0f, 0.0001f));
 
     pulp_free(bytes);
     pulp_free(nullptr);
@@ -183,7 +234,7 @@ TEST_CASE("PulpBridge parameter calls fail closed for unknown ids",
     pulp_param_set_normalized(kMissingParamId, 0.75f);
     REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
     REQUIRE_THAT(pulp_param_get_normalized(kMissingParamId), WithinAbs(0.0f, 0.0001f));
-    REQUIRE(pulp_param_count() == 1);
+    REQUIRE(pulp_param_count() == 2);
 
     PulpParamInfo info{};
     REQUIRE(pulp_param_info(0, &info));
@@ -208,10 +259,35 @@ TEST_CASE("PulpBridge parameter calls fail closed for unknown ids",
     REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
 }
 
+TEST_CASE("PulpBridge parameters clamp raw and normalized values",
+          "[apple][bridge][params][coverage]") {
+    reset_bridge_store();
+
+    pulp_param_set(kBridgeParamId, -999.0f);
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(-60.0f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get_normalized(kBridgeParamId), WithinAbs(0.0f, 0.0001f));
+
+    pulp_param_set(kBridgeParamId, 999.0f);
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(24.0f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get_normalized(kBridgeParamId), WithinAbs(1.0f, 0.0001f));
+
+    pulp_param_set_normalized(kSecondBridgeParamId, -1.0f);
+    REQUIRE_THAT(pulp_param_get(kSecondBridgeParamId), WithinAbs(0.0f, 0.0001f));
+
+    pulp_param_set_normalized(kSecondBridgeParamId, 2.0f);
+    REQUIRE_THAT(pulp_param_get(kSecondBridgeParamId), WithinAbs(100.0f, 0.0001f));
+
+    pulp_param_set(kSecondBridgeParamId, 25.0f);
+    pulp_param_reset(999999);
+    REQUIRE_THAT(pulp_param_get(kSecondBridgeParamId), WithinAbs(25.0f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get_normalized(kSecondBridgeParamId), WithinAbs(0.25f, 0.0001f));
+}
+
 TEST_CASE("PulpBridge deserialize rejects malformed state without clobbering values",
           "[apple][bridge][state][coverage]") {
     reset_bridge_store();
     pulp_param_set(kBridgeParamId, 7.25f);
+    pulp_param_set(kSecondBridgeParamId, 33.0f);
 
     std::vector<uint8_t> empty;
     std::vector<uint8_t> bad_magic = {'N', 'O', 'P', 'E'};
@@ -225,6 +301,7 @@ TEST_CASE("PulpBridge deserialize rejects malformed state without clobbering val
 
     REQUIRE_FALSE(pulp_state_deserialize(truncated.data(), static_cast<int>(truncated.size())));
     REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(7.25f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get(kSecondBridgeParamId), WithinAbs(33.0f, 0.0001f));
 
     int size = 0;
     uint8_t* bytes = pulp_state_serialize(&size);
@@ -234,7 +311,34 @@ TEST_CASE("PulpBridge deserialize rejects malformed state without clobbering val
     REQUIRE(std::memcmp(bytes, "PULP", 4) == 0);
     REQUIRE(pulp_state_deserialize(bytes, size));
     REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(7.25f, 0.0001f));
+    REQUIRE_THAT(pulp_param_get(kSecondBridgeParamId), WithinAbs(33.0f, 0.0001f));
     pulp_free(bytes);
+}
+
+TEST_CASE("PulpBridge state serialization snapshots current parameter values",
+          "[apple][bridge][state][coverage]") {
+    reset_bridge_store();
+
+    pulp_param_set(kBridgeParamId, -6.0f);
+    int first_size = 0;
+    uint8_t* first = pulp_state_serialize(&first_size);
+    REQUIRE(first != nullptr);
+    REQUIRE(first_size > 0);
+
+    pulp_param_set(kBridgeParamId, 18.0f);
+    int second_size = 0;
+    uint8_t* second = pulp_state_serialize(&second_size);
+    REQUIRE(second != nullptr);
+    REQUIRE(second_size == first_size);
+
+    REQUIRE(pulp_state_deserialize(first, first_size));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(-6.0f, 0.0001f));
+
+    REQUIRE(pulp_state_deserialize(second, second_size));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(18.0f, 0.0001f));
+
+    pulp_free(first);
+    pulp_free(second);
 }
 
 TEST_CASE("PulpBridge plugin info rejects missing factories and null outputs",
@@ -302,4 +406,32 @@ TEST_CASE("PulpBridge plugin info string storage survives later descriptor calls
     REQUIRE(std::string(second.manufacturer) == "Pulp");
     REQUIRE(std::string(second.version) == "1.2.3");
     REQUIRE(std::string(second.bundle_id) == "com.pulp.test.bridge");
+}
+
+TEST_CASE("PulpBridge plugin info updates static string storage per descriptor",
+          "[apple][bridge][plugin-info][coverage]") {
+    PulpPluginInfo info{};
+
+    {
+        ScopedFactoryRegistration registration(create_test_processor);
+        REQUIRE(pulp_plugin_info(&info));
+        REQUIRE(std::string(info.name) == "PulpBridgeTest");
+        REQUIRE(info.category ==
+                static_cast<int>(pulp::format::PluginCategory::Instrument));
+        REQUIRE(info.accepts_midi);
+        REQUIRE_FALSE(info.produces_midi);
+    }
+
+    {
+        ScopedFactoryRegistration registration(create_effect_processor);
+        REQUIRE(pulp_plugin_info(&info));
+        REQUIRE(std::string(info.name) == "PulpBridgeEffect");
+        REQUIRE(std::string(info.manufacturer) == "Pulp Labs");
+        REQUIRE(std::string(info.version) == "2.0.0");
+        REQUIRE(std::string(info.bundle_id) == "com.pulp.test.bridge-effect");
+        REQUIRE(info.category ==
+                static_cast<int>(pulp::format::PluginCategory::Effect));
+        REQUIRE_FALSE(info.accepts_midi);
+        REQUIRE(info.produces_midi);
+    }
 }
