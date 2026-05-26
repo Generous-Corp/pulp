@@ -26,7 +26,7 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | Track | Branch target | Worktree target | Status | Done means |
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
-| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; rebased onto `origin/main` at `0939e9b19`; GitHub base later advanced to `8d0aa3b44`; focused dispatcher/IPC validation passing; shared hosted CI portability fixes added for inspector/design-debug failures found during the PR sweep; SDK version is `0.218.0` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
+| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | PR [#2825](https://github.com/danielraffel/pulp/pull/2825) open; rebased onto current `origin/main` at `66428b24`; focused dispatcher/IPC/OSC, inspector, and design-debug validation passing; shared hosted CI portability fixes added for inspector/design-debug/OSC Linux failures found during the PR sweep; SDK version is `0.236.0` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
 | OSC | `feature/platform-osc` | `pulp-platform-osc` | PR [#2822](https://github.com/danielraffel/pulp/pull/2822) open, ready for review; rebased onto current `main`; local OSC suite and manual GPU-off diff coverage passing | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, focused UDP and pure parser tests |
 | Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | Queued | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
@@ -325,8 +325,8 @@ Native event loop local validation:
   `python3 tools/scripts/test_local_diff_cover.py` — 17 tests.
 - `git diff --check` passed.
 - After the branch was rebased onto `origin/main` at `0939e9b19`, the stale
-  `0.209.0` version bump remained dropped. After `main` advanced to
-  `0.217.0`, this branch now carries a fresh required SDK bump to `0.218.0`.
+  `0.209.0` version bump remained dropped. After `main` advanced through
+  `0.235.0`, this branch now carries a fresh required SDK bump to `0.236.0`.
   Focused Release/GPU-off validation passed:
   `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF`,
   `cmake --build build --target pulp-test-events pulp-test-ipc pulp-test-osc
