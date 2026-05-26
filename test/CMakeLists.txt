@@ -1668,6 +1668,24 @@ if(PULP_ENABLE_GPU)
     endif()
     catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # HeadlessSurface CI wrapper (plan §6.7) — one-call offscreen
+    # Dawn/Skia helper for golden-test fixtures. Compiles on every
+    # build; runtime cases gate on PULP_HAS_SKIA && __APPLE__ at the
+    # source level and otherwise soft-skip when no Dawn adapter is
+    # available. Needs Skia headers directly for the SkPngEncoder /
+    # SkPixmap symbols the wrapper uses to PNG-encode the readback.
+    add_executable(pulp-test-headless-surface test_headless_surface.cpp)
+    target_link_libraries(pulp-test-headless-surface PRIVATE
+        pulp::render pulp::canvas Catch2::Catch2WithMain)
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-headless-surface PRIVATE
+            PULP_HAS_SKIA=1)
+        target_include_directories(pulp-test-headless-surface PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+    endif()
+    catch_discover_tests(pulp-test-headless-surface
+        ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # GPU compute tests (Phase 11 feasibility)
     add_executable(pulp-test-gpu-compute test_gpu_compute.cpp)
     target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
