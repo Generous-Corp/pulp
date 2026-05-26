@@ -52,6 +52,17 @@ elseif(UNIX AND NOT APPLE)
     target_sources(pulp-events PRIVATE
         platform/linux/avahi_backend.cpp
     )
+elseif(WIN32)
+    # Windows Bonjour SDK backend — runtime-LoadLibrary dnssd.dll;
+    # no build-time dependency on the Bonjour SDK headers or libs.
+    target_sources(pulp-events PRIVATE
+        platform/win/bonjour_backend.cpp
+    )
+    # ws2_32 supplies select / htons / ntohs / getaddrinfo. iphlpapi
+    # is harmless to link and matches the existing socket-shaped code
+    # paths in core/runtime so we don't introduce a new dependency
+    # boundary here.
+    target_link_libraries(pulp-events PRIVATE ws2_32)
 endif()
 
 target_link_libraries(pulp-events PUBLIC pulp::runtime)

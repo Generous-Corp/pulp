@@ -13,6 +13,11 @@ std::unique_ptr<NetworkServiceDiscovery::Backend> make_bonjour_backend();
 // Returns nullptr when libavahi-client.so.3 isn't installed; caller
 // degrades to the "no mDNS available" path.
 std::unique_ptr<NetworkServiceDiscovery::Backend> make_avahi_backend();
+#elif defined(_WIN32)
+// Implemented in platform/win/bonjour_backend.cpp.
+// Returns nullptr when dnssd.dll isn't installed; caller degrades to
+// the "no mDNS available" path.
+std::unique_ptr<NetworkServiceDiscovery::Backend> make_windows_bonjour_backend();
 #endif
 
 bool install_default_backend(NetworkServiceDiscovery& nsd) {
@@ -30,10 +35,16 @@ bool install_default_backend(NetworkServiceDiscovery& nsd) {
     if (!backend) return false;
     nsd.install_backend(std::move(backend));
     return true;
+#elif defined(_WIN32)
+    // Bonjour SDK for Windows ships `dnssd.dll`; we resolve it at
+    // runtime. Returns false on stock Windows boxes that have never
+    // had the SDK installed — same honest contract as Linux without
+    // avahi-daemon.
+    auto backend = make_windows_bonjour_backend();
+    if (!backend) return false;
+    nsd.install_backend(std::move(backend));
+    return true;
 #else
-    // Windows (Bonjour SDK / WinRT NsdManager) backend still pending —
-    // a follow-up commit installs it via runtime LoadLibrary so the
-    // build doesn't hard-fail when the SDK isn't present.
     (void)nsd;
     return false;
 #endif

@@ -923,6 +923,24 @@ TEST_CASE("Avahi backend factory returns nullptr or working backend",
 }
 #endif  // __linux__
 
+#if defined(_WIN32)
+namespace pulp::events {
+std::unique_ptr<NetworkServiceDiscovery::Backend> make_windows_bonjour_backend();
+}
+TEST_CASE("Windows Bonjour factory returns nullptr or working backend",
+          "[events][service-discovery][bonjour][platform]") {
+    auto backend = pulp::events::make_windows_bonjour_backend();
+    if (!backend) {
+        SUCCEED("dnssd.dll not present on this host; "
+                "make_windows_bonjour_backend honestly returned nullptr.");
+        return;
+    }
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::move(backend));
+    REQUIRE(nsd.has_backend());
+}
+#endif  // _WIN32
+
 #if defined(__APPLE__)
 #include <unistd.h>  // ::getpid for unique smoke-test service name
 // Smoke test against the real Bonjour stack. Publishes a unique
