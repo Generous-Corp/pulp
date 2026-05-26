@@ -1348,6 +1348,11 @@ pulp_add_test_suite(pulp-test-audio-device-manager
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
 pulp_add_test_suite(pulp-test-dsp-enhancements LIBRARIES pulp::signal)
 
+# Elliptic / Jacobi special functions (pulp::signal::special). Kept in its
+# own binary so the upcoming elliptic IIR design slice can grow tests
+# beside it without bloating pulp-test-dsp-enhancements.
+pulp_add_test_suite(pulp-test-special-functions LIBRARIES pulp::signal)
+
 # Animation & 3D math tests
 pulp_add_test_suite(pulp-test-animation-3d LIBRARIES pulp::view)
 
