@@ -7,6 +7,7 @@
 #include <pulp/format/host_quirks/cubase.hpp>
 #include <pulp/format/host_quirks/fl_studio.hpp>
 #include <pulp/format/host_quirks/logic_pro.hpp>
+#include <pulp/format/host_quirks/pro_tools.hpp>
 #include <pulp/format/host_quirks/reaper.hpp>
 #include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
@@ -26,27 +27,27 @@ namespace {
 // `planning/2026-05-24-daw-host-quirks-inheritance.md`.
 
 void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
-    q.reaper_vst3_gesture_ordering = true;
-    q.reaper_process_while_bypassed = true;
-    q.reaper_keyboard_passthrough = true;
-    q.reaper_permissive_bus_arrangements = true;
-    q.reaper_anticipative_fx_buffer_variability = true;
-    q.reaper_midsession_setstate = true;
-    // Layer the keyboard-only-space flag on top via the per-host header
-    // so the dispatch table doesn't grow further.
+    // Main 6 REAPER rows (15 + R1-R4 + R6) — extracted to the per-host
+    // header so REAPER-specific lessons live in one place. Adapter
+    // surface unchanged; this is a pure header refactor for item 5.8.
+    host_quirks::apply_reaper(q, v);
+    // Layer the iPlug2-audit keyboard-only-space lesson on top via the
+    // separate factory so its LessonOnly tier can evolve independently
+    // of the rest of the REAPER dispatch (Speculative).
     host_quirks::apply_reaper_keyboard(q, v);
 }
 
-void apply_pro_tools_quirks(HostQuirks& q, HostVersion /*v*/) {
-    q.pro_tools_aax_sidechain_negotiation = true;
-    q.pro_tools_aax_latency_callback_push = true;
-    q.pro_tools_aax_mono_second_bus = true;
+void apply_pro_tools_quirks(HostQuirks& q, HostVersion v) {
+    // Main 3 AAX rows (16-18) — extracted to the per-host header for
+    // item 5.9 (opt-in lane gated on Avid SDK at the adapter level;
+    // the quirk dispatch itself is unconditional so filtering behaves
+    // identically across builds).
+    host_quirks::apply_pro_tools(q, v);
     // Pro Tools' AAX wrapper does not surface a reliable vendor version
     // through the AAX spec, so version-gated decisions for this host
-    // must be skipped entirely. Adapters should branch on this flag
-    // rather than `HostVersion` when deciding Pro Tools-specific
-    // behavior.
-    q.aax_vendor_version_unknown = true;
+    // must be skipped entirely. Layered via the separate factory so its
+    // LessonOnly tier can evolve independently of rows 16-18.
+    host_quirks::apply_pro_tools_aax_vendor_version_unknown(q, v);
 }
 
 // Tier filtering. A single helper reduces a (status-tag, current value)

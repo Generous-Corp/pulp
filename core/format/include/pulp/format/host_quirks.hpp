@@ -209,24 +209,30 @@ struct HostQuirksMeta {
     QuirkStatus fl_studio_setactive_process_mutex = QuirkStatus::Speculative;
     QuirkStatus fl_studio_state_reader_skip = QuirkStatus::Speculative;
 
-    // Reaper rows live in the dispatch table (host_quirks.cpp) but
-    // have NO per-host header yet and no isolation tests. LessonOnly
-    // until item 5.8 lands the header + per-symptom regression tests.
-    QuirkStatus reaper_vst3_gesture_ordering = QuirkStatus::LessonOnly;
-    QuirkStatus reaper_process_while_bypassed = QuirkStatus::LessonOnly;
-    QuirkStatus reaper_keyboard_passthrough = QuirkStatus::LessonOnly;
-    QuirkStatus reaper_permissive_bus_arrangements = QuirkStatus::LessonOnly;
-    QuirkStatus reaper_anticipative_fx_buffer_variability = QuirkStatus::LessonOnly;
-    QuirkStatus reaper_midsession_setstate = QuirkStatus::LessonOnly;
+    // Reaper rows now have a per-host header
+    // (`host_quirks/reaper.hpp`, item 5.8) + per-symptom isolation
+    // tests pinning the dispatch. In-DAW bench evidence is still
+    // pending → Speculative. Promote to Validated when REAPER 7.x
+    // bench rows ship.
+    QuirkStatus reaper_vst3_gesture_ordering = QuirkStatus::Speculative;
+    QuirkStatus reaper_process_while_bypassed = QuirkStatus::Speculative;
+    QuirkStatus reaper_keyboard_passthrough = QuirkStatus::Speculative;
+    QuirkStatus reaper_permissive_bus_arrangements = QuirkStatus::Speculative;
+    QuirkStatus reaper_anticipative_fx_buffer_variability = QuirkStatus::Speculative;
+    QuirkStatus reaper_midsession_setstate = QuirkStatus::Speculative;
     // iPlug2-audit lesson (2026-05-25): REAPER keyboard only-Space —
     // documented across 5.x–7.x line, no in-tree bench yet → LessonOnly.
     QuirkStatus reaper_keyboard_only_space = QuirkStatus::LessonOnly;
 
-    // Pro Tools AAX rows are gated on the developer-supplied Avid SDK
-    // (item 5.9). Catalog entries until the AAX lane lands a header.
-    QuirkStatus pro_tools_aax_sidechain_negotiation = QuirkStatus::LessonOnly;
-    QuirkStatus pro_tools_aax_latency_callback_push = QuirkStatus::LessonOnly;
-    QuirkStatus pro_tools_aax_mono_second_bus = QuirkStatus::LessonOnly;
+    // Pro Tools AAX rows now have a per-host header
+    // (`host_quirks/pro_tools.hpp`, item 5.9) + per-symptom isolation
+    // tests. AAX adapter use is gated on the developer-supplied Avid
+    // SDK (`PULP_AAX_SDK`); the quirk dispatch itself is unconditional
+    // so filter behavior matches across builds. In-DAW bench evidence
+    // requires the SDK → Speculative until those rows ship.
+    QuirkStatus pro_tools_aax_sidechain_negotiation = QuirkStatus::Speculative;
+    QuirkStatus pro_tools_aax_latency_callback_push = QuirkStatus::Speculative;
+    QuirkStatus pro_tools_aax_mono_second_bus = QuirkStatus::Speculative;
     // iPlug2-audit lesson (2026-05-25): Pro Tools AAX vendor-version
     // unreliability — documented via Avid AAX docs, no bench → LessonOnly.
     QuirkStatus aax_vendor_version_unknown = QuirkStatus::LessonOnly;
