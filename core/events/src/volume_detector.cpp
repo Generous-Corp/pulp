@@ -131,6 +131,18 @@ bool NetworkServiceDiscovery::register_service(std::string_view name,
     return backend_->register_service(name, type, port);
 }
 
+bool NetworkServiceDiscovery::register_service(std::string_view name,
+                                                std::string_view type,
+                                                uint16_t port,
+                                                const TxtRecords& txt_records) {
+    if (!backend_) return false;
+    // Forwards to the Backend::register_service(name, type, port, txt)
+    // overload. Backends that do not override the TXT-aware overload
+    // inherit the default that drops the records and forwards to the
+    // 3-arg form.
+    return backend_->register_service(name, type, port, txt_records);
+}
+
 void NetworkServiceDiscovery::unregister_service() {
     if (backend_) backend_->unregister_service();
 }

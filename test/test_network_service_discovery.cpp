@@ -5,18 +5,26 @@
 // backend is running.
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/events/service_discovery.hpp>
 #include <pulp/events/volume_detector.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 using pulp::events::LockingAsyncUpdater;
 using pulp::events::MountedVolumeListChangeDetector;
 using pulp::events::NetworkServiceDiscovery;
+using pulp::events::ServiceBrowser;
+using pulp::events::ServiceDiscoveryAction;
+using pulp::events::ServicePublisher;
 using namespace std::chrono_literals;
 
 TEST_CASE("NSD without backend is honest no-op, not fake-success",
@@ -662,3 +670,269 @@ TEST_CASE("LockingAsyncUpdater trigger_and_wait handles synchronously",
     updater.trigger_and_wait();
     REQUIRE(updater.handles.load() == 2);
 }
+
+// ── TXT records + RAII wrappers (gap-doc 2026-05-24) ────────────────────
+
+namespace {
+
+// FakeBackend that captures the TXT-aware register_service overload so
+// tests can assert metadata round-tripped through the dispatcher.
+class TxtAwareFakeBackend : public NetworkServiceDiscovery::Backend {
+public:
+    struct Capture {
+        std::string name;
+        std::string type;
+        uint16_t port = 0;
+        NetworkServiceDiscovery::TxtRecords txt;
+    };
+    std::shared_ptr<std::vector<Capture>> registrations =
+        std::make_shared<std::vector<Capture>>();
+    std::shared_ptr<int> stops = std::make_shared<int>(0);
+    std::shared_ptr<int> unregisters = std::make_shared<int>(0);
+
+    void browse(std::string_view, NetworkServiceDiscovery&) override {}
+    void stop() override { ++(*stops); }
+    bool register_service(std::string_view name,
+                          std::string_view type,
+                          uint16_t port) override {
+        registrations->push_back({std::string(name), std::string(type), port, {}});
+        return true;
+    }
+    bool register_service(std::string_view name,
+                          std::string_view type,
+                          uint16_t port,
+                          const NetworkServiceDiscovery::TxtRecords& txt) override {
+        registrations->push_back({std::string(name), std::string(type), port, txt});
+        return true;
+    }
+    void unregister_service() override { ++(*unregisters); }
+};
+
+// Backend that does NOT override the TXT-aware overload so we can
+// verify the default implementation drops records and forwards to the
+// 3-arg form — the "degraded backend" contract from the header.
+class LegacyOnlyFakeBackend : public NetworkServiceDiscovery::Backend {
+public:
+    std::shared_ptr<int> legacy_calls = std::make_shared<int>(0);
+
+    void browse(std::string_view, NetworkServiceDiscovery&) override {}
+    void stop() override {}
+    bool register_service(std::string_view, std::string_view, uint16_t) override {
+        ++(*legacy_calls);
+        return true;
+    }
+    void unregister_service() override {}
+};
+
+}  // namespace
+
+TEST_CASE("NSD forwards TXT records to TXT-aware backends",
+          "[events][service-discovery][txt-records]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<TxtAwareFakeBackend>();
+    auto registrations = backend->registrations;
+    nsd.install_backend(std::move(backend));
+
+    NetworkServiceDiscovery::TxtRecords txt{
+        {"version", "1.4.2"},
+        {"path",    "/api"},
+    };
+    REQUIRE(nsd.register_service("api", "_http._tcp", 8080, txt));
+    REQUIRE(registrations->size() == 1);
+    REQUIRE(registrations->front().port == 8080);
+    REQUIRE(registrations->front().txt.size() == 2);
+    REQUIRE(registrations->front().txt.at("version") == "1.4.2");
+    REQUIRE(registrations->front().txt.at("path") == "/api");
+}
+
+TEST_CASE("NSD without backend rejects TXT-aware register_service",
+          "[events][service-discovery][txt-records]") {
+    NetworkServiceDiscovery nsd;
+    NetworkServiceDiscovery::TxtRecords txt{{"foo", "bar"}};
+    REQUIRE_FALSE(nsd.register_service("svc", "_http._tcp", 80, txt));
+}
+
+TEST_CASE("Legacy backend without TXT override drops records and accepts the call",
+          "[events][service-discovery][txt-records]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<LegacyOnlyFakeBackend>();
+    auto legacy_calls = backend->legacy_calls;
+    nsd.install_backend(std::move(backend));
+
+    NetworkServiceDiscovery::TxtRecords txt{{"k", "v"}};
+    REQUIRE(nsd.register_service("svc", "_pulp._tcp", 1234, txt));
+    REQUIRE(*legacy_calls == 1);
+}
+
+TEST_CASE("ServicePublisher RAII registers on construct, unregisters on destroy",
+          "[events][service-discovery][raii]") {
+    auto backend = std::make_unique<TxtAwareFakeBackend>();
+    auto registrations = backend->registrations;
+    auto unregisters = backend->unregisters;
+
+    {
+        auto publisher = ServicePublisher::with_backend(
+            std::move(backend),
+            "pulpd", "_pulp._tcp", 4321,
+            NetworkServiceDiscovery::TxtRecords{{"role", "control"}});
+        REQUIRE(publisher);
+        REQUIRE(publisher->is_published());
+        REQUIRE(registrations->size() == 1);
+        REQUIRE(registrations->front().txt.at("role") == "control");
+        REQUIRE(*unregisters == 0);
+    }
+    REQUIRE(*unregisters == 1);
+}
+
+TEST_CASE("ServicePublisher with null backend is_not_published and no-ops cleanly",
+          "[events][service-discovery][raii]") {
+    auto publisher = ServicePublisher::with_backend(
+        nullptr, "noop", "_pulp._tcp", 1234);
+    REQUIRE(publisher);
+    REQUIRE_FALSE(publisher->is_published());
+    // Destructor must not crash on the null-backend path.
+}
+
+namespace {
+
+// Browse-aware backend that hands us a pointer back to the dispatcher
+// so the test can drive notify_service_found / notify_service_lost
+// through the wired-up callback.
+class BrowsableFakeBackend : public NetworkServiceDiscovery::Backend {
+public:
+    NetworkServiceDiscovery* owner = nullptr;
+    std::shared_ptr<std::vector<std::string>> browse_types =
+        std::make_shared<std::vector<std::string>>();
+    std::shared_ptr<int> stops = std::make_shared<int>(0);
+
+    void browse(std::string_view t, NetworkServiceDiscovery& o) override {
+        browse_types->emplace_back(t);
+        owner = &o;
+    }
+    void stop() override { ++(*stops); }
+    bool register_service(std::string_view, std::string_view, uint16_t) override {
+        return true;
+    }
+    void unregister_service() override {}
+};
+
+}  // namespace
+
+TEST_CASE("ServiceBrowser RAII starts browsing and dispatches found/lost",
+          "[events][service-discovery][raii]") {
+    auto backend = std::make_unique<BrowsableFakeBackend>();
+    auto browse_types = backend->browse_types;
+    auto stops = backend->stops;
+    BrowsableFakeBackend* raw = backend.get();
+
+    std::vector<std::pair<ServiceDiscoveryAction, std::string>> events;
+
+    {
+        auto browser = ServiceBrowser::with_backend(
+            std::move(backend),
+            "_pulp._tcp",
+            [&](ServiceDiscoveryAction action,
+                const NetworkServiceDiscovery::Service& svc) {
+                events.emplace_back(action, svc.name);
+            });
+        REQUIRE(browser);
+        REQUIRE(browser->is_browsing());
+        REQUIRE(*browse_types == std::vector<std::string>{"_pulp._tcp"});
+        REQUIRE(raw->owner != nullptr);
+
+        NetworkServiceDiscovery::Service svc;
+        svc.name = "alpha";
+        svc.type = "_pulp._tcp";
+        svc.port = 1;
+        raw->owner->notify_service_found(svc);
+        raw->owner->notify_service_lost(svc);
+
+        REQUIRE(events.size() == 2);
+        REQUIRE(events[0].first == ServiceDiscoveryAction::ServiceFound);
+        REQUIRE(events[0].second == "alpha");
+        REQUIRE(events[1].first == ServiceDiscoveryAction::ServiceLost);
+        REQUIRE(events[1].second == "alpha");
+    }
+    // ServiceBrowser destructor calls nsd_.stop(); NSD destructor also
+    // calls stop(). Either path forwards to backend->stop(), so any
+    // count >= 1 is correct — what matters is that the backend got
+    // stopped at least once before destruction.
+    REQUIRE(*stops >= 1);
+}
+
+TEST_CASE("ServiceBrowser with null backend reports not_browsing",
+          "[events][service-discovery][raii]") {
+    int events = 0;
+    auto browser = ServiceBrowser::with_backend(
+        nullptr, "_pulp._tcp",
+        [&](ServiceDiscoveryAction, const NetworkServiceDiscovery::Service&) {
+            ++events;
+        });
+    REQUIRE(browser);
+    REQUIRE_FALSE(browser->is_browsing());
+    REQUIRE(events == 0);
+}
+
+TEST_CASE("install_default_backend reports platform support honestly",
+          "[events][service-discovery][platform]") {
+    NetworkServiceDiscovery nsd;
+    const bool installed = pulp::events::install_default_backend(nsd);
+#if defined(__APPLE__)
+    // Apple platforms must always install a working Bonjour backend.
+    REQUIRE(installed);
+    REQUIRE(nsd.has_backend());
+#else
+    // Linux + Windows: deferred to a follow-up. The API must report
+    // false rather than silently install a no-op so callers can decide
+    // how to degrade.
+    REQUIRE_FALSE(installed);
+    REQUIRE_FALSE(nsd.has_backend());
+#endif
+}
+
+#if defined(__APPLE__)
+#include <unistd.h>  // ::getpid for unique smoke-test service name
+// Smoke test against the real Bonjour stack. Publishes a unique
+// service from one NSD and browses for it from another, expecting the
+// browse-side dispatcher to discover it within a few seconds via the
+// local mDNSResponder. Skipped when the runner explicitly opts out via
+// PULP_SKIP_BONJOUR_SMOKE=1 (e.g., the sandboxed CI lane where
+// mDNSResponder isn't reachable).
+TEST_CASE("Bonjour backend round-trips publish → browse on macOS",
+          "[events][service-discovery][bonjour][smoke][.][!mayfail]") {
+    if (const char* skip = std::getenv("PULP_SKIP_BONJOUR_SMOKE"); skip && *skip) {
+        SUCCEED("PULP_SKIP_BONJOUR_SMOKE set; skipping Bonjour smoke.");
+        return;
+    }
+
+    const std::string unique_name =
+        "pulp-nsd-smoke-" + std::to_string(::getpid());
+    const std::string service_type = "_pulp-test._tcp";
+
+    NetworkServiceDiscovery publisher_nsd;
+    REQUIRE(pulp::events::install_default_backend(publisher_nsd));
+    REQUIRE(publisher_nsd.register_service(unique_name, service_type, 54321,
+                                            {{"v", "1"}}));
+
+    std::atomic<bool> seen{false};
+    NetworkServiceDiscovery browser_nsd;
+    REQUIRE(pulp::events::install_default_backend(browser_nsd));
+    browser_nsd.on_service_found =
+        [&, unique_name](const NetworkServiceDiscovery::Service& svc) {
+            if (svc.name == unique_name) seen.store(true);
+        };
+    browser_nsd.browse(service_type);
+
+    // Poll up to 5s for the discovery; mDNSResponder usually answers
+    // in well under a second on a quiet network.
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!seen.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(50ms);
+    }
+
+    publisher_nsd.unregister_service();
+    browser_nsd.stop();
+
+    REQUIRE(seen.load());
+}
+#endif

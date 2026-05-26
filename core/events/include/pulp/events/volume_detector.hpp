@@ -6,6 +6,7 @@
 // NetworkServiceDiscovery — mDNS-based service discovery.
 
 #include <string>
+#include <string_view>
 #include <vector>
 #include <functional>
 #include <atomic>
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <mutex>
 #include <condition_variable>
+#include <unordered_map>
 
 namespace pulp::events {
 
@@ -63,12 +65,21 @@ private:
 /// application-owned Bonjour wrapper and plumbing the callbacks).
 class NetworkServiceDiscovery {
 public:
+    /// TXT records carry arbitrary key=value metadata published with a
+    /// service registration (RFC 6763 §6). Keys are case-insensitive
+    /// ASCII; values may be any bytes (binary-safe via std::string).
+    /// A backend that cannot encode TXT records (e.g., a degraded UDP
+    /// heartbeat) should still publish the base service and silently
+    /// drop the records — never fail registration.
+    using TxtRecords = std::unordered_map<std::string, std::string>;
+
     struct Service {
         std::string name;
         std::string type;      // e.g., "_http._tcp"
         std::string hostname;
         std::string address;
         uint16_t port = 0;
+        TxtRecords txt_records;
     };
 
     /// Backend interface the host installs to get real mDNS.
@@ -85,6 +96,15 @@ public:
         virtual bool register_service(std::string_view name,
                                       std::string_view type,
                                       uint16_t port) = 0;
+        /// Default implementation drops the TXT records and forwards
+        /// to the legacy 3-arg register_service. Backends with real
+        /// TXT support (e.g., Bonjour) override this method.
+        virtual bool register_service(std::string_view name,
+                                      std::string_view type,
+                                      uint16_t port,
+                                      const TxtRecords& /*txt_records*/) {
+            return register_service(name, type, port);
+        }
         virtual void unregister_service() = 0;
     };
 
@@ -110,6 +130,14 @@ public:
     /// Register a service on this machine. Returns false when no
     /// backend is installed or the backend can't register.
     bool register_service(std::string_view name, std::string_view type, uint16_t port);
+
+    /// Register a service with TXT records (RFC 6763 §6 metadata).
+    /// Returns false when no backend is installed or registration
+    /// fails. Backends without TXT support silently drop the records.
+    bool register_service(std::string_view name,
+                          std::string_view type,
+                          uint16_t port,
+                          const TxtRecords& txt_records);
 
     /// Unregister a previously registered service.
     void unregister_service();
