@@ -69,6 +69,21 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
+# Install-layout regression for format helper sources used by
+# PulpAuv3.cmake / PulpPluginFormats.cmake from _PULP_FORMAT_SOURCE_DIR.
+# Without au_view_controller_mac.mm in the installed SDK, downstream
+# pulp_add_plugin(FORMATS AUv3 ...) builds on macOS fail with a
+# missing-source error. Tracked by the Linux/macOS Chainer gap-closure
+# plan (planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md,
+# Phase 0/3).
+add_test(NAME cmake-pulp-install-format-sources
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_install_format_sources.cmake)
+set_tests_properties(cmake-pulp-install-format-sources PROPERTIES
+    LABELS "cmake;sdk;auv3;chainer-cross;slow"
+    TIMEOUT 120)
+
 # PULP_REQUIRE_GPU_FOR_SDK gate smoke (pulp #1817). Two full configures
 # in a tmpdir: ON+missing-skia must FAIL, OFF+missing-skia must SUCCEED.
 # Tagged `slow` because each configure pays the SDL3 / FetchContent cost.

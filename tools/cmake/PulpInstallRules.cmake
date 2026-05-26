@@ -300,6 +300,14 @@ endif()
 
 # Helper sources needed by installed-SDK plugin targets. These are shared by
 # the unified PulpUtils.cmake implementation when it is used from find_package.
+#
+# au_view_controller_mac.mm is the macOS AUv3 principal-class view controller
+# (PulpAUMacViewController), referenced by PulpAuv3.cmake's macOS framework
+# target. Without it, an installed-SDK consumer that calls
+# pulp_add_plugin(FORMATS AUv3 ...) on macOS fails at configure time because
+# _PULP_FORMAT_SOURCE_DIR/au_view_controller_mac.mm doesn't exist in the SDK
+# tree (only au_view_controller_ios.mm was being shipped). This is the SDK
+# packaging fix tracked in the Linux/macOS Chainer gap-closure plan.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
@@ -307,6 +315,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
     DESTINATION src/pulp/format
 )
