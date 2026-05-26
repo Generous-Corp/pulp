@@ -2775,6 +2775,15 @@ pulp_add_test_suite(pulp-test-web-compat-overlay LIBRARIES pulp::view)
 # Panel widget tests (styled containers)
 pulp_add_test_suite(pulp-test-panel LIBRARIES pulp::view)
 
+# ComponentDragger — drag-to-move helper for any View (gap-doc P2)
+pulp_add_test_suite(pulp-test-component-dragger LIBRARIES pulp::view)
+
+# TooltipWindow — transient floating tooltip near cursor (gap-doc P2)
+pulp_add_test_suite(pulp-test-tooltip-window LIBRARIES pulp::view)
+
+# PreferencesPanel — sidebar-of-pages container (gap-doc P3)
+pulp_add_test_suite(pulp-test-preferences-panel LIBRARIES pulp::view)
+
 # UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
 pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
 
