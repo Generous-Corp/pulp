@@ -281,8 +281,15 @@ public:
     bool restore_state(const std::vector<uint8_t>&) override { return false; }
 
     bool has_editor() const override { return false; }
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     void* create_editor_view() override { return nullptr; }
     void destroy_editor_view() override {}
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
 
     int latency_samples() const override { return 0; }
     int tail_samples() const override { return 0; }

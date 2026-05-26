@@ -280,8 +280,15 @@ public:
     }
 
     bool has_editor() const override { return false; }      // Phase 4
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     void* create_editor_view() override { return nullptr; } // Phase 4
     void destroy_editor_view() override {}                  // Phase 4
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma clang diagnostic pop
+#endif
 
     int latency_samples() const override {
         if (!au_) return 0;

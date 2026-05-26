@@ -7,6 +7,16 @@
 
 using namespace pulp::host;
 
+// The legacy `void* create_editor_view()` / `destroy_editor_view()` virtuals
+// were marked `[[deprecated]]` in item 4.4 (macOS plan). These tests exercise
+// the back-compat path and exist precisely to pin its behavior until every
+// real slot has been migrated. Suppress the deprecation warnings locally so a
+// `-Werror` build still compiles them.
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 namespace {
 
 class NoEditorSlot : public PluginSlot {
@@ -136,3 +146,7 @@ TEST_CASE("typed slot populates size + resizable",
     s.destroy_hosted_editor(std::move(ed));
     REQUIRE(s.destroyed);
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif

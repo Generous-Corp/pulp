@@ -102,10 +102,23 @@ public:
     virtual std::vector<uint8_t> save_state() const = 0;
     virtual bool restore_state(const std::vector<uint8_t>& data) = 0;
 
-    // Editor — legacy void* handle API. Kept for slots that still need it
-    // while slices migrate to the richer HostedEditor API below.
+    // Editor — legacy void* handle API.
+    //
+    // Item 4.4 (macOS plan): the canonical surface is `create_hosted_editor()`
+    // below. PR #2844 established `pulp::view::WindowHost::attach_native_child_view`
+    // as the host-side bridge, and `pulp::view::EditorAttachment`
+    // (`core/view/include/pulp/view/hosted_editor_attachment.hpp`) wires the
+    // two together. Slots may still override these for now — the default
+    // `create_hosted_editor()` falls back to them so unchanged subclasses keep
+    // working — but new slots should override `create_hosted_editor()`
+    // directly and the legacy entry points are slated for removal once every
+    // adapter is migrated.
     virtual bool has_editor() const = 0;
+    [[deprecated("Override create_hosted_editor() instead — see pulp::view::EditorAttachment "
+                 "(item 4.4 macOS plan).")]]
     virtual void* create_editor_view() = 0;  // Returns platform-native view handle
+    [[deprecated("Override destroy_hosted_editor() instead — see pulp::view::EditorAttachment "
+                 "(item 4.4 macOS plan).")]]
     virtual void destroy_editor_view() = 0;
 
     // ── Hosted editor (workstream 03 slice 3.4) ────────────────────────
@@ -138,7 +151,14 @@ public:
     virtual std::unique_ptr<HostedEditor>
     create_hosted_editor(void* /*parent_window*/) {
         if (!has_editor()) return nullptr;
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
         void* h = create_editor_view();
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
         if (!h) return nullptr;
         auto ed = std::make_unique<HostedEditor>();
         ed->native_handle = h;
@@ -147,7 +167,14 @@ public:
 
     /// Tear down a hosted editor. Default routes to destroy_editor_view().
     virtual void destroy_hosted_editor(std::unique_ptr<HostedEditor> ed) {
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
         if (ed) destroy_editor_view();
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
     }
 
     // Latency
