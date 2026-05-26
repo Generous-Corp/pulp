@@ -3256,6 +3256,24 @@ pulp_add_test_suite(pulp-test-style-pack LIBRARIES pulp::view)
 # WindowManager multi-window framework tests (Phase 6)
 pulp_add_test_suite(pulp-test-window-manager LIBRARIES pulp::view)
 
+# Multi-window rendering fairness + per-window RenderLoop isolation
+# (planning §6.6 — macOS-plan item 6.6). Mirrors pulp-test-render-loop:
+# compiles render_loop.cpp directly with PULP_RENDER_LOOP_FORCE_TIMER=1 so
+# the test runs headlessly on every host (GPU off / no native vsync source).
+add_executable(pulp-test-multi-window
+    test_multi_window.cpp
+    ${CMAKE_SOURCE_DIR}/core/render/src/render_loop.cpp)
+target_compile_definitions(pulp-test-multi-window PRIVATE
+    PULP_RENDER_LOOP_FORCE_TIMER=1)
+target_include_directories(pulp-test-multi-window PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include
+    ${CMAKE_SOURCE_DIR}/core/render/src)
+target_link_libraries(pulp-test-multi-window PRIVATE
+    pulp::view
+    pulp::runtime
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-multi-window)
+
 # ── Phase 9: Theme management, widgets, asset system ────────────────────────
 
 # Theme contrast utilities (WCAG AA)
