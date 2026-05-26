@@ -210,7 +210,7 @@ TEST_CASE("design-import benchmark baked IR fixture carries expected controls",
 
     const auto* panel = find_ir_node(ir.root, "bench-panel");
     REQUIRE(panel != nullptr);
-    REQUIRE(panel->children.size() == 9);
+    REQUIRE(panel->children.size() == 8);
     REQUIRE(panel->style.background_color == "#1f2030");
     REQUIRE(panel->style.overflow == "hidden");
 

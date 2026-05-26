@@ -32,6 +32,7 @@ std::string resolve_checkpoint_url(const std::string& checkpoint_ref) {
         if (first_slash == std::string::npos) return {};
         auto second_slash = path.find('/', first_slash + 1);
         if (second_slash == std::string::npos) return {};
+        if (first_slash == 0 || second_slash == first_slash + 1) return {};
         auto user_repo = path.substr(0, second_slash);   // "user/repo"
         auto file_path = path.substr(second_slash + 1);  // "path/to/file"
         if (file_path.empty()) return {};

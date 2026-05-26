@@ -147,6 +147,95 @@ TEST_CASE("audio model registry preserves direct URLs and rejects incomplete ref
     REQUIRE(resolve_checkpoint_url("hf://org/repo").empty());
 }
 
+TEST_CASE("audio model registry exposes stable CLAP model metadata",
+          "[audio][tools][model-registry][coverage]") {
+    const auto& first = registered_models();
+    const auto& second = registered_models();
+    REQUIRE(&first == &second);
+    REQUIRE_FALSE(first.empty());
+
+    const auto* lookup = find_registered_model("clap_music_audioset_v1");
+    REQUIRE(lookup != nullptr);
+    const auto& model = *lookup;
+    REQUIRE(model.model_id == "clap_music_audioset_v1");
+    REQUIRE(model.display_name == "CLAP Music AudioSet");
+    REQUIRE(model.backend == "clap");
+    REQUIRE(model.checkpoint_ref == "hf://lukewys/laion_clap/music.pt");
+    REQUIRE(model.download_url
+            == "https://huggingface.co/lukewys/laion_clap/resolve/main/music.pt");
+    REQUIRE(model.sha256.empty());
+    REQUIRE(model.auto_downloadable);
+    REQUIRE(model.size_bytes == 2523293286ULL);
+    REQUIRE(model.size_bytes > 2'000'000'000ULL);
+    REQUIRE(model.task_tags.size() == 2);
+    REQUIRE(model.task_tags[0] == "music");
+    REQUIRE(model.task_tags[1] == "excerpt_find");
+
+    REQUIRE(lookup->download_url == resolve_checkpoint_url(model.checkpoint_ref));
+}
+
+TEST_CASE("audio model registry lookup is exact and non-mutating",
+          "[audio][tools][model-registry][coverage]") {
+    const auto& models = registered_models();
+    const auto* model = find_registered_model("clap_music_audioset_v1");
+    REQUIRE(model != nullptr);
+    REQUIRE(model == &models.front());
+
+    REQUIRE(find_registered_model("") == nullptr);
+    REQUIRE(find_registered_model("clap_music_audioset_v1 ") == nullptr);
+    REQUIRE(find_registered_model(" clap_music_audioset_v1") == nullptr);
+    REQUIRE(find_registered_model("CLAP_MUSIC_AUDIOSET_V1") == nullptr);
+    REQUIRE(find_registered_model("clap_music_audioset") == nullptr);
+
+    const auto* again = find_registered_model("clap_music_audioset_v1");
+    REQUIRE(again == model);
+    REQUIRE(registered_models().size() == models.size());
+    REQUIRE(registered_models().front().model_id == model->model_id);
+}
+
+TEST_CASE("audio model registry resolves Hugging Face refs with nested files",
+          "[audio][tools][model-registry][coverage]") {
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/model.pt")
+            == "https://huggingface.co/org/repo/resolve/main/model.pt");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/checkpoints/music/model.bin")
+            == "https://huggingface.co/org/repo/resolve/main/checkpoints/music/model.bin");
+    REQUIRE(resolve_checkpoint_url("hf://org-name/repo.name/sub.dir/file.safetensors")
+            == "https://huggingface.co/org-name/repo.name/resolve/main/sub.dir/file.safetensors");
+    REQUIRE(resolve_checkpoint_url("hf://user/repo/path%20with%20spaces/model.pt")
+            == "https://huggingface.co/user/repo/resolve/main/path%20with%20spaces/model.pt");
+    REQUIRE(resolve_checkpoint_url("hf://u/r/a/b/c")
+            == "https://huggingface.co/u/r/resolve/main/a/b/c");
+}
+
+TEST_CASE("audio model registry rejects malformed checkpoint refs",
+          "[audio][tools][model-registry][coverage]") {
+    REQUIRE(resolve_checkpoint_url("hf://").empty());
+    REQUIRE(resolve_checkpoint_url("hf:///repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/").empty());
+    REQUIRE(resolve_checkpoint_url(" hf://org/repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("HF://org/repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("s3://bucket/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("file:///tmp/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("https:/example.test/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("http:/example.test/model.pt").empty());
+}
+
+TEST_CASE("audio model registry preserves direct HTTP URLs byte-for-byte",
+          "[audio][tools][model-registry][coverage]") {
+    REQUIRE(resolve_checkpoint_url("https://example.test/model.pt")
+            == "https://example.test/model.pt");
+    REQUIRE(resolve_checkpoint_url("http://example.test/model.pt")
+            == "http://example.test/model.pt");
+    REQUIRE(resolve_checkpoint_url("https://example.test/model.pt?download=1#sha256")
+            == "https://example.test/model.pt?download=1#sha256");
+    REQUIRE(resolve_checkpoint_url("https://huggingface.co/org/repo/resolve/main/model.pt")
+            == "https://huggingface.co/org/repo/resolve/main/model.pt");
+    REQUIRE(resolve_checkpoint_url("https://example.test/").ends_with('/'));
+}
+
 TEST_CASE("audio model store reads legacy metadata and malformed records fail closed",
           "[audio][tools][issue-643]") {
     TempDir temp;
