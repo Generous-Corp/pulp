@@ -139,7 +139,62 @@ def parse_markdown_results(path: Path) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 # Filename convention: <host>-<format>-<timestamp>-pidNNN.log
-_LOG_FILENAME = re.compile(r"^(?P<host>[A-Za-z][A-Za-z0-9]*)-(?P<format>[A-Za-z0-9]+)-")
+#
+# The bench plugin writes filenames from `pulp::format::host_type_name()`, which
+# returns display strings like "FL Studio", "Logic Pro", "Studio One", "Ableton
+# Live", "REAPER", "WaveLab", "Bitwig Studio". Those contain spaces and mixed
+# case, so the host segment is anything up to the last `-<format>-<timestamp>-`
+# suffix. We match the trailing `<format>-<timestamp>-pid…` greedily from the
+# right so the host segment can include spaces.
+_LOG_FILENAME = re.compile(
+    r"^(?P<host>[A-Za-z][A-Za-z0-9 ]*?)-(?P<format>[A-Za-z0-9]+)-\d"
+)
+
+
+# Map raw `host_type_name()` strings → the keys used in LOG_PROMOTION_RULES.
+# Without normalization, rules like `Reaper`/`Wavelab`/`LogicPro` never match
+# the emitted names `REAPER`/`WaveLab`/`Logic Pro` and only the `*` rule fires,
+# silently under-promoting most host-specific quirks.
+_HOST_NAME_ALIASES: dict[str, str] = {
+    "reaper": "Reaper",
+    "fl studio": "FLStudio",
+    "flstudio": "FLStudio",
+    "logic pro": "LogicPro",
+    "logicpro": "LogicPro",
+    "ableton live": "AbletonLive",
+    "abletonlive": "AbletonLive",
+    "studio one": "StudioOne",
+    "studioone": "StudioOne",
+    "cubase": "Cubase",
+    "nuendo": "Nuendo",
+    "wavelab": "Wavelab",
+    "pro tools": "ProTools",
+    "protools": "ProTools",
+    "bitwig studio": "BitwigStudio",
+    "bitwigstudio": "BitwigStudio",
+    "bitwig": "Bitwig",
+    "garageband": "GarageBand",
+    "maschine": "Maschine",
+    "ardour": "Ardour",
+}
+
+
+def normalize_host_name(raw: str) -> str:
+    """Return the canonical host key used in LOG_PROMOTION_RULES.
+
+    Accepts raw values produced by `pulp::format::host_type_name()` (which can
+    have spaces and mixed case) and returns a stable key suitable for
+    case-sensitive comparison against rule keys. Unknown hosts pass through
+    with spaces stripped, preserving their original casing so caller-supplied
+    custom rules still match if they happen to align.
+    """
+    if not raw:
+        return raw
+    key = raw.strip().lower()
+    if key in _HOST_NAME_ALIASES:
+        return _HOST_NAME_ALIASES[key]
+    # Unknown host — collapse spaces but keep original case otherwise.
+    return raw.replace(" ", "")
 
 # Each log line: <iso>\t<event>\tkey=value\tkey=value...
 _LOG_LINE = re.compile(r"^[^\t]+\t(?P<event>[A-Za-z_][A-Za-z0-9_]*)(?P<rest>(\t[^\t]+)*)\s*$")
@@ -202,7 +257,7 @@ def parse_log_results(path: Path) -> dict[str, str]:
     m = _LOG_FILENAME.match(path.name)
     if not m:
         return {}
-    host = m.group("host")
+    host = normalize_host_name(m.group("host"))
     events: set[str] = set()
     try:
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():

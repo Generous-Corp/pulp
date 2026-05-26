@@ -15,6 +15,7 @@
 // the equiripple notch signature in the stopband. Jacobi machinery
 // lives in `pulp::signal::special` (see special_functions.hpp).
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/iir_design.hpp>
@@ -244,6 +245,60 @@ TEST_CASE("IirDesign elliptic_lowpass passband ripple matches spec",
     }
     INFO("max " << max_db << " min " << min_db);
     REQUIRE((max_db - min_db) <= Rp + 0.5);
+}
+
+// Regression: #2964 / Codex comment 3305447117 — `elliptic_cascade()` used
+// `jacobi_asn(1/ε, k1²)` directly, but `jacobi_asn` clamps to [−1, 1]. For
+// any reasonable spec (Rp < ~3 dB ⇒ ε < 1 ⇒ 1/ε > 1) the input was clamped
+// to 1, collapsing v0 to a constant independent of `passband_ripple_db`.
+// In practice the designed ripple stuck near ~0.75 dB regardless of the
+// caller's request. This test pins that the actual ripple SCALES with the
+// requested ripple — a behavior the old code did not satisfy.
+TEST_CASE("IirDesign elliptic_lowpass passband ripple tracks Rp (#2964)",
+          "[signal][iir_design][elliptic][issue-2964]") {
+    const double fs = 48000.0;
+    const double fc = 2000.0;
+    const double As = 60.0;
+    const int order = 6;
+
+    auto measure_ripple = [&](double Rp) {
+        auto sos = IirDesign::elliptic_lowpass(order,
+            static_cast<float>(fc), static_cast<float>(Rp),
+            static_cast<float>(As), static_cast<float>(fs));
+        REQUIRE_FALSE(sos.empty());
+        double max_db = -1e9, min_db = 1e9;
+        for (int i = 1; i <= 800; ++i) {
+            double f = fc * static_cast<double>(i) / 800.0;
+            double db = cascade_db_at_hz(sos, f, fs);
+            max_db = std::max(max_db, db);
+            min_db = std::min(min_db, db);
+        }
+        return max_db - min_db;
+    };
+
+    // Sweep across an order-of-magnitude range. The previous clamped
+    // implementation produced ~0.75 dB ripple for ALL of these.
+    double r_p1 = measure_ripple(0.1);
+    double r_0p5 = measure_ripple(0.5);
+    double r_1p0 = measure_ripple(1.0);
+    double r_2p0 = measure_ripple(2.0);
+
+    INFO("Rp=0.1 → " << r_p1 << " dB  Rp=0.5 → " << r_0p5
+         << " dB  Rp=1.0 → " << r_1p0 << " dB  Rp=2.0 → " << r_2p0 << " dB");
+
+    // Each measured ripple should land within ±50 % of its target
+    // (generous tolerance: amplitude-discretization + biquad rounding).
+    REQUIRE(r_p1  == Catch::Approx(0.1).margin(0.10));
+    REQUIRE(r_0p5 == Catch::Approx(0.5).margin(0.25));
+    REQUIRE(r_1p0 == Catch::Approx(1.0).margin(0.40));
+    REQUIRE(r_2p0 == Catch::Approx(2.0).margin(0.60));
+
+    // And — most importantly — the curve must be monotonic-ish in Rp.
+    // Under the bug, r_p1 ≈ r_0p5 ≈ r_1p0 ≈ r_2p0 (all ~0.75 dB), so a
+    // strict ordering catches the regression without false positives.
+    REQUIRE(r_p1 < r_0p5);
+    REQUIRE(r_0p5 < r_1p0);
+    REQUIRE(r_1p0 < r_2p0);
 }
 
 TEST_CASE("IirDesign elliptic_lowpass meets stopband attenuation",

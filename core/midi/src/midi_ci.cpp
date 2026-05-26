@@ -370,6 +370,16 @@ void CiDiscovery::handle_notify(const uint8_t* data, size_t size) {
     // consumer side).
     if (!on_pe_notify) return;
 
+    // Destination-MUID gate. Without this, on a multi-device MIDI-CI bus
+    // (or when sharing a transport with multiple ci-capable peers), a
+    // PropertyNotify addressed to another peer would still fire local
+    // handlers and apply/surface updates for the wrong session/resource.
+    // Other handlers (Subscribe, Discovery, InquireProperties, …) gate
+    // identically at data+10. Regression: Codex #2959 comment 3305288207.
+    MUID source = read_muid(data + 6);
+    MUID dest = read_muid(data + 10);
+    if (!dest.is_broadcast() && !(dest == local_info_.muid)) return;
+
     std::string resource, command;
     int status = 200;
     pe_header_parse(chunk->header_json, &resource, &command, &status);
@@ -377,7 +387,6 @@ void CiDiscovery::handle_notify(const uint8_t* data, size_t size) {
 
     // Source MUID identifies who emitted the notification — pass that
     // up so the application can disambiguate multi-publisher topics.
-    MUID source = read_muid(data + 6);
     on_pe_notify(source, resource, chunk->header_json, chunk->payload);
 }
 

@@ -558,6 +558,67 @@ TEST_CASE("CiDiscovery.notify with no subscribers is a no-op",
     REQUIRE(fires == 0);
 }
 
+// Regression: #2959 / Codex comment 3305288207 — handle_notify() used to
+// forward every parsed PropertyNotify without checking the destination MUID.
+// On a multi-device MIDI-CI bus, that meant notifications addressed to other
+// peers leaked into the local on_pe_notify callback. All other PE/CI handlers
+// (Subscribe, Discovery, Inquire/Set Property) already gate on dest-MUID;
+// Notify was the outlier.
+TEST_CASE("CiDiscovery PropertyNotify filtered by destination MUID",
+          "[midi][ci][pe][notify][issue-2959]") {
+    CiDiscovery client;
+    CiDeviceInfo info;
+    info.muid = {0xDEADBE};
+    client.set_device_info(info);
+
+    int fires = 0;
+    MUID seen_source{0};
+    client.on_pe_notify = [&](MUID m, std::string_view, std::string_view,
+                              const std::vector<uint8_t>&) {
+        ++fires;
+        seen_source = m;
+    };
+
+    MUID publisher{0x55555};
+    MUID other_peer{0xCAFE42};
+    std::vector<uint8_t> payload = {1, 2, 3};
+
+    // Case 1: notify addressed to another peer must be dropped.
+    auto for_other = pe_build_message(
+        PeMessageType::Notify, /*ci_version=*/2,
+        publisher, other_peer,
+        /*request_id=*/1,
+        pe_header_make("/Topic", "notify"),
+        /*total_chunks=*/1, /*chunk_number=*/1,
+        payload.data(), payload.size());
+    auto reply = client.process_message(for_other.data(), for_other.size());
+    REQUIRE(reply.empty());
+    REQUIRE(fires == 0);  // Did NOT leak into our callback.
+
+    // Case 2: notify addressed directly to us must fire.
+    auto for_us = pe_build_message(
+        PeMessageType::Notify, /*ci_version=*/2,
+        publisher, info.muid,
+        /*request_id=*/2,
+        pe_header_make("/Topic", "notify"),
+        /*total_chunks=*/1, /*chunk_number=*/1,
+        payload.data(), payload.size());
+    client.process_message(for_us.data(), for_us.size());
+    REQUIRE(fires == 1);
+    REQUIRE(seen_source == publisher);
+
+    // Case 3: broadcast notify must fire (broadcast MUID == 0x0FFFFFFF).
+    auto bcast = pe_build_message(
+        PeMessageType::Notify, /*ci_version=*/2,
+        publisher, MUID::broadcast(),
+        /*request_id=*/3,
+        pe_header_make("/Topic", "notify"),
+        /*total_chunks=*/1, /*chunk_number=*/1,
+        payload.data(), payload.size());
+    client.process_message(bcast.data(), bcast.size());
+    REQUIRE(fires == 2);
+}
+
 // ── RT-safety annotation regression tests (plan item 8.4 follow-up) ─────
 //
 // Every public CI / PE entry point is annotated RT-safe vs NOT RT-safe

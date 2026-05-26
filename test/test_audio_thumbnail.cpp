@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <numbers>
 #include <string>
@@ -423,6 +424,73 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
         if (entry.path().extension() == ".thumb") thumb_files++;
     }
     REQUIRE(thumb_files == 0);
+
+    std::filesystem::remove(wav_path);
+    std::error_code ec;
+    std::filesystem::remove_all(cache_dir, ec);
+}
+
+// Regression: #2966 / Codex comment 3305530560 — load_from_disk() used to
+// trust the .thumb file size and allocate a `std::vector<uint8_t>` of that
+// exact size with no upper bound. A corrupt or hostile oversized cache
+// file would throw `std::bad_alloc` (or trip OOM-killer) instead of being
+// treated as a cache miss. We pin the contract: an oversize blob in the
+// cache directory must NOT crash get_or_build() and the call must fall
+// back to rebuilding from source.
+TEST_CASE("AudioThumbnailCache load_from_disk treats oversize blob as cache miss",
+          "[audio][thumbnail][cache][persist][issue-2966]") {
+    const auto cache_dir = unique_cache_dir();
+    const auto wav_path = unique_wav_path();
+    REQUIRE(write_wav_file(wav_path.string(),
+                           make_sine(44100, 4410, 1, 220.0)));
+
+    // Pass 1 — build a legitimate cache entry so we know the .thumb path.
+    std::filesystem::path thumb_file;
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        REQUIRE(cache.get_or_build(wav_path.string(), 256) != nullptr);
+        REQUIRE(cache.stats().disk_writes == 1);
+
+        for (auto& entry : std::filesystem::directory_iterator(cache_dir)) {
+            if (entry.path().extension() == ".thumb") {
+                thumb_file = entry.path();
+                break;
+            }
+        }
+        REQUIRE_FALSE(thumb_file.empty());
+    }
+
+    // Replace the real .thumb file with an oversize (~128 MiB) sparse file.
+    // The cap in load_from_disk() (kMaxThumbnailDiskBytes = 64 MiB) must
+    // reject it before any allocation is attempted.
+    {
+        std::error_code ec;
+        std::filesystem::remove(thumb_file, ec);
+        std::ofstream out(thumb_file, std::ios::binary | std::ios::trunc);
+        REQUIRE(out.is_open());
+        constexpr std::streamoff kOversize = 128LL * 1024 * 1024;  // 128 MiB
+        out.seekp(kOversize - 1);
+        out.put('\0');
+        out.close();
+        // Sanity: file is actually that size on disk (sparse or not).
+        REQUIRE(std::filesystem::file_size(thumb_file) ==
+                static_cast<std::uintmax_t>(kOversize));
+    }
+
+    // Pass 2 — fresh cache, must not crash or throw.
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        std::shared_ptr<const AudioThumbnail> t;
+        REQUIRE_NOTHROW(t = cache.get_or_build(wav_path.string(), 256));
+        // Either the entry is silently treated as a miss and rebuilt from
+        // source (preferred) or skipped entirely — both are acceptable;
+        // the only forbidden outcome is bad_alloc / termination.
+        REQUIRE(t != nullptr);
+        // It must NOT have counted as a disk hit.
+        REQUIRE(cache.stats().disk_hits == 0);
+    }
 
     std::filesystem::remove(wav_path);
     std::error_code ec;

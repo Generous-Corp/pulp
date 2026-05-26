@@ -44,12 +44,23 @@ PULP_SOURCE_VENDOR_NAME_ALLOWLIST = {
 
 
 def is_allowed_vendor_name_source(path, root):
-    """Return true for Pulp-owned source files whose names mention hosts."""
+    """Return true for Pulp-owned source files whose names mention hosts.
+
+    Security: explicitly rejects symlinks so a forbidden file can't be
+    allowlisted by pointing at a canonical entry. We also avoid `Path.resolve()`
+    here for the same reason — resolving would erase the symlink and trick the
+    relative-path comparison into matching the allowlist. (Codex #2939 finding
+    3302833422.)
+    """
+    p = Path(path)
+    # Reject symlinks outright. The allowlist names canonical real files.
+    if p.is_symlink():
+        return False
     try:
-        rel = Path(path).absolute().relative_to(Path(root).absolute())
+        rel = p.absolute().relative_to(Path(root).absolute())
     except ValueError:
         return False
-    return rel in PULP_SOURCE_VENDOR_NAME_ALLOWLIST and Path(path).suffix in SOURCE_EXTENSIONS
+    return rel in PULP_SOURCE_VENDOR_NAME_ALLOWLIST and p.suffix in SOURCE_EXTENSIONS
 
 
 def check_vendor_files(root):

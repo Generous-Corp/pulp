@@ -431,16 +431,36 @@ private:
         // Design-parameter v0 (SciPy ellipap convention,
         // _filter_design.py):
         //
-        //   v0 = K(m) · arc_jac_sn(1/ε, k1²) / (N · K(k1²))
+        //   v0 = K(m) · arc_jac_sc1(1/ε, k1²) / (N · K(k1²))
         //
-        // For typical engineering specs (Rp few dB, As ≥ 40), 1/ε > 1,
-        // and k1 is tiny ⇒ K(k1²) ≈ π/2 ≈ arc_jac_sn(>1, ~0) clamp,
-        // so the ratio → 1 and v0 → K/N. We mirror that clamp here
-        // via `special::jacobi_asn`, which is already saturating; the
-        // alternative is full complex sn⁻¹ machinery which the typical
-        // Cauer design lane does not need.
+        // where arc_jac_sc1(w, k1²) is the *real* inverse Jacobi sc with
+        // complementary modulus, defined by w = sc(z, 1 − k1²). It is the
+        // imaginary part of the complex sn⁻¹(j·w, k1²) under Jacobi's
+        // imaginary transformation:
+        //
+        //   sn(j·u, m) = j · sc(u, 1 − m)
+        //   ⇒ sn⁻¹(j·w, m) = j · sc⁻¹(w, 1 − m)
+        //
+        // The previous implementation used `jacobi_asn(1/ε, k1²)` directly,
+        // but `jacobi_asn` clamps its input to [−1, 1]. For any reasonable
+        // ripple spec (Rp < ~3 dB ⇒ ε < 1 ⇒ 1/ε > 1), the input was
+        // silently clamped to 1 and v0 collapsed to a constant independent
+        // of the user-supplied passband_ripple_db — i.e. the API stopped
+        // honoring its main ripple parameter (#2964, Codex 3305447117).
+        //
+        // The real `sc⁻¹(w, m')` for w ≥ 0, m' ∈ (0,1) can be reduced to a
+        // domain-safe asn call. From sc² = sn²/cn² = sn²/(1−sn²):
+        //
+        //   sn(sc⁻¹(w, m'); m') = w / sqrt(1 + w²)
+        //   ⇒ sc⁻¹(w, m') = asn( w / sqrt(1 + w²), m' )
+        //
+        // The asn argument here is bounded in [0, 1) for all real w, so
+        // no clamp is hit and v0 tracks the requested ripple properly.
         double K_k1 = special::elliptic_K(k1 * k1);
-        double r = special::jacobi_asn(1.0 / eps, k1 * k1);  // clamps if 1/ε > 1
+        const double inv_eps = 1.0 / eps;
+        const double sn_arg = inv_eps / std::sqrt(1.0 + inv_eps * inv_eps);
+        const double m_prime = 1.0 - k1 * k1;
+        double r = special::jacobi_asn(sn_arg, m_prime);  // sc⁻¹(1/ε, 1−k1²)
         double v0 = (K * r) / (static_cast<double>(order) * K_k1);
         double sv, cv, dv;
         // jacobi_sncndn(u, m, ...): note `m` is the parameter (k²),

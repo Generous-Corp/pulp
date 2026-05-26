@@ -39,6 +39,16 @@ namespace {
 constexpr char     kThumbnailMagic[4] = {'P', 'T', 'H', 'M'};
 constexpr uint16_t kThumbnailDiskVersion = 1;
 
+// Cap on a single .thumb blob we'll read from disk before allocating.
+// Real thumbnails are small (a 30-minute stereo file at level0
+// samples_per_peak=512 ≈ 30·60·44100·2/512 ≈ 620 KB; deeper LODs add a
+// geometric tail). 64 MiB is ~100× the largest plausible thumbnail and
+// safely below any 32-bit allocation panic.  Anything larger is treated
+// as a corrupt/hostile cache entry: load_from_disk() returns nullptr and
+// the cache silently behaves like a miss (rebuild from source), matching
+// the documented contract. (Regression: #2966 / Codex 3305530560.)
+constexpr std::streamsize kMaxThumbnailDiskBytes = 64 * 1024 * 1024;
+
 template <typename T>
 void append_le(std::vector<uint8_t>& out, T value) {
     static_assert(std::is_integral_v<T>, "append_le wants an integer");
@@ -557,6 +567,12 @@ std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::load_from_disk(
     in.seekg(0, std::ios::end);
     const std::streamsize size = in.tellg();
     if (size <= 0) return nullptr;
+    // Cap blob size BEFORE allocating. A corrupt or hostile .thumb file
+    // claiming an absurd size would otherwise throw std::bad_alloc /
+    // terminate when constructing `buf`. Treat oversize entries as a
+    // cache miss so the caller silently rebuilds from source, matching
+    // the documented "silently ignored" contract for bad cache entries.
+    if (size > kMaxThumbnailDiskBytes) return nullptr;
     in.seekg(0, std::ios::beg);
     std::vector<uint8_t> buf(static_cast<std::size_t>(size));
     in.read(reinterpret_cast<char*>(buf.data()), size);
