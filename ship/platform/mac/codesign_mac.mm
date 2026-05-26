@@ -15,6 +15,54 @@
 namespace pulp::ship {
 namespace fs = std::filesystem;
 
+namespace detail {
+
+SigningInfo parse_codesign_details(const std::string& output) {
+    SigningInfo info;
+    std::regex id_re("Authority=(.+)");
+    std::smatch match;
+    if (std::regex_search(output, match, id_re))
+        info.identity = match[1].str();
+
+    std::regex team_re("TeamIdentifier=(.+)");
+    if (std::regex_search(output, match, team_re))
+        info.team_id = match[1].str();
+    return info;
+}
+
+std::optional<std::string> parse_notarytool_submit_id(const std::string& output) {
+    std::regex uuid_re("id: ([0-9a-f-]+)");
+    std::smatch match;
+    if (std::regex_search(output, match, uuid_re))
+        return match[1].str();
+    return std::nullopt;
+}
+
+NotarizationStatus parse_notarytool_status(const std::string& output) {
+    NotarizationStatus status;
+    status.complete = output.find("Accepted") != std::string::npos
+                   || output.find("Invalid") != std::string::npos
+                   || output.find("Rejected") != std::string::npos;
+    status.success = output.find("Accepted") != std::string::npos;
+    status.message = output;
+    return status;
+}
+
+std::vector<std::string> parse_signing_identities(const std::string& output) {
+    std::vector<std::string> identities;
+    std::istringstream stream(output);
+    std::string line;
+    while (std::getline(stream, line)) {
+        auto start = line.find('"');
+        auto end = line.rfind('"');
+        if (start != std::string::npos && end > start)
+            identities.push_back(line.substr(start + 1, end - start - 1));
+    }
+    return identities;
+}
+
+} // namespace detail
+
 static std::string exec_cmd(const std::string& cmd, int timeout_ms = 120000) {
     auto r = pulp::platform::exec("/bin/sh", {"-c", cmd}, timeout_ms);
     auto result = r.stdout_output;
@@ -69,16 +117,9 @@ SigningInfo check_codesign(const std::string& path) {
 
     // Get signing identity
     auto output = exec_cmd("codesign -dvvv \"" + path + "\" 2>&1");
-    std::regex id_re("Authority=(.+)");
-    std::smatch match;
-    if (std::regex_search(output, match, id_re)) {
-        info.identity = match[1].str();
-    }
-
-    std::regex team_re("TeamIdentifier=(.+)");
-    if (std::regex_search(output, match, team_re)) {
-        info.team_id = match[1].str();
-    }
+    auto parsed = detail::parse_codesign_details(output);
+    info.identity = std::move(parsed.identity);
+    info.team_id = std::move(parsed.team_id);
 
     // Check notarization via spctl
     int spctl_status = exec_status("spctl --assess --type exec \"" + path + "\" 2>/dev/null");
@@ -112,24 +153,12 @@ std::optional<std::string> notarize_submit(const std::string& path,
 
     // Notarization can take 5-15 minutes — use 20 min timeout
     auto output = exec_cmd(cmd, 1200000);
-    // Extract request UUID
-    std::regex uuid_re("id: ([0-9a-f-]+)");
-    std::smatch match;
-    if (std::regex_search(output, match, uuid_re))
-        return match[1].str();
-
-    return std::nullopt;
+    return detail::parse_notarytool_submit_id(output);
 }
 
 NotarizationStatus notarize_check(const std::string& request_uuid) {
-    NotarizationStatus status;
     auto output = exec_cmd("xcrun notarytool info " + request_uuid + " 2>&1");
-    status.complete = output.find("Accepted") != std::string::npos
-                   || output.find("Invalid") != std::string::npos
-                   || output.find("Rejected") != std::string::npos;
-    status.success = output.find("Accepted") != std::string::npos;
-    status.message = output;
-    return status;
+    return detail::parse_notarytool_status(output);
 }
 
 bool notarize_staple(const std::string& path) {
@@ -137,18 +166,8 @@ bool notarize_staple(const std::string& path) {
 }
 
 std::vector<std::string> list_signing_identities() {
-    std::vector<std::string> identities;
     auto output = exec_cmd("security find-identity -v -p codesigning 2>/dev/null");
-    std::istringstream stream(output);
-    std::string line;
-    while (std::getline(stream, line)) {
-        auto start = line.find('"');
-        auto end = line.rfind('"');
-        if (start != std::string::npos && end > start) {
-            identities.push_back(line.substr(start + 1, end - start - 1));
-        }
-    }
-    return identities;
+    return detail::parse_signing_identities(output);
 }
 
 bool create_pkg(const std::string& component_path,

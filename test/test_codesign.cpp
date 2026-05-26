@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 #ifdef __APPLE__
@@ -11,6 +12,15 @@
 
 using namespace pulp::ship;
 namespace fs = std::filesystem;
+
+#ifdef __APPLE__
+namespace pulp::ship::detail {
+SigningInfo parse_codesign_details(const std::string& output);
+std::optional<std::string> parse_notarytool_submit_id(const std::string& output);
+NotarizationStatus parse_notarytool_status(const std::string& output);
+std::vector<std::string> parse_signing_identities(const std::string& output);
+}
+#endif
 
 namespace {
 
@@ -222,5 +232,110 @@ TEST_CASE("default audio entitlements keep hardened runtime permissions narrow",
     REQUIRE(plist.find("</plist>") != std::string::npos);
 #else
     REQUIRE(plist.empty());
+#endif
+}
+
+TEST_CASE("codesign detail parser extracts identity and team fields",
+          "[ship][codesign][coverage][phase3]") {
+#ifdef __APPLE__
+    auto info = pulp::ship::detail::parse_codesign_details(R"(
+Executable=/Applications/Pulp.app/Contents/MacOS/Pulp
+Identifier=dev.pulp.app
+Authority=Developer ID Application: Pulp Audio LLC (ABCDE12345)
+Authority=Developer ID Certification Authority
+TeamIdentifier=ABCDE12345
+Runtime Version=15.0.0
+)");
+
+    REQUIRE(info.identity == "Developer ID Application: Pulp Audio LLC (ABCDE12345)");
+    REQUIRE(info.team_id == "ABCDE12345");
+    REQUIRE_FALSE(info.is_signed);
+    REQUIRE_FALSE(info.is_valid);
+    REQUIRE_FALSE(info.is_notarized);
+    REQUIRE(info.error.empty());
+
+    auto missing_team = pulp::ship::detail::parse_codesign_details(
+        "Authority=Apple Development: Local Tester (VWXYZ98765)\n");
+    REQUIRE(missing_team.identity == "Apple Development: Local Tester (VWXYZ98765)");
+    REQUIRE(missing_team.team_id.empty());
+
+    auto missing_identity = pulp::ship::detail::parse_codesign_details(
+        "TeamIdentifier=VWXYZ98765\n");
+    REQUIRE(missing_identity.identity.empty());
+    REQUIRE(missing_identity.team_id == "VWXYZ98765");
+#endif
+}
+
+TEST_CASE("notarytool submit parser accepts UUID ids only",
+          "[ship][codesign][coverage][phase3]") {
+#ifdef __APPLE__
+    auto accepted = pulp::ship::detail::parse_notarytool_submit_id(R"(
+Submission ID received
+  id: 12345678-abcd-4abc-9def-123456789abc
+  status: Accepted
+)");
+    REQUIRE(accepted.has_value());
+    REQUIRE(*accepted == "12345678-abcd-4abc-9def-123456789abc");
+
+    auto lower = pulp::ship::detail::parse_notarytool_submit_id(
+        "id: abcdefab-1234-5678-9abc-def012345678");
+    REQUIRE(lower.has_value());
+    REQUIRE(*lower == "abcdefab-1234-5678-9abc-def012345678");
+
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id("id: NOT-A-UUID").has_value());
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id("status: Invalid").has_value());
+#endif
+}
+
+TEST_CASE("notarytool status parser classifies terminal states",
+          "[ship][codesign][coverage][phase3]") {
+#ifdef __APPLE__
+    auto accepted = pulp::ship::detail::parse_notarytool_status("status: Accepted\nmessage: Ready");
+    REQUIRE(accepted.complete);
+    REQUIRE(accepted.success);
+    REQUIRE(accepted.message.find("Accepted") != std::string::npos);
+
+    auto invalid = pulp::ship::detail::parse_notarytool_status("status: Invalid\nmessage: bad signature");
+    REQUIRE(invalid.complete);
+    REQUIRE_FALSE(invalid.success);
+    REQUIRE(invalid.message.find("bad signature") != std::string::npos);
+
+    auto rejected = pulp::ship::detail::parse_notarytool_status("status: Rejected");
+    REQUIRE(rejected.complete);
+    REQUIRE_FALSE(rejected.success);
+    REQUIRE(rejected.message == "status: Rejected");
+
+    auto progress = pulp::ship::detail::parse_notarytool_status("status: In Progress");
+    REQUIRE_FALSE(progress.complete);
+    REQUIRE_FALSE(progress.success);
+    REQUIRE(progress.message == "status: In Progress");
+#endif
+}
+
+TEST_CASE("security identity parser preserves quoted display names",
+          "[ship][codesign][coverage][phase3]") {
+#ifdef __APPLE__
+    auto identities = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
+  1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Developer ID Application: Pulp Audio LLC (ABCDE12345)"
+  2) BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB "Apple Development: Local Tester (VWXYZ98765)"
+     2 valid identities found
+)IDENTITIES");
+    REQUIRE(identities.size() == 2);
+    REQUIRE(identities[0] == "Developer ID Application: Pulp Audio LLC (ABCDE12345)");
+    REQUIRE(identities[1] == "Apple Development: Local Tester (VWXYZ98765)");
+
+    auto mixed = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
+  malformed no quote
+  3) CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC "Mac Developer: First" trailing text
+  "bare quoted identity"
+  4) DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD ""
+)IDENTITIES");
+    REQUIRE(mixed.size() == 3);
+    REQUIRE(mixed[0] == "Mac Developer: First");
+    REQUIRE(mixed[1] == "bare quoted identity");
+    REQUIRE(mixed[2].empty());
+
+    auto none = pulp::ship::detail::parse_signing_identities("0 valid identities found\n");
+    REQUIRE(none.empty());
 #endif
 }
