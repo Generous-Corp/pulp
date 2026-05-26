@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/host_quirks/pro_tools.hpp>
+#include <pulp/format/host_quirks/reaper.hpp>
 #include <pulp/format/host_type.hpp>
 
 #include <array>
@@ -547,6 +549,225 @@ TEST_CASE("make_quirks_for Pro Tools with unknown version still sets the version
     REQUIRE(q.aax_vendor_version_unknown == true);
 }
 
+// ── macOS plan item 5.8 — REAPER per-host header extraction (DAW-quirks
+//    rows 15 + R1-R7). Main dispatch moved to
+//    `core/format/include/pulp/format/host_quirks/reaper.hpp::apply_reaper`,
+//    with the iPlug2-audit `apply_reaper_keyboard` factory layered on
+//    top. These isolation tests pin each symptom row to its own assertion
+//    so a regression localizes to the exact REAPER quirk that broke. ──
+
+TEST_CASE("apply_reaper fires row 15 (VST3 gesture ordering) standalone",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_vst3_gesture_ordering == true);
+}
+
+TEST_CASE("apply_reaper fires row R1 (process while bypassed) standalone",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_process_while_bypassed == true);
+}
+
+TEST_CASE("apply_reaper fires row R2 (keyboard passthrough) standalone",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_keyboard_passthrough == true);
+}
+
+TEST_CASE("apply_reaper fires row R3 (permissive bus arrangements) standalone",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_permissive_bus_arrangements == true);
+}
+
+TEST_CASE("apply_reaper fires row R4 (anticipative-FX buffer variability) standalone",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_anticipative_fx_buffer_variability == true);
+}
+
+TEST_CASE("apply_reaper fires row R6 (mid-session setState) standalone",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_midsession_setstate == true);
+}
+
+TEST_CASE("apply_reaper does not flip the keyboard-only-space iPlug2 lesson",
+          "[format][host-quirks][reaper][isolation]") {
+    // The two REAPER factories must stay independently composable so
+    // their validation tiers can evolve separately (Speculative for the
+    // main 6 rows vs LessonOnly for the iPlug2-audit lesson). The main
+    // apply_reaper(...) must not silently include the keyboard lesson.
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_keyboard_only_space == false);
+
+    // The keyboard factory called alone must not flip the main 6 rows.
+    HostQuirks kb;
+    host_quirks::apply_reaper_keyboard(kb, HostVersion{7, 20});
+    REQUIRE(kb.reaper_keyboard_only_space == true);
+    REQUIRE(kb.reaper_process_while_bypassed == false);
+    REQUIRE(kb.reaper_vst3_gesture_ordering == false);
+}
+
+TEST_CASE("apply_reaper leaves other hosts' flags off",
+          "[format][host-quirks][reaper][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_vst3_gesture_ordering == true);
+    // No cross-host bleed — every non-REAPER row must stay default.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.cubase9_state_blob_size_validation == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+    REQUIRE(q.bitwig_vst3_linux_repaint_after_resize == false);
+    REQUIRE(q.fl_studio_setactive_process_mutex == false);
+    REQUIRE(q.logic_au_channel_probe_cap == 64);
+    REQUIRE(q.au_v3_bypass_dual_tracking == false);
+    REQUIRE(q.pro_tools_aax_sidechain_negotiation == false);
+    REQUIRE(q.pro_tools_aax_latency_callback_push == false);
+    REQUIRE(q.pro_tools_aax_mono_second_bus == false);
+    REQUIRE(q.aax_vendor_version_unknown == false);
+    REQUIRE(q.skip_bus_arrangement_call == false);
+}
+
+TEST_CASE("make_quirks_for Reaper routes through the extracted header",
+          "[format][host-quirks][reaper][isolation]") {
+    // Sanity: the dispatch table still produces the same struct after
+    // the extraction — every Reaper main row + the keyboard lesson + the
+    // cheap defenses must all be on. Mirrors the pre-extraction
+    // behavior pinned by the "flips all 6 Reaper flags" case above.
+    auto dispatched = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    HostQuirks direct;
+    host_quirks::apply_reaper(direct, HostVersion{7, 20});
+    host_quirks::apply_reaper_keyboard(direct, HostVersion{7, 20});
+
+    REQUIRE(dispatched.reaper_vst3_gesture_ordering
+            == direct.reaper_vst3_gesture_ordering);
+    REQUIRE(dispatched.reaper_process_while_bypassed
+            == direct.reaper_process_while_bypassed);
+    REQUIRE(dispatched.reaper_keyboard_passthrough
+            == direct.reaper_keyboard_passthrough);
+    REQUIRE(dispatched.reaper_permissive_bus_arrangements
+            == direct.reaper_permissive_bus_arrangements);
+    REQUIRE(dispatched.reaper_anticipative_fx_buffer_variability
+            == direct.reaper_anticipative_fx_buffer_variability);
+    REQUIRE(dispatched.reaper_midsession_setstate
+            == direct.reaper_midsession_setstate);
+    REQUIRE(dispatched.reaper_keyboard_only_space
+            == direct.reaper_keyboard_only_space);
+    // Cheap defenses present in the dispatched struct but not on the
+    // hand-composed `direct` one (which started from default-ctor) —
+    // verify the dispatch keeps them on independently.
+    REQUIRE(dispatched.synthesize_bypass_parameter == true);
+}
+
+// ── macOS plan item 5.9 — Pro Tools / AAX per-host header extraction
+//    (DAW-quirks rows 16 + 17 + 18, gated on Avid SDK at the adapter
+//    surface). Main dispatch moved to
+//    `core/format/include/pulp/format/host_quirks/pro_tools.hpp::apply_pro_tools`
+//    with the iPlug2-audit `apply_pro_tools_aax_vendor_version_unknown`
+//    factory layered on top. Per-symptom isolation pins each row. ──
+
+TEST_CASE("apply_pro_tools fires row 16 (sidechain negotiation) standalone",
+          "[format][host-quirks][protools][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_pro_tools(q, HostVersion{2024, 6});
+    REQUIRE(q.pro_tools_aax_sidechain_negotiation == true);
+}
+
+TEST_CASE("apply_pro_tools fires row 17 (latency callback push) standalone",
+          "[format][host-quirks][protools][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_pro_tools(q, HostVersion{2024, 6});
+    REQUIRE(q.pro_tools_aax_latency_callback_push == true);
+}
+
+TEST_CASE("apply_pro_tools fires row 18 (mono second bus) standalone",
+          "[format][host-quirks][protools][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_pro_tools(q, HostVersion{2024, 6});
+    REQUIRE(q.pro_tools_aax_mono_second_bus == true);
+}
+
+TEST_CASE("apply_pro_tools does not flip the aax-vendor-version-unknown iPlug2 lesson",
+          "[format][host-quirks][protools][isolation]") {
+    // The two Pro Tools factories must stay independently composable so
+    // their validation tiers can evolve separately (Speculative for the
+    // main 3 AAX rows vs LessonOnly for the iPlug2-audit lesson).
+    HostQuirks q;
+    host_quirks::apply_pro_tools(q, HostVersion{2024, 6});
+    REQUIRE(q.aax_vendor_version_unknown == false);
+
+    HostQuirks ver;
+    host_quirks::apply_pro_tools_aax_vendor_version_unknown(ver, HostVersion{2024, 6});
+    REQUIRE(ver.aax_vendor_version_unknown == true);
+    REQUIRE(ver.pro_tools_aax_sidechain_negotiation == false);
+    REQUIRE(ver.pro_tools_aax_latency_callback_push == false);
+    REQUIRE(ver.pro_tools_aax_mono_second_bus == false);
+}
+
+TEST_CASE("apply_pro_tools leaves other hosts' flags off",
+          "[format][host-quirks][protools][isolation]") {
+    HostQuirks q;
+    host_quirks::apply_pro_tools(q, HostVersion{2024, 6});
+    REQUIRE(q.pro_tools_aax_sidechain_negotiation == true);
+    // No cross-host bleed.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.cubase9_state_blob_size_validation == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+    REQUIRE(q.bitwig_vst3_linux_repaint_after_resize == false);
+    REQUIRE(q.fl_studio_setactive_process_mutex == false);
+    REQUIRE(q.reaper_process_while_bypassed == false);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+    REQUIRE(q.logic_au_channel_probe_cap == 64);
+    REQUIRE(q.au_v3_bypass_dual_tracking == false);
+    REQUIRE(q.skip_bus_arrangement_call == false);
+}
+
+TEST_CASE("make_quirks_for Pro Tools routes through the extracted header",
+          "[format][host-quirks][protools][isolation]") {
+    // Sanity: the dispatch table still produces the same struct after
+    // the extraction — every AAX main row + the version-unknown lesson
+    // + cheap defenses must all be on.
+    auto dispatched = make_quirks_for(HostType::ProTools, HostVersion{2024, 6});
+    HostQuirks direct;
+    host_quirks::apply_pro_tools(direct, HostVersion{2024, 6});
+    host_quirks::apply_pro_tools_aax_vendor_version_unknown(direct, HostVersion{2024, 6});
+
+    REQUIRE(dispatched.pro_tools_aax_sidechain_negotiation
+            == direct.pro_tools_aax_sidechain_negotiation);
+    REQUIRE(dispatched.pro_tools_aax_latency_callback_push
+            == direct.pro_tools_aax_latency_callback_push);
+    REQUIRE(dispatched.pro_tools_aax_mono_second_bus
+            == direct.pro_tools_aax_mono_second_bus);
+    REQUIRE(dispatched.aax_vendor_version_unknown
+            == direct.aax_vendor_version_unknown);
+    REQUIRE(dispatched.synthesize_bypass_parameter == true);
+}
+
+TEST_CASE("make_quirks_for_validated_only on Pro Tools leaves only cheap defenses",
+          "[format][host-quirks][protools][tiers]") {
+    // Every Pro Tools row is currently Speculative (AAX 16-18) or
+    // LessonOnly (vendor-version-unknown), so the validated-only filter
+    // should zero all of them and leave cheap defenses on.
+    auto q = make_quirks_for_validated_only(HostType::ProTools, HostVersion{2024, 6});
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.clamp_latency_to_nonneg == true);
+    REQUIRE(q.silence_unsupported_bus_arrangements == true);
+    REQUIRE(q.pro_tools_aax_sidechain_negotiation == false);
+    REQUIRE(q.pro_tools_aax_latency_callback_push == false);
+    REQUIRE(q.pro_tools_aax_mono_second_bus == false);
+    REQUIRE(q.aax_vendor_version_unknown == false);
+}
+
 // ── Validation-tier API (2026-05-25, item 5.15) ──
 //
 // Per-quirk validation tiers + the filter + the validated-only factory
@@ -596,20 +817,31 @@ TEST_CASE("kHostQuirksMeta tags every host-gated row as Speculative",
                    == QuirkStatus::Speculative);
 }
 
-TEST_CASE("kHostQuirksMeta tags Reaper / Pro Tools rows as LessonOnly",
+TEST_CASE("kHostQuirksMeta tags Reaper / Pro Tools main rows as Speculative",
           "[format][host-quirks][tiers]") {
-    // Reaper + Pro Tools live in the dispatch table but have no
-    // per-host header yet (see host_quirks.cpp). They're catalog
-    // entries Pulp uses as lessons until the headers + bench evidence
-    // ship.
+    // After items 5.8 (Reaper) + 5.9 (Pro Tools AAX) extracted the
+    // per-host headers + per-symptom isolation tests, the main rows
+    // graduate from LessonOnly to Speculative. They stay Speculative
+    // until the in-DAW bench evidence ships (Reaper 7.x for 5.8;
+    // PULP_AAX_SDK + Pro Tools session for 5.9).
     STATIC_REQUIRE(kHostQuirksMeta.reaper_process_while_bypassed
-                   == QuirkStatus::LessonOnly);
+                   == QuirkStatus::Speculative);
     STATIC_REQUIRE(kHostQuirksMeta.reaper_vst3_gesture_ordering
-                   == QuirkStatus::LessonOnly);
+                   == QuirkStatus::Speculative);
+    STATIC_REQUIRE(kHostQuirksMeta.reaper_keyboard_passthrough
+                   == QuirkStatus::Speculative);
+    STATIC_REQUIRE(kHostQuirksMeta.reaper_permissive_bus_arrangements
+                   == QuirkStatus::Speculative);
+    STATIC_REQUIRE(kHostQuirksMeta.reaper_anticipative_fx_buffer_variability
+                   == QuirkStatus::Speculative);
+    STATIC_REQUIRE(kHostQuirksMeta.reaper_midsession_setstate
+                   == QuirkStatus::Speculative);
     STATIC_REQUIRE(kHostQuirksMeta.pro_tools_aax_sidechain_negotiation
-                   == QuirkStatus::LessonOnly);
+                   == QuirkStatus::Speculative);
+    STATIC_REQUIRE(kHostQuirksMeta.pro_tools_aax_latency_callback_push
+                   == QuirkStatus::Speculative);
     STATIC_REQUIRE(kHostQuirksMeta.pro_tools_aax_mono_second_bus
-                   == QuirkStatus::LessonOnly);
+                   == QuirkStatus::Speculative);
 }
 
 TEST_CASE("kHostQuirksMeta tags iPlug2-audit 2026-05-25 rows as LessonOnly",
@@ -716,22 +948,37 @@ TEST_CASE("apply_filter is idempotent",
     REQUIRE(q.logic_au_channel_probe_cap == snapshot.logic_au_channel_probe_cap);
 }
 
-TEST_CASE("apply_filter custom: allow only LessonOnly keeps Reaper / Pro Tools flags",
+TEST_CASE("apply_filter custom: allow only LessonOnly keeps iPlug2-audit lessons",
           "[format][host-quirks][tiers]") {
-    // LessonOnly-only filter: lets the (currently un-bench-validated)
-    // Reaper rows ride while suppressing the validated cheap defenses
-    // and the speculative per-host rows.
-    auto q = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    // LessonOnly-only filter: lets the iPlug2-audit catalog lessons
+    // (currently the only LessonOnly tier rows on these two hosts)
+    // ride while suppressing the validated cheap defenses and the
+    // speculative per-host rows that items 5.8 + 5.9 promoted.
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
     QuirkFilter only_lesson{
         .allow_validated = false,
         .allow_speculative = false,
         .allow_lesson_only = true,
     };
-    apply_filter(q, only_lesson);
-    REQUIRE(q.reaper_process_while_bypassed == true);
-    REQUIRE(q.reaper_midsession_setstate == true);
+    apply_filter(reaper, only_lesson);
+    // LessonOnly REAPER row survives.
+    REQUIRE(reaper.reaper_keyboard_only_space == true);
+    // Speculative REAPER rows (post-5.8) zeroed.
+    REQUIRE(reaper.reaper_process_while_bypassed == false);
+    REQUIRE(reaper.reaper_midsession_setstate == false);
+    REQUIRE(reaper.reaper_vst3_gesture_ordering == false);
     // Validated cheap defenses zeroed.
-    REQUIRE(q.synthesize_bypass_parameter == false);
+    REQUIRE(reaper.synthesize_bypass_parameter == false);
+
+    auto pt = make_quirks_for(HostType::ProTools, HostVersion{2024, 6});
+    apply_filter(pt, only_lesson);
+    // LessonOnly Pro Tools row survives.
+    REQUIRE(pt.aax_vendor_version_unknown == true);
+    // Speculative Pro Tools AAX rows (post-5.9) zeroed.
+    REQUIRE(pt.pro_tools_aax_sidechain_negotiation == false);
+    REQUIRE(pt.pro_tools_aax_latency_callback_push == false);
+    REQUIRE(pt.pro_tools_aax_mono_second_bus == false);
+    REQUIRE(pt.synthesize_bypass_parameter == false);
 }
 
 TEST_CASE("make_quirks_for_validated_only matches make_quirks_for + filter",
