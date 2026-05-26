@@ -331,6 +331,7 @@ target_sources(pulp-view-core PRIVATE
     src/breadcrumb.cpp
     src/buttons.cpp
     src/file_browser.cpp
+    src/file_chooser.cpp
     src/code_editor.cpp
     src/table.cpp
     src/toolbar.cpp

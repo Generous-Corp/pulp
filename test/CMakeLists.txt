@@ -2928,6 +2928,10 @@ pulp_add_test_suite(pulp-test-tree-view LIBRARIES pulp::view)
 # File browser, file tree, and multi-document panel tests
 pulp_add_test_suite(pulp-test-file-browser LIBRARIES pulp::view)
 
+# FileChooser widget (macOS plan item 6.2 — builder wrapper over
+# pulp::platform::FileDialog with async callback delivery).
+pulp_add_test_suite(pulp-test-file-chooser LIBRARIES pulp::view pulp::platform)
+
 # Undo manager tests
 pulp_add_test_suite(pulp-test-undo-manager LIBRARIES pulp::state)
 
