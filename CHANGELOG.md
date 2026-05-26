@@ -11,7 +11,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v02570"></a>
 ## [0.257.0] - 2026-05-26
 
-- feat(events): Linux Avahi + Windows Bonjour SDK backends for NetworkServiceDiscovery (closes deferred follow-up from #2990)
+- feat(runtime): add AbstractFifo + FileSearchPath ([#2985](https://github.com/danielraffel/pulp/pull/2985))
+- feat(events): Linux Avahi + Windows Bonjour NSD backends (closes #2990 follow-up) ([#3003](https://github.com/danielraffel/pulp/pull/3003))
+- test(cli): cover version command contracts ([#2998](https://github.com/danielraffel/pulp/pull/2998))
+- fix(audio): shared token-id counter for MIDI subscription hub (closes #2976 P1 batch 2) ([#3001](https://github.com/danielraffel/pulp/pull/3001))
+- feat(macos-plan): items 4.4 + 6.4b + 6.5 — HostedEditor migration + plugin-mode MainThreadDispatcher + DocumentWindow/DialogWindow/AlertWindow ([#3006](https://github.com/danielraffel/pulp/pull/3006))
+- feat(view): add PreferencesPanel + TooltipWindow + ComponentDragger widgets (gap-doc P2/P3) ([#2987](https://github.com/danielraffel/pulp/pull/2987))
+
+<a id="v02560"></a>
+## [0.256.0] - 2026-05-26
+
+- feat(cli): mac runtime validators for chainer plan Phase 5 ([#3005](https://github.com/danielraffel/pulp/pull/3005))
 
 <a id="v02553"></a>
 ## [0.255.3] - 2026-05-26
@@ -2998,6 +3008,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.257.0]: https://github.com/danielraffel/pulp/releases/tag/v0.257.0
+[0.256.0]: https://github.com/danielraffel/pulp/releases/tag/v0.256.0
 [0.255.3]: https://github.com/danielraffel/pulp/releases/tag/v0.255.3
 [0.255.2]: https://github.com/danielraffel/pulp/releases/tag/v0.255.2
 [0.255.1]: https://github.com/danielraffel/pulp/releases/tag/v0.255.1
