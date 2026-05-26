@@ -708,6 +708,69 @@ TEST_CASE("CLAP item-1.3 transport extensions land on ProcessContext",
     REQUIRE_FALSE(ctx.transport_changed);
 }
 
+// Regression: #2963 / Codex comment 3305434127 — the CLAP adapter never
+// reset `self->playhead_prev` across lifecycle transitions, so the first
+// block after a deactivate / reactivate (or reset) diff'd against stale
+// transport data from the previous activation and spuriously raised
+// tempo_changed / time_sig_changed / transport_changed.
+TEST_CASE("CLAP playhead snapshot is reset on activate / deactivate / reset (#2963)",
+          "[clap][transport][item-13][issue-2963]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    // Block 1 — establish a baseline tempo/time-sig/playing snapshot.
+    clap_event_transport_t baseline{};
+    baseline.header = make_header(sizeof(baseline), CLAP_EVENT_TRANSPORT, 0);
+    baseline.flags = CLAP_TRANSPORT_IS_PLAYING
+                   | CLAP_TRANSPORT_HAS_TEMPO
+                   | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    baseline.tempo = 140.0;
+    baseline.tsig_num = 7;
+    baseline.tsig_denom = 8;
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1, &h.audio_out, 1,
+                         Harness::kFrames, &baseline) == CLAP_PROCESS_CONTINUE);
+    // First block must not raise change flags.
+    REQUIRE_FALSE(g_capturing->captured_context.tempo_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.time_sig_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.transport_changed);
+
+    // Block 2 — same transport values → no change flags.
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1, &h.audio_out, 1,
+                         Harness::kFrames, &baseline) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.tempo_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.time_sig_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.transport_changed);
+
+    // ── Path A: clap_reset() must wipe the snapshot ─────────────────
+    clap_adapter::clap_reset(&h.plugin.plugin);
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1, &h.audio_out, 1,
+                         Harness::kFrames, &baseline) == CLAP_PROCESS_CONTINUE);
+    // Same transport values still — but the snapshot was wiped, so
+    // this block is treated as the FIRST block again → no flags.
+    REQUIRE_FALSE(g_capturing->captured_context.tempo_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.time_sig_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.transport_changed);
+
+    // ── Path B: deactivate + reactivate must wipe the snapshot ─────
+    h.deactivate();
+    REQUIRE(clap_adapter::clap_activate(&h.plugin.plugin, 48000.0, 32,
+                                         Harness::kFrames));
+    h.active = true;
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1, &h.audio_out, 1,
+                         Harness::kFrames, &baseline) == CLAP_PROCESS_CONTINUE);
+    // The bug would have compared against the still-stored snapshot
+    // from before deactivate. With the fix, the new activation starts
+    // with a fresh snapshot, so the first block raises no flags.
+    REQUIRE_FALSE(g_capturing->captured_context.tempo_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.time_sig_changed);
+    REQUIRE_FALSE(g_capturing->captured_context.transport_changed);
+}
+
 TEST_CASE("CLAP item-1.3 change flags flip on the second block",
           "[clap][transport][item-13][change-flags]") {
     g_pending_opts_mpe = false;

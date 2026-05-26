@@ -87,17 +87,29 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     ctx.input_channels = desc.default_input_channels();
     ctx.output_channels = desc.default_output_channels();
     self->processor->prepare(ctx);
+    // Reset the playhead snapshot — the next process() call is the
+    // first block of a fresh activation cycle and must NOT diff against
+    // stale transport data from the previous activation. Without this,
+    // the first block after a deactivate / reactivate (or reset) would
+    // spuriously raise tempo_changed / time_sig_changed /
+    // transport_changed against the prior session's last block.
+    // Regression: #2963 / Codex comment 3305434127.
+    self->playhead_prev = {};
     return true;
 }
 
 void clap_deactivate(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
     self->processor->release();
+    self->playhead_prev = {};
 }
 
 bool clap_start_processing(const clap_plugin_t*) { return true; }
 void clap_stop_processing(const clap_plugin_t*) {}
-void clap_reset(const clap_plugin_t*) {}
+void clap_reset(const clap_plugin_t* plugin) {
+    auto* self = get_self(plugin);
+    self->playhead_prev = {};
+}
 
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
     auto* self = get_self(plugin);
