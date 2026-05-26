@@ -144,3 +144,41 @@ TEST_CASE("make_quirks_for Ableton Live leaves Cubase / Wavelab flags off",
     REQUIRE(q.wavelab_state_blob_fallback == false);
     REQUIRE(q.reaper_process_while_bypassed == false);
 }
+
+// ── macOS plan item 5.6 — Wavelab dispatch (DAW-quirks rows 10 + 11).
+//    New `HostType::Wavelab` + per-host header at
+//    `core/format/include/pulp/format/host_quirks/wavelab.hpp`. ──
+
+TEST_CASE("make_quirks_for Wavelab 11.1 fires both Wavelab flags",
+          "[format][host-quirks][wavelab]") {
+    auto q = make_quirks_for(HostType::Wavelab, HostVersion{11, 1});
+    REQUIRE(q.wavelab_vst3_defer_activation == true);
+    REQUIRE(q.wavelab_state_blob_fallback == true);
+    // No cross-host bleed.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+}
+
+TEST_CASE("make_quirks_for Wavelab 12 keeps both flags on (regression coverage)",
+          "[format][host-quirks][wavelab]") {
+    auto q = make_quirks_for(HostType::Wavelab, HostVersion{12, 0});
+    REQUIRE(q.wavelab_vst3_defer_activation == true);
+    REQUIRE(q.wavelab_state_blob_fallback == true);
+}
+
+TEST_CASE("make_quirks_for Wavelab 10 keeps activation-deferral OFF but state-blob fallback ON",
+          "[format][host-quirks][wavelab]") {
+    // Row 10 is documented as Wavelab 11+; row 11 is version-invariant.
+    auto q = make_quirks_for(HostType::Wavelab, HostVersion{10, 5});
+    REQUIRE(q.wavelab_vst3_defer_activation == false);
+    REQUIRE(q.wavelab_state_blob_fallback == true);
+}
+
+TEST_CASE("make_quirks_for Wavelab unknown version keeps state-blob fallback on, defer off",
+          "[format][host-quirks][wavelab]") {
+    // Version-invariant state-blob row fires even when version is
+    // undetected; activation-deferral stays off without 11+ evidence.
+    auto q = make_quirks_for(HostType::Wavelab, HostVersion{});
+    REQUIRE(q.wavelab_state_blob_fallback == true);
+    REQUIRE(q.wavelab_vst3_defer_activation == false);
+}

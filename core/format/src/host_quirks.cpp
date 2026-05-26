@@ -2,6 +2,7 @@
 
 #include <pulp/format/host_quirks/ableton_live.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
+#include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
 
 namespace pulp::format {
@@ -53,13 +54,14 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
         case HostType::Cubase:
         case HostType::Nuendo:        host_quirks::apply_cubase(q, version); break;
         case HostType::AbletonLive:   host_quirks::apply_ableton_live(q, version); break;
+        case HostType::Wavelab:       host_quirks::apply_wavelab(q, version); break;
         case HostType::Bitwig:        apply_bitwig_quirks(q, version); break;
         case HostType::Reaper:        apply_reaper_quirks(q, version); break;
         case HostType::LogicPro:
         case HostType::GarageBand:    apply_logic_pro_quirks(q, version); break;
         case HostType::ProTools:      apply_pro_tools_quirks(q, version); break;
-        // Wavelab / FL Studio / StudioOne / DigitalPerformer / etc. land
-        // their flags here when the per-host fixes ship in batches L/N.
+        // FL Studio / StudioOne / DigitalPerformer / etc. land their
+        // flags here when the per-host fixes ship in batches L/N.
         default: break;
     }
     return q;

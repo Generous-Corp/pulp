@@ -271,6 +271,7 @@ TEST_CASE("HostType names cover every declared host enum",
     REQUIRE(host_type_name(HostType::ProTools) == "Pro Tools");
     REQUIRE(host_type_name(HostType::Cubase) == "Cubase");
     REQUIRE(host_type_name(HostType::Nuendo) == "Nuendo");
+    REQUIRE(host_type_name(HostType::Wavelab) == "WaveLab");
     REQUIRE(host_type_name(HostType::StudioOne) == "Studio One");
     REQUIRE(host_type_name(HostType::FLStudio) == "FL Studio");
     REQUIRE(host_type_name(HostType::Bitwig) == "Bitwig Studio");
@@ -287,6 +288,7 @@ TEST_CASE("HostType feature heuristics default permissive for modern hosts",
                       HostType::Reaper,
                       HostType::Cubase,
                       HostType::Nuendo,
+                      HostType::Wavelab,
                       HostType::StudioOne,
                       HostType::FLStudio,
                       HostType::Bitwig,
@@ -309,6 +311,8 @@ TEST_CASE("HostType process-name classifier covers DAW executable aliases",
     REQUIRE(host_type_from_process_name("protools") == HostType::ProTools);
     REQUIRE(host_type_from_process_name("Cubase 14") == HostType::Cubase);
     REQUIRE(host_type_from_process_name("Nuendo") == HostType::Nuendo);
+    REQUIRE(host_type_from_process_name("WaveLab 12") == HostType::Wavelab);
+    REQUIRE(host_type_from_process_name("wavelab") == HostType::Wavelab);
     REQUIRE(host_type_from_process_name("Studio One") == HostType::StudioOne);
     REQUIRE(host_type_from_process_name("studioone") == HostType::StudioOne);
     REQUIRE(host_type_from_process_name("FL Studio") == HostType::FLStudio);
