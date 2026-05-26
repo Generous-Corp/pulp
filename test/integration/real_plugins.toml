@@ -41,11 +41,35 @@
 
 # ── Free plugin set (canonical) ────────────────────────────────────────────
 #
-# URLs and sha256 values below are PLACEHOLDERS — they pass the file's
-# self-validation (script + runner read them) but the actual downloader
-# treats sha256 == "TBD" as "no fixture available yet" and the runner
-# treats the test as `SKIP: fixture not provisioned`. A follow-up PR
-# fills these in alongside the first real downloader run.
+# Fixture-pinning status, as of the 2026-05-26 4.2 follow-up:
+#
+# - Surge XT 1.3.4 (GitHub release) — pinned. The "pluginsonly" variants
+#   for Linux/Windows are intentionally chosen over the full installers
+#   (.deb / setup.exe) so the scaffold's unpack helpers (.tar.gz, .zip)
+#   land the .clap / .vst3 directly at the cache root. The macOS .dmg
+#   verified to a real download (416 MB, hash pinned below), but the DMG
+#   itself only contains `surge-xt-macOS-1.3.4.pkg` — a vendor installer
+#   the scaffold cannot run unattended. macOS therefore points at the
+#   .pkg path so the runner SKIPs cleanly until the developer installs
+#   it; verified flat bundles still come from
+#   `~/Library/Audio/Plug-Ins/CLAP/Surge XT.clap` via the existing
+#   `PULP_REAL_PLUGIN_CACHE` env override.
+# - Dexed 0.9.9 (GitHub release) — Linux ZIP pinned (unpacks to a flat
+#   `Dexed.vst3`). The macOS DMG contains `Dexed-0.9.9-macOS.pkg`, same
+#   installer-only situation as Surge XT; the runner SKIPs until the
+#   .pkg is installed. The v0.9.9 Windows asset is shipped as an .exe
+#   installer (no plain ZIP exists); Windows stays TBD-by-hash because
+#   the scaffold's archive_kinds do not support running .exe installers.
+# - Vital 1.5.5 — every download URL gates on account-vital.audio auth
+#   (returns HTTP 500 to unauthenticated clients). Cannot be pinned by a
+#   plain downloader, so all three rows remain TBD until a developer-
+#   supplied lane (env override → already supported by the runner) lands.
+# - OB-Xd 3.4 — every discodsp.com URL returns an HTML EULA landing page
+#   (text/html, ~1.7 KB) instead of the archive. Same situation as Vital;
+#   rows remain TBD pending a developer-supplied lane.
+#
+# Plugins whose rows are still TBD make the runner SKIP cleanly on that
+# OS; they do NOT prevent the verified rows from running.
 
 [[plugins]]
 id              = "surge-xt"
@@ -57,18 +81,25 @@ expected_manufacturer = "Surge Synth Team"
 bundle_relpath  = "Surge XT.clap"
 
   [plugins.platforms.macos]
-  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-macos-1.3.4.dmg"
-  sha256         = "TBD"
+  # canonical release asset name uses "macOS" (capital O/S) — the
+  # all-lowercase variant 301-redirects to this one.
+  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/Surge-xt-macOS-1.3.4.dmg"
+  sha256         = "b56e8d51a8dc2382ae668c9ff4e96bae38dbd452af4e584d5a5ef50ab2d09b07"
   archive_kind   = "dmg"
 
   [plugins.platforms.linux]
-  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-linux-x64-1.3.4.tar.gz"
-  sha256         = "TBD"
+  # "pluginsonly" variant — VST3/CLAP/LV2 bundles without the .deb
+  # installer wrapper. Keeps the scaffold's archive_kind list (tar.gz)
+  # sufficient without needing a .deb path.
+  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-linux-1.3.4-pluginsonly.tar.gz"
+  sha256         = "dd431b75f5fa197c4bffa6ca27ca46970f0a94c834119bb1db7decdeec4c28db"
   archive_kind   = "tar.gz"
 
   [plugins.platforms.windows]
-  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4.zip"
-  sha256         = "TBD"
+  # "pluginsonly" variant — VST3/CLAP bundles without the .exe
+  # installer wrapper. Lets the scaffold use the existing zip path.
+  url            = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-pluginsonly.zip"
+  sha256         = "564e162c560af07ad4ed47fe1bfcd827cf97a575de30d06c48249aad2e7c35e6"
   archive_kind   = "zip"
 
 [[plugins]]
@@ -81,6 +112,11 @@ expected_manufacturer = "Matt Tytel"
 bundle_relpath  = "Vital.vst3"
 
   [plugins.platforms.macos]
+  # account.vital.audio gates every build URL behind sign-in
+  # (HTTP 500 to unauthenticated clients). The runner treats TBD as
+  # "fixture not provisioned" and skips; developers can still drop a
+  # locally-installed Vital.vst3 into the cache via the env override
+  # the runner respects (PULP_REAL_PLUGIN_CACHE).
   url            = "https://account.vital.audio/builds/1.5.5/VitalInstaller.dmg"
   sha256         = "TBD"
   archive_kind   = "dmg"
@@ -105,6 +141,9 @@ expected_manufacturer = "discoDSP"
 bundle_relpath  = "OB-Xd.vst3"
 
   [plugins.platforms.macos]
+  # discodsp.com URLs return an HTML EULA landing page instead of the
+  # archive (~1.7 KB text/html). Same developer-supplied lane as Vital
+  # applies — TBD until a script-friendly mirror exists.
   url            = "https://www.discodsp.com/download/ob-xd/OB-Xd_3.4_Mac.zip"
   sha256         = "TBD"
   archive_kind   = "zip"
@@ -129,16 +168,20 @@ expected_manufacturer = "Digital Suburban"
 bundle_relpath  = "Dexed.vst3"
 
   [plugins.platforms.macos]
-  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/dexed-0.9.9-mac.dmg"
-  sha256         = "TBD"
+  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/Dexed-0.9.9-macOS.dmg"
+  sha256         = "d747015bcd6d8e0714e87ca8a679ff4861a4c27c73339051ecfa52d1928e8ff8"
   archive_kind   = "dmg"
 
   [plugins.platforms.linux]
-  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/dexed-0.9.9-linux-x64.tar.gz"
-  sha256         = "TBD"
-  archive_kind   = "tar.gz"
+  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/Dexed-0.9.9-lnx.zip"
+  sha256         = "0d75451d51e23f154404cacfc6ec53fd38393644bd9c44d99547bda02095d518"
+  archive_kind   = "zip"
 
   [plugins.platforms.windows]
-  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/dexed-0.9.9-win64.zip"
+  # v0.9.9 ships a Win .exe installer only — no plain .zip. The
+  # scaffold's archive_kind list intentionally does not support .exe
+  # installers (would have to spawn the GUI installer), so Windows
+  # stays TBD until upstream publishes a zipped bundle.
+  url            = "https://github.com/asb2m10/dexed/releases/download/v0.9.9/Dexed-0.9.9-win.exe"
   sha256         = "TBD"
-  archive_kind   = "zip"
+  archive_kind   = "raw"

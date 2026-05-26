@@ -263,7 +263,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto combined = r.stdout_output + r.stderr_output;
     if (r.exit_code == 0) {
         // Help branch reached — every shipping subcommand must be listed.
-        for (const char* sub : {"sign", "notarize", "package", "appcast", "check"}) {
+        for (const char* sub : {"sign", "notarize", "package", "appcast",
+                                "check", "auv3-xcodeproj"}) {
             INFO("ship help missing subcommand: " << sub);
             REQUIRE(contains(r.stdout_output, sub));
         }
@@ -668,3 +669,93 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+// ── auv3-xcodeproj (item 3.10 follow-up) ─────────────────────────────────
+//
+// The Xcode-project flow shells out to `cmake -G Xcode` and so cannot
+// actually be exercised end-to-end without Xcode installed. These tests
+// pin the argument-parser contract (required target name, --sdk
+// validation) and the macOS-only guard. The successful path is covered
+// by `--dry-run`, which prints the resolved cmake invocation without
+// spawning it — that asserts the SDK + entitlements wiring without
+// needing Xcode in CI.
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship auv3-xcodeproj requires a target name",
+                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("auv3-xcodeproj-no-target", true);
+
+    auto r = run_pulp_in(root, {"ship", "auv3-xcodeproj"});
+    REQUIRE_FALSE(r.timed_out);
+#ifndef __APPLE__
+    // Non-Apple platforms short-circuit with a clear OS-gate error
+    // before parsing args. Exit non-zero is the contract.
+    REQUIRE(r.exit_code != 0);
+#else
+    REQUIRE(r.exit_code != 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "Usage: pulp ship auv3-xcodeproj"));
+#endif
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship auv3-xcodeproj rejects unknown --sdk values",
+                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("auv3-xcodeproj-bad-sdk", true);
+
+    auto r = run_pulp_in(root,
+        {"ship", "auv3-xcodeproj", "MyPlugin", "--sdk", "bogus"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+#ifdef __APPLE__
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "unknown --sdk value"));
+#endif
+    fs::remove_all(root);
+}
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship auv3-xcodeproj --dry-run prints the resolved cmake invocation",
+                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("auv3-xcodeproj-dry-run", true);
+
+    auto r = run_pulp_in(root,
+        {"ship", "auv3-xcodeproj", "MyPlugin", "--sdk", "iphonesimulator",
+         "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    // Resolved cmake invocation must include the Xcode generator, the
+    // target name, and the simulator toolchain.
+    REQUIRE(contains(combined, "-G Xcode"));
+    REQUIRE(contains(combined, "MyPlugin"));
+    REQUIRE(contains(combined, "ios.toolchain.cmake"));
+    REQUIRE(contains(combined, "SIMULATOR64"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship auv3-xcodeproj --sdk macosx skips iOS toolchain",
+                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("auv3-xcodeproj-macosx", true);
+
+    auto r = run_pulp_in(root,
+        {"ship", "auv3-xcodeproj", "MacPlugin", "--sdk", "macosx",
+         "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "CMAKE_OSX_SYSROOT=macosx"));
+    // Must NOT pull in the iOS toolchain when targetting native macOS.
+    REQUIRE_FALSE(contains(combined, "ios.toolchain.cmake"));
+
+    fs::remove_all(root);
+}
+#endif

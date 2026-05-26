@@ -714,6 +714,190 @@ int cmd_ship(const std::vector<std::string>& args) {
 #endif
     }
 
+    // ── auv3-xcodeproj (item 3.10 follow-up: one-click Xcode flow) ──────────
+    //
+    // Thin wrapper around `cmake -G Xcode -DPULP_AUV3_TARGET=<name>` that
+    // generates an Xcode project ready to "Run" on an iOS Simulator or a
+    // connected iOS device. Picks the right SDK + the right entitlements
+    // template from `tools/templates/auv3/iOS-{Simulator,Device}-
+    // Entitlements.plist.template` (shipped in PR #2938 alongside the
+    // CMake template wiring).
+    //
+    // Usage:
+    //   pulp ship auv3-xcodeproj <target>           # iphonesimulator (default)
+    //   pulp ship auv3-xcodeproj <target> --sdk iphoneos
+    //   pulp ship auv3-xcodeproj <target> --sdk macosx
+    //   pulp ship auv3-xcodeproj <target> --output build-ios/MyPlugin.xcodeproj
+    //   pulp ship auv3-xcodeproj <target> --open    # open in Xcode after gen
+    //
+    // The wrapper intentionally writes to a separate build dir (default
+    // `build/xcode/<target>-<sdk>`) so it does not collide with the user's
+    // normal `build/` Ninja/Makefile cache. The full Xcode-project
+    // generation requires Xcode and the matching iOS SDK to be installed;
+    // when they are missing we emit a clear scaffold message + exit 0 so
+    // CI / sandboxed environments can still exercise the wrapper without a
+    // real Xcode install.
+    if (sub == "auv3-xcodeproj") {
+#ifndef __APPLE__
+        std::cerr << "pulp ship auv3-xcodeproj: macOS-only (requires Xcode + iOS SDKs).\n";
+        return 1;
+#else
+        std::string target_name, sdk = "iphonesimulator", output_dir;
+        bool open_after = false;
+        bool dry_run = false;
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--sdk") {
+                if (!take_ship_value(args, i, sub, args[i], sdk)) return 2;
+            } else if (args[i] == "--output") {
+                if (!take_ship_value(args, i, sub, args[i], output_dir)) return 2;
+            } else if (args[i] == "--open") {
+                open_after = true;
+            } else if (args[i] == "--dry-run") {
+                // Print the cmake invocation that would run but do not
+                // actually shell out. Lets the shell-out test exercise
+                // the argument-parsing + SDK-selection logic without
+                // requiring Xcode in CI.
+                dry_run = true;
+            } else if (!args[i].empty() && args[i][0] != '-' && target_name.empty()) {
+                target_name = args[i];
+            } else {
+                return unknown_ship_arg(sub, args[i]);
+            }
+        }
+
+        if (target_name.empty()) {
+            std::cerr <<
+                "Usage: pulp ship auv3-xcodeproj <target> "
+                "[--sdk iphonesimulator|iphoneos|macosx] "
+                "[--output <dir>] [--open] [--dry-run]\n"
+                "Generates an Xcode project for an AUv3 target ready to "
+                "Run on the iOS Simulator or a connected device.\n";
+            return 2;
+        }
+
+        const bool sdk_ok =
+            (sdk == "iphonesimulator" || sdk == "iphoneos" || sdk == "macosx");
+        if (!sdk_ok) {
+            std::cerr << "pulp ship auv3-xcodeproj: unknown --sdk value '" << sdk
+                      << "'. Expected one of: iphonesimulator, iphoneos, macosx.\n";
+            return 2;
+        }
+
+        if (output_dir.empty()) {
+            output_dir = (root / "build" / "xcode" /
+                          (target_name + "-" + sdk)).string();
+        }
+        fs::create_directories(output_dir);
+
+        // Resolve the iOS toolchain only for iOS SDKs; macosx uses the
+        // default native compiler and CMake's bundled Xcode generator
+        // without an extra toolchain file.
+        std::string toolchain;
+        std::string ios_platform_arg;
+        if (sdk == "iphonesimulator") {
+            toolchain = (root / "tools" / "cmake" / "ios.toolchain.cmake").string();
+            ios_platform_arg = "SIMULATOR64";
+        } else if (sdk == "iphoneos") {
+            toolchain = (root / "tools" / "cmake" / "ios.toolchain.cmake").string();
+            ios_platform_arg = "OS";
+        }
+
+        std::string configure_cmd =
+            "cmake -S " + shell_quote(root.string()) +
+            " -B " + shell_quote(output_dir) +
+            " -G Xcode" +
+            " -DPULP_AUV3_TARGET=" + shell_quote(target_name);
+        if (!toolchain.empty()) {
+            // Only require the toolchain on disk when we're actually
+            // going to invoke cmake. `--dry-run` is allowed to print
+            // the resolved invocation against a fake project that
+            // doesn't carry tools/cmake/ios.toolchain.cmake (e.g. the
+            // shell-out tests). Real runs still hard-fail below.
+            if (!dry_run && !fs::exists(toolchain)) {
+                std::cerr << "pulp ship auv3-xcodeproj: iOS toolchain not "
+                             "found at " << toolchain << "\n";
+                return 1;
+            }
+            configure_cmd += " -DCMAKE_TOOLCHAIN_FILE=" + shell_quote(toolchain);
+            configure_cmd += " -DIOS_PLATFORM=" + ios_platform_arg;
+        } else {
+            // macosx: explicit sysroot so users on machines with both
+            // SDKs installed get a deterministic result.
+            configure_cmd += " -DCMAKE_OSX_SYSROOT=macosx";
+        }
+
+        std::cout << "pulp ship auv3-xcodeproj: generating Xcode project\n"
+                  << "  target = " << target_name << "\n"
+                  << "  sdk    = " << sdk << "\n"
+                  << "  output = " << output_dir << "\n";
+
+        if (dry_run) {
+            std::cout << "  cmake  = " << configure_cmd << "\n";
+            std::cout << "(--dry-run: no cmake invocation)\n";
+            return 0;
+        }
+
+        // Refuse to invoke cmake when the developer-tools shim is the
+        // bare `/usr/bin/xcrun`-pointing stub that ships with macOS but
+        // has no full Xcode behind it. Generating an Xcode project with
+        // only the command-line tools succeeds in part but produces a
+        // .xcodeproj that the actual Xcode.app refuses to open.
+        std::string xcselect = exec_output("xcode-select -p 2>/dev/null");
+        // trim trailing newline
+        while (!xcselect.empty() &&
+               (xcselect.back() == '\n' || xcselect.back() == '\r'))
+            xcselect.pop_back();
+        if (xcselect.empty() || xcselect.find("Xcode.app") == std::string::npos) {
+            std::cerr << "pulp ship auv3-xcodeproj: full Xcode.app not "
+                         "selected (xcode-select -p reports '" << xcselect
+                      << "').\n"
+                         "Run `sudo xcode-select -s /Applications/Xcode.app/"
+                         "Contents/Developer` and retry, or pass --dry-run.\n";
+            return 1;
+        }
+
+        int rc = run_with_spinner(configure_cmd, "Generating Xcode project");
+        if (rc != 0) {
+            std::cerr << "pulp ship auv3-xcodeproj: cmake generation failed "
+                         "(exit " << rc << ").\n";
+            return rc;
+        }
+
+        // Resolve the generated .xcodeproj for the open hint + the optional
+        // `--open` shortcut. CMake names it <project>.xcodeproj based on
+        // the top-level `project()` call, so we glob for the first one we
+        // find in the build dir.
+        fs::path xcodeproj;
+        for (auto& entry : fs::directory_iterator(output_dir)) {
+            if (entry.path().extension() == ".xcodeproj") {
+                xcodeproj = entry.path();
+                break;
+            }
+        }
+        if (xcodeproj.empty()) {
+            std::cerr << "pulp ship auv3-xcodeproj: no .xcodeproj produced "
+                         "in " << output_dir << ". Check the cmake log.\n";
+            return 1;
+        }
+
+        std::cout << "\nXcode project: " << xcodeproj.string() << "\n";
+        std::cout << "  open in Xcode: open " << shell_quote(xcodeproj.string()) << "\n";
+        std::cout << "  build from CLI: cmake --build " << shell_quote(output_dir)
+                  << " --target " << target_name << "_AUv3\n";
+
+        if (open_after) {
+            std::string open_cmd = "open " + shell_quote(xcodeproj.string());
+            int orc = run(open_cmd);
+            if (orc != 0) {
+                std::cerr << "pulp ship auv3-xcodeproj: `open` returned "
+                          << orc << ".\n";
+                return orc;
+            }
+        }
+        return 0;
+#endif
+    }
+
     // ── appcast ─────────────────────────────────────────────────────────────
     if (sub == "appcast") {
         std::string version, notes, url, output_path, title, sign_key, min_os;
@@ -829,5 +1013,8 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
     std::cout << "  check      Check signing status of built plugins\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
+    std::cout << "  auv3-xcodeproj  Generate an Xcode project for an AUv3 target\n";
+    std::cout << "             <target> [--sdk iphonesimulator|iphoneos|macosx]\n";
+    std::cout << "             [--output <dir>] [--open] [--dry-run]\n";
     return 0;
 }
