@@ -907,6 +907,16 @@ pulp_add_test_suite(pulp-test-playhead-diff LIBRARIES pulp::format)
 # VST3 SMPTE → FrameRate mapping (pure helper, no Steinberg SDK
 # dependency). Pins the #2963 59.94 vs 60 regression among others.
 pulp_add_test_suite(pulp-test-vst3-frame-rate LIBRARIES pulp::format)
+# `pulp ship auv3-xcodeproj` developer-path validation helper. Pins the
+# #2969 Xcode-beta regression. Header-only; no extra libraries needed.
+add_executable(pulp-test-xcode-developer-path
+    test_xcode_developer_path.cpp
+)
+target_include_directories(pulp-test-xcode-developer-path PRIVATE
+    ${CMAKE_SOURCE_DIR}/tools/cli
+)
+target_link_libraries(pulp-test-xcode-developer-path PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-xcode-developer-path)
 # TableModel data/sort layer (workstream 07 slice 7.3)
 pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
 # ModulationMatrix data model (workstream 07 slice 7.1)

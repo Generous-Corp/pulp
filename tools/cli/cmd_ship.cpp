@@ -2,6 +2,7 @@
 // Handles: sign, notarize, package, appcast, check
 
 #include "cli_common.hpp"
+#include "xcode_developer_path.hpp"
 
 #include <ctime>
 #include <fstream>
@@ -842,17 +843,28 @@ int cmd_ship(const std::vector<std::string>& args) {
         // has no full Xcode behind it. Generating an Xcode project with
         // only the command-line tools succeeds in part but produces a
         // .xcodeproj that the actual Xcode.app refuses to open.
+        //
+        // Accept any full-Xcode developer path of the form
+        // `<...>/Xcode*.app/Contents/Developer`. We must NOT hard-match
+        // the literal substring `Xcode.app` because beta-channel users
+        // run `Xcode-beta.app`, `Xcode_15.app`, etc., and the previous
+        // check blocked all of them. Regression: #2969 / Codex comment
+        // 3305628892. We still reject the command-line-tools-only
+        // selection (`/Library/Developer/CommandLineTools`) by requiring
+        // both `.app/` AND `/Contents/Developer` in the path.
         std::string xcselect = exec_output("xcode-select -p 2>/dev/null");
         // trim trailing newline
         while (!xcselect.empty() &&
                (xcselect.back() == '\n' || xcselect.back() == '\r'))
             xcselect.pop_back();
-        if (xcselect.empty() || xcselect.find("Xcode.app") == std::string::npos) {
+        if (xcselect.empty() ||
+            !pulp::cli::looks_like_full_xcode_developer_dir(xcselect)) {
             std::cerr << "pulp ship auv3-xcodeproj: full Xcode.app not "
                          "selected (xcode-select -p reports '" << xcselect
                       << "').\n"
                          "Run `sudo xcode-select -s /Applications/Xcode.app/"
-                         "Contents/Developer` and retry, or pass --dry-run.\n";
+                         "Contents/Developer` (or `Xcode-beta.app/Contents/"
+                         "Developer`) and retry, or pass --dry-run.\n";
             return 1;
         }
 
