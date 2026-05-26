@@ -570,13 +570,16 @@ int cmd_ship(const std::vector<std::string>& args) {
                 // an empty edSignature into the appcast looked like a
                 // successful sign but produced unsigned XML that Sparkle
                 // rejects silently — worse than no signing at all.
+                // Ed25519 is wired through pulp::runtime::ed25519_sign
+                // since macOS plan item 7.3 (vendored TweetNaCl).
                 auto sig = pulp::ship::sign_file_ed25519(url_as_path.string(), sign_key);
                 if (!sig || sig->empty()) {
-                    std::cerr << "Error: --sign-key requested but Ed25519 signing is not "
-                                 "available in this build. Refusing to emit an empty "
-                                 "signature into the appcast.\n";
-                    std::cerr << "  Follow-up tracked at: "
-                                 "https://github.com/danielraffel/pulp/issues/295\n";
+                    std::cerr << "Error: --sign-key Ed25519 signing failed. Refusing "
+                                 "to emit an empty signature into the appcast.\n";
+                    std::cerr << "  Check that the key is a base64-encoded 32-byte "
+                                 "seed or 64-byte NaCl secret key,\n";
+                    std::cerr << "  and that the artifact at " << url_as_path
+                              << " is readable.\n";
                     return 1;
                 }
                 item.ed_signature = std::move(*sig);

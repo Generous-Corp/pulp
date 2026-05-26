@@ -1,9 +1,14 @@
 #include <pulp/ship/appcast.hpp>
+#include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/base64.hpp>
 #include <sstream>
 #include <cstring>
 #include <regex>
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <optional>
+#include <vector>
 
 namespace pulp::ship {
 
@@ -164,36 +169,113 @@ int compare_versions(const std::string& a, const std::string& b) {
     return 0;
 }
 
-// ── EdDSA signing ────────────────────────────────────────────────────────────
+// ── EdDSA signing (Sparkle) ──────────────────────────────────────────────────
 //
-// Real Ed25519 signing is a follow-up to this P0 fix (#295). Until
-// a vetted implementation lands, this function returns std::nullopt
-// unconditionally so the CLI refuses to emit `edSignature=""` into
-// an appcast — which is what Sparkle-speaking hosts parse as
-// "unsigned" while our CLI logs a successful-looking "signed" line.
-// The silent-empty-signature behaviour was worse than no signing,
-// because operators thought their releases were signed.
+// Sparkle's `sign_update` Python helper accepts a 32-byte Ed25519 seed
+// (base64) OR a 64-byte NaCl-form secret key (seed || public key,
+// base64). We accept both. Output is a base64-encoded 64-byte
+// detached signature, which is the literal value written into the
+// `sparkle:edSignature` attribute on `<enclosure>`.
 //
-// Vendoring options for the follow-up implementation:
-//   1. monocypher (2-clause BSD, single-file, pulled in as subset)
-//   2. mbedTLS PSA_WANT_ALG_PURE_EDDSA (flip PSA config flags, no
-//      additional dependency; requires mbedTLS 3.6+ with PSA crypto)
-//   3. Apple CryptoKit on mac/iOS + mbedTLS elsewhere
+// Backed by `pulp::runtime::ed25519_*` (TweetNaCl, RFC 8032).
 //
-// Whichever lands, it must:
-//   - parse a base64 Ed25519 private key (32-byte seed or 64-byte full)
-//   - read + SHA-512 the file contents (Ed25519 hashes internally)
-//   - emit a 64-byte signature, base64-encoded
-//   - include a round-trip verify() call in tests
+// Returns std::nullopt on:
+//   - unreadable file
+//   - private key that decodes to neither 32 nor 64 bytes
+//   - any signing-call failure
+// Callers MUST treat nullopt as a hard failure (#295). Earlier
+// behaviour wrote an empty `edSignature=""` into the appcast and
+// logged success — Sparkle then parsed the unsigned release as
+// "not signed yet" while operators believed they had shipped a
+// signed update. Tracking issue is the same #295.
+
+namespace {
+
+std::optional<std::vector<uint8_t>> read_file_bytes(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return std::nullopt;
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+    return bytes;
+}
+
+} // namespace
 
 std::optional<std::string> sign_file_ed25519(const std::string& file_path,
                                              const std::string& private_key_b64) {
-    (void)file_path;
-    (void)private_key_b64;
-    // Intentional nullopt: no Ed25519 impl linked in. Callers must
-    // surface this as a hard error instead of writing an empty
-    // signature into the appcast.
-    return std::nullopt;
+    auto file_bytes = read_file_bytes(file_path);
+    if (!file_bytes) return std::nullopt;
+
+    auto key_bytes = pulp::runtime::base64_decode(private_key_b64);
+    if (!key_bytes) return std::nullopt;
+
+    // Sparkle's generate_keys emits a 32-byte seed (modern) but older
+    // versions store the full 64-byte NaCl secret key (seed || pk).
+    // Accept either; for the seed form, derive the matching keypair via
+    // pulp::runtime::ed25519_keypair_from_seed().
+    std::vector<uint8_t> sk;
+    if (key_bytes->size() == pulp::runtime::ed25519_seed_size) {
+        auto kp = pulp::runtime::ed25519_keypair_from_seed(
+            key_bytes->data(), key_bytes->size());
+        if (!kp) return std::nullopt;
+        sk = std::move(kp->private_key);
+    } else if (key_bytes->size() == pulp::runtime::ed25519_private_key_size) {
+        sk = std::move(*key_bytes);
+    } else {
+        return std::nullopt;
+    }
+
+    auto sig = pulp::runtime::ed25519_sign(
+        sk.data(), sk.size(),
+        file_bytes->data(), file_bytes->size());
+    if (!sig) return std::nullopt;
+
+    return pulp::runtime::base64_encode(sig->data(), sig->size());
+}
+
+// ── Sparkle Ed25519 verification ─────────────────────────────────────────────
+//
+// Verify a base64-encoded 64-byte detached Ed25519 signature against a
+// file's raw bytes and a base64-encoded 32-byte public key. Mirrors what
+// Sparkle does internally on the host. Useful for:
+//   1. Local round-trip tests (sign -> verify before publishing).
+//   2. Self-update flows that re-verify a downloaded artifact before
+//      install, even if Sparkle has already done so.
+bool verify_file_ed25519(const std::string& file_path,
+                         const std::string& signature_b64,
+                         const std::string& public_key_b64) {
+    auto file_bytes = read_file_bytes(file_path);
+    if (!file_bytes) return false;
+
+    auto pk = pulp::runtime::base64_decode(public_key_b64);
+    if (!pk || pk->size() != pulp::runtime::ed25519_public_key_size) return false;
+
+    auto sig = pulp::runtime::base64_decode(signature_b64);
+    if (!sig || sig->size() != pulp::runtime::ed25519_signature_size) return false;
+
+    return pulp::runtime::ed25519_verify(
+        pk->data(), pk->size(),
+        sig->data(), sig->size(),
+        file_bytes->data(), file_bytes->size());
+}
+
+// Verify every `<enclosure sparkle:edSignature="...">` item in an appcast
+// against the supplied base64 public key. Each item's download_url is
+// expected to be a local file path (so the caller has already downloaded
+// the artifact) — for HTTP URLs the caller must fetch + hand a local
+// path. Returns true iff every signed item verifies and at least one
+// item carried a signature. Items without `ed_signature` are skipped.
+bool verify_appcast_signatures(const Appcast& feed,
+                               const std::string& public_key_b64) {
+    bool saw_signature = false;
+    for (auto& item : feed.items) {
+        if (item.ed_signature.empty()) continue;
+        saw_signature = true;
+        if (!verify_file_ed25519(item.download_url, item.ed_signature,
+                                 public_key_b64))
+            return false;
+    }
+    return saw_signature;
 }
 
 } // namespace pulp::ship

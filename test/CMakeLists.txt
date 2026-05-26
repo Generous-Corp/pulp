@@ -748,6 +748,9 @@ pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 # Appcast/auto-update tests
 pulp_add_test_suite(pulp-test-appcast LIBRARIES pulp::ship)
 
+# Sparkle Ed25519 sign/verify (macOS plan item 7.3)
+pulp_add_test_suite(pulp-test-sparkle-verify LIBRARIES pulp::ship pulp::runtime)
+
 # Android package/signing tests (host-side fake SDK/toolchain only)
 pulp_add_test_suite(pulp-test-android-package LIBRARIES pulp::ship)
 

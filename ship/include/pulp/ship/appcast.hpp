@@ -48,18 +48,39 @@ struct KeyPair {
     std::string public_key_b64;
 };
 
-// Sign a file with Ed25519 and return base64 signature.
+// Sign a file with Ed25519 and return a base64-encoded 64-byte detached
+// signature suitable for the `sparkle:edSignature` attribute on an
+// `<enclosure>` element.
 //
-// Returns std::nullopt when signing is unavailable (no vetted Ed25519
-// implementation linked in yet — tracked as follow-up to #295) OR when
-// inputs are invalid (unreadable file, malformed key). Callers MUST
-// treat nullopt as a hard failure and refuse to produce an unsigned
-// appcast. Returning an empty string silently was the #295 P0 bug —
-// it looked like a successful sign to the CLI but emitted
-// `edSignature=""` into the appcast, which Sparkle won't validate
-// against the public key. Worse than no signing because the signed-
-// looking workflow hid the problem from operators.
+// Accepts either a 32-byte Ed25519 seed (Sparkle's modern `generate_keys`
+// output) or a 64-byte NaCl-form secret key (seed || public_key), both
+// base64-encoded. Backed by `pulp::runtime::ed25519_sign()` (TweetNaCl
+// reference implementation, RFC 8032).
+//
+// Returns std::nullopt when signing is unavailable OR when inputs are
+// invalid (unreadable file, malformed key). Callers MUST treat nullopt
+// as a hard failure and refuse to produce an unsigned appcast. Returning
+// an empty string silently was the #295 P0 bug — it looked like a
+// successful sign to the CLI but emitted `edSignature=""` into the
+// appcast, which Sparkle then parsed as "not signed yet" while operators
+// believed they had shipped a signed update.
 std::optional<std::string> sign_file_ed25519(const std::string& file_path,
                                              const std::string& private_key_b64);
+
+// Verify a base64-encoded 64-byte detached Ed25519 signature against a
+// file's raw bytes and a base64-encoded 32-byte public key. Returns true
+// iff the signature is authentic.
+bool verify_file_ed25519(const std::string& file_path,
+                         const std::string& signature_b64,
+                         const std::string& public_key_b64);
+
+// Verify every `<enclosure sparkle:edSignature="...">` item in an appcast
+// against the supplied base64 public key. Items without `ed_signature`
+// are skipped. Each item's `download_url` is treated as a local file
+// path (HTTP URLs must be downloaded by the caller first). Returns true
+// iff every signed item verifies AND at least one item carried a
+// signature.
+bool verify_appcast_signatures(const Appcast& feed,
+                               const std::string& public_key_b64);
 
 } // namespace pulp::ship
