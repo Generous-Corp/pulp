@@ -384,6 +384,20 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-ship-shellout)
 
+# Item 7.4b (macos-plugin-authoring-plan): `pulp build --install`
+# validation gate. The test compiles install_paths_mac.cpp directly
+# so it stays free of cli_common's link surface; the InstallEnv
+# interface lets the scenarios assert mkdir/rm/cp order without
+# touching the real ~/Library/Audio/Plug-Ins/ tree.
+add_executable(pulp-test-cli-install-paths-mac
+    test_cli_install_paths_mac.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/install_paths_mac.cpp)
+target_include_directories(pulp-test-cli-install-paths-mac
+    PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-install-paths-mac
+    PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-install-paths-mac)
+
 # CLI upgrade URL regression test (#352): asset filename stays
 # "pulp-<platform>-<arch>.<ext>" — the version sits in the release tag.
 # Test includes tools/cli/upgrade_url.hpp directly, no link deps needed.

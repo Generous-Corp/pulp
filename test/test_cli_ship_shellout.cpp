@@ -416,3 +416,37 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+// Item 7.4b (macos-plugin-authoring-plan): `pulp build --install` exists
+// and rejects invalid flag combinations before touching the filesystem.
+// The end-to-end install path is unit-tested via install_paths_mac;
+// here we cover the CLI-surface contract.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp build --skip-validation without --install is rejected",
+                 "[cli][shellout][build][install][macos-7.4b]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("build-skip-no-install", true);
+
+    auto r = run_pulp_in(root, {"build", "--skip-validation"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(r.stdout_output + r.stderr_output,
+                     "--skip-validation only applies with --install"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp build --install + --watch is rejected",
+                 "[cli][shellout][build][install][macos-7.4b]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("build-install-watch", true);
+
+    auto r = run_pulp_in(root, {"build", "--install", "--watch"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(r.stdout_output + r.stderr_output,
+                     "--install cannot be combined with --watch"));
+
+    fs::remove_all(root);
+}
