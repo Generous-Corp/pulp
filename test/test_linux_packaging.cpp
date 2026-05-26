@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,12 @@ void write_file(const fs::path& path, const std::string& body) {
     std::ofstream out(path, std::ios::binary);
     REQUIRE(out.good());
     out << body;
+}
+
+std::string read_file(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in.good());
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
 pulp::platform::ProcessResult run_sh(const std::string& command) {
@@ -128,6 +135,56 @@ TEST_CASE("Linux packaging tarball path fails closed without plugin formats",
     REQUIRE_FALSE(fs::exists(output));
 }
 
+TEST_CASE("Linux packaging tarballs support LV2-only bundles",
+          "[ship][linux-package][coverage]") {
+    TempDir temp("lv2-tarball");
+    auto build = temp.path / "build";
+    write_file(build / "LV2" / "Pad.lv2" / "manifest.ttl", "manifest");
+    write_file(build / "LV2" / "Pad.lv2" / "dsp.so", "binary");
+    write_file(build / "Docs" / "readme.txt", "not packaged");
+
+    auto output = temp.path / "lv2.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Pad", build.string(), output.string()));
+    REQUIRE(fs::is_regular_file(output));
+    REQUIRE(fs::file_size(output) > 0);
+
+    auto listing = run_sh("tar tzf " + quote(output));
+    REQUIRE(listing.exit_code == 0);
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("LV2/Pad.lv2/manifest.ttl"));
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("LV2/Pad.lv2/dsp.so"));
+    REQUIRE(listing.stdout_output.find("VST3/") == std::string::npos);
+    REQUIRE(listing.stdout_output.find("CLAP/") == std::string::npos);
+    REQUIRE(listing.stdout_output.find("Docs/readme.txt") == std::string::npos);
+
+    auto extract = temp.path / "extract";
+    fs::create_directories(extract);
+    auto unpack = run_sh("tar xzf " + quote(output) + " -C " + quote(extract));
+    REQUIRE(unpack.exit_code == 0);
+    REQUIRE(read_file(extract / "LV2" / "Pad.lv2" / "manifest.ttl") == "manifest");
+    REQUIRE(read_file(extract / "LV2" / "Pad.lv2" / "dsp.so") == "binary");
+    REQUIRE_FALSE(fs::exists(extract / "Docs" / "readme.txt"));
+}
+
+TEST_CASE("Linux packaging tarball failures do not leave partial archives",
+          "[ship][linux-package][coverage]") {
+    TempDir temp("tarball-failures");
+
+    auto missing_build_output = temp.path / "missing-build.tar.gz";
+    REQUIRE_FALSE(pulp::ship::create_tar_gz("Missing",
+                                            (temp.path / "missing-build").string(),
+                                            missing_build_output.string()));
+    REQUIRE_FALSE(fs::exists(missing_build_output));
+
+    auto build = temp.path / "build";
+    write_file(build / "VST3" / "Broken.vst3" / "Contents" / "module.txt", "vst3");
+
+    auto missing_parent_output = temp.path / "missing-parent" / "plugins.tar.gz";
+    REQUIRE_FALSE(pulp::ship::create_tar_gz("Broken", build.string(),
+                                            missing_parent_output.string()));
+    REQUIRE_FALSE(fs::exists(missing_parent_output));
+    REQUIRE(fs::is_regular_file(build / "VST3" / "Broken.vst3" / "Contents" / "module.txt"));
+}
+
 TEST_CASE("Linux packaging builds deb archives and removes staging",
           "[ship][linux-package][coverage]") {
     if (!command_available("dpkg-deb"))
@@ -160,4 +217,54 @@ TEST_CASE("Linux packaging builds deb archives and removes staging",
     REQUIRE_THAT(contents.stdout_output, ContainsSubstring("./usr/lib/vst3/Meter.vst3/Contents/module.txt"));
     REQUIRE_THAT(contents.stdout_output, ContainsSubstring("./usr/lib/clap/Meter.clap"));
     REQUIRE_THAT(contents.stdout_output, ContainsSubstring("./usr/lib/lv2/Meter.lv2/manifest.ttl"));
+}
+
+TEST_CASE("Linux packaging deb archives can carry metadata without plugin dirs",
+          "[ship][linux-package][coverage]") {
+    if (!command_available("dpkg-deb"))
+        SKIP("dpkg-deb is required to inspect generated deb archives");
+
+    TempDir temp("metadata-only-deb");
+    auto build = temp.path / "build";
+    fs::create_directories(build);
+    write_file(build / "notes.txt", "not installed");
+
+    auto output = temp.path / "metadata.deb";
+    REQUIRE(pulp::ship::create_deb("pulp-empty", "0.0.1", build.string(),
+                                   output.string(), "Pulp Tests"));
+    REQUIRE(fs::is_regular_file(output));
+    REQUIRE(fs::file_size(output) > 0);
+    REQUIRE_FALSE(fs::exists(build / "deb-staging"));
+
+    auto control = run_sh("dpkg-deb --field " + quote(output));
+    REQUIRE(control.exit_code == 0);
+    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Package: pulp-empty"));
+    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Version: 0.0.1"));
+    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Maintainer: Pulp Tests"));
+    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Description: pulp-empty audio plugin"));
+
+    auto contents = run_sh("dpkg-deb --contents " + quote(output));
+    REQUIRE(contents.exit_code == 0);
+    REQUIRE(contents.stdout_output.find("./usr/lib/vst3/") == std::string::npos);
+    REQUIRE(contents.stdout_output.find("./usr/lib/clap/") == std::string::npos);
+    REQUIRE(contents.stdout_output.find("./usr/lib/lv2/") == std::string::npos);
+    REQUIRE(contents.stdout_output.find("notes.txt") == std::string::npos);
+}
+
+TEST_CASE("Linux packaging deb failures remove staging and preserve inputs",
+          "[ship][linux-package][coverage]") {
+    if (!command_available("dpkg-deb"))
+        SKIP("dpkg-deb is required to inspect generated deb archives");
+
+    TempDir temp("deb-failure-cleanup");
+    auto build = temp.path / "build";
+    write_file(build / "CLAP" / "Failure.clap", "clap");
+
+    auto output = temp.path / "missing-parent" / "failure.deb";
+    REQUIRE_FALSE(pulp::ship::create_deb("pulp-failure", "1.0.0", build.string(),
+                                         output.string(), "Pulp Tests"));
+    REQUIRE_FALSE(fs::exists(output));
+    REQUIRE_FALSE(fs::exists(build / "deb-staging"));
+    REQUIRE(fs::is_regular_file(build / "CLAP" / "Failure.clap"));
+    REQUIRE(read_file(build / "CLAP" / "Failure.clap") == "clap");
 }
