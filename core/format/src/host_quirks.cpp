@@ -1,6 +1,7 @@
 #include <pulp/format/host_quirks.hpp>
 
 #include <pulp/format/host_quirks/ableton_live.hpp>
+#include <pulp/format/host_quirks/auv3_cross_host.hpp>
 #include <pulp/format/host_quirks/bitwig.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
 #include <pulp/format/host_quirks/fl_studio.hpp>
@@ -50,7 +51,15 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
         case HostType::FLStudio:      host_quirks::apply_fl_studio(q, version); break;
         case HostType::Reaper:        apply_reaper_quirks(q, version); break;
         case HostType::LogicPro:
-        case HostType::GarageBand:    host_quirks::apply_logic_pro(q, version); break;
+        case HostType::GarageBand:
+            // Logic + GarageBand share the AU v2 host stack (rows 19,
+            // 20) and also expose an AU v3 surface (rows 21, 22). Apply
+            // the per-host Logic helper first, then layer the AU v3
+            // cross-host flags on top so adapters consulting either
+            // surface see consistent state.
+            host_quirks::apply_logic_pro(q, version);
+            host_quirks::apply_auv3_cross_host(q, version);
+            break;
         case HostType::ProTools:      apply_pro_tools_quirks(q, version); break;
         // StudioOne / DigitalPerformer / etc. land their flags here
         // when the per-host fixes ship in later batches.

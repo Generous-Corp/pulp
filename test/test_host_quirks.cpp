@@ -278,3 +278,49 @@ TEST_CASE("make_quirks_for Logic Pro leaves other hosts' flags off",
     REQUIRE(q.fl_studio_setactive_process_mutex == false);
     REQUIRE(q.reaper_process_while_bypassed == false);
 }
+
+// ── macOS plan item 5.11 — AU v3 cross-host dispatch (DAW-quirks rows
+//    21 + 22). Helper at
+//    `core/format/include/pulp/format/host_quirks/auv3_cross_host.hpp`,
+//    layered on Logic + GarageBand which expose an AU v3 surface. ──
+
+TEST_CASE("make_quirks_for Logic Pro layers AU v3 cross-host flags on top",
+          "[format][host-quirks][auv3]") {
+    auto q = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(q.au_v3_bypass_dual_tracking == true);
+    REQUIRE(q.au_v3_host_id_from_wrapper == true);
+    // Logic AU quirks still on (layering doesn't clobber the per-host
+    // flags).
+    REQUIRE(q.logic_au_channel_probe_cap == 8);
+    REQUIRE(q.logic_au_tail_time_conversion == true);
+}
+
+TEST_CASE("make_quirks_for GarageBand layers AU v3 cross-host flags on top",
+          "[format][host-quirks][auv3]") {
+    auto q = make_quirks_for(HostType::GarageBand, HostVersion{10, 4});
+    REQUIRE(q.au_v3_bypass_dual_tracking == true);
+    REQUIRE(q.au_v3_host_id_from_wrapper == true);
+}
+
+TEST_CASE("AU v3 cross-host flags stay off for non-AU-v3 hosts",
+          "[format][host-quirks][auv3][isolation]") {
+    auto cubase = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(cubase.au_v3_bypass_dual_tracking == false);
+    REQUIRE(cubase.au_v3_host_id_from_wrapper == false);
+
+    auto live = make_quirks_for(HostType::AbletonLive, HostVersion{12, 0});
+    REQUIRE(live.au_v3_bypass_dual_tracking == false);
+    REQUIRE(live.au_v3_host_id_from_wrapper == false);
+
+    auto bitwig = make_quirks_for(HostType::Bitwig, HostVersion{5, 0});
+    REQUIRE(bitwig.au_v3_bypass_dual_tracking == false);
+    REQUIRE(bitwig.au_v3_host_id_from_wrapper == false);
+
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.au_v3_bypass_dual_tracking == false);
+    REQUIRE(reaper.au_v3_host_id_from_wrapper == false);
+
+    auto fl = make_quirks_for(HostType::FLStudio, HostVersion{21, 0});
+    REQUIRE(fl.au_v3_bypass_dual_tracking == false);
+    REQUIRE(fl.au_v3_host_id_from_wrapper == false);
+}
