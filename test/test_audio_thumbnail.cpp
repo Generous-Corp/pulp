@@ -277,6 +277,158 @@ TEST_CASE("AudioThumbnailCache::get_or_build hits the cache on second call",
 // WaveformView integration smoke
 // ─────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────
+// On-disk persistence (item 6.12 follow-up)
+// ─────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+std::filesystem::path unique_cache_dir() {
+    static int counter = 0;
+    auto name = "pulp_test_thumbcache_"
+              + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
+              + "_" + std::to_string(counter++);
+    auto p = std::filesystem::temp_directory_path() / name;
+    std::error_code ec;
+    std::filesystem::remove_all(p, ec);
+    return p;
+}
+
+}  // namespace
+
+TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
+          "[audio][thumbnail][persist]") {
+    const auto data = make_sine(44100, 8820, 2, 220.0, 0.6f);
+    AudioThumbnail original = AudioThumbnail::build_from_buffer(data, 256);
+    REQUIRE_FALSE(original.empty());
+
+    const auto blob = serialize_thumbnail(original);
+    REQUIRE(blob.size() > 26);  // header + payload
+    REQUIRE(blob[0] == 'P');
+    REQUIRE(blob[1] == 'T');
+    REQUIRE(blob[2] == 'H');
+    REQUIRE(blob[3] == 'M');
+
+    auto restored = deserialize_thumbnail(blob.data(), blob.size());
+    REQUIRE(restored.has_value());
+    REQUIRE_FALSE(restored->empty());
+
+    const auto a = original.info();
+    const auto b = restored->info();
+    REQUIRE(a.num_channels == b.num_channels);
+    REQUIRE(a.num_source_frames == b.num_source_frames);
+    REQUIRE(a.sample_rate == b.sample_rate);
+    REQUIRE(a.num_levels == b.num_levels);
+    REQUIRE(a.bytes_used == b.bytes_used);
+
+    // Spot-check every peak in level 0 is identical post round-trip.
+    for (std::size_t i = 0; i < original.num_levels(); ++i) {
+        const auto& la = original.level(i);
+        const auto& lb = restored->level(i);
+        REQUIRE(la.samples_per_peak == lb.samples_per_peak);
+        REQUIRE(la.peaks_per_channel == lb.peaks_per_channel);
+        REQUIRE(la.peaks.size() == lb.peaks.size());
+        for (std::size_t ch = 0; ch < la.peaks.size(); ++ch) {
+            REQUIRE(la.peaks[ch].size() == lb.peaks[ch].size());
+            for (std::size_t p = 0; p < la.peaks[ch].size(); ++p) {
+                REQUIRE(la.peaks[ch][p].min_q7 == lb.peaks[ch][p].min_q7);
+                REQUIRE(la.peaks[ch][p].max_q7 == lb.peaks[ch][p].max_q7);
+            }
+        }
+    }
+}
+
+TEST_CASE("deserialize_thumbnail rejects bad magic / truncated blobs",
+          "[audio][thumbnail][persist]") {
+    std::vector<uint8_t> garbage{0xDE, 0xAD, 0xBE, 0xEF,
+                                  0x01, 0x00, 0x00, 0x00};
+    REQUIRE_FALSE(deserialize_thumbnail(garbage.data(), garbage.size()).has_value());
+    REQUIRE_FALSE(deserialize_thumbnail(nullptr, 0).has_value());
+
+    // Correct magic + bumped version → still rejected.
+    std::vector<uint8_t> wrong_version{'P', 'T', 'H', 'M',
+                                       0xFF, 0xFF};
+    REQUIRE_FALSE(deserialize_thumbnail(wrong_version.data(),
+                                        wrong_version.size()).has_value());
+}
+
+TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",
+          "[audio][thumbnail][cache][persist]") {
+    const auto cache_dir = unique_cache_dir();
+    const auto wav_path = unique_wav_path();
+    const auto data = make_sine(44100, 22050, 1, 330.0, 0.5f);
+    REQUIRE(write_wav_file(wav_path.string(), data));
+
+    // Pass 1 — build, expect a disk write.
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        auto t = cache.get_or_build(wav_path.string(), 256);
+        REQUIRE(t != nullptr);
+        const auto s = cache.stats();
+        REQUIRE(s.disk_writes == 1);
+        REQUIRE(s.disk_hits == 0);
+    }
+
+    // Pass 2 — fresh cache, expect a disk hit and no extra decode.
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        auto t = cache.get_or_build(wav_path.string(), 256);
+        REQUIRE(t != nullptr);
+        const auto s = cache.stats();
+        REQUIRE(s.disk_hits == 1);
+        REQUIRE(s.entries == 1);
+        REQUIRE(s.misses == 1);  // initial in-memory miss before disk lookup
+    }
+
+    // Clean up.
+    std::filesystem::remove(wav_path);
+    std::error_code ec;
+    std::filesystem::remove_all(cache_dir, ec);
+}
+
+TEST_CASE("AudioThumbnailCache::set_disk_cache_dir is a no-op when empty",
+          "[audio][thumbnail][cache][persist]") {
+    AudioThumbnailCache cache(2);
+    cache.set_disk_cache_dir("");
+    REQUIRE(cache.disk_cache_dir().empty());
+    auto t = std::make_shared<AudioThumbnail>(
+        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
+    cache.put("no-disk", t);
+    REQUIRE(cache.stats().disk_writes == 0);
+}
+
+TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
+          "[audio][thumbnail][cache][persist]") {
+    const auto cache_dir = unique_cache_dir();
+    const auto wav_path = unique_wav_path();
+    REQUIRE(write_wav_file(wav_path.string(),
+                           make_sine(44100, 4410, 1, 100.0)));
+
+    AudioThumbnailCache cache(4);
+    cache.set_disk_cache_dir(cache_dir.string());
+    REQUIRE(cache.get_or_build(wav_path.string(), 256) != nullptr);
+    REQUIRE(cache.stats().disk_writes == 1);
+
+    std::size_t thumb_files = 0;
+    for (auto& entry : std::filesystem::directory_iterator(cache_dir)) {
+        if (entry.path().extension() == ".thumb") thumb_files++;
+    }
+    REQUIRE(thumb_files == 1);
+
+    cache.clear_disk_cache();
+    thumb_files = 0;
+    for (auto& entry : std::filesystem::directory_iterator(cache_dir)) {
+        if (entry.path().extension() == ".thumb") thumb_files++;
+    }
+    REQUIRE(thumb_files == 0);
+
+    std::filesystem::remove(wav_path);
+    std::error_code ec;
+    std::filesystem::remove_all(cache_dir, ec);
+}
+
 TEST_CASE("WaveformView accepts an AudioThumbnail source", "[view][waveform][thumbnail]") {
     pulp::view::WaveformView view;
     REQUIRE_FALSE(view.has_thumbnail());

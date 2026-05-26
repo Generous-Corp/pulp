@@ -63,6 +63,9 @@ struct PeChunk {
 /// Returns a complete SysEx envelope: F0 7E 7F 0D <sub-id> version
 /// src(4) dst(4) request_id hdr_len(2) hdr(Mcoded7) total(2)
 /// chunk_num(2) pay_len(2) pay(Mcoded7) F7.
+///
+/// NOT RT-safe — allocates the returned vector and the intermediate
+/// Mcoded7 encode buffers. SysEx is a main-thread protocol.
 std::vector<uint8_t> pe_build_message(PeMessageType pe_type,
                                       uint8_t ci_version,
                                       MUID source,
@@ -91,11 +94,16 @@ inline std::vector<uint8_t> pe_build_message(PeMessageType pe_type,
 /// Parse a single PE SysEx envelope into a `PeChunk`. Returns `nullopt` if
 /// the buffer is not a well-formed PE message or fails Mcoded7 decode.
 /// Caller is responsible for matching `request_id` and reassembling chunks.
+///
+/// NOT RT-safe — allocates the PeChunk's `header_json` and `payload`
+/// vectors, plus a transient Mcoded7 decode buffer.
 std::optional<PeChunk> pe_parse_message(const uint8_t* data, std::size_t size);
 
 /// Split a logical PE Get/Set into wire-ready chunks bounded by
 /// `max_payload_bytes` of decoded resource per chunk. The header is
 /// repeated verbatim in each chunk per the spec.
+///
+/// NOT RT-safe — allocates the outer vector and N inner SysEx buffers.
 std::vector<std::vector<uint8_t>>
 pe_split_into_chunks(PeMessageType pe_type,
                      uint8_t ci_version,
@@ -110,16 +118,25 @@ pe_split_into_chunks(PeMessageType pe_type,
 /// Reassemble a stream of incoming `PeChunk`s for the same `request_id`.
 /// Holds chunks until `total_chunks` have all been observed, then returns
 /// the concatenated payload and the (first) header.
+///
+/// RT-safety contract (audited 2026-05-26 for plan item 8.4): every
+/// method mutates an `unordered_map` slot owning per-transfer `vector`s,
+/// and on completion concatenates payload bytes into the returned chunk.
+/// Drive the reassembler from the same MIDI / main thread that decoded
+/// the SysEx envelope, never from the audio callback.
 class PeReassembler {
 public:
-    /// Feed one chunk. Returns the fully reassembled chunk if this chunk
-    /// completes the transfer; otherwise `nullopt`.
+    /// NOT RT-safe — inserts/erases on `unordered_map`, resizes per-slot
+    /// `vector<bool>` and `vector<vector<uint8_t>>`, and on the final
+    /// chunk allocates the concatenated output payload.
     std::optional<PeChunk> push(PeChunk chunk);
 
-    /// Drop any in-progress transfer for `request_id`.
+    /// NOT RT-safe — `unordered_map::erase` may rehash and frees the
+    /// per-slot vectors.
     void cancel(uint8_t request_id);
 
-    /// Number of in-flight transfers (test introspection).
+    /// RT-safe. Returns the in-progress transfer count; touches no
+    /// heap state.
     std::size_t pending_transfers() const { return slots_.size(); }
 
 private:
@@ -139,6 +156,9 @@ private:
 // when the JSON header advertises `"compressed": "zlib"`. Both helpers
 // are payload-only — they do not touch the SysEx envelope or the
 // Mcoded7 framing.
+//
+// NOT RT-safe — both calls heap-allocate the output buffer and run
+// `deflate` / `inflate` internally.
 
 /// Compress a PE payload using zlib (RFC 1950). Returns nullopt on failure.
 std::optional<std::vector<uint8_t>> pe_compress(const uint8_t* data, std::size_t size);
@@ -160,6 +180,9 @@ inline std::optional<std::vector<uint8_t>> pe_decompress(const std::vector<uint8
 ///
 /// `command` is one of "start" / "end" / "partial" / "full" / "notify".
 /// Empty `command` is omitted.
+///
+/// NOT RT-safe — returns a heap-backed std::string built via
+/// `std::ostringstream`.
 std::string pe_header_make(std::string_view resource,
                            std::string_view command = {},
                            int status = 200);
@@ -168,6 +191,8 @@ std::string pe_header_make(std::string_view resource,
 /// params; returns false if the header is not valid JSON. Only the
 /// fields used by the PE framing are extracted; everything else is
 /// considered application data and ignored here.
+///
+/// NOT RT-safe — populates out-param std::strings (allocations).
 bool pe_header_parse(std::string_view json,
                      std::string* resource,
                      std::string* command,
@@ -190,19 +215,30 @@ struct PeSubscription {
 ///   - `unsubscribe(id)` removes it.
 ///   - `subscribers_of(resource)` is used by the responder when a
 ///     resource changes to fan out Notify messages.
+///
+/// RT-safety contract (audited 2026-05-26 for plan item 8.4):
+/// every mutating method allocates; `subscribers_of()` allocates a
+/// fresh result vector even when nothing matches. Drive the manager
+/// from the same non-RT thread that drives PE message dispatch.
 class PeSubscriptionManager {
 public:
-    /// Allocate a subscription. `subscription_id` is generated
-    /// deterministically and is unique within this manager instance.
+    /// NOT RT-safe — allocates a new `PeSubscription` (two
+    /// `std::string`s), pushes onto `subs_`, and builds the returned
+    /// subscription id via `std::to_string`.
     std::string subscribe(std::string_view resource, MUID subscriber);
 
-    /// Remove a subscription. Returns true if it existed.
+    /// NOT RT-safe — linear scan + `std::vector::erase`.
     bool unsubscribe(std::string_view subscription_id);
 
-    /// Returns all subscribers (MUID + id) currently bound to `resource`.
+    /// NOT RT-safe — allocates the result `std::vector<PeSubscription>`,
+    /// even when the call ends up empty (the return value still owns a
+    /// 0-capacity vector header). Match what `notify()` already does
+    /// and call this from a non-audio thread.
     std::vector<PeSubscription> subscribers_of(std::string_view resource) const;
 
-    /// All known subscriptions (test introspection).
+    /// RT-safe. Returns a reference; no allocation. The underlying
+    /// vector mutates on other threads — readers should treat the
+    /// reference as a snapshot, not a live view.
     const std::vector<PeSubscription>& all() const { return subs_; }
 
 private:

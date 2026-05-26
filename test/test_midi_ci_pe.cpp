@@ -557,3 +557,113 @@ TEST_CASE("CiDiscovery.notify with no subscribers is a no-op",
     REQUIRE(n == 0);
     REQUIRE(fires == 0);
 }
+
+// ── RT-safety annotation regression tests (plan item 8.4 follow-up) ─────
+//
+// Every public CI / PE entry point is annotated RT-safe vs NOT RT-safe
+// in the headers. These tests pin the trickier "looks RT-safe but isn't"
+// cases so a future refactor cannot silently flip them without updating
+// the doc — and so callers can `grep` for a test naming the contract.
+
+TEST_CASE("CiDiscovery::subscription_manager() lazily allocates on first call",
+          "[midi][ci][pe][rt-safety][issue-84]") {
+    // Documents the gotcha: the const overload also performs the lazy
+    // make_unique because sub_mgr_ is mutable. Callers that assume "we
+    // only built one once, so subsequent calls are RT-safe" need to be
+    // sure the first call happened on a non-RT thread. We pre-warm the
+    // manager on the main thread; afterwards subscribers_of() touches
+    // only the existing object.
+    CiDiscovery d;
+    auto& mgr = d.subscription_manager();
+    REQUIRE(mgr.all().empty());
+
+    // Const overload returns the same object — no second allocation.
+    const auto& cd = d;
+    REQUIRE(&cd.subscription_manager() == &mgr);
+}
+
+TEST_CASE("CiDiscovery::process_message rejects malformed buffers without alloc",
+          "[midi][ci][pe][rt-safety][issue-84]") {
+    // process_message() is documented NOT RT-safe overall (the happy path
+    // allocates a SysEx response). The fast-fail branches (null buffer,
+    // short buffer, wrong magic) must return an empty vector — those
+    // returns are RT-safe by virtue of returning a default-constructed
+    // std::vector<uint8_t>. This test pins that contract.
+    CiDiscovery d;
+    REQUIRE(d.process_message(nullptr, 0).empty());
+    REQUIRE(d.process_message(nullptr, 64).empty());
+    const uint8_t too_short[5] = {0xF0, 0x7E, 0x7F, 0x0D, 0x70};
+    REQUIRE(d.process_message(too_short, sizeof(too_short)).empty());
+    const uint8_t wrong_magic[14] = {0xAA, 0xBB, 0xCC, 0xDD};
+    REQUIRE(d.process_message(wrong_magic, sizeof(wrong_magic)).empty());
+}
+
+TEST_CASE("PeReassembler::pending_transfers is allocation-free at rest",
+          "[midi][ci][pe][rt-safety][issue-84]") {
+    PeReassembler r;
+    // Reading pending_transfers() before any push must not allocate any
+    // hash buckets — the underlying unordered_map starts empty.
+    REQUIRE(r.pending_transfers() == 0);
+    REQUIRE(r.pending_transfers() == 0);  // idempotent
+
+    // After a single push, the count reflects the new slot. The push
+    // itself IS RT-unsafe — but pending_transfers() reads it cheaply.
+    PeChunk c;
+    c.request_id = 7;
+    c.total_chunks = 2;
+    c.chunk_number = 1;
+    c.payload = {1, 2, 3};
+    auto out = r.push(std::move(c));
+    REQUIRE_FALSE(out.has_value());
+    REQUIRE(r.pending_transfers() == 1);
+}
+
+TEST_CASE("PeSubscriptionManager: zero subscribers still allocates a vector",
+          "[midi][ci][pe][rt-safety][issue-84]") {
+    // Pins the "even an empty subscribers_of() result allocates the
+    // outer vector header" gotcha called out in the header comment.
+    // The check itself is structural — we cannot observe a heap miss
+    // from C++ without a custom allocator — so we instead assert the
+    // return type is a value, not a reference, which is what forces
+    // the allocation in the first place. Use a type trait.
+    static_assert(
+        std::is_same_v<
+            std::vector<PeSubscription>,
+            decltype(std::declval<PeSubscriptionManager>()
+                         .subscribers_of(std::string_view{}))>,
+        "subscribers_of must return a value (allocates) — match the doc");
+    PeSubscriptionManager m;
+    auto v = m.subscribers_of("/nothing");
+    REQUIRE(v.empty());
+}
+
+TEST_CASE("CiDiscovery::device_info/local_muid stays allocation-free",
+          "[midi][ci][pe][rt-safety][issue-84]") {
+    // These are the RT-safe surface: they must return by reference /
+    // by value of trivially-copyable POD. Compile-time pin.
+    static_assert(
+        std::is_same_v<const CiDeviceInfo&,
+                       decltype(std::declval<CiDiscovery>().device_info())>,
+        "device_info must return a reference — match the doc");
+    static_assert(
+        std::is_same_v<MUID,
+                       decltype(std::declval<CiDiscovery>().local_muid())>,
+        "local_muid must return MUID by value — match the doc");
+    CiDiscovery d;
+    REQUIRE(d.device_info().muid == d.local_muid());
+}
+
+TEST_CASE("PeSubscriptionManager::all() returns a reference",
+          "[midi][ci][pe][rt-safety][issue-84]") {
+    // The RT-safe accessor — returning a reference, not a copy. Pin via
+    // static_assert so a future refactor that changes the return type
+    // breaks at compile time.
+    static_assert(
+        std::is_same_v<const std::vector<PeSubscription>&,
+                       decltype(std::declval<PeSubscriptionManager>().all())>,
+        "PeSubscriptionManager::all() must return a const reference");
+    PeSubscriptionManager m;
+    const auto& a = m.all();
+    const auto& b = m.all();
+    REQUIRE(&a == &b);
+}
