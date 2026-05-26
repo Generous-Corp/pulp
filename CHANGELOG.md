@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02490"></a>
+## [0.249.0] - 2026-05-26
+
+- feat(format): wire item-1.3 AudioPlayHead transport extensions into every adapter ([#2963](https://github.com/danielraffel/pulp/pull/2963))
+- fix(screenshot): preserve help option short-circuit ([#2957](https://github.com/danielraffel/pulp/pull/2957))
+- feat(signal+midi): close 3 deferred follow-ups — Oversampler polyphase IIR + PE zlib + PE Subscribe/Notify ([#2959](https://github.com/danielraffel/pulp/pull/2959))
+
 <a id="v02480"></a>
 ## [0.248.0] - 2026-05-26
 
@@ -2926,6 +2933,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.249.0]: https://github.com/danielraffel/pulp/releases/tag/v0.249.0
 [0.248.0]: https://github.com/danielraffel/pulp/releases/tag/v0.248.0
 [0.247.0]: https://github.com/danielraffel/pulp/releases/tag/v0.247.0
 [0.246.0]: https://github.com/danielraffel/pulp/releases/tag/v0.246.0
