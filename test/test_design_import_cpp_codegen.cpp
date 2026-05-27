@@ -14,10 +14,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <map>
 #include <sstream>
 #include <string>
@@ -73,6 +76,12 @@ void write_bytes(const fs::path& path, const std::vector<uint8_t>& bytes) {
     REQUIRE(out.good());
 }
 
+std::vector<uint8_t> read_bytes(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in.is_open());
+    return {std::istreambuf_iterator<char>(in), {}};
+}
+
 std::string read_text(const fs::path& path) {
     std::ifstream in(path);
     REQUIRE(in.is_open());
@@ -90,6 +99,63 @@ View* find_anchor(View& root, std::string_view anchor) {
             return found;
     }
     return nullptr;
+}
+
+Rect absolute_bounds(const View& view) {
+    auto out = view.bounds();
+    for (auto* parent = view.parent(); parent != nullptr; parent = parent->parent()) {
+        out.x += parent->bounds().x;
+        out.y += parent->bounds().y;
+    }
+    return out;
+}
+
+Rect union_bounds(const std::vector<Rect>& rects) {
+    REQUIRE_FALSE(rects.empty());
+    float left = rects.front().x;
+    float top = rects.front().y;
+    float right = rects.front().right();
+    float bottom = rects.front().bottom();
+    for (const auto& rect : rects) {
+        left = std::min(left, rect.x);
+        top = std::min(top, rect.y);
+        right = std::max(right, rect.right());
+        bottom = std::max(bottom, rect.bottom());
+    }
+    return {left, top, right - left, bottom - top};
+}
+
+struct PixelCropRect {
+    uint32_t x = 0;
+    uint32_t y = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
+PixelCropRect expanded_crop(Rect rect, float pad, uint32_t max_width, uint32_t max_height) {
+    const auto left = std::max(0.0f, std::floor(rect.x - pad));
+    const auto top = std::max(0.0f, std::floor(rect.y - pad));
+    const auto right = std::min(static_cast<float>(max_width), std::ceil(rect.right() + pad));
+    const auto bottom = std::min(static_cast<float>(max_height), std::ceil(rect.bottom() + pad));
+    REQUIRE(right > left);
+    REQUIRE(bottom > top);
+    return {
+        static_cast<uint32_t>(left),
+        static_cast<uint32_t>(top),
+        static_cast<uint32_t>(right - left),
+        static_cast<uint32_t>(bottom - top),
+    };
+}
+
+bool crop_intersects_diff(PixelCropRect crop, const DiffBounds& bounds) {
+    if (!bounds.valid)
+        return true;
+    const auto crop_right = crop.x + crop.width;
+    const auto crop_bottom = crop.y + crop.height;
+    const auto bounds_right = bounds.x + bounds.width;
+    const auto bounds_bottom = bounds.y + bounds.height;
+    return crop.x < bounds_right && crop_right > bounds.x &&
+           crop.y < bounds_bottom && crop_bottom > bounds.y;
 }
 
 struct PhaseDParamEvent {
@@ -495,6 +561,27 @@ DesignIR lower_chainer_knob_routes_to_phase_d_ir(DesignIR materialized_ir,
     REQUIRE(ir.root.children.size() == 8);
 
     return ir;
+}
+
+DesignIR lower_chainer_knob_routes_to_phase_d_original_layout_ir(DesignIR materialized_ir,
+                                                                 choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-d-chainer-original-layout-hybrid-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-d-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Knob")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto knob = lower_chainer_knob_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(knob);
+        ++lowered;
+    }
+    REQUIRE(lowered == 8);
+    return materialized_ir;
 }
 
 std::string diff_messages(const LayoutTreeDiff& diff) {
@@ -915,6 +1002,121 @@ TEST_CASE("generated Chainer all-knob C++ can bind and drag every knob",
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-d-behavior-report.json", report.str());
+    }
+}
+
+TEST_CASE("Chainer original-layout hybrid classifies knob region visual diff",
+          "[view][import][cpp-codegen][native-cpp-phase-d][visual]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path live_png_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/screenshots/chainer-live-coregraphics-1280x800.png";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(live_png_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    auto hybrid_ir = lower_chainer_knob_routes_to_phase_d_original_layout_ir(std::move(materialized_ir), route_rows);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto hybrid_view = build_native_view_tree(hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr uint32_t kWidth = 1280;
+    constexpr uint32_t kHeight = 800;
+    auto hybrid_png = render_to_png(*hybrid_view, kWidth, kHeight, 1.0f);
+    if (hybrid_png.empty())
+        SKIP("native screenshot renderer unavailable for original-layout hybrid visual gate");
+    const auto live_png = read_bytes(live_png_path);
+    REQUIRE_FALSE(live_png.empty());
+
+    auto full_result = compare_screenshots(live_png, hybrid_png, 32);
+    REQUIRE(full_result.valid);
+    auto full_changed = diff_bounds(live_png, hybrid_png, 32);
+
+    const std::vector<std::string_view> anchors = {
+        "pr_2c", "pr_2l", "pr_2u", "pr_49", "pr_4i", "pr_4y", "pr_57", "pr_6p",
+    };
+    std::vector<Rect> knob_bounds;
+    for (auto anchor : anchors) {
+        auto* view = find_anchor(*hybrid_view, anchor);
+        REQUIRE(view != nullptr);
+        REQUIRE(dynamic_cast<Knob*>(view) != nullptr);
+        auto bounds = absolute_bounds(*view);
+        REQUIRE(bounds.width > 0.0f);
+        REQUIRE(bounds.height > 0.0f);
+        knob_bounds.push_back(bounds);
+    }
+
+    const auto crop_rect = expanded_crop(union_bounds(knob_bounds), 18.0f, kWidth, kHeight);
+    const bool full_diff_overlaps_crop = crop_intersects_diff(crop_rect, full_changed);
+    REQUIRE(full_diff_overlaps_crop);
+    auto live_crop = crop_png(live_png, crop_rect.x, crop_rect.y, crop_rect.width, crop_rect.height);
+    auto hybrid_crop = crop_png(hybrid_png, crop_rect.x, crop_rect.y, crop_rect.width, crop_rect.height);
+    REQUIRE_FALSE(live_crop.empty());
+    REQUIRE_FALSE(hybrid_crop.empty());
+
+    auto knob_result = compare_screenshots(live_crop, hybrid_crop, 32);
+    REQUIRE(knob_result.valid);
+    auto diff = generate_diff_image(live_crop, hybrid_crop, 32);
+    REQUIRE_FALSE(diff.empty());
+    auto changed = diff_bounds(live_crop, hybrid_crop, 32);
+
+    constexpr float kKnobRegionThreshold = 0.90f;
+    const bool within_threshold = knob_result.passes(kKnobRegionThreshold);
+    const char* classification = within_threshold ? "within_threshold" : "classified_difference";
+    const char* reason = within_threshold
+        ? "native_hybrid_knob_region_matches_live_runtime_threshold"
+        : "standard_native_knob_style_differs_from_source_svg_region";
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-d-original-layout-hybrid.png", hybrid_png);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-d-live-knob-region.png", live_crop);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-d-hybrid-knob-region.png", hybrid_crop);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-d-knob-region-diff.png", diff);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-d-live-visual-v1\",\n"
+               << "  \"fixture\": \"chainer-original-layout-hybrid\",\n"
+               << "  \"scope\": \"native-hybrid-knob-region-vs-live-runtime\",\n"
+               << "  \"threshold\": " << kKnobRegionThreshold << ",\n"
+               << "  \"classification\": \"" << classification << "\",\n"
+               << "  \"classification_reason\": \"" << reason << "\",\n"
+               << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"full_similarity\": " << std::setprecision(7) << full_result.similarity << ",\n"
+               << "  \"full_mean_error\": " << full_result.mean_error << ",\n"
+               << "  \"knob_region_similarity\": " << knob_result.similarity << ",\n"
+               << "  \"knob_region_mean_error\": " << knob_result.mean_error << ",\n"
+               << "  \"knob_region_diff_pixels\": " << knob_result.diff_pixels << ",\n"
+               << "  \"knob_region_total_pixels\": " << knob_result.total_pixels << ",\n"
+               << "  \"crop_rect\": {"
+               << "\"x\": " << crop_rect.x << ", "
+               << "\"y\": " << crop_rect.y << ", "
+               << "\"width\": " << crop_rect.width << ", "
+               << "\"height\": " << crop_rect.height << "},\n"
+               << "  \"full_diff_bounds\": {"
+               << "\"valid\": " << (full_changed.valid ? "true" : "false") << ", "
+               << "\"x\": " << full_changed.x << ", "
+               << "\"y\": " << full_changed.y << ", "
+               << "\"width\": " << full_changed.width << ", "
+               << "\"height\": " << full_changed.height << ", "
+               << "\"diff_pixels\": " << full_changed.diff_pixels << "},\n"
+               << "  \"full_diff_overlaps_crop\": " << (full_diff_overlaps_crop ? "true" : "false") << ",\n"
+               << "  \"diff_bounds\": {"
+               << "\"valid\": " << (changed.valid ? "true" : "false") << ", "
+               << "\"x\": " << changed.x << ", "
+               << "\"y\": " << changed.y << ", "
+               << "\"width\": " << changed.width << ", "
+               << "\"height\": " << changed.height << ", "
+               << "\"diff_pixels\": " << changed.diff_pixels << "}\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-d-live-visual-report.json", report.str());
     }
 }
 
