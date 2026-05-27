@@ -63,6 +63,12 @@ target_sources(pulp-canvas PRIVATE
     # trace CLI flag, the import-missing-font-advisor, debug overlays)
     # drain to see every typeface resolution the resolver performed.
     src/font_flight_recorder.cpp
+    # planning/2026-05-24 gap-doc row "PNG / JPEG / GIF codecs" —
+    # GIF (89a) + Baseline TIFF 6.0 readers/writers, Skia-free so
+    # they compile on every config (headless / GPU-off / no Skia).
+    # See include/pulp/canvas/image_codecs.hpp for the public API.
+    src/image_codecs_gif.cpp
+    src/image_codecs_tiff.cpp
 )
 
 # Text shaping via SkParagraph (default ON when Skia available, can be disabled)
