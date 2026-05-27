@@ -1051,6 +1051,27 @@ DesignIR lower_chainer_knob_routes_to_phase_d_original_layout_ir(DesignIR materi
     return materialized_ir;
 }
 
+DesignIR lower_chainer_fader_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
+                                                                  choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-e-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Fader")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto fader = lower_chainer_fader_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(fader);
+        ++lowered;
+    }
+    REQUIRE(lowered == 6);
+    return materialized_ir;
+}
+
 std::string json_escape(std::string_view text) {
     std::ostringstream out;
     for (unsigned char c : text) {
@@ -1122,6 +1143,18 @@ struct PhaseDKnobLayoutCase {
     float expected_size = 0.0f;
 };
 
+struct PhaseEFaderLayoutCase {
+    std::string id;
+    std::string anchor;
+    std::string source_track_anchor;
+    std::string source_thumb_anchor;
+    std::string source_track_ir_path;
+    std::string source_thumb_ir_path;
+    std::string param_key;
+    float expected_width = 0.0f;
+    float expected_height = 0.0f;
+};
+
 std::vector<PhaseDKnobSurfaceCase> chainer_knob_surface_cases(choc::value::ValueView route_rows) {
     std::vector<PhaseDKnobSurfaceCase> cases;
     for (uint32_t i = 0; i < route_rows.size(); ++i) {
@@ -1176,6 +1209,48 @@ std::vector<PhaseDKnobLayoutCase> chainer_knob_layout_cases(IRNode& materialized
         cases.push_back(std::move(item));
     }
     REQUIRE(cases.size() == 8);
+    return cases;
+}
+
+std::vector<PhaseEFaderLayoutCase> chainer_fader_layout_cases(IRNode& materialized_root,
+                                                              choc::value::ValueView route_rows) {
+    std::vector<PhaseEFaderLayoutCase> cases;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Fader")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto* wrapper = node_at_ir_path(materialized_root, materialized_path);
+        REQUIRE(wrapper != nullptr);
+        REQUIRE_FALSE(wrapper->children.empty());
+        auto& source_track = wrapper->children.front();
+        REQUIRE(source_track.stable_anchor_id.has_value());
+        REQUIRE_FALSE(source_track.children.empty());
+        auto& source_thumb = source_track.children.back();
+        REQUIRE(source_thumb.stable_anchor_id.has_value());
+
+        const auto binding = route["parameter_bindings"][0];
+        PhaseEFaderLayoutCase item;
+        item.id = json_string(route["id"]);
+        item.anchor = json_string(route["materialized_ir_anchor"]);
+        item.source_track_anchor = *source_track.stable_anchor_id;
+        item.source_thumb_anchor = *source_thumb.stable_anchor_id;
+        item.source_track_ir_path = materialized_path + "/0";
+        item.source_thumb_ir_path = materialized_path + "/0/" +
+            std::to_string(source_track.children.size() - 1u);
+        item.param_key = json_string(binding["param_key"]);
+        item.expected_height = json_float(route["height"]);
+
+        REQUIRE(source_track.style.height.has_value());
+        REQUIRE(*source_track.style.height == Catch::Approx(item.expected_height));
+        REQUIRE(source_thumb.style.width.has_value());
+        REQUIRE(source_thumb.style.height.has_value());
+        item.expected_width = *source_thumb.style.width;
+        REQUIRE(item.expected_width == Catch::Approx(17.0f));
+        REQUIRE(*source_thumb.style.height == Catch::Approx(5.0f));
+        cases.push_back(std::move(item));
+    }
+    REQUIRE(cases.size() == 6);
     return cases;
 }
 
@@ -1781,6 +1856,338 @@ TEST_CASE("generated Chainer fader C++ can bind and drag every fader",
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-e-fader-behavior-report.json", report.str());
+    }
+}
+
+TEST_CASE("Chainer original-layout hybrid classifies fader replacement bounds against live source composite",
+          "[view][import][cpp-codegen][native-cpp-phase-e][layout]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path runtime_trace_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/traces/chainer-live-runtime-trace.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(runtime_trace_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    const auto live_native_bounds = read_runtime_native_bounds(runtime_trace_path);
+    const auto cases = chainer_fader_layout_cases(materialized_ir.root, route_rows);
+
+    std::vector<ImportDiagnostic> source_diagnostics;
+    auto source_view = build_native_view_tree(
+        materialized_ir, materialized_ir.asset_manifest, {.diagnostics_out = &source_diagnostics});
+    REQUIRE(source_view != nullptr);
+
+    auto hybrid_ir = lower_chainer_fader_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    std::vector<ImportDiagnostic> hybrid_diagnostics;
+    auto hybrid_view = build_native_view_tree(
+        hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &hybrid_diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr float kWidth = 1280.0f;
+    constexpr float kHeight = 800.0f;
+    source_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    hybrid_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    source_view->layout_children();
+    hybrid_view->layout_children();
+
+    struct LayoutComparison {
+        const PhaseEFaderLayoutCase* item = nullptr;
+        Rect source_track_bounds;
+        Rect source_thumb_bounds;
+        Rect source_composite_bounds;
+        Rect live_track_bounds;
+        Rect live_thumb_bounds;
+        Rect live_composite_bounds;
+        Rect native_bounds;
+        std::vector<RuntimeAncestorBounds> source_chain;
+        std::vector<RuntimeAncestorBounds> live_source_chain;
+        std::vector<RuntimeAncestorBounds> native_chain;
+        std::size_t source_live_common_ancestor_count = 0;
+        std::size_t live_native_common_ancestor_count = 0;
+        ChainDelta source_live_first_chain_delta;
+        ChainDelta live_native_first_chain_delta;
+        ChainDelta live_native_preserved_first_chain_delta;
+        float center_delta_px = 0.0f;
+        float size_delta_px = 0.0f;
+        float source_expected_width_delta_px = 0.0f;
+        float source_expected_height_delta_px = 0.0f;
+        float live_center_delta_px = 0.0f;
+        float live_size_delta_px = 0.0f;
+        float live_expected_width_delta_px = 0.0f;
+        float live_expected_height_delta_px = 0.0f;
+        float native_expected_width_delta_px = 0.0f;
+        float native_expected_height_delta_px = 0.0f;
+    };
+
+    std::vector<LayoutComparison> comparisons;
+    comparisons.reserve(cases.size());
+    float max_center_delta = 0.0f;
+    float max_size_delta = 0.0f;
+    float max_source_expected_width_delta = 0.0f;
+    float max_source_expected_height_delta = 0.0f;
+    float max_live_center_delta = 0.0f;
+    float max_live_size_delta = 0.0f;
+    float max_live_expected_width_delta = 0.0f;
+    float max_live_expected_height_delta = 0.0f;
+    float max_native_expected_width_delta = 0.0f;
+    float max_native_expected_height_delta = 0.0f;
+    float max_source_live_chain_center_delta = 0.0f;
+    float max_source_live_chain_size_delta = 0.0f;
+    float max_live_native_chain_center_delta = 0.0f;
+    float max_live_native_chain_size_delta = 0.0f;
+    std::string max_live_native_chain_delta_id;
+    float max_live_native_preserved_chain_center_delta = 0.0f;
+    float max_live_native_preserved_chain_size_delta = 0.0f;
+    std::string max_live_native_preserved_chain_delta_id;
+    constexpr float kBoundsTolerancePx = 0.5f;
+
+    for (const auto& item : cases) {
+        auto* source_track = find_anchor(*source_view, item.source_track_anchor);
+        auto* source_thumb = find_anchor(*source_view, item.source_thumb_anchor);
+        auto* native_fader = find_anchor(*hybrid_view, item.anchor);
+        REQUIRE(source_track != nullptr);
+        REQUIRE(source_thumb != nullptr);
+        REQUIRE(native_fader != nullptr);
+        REQUIRE(dynamic_cast<Fader*>(native_fader) != nullptr);
+
+        const auto live_track_it = live_native_bounds.find(item.source_track_anchor);
+        const auto live_thumb_it = live_native_bounds.find(item.source_thumb_anchor);
+        REQUIRE(live_track_it != live_native_bounds.end());
+        REQUIRE(live_thumb_it != live_native_bounds.end());
+
+        const auto source_track_bounds = absolute_bounds(*source_track);
+        const auto source_thumb_bounds = absolute_bounds(*source_thumb);
+        const auto source_composite_bounds = union_bounds({source_track_bounds, source_thumb_bounds});
+        const auto live_track_bounds = live_track_it->second.bounds;
+        const auto live_thumb_bounds = live_thumb_it->second.bounds;
+        const auto live_composite_bounds = union_bounds({live_track_bounds, live_thumb_bounds});
+        const auto native_bounds = absolute_bounds(*native_fader);
+        const auto source_chain = view_ancestor_chain(*source_track);
+        const auto live_source_chain = live_track_it->second.ancestor_chain;
+        const auto native_chain = view_ancestor_chain(*native_fader);
+        const auto source_live_first_chain_delta = first_chain_delta(
+            live_source_chain, source_chain, kBoundsTolerancePx);
+        const auto live_native_first_chain_delta = first_chain_delta(
+            live_source_chain, native_chain, kBoundsTolerancePx);
+        const auto live_native_preserved_first_chain_delta = first_chain_delta(
+            live_source_chain, native_chain, kBoundsTolerancePx, item.anchor);
+        const auto source_live_common_ancestor_count = common_chain_id_count(live_source_chain, source_chain);
+        const auto live_native_common_ancestor_count = common_chain_id_count(live_source_chain, native_chain);
+
+        const auto center_delta = center_delta_px(source_composite_bounds, native_bounds);
+        const auto size_delta = size_delta_px(source_composite_bounds, native_bounds);
+        const auto source_expected_width_delta =
+            std::abs(source_composite_bounds.width - item.expected_width);
+        const auto source_expected_height_delta =
+            std::abs(source_composite_bounds.height - item.expected_height);
+        const auto live_center_delta = center_delta_px(live_composite_bounds, native_bounds);
+        const auto live_size_delta = size_delta_px(live_composite_bounds, native_bounds);
+        const auto live_expected_width_delta =
+            std::abs(live_composite_bounds.width - item.expected_width);
+        const auto live_expected_height_delta =
+            std::abs(live_composite_bounds.height - item.expected_height);
+        const auto native_expected_width_delta =
+            std::abs(native_bounds.width - item.expected_width);
+        const auto native_expected_height_delta =
+            std::abs(native_bounds.height - item.expected_height);
+
+        max_center_delta = std::max(max_center_delta, center_delta);
+        max_size_delta = std::max(max_size_delta, size_delta);
+        max_source_expected_width_delta = std::max(max_source_expected_width_delta, source_expected_width_delta);
+        max_source_expected_height_delta = std::max(max_source_expected_height_delta, source_expected_height_delta);
+        max_live_center_delta = std::max(max_live_center_delta, live_center_delta);
+        max_live_size_delta = std::max(max_live_size_delta, live_size_delta);
+        max_live_expected_width_delta = std::max(max_live_expected_width_delta, live_expected_width_delta);
+        max_live_expected_height_delta = std::max(max_live_expected_height_delta, live_expected_height_delta);
+        max_native_expected_width_delta = std::max(max_native_expected_width_delta, native_expected_width_delta);
+        max_native_expected_height_delta = std::max(max_native_expected_height_delta, native_expected_height_delta);
+        if (source_live_first_chain_delta.valid) {
+            max_source_live_chain_center_delta = std::max(
+                max_source_live_chain_center_delta, source_live_first_chain_delta.center_delta_px);
+            max_source_live_chain_size_delta = std::max(
+                max_source_live_chain_size_delta, source_live_first_chain_delta.size_delta_px);
+        }
+        if (live_native_first_chain_delta.valid) {
+            if (live_native_first_chain_delta.center_delta_px > max_live_native_chain_center_delta ||
+                live_native_first_chain_delta.size_delta_px > max_live_native_chain_size_delta) {
+                max_live_native_chain_delta_id = live_native_first_chain_delta.id;
+            }
+            max_live_native_chain_center_delta = std::max(
+                max_live_native_chain_center_delta, live_native_first_chain_delta.center_delta_px);
+            max_live_native_chain_size_delta = std::max(
+                max_live_native_chain_size_delta, live_native_first_chain_delta.size_delta_px);
+        }
+        if (live_native_preserved_first_chain_delta.valid) {
+            if (live_native_preserved_first_chain_delta.center_delta_px > max_live_native_preserved_chain_center_delta ||
+                live_native_preserved_first_chain_delta.size_delta_px > max_live_native_preserved_chain_size_delta) {
+                max_live_native_preserved_chain_delta_id = live_native_preserved_first_chain_delta.id;
+            }
+            max_live_native_preserved_chain_center_delta = std::max(
+                max_live_native_preserved_chain_center_delta,
+                live_native_preserved_first_chain_delta.center_delta_px);
+            max_live_native_preserved_chain_size_delta = std::max(
+                max_live_native_preserved_chain_size_delta,
+                live_native_preserved_first_chain_delta.size_delta_px);
+        }
+
+        comparisons.push_back({&item,
+                               source_track_bounds,
+                               source_thumb_bounds,
+                               source_composite_bounds,
+                               live_track_bounds,
+                               live_thumb_bounds,
+                               live_composite_bounds,
+                               native_bounds,
+                               source_chain,
+                               live_source_chain,
+                               native_chain,
+                               source_live_common_ancestor_count,
+                               live_native_common_ancestor_count,
+                               source_live_first_chain_delta,
+                               live_native_first_chain_delta,
+                               live_native_preserved_first_chain_delta,
+                               center_delta,
+                               size_delta,
+                               source_expected_width_delta,
+                               source_expected_height_delta,
+                               live_center_delta,
+                               live_size_delta,
+                               live_expected_width_delta,
+                               live_expected_height_delta,
+                               native_expected_width_delta,
+                               native_expected_height_delta});
+    }
+
+    const bool within_threshold = max_center_delta <= kBoundsTolerancePx &&
+        max_size_delta <= kBoundsTolerancePx &&
+        max_source_expected_width_delta <= kBoundsTolerancePx &&
+        max_source_expected_height_delta <= kBoundsTolerancePx &&
+        max_native_expected_width_delta <= kBoundsTolerancePx &&
+        max_native_expected_height_delta <= kBoundsTolerancePx;
+    const bool live_runtime_within_threshold = max_live_center_delta <= kBoundsTolerancePx &&
+        max_live_size_delta <= kBoundsTolerancePx &&
+        max_live_expected_width_delta <= kBoundsTolerancePx &&
+        max_live_expected_height_delta <= kBoundsTolerancePx &&
+        max_native_expected_width_delta <= kBoundsTolerancePx &&
+        max_native_expected_height_delta <= kBoundsTolerancePx;
+    const char* coordinate_uncertainty_source = within_threshold
+        ? "none"
+        : (max_source_expected_width_delta > kBoundsTolerancePx ||
+           max_source_expected_height_delta > kBoundsTolerancePx) &&
+              max_native_expected_width_delta <= kBoundsTolerancePx &&
+              max_native_expected_height_delta <= kBoundsTolerancePx
+            ? "source_materialized_composite_mismatch"
+            : (max_native_expected_width_delta > kBoundsTolerancePx ||
+               max_native_expected_height_delta > kBoundsTolerancePx)
+                ? "native_layout_mismatch"
+                : "source_native_bounds_delta";
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-fader-layout-bounds-v1\",\n"
+               << "  \"fixture\": \"chainer-original-layout-hybrid-faders\",\n"
+               << "  \"scope\": \"source-fader-track-thumb-composite-vs-native-replacement-bounds\",\n"
+               << "  \"source_bounds_basis\": \"materialized-ir-track-plus-thumb-union\",\n"
+               << "  \"live_bounds_basis\": \"runtime-trace-track-plus-thumb-union\",\n"
+               << "  \"native_bounds_basis\": \"original-layout-hybrid-native-fader\",\n"
+               << "  \"threshold_px\": " << kBoundsTolerancePx << ",\n"
+               << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"live_runtime_classification\": \""
+               << (live_runtime_within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"coordinate_uncertainty_source\": \"" << coordinate_uncertainty_source << "\",\n"
+               << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"live_runtime_within_threshold\": "
+               << (live_runtime_within_threshold ? "true" : "false") << ",\n"
+               << "  \"fader_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_matched_fader_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_bounds_count\": " << live_native_bounds.size() << ",\n"
+               << "  \"max_center_delta_px\": " << std::setprecision(7) << max_center_delta << ",\n"
+               << "  \"max_size_delta_px\": " << max_size_delta << ",\n"
+               << "  \"max_source_expected_width_delta_px\": " << max_source_expected_width_delta << ",\n"
+               << "  \"max_source_expected_height_delta_px\": " << max_source_expected_height_delta << ",\n"
+               << "  \"max_live_center_delta_px\": " << max_live_center_delta << ",\n"
+               << "  \"max_live_size_delta_px\": " << max_live_size_delta << ",\n"
+               << "  \"max_live_expected_width_delta_px\": " << max_live_expected_width_delta << ",\n"
+               << "  \"max_live_expected_height_delta_px\": " << max_live_expected_height_delta << ",\n"
+               << "  \"max_native_expected_width_delta_px\": " << max_native_expected_width_delta << ",\n"
+               << "  \"max_native_expected_height_delta_px\": " << max_native_expected_height_delta << ",\n"
+               << "  \"max_source_live_chain_center_delta_px\": " << max_source_live_chain_center_delta << ",\n"
+               << "  \"max_source_live_chain_size_delta_px\": " << max_source_live_chain_size_delta << ",\n"
+               << "  \"max_live_native_chain_center_delta_px\": " << max_live_native_chain_center_delta << ",\n"
+               << "  \"max_live_native_chain_size_delta_px\": " << max_live_native_chain_size_delta << ",\n"
+               << "  \"max_live_native_chain_delta_id\": \"" << json_escape(max_live_native_chain_delta_id) << "\",\n"
+               << "  \"max_live_native_preserved_chain_center_delta_px\": "
+               << max_live_native_preserved_chain_center_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_size_delta_px\": "
+               << max_live_native_preserved_chain_size_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_delta_id\": \""
+               << json_escape(max_live_native_preserved_chain_delta_id) << "\",\n"
+               << "  \"faders\": [";
+        for (std::size_t i = 0; i < comparisons.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& row = comparisons[i];
+            report << "\n    {"
+                   << "\"id\": \"" << json_escape(row.item->id) << "\", "
+                   << "\"anchor\": \"" << json_escape(row.item->anchor) << "\", "
+                   << "\"source_track_anchor\": \"" << json_escape(row.item->source_track_anchor) << "\", "
+                   << "\"source_thumb_anchor\": \"" << json_escape(row.item->source_thumb_anchor) << "\", "
+                   << "\"source_track_ir_path\": \"" << json_escape(row.item->source_track_ir_path) << "\", "
+                   << "\"source_thumb_ir_path\": \"" << json_escape(row.item->source_thumb_ir_path) << "\", "
+                   << "\"param_key\": \"" << json_escape(row.item->param_key) << "\", "
+                   << "\"expected_width\": " << row.item->expected_width << ", "
+                   << "\"expected_height\": " << row.item->expected_height << ", "
+                   << "\"source_track_bounds\": ";
+            append_rect_json(report, row.source_track_bounds);
+            report << ", \"source_thumb_bounds\": ";
+            append_rect_json(report, row.source_thumb_bounds);
+            report << ", \"source_composite_bounds\": ";
+            append_rect_json(report, row.source_composite_bounds);
+            report << ", \"live_track_bounds\": ";
+            append_rect_json(report, row.live_track_bounds);
+            report << ", \"live_thumb_bounds\": ";
+            append_rect_json(report, row.live_thumb_bounds);
+            report << ", \"live_composite_bounds\": ";
+            append_rect_json(report, row.live_composite_bounds);
+            report << ", \"native_bounds\": ";
+            append_rect_json(report, row.native_bounds);
+            report << ", \"center_delta_px\": " << row.center_delta_px
+                   << ", \"size_delta_px\": " << row.size_delta_px
+                   << ", \"source_expected_width_delta_px\": " << row.source_expected_width_delta_px
+                   << ", \"source_expected_height_delta_px\": " << row.source_expected_height_delta_px
+                   << ", \"live_center_delta_px\": " << row.live_center_delta_px
+                   << ", \"live_size_delta_px\": " << row.live_size_delta_px
+                   << ", \"live_expected_width_delta_px\": " << row.live_expected_width_delta_px
+                   << ", \"live_expected_height_delta_px\": " << row.live_expected_height_delta_px
+                   << ", \"native_expected_width_delta_px\": " << row.native_expected_width_delta_px
+                   << ", \"native_expected_height_delta_px\": " << row.native_expected_height_delta_px
+                   << ", \"source_live_common_ancestor_count\": " << row.source_live_common_ancestor_count
+                   << ", \"live_native_common_ancestor_count\": " << row.live_native_common_ancestor_count
+                   << ", \"source_live_first_chain_delta\": ";
+            append_chain_delta_json(report, row.source_live_first_chain_delta);
+            report << ", \"live_native_first_chain_delta\": ";
+            append_chain_delta_json(report, row.live_native_first_chain_delta);
+            report << ", \"live_native_preserved_first_chain_delta\": ";
+            append_chain_delta_json(report, row.live_native_preserved_first_chain_delta);
+            report << ", \"source_ancestor_chain\": ";
+            append_chain_json(report, row.source_chain);
+            report << ", \"live_source_ancestor_chain\": ";
+            append_chain_json(report, row.live_source_chain);
+            report << ", \"native_ancestor_chain\": ";
+            append_chain_json(report, row.native_chain);
+            report << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-fader-layout-report.json", report.str());
     }
 }
 
