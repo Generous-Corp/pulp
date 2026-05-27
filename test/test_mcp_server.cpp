@@ -326,6 +326,28 @@ TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
     REQUIRE_FALSE(extract_bool(payload, "array", false));
 }
 
+TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
+          "[mcp][json][coverage]") {
+    const auto error = json_error("null", -32602, "bad \"arg\"\nline");
+    require_contains(error, R"JSON("jsonrpc":"2.0")JSON");
+    require_contains(error, R"JSON("id":null)JSON");
+    require_contains(error, R"JSON("code":-32602)JSON");
+    require_contains(error, R"JSON("message":"bad \"arg\"\nline")JSON");
+    REQUIRE(error.find('\n') == std::string::npos);
+
+    const auto result = json_result("7", R"JSON({"ok":true,"count":3})JSON");
+    REQUIRE(result == R"JSON({"jsonrpc":"2.0","id":7,"result":{"ok":true,"count":3}})JSON");
+
+    const auto payload = json_tool_payload(
+        R"JSON({"ok":true,"text":"a \"quoted\" value","items":[1,2]})JSON");
+    require_contains(payload, R"JSON("content":[{"type":"text","text":")JSON");
+    require_contains(payload, R"JSON(\"text\":\"a \\\"quoted\\\" value\")JSON");
+    require_contains(payload,
+                     R"JSON("structuredContent":{"ok":true,"text":"a \"quoted\" value","items":[1,2]})JSON");
+    REQUIRE(payload.find('\n') == std::string::npos);
+    REQUIRE(payload.find(R"JSON("isError")JSON") == std::string::npos);
+}
+
 TEST_CASE("MCP shell_quote keeps shell arguments atomic",
           "[mcp][shell][coverage]") {
 #if defined(_WIN32)
@@ -1161,6 +1183,43 @@ TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
     REQUIRE_FALSE(version.empty());
 }
 
+TEST_CASE("parse_cmake_project_version handles plugin VERSION fallback",
+          "[mcp][compat][coverage]") {
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "cmake_minimum_required(VERSION 3.25)\n"
+                "pulp_add_plugin(MyPlugin VERSION \"1.2.3\")\n") == "1.2.3");
+
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "pulp_add_plugin(\n"
+                "  MyPlugin\n"
+                "  FORMAT VST3\n"
+                "  VERSION 2.3.4\n"
+                ")\n") == "2.3.4");
+
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "project(Product VERSION 4.5.6)\n"
+                "pulp_add_plugin(MyPlugin VERSION \"1.2.3\")\n") == "4.5.6");
+
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "pulp_add_plugin(MyPlugin NAME Only)\n").empty());
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "pulp_add_plugin(MyPlugin VERSION \"1.2\")\n").empty());
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "pulp_add_plugin(MyPlugin VERSION \"1.2.3.4\")\n").empty());
+    REQUIRE(pulp_mcp::parse_cmake_project_version(
+                "pulp_add_plugin(MyPlugin VERSION \"1.2.3-beta\")\n") == "1.2.3");
+}
+
+TEST_CASE("compare_semver tolerates metadata and leading zeroes",
+          "[mcp][compat][coverage]") {
+    REQUIRE(compare_semver("1.2.3-alpha", "1.2.3") == 0);
+    REQUIRE(compare_semver("1.2.4+build", "1.2.3") > 0);
+    REQUIRE(compare_semver("01.002.0003", "1.2.3") == 0);
+    REQUIRE(compare_semver("1.10.0", "1.2.99") > 0);
+    REQUIRE(compare_semver("2.0", "1.9.9") == 0);
+    REQUIRE(compare_semver("", "1.9.9") == 0);
+}
+
 // MCP stdio transport: messages are delimited by newlines and MUST
 // NOT contain embedded newlines (per the MCP spec). Pre-fix,
 // tools_list_json() returned a multi-line R"JSON(...)" raw string with
@@ -1382,4 +1441,22 @@ TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
         "[dependency]\nsdk_version = \"9.9.9\"\n").empty());
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
         "sdk_version = \"1.2.3\"\n[dependency]\nsdk_version = \"9.9.9\"\n") == "1.2.3");
+}
+
+TEST_CASE("parse_pulp_toml_sdk_version rejects ambiguous sdk pins",
+          "[mcp][compat][coverage]") {
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "[pulp.extra]\nsdk_version = \"9.9.9\"\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "sdk_version = '1.2.3'\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "sdk_version = 1.2.3\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "sdk_versionish = \"1.2.3\"\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "sdk_version = \"1.2.3\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "[pulp]\nsdk_version = \"2.3.4\" # generated pin\n") == "2.3.4");
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
+                "[tools]\nsdk_version = \"9.9.9\"\n[pulp]\nsdk_version = \"2.3.4\"\n") == "2.3.4");
 }
