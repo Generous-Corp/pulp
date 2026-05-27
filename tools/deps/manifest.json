@@ -570,7 +570,7 @@
           },
           "linux-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-linux-arm64-gpu-release.zip",
-            "sha256": "PLACEHOLDER_LINUX_ARM64_SHA256"
+            "sha256": "6dfd451aa27df4f200fae0d728ccfa31e3c0b0ae16e20f136a384c93d3b5e45e"
           },
           "linux-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-linux-x64-gpu-release.zip",

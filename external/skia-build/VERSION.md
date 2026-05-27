@@ -78,7 +78,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 
 | Asset | SHA-256 |
 |-------|---------|
-| `skia-build-linux-arm64-gpu-release.zip` | `PLACEHOLDER_LINUX_ARM64_SHA256` (pulp #47 — built on the project's Ubuntu 24.04 aarch64 host; real digest backfills once `gh release upload danielraffel/skia-builder chrome/m149 skia-build-linux-arm64-gpu-release.zip` completes) |
+| `skia-build-linux-arm64-gpu-release.zip` | `6dfd451aa27df4f200fae0d728ccfa31e3c0b0ae16e20f136a384c93d3b5e45e` |
 | `skia-build-linux-x64-gpu-release.zip` | `53e2bfb5225148311da9bbcb7e65da4479acf774bc3d40b0341530cdc48e97b6` |
 | `skia-build-mac-arm64-gpu-release.zip` | `774f5df966cd7133d05ce217eb3ed7bb226246ac336f764d7409350f175437f7` |
 | `skia-build-mac-universal-gpu-release.zip` | `416c5872296bd69f307cd279a3125e6574b86ef9effbb10adc31203781e434aa` |
