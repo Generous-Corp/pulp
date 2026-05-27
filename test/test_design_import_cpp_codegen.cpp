@@ -1336,6 +1336,38 @@ IRNode lower_chainer_waveform_choice_route_to_node(IRNode& materialized_root,
     return button;
 }
 
+IRNode lower_chainer_waveform_display_route_to_node(IRNode& materialized_root,
+                                                    choc::value::ValueView route) {
+    auto* source = node_at_ir_path(materialized_root, json_string(route["materialized_ir_path"]));
+    REQUIRE(source != nullptr);
+    REQUIRE(source->stable_anchor_id.has_value());
+    REQUIRE(*source->stable_anchor_id == json_string(route["materialized_ir_anchor"]));
+
+    const auto binding = route["parameter_bindings"][0];
+    auto waveform = *source;
+    waveform.children.clear();
+    waveform.type = "waveform";
+    waveform.name = "oscillator waveform display";
+    waveform.text_content.clear();
+    waveform.style.width = json_float(route["width"]);
+    waveform.style.height = json_float(route["height"]);
+    waveform.layout.flex_shrink = 0.0f;
+    waveform.audio_widget = AudioWidgetType::waveform;
+    waveform.audio_label = "Osc Waveform";
+    waveform.attributes["pulpRouteId"] = json_string(route["id"]);
+    waveform.attributes["pulpRouteType"] = json_string(route["route_type"]);
+    waveform.attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
+    waveform.attributes["pulpSourcePath"] = json_string(route["stable_source_path"]);
+    waveform.attributes["pulpParamKey"] = json_string(binding["param_key"]);
+    waveform.attributes["pulpWaveformShape"] = json_string(route["shape"]);
+    waveform.attributes["pulpEventContract"] = event_contract_string(route);
+    waveform.attributes["pulpStyleTokens"] = style_token_string(route);
+    waveform.attributes["pulpDefaultValueSource"] = json_string(route["default_value_source"]);
+    waveform.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
+    waveform.anchor_strategy = "adapter";
+    return waveform;
+}
+
 IRNode* node_at_relative_ir_path(IRNode& root,
                                  std::string_view root_path,
                                  std::string_view target_path) {
@@ -1502,6 +1534,25 @@ DesignIR lower_chainer_waveform_choice_routes_to_phase_e_ir(DesignIR materialize
     }
     REQUIRE(ir.root.children.size() == 4);
 
+    return ir;
+}
+
+DesignIR lower_chainer_waveform_display_routes_to_phase_e_ir(DesignIR materialized_ir,
+                                                             choc::value::ValueView route_rows) {
+    DesignIR ir;
+    ir.source = DesignSource::jsx;
+    ir.capture_method = "phase-e-chainer-waveform-display-route-overlay";
+    ir.source_adapter = "native-cpp-import-execution-validation";
+    ir.source_version = "phase-e";
+    add_chainer_token_colors(ir);
+    ir.root = frame_node("phase-e-waveform-display-root", "Chainer Waveform Display", 88.0f, 42.0f, LayoutDirection::column);
+
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "WaveformDisplay")
+            continue;
+        ir.root.children.push_back(lower_chainer_waveform_display_route_to_node(materialized_ir.root, route));
+    }
     return ir;
 }
 
@@ -2738,6 +2789,57 @@ TEST_CASE("Chainer route overlay can lower waveform choices to typed C++ with ch
     const auto header = tmp.path / "phase_e_chainer_waveform_choices.hpp";
     const auto source = tmp.path / "phase_e_chainer_waveform_choices.cpp";
     const auto object = tmp.path / "phase_e_chainer_waveform_choices.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("Chainer route overlay can lower waveform display to native preview paint",
+          "[view][import][cpp-codegen][native-cpp-phase-e]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["waveform_display_routes"].getInt64() == 1);
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["waveform_display_routes_mapped_to_ir"].getInt64() == 1);
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["unique_waveform_display_ir_paths"].getInt64() == 1);
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    auto waveform_ir = lower_chainer_waveform_display_routes_to_phase_e_ir(std::move(materialized_ir), route_rows);
+
+    CppExportOptions opts;
+    opts.header_filename = "phase_e_chainer_waveform_display.hpp";
+    const auto result = generate_pulp_cpp(waveform_ir, waveform_ir.asset_manifest, opts);
+
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::WaveformView>()") == 1);
+    REQUIRE(result.source.find("->set_anchor_id(\"pr_2x\");") != std::string::npos);
+    REQUIRE(result.source.find("->set_preview_shape(\"saw\");") != std::string::npos);
+
+    auto binding_manifest = choc::json::parse(result.binding_manifest);
+    REQUIRE(binding_manifest["entries"].size() == 1);
+    const auto entry = binding_manifest["entries"][0];
+    REQUIRE(json_string(entry["id"]) == "chainer.waveform_display.0.osc_waveform");
+    REQUIRE(json_string(entry["anchor_id"]) == "pr_2x");
+    REQUIRE(json_string(entry["native_primitive"]) == "waveform");
+    REQUIRE(json_string(entry["source_family"]) == "WaveformDisplay");
+    REQUIRE(json_string(entry["param_key"]) == "osc_waveform");
+    REQUIRE(json_string(entry["waveform_shape"]) == "saw");
+    REQUIRE(json_string(entry["event_contract"]) == "paramInput:set_waveform_shape:osc_waveform");
+    REQUIRE(json_string(entry["style_tokens"]) == "C.orange,C.borderMid,C.bgDeep");
+    REQUIRE(json_string(entry["default_value_source"]) == "source_state_default");
+
+    TempDir tmp("pulp-phase-e-chainer-waveform-display-cpp-codegen");
+    const auto header = tmp.path / "phase_e_chainer_waveform_display.hpp";
+    const auto source = tmp.path / "phase_e_chainer_waveform_display.cpp";
+    const auto object = tmp.path / "phase_e_chainer_waveform_display.o";
     write_text(header, result.header);
     write_text(source, result.source);
 
