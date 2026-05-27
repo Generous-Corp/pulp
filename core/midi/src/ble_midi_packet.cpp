@@ -70,6 +70,14 @@ bool BleMidiPacketDecoder::decode(const uint8_t* data, std::size_t size) {
     if ((header & 0x80) == 0) return false;       // Top bit must be set.
     last_header_ts_ = static_cast<uint8_t>(header & 0x3F);
 
+    // BLE-MIDI running status is scoped to a SINGLE GATT packet
+    // (Apple BLE-MIDI 1.0 spec §3.4). Carrying `last_status_` across
+    // packets would let a leading data byte in the next packet be
+    // mis-emitted as a fabricated channel-voice event using the prior
+    // packet's status. Sysex is the only state explicitly defined to
+    // span packets — we leave `sysex_buffer_` alone. Codex PR #3017 P2.
+    last_status_ = 0;
+
     std::size_t i = 1;
     uint8_t cur_ts_lo = 0;
     bool ts_seen = false;

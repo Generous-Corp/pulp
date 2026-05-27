@@ -188,3 +188,85 @@ TEST_CASE("TiffWriter rejects mismatched buffer sizes",
     auto encoded = TiffWriter::encode(bad);
     REQUIRE(encoded.empty());
 }
+
+// Regression: Codex PR #3017 review — big-endian inline TIFF SHORT values
+// were read as low 16 bits of value_or_offset, which returns 0 in MM files
+// (where SHORT is left-justified in the 4-byte slot). This caused valid
+// big-endian baseline TIFFs to be rejected or decoded incorrectly. Build a
+// minimal 2×1 grayscale uncompressed MM TIFF by hand and prove the
+// reader extracts the right Width/Height/Compression/Photometric.
+TEST_CASE("TiffReader decodes big-endian inline SHORT values correctly "
+          "(regression: PR #3017 review)",
+          "[image-codecs][tiff][issue-3017]") {
+    // Big-endian TIFF: 'MM', magic 42, IFD at offset 8.
+    // Layout chosen so IFD entries with SHORT inline values exercise the
+    // high-half read path for the bug under regression.
+    std::vector<uint8_t> tiff;
+    auto put_u16_be = [&](uint16_t v) {
+        tiff.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        tiff.push_back(static_cast<uint8_t>(v & 0xFF));
+    };
+    auto put_u32_be = [&](uint32_t v) {
+        tiff.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+        tiff.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+        tiff.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        tiff.push_back(static_cast<uint8_t>(v & 0xFF));
+    };
+    auto put_ifd = [&](uint16_t tag, uint16_t type, uint32_t count,
+                       uint32_t value_or_offset) {
+        put_u16_be(tag);
+        put_u16_be(type);
+        put_u32_be(count);
+        put_u32_be(value_or_offset);
+    };
+    // For SHORT inline values, place them in the HIGH half of the 4-byte
+    // value_or_offset field (TIFF 6.0 left-justified rule).
+    auto short_inline = [](uint16_t v) -> uint32_t {
+        return static_cast<uint32_t>(v) << 16;
+    };
+
+    // Header: 'MM', magic 42, IFD offset (will patch later).
+    tiff.push_back('M'); tiff.push_back('M');
+    put_u16_be(42);
+    put_u32_be(0);  // IFD offset placeholder
+
+    // Pixel data: 2x1 grayscale, two pixels.
+    const uint32_t pixel_offset = static_cast<uint32_t>(tiff.size());
+    tiff.push_back(0x40);  // pixel 0
+    tiff.push_back(0xC0);  // pixel 1
+
+    // IFD at current offset.
+    const uint32_t ifd_offset = static_cast<uint32_t>(tiff.size());
+    put_u16_be(8);  // entry count
+    put_ifd(256, 3, 1, short_inline(2));     // ImageWidth SHORT = 2
+    put_ifd(257, 3, 1, short_inline(1));     // ImageLength SHORT = 1
+    put_ifd(258, 3, 1, short_inline(8));     // BitsPerSample SHORT = 8
+    put_ifd(259, 3, 1, short_inline(1));     // Compression SHORT = 1 (none)
+    put_ifd(262, 3, 1, short_inline(1));     // Photometric SHORT = 1 (BlackIsZero)
+    put_ifd(273, 4, 1, pixel_offset);        // StripOffsets LONG
+    put_ifd(277, 3, 1, short_inline(1));     // SamplesPerPixel SHORT = 1
+    put_ifd(279, 4, 1, 2);                   // StripByteCounts LONG = 2
+    put_u32_be(0);  // Next IFD = none
+
+    // Patch IFD offset into header bytes [4..7].
+    tiff[4] = static_cast<uint8_t>((ifd_offset >> 24) & 0xFF);
+    tiff[5] = static_cast<uint8_t>((ifd_offset >> 16) & 0xFF);
+    tiff[6] = static_cast<uint8_t>((ifd_offset >> 8) & 0xFF);
+    tiff[7] = static_cast<uint8_t>(ifd_offset & 0xFF);
+
+    REQUIRE(TiffReader::is_tiff(tiff.data(), tiff.size()));
+    auto decoded = TiffReader::decode(tiff.data(), tiff.size());
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->width == 2);
+    REQUIRE(decoded->height == 1);
+    REQUIRE(decoded->rgba.size() == 2 * 1 * 4);
+    // BlackIsZero grayscale: pixel value broadcast to RGB, alpha 0xFF.
+    REQUIRE(decoded->rgba[0] == 0x40);
+    REQUIRE(decoded->rgba[1] == 0x40);
+    REQUIRE(decoded->rgba[2] == 0x40);
+    REQUIRE(decoded->rgba[3] == 0xFF);
+    REQUIRE(decoded->rgba[4] == 0xC0);
+    REQUIRE(decoded->rgba[5] == 0xC0);
+    REQUIRE(decoded->rgba[6] == 0xC0);
+    REQUIRE(decoded->rgba[7] == 0xFF);
+}

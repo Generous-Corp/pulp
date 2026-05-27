@@ -134,8 +134,13 @@ constexpr int DFTI_SINGLE         = 35;
 constexpr int DFTI_COMPLEX        = 32;
 
 using fn_create  = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE*, int, int, MKL_LONG, MKL_LONG);
+// DftiSetValue is a variadic MKL API. Calling a variadic function through a
+// fixed-signature function pointer is undefined behavior per C/C++ standard
+// (mismatched ABI, no default-argument promotion guarantees). We MUST keep
+// the variadic prototype on the function pointer we call through, and let
+// the compiler handle argument promotion at the call site (float → double).
+// Regression: Codex PR #3021 review.
 using fn_set     = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE, int, ...);
-using fn_set_f   = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE, int, float);
 using fn_commit  = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE);
 using fn_compute = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE, void*);
 using fn_free    = MKL_LONG (*)(DFTI_DESCRIPTOR_HANDLE*);
@@ -144,7 +149,6 @@ struct Bindings {
     void* handle = nullptr;
     fn_create  create  = nullptr;
     fn_set     set     = nullptr;
-    fn_set_f   set_f   = nullptr;
     fn_commit  commit  = nullptr;
     fn_compute fwd     = nullptr;
     fn_compute bwd     = nullptr;
@@ -166,7 +170,6 @@ static const Bindings& get() noexcept {
         if (!b.handle) return b;
         b.create  = dlsym_cast<fn_create>(b.handle, "DftiCreateDescriptor");
         b.set     = dlsym_cast<fn_set>(b.handle, "DftiSetValue");
-        b.set_f   = reinterpret_cast<fn_set_f>(b.set);  // same entry, different prototype
         b.commit  = dlsym_cast<fn_commit>(b.handle, "DftiCommitDescriptor");
         b.fwd     = dlsym_cast<fn_compute>(b.handle, "DftiComputeForward");
         b.bwd     = dlsym_cast<fn_compute>(b.handle, "DftiComputeBackward");
@@ -320,8 +323,16 @@ struct MultiBackendFft::Impl {
         if (b.create(&mkl_desc, mkl_dyn::DFTI_SINGLE, mkl_dyn::DFTI_COMPLEX,
                      1, static_cast<mkl_dyn::MKL_LONG>(size)) != 0)
             throw std::runtime_error("MultiBackendFft: DftiCreateDescriptor failed");
-        // Inverse normalisation: 1/N scale
-        b.set_f(mkl_desc, mkl_dyn::DFTI_BACKWARD_SCALE, 1.0f / static_cast<float>(size));
+        // Inverse normalisation: 1/N scale.
+        //
+        // DftiSetValue is variadic — for a single-precision descriptor the
+        // expected trailing argument is `float`. We pass the float through
+        // the variadic interface; the compiler emits the right ABI dance
+        // (varargs promote float → double, MKL recovers it via va_arg). The
+        // standalone `fn_set_f` typed alias that previously aliased the
+        // same dlsym handle was undefined behavior (Codex PR #3021 review).
+        b.set(mkl_desc, mkl_dyn::DFTI_BACKWARD_SCALE,
+              1.0f / static_cast<float>(size));
         if (b.commit(mkl_desc) != 0)
             throw std::runtime_error("MultiBackendFft: DftiCommitDescriptor failed");
     }

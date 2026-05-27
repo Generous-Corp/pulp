@@ -279,6 +279,41 @@ inline ResolvedFixture resolve_fixture(const PluginEntry& e,
         return r;
     }
 
+    // Shape check: refuse empty placeholders (`touch …/Vital.vst3`) or empty
+    // directories. Without this, `PluginSlot::load` runs against the bogus
+    // bundle and the integration test hard-fails instead of cleanly
+    // SKIPping with actionable guidance (Codex PR #3015 P2). Mirrors the
+    // checks used by `fetch_real_plugins.py --validate-cache`.
+    std::error_code ec;
+    if (fs::is_regular_file(bundle, ec)) {
+        const auto size = fs::file_size(bundle, ec);
+        if (ec || size == 0) {
+            r.skip_reason = "developer-supplied bundle is empty at " + bundle.string()
+                            + " (delete or replace; see "
+                              "docs/validation/real-plugins-developer-lane.md)";
+            return r;
+        }
+    } else if (fs::is_directory(bundle, ec)) {
+        bool has_any = false;
+        for (auto it = fs::directory_iterator(bundle, ec);
+             !ec && it != fs::directory_iterator(); ++it) {
+            has_any = true;
+            break;
+        }
+        if (!has_any) {
+            r.skip_reason = "developer-supplied bundle directory is empty at "
+                            + bundle.string()
+                            + " (delete or replace; see "
+                              "docs/validation/real-plugins-developer-lane.md)";
+            return r;
+        }
+    } else {
+        r.skip_reason = "developer-supplied bundle is neither a file nor a "
+                        "directory at " + bundle.string()
+                        + " (see docs/validation/real-plugins-developer-lane.md)";
+        return r;
+    }
+
     r.bundle_path = bundle;
     r.source = FixtureSource::DeveloperSupplied;
     return r;

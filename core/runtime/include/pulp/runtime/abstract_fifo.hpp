@@ -111,8 +111,13 @@ public:
     void finish_write(int num_written) noexcept {
         if (num_written <= 0) return;
         const int w = write_pos_.load(std::memory_order_relaxed);
-        int next = w + num_written;
-        if (next >= capacity_) next -= capacity_;
+        // True modulo wrap. The previous `next -= capacity_` only handled
+        // a single overflow span, so an oversized `num_written` (caller
+        // error past the prepared sum) could leave `next` >= capacity_
+        // and subsequent prepare_* calls would return invalid indices
+        // (Codex PR #2985 review).
+        int next = (w + num_written) % capacity_;
+        if (next < 0) next += capacity_;
         write_pos_.store(next, std::memory_order_release);
     }
 
@@ -153,8 +158,10 @@ public:
     void finish_read(int num_read) noexcept {
         if (num_read <= 0) return;
         const int r = read_pos_.load(std::memory_order_relaxed);
-        int next = r + num_read;
-        if (next >= capacity_) next -= capacity_;
+        // True modulo wrap — mirror the finish_write fix so an oversized
+        // num_read does not leave the cursor out of range (Codex PR #2985).
+        int next = (r + num_read) % capacity_;
+        if (next < 0) next += capacity_;
         read_pos_.store(next, std::memory_order_release);
     }
 

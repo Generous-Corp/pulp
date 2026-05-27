@@ -114,7 +114,21 @@ def scan_template_vars(text: str) -> set[str]:
 
 
 def check_template_dir(type_name: str, dir_path: Path) -> list[str]:
-    """Return a list of human-readable failure messages for `dir_path`."""
+    """Return a list of human-readable failure messages for `dir_path`.
+
+    Recurses into nested directories under `dir_path` so trees like
+    ``tools/templates/android/app/src/main/...`` and
+    ``tools/templates/standalone/<type>/CMakeLists.txt.template`` are
+    covered too — `pulp create` materializes those via
+    ``recursive_directory_iterator``, so any `{{VAR}}` placeholder in
+    them must be in the substitution map or the generated project
+    silently ships the literal text.
+
+    Regression: Codex PR #3002 review (P1 + P2). The previous
+    implementation called `dir_path.glob("*.template")` which only
+    matched immediate children, so nested template trees escaped the
+    smoke entirely.
+    """
     failures: list[str] = []
     required = REQUIRED_FILES_BY_TYPE.get(type_name)
     if required is None:
@@ -123,7 +137,7 @@ def check_template_dir(type_name: str, dir_path: Path) -> list[str]:
         # template trees that compose with another type; their
         # structural rules differ and are out of scope for this smoke.
         # We still validate every `{{VAR}}` they reference.
-        present = set()
+        pass
     else:
         present = {p.name for p in dir_path.glob("*.template")}
         missing = required - present
@@ -133,19 +147,20 @@ def check_template_dir(type_name: str, dir_path: Path) -> list[str]:
                 + ", ".join(sorted(missing))
             )
 
-    for template_file in sorted(dir_path.glob("*.template")):
+    for template_file in sorted(dir_path.rglob("*.template")):
         try:
             text = template_file.read_text(encoding="utf-8")
         except UnicodeDecodeError as e:
             failures.append(
-                f"[{type_name}] {template_file.name}: not valid UTF-8: {e}"
+                f"[{type_name}] {template_file.relative_to(dir_path)}: "
+                f"not valid UTF-8: {e}"
             )
             continue
         unknown = scan_template_vars(text) - KNOWN_TEMPLATE_VARS
         if unknown:
             failures.append(
-                f"[{type_name}] {template_file.name}: references "
-                f"unknown template variable(s): "
+                f"[{type_name}] {template_file.relative_to(dir_path)}: "
+                f"references unknown template variable(s): "
                 + ", ".join(f"{{{{{v}}}}}" for v in sorted(unknown))
                 + " (add to KNOWN_TEMPLATE_VARS here and to the "
                   "substitution map in tools/cli/cmd_create.cpp)"
@@ -184,9 +199,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     all_failures: list[str] = []
+    # Use rglob so trees like `standalone/<type>/CMakeLists.txt.template`
+    # are recognised even though their immediate parent has no top-level
+    # .template files. Regression: Codex PR #3002 P1.
     type_dirs = [
         d for d in sorted(templates_root.iterdir())
-        if d.is_dir() and any(d.glob("*.template"))
+        if d.is_dir() and any(d.rglob("*.template"))
     ]
     if not type_dirs:
         print(

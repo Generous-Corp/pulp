@@ -56,6 +56,36 @@ float max_abs_diff(const std::vector<std::complex<float>>& a,
 
 }  // namespace
 
+// Regression: Codex PR #3021 review — MKL DftiSetValue is a variadic API.
+// Calling it through a fixed-signature `fn_set_f` reinterpret_cast was UB
+// on most ABIs (varargs uses different register/stack slots than typed args)
+// and would silently mis-pass the backward-scale float on platforms where
+// MKL is available. The fix removed `fn_set_f` and routes the float through
+// the variadic `b.set(...)` entry. This test pins the public surface so a
+// future refactor cannot silently reintroduce the wrong call path.
+TEST_CASE("MKL backend availability stays gated on runtime presence "
+          "(no UB call path) (regression: PR #3021 review)",
+          "[fft][backend][mkl][issue-3021]") {
+    // Constructing with MKL when libmkl_rt is absent MUST throw — the
+    // selector helper reports availability via runtime dlopen, not a
+    // build flag. If a future code change accidentally reintroduces the
+    // reinterpret_cast trap, this test still exercises the same surface
+    // (the descriptor init path), and on hosts where MKL IS available the
+    // round-trip test below catches numerical errors from the bad ABI.
+    if (!fft_backend_available(FftBackend::mkl)) {
+        REQUIRE_THROWS(MultiBackendFft(64, FftBackend::mkl));
+    } else {
+        // MKL present: tiny round-trip to flush the descriptor init path.
+        constexpr int N = 64;
+        MultiBackendFft fft(N, FftBackend::mkl);
+        auto x = make_signal(N);
+        auto ref = x;
+        fft.forward(x.data());
+        fft.inverse(x.data());
+        REQUIRE(max_abs_diff(x, ref) < 1e-3f);
+    }
+}
+
 TEST_CASE("MultiBackendFft selector helpers", "[fft][backend][selector]") {
     SECTION("backend names round-trip through parse") {
         for (FftBackend b : {FftBackend::auto_, FftBackend::vdsp,

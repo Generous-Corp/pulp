@@ -27,15 +27,30 @@
 #if defined(__APPLE__)
 
 namespace pulp::view {
+// When PULP_BUILD_WEBVIEW is OFF the WebView implementation file
+// (web_view.cpp) is excluded from the build, so reporting "wkwebview"
+// would lie about a build that physically cannot construct a
+// WebViewPanel. Honor the documented "none if disabled" contract
+// (Codex PR #3016 P2).
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+std::string detect_webview_backend() { return "none"; }
+bool webview_backend_available() { return false; }
+#else
 std::string detect_webview_backend() { return "wkwebview"; }
 bool webview_backend_available() { return true; }
+#endif
 } // namespace pulp::view
 
 #elif defined(__ANDROID__)
 
 namespace pulp::view {
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+std::string detect_webview_backend() { return "none"; }
+bool webview_backend_available() { return false; }
+#else
 std::string detect_webview_backend() { return "chromium"; }
 bool webview_backend_available() { return true; }
+#endif
 } // namespace pulp::view
 
 #elif !defined(_WIN32) && !defined(__linux__)

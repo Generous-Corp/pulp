@@ -228,6 +228,30 @@ void apply_disposal(GifState& state,
                     uint32_t fw, uint32_t fh) {
     switch (state.disposal_method) {
         case 2: {
+            // GIF89a §23 "Graphic Control Extension" disposal method 2:
+            // "Restore to background color". The background is the logical
+            // screen background index resolved against the GLOBAL color
+            // table. If a transparent index was active, the cleared region
+            // becomes transparent. Otherwise it becomes the global
+            // background color, NOT transparent black (Codex PR #3017 P2).
+            uint8_t br = 0, bg = 0, bb = 0, ba = 0;
+            const bool transparent_active =
+                (state.transparent_index >= 0) &&
+                state.has_global_palette &&
+                static_cast<std::size_t>(state.transparent_index) ==
+                    static_cast<std::size_t>(state.bg_index);
+            if (!transparent_active && state.has_global_palette) {
+                const std::size_t pal_off =
+                    static_cast<std::size_t>(state.bg_index) * 3u;
+                if (pal_off + 2 < state.global_palette.size()) {
+                    br = state.global_palette[pal_off + 0];
+                    bg = state.global_palette[pal_off + 1];
+                    bb = state.global_palette[pal_off + 2];
+                    ba = 0xFF;
+                }
+            }
+            // else: no global palette / transparent — leave as
+            // transparent black (0,0,0,0).
             for (uint32_t y = 0; y < fh; ++y) {
                 const uint32_t row = top + y;
                 if (row >= state.height) break;
@@ -236,10 +260,10 @@ void apply_disposal(GifState& state,
                     if (col >= state.width) break;
                     const std::size_t off =
                         (static_cast<std::size_t>(row) * state.width + col) * 4;
-                    state.canvas[off + 0] = 0;
-                    state.canvas[off + 1] = 0;
-                    state.canvas[off + 2] = 0;
-                    state.canvas[off + 3] = 0;
+                    state.canvas[off + 0] = br;
+                    state.canvas[off + 1] = bg;
+                    state.canvas[off + 2] = bb;
+                    state.canvas[off + 3] = ba;
                 }
             }
             break;

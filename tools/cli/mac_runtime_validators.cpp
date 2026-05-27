@@ -14,6 +14,7 @@
 
 #if !defined(_WIN32)
 #  include <sys/wait.h>
+#  include <unistd.h>
 #endif
 
 namespace pulp::cli::mac_runtime {
@@ -158,20 +159,61 @@ ValidatorResult run_standalone_validator(const fs::path& bundle,
     }
     auto exe = resolve_standalone_executable(bundle, env);
     if (exe.empty()) {
-        return make_result("standalone", "open", bundle, "skip", -1,
-                           "not a .app bundle, or executable missing");
+        // Distinguish "this isn't a .app at all" (legitimately skip) from
+        // "this IS a .app bundle but the runnable binary inside is
+        // missing/broken" (fail). The latter is a packaging regression
+        // that MUST surface as a non-zero exit (Codex PR #3005 P2).
+        const bool looks_like_app_bundle = bundle.extension() == ".app";
+        if (looks_like_app_bundle) {
+            return make_result("standalone", "exec", bundle, "fail", -1,
+                               "malformed .app bundle: no runnable binary "
+                               "at Contents/MacOS/<stem>");
+        }
+        return make_result("standalone", "exec", bundle, "skip", -1,
+                           "not a .app bundle");
     }
-    // Execute the binary directly with a smoke-mode env var so the
-    // app self-exits cleanly after ~1s. Direct exec is preferable to
-    // `open --wait-apps` because (a) we can pass env vars without a
-    // LaunchServices dance and (b) we get the binary's real exit code,
-    // not LaunchServices' translation. We still allow `open` as a
-    // fallback for callers that don't bake the smoke-mode hook in.
+    // Execute the binary directly so we get the real exit code (open
+    // --wait-apps would route through LaunchServices and lose detail).
+    //
+    // Env recipe (regression: Codex PR #3005 review):
+    //   PULP_HEADLESS=1  → run_with_editor() takes the headless path
+    //                      and returns false IF no screenshot target is
+    //                      provided. We MUST give a screenshot path so
+    //                      the standalone actually smoke-runs instead
+    //                      of fail-fast'ing on missing PULP_SCREENSHOT.
+    //   PULP_SCREENSHOT=<tmp> → wires the headless one-shot capture so
+    //                      the binary exits cleanly after rendering one
+    //                      frame to disk. The capture file itself is
+    //                      treated as smoke artifact, not validated
+    //                      pixel-by-pixel by this validator.
+    //   PULP_DISABLE_PLUGIN_EDITOR=1 → ensures any embedded plugin host
+    //                      mode skips the editor; standalone owns the UI.
+    //
+    // The previous PULP_HEADLESS=1 + PULP_TEST_MODE=1 without a
+    // PULP_SCREENSHOT path made `standalone_config_from_environment`
+    // flip headless on and then `run_with_editor` immediately returned
+    // false, so EVERY healthy standalone bundle would have reported a
+    // false failure (`pulp validate --target standalone`).
+    char tmpl[] = "/tmp/pulp-standalone-smoke-XXXXXX.png";
+    int fd = mkstemps(tmpl, 4);
+    std::string screenshot_path;
+    if (fd != -1) {
+        screenshot_path = tmpl;
+        ::close(fd);
+    } else {
+        // Fallback to a fixed path. If smoke runs concurrently this could
+        // race, but a fixed path still beats an empty one (which would
+        // trigger the very fail-fast regression we're avoiding).
+        screenshot_path = "/tmp/pulp-standalone-smoke.png";
+    }
     std::ostringstream cmd;
-    cmd << "PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1 "
-        << "_PULP_SMOKE_EXIT_AFTER_MS=1000 "
+    cmd << "PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 "
+        << "PULP_SCREENSHOT=" << sh_quote(screenshot_path) << " "
         << q(exe);
     auto [rc, out] = env.run_capture(cmd.str());
+    // Best-effort cleanup; ignore failure.
+    std::error_code ec;
+    fs::remove(screenshot_path, ec);
     if (rc == 0) {
         return make_result("standalone", "exec", bundle, "pass", 0, "");
     }

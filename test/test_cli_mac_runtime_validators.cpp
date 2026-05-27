@@ -142,6 +142,69 @@ TEST_CASE("standalone validator: surfaces non-zero exit",
     REQUIRE(r.summary.find("Library not loaded") != std::string::npos);
 }
 
+// Regression: Codex PR #3005 P1. The smoke command must pass
+// PULP_SCREENSHOT alongside PULP_HEADLESS so `run_with_editor` doesn't
+// early-fail on the missing screenshot path (see
+// core/format/src/standalone.cpp:264). Without PULP_SCREENSHOT, every
+// healthy standalone bundle would report a false failure.
+TEST_CASE("standalone validator passes PULP_SCREENSHOT alongside "
+          "PULP_HEADLESS so the binary actually smoke-runs "
+          "(regression: PR #3005 review)",
+          "[cli][mac-validators][issue-3005]") {
+    StubEnv s;
+    fs::path bundle = "/tmp/Synth.app";
+    s.existing_paths.insert(bundle.string());
+    s.existing_paths.insert((bundle / "Contents" / "MacOS").string());
+    s.existing_paths.insert((bundle / "Contents" / "MacOS" / "Synth").string());
+    s.cmd_results["Synth"] = {0, ""};
+    auto env = s.build();
+    auto r = mr::run_standalone_validator(bundle, env);
+    REQUIRE(r.status == "pass");
+
+    // The smoke command that ran must include PULP_SCREENSHOT (else
+    // run_with_editor() rejects the headless mode with "headless/CI
+    // mode requires a screenshot path"). We don't pin the exact path —
+    // it's a mkstemp'd temp file — but the env var name must appear.
+    REQUIRE_FALSE(s.commands_run.empty());
+    const auto& cmd = s.commands_run.back();
+    REQUIRE(cmd.find("PULP_SCREENSHOT=") != std::string::npos);
+    REQUIRE(cmd.find("PULP_HEADLESS=1") != std::string::npos);
+}
+
+// Regression: Codex PR #3005 P2. A `.app` bundle that exists but has no
+// runnable binary inside is a packaging regression. Previously this
+// returned `skip` (exit 0 unless --strict), letting malformed standalone
+// artifacts sneak past `pulp validate --target standalone`. Now it
+// returns `fail` so the gate actually gates.
+TEST_CASE("standalone validator fails (not skips) on a malformed "
+          ".app bundle with no runnable binary "
+          "(regression: PR #3005 review)",
+          "[cli][mac-validators][issue-3005]") {
+    StubEnv s;
+    fs::path bundle = "/tmp/Headless.app";
+    // .app exists, Contents/MacOS exists, but the binary is missing.
+    s.existing_paths.insert(bundle.string());
+    s.existing_paths.insert((bundle / "Contents" / "MacOS").string());
+    // NOTE: we deliberately do NOT insert
+    // (bundle / "Contents" / "MacOS" / "Headless") so the binary lookup
+    // fails.
+    auto env = s.build();
+    auto r = mr::run_standalone_validator(bundle, env);
+    REQUIRE(r.status == "fail");
+    REQUIRE(r.summary.find("malformed .app bundle") != std::string::npos);
+
+    // A truly-not-a-.app path still legitimately skips.
+    SECTION("non-.app paths still skip cleanly") {
+        StubEnv s2;
+        fs::path notapp = "/tmp/Foo.appex";
+        s2.existing_paths.insert(notapp.string());
+        auto env2 = s2.build();
+        auto r2 = mr::run_standalone_validator(notapp, env2);
+        REQUIRE(r2.status == "skip");
+        REQUIRE(r2.summary == "not a .app bundle");
+    }
+}
+
 TEST_CASE("parse_au_component_tuple", "[cli][mac-validators][phase5]") {
     std::string plist_dump = R"(
         "AudioComponents" => [

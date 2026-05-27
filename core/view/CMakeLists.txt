@@ -398,6 +398,9 @@ endif()
 option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
 if(PULP_BUILD_WEBVIEW)
     target_sources(pulp-view-core PRIVATE src/web_view.cpp)
+    # PUBLIC so tests and downstream callers see the same value the
+    # detector TU was compiled with.
+    target_compile_definitions(pulp-view-core PUBLIC PULP_BUILD_WEBVIEW=1)
     if(APPLE AND NOT PULP_IOS)
         target_link_libraries(pulp-view-core PRIVATE "-framework WebKit")
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
@@ -407,6 +410,12 @@ if(PULP_BUILD_WEBVIEW)
         target_link_libraries(pulp-view-core PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
     # Android: WebView is handled by the Kotlin layer, not native GTK
     endif()
+else()
+    # Backend detector honors the documented "none if disabled" contract
+    # (Codex PR #3016 P2): when WebView is excluded from the build,
+    # detect_webview_backend() must return "none" so callers can
+    # distinguish "build excluded WebView" from "OS has no WebView".
+    target_compile_definitions(pulp-view-core PUBLIC PULP_BUILD_WEBVIEW=0)
 endif()
 
 # Backend detection TUs — always compiled into pulp-view-core regardless

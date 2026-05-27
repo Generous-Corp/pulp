@@ -138,6 +138,40 @@ TEST_CASE("AbstractFifo finish_* with non-positive args is a no-op",
     REQUIRE(fifo.free_space() == 3);
 }
 
+// Regression: Codex PR #2985 review. The previous `next -= capacity_`
+// only handled one overflow span. A finish_write/finish_read advance
+// larger than one buffer span (which is a caller bug, but the header
+// promised "clamped to keep the fifo coherent") would leave the cursor
+// out of range, and the next prepare_to_* call would return invalid
+// indices into the caller-owned buffer. True modulo wrap fixes that.
+TEST_CASE("AbstractFifo finish_write clamps overshoot to a valid cursor "
+          "(regression: PR #2985 review)",
+          "[runtime][abstract_fifo][issue-2985]") {
+    AbstractFifo fifo(8);
+    // Even with a far-too-large finish, the resulting prepare must
+    // return offsets STRICTLY within [0, capacity).
+    fifo.finish_write(/*num_written=*/100);  // 100 % 8 = 4
+    int s1 = -1, n1 = -1, s2 = -1, n2 = -1;
+    fifo.prepare_to_write(1, s1, n1, s2, n2);
+    REQUIRE(s1 >= 0);
+    REQUIRE(s1 < fifo.capacity());
+    REQUIRE(s2 >= 0);
+    REQUIRE(s2 < fifo.capacity());
+}
+
+TEST_CASE("AbstractFifo finish_read clamps overshoot to a valid cursor "
+          "(regression: PR #2985 review)",
+          "[runtime][abstract_fifo][issue-2985]") {
+    AbstractFifo fifo(8);
+    fifo.finish_read(/*num_read=*/100);  // 100 % 8 = 4
+    int s1 = -1, n1 = -1, s2 = -1, n2 = -1;
+    fifo.prepare_to_read(1, s1, n1, s2, n2);
+    REQUIRE(s1 >= 0);
+    REQUIRE(s1 < fifo.capacity());
+    REQUIRE(s2 >= 0);
+    REQUIRE(s2 < fifo.capacity());
+}
+
 TEST_CASE("AbstractFifo reset returns cursors to zero",
           "[runtime][abstract_fifo]") {
     AbstractFifo fifo(8);

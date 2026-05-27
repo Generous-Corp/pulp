@@ -79,6 +79,37 @@ TEST_CASE("BleMidiPacketDecoder rejects undersized packets", "[ble-midi]") {
     REQUIRE_FALSE(dec.decode(bogus, sizeof(bogus)));
 }
 
+// Regression: Codex PR #3017 P2. Running status is scoped to a single
+// BLE-MIDI packet per Apple BLE-MIDI 1.0 §3.4. Carrying it across
+// packets would fabricate events from leading data bytes in the next
+// packet. The first packet establishes 0x90 running status; the second
+// arrives with NO status byte (just timestamp + data) and must NOT emit
+// a Note On using the prior packet's 0x90.
+TEST_CASE("BleMidiPacketDecoder clears running status at packet boundaries "
+          "(regression: PR #3017 review)",
+          "[ble-midi][issue-3017]") {
+    BleMidiPacketDecoder dec;
+    std::vector<DecodedMsg> received;
+    dec.set_message_callback([&](const std::vector<uint8_t>& bytes, uint32_t ts) {
+        received.push_back({bytes, ts});
+    });
+
+    // Packet 1 — Note On using explicit status, sets running status.
+    const uint8_t packet1[] = { 0x80, 0x80, 0x90, 60, 100 };
+    REQUIRE(dec.decode(packet1, sizeof(packet1)));
+    REQUIRE(received.size() == 1);
+    REQUIRE(received.back().bytes == std::vector<uint8_t>{0x90, 60, 100});
+
+    received.clear();
+
+    // Packet 2 — header + timestamp + ORPHAN data bytes (no status). If
+    // running status leaked across packets, the decoder would emit a
+    // fabricated Note On {0x90, 64, 90} here. It must emit nothing.
+    const uint8_t packet2[] = { 0x80, 0x80, 64, 90 };
+    (void)dec.decode(packet2, sizeof(packet2));
+    REQUIRE(received.empty());
+}
+
 TEST_CASE("BleMidiPacketDecoder reset() clears running status", "[ble-midi]") {
     BleMidiPacketDecoder dec;
     dec.set_message_callback([](const std::vector<uint8_t>&, uint32_t) {});

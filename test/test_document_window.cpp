@@ -246,3 +246,113 @@ TEST_CASE("AlertWindow show forces at least one button when none added",
     REQUIRE(a.button_count() == 1);
     REQUIRE(a.button_label(0) == "OK");
 }
+
+// ── PR #3006 regression: native close routing ──────────────────────────────
+//
+// On Apple platforms `WindowHost::create` ignores the registered factory
+// entirely and always returns the native NSWindow-backed host (see
+// core/view/platform/mac/window_host_mac.mm:2709). The fake-factory test
+// pattern below only runs on non-Apple platforms where WindowHost::create
+// honors the factory. The macOS-native variant of the same regression is
+// covered by the AppKit window controller's close-routing path
+// (apple/AppKit*).
+#if !defined(__APPLE__)
+
+namespace {
+
+// Minimal WindowHost that captures whatever the high-level wrapper installs
+// as close_callback so the test can trigger the simulated native close.
+// Implements only the pure-virtual surface so a unique_ptr to it satisfies
+// WindowHost::Factory.
+class FakeWindowHost final : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return false; }
+    void repaint() override {}
+    void set_close_callback(std::function<void()> cb) override {
+        close_callback_ = std::move(cb);
+    }
+    void run_event_loop() override {}
+
+    // Simulate a native title-bar / Cmd+W close arriving on this host.
+    void fire_native_close() {
+        if (close_callback_) close_callback_();
+    }
+
+private:
+    std::function<void()> close_callback_;
+};
+
+// Install the fake factory and remember the most recently created host so
+// the test can poke its native-close path. Scoped via RAII to keep the
+// global factory state local to the test case.
+struct ScopedFakeWindowFactory {
+    ScopedFakeWindowFactory() {
+        WindowHost::set_factory(
+            [this](View&, const WindowOptions&)
+                -> std::unique_ptr<WindowHost> {
+                auto host = std::make_unique<FakeWindowHost>();
+                last_host = host.get();
+                return host;
+            });
+    }
+    ~ScopedFakeWindowFactory() {
+        last_host = nullptr;
+        WindowHost::clear_factory();
+    }
+    FakeWindowHost* last_host = nullptr;
+};
+
+} // namespace
+
+TEST_CASE("DocumentWindow::show() routes native closes through the "
+          "confirmation handler (regression: PR #3006 review)",
+          "[view][window-classes][document-window][issue-3006]") {
+    ScopedFakeWindowFactory factory;
+    View root;
+    DocumentWindow doc("Doc", root);
+
+    int hook_calls = 0;
+    bool allow_close = false;
+    doc.set_close_confirmation_handler([&] {
+        ++hook_calls;
+        return allow_close;
+    });
+
+    REQUIRE(doc.show());
+    REQUIRE(factory.last_host != nullptr);
+
+    // Simulate a native title-bar close. The hook MUST run (otherwise the
+    // bug Codex flagged stands — close affordances bypass the hook).
+    factory.last_host->fire_native_close();
+    REQUIRE(hook_calls == 1);
+
+    // Toggle the hook decision and fire again to prove subsequent closes
+    // re-enter the hook (not a one-shot signal).
+    allow_close = true;
+    factory.last_host->fire_native_close();
+    REQUIRE(hook_calls == 2);
+}
+
+TEST_CASE("DialogWindow::show() emits closed via the completion handler "
+          "when the native window closes (regression: PR #3006 review)",
+          "[view][window-classes][dialog-window][issue-3006]") {
+    ScopedFakeWindowFactory factory;
+    View content;
+    DialogWindow dlg("Dlg", content);
+
+    std::optional<DialogResult> received;
+    dlg.set_completion_handler([&](DialogResult r) { received = r; });
+
+    REQUIRE(dlg.show());
+    REQUIRE(factory.last_host != nullptr);
+
+    // Simulate the user closing the dialog via native chrome.
+    factory.last_host->fire_native_close();
+    REQUIRE(dlg.is_dismissed());
+    REQUIRE(dlg.last_result() == DialogResult::closed);
+    REQUIRE(received == DialogResult::closed);
+}
+
+#endif // !defined(__APPLE__)

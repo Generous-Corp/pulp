@@ -71,11 +71,19 @@ struct Ifd {
 };
 
 uint32_t ifd_short(const Ifd& e, const ByteOrder& bo) {
-    // For type SHORT count 1, the value is stored in the low 2 bytes
-    // of the 4-byte field — same bytes for either byte order because
-    // we already byte-swapped on read.
-    (void)bo;
-    return e.value_or_offset & 0xFFFF;
+    // For type SHORT (count 1), the value is stored left-justified in the
+    // 4-byte value_or_offset field per TIFF 6.0 §2 ("Image File Directory").
+    // In little-endian files the low 2 bytes hold the value; in big-endian
+    // files the high 2 bytes hold it. We already byte-swapped the full
+    // 32-bit field through bo.u32() on read, so the SHORT now occupies the
+    // high half on big-endian and the low half on little-endian.
+    //
+    // Regression: Codex PR #3017 review — the previous `& 0xFFFF` returned
+    // 0 for big-endian inline SHORT values, breaking baseline MM TIFFs.
+    if (bo.little) {
+        return e.value_or_offset & 0xFFFF;
+    }
+    return (e.value_or_offset >> 16) & 0xFFFF;
 }
 
 bool read_strip(const uint8_t* data, std::size_t size,

@@ -49,9 +49,24 @@ PluginEntry make_entry(const std::string& id, const std::string& bundle_relpath,
     return e;
 }
 
+// Write a non-empty placeholder for the resolver's shape check
+// (Codex PR #3015 P2 added the "empty bundle is not a fixture" guard).
 void touch(const fs::path& bundle) {
     fs::create_directories(bundle.parent_path());
-    std::ofstream(bundle) << ""; // zero-byte placeholder is enough
+    std::ofstream(bundle) << "PULP-FIXTURE-PLACEHOLDER";
+}
+
+// Zero-byte file at the bundle path — used by the regression test to
+// confirm the resolver SKIPs instead of accepting a malformed fixture.
+void touch_empty(const fs::path& bundle) {
+    fs::create_directories(bundle.parent_path());
+    std::ofstream(bundle) << "";
+}
+
+// Empty directory at the bundle path — for the directory-shape side of
+// the same shape check.
+void touch_empty_dir(const fs::path& bundle) {
+    fs::create_directories(bundle);
 }
 
 struct TempCache {
@@ -143,6 +158,35 @@ TEST_CASE("resolver: TBD entry without override never silently passes",
     const auto r = resolve_fixture(e); // no override
     REQUIRE(r.source == FixtureSource::Missing);
     REQUIRE(r.skip_reason.find("PULP_REAL_PLUGIN_CACHE") != std::string::npos);
+}
+
+// Regression: Codex PR #3015 P2. The developer-supplied lane previously
+// accepted ANY existing path, including zero-byte placeholders left over
+// from a `touch $PULP_REAL_PLUGIN_CACHE/vital/Vital.vst3` mistake.
+// `PluginSlot::load` would then hard-fail on the bogus bundle instead of
+// the resolver returning a clean SKIP with actionable guidance.
+TEST_CASE("resolver: developer-supplied lane skips an empty-file bundle "
+          "(regression: PR #3015 review)",
+          "[host][integration][real-plugins][resolver][issue-3015]") {
+    TempCache cache("tbd-empty-bundle-file");
+    const auto e = make_entry("vital-like", "Vital.vst3", "TBD");
+    touch_empty(cache.root / e.id / e.bundle_relpath);
+
+    const auto r = resolve_fixture(e, cache.root);
+    REQUIRE(r.source == FixtureSource::Missing);
+    REQUIRE(r.skip_reason.find("empty") != std::string::npos);
+}
+
+TEST_CASE("resolver: developer-supplied lane skips an empty-directory bundle "
+          "(regression: PR #3015 review)",
+          "[host][integration][real-plugins][resolver][issue-3015]") {
+    TempCache cache("tbd-empty-bundle-dir");
+    const auto e = make_entry("vital-like", "Vital.vst3", "TBD");
+    touch_empty_dir(cache.root / e.id / e.bundle_relpath);
+
+    const auto r = resolve_fixture(e, cache.root);
+    REQUIRE(r.source == FixtureSource::Missing);
+    REQUIRE(r.skip_reason.find("empty") != std::string::npos);
 }
 
 TEST_CASE("resolver: source labels are stable",

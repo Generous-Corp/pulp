@@ -92,6 +92,48 @@ class TestCheckTemplateDir(unittest.TestCase):
             failures = vct.check_template_dir("android", root)
             self.assertEqual(failures, [])
 
+    def test_flags_unknown_var_in_nested_template(self) -> None:
+        # Regression: Codex PR #3002 review (P1 + P2). The previous
+        # implementation called `glob("*.template")` and missed nested
+        # template trees like `tools/templates/android/app/src/main/...`
+        # and `tools/templates/standalone/<type>/CMakeLists.txt.template`.
+        # A bad placeholder in those files would silently ship to users.
+        # This test plants a nested template with an unknown var and
+        # asserts the checker now catches it.
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            nested_dir = root / "app" / "src" / "main"
+            nested_dir.mkdir(parents=True)
+            (nested_dir / "AndroidManifest.xml.template").write_text(
+                "<!-- {{TOTALLY_NEW_NESTED_PLACEHOLDER}} -->\n",
+                encoding="utf-8",
+            )
+            failures = vct.check_template_dir("android", root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("TOTALLY_NEW_NESTED_PLACEHOLDER", failures[0])
+            self.assertIn("unknown template variable", failures[0])
+            # The diagnostic path should be relative to the type-dir so
+            # the user can locate the broken file.
+            self.assertIn("app/src/main/AndroidManifest.xml.template",
+                          failures[0])
+
+    def test_discovers_subtree_without_top_level_templates(self) -> None:
+        # Regression: Codex PR #3002 P1. `tools/templates/standalone/`
+        # contains no top-level *.template files (only nested subdirs).
+        # The previous iterdir filter (`any(d.glob("*.template"))`)
+        # excluded it entirely, leaving the standalone subtree unchecked.
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            # Build a fake `standalone/` shaped like the real one.
+            standalone = root / "standalone"
+            (standalone / "app").mkdir(parents=True)
+            (standalone / "app" / "CMakeLists.txt.template").write_text(
+                "# {{UNKNOWN_STANDALONE_PLACEHOLDER}}\n",
+                encoding="utf-8",
+            )
+            rc = vct.main(["--templates-root", str(root)])
+            self.assertEqual(rc, 1)
+
 
 class TestMain(unittest.TestCase):
     def test_pass_run_on_real_pulp_templates(self) -> None:

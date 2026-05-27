@@ -43,11 +43,30 @@ TEST_CASE("WebView backend availability flag matches identifier",
     }
 }
 
+// Per the detect_webview_backend() doc-comment, the answer depends on
+// BOTH the OS and whether PULP_BUILD_WEBVIEW was set ON at build time.
+// When the build option is OFF, the WebView TU is excluded entirely and
+// detect_webview_backend() MUST return "none" so callers can distinguish
+// "this build excluded WebView" from "this OS has no WebView installed"
+// (regression: Codex PR #3016 P2).
+#if defined(PULP_BUILD_WEBVIEW) && !PULP_BUILD_WEBVIEW
+TEST_CASE("WebView backend reports none when PULP_BUILD_WEBVIEW=OFF "
+          "(regression: PR #3016 review)",
+          "[webview][backend-detect][issue-3016]") {
+    REQUIRE(pulp::view::detect_webview_backend() == "none");
+    REQUIRE_FALSE(pulp::view::webview_backend_available());
+}
+#endif
+
 #if defined(__APPLE__)
-TEST_CASE("WebView backend on Apple platforms is wkwebview",
+TEST_CASE("WebView backend on Apple platforms is wkwebview when enabled",
           "[webview][backend-detect][apple]") {
+#if defined(PULP_BUILD_WEBVIEW) && PULP_BUILD_WEBVIEW
     REQUIRE(pulp::view::detect_webview_backend() == "wkwebview");
     REQUIRE(pulp::view::webview_backend_available());
+#else
+    REQUIRE(pulp::view::detect_webview_backend() == "none");
+#endif
 }
 #endif
 
@@ -68,8 +87,12 @@ TEST_CASE("WebView backend on Linux is either webkitgtk or none",
 #endif
 
 #if defined(__ANDROID__)
-TEST_CASE("WebView backend on Android is chromium",
+TEST_CASE("WebView backend on Android is chromium when enabled",
           "[webview][backend-detect][android]") {
+#if defined(PULP_BUILD_WEBVIEW) && PULP_BUILD_WEBVIEW
     REQUIRE(pulp::view::detect_webview_backend() == "chromium");
+#else
+    REQUIRE(pulp::view::detect_webview_backend() == "none");
+#endif
 }
 #endif

@@ -576,6 +576,13 @@ TEST_CASE("AudioDeviceManager subscriptions stay globally consistent under load"
     midi_hold.reserve(kThreads * kPerThread);
     ep_hold.reserve(kThreads * kPerThread);
 
+    // Worker-thread failure signal. Catch2 assertion macros are not
+    // thread-safe, so a REQUIRE inside the worker can race or otherwise
+    // wedge the harness in nondeterministic ways. Track the failure as
+    // an atomic flag here and assert it on the test thread after join()
+    // (Codex PR #3001 review).
+    std::atomic<int> inactive_token_count{0};
+
     auto worker = [&](bool use_endpoints) {
         std::vector<MidiSubscriptionToken> local;
         local.reserve(kPerThread);
@@ -584,7 +591,9 @@ TEST_CASE("AudioDeviceManager subscriptions stay globally consistent under load"
                 ? mgr.subscribe_midi_endpoints(
                     [](const AudioDeviceManager::MidiEndpointChange&) {})
                 : mgr.subscribe_midi([](const pulp::midi::MidiEvent&) {});
-            REQUIRE(tok.active());
+            if (!tok.active()) {
+                inactive_token_count.fetch_add(1, std::memory_order_relaxed);
+            }
             local.push_back(std::move(tok));
         }
         std::lock_guard<std::mutex> lk(hold_mu);
@@ -601,6 +610,9 @@ TEST_CASE("AudioDeviceManager subscriptions stay globally consistent under load"
         threads.emplace_back(worker, /*use_endpoints=*/(t % 2 == 0));
     }
     for (auto& th : threads) th.join();
+
+    // Now safe to assert on the worker-thread observations.
+    REQUIRE(inactive_token_count.load() == 0);
 
     const int midi_threads = (kThreads + 1) / 2;
     const int ep_threads   = kThreads - midi_threads;

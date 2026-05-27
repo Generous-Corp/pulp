@@ -33,6 +33,15 @@ set(PULP_SDK_TARGETS
     pulp-standalone pulp-dsl
 )
 
+# pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
+# defined in core/signal/CMakeLists.txt and ships a public header
+# (`pulp/signal/fft_backend.hpp`). Without this export, find_package(Pulp)
+# consumers can include the header but cannot link the symbols
+# (Codex PR #3021 P2).
+if(TARGET pulp-signal-fft-backend)
+    list(APPEND PULP_SDK_TARGETS pulp-signal-fft-backend)
+endif()
+
 # pulp-host is platform-conditional: iOS skips the subdirectory entirely
 # (no plugin hosting on iOS), so only include it in the SDK export set on
 # platforms that actually built it.
