@@ -126,6 +126,19 @@ TEST_CASE("pulp_motion_publish_components emits sorted multi-component events",
     REQUIRE(baseline->components[1].first == "y");
 }
 
+TEST_CASE("pulp_motion_publish_components tolerates empty and null inputs",
+          "[motion][swift-bridge][coverage]") {
+    BridgeFixture fx;
+
+    const char* keys[1] = {"x"};
+    const double vals[1] = {1.0};
+    pulp_motion_publish_components("Card", "p", keys, vals, 0, 0.001, 3);
+    pulp_motion_publish_components("Card", "p", nullptr, vals, 1, 0.001, 3);
+    pulp_motion_publish_components("Card", "p", keys, nullptr, 1, 0.001, 3);
+
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "p") == 0);
+}
+
 // ── Ambient provenance ────────────────────────────────────────────────
 
 TEST_CASE("pulp_motion_set_ambient_provenance stamps subsequent publishes",
@@ -229,4 +242,27 @@ TEST_CASE("pulp_motion_update_geometry with a non-default metric also emits",
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "scroll") >= 1);
 
     pulp_motion_detach_trace(id);
+}
+
+TEST_CASE("pulp_motion geometry registry survives coordinator reset",
+          "[motion][swift-bridge][coverage]") {
+    BridgeFixture fx;
+
+    const int first = pulp_motion_register_geometry_trace("ViewA", 30);
+    const int second = pulp_motion_register_geometry_trace("ViewB", 30);
+    REQUIRE(first > 0);
+    REQUIRE(second > 0);
+
+    pulp_motion_update_geometry(first, "frame", 0.0, 0.0, 100.0, 100.0);
+    pulp_motion_update_geometry(second, "frame", 10.0, 20.0, 50.0, 50.0);
+    for (int i = 0; i < 3; ++i) fx.clock.tick(1.0f / 60.0f);
+
+    Coordinator::instance().reset();
+    Coordinator::instance().bind(fx.clock);
+    Coordinator::instance().set_firehose(true);
+    Coordinator::instance().set_tracing_enabled(true);
+
+    const int fresh = pulp_motion_register_geometry_trace("ViewC", 30);
+    REQUIRE(fresh > 0);
+    pulp_motion_detach_trace(fresh);
 }
