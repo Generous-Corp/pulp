@@ -84,7 +84,17 @@ fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
-    return fs::current_path() / ".." / "tools" / "cli" / "pulp";
+    auto build_root = fs::current_path() / "..";
+    for (const auto& candidate : {
+             build_root / "pulp",
+             build_root / "tools" / "cli" / "pulp-cpp",
+             build_root / "tools" / "cli" / "pulp",
+         }) {
+        if (fs::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return build_root / "tools" / "cli" / "pulp-cpp";
 }
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
@@ -129,6 +139,22 @@ fs::path make_fake_project(std::string_view name, bool with_build_cache) {
     }
 
     return root;
+}
+
+fs::path make_fake_bundle(const fs::path& root,
+                          std::string_view format,
+                          std::string_view bundle_name) {
+    auto bundle = root / "build" / std::string(format) / std::string(bundle_name);
+    fs::create_directories(bundle / "Contents");
+    std::ofstream marker(bundle / "Contents" / "Info.plist");
+    marker << "<plist><dict></dict></plist>\n";
+    return bundle;
+}
+
+void write_ship_config(const fs::path& home, std::string_view text) {
+    fs::create_directories(home);
+    std::ofstream config(home / "config.toml");
+    config << text;
 }
 
 // Issue #901: isolate every shell-out from the developer's `~/.pulp/config.toml`
@@ -274,6 +300,24 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship rejects unknown subcommands before side effects",
+                 "[cli][shellout][ship][help][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("unknown-subcommand", true);
+
+    auto r = run_pulp_in(root, {"ship", "spaceship", "--identity", "fake-id"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "unknown subcommand"));
+    REQUIRE(contains(combined, "spaceship"));
+    REQUIRE_FALSE(contains(combined, "Subcommands:"));
+    REQUIRE_FALSE(contains(combined, "Signing "));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship inside project without build cache reports build guidance",
                  "[cli][shellout][ship][issue-643]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
@@ -308,15 +352,51 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign discovers desktop bundles via env and config identities",
+                 "[cli][shellout][ship][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("sign-bundles", true);
+    make_fake_bundle(root, "VST3", "FakeShipPlugin.vst3");
+    make_fake_bundle(root, "CLAP", "FakeShipPlugin.clap");
+    make_fake_bundle(root, "AU", "FakeShipPlugin.component");
+
+    {
+        ScopedEnvVar identity("PULP_SIGN_IDENTITY", "Developer ID Application: Env");
+        auto env_sign = run_pulp_in(root, {"ship", "sign"});
+        REQUIRE_FALSE(env_sign.timed_out);
+        REQUIRE(env_sign.exit_code != 0);
+        auto combined = env_sign.stdout_output + env_sign.stderr_output;
+        REQUIRE_FALSE(contains(combined, "No signing identity specified"));
+        REQUIRE(contains(combined, "Signing FakeShipPlugin.vst3"));
+        REQUIRE(contains(combined, "Signing FakeShipPlugin.clap"));
+        REQUIRE(contains(combined, "Signing FakeShipPlugin.component"));
+        REQUIRE(contains(combined, "FAILED"));
+    }
+
+    write_ship_config(home_dir,
+        "[signing.apple]\n"
+        "identity = \"Developer ID Application: Config\"\n");
+    auto config_sign = run_pulp_in(root, {"ship", "sign"});
+    REQUIRE_FALSE(config_sign.timed_out);
+    REQUIRE(config_sign.exit_code != 0);
+    auto config_combined = config_sign.stdout_output + config_sign.stderr_output;
+    REQUIRE_FALSE(contains(config_combined, "No signing identity specified"));
+    REQUIRE(contains(config_combined, "Signing FakeShipPlugin.vst3"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship validates option parser errors before side effects",
                  "[cli][shellout][ship][coverage][phase3]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("parser-errors", true);
 
-    const struct {
+    struct ParserCase {
         std::vector<std::string> args;
         const char* message;
-    } cases[] = {
+    };
+    std::vector<ParserCase> cases = {
         {{"ship", "sign", "--identity"}, "--identity requires a value"},
         {{"ship", "sign", "--bogus"}, "unknown argument"},
         {{"ship", "package", "--version"}, "--version requires a value"},
@@ -328,6 +408,20 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "appcast", "--output"}, "--output requires a value"},
         {{"ship", "appcast", "--bogus"}, "unknown argument"},
     };
+#ifdef __APPLE__
+    cases.insert(cases.end(), {
+        {{"ship", "notarize", "--apple-id"}, "--apple-id requires a value"},
+        {{"ship", "notarize", "--team-id"}, "--team-id requires a value"},
+        {{"ship", "notarize", "--password"}, "--password requires a value"},
+        {{"ship", "notarize", "--bogus"}, "unknown argument"},
+        {{"ship", "release", "--target"}, "--target requires a value"},
+        {{"ship", "release", "--identity"}, "--identity requires a value"},
+        {{"ship", "release", "--apple-id"}, "--apple-id requires a value"},
+        {{"ship", "release", "--team-id"}, "--team-id requires a value"},
+        {{"ship", "release", "--password"}, "--password requires a value"},
+        {{"ship", "release", "--version"}, "--version requires a value"},
+    });
+#endif
 
     for (const auto& c : cases) {
         INFO("ship args under test");
@@ -339,6 +433,30 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "Packaging "));
         REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "Appcast written"));
     }
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check reports desktop bundle signing status without credentials",
+                 "[cli][shellout][ship][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("check-desktop", true);
+    make_fake_bundle(root, "VST3", "CheckMe.vst3");
+    make_fake_bundle(root, "CLAP", "CheckMe.clap");
+    make_fake_bundle(root, "AU", "CheckMe.component");
+    {
+        std::ofstream ignored(root / "build" / "VST3" / "notes.txt");
+        ignored << "not a bundle";
+    }
+
+    auto r = run_pulp_in(root, {"ship", "check"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "CheckMe.vst3: unsigned"));
+    REQUIRE(contains(r.stdout_output, "CheckMe.clap: unsigned"));
+    REQUIRE(contains(r.stdout_output, "CheckMe.component: unsigned"));
+    REQUIRE_FALSE(contains(r.stdout_output, "notes.txt"));
 
     fs::remove_all(root);
 }
@@ -373,6 +491,35 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(missing_android.exit_code != 0);
     REQUIRE(contains(missing_android.stdout_output + missing_android.stderr_output,
                      "No android/ project found"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast uses safe defaults and preserves existing invalid feed fallback",
+                 "[cli][shellout][ship][appcast][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("appcast-defaults", true);
+    auto feed = root / "artifacts" / "defaults.xml";
+    fs::create_directories(feed.parent_path());
+    {
+        std::ofstream existing(feed);
+        existing << "<rss><not-an-appcast></rss>";
+    }
+
+    auto r = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", "https://example.com/FakeShipPlugin-default.pkg",
+         "--output", feed.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "(1 items)"));
+
+    auto xml = read_text_file(feed);
+    REQUIRE(contains(xml, "Plugin Updates"));
+    REQUIRE(contains(xml, "Version 0.1.0"));
+    REQUIRE(contains(xml, "https://example.com/FakeShipPlugin-default.pkg"));
+    REQUIRE_FALSE(contains(xml, "not-an-appcast"));
 
     fs::remove_all(root);
 }
@@ -604,6 +751,32 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship release aborts before later stages when signing fails",
+                 "[cli][shellout][ship][release][macos-7.4][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("release-sign-fail", true);
+
+    auto r = run_pulp_in(root,
+        {"ship", "release", "--target", "macos",
+         "--identity", "Developer ID Application: Missing",
+         "--skip-package", "--skip-notarize"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+#ifdef __APPLE__
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(combined, "Stage 1/4"));
+    REQUIRE(contains(combined, "No plugin bundles found"));
+    REQUIRE(contains(combined, "sign stage failed"));
+    REQUIRE_FALSE(contains(combined, "Stage 2/4"));
+#else
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(combined, "macOS"));
+#endif
+
+    fs::remove_all(root);
+}
+
 // Item 7.4 acceptance: when sign + notarize stages can be skipped, the
 // `release` orchestration completes without Apple credentials so CI
 // can verify the wiring even on hosts that have no signing identity.
@@ -718,6 +891,34 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 #ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship auv3-xcodeproj parser rejects missing values and extra positionals",
+                 "[cli][shellout][ship][auv3-xcodeproj][macos-3.10][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("auv3-xcodeproj-parser", true);
+
+    const struct {
+        std::vector<std::string> args;
+        const char* message;
+    } cases[] = {
+        {{"ship", "auv3-xcodeproj", "MyPlugin", "--sdk"}, "--sdk requires a value"},
+        {{"ship", "auv3-xcodeproj", "MyPlugin", "--output"}, "--output requires a value"},
+        {{"ship", "auv3-xcodeproj", "MyPlugin", "OtherPlugin"}, "unknown argument"},
+        {{"ship", "auv3-xcodeproj", "MyPlugin", "--bogus"}, "unknown argument"},
+    };
+
+    for (const auto& c : cases) {
+        auto r = run_pulp_in(root, c.args);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(contains(r.stdout_output + r.stderr_output, c.message));
+        REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output,
+                               "generating Xcode project"));
+    }
+
+    fs::remove_all(root);
+}
+
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj --dry-run prints the resolved cmake invocation",
                  "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
