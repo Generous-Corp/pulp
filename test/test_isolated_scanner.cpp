@@ -10,6 +10,7 @@
 //     Timeout, and "unparseable worker output" classifications).
 
 #include <pulp/host/isolated_scanner.hpp>
+#include <pulp/platform/child_process.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -96,6 +97,27 @@ TEST_CASE("IsolatedPluginScanner returns FormatError for an unknown extension",
     REQUIRE(result.status == ScanStatus::FormatError);
     REQUIRE(result.exit_code == 3);
     REQUIRE_THAT(result.error_message, ContainsSubstring("unsupported"));
+}
+
+TEST_CASE("pulp-scan-worker command line reports usage and unsupported bundles",
+          "[tools][scan-worker][coverage]") {
+    auto usage = pulp::platform::exec(PULP_ISOLATED_SCANNER_REAL_WORKER, {}, 5000);
+    REQUIRE(usage.exit_code == 2);
+    REQUIRE_THAT(usage.stderr_output, ContainsSubstring("usage: pulp-scan-worker"));
+    REQUIRE(usage.stdout_output.empty());
+
+    ScratchDir scratch("worker-cli");
+    auto unsupported = scratch.path / "Plugin.component";
+    write_file(unsupported, "not a supported bundle");
+
+    auto rejected = pulp::platform::exec(
+        PULP_ISOLATED_SCANNER_REAL_WORKER,
+        {unsupported.string()},
+        5000);
+    REQUIRE(rejected.exit_code == 3);
+    REQUIRE_THAT(rejected.stderr_output, ContainsSubstring("unsupported bundle extension"));
+    REQUIRE_THAT(rejected.stderr_output, ContainsSubstring(unsupported.string()));
+    REQUIRE(rejected.stdout_output.empty());
 }
 
 // ── Crash path: deliberate-crash helper ────────────────────────────────

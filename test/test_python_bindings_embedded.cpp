@@ -283,6 +283,27 @@ assert host.load_state(saved)
 assert math.isclose(host_state.get_value(8101), 1.0)
 assert not host.load_state(b"not a valid host state")
 assert raises(TypeError, lambda: host.prepare("48000", 16))
+
+import numpy as np
+
+host.prepare(48000.0, 16, input_channels=2, output_channels=2)
+audio = np.array([[0.0, 0.25, -0.5, 1.0],
+                  [1.0, -0.25, 0.5, 0.0]], dtype=np.float32)
+processed = host.process_numpy(audio)
+assert processed.shape == audio.shape
+assert processed.dtype == np.float32
+assert np.allclose(processed, audio)
+assert raises(RuntimeError, lambda: host.process_numpy(np.array([1.0, 2.0], dtype=np.float32)))
+
+midi_in = pulp.MidiBuffer()
+midi_in.add(pulp.MidiEvent.note_on(1, 64, 100))
+processed_with_midi, midi_out = host.process_numpy_midi(audio, midi_in)
+assert np.allclose(processed_with_midi, audio)
+assert isinstance(midi_out, pulp.MidiBuffer)
+assert midi_out.empty()
+assert raises(RuntimeError, lambda: host.process_numpy_midi(
+    np.array([1.0, 2.0], dtype=np.float32), midi_in))
+
 host.release()
 )PY";
 
