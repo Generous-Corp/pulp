@@ -803,15 +803,19 @@ public:
     void set_y_label(std::string l) { y_label_ = std::move(l); }
 
     std::function<void(float, float)> on_change;
+    std::function<void()> on_gesture_begin;
+    std::function<void()> on_gesture_end;
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
 
 private:
     void update_from_pos(Point pos);
     float x_ = 0.5f, y_ = 0.5f;
     std::string x_label_, y_label_;
+    bool dragging_ = false;
 };
 
 // ── WaveformView ─────────────────────────────────────────────────────────────

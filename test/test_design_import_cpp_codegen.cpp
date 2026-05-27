@@ -236,6 +236,45 @@ public:
         };
     }
 
+    void bind_xy_pad(XYPad& pad, const NativeImportXYPadBindingDescriptor& descriptor) override {
+        const auto route_id = std::string(descriptor.route_id);
+        const auto x_param_key = std::string(descriptor.x_param_key);
+        const auto y_param_key = std::string(descriptor.y_param_key);
+
+        auto add_param = [this](std::string_view param_key, float value) {
+            auto id = static_cast<pulp::state::ParamID>(param_ids_.size() + 1u);
+            pulp::state::ParamInfo info;
+            info.id = id;
+            info.name = std::string(param_key);
+            info.range = {0.0f, 1.0f, value};
+            store_.add_parameter(info);
+            store_.set_normalized(id, value);
+            param_ids_[std::string(param_key)] = id;
+            param_keys_by_id_[id] = std::string(param_key);
+            bound_params_.push_back(std::string(param_key));
+            return id;
+        };
+
+        const auto x_id = add_param(x_param_key, pad.x_value());
+        const auto y_id = add_param(y_param_key, pad.y_value());
+        route_ids_[x_param_key] = route_id;
+        route_ids_[y_param_key] = route_id;
+        pad.on_gesture_begin = [this, x_id, y_id] {
+            store_.begin_gesture(x_id);
+            store_.begin_gesture(y_id);
+        };
+        pad.on_change = [this, x_id, y_id, x_param_key, y_param_key](float x, float y) {
+            store_.set_normalized(x_id, x);
+            store_.set_normalized(y_id, y);
+            events_.push_back({x_param_key, x});
+            events_.push_back({y_param_key, y});
+        };
+        pad.on_gesture_end = [this, x_id, y_id] {
+            store_.end_gesture(x_id);
+            store_.end_gesture(y_id);
+        };
+    }
+
     float normalized(std::string_view param_key) const {
         auto found = param_ids_.find(std::string(param_key));
         REQUIRE(found != param_ids_.end());
@@ -967,6 +1006,82 @@ IRNode lower_chainer_fader_route_to_node(IRNode& materialized_root,
     return wrapper;
 }
 
+std::string xy_event_contract_string(choc::value::ValueView route) {
+    const auto event = route["event_contracts"][0];
+    return json_string(event["prop"]) + ":" + json_string(event["kind"]) + ":" +
+           json_string(event["x_param_key"]) + "/" + json_string(event["y_param_key"]);
+}
+
+IRNode lower_chainer_xy_pad_route_to_node(IRNode& materialized_root,
+                                          choc::value::ValueView route) {
+    const auto materialized_path = json_string(route["materialized_ir_path"]);
+    auto* materialized_node = node_at_ir_path(materialized_root, materialized_path);
+    REQUIRE(materialized_node != nullptr);
+    REQUIRE(materialized_node->stable_anchor_id.has_value());
+    REQUIRE(*materialized_node->stable_anchor_id == json_string(route["materialized_ir_anchor"]));
+
+    const auto binding_x = route["parameter_bindings"][0];
+    const auto binding_y = route["parameter_bindings"][1];
+    const auto width = json_float(route["width"]);
+    const auto height = json_float(route["height"]);
+    const auto x = json_float(route["x"]);
+    const auto y = json_float(route["y"]);
+    const auto label_x = json_string(route["label_x"]);
+    const auto label_y = json_string(route["label_y"]);
+    const auto style_tokens = style_token_string(route);
+
+    auto wrapper = *materialized_node;
+    REQUIRE_FALSE(wrapper.children.empty());
+    wrapper.name = "xy pad wrapper";
+    wrapper.audio_widget = AudioWidgetType::none;
+    wrapper.audio_label.clear();
+    wrapper.layout.flex_shrink = 0.0f;
+    wrapper.attributes.clear();
+    wrapper.stable_anchor_id.reset();
+    wrapper.anchor_strategy.reset();
+
+    auto pad = wrapper.children.front();
+    pad.children.clear();
+    pad.type = "xy_pad";
+    pad.name = "filter xy";
+    pad.text_content.clear();
+    pad.style.width = width;
+    pad.style.height = height;
+    pad.style.border_color = color_for_style_tokens(style_tokens);
+    pad.layout.flex_shrink = 0.0f;
+    pad.audio_widget = AudioWidgetType::xy_pad;
+    pad.audio_label.clear();
+    pad.audio_min = 0.0f;
+    pad.audio_max = 1.0f;
+    pad.audio_default = 0.5f;
+    pad.attributes["x"] = float_attr(x);
+    pad.attributes["y"] = float_attr(y);
+    pad.attributes["xLabel"] = label_x;
+    pad.attributes["yLabel"] = label_y;
+    pad.attributes["pulpRouteId"] = json_string(route["id"]);
+    pad.attributes["pulpRouteType"] = json_string(route["route_type"]);
+    pad.attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
+    pad.attributes["pulpSourcePath"] = json_string(route["stable_source_path"]);
+    pad.attributes["pulpParamKeyX"] = json_string(binding_x["param_key"]);
+    pad.attributes["pulpParamKeyY"] = json_string(binding_y["param_key"]);
+    pad.attributes["pulpBindingModuleX"] = json_string(binding_x["module"]);
+    pad.attributes["pulpBindingParamX"] = json_string(binding_x["param"]);
+    pad.attributes["pulpBindingModuleY"] = json_string(binding_y["module"]);
+    pad.attributes["pulpBindingParamY"] = json_string(binding_y["param"]);
+    pad.attributes["pulpEventContract"] = xy_event_contract_string(route);
+    pad.attributes["pulpGestureContract"] = gesture_contract_string(route);
+    pad.attributes["pulpStyleTokens"] = style_tokens;
+    pad.attributes["pulpDefaultValueSource"] =
+        route["default_x"].isVoid() && route["default_y"].isVoid()
+            ? "phase_c_initial_value_fallback"
+            : "source_default";
+    pad.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
+    pad.anchor_strategy = "adapter";
+
+    wrapper.children.front() = std::move(pad);
+    return wrapper;
+}
+
 DesignIR lower_chainer_knob_route_to_phase_c_ir(DesignIR materialized_ir,
                                                 choc::value::ValueView route,
                                                 const ChainerKnobSourceFormula& formula) {
@@ -1002,6 +1117,27 @@ DesignIR lower_chainer_knob_routes_to_phase_d_ir(DesignIR materialized_ir,
         ir.root.children.push_back(lower_chainer_knob_route_to_node(materialized_ir.root, route, formula));
     }
     REQUIRE(ir.root.children.size() == 8);
+
+    return ir;
+}
+
+DesignIR lower_chainer_xy_pad_routes_to_phase_e_ir(DesignIR materialized_ir,
+                                                   choc::value::ValueView route_rows) {
+    DesignIR ir;
+    ir.source = DesignSource::jsx;
+    ir.capture_method = "phase-e-chainer-xy-pad-route-overlay";
+    ir.source_adapter = "native-cpp-import-execution-validation";
+    ir.source_version = "phase-e";
+    add_chainer_token_colors(ir);
+    ir.root = frame_node("phase-e-xy-pad-root", "Chainer XY Pad", 128.0f, 112.0f, LayoutDirection::column);
+
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "XYPad")
+            continue;
+        ir.root.children.push_back(lower_chainer_xy_pad_route_to_node(materialized_ir.root, route));
+    }
+    REQUIRE(ir.root.children.size() == 1);
 
     return ir;
 }
@@ -1742,6 +1878,65 @@ TEST_CASE("Chainer route overlay can lower all faders to typed C++ with binding 
     const auto header = tmp.path / "phase_e_chainer_faders.hpp";
     const auto source = tmp.path / "phase_e_chainer_faders.cpp";
     const auto object = tmp.path / "phase_e_chainer_faders.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("Chainer route overlay can lower XY pad to typed C++ with paired binding sidecar",
+          "[view][import][cpp-codegen][native-cpp-phase-e]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    auto xy_ir = lower_chainer_xy_pad_routes_to_phase_e_ir(std::move(materialized_ir), route_rows);
+
+    CppExportOptions opts;
+    opts.header_filename = "phase_e_chainer_xy_pad.hpp";
+    const auto result = generate_pulp_cpp(xy_ir, xy_ir.asset_manifest, opts);
+
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::XYPad>()") == 1);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::View>()") >= 1);
+    REQUIRE(result.source.find("->set_anchor_id(\"pr_5w\")") != std::string::npos);
+    REQUIRE(result.source.find("->set_x(0.55f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_y(0.62f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_x_label(\"cutoff\");") != std::string::npos);
+    REQUIRE(result.source.find("->set_y_label(\"res\");") != std::string::npos);
+    REQUIRE(result.header.find("bind_imported_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx)") != std::string::npos);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_xy_pad(") == 1);
+
+    auto binding_manifest = choc::json::parse(result.binding_manifest);
+    REQUIRE(binding_manifest["entries"].size() == 1);
+    const auto entry = binding_manifest["entries"][0];
+    REQUIRE(json_string(entry["id"]) == "chainer.xy_pad.0.filt_x_filt_y");
+    REQUIRE(json_string(entry["anchor_id"]) == "pr_5w");
+    REQUIRE(json_string(entry["native_primitive"]) == "xy_pad");
+    REQUIRE(json_string(entry["source_family"]) == "XYPad");
+    REQUIRE(json_string(entry["x_param_key"]) == "filt_x");
+    REQUIRE(json_string(entry["y_param_key"]) == "filt_y");
+    REQUIRE(json_string(entry["x_binding_module"]) == "FILT");
+    REQUIRE(json_string(entry["x_binding_param"]) == "cutoff");
+    REQUIRE(json_string(entry["y_binding_module"]) == "FILT");
+    REQUIRE(json_string(entry["y_binding_param"]) == "resonance");
+    REQUIRE(json_string(entry["event_contract"]) == "onChange:set_xy_params:filt_x/filt_y");
+    REQUIRE(json_string(entry["gesture_contract"]) == "xy_drag:begin/update/end");
+    REQUIRE(json_string(entry["style_tokens"]) == "C.blue");
+    REQUIRE(json_string(entry["default_value_source"]) == "phase_c_initial_value_fallback");
+
+    TempDir tmp("pulp-phase-e-chainer-xy-pad-cpp-codegen");
+    const auto header = tmp.path / "phase_e_chainer_xy_pad.hpp";
+    const auto source = tmp.path / "phase_e_chainer_xy_pad.cpp";
+    const auto object = tmp.path / "phase_e_chainer_xy_pad.o";
     write_text(header, result.header);
     write_text(source, result.source);
 

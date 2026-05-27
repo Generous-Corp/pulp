@@ -379,8 +379,22 @@ void XYPad::update_from_pos(Point pos) {
     }
 }
 
-void XYPad::on_mouse_down(Point pos) { update_from_pos(pos); }
-void XYPad::on_mouse_drag(Point pos) { update_from_pos(pos); }
+void XYPad::on_mouse_down(Point pos) {
+    if (!dragging_ && on_gesture_begin) on_gesture_begin();
+    dragging_ = true;
+    update_from_pos(pos);
+}
+
+void XYPad::on_mouse_drag(Point pos) {
+    if (!dragging_) return;
+    update_from_pos(pos);
+}
+
+void XYPad::on_mouse_up(Point) {
+    if (!dragging_) return;
+    dragging_ = false;
+    if (on_gesture_end) on_gesture_end();
+}
 
 void XYPad::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();

@@ -23,6 +23,7 @@ namespace pulp::view {
 class View;
 class Knob;
 class Fader;
+class XYPad;
 
 // ── Design source types ─────────────────────────────────────────────────
 
@@ -368,6 +369,18 @@ struct NativeImportBindingDescriptor {
     std::string_view gesture_contract;
 };
 
+struct NativeImportXYPadBindingDescriptor {
+    std::string_view route_id;
+    std::string_view x_param_key;
+    std::string_view y_param_key;
+    std::string_view x_binding_module;
+    std::string_view x_binding_param;
+    std::string_view y_binding_module;
+    std::string_view y_binding_param;
+    std::string_view event_contract;
+    std::string_view gesture_contract;
+};
+
 class NativeImportBindingContext {
 public:
     virtual ~NativeImportBindingContext() = default;
@@ -377,6 +390,10 @@ public:
     }
     virtual void bind_fader(Fader& fader, const NativeImportBindingDescriptor& descriptor) {
         (void)fader;
+        (void)descriptor;
+    }
+    virtual void bind_xy_pad(XYPad& pad, const NativeImportXYPadBindingDescriptor& descriptor) {
+        (void)pad;
         (void)descriptor;
     }
 };

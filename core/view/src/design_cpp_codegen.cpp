@@ -1157,6 +1157,12 @@ bool has_binding_manifest_metadata(const IRNode& node) {
              "pulpParamKey",
              "pulpBindingModule",
              "pulpBindingParam",
+             "pulpParamKeyX",
+             "pulpParamKeyY",
+             "pulpBindingModuleX",
+             "pulpBindingParamX",
+             "pulpBindingModuleY",
+             "pulpBindingParamY",
              "pulpEventContract",
              "pulpGestureContract",
              "pulpHostAction",
@@ -1197,6 +1203,12 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         append_json_field_if_present(out, first_field, "param_key", attr(node, "pulpParamKey"));
         append_json_field_if_present(out, first_field, "binding_module", attr(node, "pulpBindingModule"));
         append_json_field_if_present(out, first_field, "binding_param", attr(node, "pulpBindingParam"));
+        append_json_field_if_present(out, first_field, "x_param_key", attr(node, "pulpParamKeyX"));
+        append_json_field_if_present(out, first_field, "y_param_key", attr(node, "pulpParamKeyY"));
+        append_json_field_if_present(out, first_field, "x_binding_module", attr(node, "pulpBindingModuleX"));
+        append_json_field_if_present(out, first_field, "x_binding_param", attr(node, "pulpBindingParamX"));
+        append_json_field_if_present(out, first_field, "y_binding_module", attr(node, "pulpBindingModuleY"));
+        append_json_field_if_present(out, first_field, "y_binding_param", attr(node, "pulpBindingParamY"));
         append_json_field_if_present(out, first_field, "event_contract", attr(node, "pulpEventContract"));
         append_json_field_if_present(out, first_field, "gesture_contract", attr(node, "pulpGestureContract"));
         append_json_field_if_present(out, first_field, "host_action", attr(node, "pulpHostAction"));
@@ -1235,6 +1247,12 @@ struct BindingHelperRoute {
     std::string param_key;
     std::string binding_module;
     std::string binding_param;
+    std::string x_param_key;
+    std::string y_param_key;
+    std::string x_binding_module;
+    std::string x_binding_param;
+    std::string y_binding_module;
+    std::string y_binding_param;
     std::string event_contract;
     std::string gesture_contract;
 };
@@ -1244,16 +1262,28 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
                                    const ResolvedNativeNode& resolved) {
     auto route_id = attr(node, "pulpRouteId");
     auto param_key = attr(node, "pulpParamKey");
+    auto x_param_key = attr(node, "pulpParamKeyX");
+    auto y_param_key = attr(node, "pulpParamKeyY");
+    const bool has_single_param = param_key && !param_key->empty();
+    const bool has_xy_params = resolved.kind == NativeWidgetKind::xy_pad &&
+        x_param_key && !x_param_key->empty() &&
+        y_param_key && !y_param_key->empty();
     if (route_id && !route_id->empty() &&
-        param_key && !param_key->empty() &&
+        (has_single_param || has_xy_params) &&
         node.stable_anchor_id && !node.stable_anchor_id->empty()) {
         routes.push_back(BindingHelperRoute{
             .kind = resolved.kind,
             .anchor_id = *node.stable_anchor_id,
             .route_id = *route_id,
-            .param_key = *param_key,
+            .param_key = param_key.value_or(std::string{}),
             .binding_module = attr(node, "pulpBindingModule").value_or(std::string{}),
             .binding_param = attr(node, "pulpBindingParam").value_or(std::string{}),
+            .x_param_key = x_param_key.value_or(std::string{}),
+            .y_param_key = y_param_key.value_or(std::string{}),
+            .x_binding_module = attr(node, "pulpBindingModuleX").value_or(std::string{}),
+            .x_binding_param = attr(node, "pulpBindingParamX").value_or(std::string{}),
+            .y_binding_module = attr(node, "pulpBindingModuleY").value_or(std::string{}),
+            .y_binding_param = attr(node, "pulpBindingParamY").value_or(std::string{}),
             .event_contract = attr(node, "pulpEventContract").value_or(std::string{}),
             .gesture_contract = attr(node, "pulpGestureContract").value_or(std::string{}),
         });
@@ -1297,8 +1327,24 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    auto emit_xy_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportXYPadBindingDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.x_param_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.y_param_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.x_binding_module) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.x_binding_param) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.y_binding_module) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.y_binding_param) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.gesture_contract));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
     for (const auto& route : routes) {
-        if (route.kind != NativeWidgetKind::knob && route.kind != NativeWidgetKind::fader)
+        if (route.kind != NativeWidgetKind::knob &&
+            route.kind != NativeWidgetKind::fader &&
+            route.kind != NativeWidgetKind::xy_pad)
             continue;
         emit_line(out, 1, opts.indent_spaces,
                   "if (auto* view = find_imported_view_by_anchor(root, " +
@@ -1309,6 +1355,15 @@ void emit_binding_context_helpers(std::ostringstream& out,
             emit_line(out, 3, opts.indent_spaces, "ctx.bind_knob(*knob,");
             emit_descriptor(route, 3);
         } else {
+            if (route.kind == NativeWidgetKind::xy_pad) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* pad = dynamic_cast<pulp::view::XYPad*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_xy_pad(*pad,");
+                emit_xy_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
             emit_line(out, 2, opts.indent_spaces,
                       "if (auto* fader = dynamic_cast<pulp::view::Fader*>(view)) {");
             emit_line(out, 3, opts.indent_spaces, "ctx.bind_fader(*fader,");
