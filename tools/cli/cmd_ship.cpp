@@ -707,10 +707,6 @@ int cmd_ship(const std::vector<std::string>& args) {
     // only and exits cleanly so CI can still exercise the orchestration
     // without notarytool round-trips.
     if (sub == "release") {
-#ifndef __APPLE__
-        std::cerr << "pulp ship release: macOS-only (notarization + .pkg/.dmg).\n";
-        return 1;
-#else
         std::string target = "macos";
         std::string identity, apple_id, team_id, password, version;
         std::string api_key, api_key_id, api_issuer;
@@ -762,6 +758,10 @@ int cmd_ship(const std::vector<std::string>& args) {
             return 2;
         }
 
+#ifndef __APPLE__
+        std::cerr << "pulp ship release: macOS-only (notarization + .pkg/.dmg).\n";
+        return 1;
+#else
         // Stage 1: sign. Skippable for CI dry-runs.
         if (!skip_sign) {
             std::cout << "── Stage 1/4: sign ────────────────────────────────\n";

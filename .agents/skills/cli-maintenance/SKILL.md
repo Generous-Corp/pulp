@@ -112,6 +112,10 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Output path flags should accept both nested paths and bare filenames; guard
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
+- Parser-order fixes that preserve the documented command surface still need
+  tests proving malformed argv is rejected before platform guards or side
+  effects, especially for commands like `pulp ship release` where macOS-only
+  execution follows cross-platform flag parsing.
 
 ### Rust CLI cutover path convention
 

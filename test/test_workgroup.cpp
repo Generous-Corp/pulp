@@ -73,7 +73,8 @@ TEST_CASE("AudioWorkgroup join_from_audio_thread reports actual success/failure"
         wg.leave();
         REQUIRE_FALSE(wg.is_joined());
         // Contract 4: after leave, a subsequent join attempt is allowed.
-        REQUIRE(wg.join_from_audio_thread() == wg.is_joined());
+        bool rejoin_result = wg.join_from_audio_thread();
+        REQUIRE(rejoin_result == wg.is_joined());
     }
 }
 
