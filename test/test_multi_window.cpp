@@ -157,6 +157,17 @@ TEST_CASE("Two RenderLoops render in parallel and stay within the fairness band"
     std::atomic<int> frames_a{0};
     std::atomic<int> frames_b{0};
     std::atomic<bool> done{false};
+    struct StopLoops {
+        std::atomic<bool>& done;
+        std::unique_ptr<RenderLoop>& a;
+        std::unique_ptr<RenderLoop>& b;
+
+        ~StopLoops() {
+            done.store(true, std::memory_order_relaxed);
+            if (a) a->stop();
+            if (b) b->stop();
+        }
+    } stop_loops{done, loop_a, loop_b};
 
     loop_a->start([&]() {
         frames_a.fetch_add(1, std::memory_order_relaxed);

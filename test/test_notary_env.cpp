@@ -17,13 +17,32 @@
 
 #include "../tools/cli/notary_env.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <string>
 
 namespace fs = std::filesystem;
 namespace notary = pulp::cli::notary;
 
 namespace {
+
+void set_env_var(const char* name, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    ::setenv(name, value, 1);
+#endif
+}
+
+void unset_env_var(const char* name) {
+#if defined(_WIN32)
+    _putenv_s(name, "");
+#else
+    ::unsetenv(name);
+#endif
+}
 
 fs::path write_tmp_env(const std::string& body) {
     auto path = fs::temp_directory_path()
@@ -214,11 +233,11 @@ struct ScopedEnv {
     std::optional<std::string> prior;
     ScopedEnv(const char* n, const char* v) : name(n) {
         if (auto* old = std::getenv(n)) prior = old;
-        if (v) ::setenv(n, v, 1); else ::unsetenv(n);
+        if (v) set_env_var(n, v); else unset_env_var(n);
     }
     ~ScopedEnv() {
-        if (prior) ::setenv(name.c_str(), prior->c_str(), 1);
-        else ::unsetenv(name.c_str());
+        if (prior) set_env_var(name.c_str(), prior->c_str());
+        else unset_env_var(name.c_str());
     }
 };
 } // namespace

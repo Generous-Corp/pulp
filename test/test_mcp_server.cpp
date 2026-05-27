@@ -300,7 +300,7 @@ TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
 
     REQUIRE(extract_string(payload, "message") == R"(hello \"pulp\")");
     REQUIRE(extract_string(payload, "negative").empty());
-    REQUIRE(extract_raw(payload, "message") == R"("hello \"pulp\"")");
+    REQUIRE(extract_raw(payload, "message") == R"json("hello \"pulp\"")json");
     REQUIRE(extract_raw(payload, "negative") == "-12");
     REQUIRE(extract_raw(payload, "positive") == "+7");
     REQUIRE(extract_raw(payload, "floatExp") == "6.25e-2");
@@ -331,7 +331,7 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic",
 #if defined(_WIN32)
     REQUIRE(shell_quote(R"(C:\Program Files\Pulp\pulp.exe)") ==
             R"("C:\Program Files\Pulp\pulp.exe")");
-    REQUIRE(shell_quote(R"(say "hi")") == R"("say \"hi\"")");
+    REQUIRE(shell_quote(R"(say "hi")") == R"shell("say \"hi\"")shell");
 #else
     REQUIRE(shell_quote("/tmp/Pulp Project/build") == "'/tmp/Pulp Project/build'");
     REQUIRE(shell_quote("MCP protocol's edge") == "'MCP protocol'\\''s edge'");

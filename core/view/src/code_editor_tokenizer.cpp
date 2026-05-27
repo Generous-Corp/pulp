@@ -315,7 +315,6 @@ std::vector<Token> tokenize_python_line(std::string_view line) {
         // we cannot reasonably span the next lines from here.
         if ((c == '"' || c == '\'') && i + 2 < line.size()
             && line[i + 1] == c && line[i + 2] == c) {
-            std::size_t end = line.find(std::string_view(&c, 1).data(), i + 3);
             // Simpler: search for the triple-quote terminator on the
             // same line; if it is not there, paint to end-of-line.
             std::string_view tq(&line[i], 3);

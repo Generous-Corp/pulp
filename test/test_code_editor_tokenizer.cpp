@@ -101,7 +101,7 @@ TEST_CASE("tokenize_cpp_line: string literals and escape sequences",
 
     REQUIRE(has_token(toks, line, "const", TokenClass::keyword));
     REQUIRE(has_token(toks, line, "char", TokenClass::type));
-    REQUIRE(has_token(toks, line, R"("hello \"world\"")", TokenClass::string));
+    REQUIRE(has_token(toks, line, R"cpp("hello \"world\"")cpp", TokenClass::string));
 }
 
 TEST_CASE("tokenize_cpp_line: preprocessor directives are a whole-line span",
@@ -167,7 +167,7 @@ TEST_CASE("tokenize_python_line: triple-quoted string on one line",
           "[code-editor][tokenizer][python]") {
     std::string_view line = R"(s = """doc""")";
     auto toks = tokenize_python_line(line);
-    REQUIRE(has_token(toks, line, R"("""doc""")", TokenClass::string));
+    REQUIRE(has_token(toks, line, R"py("""doc""")py", TokenClass::string));
 }
 
 TEST_CASE("tokenize_python_line: unterminated triple-quoted string spans to EOL",

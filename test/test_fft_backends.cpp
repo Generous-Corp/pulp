@@ -54,6 +54,22 @@ float max_abs_diff(const std::vector<std::complex<float>>& a,
     return worst;
 }
 
+void set_env_var(const char* name, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+void unset_env_var(const char* name) {
+#if defined(_WIN32)
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
+}
+
 }  // namespace
 
 // Regression: Codex PR #3021 review — MKL DftiSetValue is a variadic API.
@@ -113,16 +129,16 @@ TEST_CASE("MultiBackendFft selector helpers", "[fft][backend][selector]") {
 
     SECTION("env override picks an available backend") {
 #if defined(__APPLE__)
-        setenv("PULP_FFT_BACKEND", "kissfft", 1);
+        set_env_var("PULP_FFT_BACKEND", "kissfft");
         REQUIRE(resolve_fft_backend(FftBackend::auto_) == FftBackend::kissfft);
-        unsetenv("PULP_FFT_BACKEND");
+        unset_env_var("PULP_FFT_BACKEND");
 #endif
         // Unavailable backend in env: resolver falls back to default
-        setenv("PULP_FFT_BACKEND", "garbage", 1);
+        set_env_var("PULP_FFT_BACKEND", "garbage");
         FftBackend r = resolve_fft_backend(FftBackend::auto_);
         REQUIRE(r != FftBackend::auto_);
         REQUIRE(fft_backend_available(r));
-        unsetenv("PULP_FFT_BACKEND");
+        unset_env_var("PULP_FFT_BACKEND");
     }
 
     SECTION("explicit hint honored when available") {
