@@ -130,6 +130,11 @@ def main() -> int:
     pulp = load_module(module_path)
 
     assert pathlib.Path(pulp.__file__).resolve() == module_path
+    assert pulp.__doc__ == "Pulp audio plugin framework — Python bindings"
+    assert pulp.ParamRange.__name__ == "ParamRange"
+    assert pulp.ParamInfo.__name__ == "ParamInfo"
+    assert pulp.MidiEvent.__name__ == "MidiEvent"
+    assert pulp.MidiBuffer.__name__ == "MidiBuffer"
 
     assert_param_range_bindings(pulp)
     assert_midi_bindings(pulp)
