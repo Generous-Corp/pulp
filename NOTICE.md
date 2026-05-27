@@ -25,6 +25,28 @@ limitations under the License.
 
 ---
 
+## Babel parser
+
+Copyright (C) 2012-2014 by various contributors (see AUTHORS)
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+JSX/TSX parser used by `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
+to extract source contracts for import validation. npm-installed for import
+tooling; not bundled into Pulp's C++ runtime.
+
+---
+
 ## Catch2
 
 Copyright (c) 2022 Two Blue Cubes Ltd.
@@ -100,6 +122,28 @@ furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
+
+---
+
+## css-tree
+
+Copyright (C) 2016-2026 by Roman Dvornov
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+CSS parser and lexer validator used by `tools/import-design/jsx-runtime/
+jsx-contract-audit.mjs` to normalize style values for import validation.
+npm-installed for import tooling; not bundled into Pulp's C++ runtime.
 
 ---
 

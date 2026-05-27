@@ -29,6 +29,15 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **yaml-cpp** | MIT | YAML frontmatter parser for the DESIGN.md import pipeline (gated to `--from designmd`) | [github.com/jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp) |
 | **Yoga** | MIT | Layout engine for Flexbox/Grid-style native UI | [github.com/facebook/yoga](https://github.com/facebook/yoga) |
 
+### Import Tooling Dependencies
+
+These packages are npm-installed for design-import tooling and validation. They are not bundled into Pulp's C++ runtime.
+
+| Name | License | Purpose | Link |
+|------|---------|---------|------|
+| **Babel parser** | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs` | [github.com/babel/babel/tree/main/packages/babel-parser](https://github.com/babel/babel/tree/main/packages/babel-parser) |
+| **css-tree** | MIT | CSS value parsing and lexer validation for JSX source-contract extraction | [github.com/csstree/csstree](https://github.com/csstree/csstree) |
+
 ### Design Formats and Test Fixtures
 
 Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) format as a first-class import source (`pulp import-design --from designmd`). The format specification is reimplemented in C++ (no upstream code vendored); the YAML frontmatter is parsed with `yaml-cpp` (see Core Dependencies above). One example file from upstream `examples/paws-and-paths/` is redistributed verbatim as the test fixture at `test/fixtures/imports/designmd/alpha/DESIGN.md`.

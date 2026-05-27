@@ -14,8 +14,9 @@ npm install
 ```
 
 Pulls React 18.3.1, ReactDOM 18.3.1, react-reconciler 0.29.2, scheduler
-0.23.2, and esbuild 0.24.0 into the local `node_modules/`. Not committed (see
-`.gitignore`); `package-lock.json` IS committed for reproducible installs.
+0.23.2, esbuild 0.24.0, `@babel/parser` 7.29.7, and `css-tree` 3.2.1 into
+the local `node_modules/`. Not committed (see `.gitignore`);
+`package-lock.json` IS committed for reproducible installs.
 The transform aliases `@pulp/react` to the repo's `packages/pulp-react/src`
 entrypoint so a fresh checkout can bundle the native React host without
 publishing or linking the package first.
@@ -46,13 +47,30 @@ the DOM walker, then freeze the native `WidgetBridge` tree when the bundle has
 no expanded DOM; those IR envelopes record `runtime_native_snapshot` and
 `root.attributes.snapshotSource = "native-view"`.
 
+## Source-contract audit
+
+```bash
+node jsx-contract-audit.mjs \
+  --in path/to/MyInstrument.jsx \
+  --json /tmp/my-instrument-contract.json \
+  --markdown /tmp/my-instrument-contract.md \
+  --fail-on-weak-proof
+```
+
+This is a static evidence pass, not visual inference. `@babel/parser` extracts
+JSX elements, props, handler closures, `.map()` rows, source spans, and inline
+SVG/vector nodes. `css-tree` parses and validates style values so the importer
+can normalize radius, border, color, size, overflow, and related style
+contracts into Pulp-owned native attributes. The live runtime remains the
+fallback when a source contract is too dynamic to lower safely.
+
 ## End-to-end smoke
 
 ```bash
 tools/import-validation/jsx-roundtrip.sh
 ```
 
-Runs transform → smoke test → headless render against
+Runs source-contract audit → transform → smoke test → headless render against
 `planning/fixtures/jsx/chainer-instrument.jsx`.
 
 ## Why a Node preprocessor

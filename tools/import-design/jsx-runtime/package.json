@@ -4,6 +4,8 @@
   "version": "0.0.1",
   "description": "Bundling environment for pulp import-design --from jsx",
   "dependencies": {
+    "@babel/parser": "7.29.7",
+    "css-tree": "3.2.1",
     "esbuild": "0.24.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",

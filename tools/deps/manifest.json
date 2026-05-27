@@ -34,6 +34,26 @@
       ]
     },
     {
+      "name": "Babel parser",
+      "category": "import-tooling",
+      "license": "MIT",
+      "version": "7.29.7",
+      "source_kind": "npm",
+      "repository": "https://github.com/babel/babel/tree/main/packages/babel-parser",
+      "upstream": { "kind": "none" },
+      "external_names": ["@babel/parser", "babel-parser"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "JSX/TSX parser for tools/import-design/jsx-runtime/jsx-contract-audit.mjs. Used for source-contract extraction during import validation; npm-installed in the local jsx-runtime tooling directory and not bundled into Pulp's C++ runtime.",
+      "source_files": [
+        "tools/import-design/jsx-runtime/package.json",
+        "tools/import-design/jsx-runtime/package-lock.json",
+        "tools/import-design/jsx-runtime/jsx-contract-audit.mjs",
+        "tools/import-design/jsx-runtime/README.md",
+        "tools/import-validation/jsx-roundtrip.sh"
+      ]
+    },
+    {
       "name": "Catch2",
       "category": "test",
       "license": "BSL-1.0",
@@ -89,6 +109,26 @@
         "external/cpp-httplib/httplib.h",
         "core/runtime/include/pulp/runtime/http.hpp",
         "core/runtime/src/http.cpp"
+      ]
+    },
+    {
+      "name": "css-tree",
+      "category": "import-tooling",
+      "license": "MIT",
+      "version": "3.2.1",
+      "source_kind": "npm",
+      "repository": "https://github.com/csstree/csstree",
+      "upstream": { "kind": "none" },
+      "external_names": ["csstree"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "CSS value parser and lexer validator for tools/import-design/jsx-runtime/jsx-contract-audit.mjs. Used to normalize source style contracts during import validation; npm-installed in the local jsx-runtime tooling directory and not bundled into Pulp's C++ runtime.",
+      "source_files": [
+        "tools/import-design/jsx-runtime/package.json",
+        "tools/import-design/jsx-runtime/package-lock.json",
+        "tools/import-design/jsx-runtime/jsx-contract-audit.mjs",
+        "tools/import-design/jsx-runtime/README.md",
+        "tools/import-validation/jsx-roundtrip.sh"
       ]
     },
     {
