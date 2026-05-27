@@ -11,7 +11,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 SUPPORTED_SECTIONS = ("init", "slider", "block", "sample")
-SECTION_PATTERN = re.compile(r"^@([A-Za-z0-9_]+)\s*$")
+# JSFX section directives can carry trailing arguments — `@gfx WIDTH HEIGHT`
+# is the canonical example (REAPER documents `@gfx 200 200` as the standard
+# preferred-size declaration). Anchoring the regex to end-of-line would
+# silently ignore those forms and let `@gfx 200 200` slip past the bounded
+# subset check. Capture only the section name; everything after the first
+# whitespace is treated as the directive's arguments and ignored.
+SECTION_PATTERN = re.compile(r"^@([A-Za-z0-9_]+)(?:\s.*)?$")
 SLIDER_PATTERN = re.compile(r"^slider(\d+):")
 
 

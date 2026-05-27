@@ -1609,6 +1609,10 @@ pulp_add_test_suite(pulp-test-events-async-helpers LIBRARIES pulp::events)
 # (gap-doc 2026-05-24 row "PushNotifications (local + remote)").
 pulp_add_test_suite(pulp-test-push-notifications LIBRARIES pulp::events)
 
+# IapClient cross-platform smoke + headless-mock coverage
+# (gap-doc 2026-05-24 row "InAppPurchase / StoreKit").
+pulp_add_test_suite(pulp-test-in-app-purchase LIBRARIES pulp::events)
+
 add_executable(pulp-test-events-timer-helpers test_events_timer_helpers.cpp)
 target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2::Catch2WithMain)
 # `slow` (#1589): Timer hammer + UAF-free destroy-while-dispatched

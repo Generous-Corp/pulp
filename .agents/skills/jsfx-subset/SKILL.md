@@ -78,3 +78,14 @@ For the current JSFX lane, verify:
 - slider declarations are sane and unique
 - unsupported sections fail clearly
 - docs do not imply full REAPER JSFX compatibility or a shipped runtime
+
+## Gotchas
+
+- **Section directives can carry trailing arguments.** REAPER documents
+  `@gfx WIDTH HEIGHT` as the standard form for declaring the preferred
+  plugin window size. Any future regex change to `SECTION_PATTERN` in
+  `tools/scripts/jsfx_subset.py` must keep matching the `@name <args>`
+  shape — anchoring to end-of-line silently lets `@gfx 200 200` slip past
+  the bounded-subset check (the exact bug the 2026-05-26 follow-up fixed).
+  Regression coverage lives in
+  `tools/scripts/test_jsfx_subset.py::test_doctor_rejects_gfx_section_with_size_directive`.

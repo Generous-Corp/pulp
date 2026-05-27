@@ -51,6 +51,28 @@ class JsfxSubsetScriptTests(unittest.TestCase):
         self.assertIn("unsupported JSFX sections", result.stderr)
         self.assertIn("@gfx", result.stderr)
 
+    def test_doctor_rejects_gfx_section_with_size_directive(self) -> None:
+        # `@gfx WIDTH HEIGHT` is the canonical REAPER form documenting the
+        # preferred plugin-window size. Pre-fix the regex was anchored to
+        # end-of-line and silently skipped this entire shape, letting `@gfx
+        # 200 200` slip past the bounded-subset check. The fix captures only
+        # the directive name and ignores trailing tokens so the boundary
+        # actually holds for the form developers will paste in.
+        path = self.write_temp_jsfx(
+            """
+            desc:Bad Example With Size
+            slider1:1<0,2,0.01>Gain
+            @init
+              gain = 1;
+            @gfx 200 200
+              gfx_clear = 0;
+            """
+        )
+        result = self.run_script("doctor", "--file", str(path))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unsupported JSFX sections", result.stderr)
+        self.assertIn("@gfx", result.stderr)
+
     def test_doctor_emits_json_summary(self) -> None:
         path = self.write_temp_jsfx(
             """
