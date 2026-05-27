@@ -140,6 +140,23 @@ target_include_directories(pulp-runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external
 )
 
+set(_pulp_ubsan_enabled OFF)
+if(PULP_SANITIZER STREQUAL "undefined"
+        OR CMAKE_CXX_FLAGS MATCHES "(^| )-fsanitize=[^ ]*undefined"
+        OR CMAKE_C_FLAGS MATCHES "(^| )-fsanitize=[^ ]*undefined")
+    set(_pulp_ubsan_enabled ON)
+endif()
+
+if(_pulp_ubsan_enabled AND CMAKE_C_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    # TweetNaCl intentionally uses signed-bit arithmetic patterns that trip
+    # UBSan. Keep sanitizer coverage on Pulp's Ed25519 wrappers and tests
+    # while compiling only the vendored C implementation without UBSan.
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../external/tweetnacl/tweetnacl.c
+        PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined")
+endif()
+unset(_pulp_ubsan_enabled)
+
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 target_link_libraries(pulp-runtime PRIVATE hwy)
 

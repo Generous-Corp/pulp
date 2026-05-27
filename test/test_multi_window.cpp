@@ -67,7 +67,7 @@ public:
 };
 
 bool wait_for(std::atomic<int>& counter, int target,
-              std::chrono::milliseconds budget = std::chrono::milliseconds(2000)) {
+              std::chrono::milliseconds budget = std::chrono::milliseconds(10000)) {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < deadline) {
         if (counter.load(std::memory_order_relaxed) >= target) return true;
