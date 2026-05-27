@@ -13,6 +13,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string>
+
+#if defined(_WIN32)
+#  include <process.h>
+#else
+#  include <unistd.h>
+#endif
 
 using namespace pulp;
 using namespace pulp::examples;
@@ -25,7 +32,8 @@ class ScopedBenchLogDir {
 public:
     ScopedBenchLogDir() {
         dir_ = std::filesystem::temp_directory_path() /
-               ("pulp-host-bench-test-" + std::to_string(::time(nullptr)));
+               ("pulp-host-bench-test-" + std::to_string(current_pid()) + "-" +
+                std::to_string(::time(nullptr)));
         std::filesystem::create_directories(dir_);
 #if defined(__APPLE__)
         prev_ = std::getenv("HOME") ? std::getenv("HOME") : "";
@@ -52,6 +60,14 @@ public:
     std::filesystem::path root() const { return dir_; }
 
 private:
+    static int current_pid() {
+#if defined(_WIN32)
+        return _getpid();
+#else
+        return static_cast<int>(::getpid());
+#endif
+    }
+
     std::filesystem::path dir_;
     std::string prev_;
 };

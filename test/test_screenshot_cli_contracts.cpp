@@ -280,3 +280,25 @@ TEST_CASE("pulp-screenshot backend normalization rejects unavailable explicit Sk
     REQUIRE(default_backend.backend_name == "coregraphics");
 #endif
 }
+
+TEST_CASE("pulp-screenshot option parser handles malformed non-help invocations",
+          "[tools][screenshot][coverage]") {
+    REQUIRE_THROWS(parse_args({"--width", "wide"}));
+    REQUIRE_THROWS(parse_args({"--height", "tall"}));
+    REQUIRE_THROWS(parse_args({"--scale", "large"}));
+
+    auto ignored_unknown = parse_args({"--unknown", "--width=640"});
+    REQUIRE(ignored_unknown.width == 400);
+    REQUIRE(ignored_unknown.output_path == "screenshot.png");
+
+    auto incomplete_options = parse_args({"--script", "--output", "--backend"});
+    REQUIRE(incomplete_options.script_path == "--output");
+    REQUIRE(incomplete_options.backend_name == "skia");
+    REQUIRE(incomplete_options.backend_was_defaulted);
+
+    auto explicit_default = parse_args({"--backend", "default"});
+    REQUIRE(explicit_default.backend_name == "default");
+    REQUIRE_FALSE(explicit_default.backend_was_defaulted);
+    REQUIRE(normalize_backend(explicit_default));
+    REQUIRE(explicit_default.backend_name == "default");
+}

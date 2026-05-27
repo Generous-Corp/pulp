@@ -282,28 +282,17 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship help (or default) enumerates every subcommand",
                  "[cli][shellout][ship][help]") {
-    // Run from the build tree — find_project_root() walks up to the
-    // worktree root, and build/CMakeCache.txt exists since the test
-    // harness itself was built. That puts us in the fallthrough help
-    // branch regardless of whether we pass "help" or bogus args.
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
-    auto r = run_pulp_in(fs::current_path(), {"ship"});
+    auto root = make_fake_project("help", true);
+    auto r = run_pulp_in(root, {"ship"});
     REQUIRE_FALSE(r.timed_out);
 
-    // If the current-path walk doesn't find the project (some CI
-    // layouts drop tests outside the tree), we accept the non-zero
-    // branch provided the stderr mentions the project — that's the
-    // same invariant the other cases assert.
-    auto combined = r.stdout_output + r.stderr_output;
-    if (r.exit_code == 0) {
-        // Help branch reached — every shipping subcommand must be listed.
-        for (const char* sub : {"sign", "notarize", "package", "appcast",
-                                "check", "auv3-xcodeproj"}) {
-            INFO("ship help missing subcommand: " << sub);
-            REQUIRE(contains(r.stdout_output, sub));
-        }
-    } else {
-        REQUIRE(contains(combined, "Pulp project"));
+    REQUIRE(r.exit_code == 0);
+    // Help branch reached — every shipping subcommand must be listed.
+    for (const char* sub : {"sign", "notarize", "package", "appcast",
+                            "check", "auv3-xcodeproj"}) {
+        INFO("ship help missing subcommand: " << sub);
+        REQUIRE(contains(r.stdout_output, sub));
     }
 }
 

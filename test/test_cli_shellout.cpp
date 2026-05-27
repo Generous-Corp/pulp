@@ -213,6 +213,186 @@ TEST_CASE("pulp audio read-bundle json reports missing bundle errors",
     REQUIRE(r.stdout_output.find("bundle path does not exist") != std::string::npos);
 }
 
+TEST_CASE("pulp audio model commands report install, activation, and status state",
+          "[cli][shellout][audio][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-audio-model-shellout-home");
+    ScopedEnvVar scoped_pulp_home("PULP_HOME");
+    scoped_pulp_home.set(home.string());
+
+    auto checkpoint = home / "models" / "clap.pt";
+    write_text(checkpoint, "stub checkpoint");
+    write_text(home / "audio" / "models" / "clap_music_audioset_v1.json",
+               "{\n"
+               "  \"model_id\": \"clap_music_audioset_v1\",\n"
+               "  \"backend\": \"clap\",\n"
+               "  \"checkpoint_ref\": \"hf://lukewys/laion_clap/music.pt\",\n"
+               "  \"resolved_checkpoint_path\": \"" + checkpoint.generic_string() + "\"\n"
+               "}\n");
+
+    auto list_json = run_pulp({"audio", "model", "list", "--json"});
+    REQUIRE_FALSE(list_json.timed_out);
+    REQUIRE(list_json.exit_code == 0);
+    REQUIRE(list_json.stderr_output.empty());
+    REQUIRE(list_json.stdout_output.find("\"active_model_id\": \"\"") != std::string::npos);
+    REQUIRE(list_json.stdout_output.find("\"model_id\": \"clap_music_audioset_v1\"") != std::string::npos);
+    REQUIRE(list_json.stdout_output.find("\"status\": \"installed\"") != std::string::npos);
+    REQUIRE(list_json.stdout_output.find("\"active\": false") != std::string::npos);
+
+    auto status_json = run_pulp({"audio", "model", "status", "--json"});
+    REQUIRE_FALSE(status_json.timed_out);
+    REQUIRE(status_json.exit_code == 0);
+    REQUIRE(status_json.stdout_output.find("\"state_file_found\": false") != std::string::npos);
+    REQUIRE(status_json.stdout_output.find("no configured audio model") != std::string::npos);
+
+    auto unknown = run_pulp({"audio", "model", "activate", "not_a_model", "--json"});
+    REQUIRE_FALSE(unknown.timed_out);
+    REQUIRE(unknown.exit_code != 0);
+    REQUIRE(unknown.stderr_output.empty());
+    REQUIRE(unknown.stdout_output.find("\"ok\": false") != std::string::npos);
+    REQUIRE(unknown.stdout_output.find("unknown model_id: not_a_model") != std::string::npos);
+
+    auto activate = run_pulp({"audio", "model", "activate", "clap_music_audioset_v1", "--json"});
+    REQUIRE_FALSE(activate.timed_out);
+    REQUIRE(activate.exit_code == 0);
+    REQUIRE(activate.stderr_output.empty());
+    REQUIRE(activate.stdout_output.find("\"ok\": true") != std::string::npos);
+    REQUIRE(activate.stdout_output.find("\"active_model_id\": \"clap_music_audioset_v1\"") != std::string::npos);
+    REQUIRE(activate.stdout_output.find("\"backend\": \"clap\"") != std::string::npos);
+    REQUIRE(fs::exists(home / "audio" / "model-state.json"));
+
+    auto status_text = run_pulp({"audio", "model", "status"});
+    REQUIRE_FALSE(status_text.timed_out);
+    REQUIRE(status_text.exit_code == 0);
+    REQUIRE(status_text.stdout_output.find("Audio Model Status") != std::string::npos);
+    REQUIRE(status_text.stdout_output.find("Configured model: clap_music_audioset_v1") != std::string::npos);
+    REQUIRE(status_text.stdout_output.find("Loadable: yes") != std::string::npos);
+    REQUIRE(status_text.stdout_output.find("configured model is loadable") != std::string::npos);
+
+    auto list_text = run_pulp({"audio", "model", "list"});
+    REQUIRE_FALSE(list_text.timed_out);
+    REQUIRE(list_text.exit_code == 0);
+    REQUIRE(list_text.stdout_output.find("Audio Models") != std::string::npos);
+    REQUIRE(list_text.stdout_output.find("Active: clap_music_audioset_v1") != std::string::npos);
+    REQUIRE(list_text.stdout_output.find("* clap_music_audioset_v1 [installed] backend=clap") != std::string::npos);
+
+    fs::remove_all(home);
+}
+
+TEST_CASE("pulp audio read-bundle reports manifest metadata in text and json",
+          "[cli][shellout][audio][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto root = unique_temp_dir("pulp-audio-bundle-shellout");
+    auto bundle = root / "bundle";
+    fs::create_directories(bundle / "metadata");
+    write_text(bundle / "manifest.json",
+               "{\n"
+               "  \"tool\": \"pulp audio excerpt-find\",\n"
+               "  \"bundle_version\": 1,\n"
+               "  \"model_file\": \"metadata/model.json\",\n"
+               "  \"ranked_results_file\": \"metadata/results.json\",\n"
+               "  \"requested_model_id\": \"clap_music_audioset_v1\",\n"
+               "  \"loaded_model_id\": \"clap_music_audioset_v1\",\n"
+               "  \"backend\": \"null\",\n"
+               "  \"result_count\": 2\n"
+               "}\n");
+    write_text(bundle / "metadata" / "model.json",
+               "{\n"
+               "  \"model_id\": \"clap_music_audioset_v1\",\n"
+               "  \"backend\": \"null\"\n"
+               "}\n");
+    write_text(bundle / "metadata" / "results.json",
+               "{\n"
+               "  \"results\": [\n"
+               "    {\"rank\": 1, \"score\": 0.9, \"source_file\": \"kick.wav\","
+               "     \"start_ms\": 10, \"end_ms\": 110, \"excerpt_file\": \"excerpts/rank-01.wav\"},\n"
+               "    {\"rank\": 2, \"score\": 0.5, \"source_file\": \"snare.wav\","
+               "     \"start_ms\": 20, \"end_ms\": 220, \"excerpt_file\": \"excerpts/rank-02.wav\"}\n"
+               "  ]\n"
+               "}\n");
+
+    auto text = run_pulp({"audio", "read-bundle", bundle.string()});
+    REQUIRE_FALSE(text.timed_out);
+    REQUIRE(text.exit_code == 0);
+    REQUIRE(text.stderr_output.empty());
+    REQUIRE(text.stdout_output.find("Audio Excerpt Bundle") != std::string::npos);
+    REQUIRE(text.stdout_output.find("Tool: pulp audio excerpt-find") != std::string::npos);
+    REQUIRE(text.stdout_output.find("Requested model: clap_music_audioset_v1") != std::string::npos);
+    REQUIRE(text.stdout_output.find("Loaded model: clap_music_audioset_v1") != std::string::npos);
+    REQUIRE(text.stdout_output.find("Backend: null") != std::string::npos);
+    REQUIRE(text.stdout_output.find("Results: 2") != std::string::npos);
+    REQUIRE(text.stdout_output.find("#1 score=0.9000 source=kick.wav") != std::string::npos);
+    REQUIRE(text.stdout_output.find("#2 score=0.5000 source=snare.wav") != std::string::npos);
+
+    auto json = run_pulp({"audio", "read-bundle", bundle.string(), "--json"});
+    REQUIRE_FALSE(json.timed_out);
+    REQUIRE(json.exit_code == 0);
+    REQUIRE(json.stderr_output.empty());
+    REQUIRE(json.stdout_output.find("\"ok\": true") != std::string::npos);
+    REQUIRE(json.stdout_output.find("\"result_count\": 2") != std::string::npos);
+    REQUIRE(json.stdout_output.find("\"source_file\": \"kick.wav\"") != std::string::npos);
+    REQUIRE(json.stdout_output.find("\"excerpt_file\": \"excerpts/rank-02.wav\"") != std::string::npos);
+
+    fs::remove_all(root);
+}
+
+TEST_CASE("pulp audio excerpt-find surfaces service errors through text and json",
+          "[cli][shellout][audio][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-audio-excerpt-shellout-home");
+    ScopedEnvVar scoped_pulp_home("PULP_HOME");
+    scoped_pulp_home.set(home.string());
+
+    auto checkpoint = home / "models" / "clap.pt";
+    write_text(checkpoint, "stub checkpoint");
+    write_text(home / "audio" / "models" / "clap_music_audioset_v1.json",
+               "{\n"
+               "  \"model_id\": \"clap_music_audioset_v1\",\n"
+               "  \"resolved_checkpoint_path\": \"" + checkpoint.generic_string() + "\"\n"
+               "}\n");
+    auto notes = home / "notes.txt";
+    write_text(notes, "not a wav");
+
+    auto missing_model = run_pulp({"audio", "excerpt-find",
+                                   "--text", "texture",
+                                   "--input", notes.string(),
+                                   "--model", "not_a_model",
+                                   "--json"});
+    REQUIRE_FALSE(missing_model.timed_out);
+    REQUIRE(missing_model.exit_code != 0);
+    REQUIRE(missing_model.stderr_output.empty());
+    REQUIRE(missing_model.stdout_output.find("\"ok\": false") != std::string::npos);
+    REQUIRE(missing_model.stdout_output.find("unknown model_id: not_a_model") != std::string::npos);
+
+    auto json = run_pulp({"audio", "excerpt-find",
+                          "--text", "texture",
+                          "--input", notes.string(),
+                          "--model", "clap_music_audioset_v1",
+                          "--json"});
+    REQUIRE_FALSE(json.timed_out);
+    REQUIRE(json.exit_code != 0);
+    REQUIRE(json.stderr_output.empty());
+    REQUIRE(json.stdout_output.find("\"ok\": false") != std::string::npos);
+    REQUIRE(json.stdout_output.find("\"query\": \"texture\"") != std::string::npos);
+    REQUIRE(json.stdout_output.find("\"scanned_file_count\": 0") != std::string::npos);
+    REQUIRE(json.stdout_output.find("no supported WAV inputs found") != std::string::npos);
+    REQUIRE(json.stdout_output.find("unsupported; WAV only") != std::string::npos);
+
+    auto text = run_pulp({"audio", "excerpt-find",
+                          "--text", "texture",
+                          "--input", notes.string(),
+                          "--model", "clap_music_audioset_v1"});
+    REQUIRE_FALSE(text.timed_out);
+    REQUIRE(text.exit_code != 0);
+    REQUIRE(text.stdout_output.empty());
+    REQUIRE(text.stderr_output.find("Error: no supported WAV inputs found") != std::string::npos);
+
+    fs::remove_all(home);
+}
+
 TEST_CASE("pulp cache usage and parser errors are deterministic",
           "[cli][shellout][cache][coverage][phase3]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
