@@ -5,10 +5,12 @@
 #include <pulp/format/host_quirks/auv3_cross_host.hpp>
 #include <pulp/format/host_quirks/bitwig.hpp>
 #include <pulp/format/host_quirks/cubase.hpp>
+#include <pulp/format/host_quirks/digital_performer.hpp>
 #include <pulp/format/host_quirks/fl_studio.hpp>
 #include <pulp/format/host_quirks/logic_pro.hpp>
 #include <pulp/format/host_quirks/pro_tools.hpp>
 #include <pulp/format/host_quirks/reaper.hpp>
+#include <pulp/format/host_quirks/studio_one.hpp>
 #include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
 
@@ -35,6 +37,12 @@ void apply_reaper_quirks(HostQuirks& q, HostVersion v) {
     // separate factory so its LessonOnly tier can evolve independently
     // of the rest of the REAPER dispatch (Speculative).
     host_quirks::apply_reaper_keyboard(q, v);
+    // 2026-05-26 iPlug2-audit batch (Pulp #3044): REAPER hosts AU v3
+    // in-process and needs preferredContentSize set synchronously
+    // during audioUnitInitialized. Layered via a separate factory so
+    // the LessonOnly tier can evolve independently of the rest of the
+    // REAPER dispatch.
+    host_quirks::apply_reaper_auv3_in_process(q, v);
 }
 
 void apply_pro_tools_quirks(HostQuirks& q, HostVersion v) {
@@ -159,6 +167,12 @@ void apply_filter(HostQuirks& q, QuirkFilter filter) {
     PULP_QUIRK_FILTER_FIELD(au_v3_bypass_dual_tracking);
     PULP_QUIRK_FILTER_FIELD(au_v3_host_id_from_wrapper);
 
+    // 2026-05-26 iPlug2-audit batch (Pulp #3044 / #3045 / #3046 / #3047).
+    PULP_QUIRK_FILTER_FIELD(reaper_auv3_in_process_preferred_size_sync);
+    PULP_QUIRK_FILTER_FIELD(studio_one_restart_component_ui_thread);
+    PULP_QUIRK_FILTER_FIELD(digital_performer_param_list_reload);
+    PULP_QUIRK_FILTER_FIELD(cubase13_midi_cc_param_id_stable);
+
 #undef PULP_QUIRK_FILTER_FIELD
 }
 
@@ -185,8 +199,10 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
         case HostType::ProTools:      apply_pro_tools_quirks(q, version); break;
         case HostType::Ardour:        host_quirks::apply_ardour(q, version); break;
         case HostType::Mixbus32C:     host_quirks::apply_mixbus32c(q, version); break;
-        // StudioOne / DigitalPerformer / etc. land their flags here
-        // when the per-host fixes ship in later batches.
+        case HostType::StudioOne:     host_quirks::apply_studio_one(q, version); break;
+        case HostType::DigitalPerformer:
+            host_quirks::apply_digital_performer(q, version);
+            break;
         default: break;
     }
     return q;

@@ -86,3 +86,27 @@ TEST_CASE("host_type_from_process_name still classifies vanilla Ardour as Ardour
 TEST_CASE("host_type_name covers Mixbus32C", "[format][host-type][mixbus32c]") {
     REQUIRE(host_type_name(HostType::Mixbus32C) == "Harrison Mixbus 32C");
 }
+
+// ── 2026-05-26 iPlug2-audit batch — Digital Performer classifier
+//    coverage. MOTU's macOS process is "Digital Performer" / "DP11" /
+//    "DP10"; Windows builds expose "Digital Performer.exe". The
+//    classifier matches the canonical name first, then the short
+//    DP-prefixed form. Pulp #3046. ──
+
+TEST_CASE("host_type_from_process_name classifies Digital Performer variants",
+          "[format][host-type][digital-performer][issue-3046]") {
+    REQUIRE(host_type_from_process_name("Digital Performer")
+            == HostType::DigitalPerformer);
+    REQUIRE(host_type_from_process_name("/Applications/Digital Performer.app/Contents/MacOS/DP11")
+            == HostType::DigitalPerformer);
+    REQUIRE(host_type_from_process_name("DP11") == HostType::DigitalPerformer);
+    REQUIRE(host_type_from_process_name("DP10") == HostType::DigitalPerformer);
+    REQUIRE(host_type_from_process_name("DP12") == HostType::DigitalPerformer);
+    REQUIRE(host_type_from_process_name("digitalperformer")
+            == HostType::DigitalPerformer);
+}
+
+TEST_CASE("host_type_name covers DigitalPerformer",
+          "[format][host-type][digital-performer][issue-3046]") {
+    REQUIRE(host_type_name(HostType::DigitalPerformer) == "Digital Performer");
+}

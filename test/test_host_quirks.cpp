@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/host_quirks/cubase.hpp>
+#include <pulp/format/host_quirks/digital_performer.hpp>
 #include <pulp/format/host_quirks/pro_tools.hpp>
 #include <pulp/format/host_quirks/reaper.hpp>
+#include <pulp/format/host_quirks/studio_one.hpp>
 #include <pulp/format/host_type.hpp>
 
 #include <array>
@@ -1049,3 +1052,204 @@ TEST_CASE("detect_quirks respects PULP_HOST_QUIRKS_DEFAULT_POLICY compile-time p
     REQUIRE(q.silence_unsupported_bus_arrangements == true);
 #endif
 }
+
+// ── 2026-05-26 iPlug2-audit batch — 4 additional clean-room lessons
+//    sourced from each host's public vendor documentation + a Pulp
+//    reproducer issue. Each row is wired through a dedicated per-host
+//    factory (or layered on top of an existing one) so its validation
+//    tier can evolve independently. ──
+
+// REAPER AU v3 in-process preferredContentSize lesson (Pulp #3044).
+
+TEST_CASE("apply_reaper_auv3_in_process fires the preferredContentSize-sync lesson",
+          "[format][host-quirks][reaper][isolation][issue-3044]") {
+    HostQuirks q;
+    host_quirks::apply_reaper_auv3_in_process(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_auv3_in_process_preferred_size_sync == true);
+    // Standalone factory must not touch the main 6 REAPER rows.
+    REQUIRE(q.reaper_vst3_gesture_ordering == false);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+}
+
+TEST_CASE("apply_reaper alone does not flip the AU v3 in-process lesson",
+          "[format][host-quirks][reaper][isolation][issue-3044]") {
+    // Tier isolation: the main 6 REAPER rows (Speculative) must stay
+    // composable independently of the iPlug2-audit lesson (LessonOnly).
+    HostQuirks q;
+    host_quirks::apply_reaper(q, HostVersion{7, 20});
+    REQUIRE(q.reaper_auv3_in_process_preferred_size_sync == false);
+}
+
+TEST_CASE("make_quirks_for Reaper layers the AU v3 in-process lesson on top",
+          "[format][host-quirks][reaper][issue-3044]") {
+    auto q = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(q.reaper_auv3_in_process_preferred_size_sync == true);
+    // Cross-host bleed: non-REAPER hosts must stay clean.
+    auto cubase = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(cubase.reaper_auv3_in_process_preferred_size_sync == false);
+    auto logic = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(logic.reaper_auv3_in_process_preferred_size_sync == false);
+}
+
+// Studio One restart-component UI-thread lesson (Pulp #3045).
+
+TEST_CASE("apply_studio_one fires the restart-component UI-thread lesson",
+          "[format][host-quirks][studio-one][isolation][issue-3045]") {
+    HostQuirks q;
+    host_quirks::apply_studio_one(q, HostVersion{6, 5});
+    REQUIRE(q.studio_one_restart_component_ui_thread == true);
+    // No cross-host bleed.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.live_vst3_canresize_ignore == false);
+    REQUIRE(q.wavelab_state_blob_fallback == false);
+}
+
+TEST_CASE("apply_studio_one fires the lesson regardless of version",
+          "[format][host-quirks][studio-one][issue-3045]") {
+    // Version-invariant: the threading contract is the same across 5.x
+    // and 6.x.
+    HostQuirks q;
+    host_quirks::apply_studio_one(q, HostVersion{});
+    REQUIRE(q.studio_one_restart_component_ui_thread == true);
+    HostQuirks q5;
+    host_quirks::apply_studio_one(q5, HostVersion{5, 5});
+    REQUIRE(q5.studio_one_restart_component_ui_thread == true);
+}
+
+TEST_CASE("make_quirks_for Studio One routes through the per-host header",
+          "[format][host-quirks][studio-one][issue-3045]") {
+    auto q = make_quirks_for(HostType::StudioOne, HostVersion{6, 5});
+    REQUIRE(q.studio_one_restart_component_ui_thread == true);
+    // Cheap defenses still on, no cross-host bleed.
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+    REQUIRE(q.fl_studio_setactive_process_mutex == false);
+    // Other hosts must NOT pick up the Studio One flag.
+    auto cubase = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(cubase.studio_one_restart_component_ui_thread == false);
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.studio_one_restart_component_ui_thread == false);
+}
+
+// Digital Performer param-list reload lesson (Pulp #3046).
+
+TEST_CASE("apply_digital_performer fires the param-list reload lesson",
+          "[format][host-quirks][digital-performer][isolation][issue-3046]") {
+    HostQuirks q;
+    host_quirks::apply_digital_performer(q, HostVersion{11, 0});
+    REQUIRE(q.digital_performer_param_list_reload == true);
+    // No cross-host bleed.
+    REQUIRE(q.cubase10_async_view_resize_queue == false);
+    REQUIRE(q.studio_one_restart_component_ui_thread == false);
+}
+
+TEST_CASE("make_quirks_for DigitalPerformer routes through the per-host header",
+          "[format][host-quirks][digital-performer][issue-3046]") {
+    auto q = make_quirks_for(HostType::DigitalPerformer, HostVersion{11, 0});
+    REQUIRE(q.digital_performer_param_list_reload == true);
+    // Cheap defenses still on, no cross-host bleed.
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.reaper_keyboard_only_space == false);
+    REQUIRE(q.studio_one_restart_component_ui_thread == false);
+    // Other hosts must NOT pick up the DP flag.
+    auto cubase = make_quirks_for(HostType::Cubase, HostVersion{12, 0});
+    REQUIRE(cubase.digital_performer_param_list_reload == false);
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.digital_performer_param_list_reload == false);
+}
+
+TEST_CASE("apply_digital_performer is version-invariant",
+          "[format][host-quirks][digital-performer][issue-3046]") {
+    HostQuirks q;
+    host_quirks::apply_digital_performer(q, HostVersion{});
+    REQUIRE(q.digital_performer_param_list_reload == true);
+    HostQuirks q12;
+    host_quirks::apply_digital_performer(q12, HostVersion{12, 0});
+    REQUIRE(q12.digital_performer_param_list_reload == true);
+}
+
+// Cubase 13+ MIDI CC parameter ID stability (Pulp #3047).
+
+TEST_CASE("apply_cubase fires the Cubase 13+ MIDI CC stability flag on 13+",
+          "[format][host-quirks][cubase][issue-3047]") {
+    HostQuirks q;
+    host_quirks::apply_cubase(q, HostVersion{13, 0});
+    REQUIRE(q.cubase13_midi_cc_param_id_stable == true);
+    // Existing Cubase 10+ flags still fire (layering doesn't clobber).
+    REQUIRE(q.cubase10_async_view_resize_queue == true);
+}
+
+TEST_CASE("apply_cubase keeps the Cubase 13+ MIDI CC stability flag off on 12.x",
+          "[format][host-quirks][cubase][issue-3047]") {
+    HostQuirks q;
+    host_quirks::apply_cubase(q, HostVersion{12, 0});
+    REQUIRE(q.cubase13_midi_cc_param_id_stable == false);
+    // Cubase 12 still gets all of the 10+ flags.
+    REQUIRE(q.cubase10_async_view_resize_queue == true);
+}
+
+TEST_CASE("apply_cubase keeps the Cubase 13+ MIDI CC stability flag off on 11.x and 10.x",
+          "[format][host-quirks][cubase][issue-3047]") {
+    HostQuirks q10;
+    host_quirks::apply_cubase(q10, HostVersion{10, 5});
+    REQUIRE(q10.cubase13_midi_cc_param_id_stable == false);
+    HostQuirks q11;
+    host_quirks::apply_cubase(q11, HostVersion{11, 0});
+    REQUIRE(q11.cubase13_midi_cc_param_id_stable == false);
+}
+
+TEST_CASE("make_quirks_for Nuendo 13 inherits the Cubase 13+ MIDI CC stability flag",
+          "[format][host-quirks][cubase][issue-3047]") {
+    // Nuendo dispatches through apply_cubase, so the Nuendo 13+ line
+    // inherits row 3047 automatically.
+    auto q = make_quirks_for(HostType::Nuendo, HostVersion{13, 0});
+    REQUIRE(q.cubase13_midi_cc_param_id_stable == true);
+}
+
+TEST_CASE("Cubase 13+ MIDI CC stability flag stays off for non-Cubase hosts",
+          "[format][host-quirks][cubase][isolation][issue-3047]") {
+    auto reaper = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.cubase13_midi_cc_param_id_stable == false);
+    auto live = make_quirks_for(HostType::AbletonLive, HostVersion{12, 0});
+    REQUIRE(live.cubase13_midi_cc_param_id_stable == false);
+    auto studio_one = make_quirks_for(HostType::StudioOne, HostVersion{6, 5});
+    REQUIRE(studio_one.cubase13_midi_cc_param_id_stable == false);
+    auto dp = make_quirks_for(HostType::DigitalPerformer, HostVersion{11, 0});
+    REQUIRE(dp.cubase13_midi_cc_param_id_stable == false);
+}
+
+// Tier-filter coverage for the new flags.
+
+TEST_CASE("validated-only filter zeroes the 4 new iPlug2-audit lessons",
+          "[format][host-quirks][tiers][issue-3044][issue-3045][issue-3046][issue-3047]") {
+    // All 4 land at LessonOnly/Speculative — none should survive a
+    // validated-only filter.
+    auto reaper = make_quirks_for_validated_only(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(reaper.reaper_auv3_in_process_preferred_size_sync == false);
+    auto studio_one = make_quirks_for_validated_only(HostType::StudioOne, HostVersion{6, 5});
+    REQUIRE(studio_one.studio_one_restart_component_ui_thread == false);
+    auto dp = make_quirks_for_validated_only(HostType::DigitalPerformer, HostVersion{11, 0});
+    REQUIRE(dp.digital_performer_param_list_reload == false);
+    auto cubase = make_quirks_for_validated_only(HostType::Cubase, HostVersion{13, 0});
+    REQUIRE(cubase.cubase13_midi_cc_param_id_stable == false);
+}
+
+TEST_CASE("kHostQuirksMeta tags the 4 new iPlug2-audit rows correctly",
+          "[format][host-quirks][tiers][issue-3044][issue-3045][issue-3046][issue-3047]") {
+    STATIC_REQUIRE(kHostQuirksMeta.reaper_auv3_in_process_preferred_size_sync
+                   == QuirkStatus::LessonOnly);
+    STATIC_REQUIRE(kHostQuirksMeta.studio_one_restart_component_ui_thread
+                   == QuirkStatus::LessonOnly);
+    STATIC_REQUIRE(kHostQuirksMeta.digital_performer_param_list_reload
+                   == QuirkStatus::LessonOnly);
+    // Cubase 13+ MIDI CC ID stability lands as Speculative because it
+    // has a per-host header + per-symptom isolation tests, mirroring
+    // the rest of the Cubase rows.
+    STATIC_REQUIRE(kHostQuirksMeta.cubase13_midi_cc_param_id_stable
+                   == QuirkStatus::Speculative);
+}
+
+// Header includes for the new per-host modules — kept inline at the
+// bottom rather than mixed with the original includes so the diff
+// stays localized to the batch.
+

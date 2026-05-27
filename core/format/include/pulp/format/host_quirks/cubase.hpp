@@ -15,10 +15,19 @@
 ///     must validate the actual read count rather than trusting the
 ///     host-reported size.
 ///
+/// Cubase 13+ vintage — 2026-05-26 iPlug2-audit batch (Pulp #3047):
+///   * MIDI CC parameter IDs must stay stable across project reloads;
+///     Cubase 12 was forgiving but Cubase 13 binds automation lanes
+///     to the IDs at save-time. Plug-ins that synthesize CC IDs from
+///     dynamic state need a stable-hash derivation. `Speculative`
+///     tier — per-host header + isolation test in place, in-DAW bench
+///     evidence still pending.
+///
 /// Version dispatch: Cubase 10 quirks fire on `major >= 10`; the
 /// Cubase 9 state-blob quirk only fires on the 9.x line (NOT on
-/// Cubase 10+) since 10 fixed the underlying stream bug. Cubase
-/// `HostVersion{0,0,0}` (unknown) intentionally leaves both bands
+/// Cubase 10+) since 10 fixed the underlying stream bug; the Cubase
+/// 13 MIDI CC ID stability quirk fires on `major >= 13` only. Cubase
+/// `HostVersion{0,0,0}` (unknown) intentionally leaves every band
 /// off — the adapter falls back to spec-compliant defaults.
 ///
 /// Nuendo is treated as Cubase in the dispatch table
@@ -48,6 +57,18 @@ inline void apply_cubase(HostQuirks& q, HostVersion v) {
     // path stays off there.
     if (v.is_at_least(9, 0) && v.is_before(10, 0)) {
         q.cubase9_state_blob_size_validation = true;
+    }
+    // 2026-05-26 iPlug2-audit batch (Pulp #3047) — Cubase 13+ tightened
+    // its handling of VST3 MIDI CC parameter IDs: project automation
+    // lanes are bound to the parameter IDs at save-time and the host
+    // refuses to re-map them on reload. Plug-ins that synthesize CC
+    // parameter IDs from dynamic state (e.g. preset-driven parameter
+    // counts) will see automation lanes orphaned on the 13.x line. The
+    // VST3 adapter must derive CC parameter IDs from a stable hash
+    // (not the runtime parameter index) when this flag is set. Cubase
+    // 12 was forgiving so the flag stays off on 12.x and earlier.
+    if (v.is_at_least(13, 0)) {
+        q.cubase13_midi_cc_param_id_stable = true;
     }
 }
 

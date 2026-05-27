@@ -152,6 +152,54 @@ struct HostQuirks {
     // AU v3 cross-host
     bool au_v3_bypass_dual_tracking = false;           ///< row 21
     bool au_v3_host_id_from_wrapper = false;           ///< row 22
+
+    // iPlug2-audit batch 2026-05-26: 4 additional lessons (Reaper AU v3
+    // in-process, Studio One restart-component threading, Digital
+    // Performer controller-swap, Cubase 13+ MIDI CC ID stability).
+
+    /// Reaper's AU v3 host is **in-process** (it creates the
+    /// `AUAudioUnit` on the main thread via
+    /// `createAudioUnitWithComponentDescription`), unlike Logic /
+    /// GarageBand which run AU v3 plug-ins out-of-process. Setting the
+    /// view controller's `preferredContentSize` only from `viewDidLoad`
+    /// is too late on the in-process path — the editor opens at the
+    /// extension's default size and snaps to the requested size one
+    /// paint cycle later. AU v3 adapters must additionally set
+    /// `preferredContentSize` synchronously in `audioUnitInitialized`
+    /// (the in-process entry point); setting it twice is harmless on
+    /// the OOP path. Layered on top of the REAPER VST3 dispatch via
+    /// `apply_reaper_auv3_in_process`.
+    bool reaper_auv3_in_process_preferred_size_sync = false;
+
+    /// Studio One serializes `IComponentHandler::restartComponent`
+    /// notifications through a non-thread-safe lane: audio-thread calls
+    /// can deadlock the host or be dropped silently. The VST3 adapter
+    /// must marshal restart-component calls (especially
+    /// `kLatencyChanged`, which is the most common audio-thread
+    /// emitter) to the UI thread when this flag is set. Cubase /
+    /// Nuendo / Reaper accept the call from any thread.
+    bool studio_one_restart_component_ui_thread = false;
+
+    /// Digital Performer (MOTU) revives the edit controller on
+    /// preset-load / project-import paths without re-querying the
+    /// previously published parameter list. Plug-ins that mutate the
+    /// parameter set via `restartComponent(kParamValuesChanged |
+    /// kParamTitlesChanged)` end up with stale labels in DP's
+    /// automation lane. The VST3 adapter must layer an additional
+    /// `kReloadComponent` notification onto the standard restart bundle
+    /// when the detected host is Digital Performer; Cubase / Logic /
+    /// Reaper do not require this.
+    bool digital_performer_param_list_reload = false;
+
+    /// Cubase 13+ / Nuendo 13+ bind project automation lanes to the
+    /// VST3 MIDI CC parameter IDs at save-time and refuse to re-map
+    /// them on reload. Plug-ins that synthesize CC parameter IDs from
+    /// dynamic state (e.g. preset-driven parameter counts) will see
+    /// automation lanes orphaned on the 13.x line. The VST3 adapter
+    /// must derive CC parameter IDs from a stable hash (not the
+    /// runtime parameter index) when this flag is set. Cubase 12 was
+    /// forgiving; the flag stays off on 12 and earlier.
+    bool cubase13_midi_cc_param_id_stable = false;
 };
 
 /// Per-quirk validation status, parallel to `HostQuirks`.
@@ -242,6 +290,17 @@ struct HostQuirksMeta {
 
     QuirkStatus au_v3_bypass_dual_tracking = QuirkStatus::Speculative;
     QuirkStatus au_v3_host_id_from_wrapper = QuirkStatus::Speculative;
+
+    // iPlug2-audit batch 2026-05-26: documented from each host's
+    // vendor docs + reproducer issue (Pulp #3044 / #3045 / #3046 /
+    // #3047), no in-tree bench yet → LessonOnly. Cubase 13+ MIDI CC
+    // ID stability lands as Speculative because it has a per-host
+    // header + per-symptom isolation test, mirroring the rest of the
+    // Cubase rows.
+    QuirkStatus reaper_auv3_in_process_preferred_size_sync = QuirkStatus::LessonOnly;
+    QuirkStatus studio_one_restart_component_ui_thread = QuirkStatus::LessonOnly;
+    QuirkStatus digital_performer_param_list_reload = QuirkStatus::LessonOnly;
+    QuirkStatus cubase13_midi_cc_param_id_stable = QuirkStatus::Speculative;
 };
 
 /// Authoritative meta for the in-tree `HostQuirks`. Plugin authors and

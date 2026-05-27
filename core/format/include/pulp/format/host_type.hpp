@@ -25,6 +25,7 @@ enum class HostType {
     AudacityTenacity,
     Ardour,
     Mixbus32C,   // Harrison Mixbus 32C — Ardour derivative with separate quirk profile
+    DigitalPerformer, // MOTU Digital Performer — VST3 controller-swap quirk profile
     Standalone,  // Pulp standalone host
     Other
 };

@@ -60,6 +60,13 @@ HostType host_type_from_process_name(std::string_view process_name) {
     if (name.find("bitwig") != std::string::npos) return HostType::Bitwig;
     if (name.find("maschine") != std::string::npos) return HostType::Maschine;
     if (name.find("audacity") != std::string::npos || name.find("tenacity") != std::string::npos) return HostType::AudacityTenacity;
+    // MOTU Digital Performer's macOS process is "DP11" / "DP10" /
+    // "Digital Performer"; the Windows build is just "Digital
+    // Performer.exe". Match the canonical name first, then the
+    // short DP-prefixed form. Pulp #3046.
+    if (name.find("digital performer") != std::string::npos
+        || name.find("digitalperformer") != std::string::npos
+        || name == "dp11" || name == "dp10" || name == "dp12") return HostType::DigitalPerformer;
     // Mixbus32C must be checked before Ardour: Harrison Mixbus 32C is an
     // Ardour derivative whose process name carries the "mixbus" /
     // "mixbus 32c" / "mixbus32c" substring while sometimes also retaining
@@ -138,6 +145,7 @@ std::string host_type_name(HostType type) {
         case HostType::AudacityTenacity: return "Audacity/Tenacity";
         case HostType::Ardour: return "Ardour";
         case HostType::Mixbus32C: return "Harrison Mixbus 32C";
+        case HostType::DigitalPerformer: return "Digital Performer";
         case HostType::Standalone: return "Pulp Standalone";
         case HostType::Other: return "Other";
         case HostType::Unknown: return "Unknown";

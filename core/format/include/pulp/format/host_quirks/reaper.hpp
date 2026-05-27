@@ -133,4 +133,26 @@ inline void apply_reaper_keyboard(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_keyboard_only_space = true;
 }
 
+/// Populate REAPER AU v3 in-process `preferredContentSize` lesson onto
+/// `q`. Layered on top of `apply_reaper(...)` so the 2026-05-26
+/// iPlug2-audit lesson can stay at a different validation tier
+/// (LessonOnly today) without changing the rest of the REAPER
+/// dispatch.
+///
+/// REAPER's AU v3 host is in-process: it creates the `AUAudioUnit` on
+/// the main thread via `createAudioUnitWithComponentDescription`,
+/// rather than the out-of-process path Logic / GarageBand use. Setting
+/// `preferredContentSize` only from `viewDidLoad` is too late on that
+/// path — the editor opens at the extension's default size and snaps
+/// to the requested size one paint cycle later. AU v3 adapters must
+/// additionally set `preferredContentSize` synchronously in
+/// `audioUnitInitialized`; setting it twice is harmless on the OOP
+/// path.
+///
+/// Reference: https://developer.apple.com/documentation/audiotoolbox/auaudiounit
+/// (in-process host extension contract) + Pulp issue #3044.
+inline void apply_reaper_auv3_in_process(HostQuirks& q, HostVersion /*v*/) {
+    q.reaper_auv3_in_process_preferred_size_sync = true;
+}
+
 }  // namespace pulp::format::host_quirks
