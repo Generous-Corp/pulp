@@ -86,9 +86,9 @@ fs::path pulp_binary() {
     }
     auto build_root = fs::current_path() / "..";
     for (const auto& candidate : {
-             build_root / "pulp",
              build_root / "tools" / "cli" / "pulp-cpp",
              build_root / "tools" / "cli" / "pulp",
+             build_root / "pulp",
          }) {
         if (fs::exists(candidate)) {
             return candidate;
