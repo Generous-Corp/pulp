@@ -34,6 +34,19 @@ ScreenshotCliOptions parse_args(std::initializer_list<const char*> args) {
     return parse_options(static_cast<int>(argv.size()), argv.data());
 }
 
+int run_screenshot_cli(std::initializer_list<const char*> args) {
+    std::vector<std::string> storage;
+    storage.reserve(args.size() + 1);
+    storage.emplace_back("pulp-screenshot");
+    for (const char* arg : args) storage.emplace_back(arg);
+
+    std::vector<char*> argv;
+    argv.reserve(storage.size());
+    for (auto& arg : storage) argv.push_back(arg.data());
+
+    return pulp_screenshot_main_for_test(static_cast<int>(argv.size()), argv.data());
+}
+
 }  // namespace
 
 TEST_CASE("pulp-screenshot base64 encoder handles RFC 4648 padding cases",
@@ -293,7 +306,11 @@ TEST_CASE("pulp-screenshot option parser handles malformed non-help invocations"
 
     auto incomplete_options = parse_args({"--script", "--output", "--backend"});
     REQUIRE(incomplete_options.script_path == "--output");
+#ifdef PULP_HAS_SKIA
     REQUIRE(incomplete_options.backend_name == "skia");
+#else
+    REQUIRE(incomplete_options.backend_name == "coregraphics");
+#endif
     REQUIRE(incomplete_options.backend_was_defaulted);
 
     auto explicit_default = parse_args({"--backend", "default"});
@@ -301,4 +318,10 @@ TEST_CASE("pulp-screenshot option parser handles malformed non-help invocations"
     REQUIRE_FALSE(explicit_default.backend_was_defaulted);
     REQUIRE(normalize_backend(explicit_default));
     REQUIRE(explicit_default.backend_name == "default");
+}
+
+TEST_CASE("pulp-screenshot main rejects unknown backend before rendering",
+          "[tools][screenshot][coverage]") {
+    auto exit_code = run_screenshot_cli({"--demo", "--backend", "metal"});
+    REQUIRE(exit_code == 1);
 }

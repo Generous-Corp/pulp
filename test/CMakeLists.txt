@@ -2513,11 +2513,12 @@ add_executable(pulp-test-inspector-domain-helpers
     test_inspector_domain_helpers.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/audio_inspector.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/console_capture.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/editor_url.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/state_inspector.cpp)
 target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include)
 target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
-    pulp::state Catch2::Catch2WithMain)
+    pulp::state pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).

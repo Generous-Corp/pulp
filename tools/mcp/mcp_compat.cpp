@@ -48,32 +48,40 @@ static std::string read_file_text(const fs::path& p) {
 
 static std::string parse_pulp_toml_sdk_version(const std::string& body) {
     // Hand-rolled minimal TOML scan — pulp.toml is small and the
-    // sdk_version key is a top-level scalar. We deliberately do NOT
-    // pull in a TOML library here: pulp-mcp is intentionally minimal-
-    // deps so its binary stays small and load-fast.
-    auto pos = body.find("sdk_version");
-    while (pos != std::string::npos) {
-        // Reject `sdk_version` substrings that are inside other keys
-        // (`min_sdk_version`, etc.): require the previous non-space
-        // char to be a newline or start-of-file. Leading whitespace
-        // on the same line is allowed.
-        bool at_key_start = true;
-        for (std::size_t i = pos; i > 0; --i) {
-            char c = body[i - 1];
-            if (c == '\n' || c == '\r') break; // walked back to a line boundary — ok
-            if (c != ' ' && c != '\t') { at_key_start = false; break; }
-        }
-        if (!at_key_start) {
-            pos = body.find("sdk_version", pos + 1);
+    // sdk_version key is either a top-level scalar or lives under the
+    // generated [pulp] table. We deliberately do NOT pull in a TOML
+    // library here: pulp-mcp is intentionally minimal-deps so its binary
+    // stays small and load-fast.
+    std::istringstream lines(body);
+    std::string line;
+    bool in_other_section = false;
+    while (std::getline(lines, line)) {
+        auto comment = line.find('#');
+        if (comment != std::string::npos) line = line.substr(0, comment);
+        auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos) continue;
+        auto last = line.find_last_not_of(" \t\r");
+        auto trimmed = line.substr(first, last - first + 1);
+        if (trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']') {
+            auto section = trimmed.substr(1, trimmed.size() - 2);
+            in_other_section = section != "pulp";
             continue;
         }
-        auto eq = body.find('=', pos);
-        if (eq == std::string::npos) break;
-        auto q1 = body.find('"', eq);
-        if (q1 == std::string::npos) break;
-        auto q2 = body.find('"', q1 + 1);
-        if (q2 == std::string::npos) break;
-        return body.substr(q1 + 1, q2 - q1 - 1);
+        if (in_other_section) continue;
+        if (trimmed.rfind("sdk_version", 0) != 0) continue;
+        auto key_end = std::string("sdk_version").size();
+        if (trimmed.size() > key_end
+            && trimmed[key_end] != ' ' && trimmed[key_end] != '\t'
+            && trimmed[key_end] != '=') {
+            continue;
+        }
+        auto eq = trimmed.find('=', key_end);
+        if (eq == std::string::npos) continue;
+        auto q1 = trimmed.find('"', eq);
+        if (q1 == std::string::npos) continue;
+        auto q2 = trimmed.find('"', q1 + 1);
+        if (q2 == std::string::npos) continue;
+        return trimmed.substr(q1 + 1, q2 - q1 - 1);
     }
     return {};
 }

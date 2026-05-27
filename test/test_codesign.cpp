@@ -193,12 +193,22 @@ TEST_CASE("combined pkg rejects empty and missing component inputs",
     const auto empty_output = temp.path / "empty.pkg";
     const auto missing_output = temp.path / "missing.pkg";
 
+#ifdef __APPLE__
+    const auto staging_dir = fs::temp_directory_path()
+        / ("pulp-pkg-staging-" + std::to_string(getpid()));
+    std::error_code cleanup_ec;
+    fs::remove_all(staging_dir, cleanup_ec);
+#endif
+
     REQUIRE_FALSE(fs::exists(empty_output));
     REQUIRE_FALSE(create_combined_pkg({},
                                       empty_output.string(),
                                       "dev.pulp.tests.empty",
                                       "2.0.0"));
     REQUIRE_FALSE(fs::exists(empty_output));
+#ifdef __APPLE__
+    REQUIRE_FALSE(fs::exists(staging_dir));
+#endif
 
     std::vector<InstallComponent> components{
         {(temp.path / "missing-a.component").string(), "/Library/Audio/Plug-Ins/Components"},
@@ -212,6 +222,9 @@ TEST_CASE("combined pkg rejects empty and missing component inputs",
                                       "2.0.0",
                                       "Developer ID Installer: Missing"));
     REQUIRE_FALSE(fs::exists(missing_output));
+#ifdef __APPLE__
+    REQUIRE_FALSE(fs::exists(staging_dir));
+#endif
     REQUIRE(components[0].install_location.find("Components") != std::string::npos);
     REQUIRE(components[1].install_location.find("VST3") != std::string::npos);
 }

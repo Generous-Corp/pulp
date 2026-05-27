@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -162,6 +163,53 @@ TEST_CASE("design-debug capture metadata matches backend behavior",
                                               ScreenshotBackend::coregraphics));
     REQUIRE_FALSE(capture_mode_supports_widget_sksl(CaptureMode::headless_coregraphics,
                                                     ScreenshotBackend::coregraphics));
+}
+
+TEST_CASE("design-debug default option structs preserve artifact contracts",
+          "[tools][design-debug][coverage]") {
+    const Options opts;
+    REQUIRE(opts.script_path.empty());
+    REQUIRE(opts.design_tool_bin.empty());
+    REQUIRE(opts.output_dir == std::filesystem::path("build") / "design-debug");
+    REQUIRE(opts.prompt.empty());
+    REQUIRE(opts.target == "all");
+    REQUIRE(opts.provider == "claude");
+    REQUIRE(opts.model == "claude-sonnet-4-6");
+    REQUIRE(opts.reasoning_effort.empty());
+    REQUIRE(opts.ai_cli.empty());
+    REQUIRE(opts.response_file.empty());
+    REQUIRE(opts.width == 1100);
+    REQUIRE(opts.height == 700);
+    REQUIRE(opts.scale == 2.0f);
+    REQUIRE(opts.capture_mode == CaptureMode::headless_skia);
+    REQUIRE(opts.capture_backend == ScreenshotBackend::skia);
+    REQUIRE(opts.delay_ms == 350);
+    REQUIRE(opts.after_delay_ms == 350);
+    REQUIRE(opts.debug_json);
+
+    const TargetArtifacts artifacts;
+    REQUIRE_FALSE(artifacts.valid);
+    REQUIRE_FALSE(artifacts.diff_written);
+    REQUIRE(artifacts.source == "none");
+    REQUIRE(artifacts.before_path.empty());
+    REQUIRE(artifacts.after_path.empty());
+    REQUIRE(artifacts.diff_path.empty());
+    REQUIRE(artifacts.x == 0);
+    REQUIRE(artifacts.y == 0);
+    REQUIRE(artifacts.width == 0);
+    REQUIRE(artifacts.height == 0);
+    REQUIRE(artifacts.padding == 0);
+}
+
+TEST_CASE("design-debug timestamp stamp uses sortable local format",
+          "[tools][design-debug][coverage]") {
+    const auto stamp = now_stamp();
+    REQUIRE(stamp.size() == 15);
+    REQUIRE(stamp[8] == '-');
+    for (std::size_t i = 0; i < stamp.size(); ++i) {
+        if (i == 8) continue;
+        REQUIRE(std::isdigit(static_cast<unsigned char>(stamp[i])) != 0);
+    }
 }
 
 TEST_CASE("design-debug target bounds parser accepts debug state shape",

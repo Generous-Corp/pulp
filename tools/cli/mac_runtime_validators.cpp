@@ -81,15 +81,16 @@ std::string default_find_executable(const std::string& name) {
 
 // Run a shell command, capture combined stdout+stderr, return (exit, output).
 std::pair<int, std::string> default_run_capture(const std::string& cmd) {
+#if defined(_WIN32)
+    (void)cmd;
+    return {-1, "command capture unsupported on Windows"};
+#else
     std::string out;
     FILE* p = popen((cmd + " 2>&1").c_str(), "r");
     if (!p) return {-1, "popen failed"};
     char buf[4096];
     while (fgets(buf, sizeof(buf), p)) out += buf;
     int raw = pclose(p);
-#if defined(_WIN32)
-    return {raw, out};
-#else
     if (raw == -1) return {-1, out};
     if (WIFEXITED(raw)) return {WEXITSTATUS(raw), out};
     return {raw, out};
@@ -194,9 +195,12 @@ ValidatorResult run_standalone_validator(const fs::path& bundle,
     // flip headless on and then `run_with_editor` immediately returned
     // false, so EVERY healthy standalone bundle would have reported a
     // false failure (`pulp validate --target standalone`).
+    std::string screenshot_path;
+#if defined(_WIN32)
+    screenshot_path = (fs::temp_directory_path() / "pulp-standalone-smoke.png").string();
+#else
     char tmpl[] = "/tmp/pulp-standalone-smoke-XXXXXX.png";
     int fd = mkstemps(tmpl, 4);
-    std::string screenshot_path;
     if (fd != -1) {
         screenshot_path = tmpl;
         ::close(fd);
@@ -206,6 +210,7 @@ ValidatorResult run_standalone_validator(const fs::path& bundle,
         // trigger the very fail-fast regression we're avoiding).
         screenshot_path = "/tmp/pulp-standalone-smoke.png";
     }
+#endif
     std::ostringstream cmd;
     cmd << "PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 "
         << "PULP_SCREENSHOT=" << sh_quote(screenshot_path) << " "

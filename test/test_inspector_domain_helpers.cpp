@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/inspect/audio_inspector.hpp>
 #include <pulp/inspect/console_capture.hpp>
+#include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/state/store.hpp>
 
@@ -33,6 +34,18 @@ TEST_CASE("ConsoleCapture preserves previous callback ordering",
     REQUIRE(entries.size() == 1);
     REQUIRE(entries[0].level == "debug");
     REQUIRE(entries[0].message == "ordered");
+}
+
+TEST_CASE("Editor URL formatter replaces repeated tokens deterministically",
+          "[inspect][editor-url]") {
+    auto url = format_editor_url(
+        "custom://open?primary={path}&backup={path}&line={line}"
+        "&again={line}&col={col}&col2={col}",
+        "src/space file.cpp", 27, 4);
+
+    REQUIRE(url ==
+            "custom://open?primary=src/space file.cpp&backup=src/space file.cpp"
+            "&line=27&again=27&col=4&col2=4");
 }
 
 TEST_CASE("AudioInspector MIDI and underrun histories keep newest entries",
