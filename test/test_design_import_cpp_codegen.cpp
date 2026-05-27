@@ -49,6 +49,8 @@ std::unique_ptr<pulp::view::View> build_imported_xy_pad_ui();
 void bind_imported_xy_pad_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 std::unique_ptr<pulp::view::View> build_imported_toggle_buttons_ui();
 void bind_imported_toggle_buttons_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
+std::unique_ptr<pulp::view::View> build_imported_waveform_choices_ui();
+void bind_imported_waveform_choices_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 std::unique_ptr<pulp::view::View> build_imported_meter_ui();
 void bind_imported_meter_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 
@@ -185,6 +187,11 @@ struct PhaseDMeterEvent {
     float peak = 0.0f;
 };
 
+struct PhaseDChoiceEvent {
+    std::string param_key;
+    std::string choice_value;
+};
+
 class PhaseDKnobBindingContext final : public NativeImportBindingContext {
 public:
     PhaseDKnobBindingContext() {
@@ -311,6 +318,27 @@ public:
         };
     }
 
+    void bind_choice_button(ToggleButton& button, const NativeImportChoiceBindingDescriptor& descriptor) override {
+        const auto route_id = std::string(descriptor.route_id);
+        const auto param_key = std::string(descriptor.param_key);
+        const auto choice_value = std::string(descriptor.choice_value);
+        const auto choice_label = std::string(descriptor.choice_label);
+
+        bound_choices_.push_back({
+            route_id,
+            param_key,
+            choice_value,
+            choice_label,
+            &button,
+        });
+        if (button.is_on())
+            choice_values_[param_key] = choice_value;
+
+        button.on_toggle = [this, param_key, choice_value](bool) {
+            select_choice(param_key, choice_value);
+        };
+    }
+
     void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& descriptor) override {
         bound_meters_.push_back({
             std::string(descriptor.route_id),
@@ -354,6 +382,28 @@ public:
     const std::vector<std::string>& bound_params() const { return bound_params_; }
     const std::vector<PhaseDParamEvent>& events() const { return events_; }
     const std::vector<PhaseDGestureEvent>& gestures() const { return gestures_; }
+    struct BoundChoice {
+        std::string route_id;
+        std::string param_key;
+        std::string choice_value;
+        std::string choice_label;
+        ToggleButton* button = nullptr;
+    };
+    const std::vector<BoundChoice>& bound_choices() const { return bound_choices_; }
+    const std::vector<PhaseDChoiceEvent>& choice_events() const { return choice_events_; }
+    std::string choice_value(std::string_view param_key) const {
+        auto found = choice_values_.find(std::string(param_key));
+        REQUIRE(found != choice_values_.end());
+        return found->second;
+    }
+    std::size_t choice_change_count(std::string_view param_key) const {
+        std::size_t count = 0;
+        for (const auto& event : choice_events_) {
+            if (event.param_key == param_key)
+                ++count;
+        }
+        return count;
+    }
     struct BoundMeter {
         std::string route_id;
         std::string meter_source;
@@ -378,6 +428,17 @@ public:
     }
 
 private:
+    void select_choice(std::string_view param_key, std::string_view choice_value) {
+        for (auto& choice : bound_choices_) {
+            if (choice.param_key != param_key)
+                continue;
+            REQUIRE(choice.button != nullptr);
+            choice.button->set_on(choice.choice_value == choice_value);
+        }
+        choice_values_[std::string(param_key)] = std::string(choice_value);
+        choice_events_.push_back({std::string(param_key), std::string(choice_value)});
+    }
+
     void record_gesture(pulp::state::ParamID id, std::string phase) {
         auto found = param_keys_by_id_.find(id);
         REQUIRE(found != param_keys_by_id_.end());
@@ -391,6 +452,9 @@ private:
     std::vector<std::string> bound_params_;
     std::vector<PhaseDParamEvent> events_;
     std::vector<PhaseDGestureEvent> gestures_;
+    std::vector<BoundChoice> bound_choices_;
+    std::unordered_map<std::string, std::string> choice_values_;
+    std::vector<PhaseDChoiceEvent> choice_events_;
     std::vector<BoundMeter> bound_meters_;
     std::vector<PhaseDMeterEvent> meter_events_;
 };
@@ -765,8 +829,11 @@ IRNode* node_at_ir_path(IRNode& root, std::string_view path) {
 
 std::string event_contract_string(choc::value::ValueView route) {
     const auto event = route["event_contracts"][0];
-    return json_string(event["prop"]) + ":" + json_string(event["kind"]) + ":" +
-           json_string(event["param_key"]);
+    auto out = json_string(event["prop"]) + ":" + json_string(event["kind"]) + ":" +
+        json_string(event["param_key"]);
+    if (!event["value"].isVoid())
+        out += ":" + json_string(event["value"]);
+    return out;
 }
 
 std::string gesture_contract_string(choc::value::ValueView route) {
@@ -1215,6 +1282,54 @@ IRNode lower_chainer_toggle_button_route_to_node(IRNode& materialized_root,
     return button;
 }
 
+IRNode lower_chainer_waveform_choice_route_to_node(IRNode& materialized_root,
+                                                   choc::value::ValueView route) {
+    const auto materialized_path = json_string(route["materialized_ir_path"]);
+    auto* materialized_node = node_at_ir_path(materialized_root, materialized_path);
+    REQUIRE(materialized_node != nullptr);
+    REQUIRE(materialized_node->stable_anchor_id.has_value());
+    REQUIRE(*materialized_node->stable_anchor_id == json_string(route["materialized_ir_anchor"]));
+
+    const auto binding = route["parameter_bindings"][0];
+    const auto label = json_string(route["choice_label"]);
+    const auto style_tokens = style_token_string(route);
+    const auto style = route["style"];
+    const bool selected = route["selected"].getBool();
+
+    auto button = *materialized_node;
+    button.children.clear();
+    button.type = "toggle_button";
+    button.name = label + " choice";
+    button.text_content = label;
+    button.layout.flex_shrink = 0.0f;
+    button.audio_widget = AudioWidgetType::none;
+    button.audio_label.clear();
+    button.attributes["checked"] = selected ? "true" : "false";
+    button.attributes["value"] = selected ? "true" : "false";
+    button.attributes["pulpRouteId"] = json_string(route["id"]);
+    button.attributes["pulpRouteType"] = json_string(route["route_type"]);
+    button.attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
+    button.attributes["pulpSourcePath"] = json_string(route["stable_source_path"]);
+    button.attributes["pulpParamKey"] = json_string(binding["param_key"]);
+    button.attributes["pulpChoiceValue"] = json_string(route["choice_value"]);
+    button.attributes["pulpChoiceLabel"] = label;
+    button.attributes["pulpEventContract"] = event_contract_string(route);
+    button.attributes["pulpGestureContract"] = gesture_contract_string(route);
+    button.attributes["pulpStyleTokens"] = style_tokens;
+    button.attributes["pulpDefaultValueSource"] = json_string(route["default_value_source"]);
+    button.attributes["pulpOnBackgroundColor"] = json_string(style["on_background_color"]);
+    button.attributes["pulpOffBackgroundColor"] = json_string(style["off_background_color"]);
+    button.attributes["pulpOnTextColor"] = json_string(style["on_text_color"]);
+    button.attributes["pulpOffTextColor"] = json_string(style["off_text_color"]);
+    button.attributes["pulpOnBorderColor"] = json_string(style["on_border_color"]);
+    button.attributes["pulpOffBorderColor"] = json_string(style["off_border_color"]);
+    button.attributes["pulpCornerRadius"] = float_attr(json_float_or(style["corner_radius"], 2.0f));
+    button.attributes["pulpFontSize"] = float_attr(json_float_or(style["font_size"], 7.0f));
+    button.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
+    button.anchor_strategy = "adapter";
+    return button;
+}
+
 IRNode* node_at_relative_ir_path(IRNode& root,
                                  std::string_view root_path,
                                  std::string_view target_path) {
@@ -1358,6 +1473,28 @@ DesignIR lower_chainer_toggle_button_routes_to_phase_e_ir(DesignIR materialized_
         ir.root.children.push_back(lower_chainer_toggle_button_route_to_node(materialized_ir.root, route));
     }
     REQUIRE(ir.root.children.size() == 2);
+
+    return ir;
+}
+
+DesignIR lower_chainer_waveform_choice_routes_to_phase_e_ir(DesignIR materialized_ir,
+                                                            choc::value::ValueView route_rows) {
+    DesignIR ir;
+    ir.source = DesignSource::jsx;
+    ir.capture_method = "phase-e-chainer-waveform-choices-route-overlay";
+    ir.source_adapter = "native-cpp-import-execution-validation";
+    ir.source_version = "phase-e";
+    add_chainer_token_colors(ir);
+    ir.root = frame_node("phase-e-waveform-choices-root", "Chainer Choices", 93.0f, 13.0f, LayoutDirection::row);
+    ir.root.layout.gap = 3.0f;
+
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "WaveformChoice")
+            continue;
+        ir.root.children.push_back(lower_chainer_waveform_choice_route_to_node(materialized_ir.root, route));
+    }
+    REQUIRE(ir.root.children.size() == 4);
 
     return ir;
 }
@@ -2503,6 +2640,105 @@ TEST_CASE("Chainer route overlay can lower toggle buttons to typed C++ with clic
     REQUIRE(compiled);
 }
 
+TEST_CASE("Chainer route overlay can lower waveform choices to typed C++ with choice binding sidecars",
+          "[view][import][cpp-codegen][native-cpp-phase-e]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["waveform_choice_routes"].getInt64() == 4);
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["waveform_choice_routes_mapped_to_ir"].getInt64() == 4);
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["unique_waveform_choice_ir_paths"].getInt64() == 4);
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    auto choice_ir = lower_chainer_waveform_choice_routes_to_phase_e_ir(std::move(materialized_ir), route_rows);
+
+    CppExportOptions opts;
+    opts.header_filename = "phase_e_chainer_waveform_choices.hpp";
+    const auto result = generate_pulp_cpp(choice_ir, choice_ir.asset_manifest, opts);
+
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::ToggleButton>()") == 4);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_choice_button(") == 4);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_toggle_button(") == 0);
+    REQUIRE(count_occurrences(result.source, "->set_on_background_color(") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_off_background_color(") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_on_text_color(") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_off_text_color(") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_on_border_color(") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_off_border_color(") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_corner_radius(2.0f);") == 4);
+    REQUIRE(count_occurrences(result.source, "->set_font_size(7.0f);") == 4);
+
+    auto binding_manifest = choc::json::parse(result.binding_manifest);
+    REQUIRE(binding_manifest["entries"].size() == 4);
+
+    struct ExpectedChoice {
+        const char* id;
+        const char* anchor;
+        const char* label;
+        const char* choice_value;
+        const char* event_contract;
+        bool selected;
+    };
+    const std::vector<ExpectedChoice> expected = {
+        {"chainer.waveform_choice.0.saw", "pr_2z", "SAW", "saw", "onClick:set_choice:osc_waveform:saw", true},
+        {"chainer.waveform_choice.1.sine", "pr_30", "SIN", "sine", "onClick:set_choice:osc_waveform:sine", false},
+        {"chainer.waveform_choice.2.square", "pr_31", "SQU", "square", "onClick:set_choice:osc_waveform:square", false},
+        {"chainer.waveform_choice.3.tri", "pr_32", "TRI", "tri", "onClick:set_choice:osc_waveform:tri", false},
+    };
+
+    for (const auto& choice : expected) {
+        REQUIRE(result.source.find(std::string("->set_anchor_id(\"") + choice.anchor + "\");") != std::string::npos);
+        REQUIRE(result.source.find(std::string("->set_label(\"") + choice.label + "\");") != std::string::npos);
+
+        bool found = false;
+        for (uint32_t i = 0; i < binding_manifest["entries"].size(); ++i) {
+            const auto entry = binding_manifest["entries"][i];
+            if (json_string(entry["id"]) != choice.id)
+                continue;
+            found = true;
+            REQUIRE(json_string(entry["anchor_id"]) == choice.anchor);
+            REQUIRE(json_string(entry["native_primitive"]) == "toggle_button");
+            REQUIRE(json_string(entry["source_family"]) == "WaveformChoice");
+            REQUIRE(json_string(entry["param_key"]) == "osc_waveform");
+            REQUIRE(json_string(entry["choice_value"]) == choice.choice_value);
+            REQUIRE(json_string(entry["choice_label"]) == choice.label);
+            REQUIRE(json_string(entry["event_contract"]) == choice.event_contract);
+            REQUIRE(json_string(entry["gesture_contract"]) == "click_select:click");
+            REQUIRE(json_string(entry["style_tokens"]) == "C.orange,C.textDim,C.borderDim");
+            REQUIRE(json_string(entry["on_background_color"]) == "#1e1008");
+            REQUIRE(json_string(entry["off_background_color"]) == "#00000000");
+            REQUIRE(json_string(entry["on_text_color"]) == "#ff6b35");
+            REQUIRE(json_string(entry["off_text_color"]) == "#666666");
+            REQUIRE(json_string(entry["on_border_color"]) == "#ff6b35");
+            REQUIRE(json_string(entry["off_border_color"]) == "#1e1e24");
+            REQUIRE(json_string(entry["corner_radius"]) == "2");
+            REQUIRE(json_string(entry["font_size"]) == "7");
+            REQUIRE(json_string(entry["default_value_source"]) == "source_state_default");
+            break;
+        }
+        REQUIRE(found);
+        if (choice.selected)
+            REQUIRE(result.source.find(std::string("->set_on(true);")) != std::string::npos);
+    }
+
+    TempDir tmp("pulp-phase-e-chainer-waveform-choices-cpp-codegen");
+    const auto header = tmp.path / "phase_e_chainer_waveform_choices.hpp";
+    const auto source = tmp.path / "phase_e_chainer_waveform_choices.cpp";
+    const auto object = tmp.path / "phase_e_chainer_waveform_choices.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
 TEST_CASE("Chainer route overlay can lower meter bars to typed C++ with meter input sidecars",
           "[view][import][cpp-codegen][native-cpp-phase-e]") {
     const fs::path manifest_path =
@@ -2873,6 +3109,112 @@ TEST_CASE("generated Chainer toggle button C++ can bind and click both toggle co
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-e-toggle-button-behavior-report.json", report.str());
+    }
+}
+
+TEST_CASE("generated Chainer waveform choice C++ can bind and select every choice",
+          "[view][import][cpp-codegen][native-cpp-phase-e][behavior]") {
+    auto root = ::build_imported_waveform_choices_ui();
+    REQUIRE(root != nullptr);
+
+    PhaseDKnobBindingContext ctx;
+    ::bind_imported_waveform_choices_ui(*root, ctx);
+    REQUIRE(ctx.bound_choices().size() == 4);
+    REQUIRE(ctx.choice_value("osc_waveform") == "saw");
+
+    root->set_bounds({0.0f, 0.0f, 93.0f, 13.0f});
+    root->layout_children();
+
+    struct ExpectedChoice {
+        const char* anchor;
+        const char* label;
+        const char* value;
+        bool initial;
+    };
+    const std::vector<ExpectedChoice> expected = {
+        {"pr_2z", "SAW", "saw", true},
+        {"pr_30", "SIN", "sine", false},
+        {"pr_31", "SQU", "square", false},
+        {"pr_32", "TRI", "tri", false},
+    };
+
+    std::map<std::string, bool> before_values;
+    std::map<std::string, bool> after_values;
+    auto before_png = render_to_png(*root, 93, 13, 1.0f);
+
+    for (const auto& item : expected) {
+        auto* view = find_anchor(*root, item.anchor);
+        REQUIRE(view != nullptr);
+        auto* button = dynamic_cast<ToggleButton*>(view);
+        REQUIRE(button != nullptr);
+        before_values[item.value] = button->is_on();
+        if (std::string(item.value) == "saw")
+            REQUIRE(button->is_on() == item.initial);
+
+        const auto bounds = absolute_bounds(*button);
+        REQUIRE(bounds.width == Catch::Approx(21.0f));
+        REQUIRE(bounds.height == Catch::Approx(13.0f));
+        root->simulate_click({bounds.x + bounds.width * 0.5f, bounds.y + bounds.height * 0.5f});
+
+        REQUIRE(ctx.choice_value("osc_waveform") == item.value);
+        for (const auto& other : expected) {
+            auto* other_view = find_anchor(*root, other.anchor);
+            REQUIRE(other_view != nullptr);
+            auto* other_button = dynamic_cast<ToggleButton*>(other_view);
+            REQUIRE(other_button != nullptr);
+            REQUIRE(other_button->is_on() == (std::string(other.value) == item.value));
+        }
+        after_values[item.value] = button->is_on();
+    }
+
+    REQUIRE(ctx.choice_events().size() == expected.size());
+    REQUIRE(ctx.choice_change_count("osc_waveform") == expected.size());
+
+    auto after_png = render_to_png(*root, 93, 13, 1.0f);
+    bool visual_smoke_valid = false;
+    CompareResult visual_smoke;
+    if (!before_png.empty() && !after_png.empty()) {
+        visual_smoke = compare_screenshots(before_png, after_png, 8);
+        REQUIRE(visual_smoke.valid);
+        REQUIRE(visual_smoke.similarity < 0.999f);
+        visual_smoke_valid = true;
+    }
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        if (!before_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-waveform-choices-before.png", before_png);
+        if (!after_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-waveform-choices-after.png", after_png);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-waveform-choice-behavior-v1\",\n"
+               << "  \"fixture\": \"chainer-phase-e-waveform-choices\",\n"
+               << "  \"scope\": \"generated-native-cpp-choice-widget-and-binding-helper\",\n"
+               << "  \"choice_selection_tests\": " << expected.size() << ",\n"
+               << "  \"bound_choices\": " << ctx.bound_choices().size() << ",\n"
+               << "  \"choice_updates\": " << ctx.choice_events().size() << ",\n"
+               << "  \"final_choice\": \"" << json_escape(ctx.choice_value("osc_waveform")) << "\",\n"
+               << "  \"visual_smoke_valid\": " << (visual_smoke_valid ? "true" : "false") << ",\n"
+               << "  \"visual_smoke_similarity\": " << std::setprecision(7) << visual_smoke.similarity << ",\n"
+               << "  \"choices\": [";
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& item = expected[i];
+            report << "\n    {"
+                   << "\"anchor\": \"" << item.anchor << "\", "
+                   << "\"label\": \"" << item.label << "\", "
+                   << "\"choice_value\": \"" << item.value << "\", "
+                   << "\"initial\": " << (item.initial ? "true" : "false") << ", "
+                   << "\"before\": " << (before_values[item.value] ? "true" : "false") << ", "
+                   << "\"after_click_selected\": " << (after_values[item.value] ? "true" : "false")
+                   << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-waveform-choice-behavior-report.json", report.str());
     }
 }
 

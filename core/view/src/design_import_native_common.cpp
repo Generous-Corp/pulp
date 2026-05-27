@@ -763,6 +763,28 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto button = std::make_unique<ToggleButton>();
             if (!text.empty()) button->set_label(text);
             button->set_on(attr_bool(node, "checked") || attr_bool(node, "value"));
+            if (auto color = attr(node, "pulpOnBackgroundColor"); color) {
+                if (auto parsed = parse_hex_color(*color)) button->set_on_background_color(*parsed);
+            }
+            if (auto color = attr(node, "pulpOffBackgroundColor"); color) {
+                if (auto parsed = parse_hex_color(*color)) button->set_off_background_color(*parsed);
+            }
+            if (auto color = attr(node, "pulpOnTextColor"); color) {
+                if (auto parsed = parse_hex_color(*color)) button->set_on_text_color(*parsed);
+            }
+            if (auto color = attr(node, "pulpOffTextColor"); color) {
+                if (auto parsed = parse_hex_color(*color)) button->set_off_text_color(*parsed);
+            }
+            if (auto color = attr(node, "pulpOnBorderColor"); color) {
+                if (auto parsed = parse_hex_color(*color)) button->set_on_border_color(*parsed);
+            }
+            if (auto color = attr(node, "pulpOffBorderColor"); color) {
+                if (auto parsed = parse_hex_color(*color)) button->set_off_border_color(*parsed);
+            }
+            if (auto radius = attr_float(node, "pulpCornerRadius"))
+                button->set_corner_radius(*radius);
+            if (auto size = attr_float(node, "pulpFontSize"))
+                button->set_font_size(*size);
             return button;
         }
         case NativeWidgetKind::knob: {

@@ -391,6 +391,15 @@ struct NativeImportMeterBindingDescriptor {
     std::string_view event_contract;
 };
 
+struct NativeImportChoiceBindingDescriptor {
+    std::string_view route_id;
+    std::string_view param_key;
+    std::string_view choice_value;
+    std::string_view choice_label;
+    std::string_view event_contract;
+    std::string_view gesture_contract;
+};
+
 class NativeImportBindingContext {
 public:
     virtual ~NativeImportBindingContext() = default;
@@ -407,6 +416,10 @@ public:
         (void)descriptor;
     }
     virtual void bind_toggle_button(ToggleButton& button, const NativeImportBindingDescriptor& descriptor) {
+        (void)button;
+        (void)descriptor;
+    }
+    virtual void bind_choice_button(ToggleButton& button, const NativeImportChoiceBindingDescriptor& descriptor) {
         (void)button;
         (void)descriptor;
     }

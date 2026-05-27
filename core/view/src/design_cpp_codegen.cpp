@@ -880,6 +880,34 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_label(" + cpp_string_literal(text) + ");");
             if (attr_bool(node, "checked") || attr_bool(node, "value"))
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on(true);");
+            if (auto color = attr(node, "pulpOnBackgroundColor"); color) {
+                if (auto expr = color_expr(ctx, *color); !expr.empty())
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on_background_color(" + expr + ");");
+            }
+            if (auto color = attr(node, "pulpOffBackgroundColor"); color) {
+                if (auto expr = color_expr(ctx, *color); !expr.empty())
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_off_background_color(" + expr + ");");
+            }
+            if (auto color = attr(node, "pulpOnTextColor"); color) {
+                if (auto expr = color_expr(ctx, *color); !expr.empty())
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on_text_color(" + expr + ");");
+            }
+            if (auto color = attr(node, "pulpOffTextColor"); color) {
+                if (auto expr = color_expr(ctx, *color); !expr.empty())
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_off_text_color(" + expr + ");");
+            }
+            if (auto color = attr(node, "pulpOnBorderColor"); color) {
+                if (auto expr = color_expr(ctx, *color); !expr.empty())
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on_border_color(" + expr + ");");
+            }
+            if (auto color = attr(node, "pulpOffBorderColor"); color) {
+                if (auto expr = color_expr(ctx, *color); !expr.empty())
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_off_border_color(" + expr + ");");
+            }
+            if (auto radius = attr_float(node, "pulpCornerRadius"))
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius(" + float_expr(ctx, *radius) + ");");
+            if (auto size = attr_float(node, "pulpFontSize"))
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_size(" + float_expr(ctx, *size) + ");");
             break;
         case NativeWidgetKind::knob: {
             if (!text.empty())
@@ -1185,6 +1213,8 @@ bool has_binding_manifest_metadata(const IRNode& node) {
              "pulpParamKey",
              "pulpBindingModule",
              "pulpBindingParam",
+             "pulpChoiceValue",
+             "pulpChoiceLabel",
              "pulpParamKeyX",
              "pulpParamKeyY",
              "pulpBindingModuleX",
@@ -1234,6 +1264,8 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         append_json_field_if_present(out, first_field, "param_key", attr(node, "pulpParamKey"));
         append_json_field_if_present(out, first_field, "binding_module", attr(node, "pulpBindingModule"));
         append_json_field_if_present(out, first_field, "binding_param", attr(node, "pulpBindingParam"));
+        append_json_field_if_present(out, first_field, "choice_value", attr(node, "pulpChoiceValue"));
+        append_json_field_if_present(out, first_field, "choice_label", attr(node, "pulpChoiceLabel"));
         append_json_field_if_present(out, first_field, "x_param_key", attr(node, "pulpParamKeyX"));
         append_json_field_if_present(out, first_field, "y_param_key", attr(node, "pulpParamKeyY"));
         append_json_field_if_present(out, first_field, "x_binding_module", attr(node, "pulpBindingModuleX"));
@@ -1247,6 +1279,14 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         append_json_field_if_present(out, first_field, "thumb_width", attr(node, "pulpThumbWidth"));
         append_json_field_if_present(out, first_field, "thumb_height", attr(node, "pulpThumbHeight"));
         append_json_field_if_present(out, first_field, "thumb_corner_radius", attr(node, "pulpThumbCornerRadius"));
+        append_json_field_if_present(out, first_field, "on_background_color", attr(node, "pulpOnBackgroundColor"));
+        append_json_field_if_present(out, first_field, "off_background_color", attr(node, "pulpOffBackgroundColor"));
+        append_json_field_if_present(out, first_field, "on_text_color", attr(node, "pulpOnTextColor"));
+        append_json_field_if_present(out, first_field, "off_text_color", attr(node, "pulpOffTextColor"));
+        append_json_field_if_present(out, first_field, "on_border_color", attr(node, "pulpOnBorderColor"));
+        append_json_field_if_present(out, first_field, "off_border_color", attr(node, "pulpOffBorderColor"));
+        append_json_field_if_present(out, first_field, "corner_radius", attr(node, "pulpCornerRadius"));
+        append_json_field_if_present(out, first_field, "font_size", attr(node, "pulpFontSize"));
         append_json_field_if_present(out, first_field, "event_contract", attr(node, "pulpEventContract"));
         append_json_field_if_present(out, first_field, "gesture_contract", attr(node, "pulpGestureContract"));
         append_json_field_if_present(out, first_field, "host_action", attr(node, "pulpHostAction"));
@@ -1285,6 +1325,8 @@ struct BindingHelperRoute {
     std::string param_key;
     std::string binding_module;
     std::string binding_param;
+    std::string choice_value;
+    std::string choice_label;
     std::string x_param_key;
     std::string y_param_key;
     std::string x_binding_module;
@@ -1307,7 +1349,10 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
     auto y_param_key = attr(node, "pulpParamKeyY");
     auto meter_source = attr(node, "pulpMeterSource");
     auto meter_channel = attr(node, "pulpMeterChannel");
+    auto choice_value = attr(node, "pulpChoiceValue");
     const bool has_single_param = param_key && !param_key->empty();
+    const bool has_choice_param = resolved.kind == NativeWidgetKind::toggle_button &&
+        has_single_param && choice_value && !choice_value->empty();
     const bool has_xy_params = resolved.kind == NativeWidgetKind::xy_pad &&
         x_param_key && !x_param_key->empty() &&
         y_param_key && !y_param_key->empty();
@@ -1315,7 +1360,7 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
         meter_source && !meter_source->empty() &&
         meter_channel && !meter_channel->empty();
     if (route_id && !route_id->empty() &&
-        (has_single_param || has_xy_params || has_meter_input) &&
+        (has_single_param || has_choice_param || has_xy_params || has_meter_input) &&
         node.stable_anchor_id && !node.stable_anchor_id->empty()) {
         routes.push_back(BindingHelperRoute{
             .kind = resolved.kind,
@@ -1324,6 +1369,8 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
             .param_key = param_key.value_or(std::string{}),
             .binding_module = attr(node, "pulpBindingModule").value_or(std::string{}),
             .binding_param = attr(node, "pulpBindingParam").value_or(std::string{}),
+            .choice_value = choice_value.value_or(std::string{}),
+            .choice_label = attr(node, "pulpChoiceLabel").value_or(std::string{}),
             .x_param_key = x_param_key.value_or(std::string{}),
             .y_param_key = y_param_key.value_or(std::string{}),
             .x_binding_module = attr(node, "pulpBindingModuleX").value_or(std::string{}),
@@ -1390,6 +1437,17 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    auto emit_choice_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportChoiceBindingDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.param_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.choice_value) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.choice_label) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.gesture_contract));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
     auto emit_meter_descriptor = [&](const BindingHelperRoute& route, int depth) {
         emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportMeterBindingDescriptor{");
         emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
@@ -1437,8 +1495,13 @@ void emit_binding_context_helpers(std::ostringstream& out,
             if (route.kind == NativeWidgetKind::toggle_button) {
                 emit_line(out, 2, opts.indent_spaces,
                           "if (auto* button = dynamic_cast<pulp::view::ToggleButton*>(view)) {");
-                emit_line(out, 3, opts.indent_spaces, "ctx.bind_toggle_button(*button,");
-                emit_descriptor(route, 3);
+                if (!route.choice_value.empty()) {
+                    emit_line(out, 3, opts.indent_spaces, "ctx.bind_choice_button(*button,");
+                    emit_choice_descriptor(route, 3);
+                } else {
+                    emit_line(out, 3, opts.indent_spaces, "ctx.bind_toggle_button(*button,");
+                    emit_descriptor(route, 3);
+                }
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");
                 continue;

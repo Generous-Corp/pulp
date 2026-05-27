@@ -14,6 +14,7 @@
 #include <functional>
 #include <array>
 #include <vector>
+#include <optional>
 
 namespace pulp::view {
 
@@ -701,6 +702,24 @@ public:
     }
     const std::string& label() const { return label_; }
 
+    void set_on_background_color(canvas::Color color) { on_background_color_ = color; request_repaint(); }
+    void set_off_background_color(canvas::Color color) { off_background_color_ = color; request_repaint(); }
+    void set_on_text_color(canvas::Color color) { on_text_color_ = color; request_repaint(); }
+    void set_off_text_color(canvas::Color color) { off_text_color_ = color; request_repaint(); }
+    void set_on_border_color(canvas::Color color) { on_border_color_ = color; request_repaint(); }
+    void set_off_border_color(canvas::Color color) { off_border_color_ = color; request_repaint(); }
+    void set_corner_radius(float radius) { corner_radius_ = std::max(0.0f, radius); request_repaint(); }
+    void set_font_size(float size) { font_size_ = std::max(1.0f, size); request_repaint(); }
+
+    const std::optional<canvas::Color>& on_background_color_override() const { return on_background_color_; }
+    const std::optional<canvas::Color>& off_background_color_override() const { return off_background_color_; }
+    const std::optional<canvas::Color>& on_text_color_override() const { return on_text_color_; }
+    const std::optional<canvas::Color>& off_text_color_override() const { return off_text_color_; }
+    const std::optional<canvas::Color>& on_border_color_override() const { return on_border_color_; }
+    const std::optional<canvas::Color>& off_border_color_override() const { return off_border_color_; }
+    std::optional<float> corner_radius_override() const { return corner_radius_; }
+    std::optional<float> font_size_override() const { return font_size_; }
+
     std::function<void(bool)> on_toggle;
 
     void paint(canvas::Canvas& canvas) override;
@@ -711,6 +730,14 @@ public:
 private:
     bool on_ = false;
     std::string label_;
+    std::optional<canvas::Color> on_background_color_;
+    std::optional<canvas::Color> off_background_color_;
+    std::optional<canvas::Color> on_text_color_;
+    std::optional<canvas::Color> off_text_color_;
+    std::optional<canvas::Color> on_border_color_;
+    std::optional<canvas::Color> off_border_color_;
+    std::optional<float> corner_radius_;
+    std::optional<float> font_size_;
 };
 
 // ── Icon ────────────────────────────────────────────────────────────────────

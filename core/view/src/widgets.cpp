@@ -833,23 +833,29 @@ void Checkbox::on_mouse_down(Point) {
 void ToggleButton::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
-    auto bg = on_ ? resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255))
-                  : resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60));
-    auto border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
+    auto bg = on_
+        ? on_background_color_.value_or(resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255)))
+        : off_background_color_.value_or(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
+    auto border = on_
+        ? on_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)))
+        : off_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)));
+    const bool has_custom_border = on_ ? on_border_color_.has_value() : off_border_color_.has_value();
+    const float radius = corner_radius_.value_or(6.0f);
 
     canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(0, 0, b.width, b.height, 6);
-    if (!on_) {
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+    if (!on_ || has_custom_border) {
         canvas.set_stroke_color(border);
         canvas.set_line_width(1);
-        canvas.stroke_rounded_rect(0, 0, b.width, b.height, 6);
+        canvas.stroke_rounded_rect(0, 0, b.width, b.height, radius);
     }
 
     if (!label_.empty()) {
-        auto text_color = on_ ? canvas::Color::rgba8(255, 255, 255)
-                              : resolve_color("text.primary", canvas::Color::rgba8(200, 200, 210));
+        auto text_color = on_
+            ? on_text_color_.value_or(canvas::Color::rgba8(255, 255, 255))
+            : off_text_color_.value_or(resolve_color("text.primary", canvas::Color::rgba8(200, 200, 210)));
         canvas.set_fill_color(text_color);
-        canvas.set_font("Inter", 13);
+        canvas.set_font("Inter", font_size_.value_or(13.0f));
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.fill_text_anchored(label_, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
     }

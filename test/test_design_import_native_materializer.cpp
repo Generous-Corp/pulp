@@ -453,15 +453,29 @@ TEST_CASE("baked native materializer preserves audio widget attributes",
     xy_node.attributes["x"] = "0.2";
     xy_node.attributes["y"] = "0.8";
 
+    auto choice_node = frame("waveform-choice", 21.0f, 13.0f, LayoutDirection::column);
+    choice_node.type = "toggle_button";
+    choice_node.text_content = "SAW";
+    choice_node.attributes["checked"] = "true";
+    choice_node.attributes["pulpOnBackgroundColor"] = "#1e1008";
+    choice_node.attributes["pulpOffBackgroundColor"] = "#00000000";
+    choice_node.attributes["pulpOnTextColor"] = "#ff6b35";
+    choice_node.attributes["pulpOffTextColor"] = "#666666";
+    choice_node.attributes["pulpOnBorderColor"] = "#ff6b35";
+    choice_node.attributes["pulpOffBorderColor"] = "#1e1e24";
+    choice_node.attributes["pulpCornerRadius"] = "2";
+    choice_node.attributes["pulpFontSize"] = "7";
+
     ir.root.children.push_back(std::move(knob_node));
     ir.root.children.push_back(std::move(fader_node));
     ir.root.children.push_back(std::move(circle_fader_node));
     ir.root.children.push_back(std::move(meter_node));
     ir.root.children.push_back(std::move(xy_node));
+    ir.root.children.push_back(std::move(choice_node));
 
     auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
     REQUIRE(root != nullptr);
-    REQUIRE(root->child_count() == 5);
+    REQUIRE(root->child_count() == 6);
 
     auto* knob = dynamic_cast<Knob*>(root->child_at(0));
     REQUIRE(knob != nullptr);
@@ -499,4 +513,25 @@ TEST_CASE("baked native materializer preserves audio widget attributes",
     REQUIRE(xy != nullptr);
     REQUIRE(xy->x_value() == 0.2f);
     REQUIRE(xy->y_value() == 0.8f);
+
+    auto* choice = dynamic_cast<ToggleButton*>(root->child_at(5));
+    REQUIRE(choice != nullptr);
+    REQUIRE(choice->label() == "SAW");
+    REQUIRE(choice->is_on());
+    REQUIRE(choice->on_background_color_override().has_value());
+    REQUIRE(choice->on_background_color_override()->r8() == 0x1e);
+    REQUIRE(choice->on_background_color_override()->g8() == 0x10);
+    REQUIRE(choice->on_background_color_override()->b8() == 0x08);
+    REQUIRE(choice->off_background_color_override().has_value());
+    REQUIRE(choice->off_background_color_override()->a8() == 0x00);
+    REQUIRE(choice->on_text_color_override().has_value());
+    REQUIRE(choice->on_text_color_override()->r8() == 0xff);
+    REQUIRE(choice->on_text_color_override()->g8() == 0x6b);
+    REQUIRE(choice->on_text_color_override()->b8() == 0x35);
+    REQUIRE(choice->off_text_color_override().has_value());
+    REQUIRE(choice->off_text_color_override()->r8() == 0x66);
+    REQUIRE(choice->off_border_color_override().has_value());
+    REQUIRE(choice->off_border_color_override()->r8() == 0x1e);
+    REQUIRE(choice->corner_radius_override() == 2.0f);
+    REQUIRE(choice->font_size_override() == 7.0f);
 }
