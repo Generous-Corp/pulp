@@ -18,13 +18,15 @@
 
 #pragma once
 
-#include <pulp/inspect/inspector_overlay.hpp>  // pulls in pulp::canvas::Color
+#include <pulp/canvas/canvas.hpp>
 
 #include <iomanip>
 #include <sstream>
 #include <string>
 
 namespace pulp::inspect {
+
+using pulp::canvas::Color;
 
 // Format a Color as a CSS hex string (#rrggbb or #rrggbbaa). Shared across the
 // inspector-overlay TUs (used by the eyedropper pick path + the paint TU);

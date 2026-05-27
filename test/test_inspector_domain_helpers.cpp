@@ -6,6 +6,8 @@
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/state/store.hpp>
 
+#include "../inspect/src/inspector_overlay_internal.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -46,6 +48,14 @@ TEST_CASE("Editor URL formatter replaces repeated tokens deterministically",
     REQUIRE(url ==
             "custom://open?primary=src/space file.cpp&backup=src/space file.cpp"
             "&line=27&again=27&col=4&col2=4");
+}
+
+TEST_CASE("Inspector overlay color formatter emits CSS hex with alpha only when needed",
+          "[inspect][overlay]") {
+    REQUIRE(color_to_hex(pulp::canvas::Color::rgba8(0x0a, 0x1b, 0x2c)) ==
+            "#0a1b2c");
+    REQUIRE(color_to_hex(pulp::canvas::Color::rgba8(0x0a, 0x1b, 0x2c, 0x7f)) ==
+            "#0a1b2c7f");
 }
 
 TEST_CASE("AudioInspector MIDI and underrun histories keep newest entries",

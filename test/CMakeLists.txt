@@ -2518,7 +2518,7 @@ add_executable(pulp-test-inspector-domain-helpers
 target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include)
 target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
-    pulp::state pulp::runtime Catch2::Catch2WithMain)
+    pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
