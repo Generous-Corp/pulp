@@ -1437,6 +1437,10 @@ pulp_add_test_suite(pulp-test-table-list-box LIBRARIES pulp::view)
 # CodeEditor / FileBasedDocument / RecentlyOpenedFilesList tests
 pulp_add_test_suite(pulp-test-code-editor LIBRARIES pulp::view)
 
+# CodeEditor per-language tokenizer (gap-doc Phase 4 row "CodeEditor
+# language coverage")
+pulp_add_test_suite(pulp-test-code-editor-tokenizer LIBRARIES pulp::view)
+
 # PropertiesFile JSON persistence tests
 pulp_add_test_suite(pulp-test-properties SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
 

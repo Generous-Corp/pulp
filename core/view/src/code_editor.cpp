@@ -1,4 +1,5 @@
 #include <pulp/view/code_editor.hpp>
+#include <pulp/view/code_editor_tokenizer.hpp>
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
@@ -48,8 +49,31 @@ void CodeEditor::paint(canvas::Canvas& canvas) {
     auto keyword_color = (config_.theme == "vs-light")
         ? canvas::Color::rgba(0, 0, 200)
         : canvas::Color::rgba(86, 156, 214);
+    auto type_color = (config_.theme == "vs-light")
+        ? canvas::Color::rgba(38, 127, 153)
+        : canvas::Color::rgba(78, 201, 176);
+    auto number_color = (config_.theme == "vs-light")
+        ? canvas::Color::rgba(9, 134, 88)
+        : canvas::Color::rgba(181, 206, 168);
+    auto preprocessor_color = (config_.theme == "vs-light")
+        ? canvas::Color::rgba(175, 0, 219)
+        : canvas::Color::rgba(197, 134, 192);
     auto comment_color = canvas::Color::rgba(106, 153, 85);
     auto string_color = canvas::Color::rgba(206, 145, 120);
+
+    auto color_for = [&](TokenClass cls) {
+        switch (cls) {
+            case TokenClass::keyword:      return keyword_color;
+            case TokenClass::type:         return type_color;
+            case TokenClass::number:       return number_color;
+            case TokenClass::string:       return string_color;
+            case TokenClass::comment:      return comment_color;
+            case TokenClass::preprocessor: return preprocessor_color;
+            case TokenClass::heading:      return keyword_color;
+            case TokenClass::link:         return type_color;
+            default:                       return text_color;
+        }
+    };
 
     float y = line_h;
     int line_num = 1;
@@ -74,20 +98,42 @@ void CodeEditor::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(gutter_w, y - config_.font_size, w - gutter_w, line_h);
         }
 
-        // Basic syntax coloring: detect comments and strings
-        bool is_comment = false;
-        if (line.size() >= 2 && line[0] == '/' && line[1] == '/') is_comment = true;
-        if (line.size() >= 1 && line[0] == '#') is_comment = true;
-
-        if (is_comment) {
-            canvas.set_fill_color(comment_color);
-        } else if (line.find('"') != std::string::npos || line.find('\'') != std::string::npos) {
-            canvas.set_fill_color(string_color);
-        } else {
-            canvas.set_fill_color(text_color);
+        // Per-token painting via the per-language tokenizer. For
+        // `PlainText` we fall back to the historical "first character
+        // sniff" so the existing whole-line color contract holds.
+        std::vector<Token> tokens;
+        if (config_.language != CodeLanguage::PlainText) {
+            tokens = tokenize_line(line, config_.language);
         }
 
-        canvas.fill_text(line, gutter_w + 8.0f, y);
+        if (config_.language == CodeLanguage::PlainText) {
+            bool is_comment = (line.size() >= 2 && line[0] == '/' && line[1] == '/')
+                              || (!line.empty() && line[0] == '#');
+            if (is_comment) {
+                canvas.set_fill_color(comment_color);
+            } else if (line.find('"') != std::string::npos
+                       || line.find('\'') != std::string::npos) {
+                canvas.set_fill_color(string_color);
+            } else {
+                canvas.set_fill_color(text_color);
+            }
+            canvas.fill_text(line, gutter_w + 8.0f, y);
+        } else {
+            // Default paint the entire line as text — token spans paint
+            // over it in their typed color. This preserves the "render
+            // every visible character" contract the older paint had.
+            canvas.set_fill_color(text_color);
+            canvas.fill_text(line, gutter_w + 8.0f, y);
+
+            for (const auto& tok : tokens) {
+                if (tok.length == 0 || tok.cls == TokenClass::text) continue;
+                std::string before = line.substr(0, tok.start);
+                std::string span = line.substr(tok.start, tok.length);
+                float x_off = canvas.measure_text(before);
+                canvas.set_fill_color(color_for(tok.cls));
+                canvas.fill_text(span, gutter_w + 8.0f + x_off, y);
+            }
+        }
 
         y += line_h;
         line_num++;
