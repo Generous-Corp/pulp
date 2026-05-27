@@ -165,6 +165,37 @@ TEST_CASE("Linux packaging tarballs support LV2-only bundles",
     REQUIRE_FALSE(fs::exists(extract / "Docs" / "readme.txt"));
 }
 
+TEST_CASE("Linux packaging tarball command quotes paths with spaces",
+          "[ship][linux-package][coverage]") {
+    TempDir temp("space-tarball");
+    auto build = temp.path / "build with spaces";
+    write_file(build / "VST3" / "Space Echo.vst3" / "Contents" / "module.txt", "vst3");
+    write_file(build / "CLAP" / "Space Echo.clap", "clap");
+    write_file(build / "LV2" / "Space Echo.lv2" / "manifest.ttl", "lv2");
+    write_file(build / "Docs" / "readme.txt", "not packaged");
+
+    auto output = temp.path / "plugins with spaces.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Space Echo", build.string(), output.string()));
+    REQUIRE(fs::is_regular_file(output));
+    REQUIRE(fs::file_size(output) > 0);
+
+    auto listing = run_sh("tar tzf " + quote(output));
+    REQUIRE(listing.exit_code == 0);
+    REQUIRE_THAT(listing.stdout_output,
+                 ContainsSubstring("VST3/Space Echo.vst3/Contents/module.txt"));
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("CLAP/Space Echo.clap"));
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("LV2/Space Echo.lv2/manifest.ttl"));
+    REQUIRE(listing.stdout_output.find("Docs/readme.txt") == std::string::npos);
+
+    auto extract = temp.path / "extract with spaces";
+    fs::create_directories(extract);
+    auto unpack = run_sh("tar xzf " + quote(output) + " -C " + quote(extract));
+    REQUIRE(unpack.exit_code == 0);
+    REQUIRE(read_file(extract / "VST3" / "Space Echo.vst3" / "Contents" / "module.txt") == "vst3");
+    REQUIRE(read_file(extract / "CLAP" / "Space Echo.clap") == "clap");
+    REQUIRE(read_file(extract / "LV2" / "Space Echo.lv2" / "manifest.ttl") == "lv2");
+}
+
 TEST_CASE("Linux packaging tarball failures do not leave partial archives",
           "[ship][linux-package][coverage]") {
     TempDir temp("tarball-failures");
