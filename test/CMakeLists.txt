@@ -1613,6 +1613,10 @@ pulp_add_test_suite(pulp-test-push-notifications LIBRARIES pulp::events)
 # (gap-doc 2026-05-24 row "InAppPurchase / StoreKit").
 pulp_add_test_suite(pulp-test-in-app-purchase LIBRARIES pulp::events)
 
+# Message-loop integration cross-platform introspection surface
+# (gap-doc 2026-05-24 row "Per-OS message-loop integration shims").
+pulp_add_test_suite(pulp-test-message-loop-integration LIBRARIES pulp::events)
+
 add_executable(pulp-test-events-timer-helpers test_events_timer_helpers.cpp)
 target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2::Catch2WithMain)
 # `slow` (#1589): Timer hammer + UAF-free destroy-while-dispatched
