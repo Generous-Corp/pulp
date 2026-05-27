@@ -196,6 +196,9 @@ TEST_CASE("pulp-scan-worker preserves fallback JSON fields for spaced CLAP paths
 
 TEST_CASE("pulp-scan-worker escapes fallback JSON descriptor strings",
           "[host][scan-worker][coverage]") {
+#if defined(_WIN32)
+    SUCCEED("Windows filenames cannot contain the control characters needed for this fallback-name escape path");
+#else
     ScratchDir scratch("escaped-clap");
     auto bundle = scratch.path / "Quoted \"Name\"\nLine.clap";
     write_file(bundle, "not a dynamic library");
@@ -211,6 +214,7 @@ TEST_CASE("pulp-scan-worker escapes fallback JSON descriptor strings",
     REQUIRE_THAT(result.stdout_output, ContainsSubstring(json_field("path", bundle.string())));
     REQUIRE(result.stdout_output.find("Quoted \"Name\"") == std::string::npos);
     REQUIRE(result.stdout_output.find("Name\"\nLine") == std::string::npos);
+#endif
 }
 
 TEST_CASE("pulp-scan-worker rejects known but unsupported plugin suffixes",

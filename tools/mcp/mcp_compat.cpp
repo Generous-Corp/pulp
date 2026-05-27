@@ -48,12 +48,13 @@ static std::string read_file_text(const fs::path& p) {
 
 static std::string parse_pulp_toml_sdk_version(const std::string& body) {
     // Hand-rolled minimal TOML scan — pulp.toml is small and the
-    // sdk_version key is a top-level scalar. We deliberately do NOT
-    // pull in a TOML library here: pulp-mcp is intentionally minimal-
-    // deps so its binary stays small and load-fast.
+    // sdk_version key is either a top-level scalar or lives under the
+    // generated [pulp] table. We deliberately do NOT pull in a TOML
+    // library here: pulp-mcp is intentionally minimal-deps so its binary
+    // stays small and load-fast.
     std::istringstream lines(body);
     std::string line;
-    bool in_section = false;
+    bool in_other_section = false;
     while (std::getline(lines, line)) {
         auto comment = line.find('#');
         if (comment != std::string::npos) line = line.substr(0, comment);
@@ -62,10 +63,11 @@ static std::string parse_pulp_toml_sdk_version(const std::string& body) {
         auto last = line.find_last_not_of(" \t\r");
         auto trimmed = line.substr(first, last - first + 1);
         if (trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']') {
-            in_section = true;
+            auto section = trimmed.substr(1, trimmed.size() - 2);
+            in_other_section = section != "pulp";
             continue;
         }
-        if (in_section) continue;
+        if (in_other_section) continue;
         if (trimmed.rfind("sdk_version", 0) != 0) continue;
         auto key_end = std::string("sdk_version").size();
         if (trimmed.size() > key_end
