@@ -45,6 +45,8 @@ std::unique_ptr<pulp::view::View> build_imported_ui();
 void bind_imported_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 std::unique_ptr<pulp::view::View> build_imported_fader_ui();
 void bind_imported_fader_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
+std::unique_ptr<pulp::view::View> build_imported_xy_pad_ui();
+void bind_imported_xy_pad_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 
 namespace {
 
@@ -1032,7 +1034,7 @@ IRNode lower_chainer_xy_pad_route_to_node(IRNode& materialized_root,
 
     auto wrapper = *materialized_node;
     REQUIRE_FALSE(wrapper.children.empty());
-    wrapper.name = "xy pad wrapper";
+    wrapper.name = "filter control wrapper";
     wrapper.audio_widget = AudioWidgetType::none;
     wrapper.audio_label.clear();
     wrapper.layout.flex_shrink = 0.0f;
@@ -1187,6 +1189,27 @@ DesignIR lower_chainer_knob_routes_to_phase_d_original_layout_ir(DesignIR materi
     return materialized_ir;
 }
 
+DesignIR lower_chainer_xy_pad_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
+                                                                   choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-xy-pad-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-e-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "XYPad")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto pad = lower_chainer_xy_pad_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(pad);
+        ++lowered;
+    }
+    REQUIRE(lowered == 1);
+    return materialized_ir;
+}
+
 DesignIR lower_chainer_fader_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
                                                                   choc::value::ValueView route_rows) {
     materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-route-overlay";
@@ -1291,6 +1314,17 @@ struct PhaseEFaderLayoutCase {
     float expected_height = 0.0f;
 };
 
+struct PhaseEXYPadLayoutCase {
+    std::string id;
+    std::string anchor;
+    std::string source_visual_anchor;
+    std::string source_visual_ir_path;
+    std::string x_param_key;
+    std::string y_param_key;
+    float expected_width = 0.0f;
+    float expected_height = 0.0f;
+};
+
 std::vector<PhaseDKnobSurfaceCase> chainer_knob_surface_cases(choc::value::ValueView route_rows) {
     std::vector<PhaseDKnobSurfaceCase> cases;
     for (uint32_t i = 0; i < route_rows.size(); ++i) {
@@ -1387,6 +1421,42 @@ std::vector<PhaseEFaderLayoutCase> chainer_fader_layout_cases(IRNode& materializ
         cases.push_back(std::move(item));
     }
     REQUIRE(cases.size() == 6);
+    return cases;
+}
+
+std::vector<PhaseEXYPadLayoutCase> chainer_xy_pad_layout_cases(IRNode& materialized_root,
+                                                               choc::value::ValueView route_rows) {
+    std::vector<PhaseEXYPadLayoutCase> cases;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "XYPad")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto* wrapper = node_at_ir_path(materialized_root, materialized_path);
+        REQUIRE(wrapper != nullptr);
+        REQUIRE_FALSE(wrapper->children.empty());
+        auto& source_visual = wrapper->children.front();
+        REQUIRE(source_visual.stable_anchor_id.has_value());
+
+        const auto binding_x = route["parameter_bindings"][0];
+        const auto binding_y = route["parameter_bindings"][1];
+        PhaseEXYPadLayoutCase item;
+        item.id = json_string(route["id"]);
+        item.anchor = json_string(route["materialized_ir_anchor"]);
+        item.source_visual_anchor = *source_visual.stable_anchor_id;
+        item.source_visual_ir_path = materialized_path + "/0";
+        item.x_param_key = json_string(binding_x["param_key"]);
+        item.y_param_key = json_string(binding_y["param_key"]);
+        item.expected_width = json_float(route["width"]);
+        item.expected_height = json_float(route["height"]);
+
+        REQUIRE(source_visual.style.width.has_value());
+        REQUIRE(source_visual.style.height.has_value());
+        REQUIRE(*source_visual.style.width == Catch::Approx(item.expected_width));
+        REQUIRE(*source_visual.style.height == Catch::Approx(item.expected_height));
+        cases.push_back(std::move(item));
+    }
+    REQUIRE(cases.size() == 1);
     return cases;
 }
 
@@ -2054,6 +2124,94 @@ TEST_CASE("generated Chainer fader C++ can bind and drag every fader",
     }
 }
 
+TEST_CASE("generated Chainer XY pad C++ can bind and drag both axes",
+          "[view][import][cpp-codegen][native-cpp-phase-e][behavior]") {
+    auto root = ::build_imported_xy_pad_ui();
+    REQUIRE(root != nullptr);
+
+    PhaseDKnobBindingContext ctx;
+    ::bind_imported_xy_pad_ui(*root, ctx);
+    REQUIRE(ctx.bound_params().size() == 2);
+
+    root->set_bounds({0.0f, 0.0f, 128.0f, 112.0f});
+    root->layout_children();
+
+    auto* view = find_anchor(*root, "pr_5w");
+    REQUIRE(view != nullptr);
+    auto* pad = dynamic_cast<XYPad*>(view);
+    REQUIRE(pad != nullptr);
+
+    const auto bounds = absolute_bounds(*pad);
+    REQUIRE(bounds.width > 0.0f);
+    REQUIRE(bounds.height > 0.0f);
+
+    auto before_png = render_to_png(*root, 128, 112, 1.0f);
+    const auto before_x = pad->x_value();
+    const auto before_y = pad->y_value();
+    const Point start{bounds.x + bounds.width * before_x,
+                      bounds.y + bounds.height * (1.0f - before_y)};
+    const Point end{bounds.x + bounds.width * 0.9f,
+                    bounds.y + bounds.height * 0.1f};
+    root->simulate_drag(start, end, 6);
+
+    const auto after_x = pad->x_value();
+    const auto after_y = pad->y_value();
+    REQUIRE(after_x > before_x);
+    REQUIRE(after_y > before_y);
+    REQUIRE(ctx.normalized("filt_x") == Catch::Approx(after_x));
+    REQUIRE(ctx.normalized("filt_y") == Catch::Approx(after_y));
+    REQUIRE(ctx.change_count("filt_x") > 0);
+    REQUIRE(ctx.change_count("filt_y") > 0);
+    REQUIRE(ctx.has_ordered_gesture("filt_x"));
+    REQUIRE(ctx.has_ordered_gesture("filt_y"));
+
+    auto after_png = render_to_png(*root, 128, 112, 1.0f);
+    bool visual_smoke_valid = false;
+    CompareResult visual_smoke;
+    if (!before_png.empty() && !after_png.empty()) {
+        visual_smoke = compare_screenshots(before_png, after_png, 8);
+        REQUIRE(visual_smoke.valid);
+        REQUIRE(visual_smoke.similarity < 0.999f);
+        visual_smoke_valid = true;
+    }
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        if (!before_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-xy-pad-before.png", before_png);
+        if (!after_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-xy-pad-after.png", after_png);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-xy-pad-behavior-v1\",\n"
+               << "  \"fixture\": \"chainer-phase-e-xy-pad\",\n"
+               << "  \"scope\": \"generated-native-cpp-xy-pad-widget-and-binding-helper\",\n"
+               << "  \"headless_drag_tests\": 1,\n"
+               << "  \"bound_axes\": " << ctx.bound_params().size() << ",\n"
+               << "  \"parameter_updates\": " << ctx.events().size() << ",\n"
+               << "  \"gesture_events\": " << ctx.gestures().size() << ",\n"
+               << "  \"gesture_begin_events\": "
+               << std::count_if(ctx.gestures().begin(), ctx.gestures().end(), [](const PhaseDGestureEvent& event) {
+                      return event.phase == "begin";
+                  }) << ",\n"
+               << "  \"gesture_end_events\": "
+               << std::count_if(ctx.gestures().begin(), ctx.gestures().end(), [](const PhaseDGestureEvent& event) {
+                      return event.phase == "end";
+                  }) << ",\n"
+               << "  \"visual_smoke_valid\": " << (visual_smoke_valid ? "true" : "false") << ",\n"
+               << "  \"visual_smoke_similarity\": " << std::setprecision(7) << visual_smoke.similarity << ",\n"
+               << "  \"axes\": [\n"
+               << "    {\"anchor\": \"pr_5w\", \"param_key\": \"filt_x\", \"before\": " << before_x
+               << ", \"after\": " << after_x << ", \"change_count\": " << ctx.change_count("filt_x") << "},\n"
+               << "    {\"anchor\": \"pr_5w\", \"param_key\": \"filt_y\", \"before\": " << before_y
+               << ", \"after\": " << after_y << ", \"change_count\": " << ctx.change_count("filt_y") << "}\n"
+               << "  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-xy-pad-behavior-report.json", report.str());
+    }
+}
+
 TEST_CASE("Chainer original-layout hybrid classifies fader replacement bounds against live source composite",
           "[view][import][cpp-codegen][native-cpp-phase-e][layout]") {
     const fs::path manifest_path =
@@ -2383,6 +2541,185 @@ TEST_CASE("Chainer original-layout hybrid classifies fader replacement bounds ag
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-e-fader-layout-report.json", report.str());
+    }
+}
+
+TEST_CASE("Chainer original-layout hybrid classifies XY pad replacement bounds against live source pad",
+          "[view][import][cpp-codegen][native-cpp-phase-e][layout]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path runtime_trace_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/traces/chainer-live-runtime-trace.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(runtime_trace_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    const auto live_native_bounds = read_runtime_native_bounds(runtime_trace_path);
+    const auto cases = chainer_xy_pad_layout_cases(materialized_ir.root, route_rows);
+    REQUIRE(cases.size() == 1);
+    const auto& item = cases.front();
+
+    std::vector<ImportDiagnostic> source_diagnostics;
+    auto source_view = build_native_view_tree(
+        materialized_ir, materialized_ir.asset_manifest, {.diagnostics_out = &source_diagnostics});
+    REQUIRE(source_view != nullptr);
+
+    auto hybrid_ir = lower_chainer_xy_pad_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    std::vector<ImportDiagnostic> hybrid_diagnostics;
+    auto hybrid_view = build_native_view_tree(
+        hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &hybrid_diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr float kWidth = 1280.0f;
+    constexpr float kHeight = 800.0f;
+    source_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    hybrid_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    source_view->layout_children();
+    hybrid_view->layout_children();
+
+    auto* source_visual = find_anchor(*source_view, item.source_visual_anchor);
+    auto* native_pad = find_anchor(*hybrid_view, item.anchor);
+    REQUIRE(source_visual != nullptr);
+    REQUIRE(native_pad != nullptr);
+    REQUIRE(dynamic_cast<XYPad*>(native_pad) != nullptr);
+
+    const auto live_source_it = live_native_bounds.find(item.source_visual_anchor);
+    REQUIRE(live_source_it != live_native_bounds.end());
+
+    constexpr float kBoundsTolerancePx = 0.5f;
+    const auto source_bounds = absolute_bounds(*source_visual);
+    const auto live_bounds = live_source_it->second.bounds;
+    const auto native_bounds = absolute_bounds(*native_pad);
+    const auto source_chain = view_ancestor_chain(*source_visual);
+    const auto live_source_chain = live_source_it->second.ancestor_chain;
+    const auto native_chain = view_ancestor_chain(*native_pad);
+    const auto source_live_first_chain_delta = first_chain_delta(
+        live_source_chain, source_chain, kBoundsTolerancePx);
+    const auto live_native_first_chain_delta = first_chain_delta(
+        live_source_chain, native_chain, kBoundsTolerancePx);
+    const auto live_native_preserved_first_chain_delta = first_chain_delta(
+        live_source_chain, native_chain, kBoundsTolerancePx, item.anchor);
+    const auto source_live_common_ancestor_count = common_chain_id_count(live_source_chain, source_chain);
+    const auto live_native_common_ancestor_count = common_chain_id_count(live_source_chain, native_chain);
+    const auto center_delta = center_delta_px(source_bounds, native_bounds);
+    const auto size_delta = size_delta_px(source_bounds, native_bounds);
+    const auto live_center_delta = center_delta_px(live_bounds, native_bounds);
+    const auto live_size_delta = size_delta_px(live_bounds, native_bounds);
+    const auto source_expected_width_delta = std::abs(source_bounds.width - item.expected_width);
+    const auto source_expected_height_delta = std::abs(source_bounds.height - item.expected_height);
+    const auto live_expected_width_delta = std::abs(live_bounds.width - item.expected_width);
+    const auto live_expected_height_delta = std::abs(live_bounds.height - item.expected_height);
+    const auto native_expected_width_delta = std::abs(native_bounds.width - item.expected_width);
+    const auto native_expected_height_delta = std::abs(native_bounds.height - item.expected_height);
+    const bool within_threshold = center_delta <= kBoundsTolerancePx &&
+        size_delta <= kBoundsTolerancePx &&
+        source_expected_width_delta <= kBoundsTolerancePx &&
+        source_expected_height_delta <= kBoundsTolerancePx &&
+        native_expected_width_delta <= kBoundsTolerancePx &&
+        native_expected_height_delta <= kBoundsTolerancePx;
+    const bool live_runtime_within_threshold = live_center_delta <= kBoundsTolerancePx &&
+        live_size_delta <= kBoundsTolerancePx &&
+        live_expected_width_delta <= kBoundsTolerancePx &&
+        live_expected_height_delta <= kBoundsTolerancePx &&
+        native_expected_width_delta <= kBoundsTolerancePx &&
+        native_expected_height_delta <= kBoundsTolerancePx;
+    REQUIRE(live_runtime_within_threshold);
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-xy-pad-layout-bounds-v1\",\n"
+               << "  \"fixture\": \"chainer-original-layout-hybrid-xy-pad\",\n"
+               << "  \"scope\": \"source-xy-pad-surface-vs-native-replacement-bounds\",\n"
+               << "  \"source_bounds_basis\": \"materialized-ir-xy-pad-surface\",\n"
+               << "  \"live_bounds_basis\": \"runtime-trace-xy-pad-surface\",\n"
+               << "  \"native_bounds_basis\": \"original-layout-hybrid-native-xy-pad\",\n"
+               << "  \"threshold_px\": " << kBoundsTolerancePx << ",\n"
+               << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"live_runtime_classification\": \""
+               << (live_runtime_within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"live_runtime_within_threshold\": "
+               << (live_runtime_within_threshold ? "true" : "false") << ",\n"
+               << "  \"xy_pad_count\": 1,\n"
+               << "  \"live_runtime_matched_xy_pad_count\": 1,\n"
+               << "  \"live_runtime_bounds_count\": " << live_native_bounds.size() << ",\n"
+               << "  \"max_center_delta_px\": " << std::setprecision(7) << center_delta << ",\n"
+               << "  \"max_size_delta_px\": " << size_delta << ",\n"
+               << "  \"max_live_center_delta_px\": " << live_center_delta << ",\n"
+               << "  \"max_live_size_delta_px\": " << live_size_delta << ",\n"
+               << "  \"max_source_expected_width_delta_px\": " << source_expected_width_delta << ",\n"
+               << "  \"max_source_expected_height_delta_px\": " << source_expected_height_delta << ",\n"
+               << "  \"max_live_expected_width_delta_px\": " << live_expected_width_delta << ",\n"
+               << "  \"max_live_expected_height_delta_px\": " << live_expected_height_delta << ",\n"
+               << "  \"max_native_expected_width_delta_px\": " << native_expected_width_delta << ",\n"
+               << "  \"max_native_expected_height_delta_px\": " << native_expected_height_delta << ",\n"
+               << "  \"max_source_live_chain_center_delta_px\": "
+               << (source_live_first_chain_delta.valid ? source_live_first_chain_delta.center_delta_px : 0.0f) << ",\n"
+               << "  \"max_source_live_chain_size_delta_px\": "
+               << (source_live_first_chain_delta.valid ? source_live_first_chain_delta.size_delta_px : 0.0f) << ",\n"
+               << "  \"max_live_native_chain_center_delta_px\": "
+               << (live_native_first_chain_delta.valid ? live_native_first_chain_delta.center_delta_px : 0.0f) << ",\n"
+               << "  \"max_live_native_chain_size_delta_px\": "
+               << (live_native_first_chain_delta.valid ? live_native_first_chain_delta.size_delta_px : 0.0f) << ",\n"
+               << "  \"max_live_native_chain_delta_id\": \""
+               << json_escape(live_native_first_chain_delta.valid ? live_native_first_chain_delta.id : "") << "\",\n"
+               << "  \"max_live_native_preserved_chain_center_delta_px\": "
+               << (live_native_preserved_first_chain_delta.valid
+                       ? live_native_preserved_first_chain_delta.center_delta_px
+                       : 0.0f) << ",\n"
+               << "  \"max_live_native_preserved_chain_size_delta_px\": "
+               << (live_native_preserved_first_chain_delta.valid
+                       ? live_native_preserved_first_chain_delta.size_delta_px
+                       : 0.0f) << ",\n"
+               << "  \"max_live_native_preserved_chain_delta_id\": \""
+               << json_escape(live_native_preserved_first_chain_delta.valid
+                                  ? live_native_preserved_first_chain_delta.id
+                                  : "") << "\",\n"
+               << "  \"xy_pads\": [\n"
+               << "    {\"id\": \"" << json_escape(item.id) << "\", "
+               << "\"anchor\": \"" << json_escape(item.anchor) << "\", "
+               << "\"source_visual_anchor\": \"" << json_escape(item.source_visual_anchor) << "\", "
+               << "\"source_visual_ir_path\": \"" << json_escape(item.source_visual_ir_path) << "\", "
+               << "\"x_param_key\": \"" << json_escape(item.x_param_key) << "\", "
+               << "\"y_param_key\": \"" << json_escape(item.y_param_key) << "\", "
+               << "\"expected_width\": " << item.expected_width << ", "
+               << "\"expected_height\": " << item.expected_height << ", "
+               << "\"source_bounds\": ";
+        append_rect_json(report, source_bounds);
+        report << ", \"live_bounds\": ";
+        append_rect_json(report, live_bounds);
+        report << ", \"native_bounds\": ";
+        append_rect_json(report, native_bounds);
+        report << ", \"center_delta_px\": " << center_delta
+               << ", \"size_delta_px\": " << size_delta
+               << ", \"live_center_delta_px\": " << live_center_delta
+               << ", \"live_size_delta_px\": " << live_size_delta
+               << ", \"source_live_common_ancestor_count\": " << source_live_common_ancestor_count
+               << ", \"live_native_common_ancestor_count\": " << live_native_common_ancestor_count
+               << ", \"source_live_first_chain_delta\": ";
+        append_chain_delta_json(report, source_live_first_chain_delta);
+        report << ", \"live_native_first_chain_delta\": ";
+        append_chain_delta_json(report, live_native_first_chain_delta);
+        report << ", \"live_native_preserved_first_chain_delta\": ";
+        append_chain_delta_json(report, live_native_preserved_first_chain_delta);
+        report << ", \"source_ancestor_chain\": ";
+        append_chain_json(report, source_chain);
+        report << ", \"live_source_ancestor_chain\": ";
+        append_chain_json(report, live_source_chain);
+        report << ", \"native_ancestor_chain\": ";
+        append_chain_json(report, native_chain);
+        report << "}\n"
+               << "  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-xy-pad-layout-report.json", report.str());
     }
 }
 

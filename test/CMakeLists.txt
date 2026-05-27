@@ -2898,11 +2898,17 @@ set(CHAINER_PHASE_E_FADERS_CPP
 set_source_files_properties(${CHAINER_PHASE_E_FADERS_CPP} PROPERTIES
     COMPILE_DEFINITIONS "build_imported_ui=build_imported_fader_ui;bake_asset_manifest=bake_fader_asset_manifest;bind_imported_ui=bind_imported_fader_ui")
 
+set(CHAINER_PHASE_E_XY_PAD_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-e-xy-pad.cpp)
+set_source_files_properties(${CHAINER_PHASE_E_XY_PAD_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_imported_xy_pad_ui;bake_asset_manifest=bake_xy_pad_asset_manifest;bind_imported_ui=bind_imported_xy_pad_ui")
+
 add_executable(pulp-test-design-import-cpp-codegen
     test_design_import_cpp_codegen.cpp
     fixtures/design_import_generated_cpp_fixture.cpp
     ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-d-all-knobs.cpp
-    ${CHAINER_PHASE_E_FADERS_CPP})
+    ${CHAINER_PHASE_E_FADERS_CPP}
+    ${CHAINER_PHASE_E_XY_PAD_CPP})
 target_link_libraries(pulp-test-design-import-cpp-codegen
     PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-cpp-codegen PRIVATE
