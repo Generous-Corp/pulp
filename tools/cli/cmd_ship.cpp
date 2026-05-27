@@ -1004,6 +1004,11 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 0;
     }
 
+    if (sub != "help" && sub != "--help" && sub != "-h") {
+        std::cerr << "pulp ship: unknown subcommand: " << sub << "\n";
+        return 2;
+    }
+
     // ── help ────────────────────────────────────────────────────────────────
     std::cout << "pulp ship — signing, notarization, packaging, and update feeds\n\n";
     std::cout << "Subcommands:\n";
