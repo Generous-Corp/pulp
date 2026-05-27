@@ -968,6 +968,11 @@ void emit_widget_specific(std::ostringstream& out,
             if (auto label = attr(node, "xLabel")) emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_x_label(" + cpp_string_literal(*label) + ");");
             if (auto label = attr(node, "yLabel")) emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_y_label(" + cpp_string_literal(*label) + ");");
             break;
+        case NativeWidgetKind::waveform:
+            if (auto shape = attr(node, "pulpWaveformShape"); shape && !shape->empty())
+                emit_line(out, depth, opts.indent_spaces,
+                          std::string(var) + "->set_preview_shape(" + cpp_string_literal(*shape) + ");");
+            break;
         case NativeWidgetKind::image_view:
             if (auto asset_id = first_asset_id(node)) {
                 const auto uri = asset_uri(manifest, *asset_id);
@@ -1224,6 +1229,7 @@ bool has_binding_manifest_metadata(const IRNode& node) {
              "pulpMeterSource",
              "pulpMeterChannel",
              "pulpMeterValueKey",
+             "pulpWaveformShape",
              "pulpEventContract",
              "pulpGestureContract",
              "pulpHostAction",
@@ -1275,6 +1281,7 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         append_json_field_if_present(out, first_field, "meter_source", attr(node, "pulpMeterSource"));
         append_json_field_if_present(out, first_field, "meter_channel", attr(node, "pulpMeterChannel"));
         append_json_field_if_present(out, first_field, "meter_value_key", attr(node, "pulpMeterValueKey"));
+        append_json_field_if_present(out, first_field, "waveform_shape", attr(node, "pulpWaveformShape"));
         append_json_field_if_present(out, first_field, "thumb_shape", attr(node, "pulpThumbShape"));
         append_json_field_if_present(out, first_field, "thumb_width", attr(node, "pulpThumbWidth"));
         append_json_field_if_present(out, first_field, "thumb_height", attr(node, "pulpThumbHeight"));

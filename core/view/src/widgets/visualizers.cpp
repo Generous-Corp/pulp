@@ -472,6 +472,23 @@ size_t WaveformView::find_trigger_index(const float* samples, size_t count,
     return 0;
 }
 
+void WaveformView::set_preview_shape(std::string_view shape) {
+    std::string normalized(shape);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (normalized == "saw" || normalized == "sawtooth")
+        preview_shape_ = PreviewShape::saw;
+    else if (normalized == "sine" || normalized == "sin")
+        preview_shape_ = PreviewShape::sine;
+    else if (normalized == "square" || normalized == "squ")
+        preview_shape_ = PreviewShape::square;
+    else if (normalized == "tri" || normalized == "triangle")
+        preview_shape_ = PreviewShape::triangle;
+    else
+        preview_shape_ = PreviewShape::none;
+    request_repaint();
+}
+
 void WaveformView::apply_trigger() {
     if (trigger_mode_ == TriggerMode::free_run || samples_.size() < 2) return;
     size_t idx = find_trigger_index(samples_.data(), samples_.size(), trigger_mode_);
@@ -560,6 +577,59 @@ void WaveformView::paint(canvas::Canvas& canvas) {
 
         canvas.draw_waveform(envelope.data(), envelope.size(),
                               0, 0, b.width, b.height, style);
+        return;
+    }
+
+    if (samples_.empty() && preview_shape_ != PreviewShape::none) {
+        auto center_color = resolve_color("waveform.grid", canvas::Color::rgba8(50, 50, 60));
+        canvas.set_stroke_color(center_color);
+        canvas.set_line_width(0.5f);
+        const float cy = b.height * 0.5f;
+        canvas.stroke_line(0, cy, b.width, cy);
+
+        canvas.set_stroke_color(wave_color.with_alpha(wave_color.a * 0.85f));
+        canvas.set_line_width(1.2f);
+        canvas.begin_path();
+        switch (preview_shape_) {
+            case PreviewShape::saw:
+                canvas.move_to(0.0f, b.height * 0.8f);
+                canvas.line_to(b.width * 0.25f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.25f, b.height * 0.8f);
+                canvas.line_to(b.width * 0.5f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.5f, b.height * 0.8f);
+                canvas.line_to(b.width * 0.75f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.75f, b.height * 0.8f);
+                canvas.line_to(b.width, b.height * 0.2f);
+                break;
+            case PreviewShape::sine:
+                canvas.move_to(0.0f, b.height * 0.5f);
+                canvas.quad_to(b.width * 0.12f, b.height * 0.1f, b.width * 0.25f, b.height * 0.5f);
+                canvas.quad_to(b.width * 0.38f, b.height * 0.9f, b.width * 0.5f, b.height * 0.5f);
+                canvas.quad_to(b.width * 0.62f, b.height * 0.1f, b.width * 0.75f, b.height * 0.5f);
+                canvas.quad_to(b.width * 0.88f, b.height * 0.9f, b.width, b.height * 0.5f);
+                break;
+            case PreviewShape::square:
+                canvas.move_to(0.0f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.25f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.25f, b.height * 0.8f);
+                canvas.line_to(b.width * 0.5f, b.height * 0.8f);
+                canvas.line_to(b.width * 0.5f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.75f, b.height * 0.2f);
+                canvas.line_to(b.width * 0.75f, b.height * 0.8f);
+                canvas.line_to(b.width, b.height * 0.8f);
+                break;
+            case PreviewShape::triangle:
+                canvas.move_to(0.0f, b.height * 0.5f);
+                canvas.line_to(b.width * 0.125f, b.height * 0.15f);
+                canvas.line_to(b.width * 0.375f, b.height * 0.85f);
+                canvas.line_to(b.width * 0.625f, b.height * 0.15f);
+                canvas.line_to(b.width * 0.875f, b.height * 0.85f);
+                canvas.line_to(b.width, b.height * 0.5f);
+                break;
+            case PreviewShape::none:
+                break;
+        }
+        canvas.stroke_current_path();
         return;
     }
 

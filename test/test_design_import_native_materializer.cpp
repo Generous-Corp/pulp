@@ -435,6 +435,35 @@ TEST_CASE("standard meter snaps fill edge and suppresses duplicate peak line",
     REQUIRE(peak_line->f[3] == 14.0f);
 }
 
+TEST_CASE("baked native materializer preserves waveform preview shape",
+          "[view][waveform][import][native-materializer]") {
+    DesignIR ir;
+    ir.root = frame("waveform-root", 88.0f, 42.0f, LayoutDirection::column);
+
+    auto waveform_node = frame("osc-waveform", 88.0f, 42.0f, LayoutDirection::column);
+    waveform_node.audio_widget = AudioWidgetType::waveform;
+    waveform_node.attributes["pulpWaveformShape"] = "saw";
+    ir.root.children.push_back(std::move(waveform_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    auto* waveform = dynamic_cast<WaveformView*>(root->child_at(0));
+    REQUIRE(waveform != nullptr);
+    REQUIRE(waveform->preview_shape() == WaveformView::PreviewShape::saw);
+
+    waveform->set_bounds({0.0f, 0.0f, 88.0f, 42.0f});
+    pulp::canvas::RecordingCanvas canvas;
+    waveform->paint(canvas);
+
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::begin_path) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::move_to) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::line_to) == 7);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_current_path) == 1);
+}
+
 TEST_CASE("baked native materializer maps fill sizing by parent axis",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

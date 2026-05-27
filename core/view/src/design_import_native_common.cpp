@@ -852,8 +852,12 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (auto label = attr(node, "yLabel")) pad->set_y_label(*label);
             return pad;
         }
-        case NativeWidgetKind::waveform:
-            return std::make_unique<WaveformView>();
+        case NativeWidgetKind::waveform: {
+            auto waveform = std::make_unique<WaveformView>();
+            if (auto shape = attr(node, "pulpWaveformShape"))
+                waveform->set_preview_shape(*shape);
+            return waveform;
+        }
         case NativeWidgetKind::spectrum:
             return std::make_unique<SpectrumView>();
         case NativeWidgetKind::image_view: {

@@ -897,6 +897,7 @@ public:
     // rising_zero:  align to the first rising-edge zero crossing
     // falling_zero: align to the first falling-edge zero crossing
     enum class TriggerMode { free_run, rising_zero, falling_zero };
+    enum class PreviewShape { none, saw, sine, square, triangle };
 
     WaveformView() = default;
 
@@ -925,6 +926,11 @@ public:
 
     size_t sample_count() const { return samples_.size(); }
 
+    // Static oscillator-preview lane for imported synth-style designs.
+    // Live sample data and thumbnails still take precedence when present.
+    void set_preview_shape(std::string_view shape);
+    PreviewShape preview_shape() const { return preview_shape_; }
+
     void set_trigger_mode(TriggerMode mode) { trigger_mode_ = mode; }
     TriggerMode trigger_mode() const { return trigger_mode_; }
 
@@ -941,6 +947,7 @@ private:
 
     std::vector<float> samples_;
     TriggerMode trigger_mode_ = TriggerMode::free_run;
+    PreviewShape preview_shape_ = PreviewShape::none;
 
     const pulp::audio::AudioThumbnail* thumbnail_ = nullptr;
     uint32_t thumbnail_channel_ = static_cast<uint32_t>(-1);

@@ -596,6 +596,12 @@ DesignIR build_phase_a_typed_control_ir() {
     shape.attributes["yLabel"] = "Resonance";
     ir.root.children.push_back(std::move(shape));
 
+    auto waveform = frame_node("osc-waveform", "Osc Waveform", 88.0f, 42.0f, LayoutDirection::column);
+    waveform.audio_widget = AudioWidgetType::waveform;
+    waveform.audio_label = "Osc Waveform";
+    waveform.attributes["pulpWaveformShape"] = "saw";
+    ir.root.children.push_back(std::move(waveform));
+
     return ir;
 }
 
@@ -2163,6 +2169,7 @@ TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Fader>()") == 2);
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Meter>()") == 1);
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::XYPad>()") == 1);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::WaveformView>()") == 1);
     REQUIRE(result.source.find("std::make_unique<pulp::view::View>()") != std::string::npos);
 
     REQUIRE(result.source.find("->set_label(\"Drive\");") != std::string::npos);
@@ -2183,6 +2190,7 @@ TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
     REQUIRE(result.source.find("->set_y(0.8f);") != std::string::npos);
     REQUIRE(result.source.find("->set_x_label(\"Cutoff\");") != std::string::npos);
     REQUIRE(result.source.find("->set_y_label(\"Resonance\");") != std::string::npos);
+    REQUIRE(result.source.find("->set_preview_shape(\"saw\");") != std::string::npos);
 
     TempDir tmp("pulp-phase-a-typed-cpp-codegen");
     const auto header = tmp.path / "phase_a_typed_controls.hpp";
