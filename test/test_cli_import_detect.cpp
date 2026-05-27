@@ -620,6 +620,55 @@ TEST_CASE("snapshot_input scrapes script attributes without case or prefix traps
     fs::remove_all(dir);
 }
 
+TEST_CASE("snapshot_input ignores script-like tags and prefixed attributes",
+          "[cli][import-detect][coverage]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-script-boundaries";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    {
+        std::ofstream f(dir / "code.html");
+        f << R"HTML(
+<html>
+  <description src="not-a-script.js"></description>
+  <scriptish src="also-not-a-script.js"></scriptish>
+  <script data-src="not-src.js" type="ignored-prefixed"></script>
+  <script src=unquoted.js type=module></script>
+  <SCRIPT SRC='quoted.js' TYPE='application/json'></SCRIPT>
+  <script>
+    window.tailwind = { theme: { extend: { colors: {
+      "surface-container": "#111",
+      "brand-primary": "#222"
+    }}}};
+  </script>
+</html>
+)HTML";
+    }
+
+    auto snap = det::snapshot_input(dir);
+
+    REQUIRE(snap.is_directory);
+    REQUIRE(snap.html_text.find("<scriptish") != std::string::npos);
+    REQUIRE(snap.script_srcs.size() == 2);
+    REQUIRE(snap.script_srcs[0] == "unquoted.js");
+    REQUIRE(snap.script_srcs[1] == "quoted.js");
+    REQUIRE(std::find(snap.script_srcs.begin(), snap.script_srcs.end(),
+                      "not-a-script.js") == snap.script_srcs.end());
+    REQUIRE(std::find(snap.script_srcs.begin(), snap.script_srcs.end(),
+                      "also-not-a-script.js") == snap.script_srcs.end());
+    REQUIRE(std::find(snap.script_srcs.begin(), snap.script_srcs.end(),
+                      "not-src.js") == snap.script_srcs.end());
+    REQUIRE(snap.script_types.size() == 3);
+    REQUIRE(snap.script_types[0] == "ignored-prefixed");
+    REQUIRE(snap.script_types[1] == "module");
+    REQUIRE(snap.script_types[2] == "application/json");
+    REQUIRE(std::find(snap.tailwind_tokens.begin(), snap.tailwind_tokens.end(),
+                      "surface-container") != snap.tailwind_tokens.end());
+    REQUIRE(std::find(snap.tailwind_tokens.begin(), snap.tailwind_tokens.end(),
+                      "brand-primary") != snap.tailwind_tokens.end());
+
+    fs::remove_all(dir);
+}
+
 TEST_CASE("snapshot_input accepts script tag and attribute whitespace boundaries",
           "[cli][import-detect][coverage]") {
     auto dir = fs::temp_directory_path() / "pulp-import-detect-script-boundaries";
