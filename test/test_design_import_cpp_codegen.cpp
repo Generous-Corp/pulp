@@ -97,8 +97,19 @@ struct PhaseDParamEvent {
     float value = 0.0f;
 };
 
+struct PhaseDGestureEvent {
+    std::string param_key;
+    std::string phase;
+};
+
 class PhaseDKnobBindingContext final : public NativeImportBindingContext {
 public:
+    PhaseDKnobBindingContext() {
+        store_.set_gesture_callbacks(
+            [this](pulp::state::ParamID id) { record_gesture(id, "begin"); },
+            [this](pulp::state::ParamID id) { record_gesture(id, "end"); });
+    }
+
     void bind_knob(Knob& knob, const NativeImportBindingDescriptor& descriptor) override {
         const auto param_key = std::string(descriptor.param_key);
         const auto route_id = std::string(descriptor.route_id);
@@ -112,11 +123,18 @@ public:
         store_.set_normalized(id, knob.value());
 
         param_ids_[param_key] = id;
+        param_keys_by_id_[id] = param_key;
         route_ids_[param_key] = route_id;
         bound_params_.push_back(param_key);
+        knob.on_gesture_begin = [this, id] {
+            store_.begin_gesture(id);
+        };
         knob.on_change = [this, id, param_key](float normalized) {
             store_.set_normalized(id, normalized);
             events_.push_back({param_key, normalized});
+        };
+        knob.on_gesture_end = [this, id] {
+            store_.end_gesture(id);
         };
     }
 
@@ -137,13 +155,35 @@ public:
 
     const std::vector<std::string>& bound_params() const { return bound_params_; }
     const std::vector<PhaseDParamEvent>& events() const { return events_; }
+    const std::vector<PhaseDGestureEvent>& gestures() const { return gestures_; }
+
+    bool has_ordered_gesture(std::string_view param_key) const {
+        bool saw_begin = false;
+        for (const auto& event : gestures_) {
+            if (event.param_key != param_key)
+                continue;
+            if (event.phase == "begin")
+                saw_begin = true;
+            if (event.phase == "end")
+                return saw_begin;
+        }
+        return false;
+    }
 
 private:
+    void record_gesture(pulp::state::ParamID id, std::string phase) {
+        auto found = param_keys_by_id_.find(id);
+        REQUIRE(found != param_keys_by_id_.end());
+        gestures_.push_back({found->second, std::move(phase)});
+    }
+
     pulp::state::StateStore store_;
     std::unordered_map<std::string, pulp::state::ParamID> param_ids_;
+    std::unordered_map<pulp::state::ParamID, std::string> param_keys_by_id_;
     std::unordered_map<std::string, std::string> route_ids_;
     std::vector<std::string> bound_params_;
     std::vector<PhaseDParamEvent> events_;
+    std::vector<PhaseDGestureEvent> gestures_;
 };
 
 IRNode label_node(std::string id,
@@ -820,6 +860,7 @@ TEST_CASE("generated Chainer all-knob C++ can bind and drag every knob",
         REQUIRE(after > before);
         REQUIRE(ctx.normalized(item.param_key) == Catch::Approx(after));
         REQUIRE(ctx.change_count(item.param_key) > 0);
+        REQUIRE(ctx.has_ordered_gesture(item.param_key));
     }
 
     auto after_png = render_to_png(*root, 520, 96, 1.0f);
@@ -847,6 +888,15 @@ TEST_CASE("generated Chainer all-knob C++ can bind and drag every knob",
                << "  \"headless_drag_tests\": " << expected.size() << ",\n"
                << "  \"bound_knobs\": " << ctx.bound_params().size() << ",\n"
                << "  \"parameter_updates\": " << ctx.events().size() << ",\n"
+               << "  \"gesture_events\": " << ctx.gestures().size() << ",\n"
+               << "  \"gesture_begin_events\": "
+               << std::count_if(ctx.gestures().begin(), ctx.gestures().end(), [](const PhaseDGestureEvent& event) {
+                      return event.phase == "begin";
+                  }) << ",\n"
+               << "  \"gesture_end_events\": "
+               << std::count_if(ctx.gestures().begin(), ctx.gestures().end(), [](const PhaseDGestureEvent& event) {
+                      return event.phase == "end";
+                  }) << ",\n"
                << "  \"visual_smoke_valid\": " << (visual_smoke_valid ? "true" : "false") << ",\n"
                << "  \"visual_smoke_similarity\": " << std::setprecision(7) << visual_smoke.similarity << ",\n"
                << "  \"knobs\": [";

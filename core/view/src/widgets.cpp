@@ -167,6 +167,10 @@ void Knob::on_mouse_event(const MouseEvent& event) {
 void Knob::on_mouse_down(Point pos) {
     drag_start_y_ = pos.y;
     drag_start_value_ = value_;
+    if (!gesture_active_) {
+        gesture_active_ = true;
+        if (on_gesture_begin) on_gesture_begin();
+    }
     if (window_host())
         window_host()->set_mouse_relative_mode(true);
 }
@@ -174,6 +178,10 @@ void Knob::on_mouse_down(Point pos) {
 void Knob::on_mouse_up(Point) {
     if (window_host())
         window_host()->set_mouse_relative_mode(false);
+    if (gesture_active_) {
+        gesture_active_ = false;
+        if (on_gesture_end) on_gesture_end();
+    }
 }
 
 void Knob::on_mouse_drag(Point pos) {

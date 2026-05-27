@@ -322,6 +322,8 @@ public:
 
     /// Called when the value changes (from user interaction or programmatic).
     std::function<void(float)> on_change;
+    std::function<void()> on_gesture_begin;
+    std::function<void()> on_gesture_end;
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
@@ -359,6 +361,7 @@ private:
     ValueAnimation hover_glow_{0.0f};
     float drag_start_y_ = 0;
     float drag_start_value_ = 0;
+    bool gesture_active_ = false;
     std::string custom_sksl_;     // SkSL source for GPU shader body
     std::string widget_schema_;   // JSON declarative schema
     std::string lottie_json_;     // Lottie animation JSON

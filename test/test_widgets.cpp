@@ -64,6 +64,27 @@ TEST_CASE("Knob value clamping", "[view][widget]") {
     REQUIRE_THAT(knob.value(), WithinAbs(0.0, 0.001));
 }
 
+TEST_CASE("Knob drag emits ordered gesture callbacks", "[view][widget]") {
+    Knob knob;
+    knob.set_value(0.25f);
+
+    std::vector<std::string> events;
+    knob.on_gesture_begin = [&] { events.push_back("begin"); };
+    knob.on_change = [&](float) { events.push_back("change"); };
+    knob.on_gesture_end = [&] { events.push_back("end"); };
+
+    knob.on_mouse_down({24.0f, 80.0f});
+    knob.on_mouse_drag({24.0f, 20.0f});
+    knob.on_mouse_up({24.0f, 20.0f});
+    knob.on_mouse_up({24.0f, 20.0f});
+
+    REQUIRE(events.size() == 3);
+    REQUIRE(events[0] == "begin");
+    REQUIRE(events[1] == "change");
+    REQUIRE(events[2] == "end");
+    REQUIRE(knob.value() > 0.25f);
+}
+
 TEST_CASE("Knob renders arcs and indicator", "[view][widget]") {
     Knob knob;
     knob.set_bounds({0, 0, 48, 48});
