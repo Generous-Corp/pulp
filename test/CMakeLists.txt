@@ -2846,6 +2846,13 @@ pulp_add_test_suite(pulp-test-tooltip-window LIBRARIES pulp::view)
 # PreferencesPanel — sidebar-of-pages container (gap-doc P3)
 pulp_add_test_suite(pulp-test-preferences-panel LIBRARIES pulp::view)
 
+# PropertyPanel — typed property editor sister widget (gap-doc Phase 4
+# row "PreferencesPanel + PropertyPanel"). Header-only, links state
+# for PropertiesFile persistence.
+pulp_add_test_suite(pulp-test-property-panel
+    SOURCES test_property_panel.cpp
+    LIBRARIES pulp::view pulp::state)
+
 # UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
 pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
 
