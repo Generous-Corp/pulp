@@ -666,6 +666,7 @@ IRNode lower_chainer_knob_route_to_node(IRNode& materialized_root,
     wrapper.name = label + " wrapper";
     wrapper.audio_widget = AudioWidgetType::none;
     wrapper.audio_label.clear();
+    wrapper.layout.flex_shrink = 0.0f;
     wrapper.attributes.clear();
     wrapper.stable_anchor_id.reset();
     wrapper.anchor_strategy.reset();
@@ -678,6 +679,7 @@ IRNode lower_chainer_knob_route_to_node(IRNode& materialized_root,
     knob.style.width = size;
     knob.style.height = size;
     knob.style.border_color = color_for_style_tokens(style_tokens);
+    knob.layout.flex_shrink = 0.0f;
     knob.audio_widget = AudioWidgetType::knob;
     knob.audio_label = label;
     knob.audio_min = 0.0f;
@@ -828,6 +830,15 @@ struct PhaseDKnobSurfaceCase {
     float value = 0.0f;
 };
 
+struct PhaseDKnobLayoutCase {
+    std::string id;
+    std::string anchor;
+    std::string source_visual_anchor;
+    std::string source_visual_ir_path;
+    std::string param_key;
+    float expected_size = 0.0f;
+};
+
 std::vector<PhaseDKnobSurfaceCase> chainer_knob_surface_cases(choc::value::ValueView route_rows) {
     std::vector<PhaseDKnobSurfaceCase> cases;
     for (uint32_t i = 0; i < route_rows.size(); ++i) {
@@ -844,6 +855,41 @@ std::vector<PhaseDKnobSurfaceCase> chainer_knob_surface_cases(choc::value::Value
         item.source_path = json_string(route["stable_source_path"]);
         item.size = json_float(route["size"]);
         item.value = json_float(route["value"]);
+        cases.push_back(std::move(item));
+    }
+    REQUIRE(cases.size() == 8);
+    return cases;
+}
+
+std::vector<PhaseDKnobLayoutCase> chainer_knob_layout_cases(IRNode& materialized_root,
+                                                            choc::value::ValueView route_rows) {
+    std::vector<PhaseDKnobLayoutCase> cases;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Knob")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto* wrapper = node_at_ir_path(materialized_root, materialized_path);
+        REQUIRE(wrapper != nullptr);
+        REQUIRE_FALSE(wrapper->children.empty());
+        auto& source_visual = wrapper->children.front();
+        REQUIRE(source_visual.stable_anchor_id.has_value());
+
+        const auto binding = route["parameter_bindings"][0];
+        PhaseDKnobLayoutCase item;
+        item.id = json_string(route["id"]);
+        item.anchor = json_string(route["materialized_ir_anchor"]);
+        item.source_visual_anchor = *source_visual.stable_anchor_id;
+        item.source_visual_ir_path = materialized_path + "/0";
+        item.param_key = json_string(binding["param_key"]);
+        item.expected_size = json_float(route["size"]);
+
+        // This checks the source-declared SVG/control size. The layout
+        // report later measures whether the laid-out bounds preserve it.
+        REQUIRE(source_visual.style.width.has_value());
+        REQUIRE(source_visual.style.height.has_value());
+        REQUIRE(*source_visual.style.width == Catch::Approx(item.expected_size));
+        REQUIRE(*source_visual.style.height == Catch::Approx(item.expected_size));
         cases.push_back(std::move(item));
     }
     REQUIRE(cases.size() == 8);
@@ -1543,6 +1589,160 @@ TEST_CASE("generated Chainer knob schemas match source-shape paint oracle",
     }
 
     REQUIRE(within_threshold);
+}
+
+TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds against source materialization",
+          "[view][import][cpp-codegen][native-cpp-phase-d][layout]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto source_formula = read_chainer_knob_source_formula(
+        source_jsx_path_from_route_manifest(route_manifest));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    const auto cases = chainer_knob_layout_cases(materialized_ir.root, route_rows);
+
+    std::vector<ImportDiagnostic> source_diagnostics;
+    auto source_view = build_native_view_tree(
+        materialized_ir, materialized_ir.asset_manifest, {.diagnostics_out = &source_diagnostics});
+    REQUIRE(source_view != nullptr);
+
+    auto hybrid_ir = lower_chainer_knob_routes_to_phase_d_original_layout_ir(
+        std::move(materialized_ir), route_rows, source_formula);
+    std::vector<ImportDiagnostic> hybrid_diagnostics;
+    auto hybrid_view = build_native_view_tree(
+        hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &hybrid_diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr float kWidth = 1280.0f;
+    constexpr float kHeight = 800.0f;
+    source_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    hybrid_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    source_view->layout_children();
+    hybrid_view->layout_children();
+
+    struct LayoutComparison {
+        const PhaseDKnobLayoutCase* item = nullptr;
+        Rect source_bounds;
+        Rect native_bounds;
+        float center_delta_px = 0.0f;
+        float size_delta_px = 0.0f;
+        float source_expected_size_delta_px = 0.0f;
+        float native_expected_size_delta_px = 0.0f;
+    };
+
+    std::vector<LayoutComparison> comparisons;
+    comparisons.reserve(cases.size());
+    float max_center_delta = 0.0f;
+    float max_size_delta = 0.0f;
+    float max_source_expected_size_delta = 0.0f;
+    float max_native_expected_size_delta = 0.0f;
+    constexpr float kBoundsTolerancePx = 0.5f;
+
+    for (const auto& item : cases) {
+        auto* source_visual = find_anchor(*source_view, item.source_visual_anchor);
+        REQUIRE(source_visual != nullptr);
+        auto* native_knob = find_anchor(*hybrid_view, item.anchor);
+        REQUIRE(native_knob != nullptr);
+        REQUIRE(dynamic_cast<Knob*>(native_knob) != nullptr);
+
+        const auto source_bounds = absolute_bounds(*source_visual);
+        const auto native_bounds = absolute_bounds(*native_knob);
+
+        const auto source_cx = source_bounds.x + source_bounds.width * 0.5f;
+        const auto source_cy = source_bounds.y + source_bounds.height * 0.5f;
+        const auto native_cx = native_bounds.x + native_bounds.width * 0.5f;
+        const auto native_cy = native_bounds.y + native_bounds.height * 0.5f;
+        const auto center_delta = std::max(std::abs(source_cx - native_cx), std::abs(source_cy - native_cy));
+        const auto size_delta = std::max(std::abs(source_bounds.width - native_bounds.width),
+                                         std::abs(source_bounds.height - native_bounds.height));
+        const auto source_expected_size_delta = std::max(std::abs(source_bounds.width - item.expected_size),
+                                                         std::abs(source_bounds.height - item.expected_size));
+        const auto native_expected_size_delta = std::max(std::abs(native_bounds.width - item.expected_size),
+                                                         std::abs(native_bounds.height - item.expected_size));
+        max_center_delta = std::max(max_center_delta, center_delta);
+        max_size_delta = std::max(max_size_delta, size_delta);
+        max_source_expected_size_delta = std::max(max_source_expected_size_delta, source_expected_size_delta);
+        max_native_expected_size_delta = std::max(max_native_expected_size_delta, native_expected_size_delta);
+        comparisons.push_back({&item,
+                               source_bounds,
+                               native_bounds,
+                               center_delta,
+                               size_delta,
+                               source_expected_size_delta,
+                               native_expected_size_delta});
+    }
+
+    const bool within_threshold = max_center_delta <= kBoundsTolerancePx &&
+        max_size_delta <= kBoundsTolerancePx &&
+        max_source_expected_size_delta <= kBoundsTolerancePx &&
+        max_native_expected_size_delta <= kBoundsTolerancePx;
+    // Prefer reporting native mismatch first if both sides are bad. Current
+    // Chainer evidence is source-only collapse while native expected size holds.
+    const char* coordinate_uncertainty_source = within_threshold
+        ? "none"
+        : max_source_expected_size_delta > kBoundsTolerancePx &&
+              max_native_expected_size_delta <= kBoundsTolerancePx
+            ? "source_materialized_bounds_collapsed"
+            : max_native_expected_size_delta > kBoundsTolerancePx
+                ? "native_layout_mismatch"
+                : "source_native_bounds_delta";
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-d-layout-bounds-v1\",\n"
+               << "  \"fixture\": \"chainer-original-layout-hybrid\",\n"
+               << "  \"scope\": \"source-materialized-knob-visual-bounds-vs-native-replacement-bounds\",\n"
+               << "  \"source_bounds_basis\": \"materialized-ir-first-visual-child\",\n"
+               << "  \"native_bounds_basis\": \"original-layout-hybrid-native-knob\",\n"
+               << "  \"threshold_px\": " << kBoundsTolerancePx << ",\n"
+               << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"coordinate_uncertainty_source\": \"" << coordinate_uncertainty_source << "\",\n"
+               << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"knob_count\": " << comparisons.size() << ",\n"
+               << "  \"max_center_delta_px\": " << std::setprecision(7) << max_center_delta << ",\n"
+               << "  \"max_size_delta_px\": " << max_size_delta << ",\n"
+               << "  \"max_source_expected_size_delta_px\": " << max_source_expected_size_delta << ",\n"
+               << "  \"max_native_expected_size_delta_px\": " << max_native_expected_size_delta << ",\n"
+               << "  \"knobs\": [";
+        for (std::size_t i = 0; i < comparisons.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& row = comparisons[i];
+            report << "\n    {"
+                   << "\"id\": \"" << json_escape(row.item->id) << "\", "
+                   << "\"anchor\": \"" << json_escape(row.item->anchor) << "\", "
+                   << "\"source_visual_anchor\": \"" << json_escape(row.item->source_visual_anchor) << "\", "
+                   << "\"source_visual_ir_path\": \"" << json_escape(row.item->source_visual_ir_path) << "\", "
+                   << "\"param_key\": \"" << json_escape(row.item->param_key) << "\", "
+                   << "\"expected_size\": " << row.item->expected_size << ", "
+                   << "\"source_bounds\": {"
+                   << "\"x\": " << row.source_bounds.x << ", "
+                   << "\"y\": " << row.source_bounds.y << ", "
+                   << "\"width\": " << row.source_bounds.width << ", "
+                   << "\"height\": " << row.source_bounds.height << "}, "
+                   << "\"native_bounds\": {"
+                   << "\"x\": " << row.native_bounds.x << ", "
+                   << "\"y\": " << row.native_bounds.y << ", "
+                   << "\"width\": " << row.native_bounds.width << ", "
+                   << "\"height\": " << row.native_bounds.height << "}, "
+                   << "\"center_delta_px\": " << row.center_delta_px << ", "
+                   << "\"size_delta_px\": " << row.size_delta_px << ", "
+                   << "\"source_expected_size_delta_px\": " << row.source_expected_size_delta_px << ", "
+                   << "\"native_expected_size_delta_px\": " << row.native_expected_size_delta_px
+                   << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-d-layout-report.json", report.str());
+    }
 }
 
 TEST_CASE("Chainer original-layout hybrid classifies knob region visual diff",
