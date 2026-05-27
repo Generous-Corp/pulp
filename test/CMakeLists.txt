@@ -2481,6 +2481,20 @@ catch_discover_tests(pulp-test-hot-reload
         RESOURCE_LOCK hot-reload-file-watcher
         LABELS slow)
 
+# Non-GPU inspector helpers. The full inspector-domain suite is GPU-gated
+# because it exercises View/Render integration, but these domain helpers are
+# plain data/StateStore contracts and should stay covered in CPU-only builds.
+add_executable(pulp-test-inspector-domain-helpers
+    test_inspector_domain_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/audio_inspector.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/console_capture.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/state_inspector.cpp)
+target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
+    ${CMAKE_SOURCE_DIR}/inspect/include)
+target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
+    pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-domain-helpers)
+
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-inspector test_inspector.cpp)
