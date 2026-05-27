@@ -80,6 +80,16 @@ IRNode frame_node(std::string id,
     return node;
 }
 
+std::size_t count_occurrences(std::string_view text, std::string_view needle) {
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string_view::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
 DesignIR build_codegen_fixture_ir() {
     DesignIR ir;
     ir.source = DesignSource::stitch;
@@ -119,6 +129,68 @@ DesignIR build_codegen_fixture_ir() {
     asset.content_hash = "sha256:fixture";
     asset.mime = "image/svg+xml";
     ir.asset_manifest.assets.push_back(std::move(asset));
+    return ir;
+}
+
+DesignIR build_phase_a_typed_control_ir() {
+    DesignIR ir;
+    ir.source = DesignSource::stitch;
+    ir.capture_method = "phase-a-typed-ir-smoke";
+    ir.source_adapter = "native-cpp-import-execution-validation";
+    ir.source_version = "phase-a";
+    ir.root = frame_node("phase-a-root", "Typed Control Smoke", 360.0f, 140.0f, LayoutDirection::row);
+    ir.root.layout.gap = 12.0f;
+
+    auto drive = frame_node("drive", "Drive", 72.0f, 72.0f, LayoutDirection::column);
+    drive.audio_widget = AudioWidgetType::knob;
+    drive.audio_label = "Drive";
+    drive.audio_min = 0.0f;
+    drive.audio_max = 1.0f;
+    drive.audio_default = 0.4f;
+    drive.attributes["value"] = "0.7";
+    ir.root.children.push_back(std::move(drive));
+
+    auto mix = frame_node("mix", "Mix", 48.0f, 96.0f, LayoutDirection::column);
+    mix.audio_widget = AudioWidgetType::fader;
+    mix.audio_label = "Mix";
+    mix.audio_min = 0.0f;
+    mix.audio_max = 1.0f;
+    mix.audio_default = 0.5f;
+    mix.attributes["value"] = "0.25";
+    ir.root.children.push_back(std::move(mix));
+
+    auto level = frame_node("level", "Level", 96.0f, 24.0f, LayoutDirection::column);
+    level.audio_widget = AudioWidgetType::meter;
+    level.audio_label = "Level";
+    level.attributes["value"] = "0.62";
+    level.attributes["orientation"] = "horizontal";
+    ir.root.children.push_back(std::move(level));
+
+    auto shape = frame_node("shape", "Shape", 72.0f, 72.0f, LayoutDirection::column);
+    shape.audio_widget = AudioWidgetType::xy_pad;
+    shape.audio_label = "Shape";
+    shape.attributes["x"] = "0.3";
+    shape.attributes["y"] = "0.8";
+    shape.attributes["xLabel"] = "Cutoff";
+    shape.attributes["yLabel"] = "Resonance";
+    ir.root.children.push_back(std::move(shape));
+
+    return ir;
+}
+
+DesignIR build_untyped_named_control_ir() {
+    DesignIR ir;
+    ir.source = DesignSource::stitch;
+    ir.capture_method = "phase-a-negative-typed-ir-smoke";
+    ir.root = frame_node("root", "Untyped Smoke", 120.0f, 80.0f, LayoutDirection::column);
+
+    auto untyped = frame_node("gain-knob-looking-frame",
+                              "GainKnob",
+                              64.0f,
+                              64.0f,
+                              LayoutDirection::column);
+    untyped.attributes["value"] = "0.5";
+    ir.root.children.push_back(std::move(untyped));
     return ir;
 }
 
@@ -184,6 +256,59 @@ bool compile_generated_source(const fs::path& source_path,
 }
 
 }  // namespace
+
+TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
+          "[view][import][cpp-codegen][native-cpp-phase-a]") {
+    const auto ir = build_phase_a_typed_control_ir();
+    CppExportOptions opts;
+    opts.header_filename = "phase_a_typed_controls.hpp";
+    opts.namespace_name = "pulp::test::phase_a";
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Knob>()") == 1);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Fader>()") == 1);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Meter>()") == 1);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::XYPad>()") == 1);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::View>()") != std::string::npos);
+
+    REQUIRE(result.source.find("->set_label(\"Drive\");") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.7f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_default_value(0.4f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_label(\"Mix\");") != std::string::npos);
+    REQUIRE(result.source.find("->set_value(/* TODO: bind to param */ 0.25f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_level(/* TODO: bind to meter */ 0.62f, 0.62f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_orientation(pulp::view::Meter::Orientation::horizontal);") != std::string::npos);
+    REQUIRE(result.source.find("->set_x(0.3f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_y(0.8f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_x_label(\"Cutoff\");") != std::string::npos);
+    REQUIRE(result.source.find("->set_y_label(\"Resonance\");") != std::string::npos);
+
+    TempDir tmp("pulp-phase-a-typed-cpp-codegen");
+    const auto header = tmp.path / "phase_a_typed_controls.hpp";
+    const auto source = tmp.path / "phase_a_typed_controls.cpp";
+    const auto object = tmp.path / "phase_a_typed_controls.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("untyped named control-looking IR remains generic baked C++",
+          "[view][import][cpp-codegen][native-cpp-phase-a]") {
+    const auto ir = build_untyped_named_control_ir();
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+
+    REQUIRE(result.source.find("set_id(\"gain-knob-looking-frame\")") != std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::Knob>()") == std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::Fader>()") == std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::Meter>()") == std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::XYPad>()") == std::string::npos);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::View>()") >= 2);
+}
 
 TEST_CASE("baked C++ exporter emits ownable C++ source artifacts",
           "[view][import][cpp-codegen][phase-7]") {
