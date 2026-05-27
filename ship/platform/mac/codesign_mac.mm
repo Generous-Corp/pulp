@@ -156,6 +156,22 @@ std::optional<std::string> notarize_submit(const std::string& path,
     return detail::parse_notarytool_submit_id(output);
 }
 
+std::optional<std::string> notarize_submit_asc(const std::string& path,
+                                                const std::string& key_path,
+                                                const std::string& key_id,
+                                                const std::string& issuer_id) {
+    // App Store Connect API key flow — Apple's preferred path. Note
+    // notarytool reads the .p8 directly off disk; we never pass the
+    // key contents on the command line.
+    std::string cmd = "xcrun notarytool submit \"" + path + "\""
+        + " --key \"" + key_path + "\""
+        + " --key-id \"" + key_id + "\""
+        + " --issuer \"" + issuer_id + "\""
+        + " --wait 2>&1";
+    auto output = exec_cmd(cmd, 1200000);
+    return detail::parse_notarytool_submit_id(output);
+}
+
 NotarizationStatus notarize_check(const std::string& request_uuid) {
     auto output = exec_cmd("xcrun notarytool info " + request_uuid + " 2>&1");
     return detail::parse_notarytool_status(output);
@@ -275,6 +291,7 @@ SigningInfo check_codesign(const std::string&) { return {}; }
 bool check_notarization(const std::string&) { return false; }
 bool codesign(const std::string&, const std::string&, const std::string&) { return false; }
 std::optional<std::string> notarize_submit(const std::string&, const std::string&, const std::string&, const std::string&) { return std::nullopt; }
+std::optional<std::string> notarize_submit_asc(const std::string&, const std::string&, const std::string&, const std::string&) { return std::nullopt; }
 NotarizationStatus notarize_check(const std::string&) { return {}; }
 bool notarize_staple(const std::string&) { return false; }
 std::vector<std::string> list_signing_identities() { return {}; }

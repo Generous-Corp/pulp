@@ -84,10 +84,46 @@ When invoked via skill trigger (not slash command), apply the same pattern: alwa
 ```bash
 pulp build                                              # Must build first
 pulp ship sign                                          # Uses identity from config
-pulp ship notarize                                      # Uses apple_id/team_id from config
+pulp ship notarize                                      # Reads ASC key from notary.env (preferred)
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
 ```
+
+#### Notarization credentials (`pulp ship notarize`)
+
+Two lanes, resolved in this precedence (CLI > env > file > config.toml):
+
+1. **App Store Connect API key** — preferred. `xcrun notarytool submit
+   --key <p8> --key-id <id> --issuer <uuid>`. Maps to
+   `rcodesign --api-key-path` on Linux too.
+
+   ```bash
+   # One-shot CLI form
+   pulp ship notarize --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+                      --api-key-id XXX --api-issuer <uuid>
+
+   # Persisted form (recommended) — store once, reuse forever:
+   # ~/.config/pulp/secrets/notary.env  (chmod 600)
+   #   PULP_NOTARY_KEY_PATH="$HOME/.config/pulp/secrets/AuthKey_XXX.p8"
+   #   PULP_NOTARY_KEY_ID="XXX"
+   #   PULP_NOTARY_ISSUER_ID="<issuer-uuid>"
+   pulp ship notarize                  # picks creds up from notary.env
+   pulp ship notarize --dry-run        # prints resolved notarytool argv, no submit
+   ```
+
+2. **Legacy Apple-ID + app-specific password** — kept working as a fallback.
+
+   ```bash
+   pulp ship notarize --apple-id you@example.com --team-id ABCDE12345
+   # password defaults to @keychain:AC_PASSWORD — store via
+   #   security add-generic-password -s AC_PASSWORD -a you@example.com -w
+   ```
+
+Override the env-file path with `PULP_NOTARY_ENV=/some/path` or
+`pulp ship notarize --env-file /some/path` (handy in CI sandboxes that don't
+share `$HOME`). `--dry-run` is the safest way to verify credential
+resolution — it prints which surface each value came from
+(`(from cli)` / `(from env)` / `(from file)`) and never contacts Apple.
 
 ### Android: Build → Package (includes Gradle build + optional signing) → Verify
 
@@ -150,11 +186,17 @@ Install Android Studio or set `ANDROID_HOME`:
 export ANDROID_HOME=~/Library/Android/sdk  # macOS
 ```
 
-### "Notarization failed"
+### "Notarization failed" / "no notary credentials resolved"
 
-- Check that your app-specific password is valid (regenerate at https://appleid.apple.com)
-- Ensure the bundle is properly signed with a Developer ID certificate (not just a development cert)
-- Check the notarization log: `xcrun notarytool log <UUID>`
+- For the ASC-key flow: verify the `.p8` is readable, the Key ID matches
+  the filename suffix (`AuthKey_<id>.p8`), and the issuer UUID is from the
+  same App Store Connect tenant. Use `pulp ship notarize --dry-run` to
+  see which surface each value resolved from and confirm no fields are blank.
+- For the legacy flow: regenerate the app-specific password at
+  https://appleid.apple.com → Sign-In and Security.
+- Ensure the bundle is properly signed with a Developer ID certificate
+  (not just a development cert).
+- Check the notarization log: `xcrun notarytool log <UUID>`.
 
 ### "Gradle build failed"
 

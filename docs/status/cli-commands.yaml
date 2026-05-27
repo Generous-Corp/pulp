@@ -85,13 +85,23 @@ commands:
       - name: notarize
         summary: Submit signed bundles for Apple notarization (macOS)
         args:
+          - name: --api-key
+            required: false
+          - name: --api-key-id
+            required: false
+          - name: --api-issuer
+            required: false
+          - name: --env-file
+            required: false
           - name: --apple-id
-            required: true
+            required: false
           - name: --team-id
-            required: true
+            required: false
           - name: --password
             required: false
           - name: --staple
+            required: false
+          - name: --dry-run
             required: false
       - name: package
         summary: Create installers (.pkg, NSIS, APK/AAB)

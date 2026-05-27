@@ -55,6 +55,7 @@ add_executable(pulp-cli
     cmd_run.cpp
     cmd_run_parse.cpp
     cmd_ship.cpp
+    notary_env.cpp
     cmd_upgrade.cpp
     cmd_validate.cpp
     cmd_sdk.cpp

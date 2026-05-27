@@ -2,6 +2,7 @@
 // Handles: sign, notarize, package, appcast, check
 
 #include "cli_common.hpp"
+#include "notary_env.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <ctime>
@@ -482,13 +483,41 @@ int cmd_ship(const std::vector<std::string>& args) {
     }
 
     // ── notarize ────────────────────────────────────────────────────────────
+    //
+    // Two credential flows are supported and resolved in this order:
+    //
+    //   1. App Store Connect API key (preferred): a `.p8` private key
+    //      file plus Key ID + Issuer UUID. `xcrun notarytool` reads
+    //      these via `--key/--key-id/--issuer`; rcodesign on Linux
+    //      accepts the same trio via `--api-key-path`. Apple recommends
+    //      this flow because the key can be rotated and scoped.
+    //
+    //   2. Legacy Apple-ID + Team-ID + app-specific password (typically
+    //      `@keychain:AC_PASSWORD`). Kept working as a fallback so we
+    //      don't break existing users mid-flight.
+    //
+    // Resolution precedence per credential surface (highest wins):
+    //   - CLI flags (`--api-key`, `--api-key-id`, `--api-issuer`,
+    //     `--apple-id`, `--team-id`, `--password`)
+    //   - Environment variables (PULP_NOTARY_KEY_PATH / _ID / _ISSUER_ID,
+    //     PULP_APPLE_ID, PULP_TEAM_ID)
+    //   - `~/.config/pulp/secrets/notary.env` (overridable via
+    //     PULP_NOTARY_ENV for tests)
+    //   - `~/.pulp/config.toml` (`[signing.apple]`, legacy fields only)
+    //
+    // `--dry-run` short-circuits before invoking notarytool and prints
+    // the resolved command line so the user (or our shell-out test) can
+    // verify the flags without touching Apple's servers.
     if (sub == "notarize") {
 #ifndef __APPLE__
         std::cerr << "Notarization is only available on macOS.\n";
         return 1;
 #else
         std::string apple_id, team_id, password;
+        std::string api_key, api_key_id, api_issuer;
+        std::string env_file_override;
         bool staple_only = false;
+        bool dry_run = false;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--apple-id") {
                 if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
@@ -496,8 +525,17 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], team_id)) return 2;
             } else if (args[i] == "--password") {
                 if (!take_ship_value(args, i, sub, args[i], password)) return 2;
+            } else if (args[i] == "--api-key") {
+                if (!take_ship_value(args, i, sub, args[i], api_key)) return 2;
+            } else if (args[i] == "--api-key-id") {
+                if (!take_ship_value(args, i, sub, args[i], api_key_id)) return 2;
+            } else if (args[i] == "--api-issuer") {
+                if (!take_ship_value(args, i, sub, args[i], api_issuer)) return 2;
+            } else if (args[i] == "--env-file") {
+                if (!take_ship_value(args, i, sub, args[i], env_file_override)) return 2;
             }
             else if (args[i] == "--staple") staple_only = true;
+            else if (args[i] == "--dry-run") dry_run = true;
             else return unknown_ship_arg(sub, args[i]);
         }
 
@@ -512,7 +550,7 @@ int cmd_ship(const std::vector<std::string>& args) {
             }
         }
 
-        if (bundles.empty()) {
+        if (bundles.empty() && !dry_run) {
             std::cerr << "No plugin bundles found.\n";
             return 1;
         }
@@ -528,34 +566,109 @@ int cmd_ship(const std::vector<std::string>& args) {
             return stapled == static_cast<int>(bundles.size()) ? 0 : 1;
         }
 
-        // Fall back to config
-        apple_id = ship_config(apple_id, "PULP_APPLE_ID", "signing.apple", "apple_id");
-        team_id = ship_config(team_id, "PULP_TEAM_ID", "signing.apple", "team_id");
-        password = ship_config(password, "", "signing.apple", "password");
+        // ── ASC API key resolution (preferred) ──────────────────────
+        // Look at the env file first so we can layer env+CLI over it.
+        auto env_path = env_file_override.empty()
+            ? pulp::cli::notary::default_env_path()
+            : std::filesystem::path(env_file_override);
+        std::string home_str;
+        if (auto h = pulp::runtime::get_env("HOME")) home_str = *h;
+        pulp::cli::notary::NotaryEnvFile env_file;
+        bool env_file_loaded = false;
+        if (!env_path.empty() && fs::exists(env_path)) {
+            env_file = pulp::cli::notary::parse_env_file(env_path, home_str);
+            env_file_loaded = true;
+        }
 
-        if (apple_id.empty() || team_id.empty()) {
-            std::cerr << "Error: Apple ID and Team ID required for notarization.\n\n";
-            std::cerr << "  pulp ship notarize --apple-id you@example.com --team-id ABCDE12345\n\n";
-            std::cerr << "  Where to find these:\n";
-            std::cerr << "    Apple ID:  Your Apple Developer account email\n";
-            std::cerr << "    Team ID:   https://developer.apple.com/account → Membership → Team ID\n";
-            std::cerr << "    Password:  https://appleid.apple.com → Sign-In and Security → App-Specific Passwords\n";
-            std::cerr << "               Then store in Keychain:\n";
-            std::cerr << "               security add-generic-password -s AC_PASSWORD -a you@example.com -w\n\n";
-            std::cerr << "  To save for next time, add to ~/.pulp/config.toml:\n";
-            std::cerr << "    [signing.apple]\n";
-            std::cerr << "    apple_id = \"you@example.com\"\n";
-            std::cerr << "    team_id  = \"ABCDE12345\"\n";
-            std::cerr << "    password = \"@keychain:AC_PASSWORD\"\n";
+        auto getenv_fn = [](const std::string& name)
+            -> std::optional<std::string> {
+            return pulp::runtime::get_env(name);
+        };
+        auto asc = pulp::cli::notary::resolve_creds(
+            api_key, api_key_id, api_issuer, env_file, getenv_fn);
+
+        // Layer legacy creds over the same surface so the failure
+        // message can tell the user which lane they fell back to.
+        if (apple_id.empty()) {
+            if (auto e = pulp::runtime::get_env("PULP_APPLE_ID"); e && !e->empty()) apple_id = *e;
+        }
+        if (team_id.empty()) {
+            if (auto e = pulp::runtime::get_env("PULP_TEAM_ID"); e && !e->empty()) team_id = *e;
+            else if (!env_file.team_id.empty()) team_id = env_file.team_id;
+        }
+        if (apple_id.empty())
+            apple_id = read_user_config_value("signing.apple", "apple_id");
+        if (team_id.empty())
+            team_id = read_user_config_value("signing.apple", "team_id");
+        if (password.empty())
+            password = read_user_config_value("signing.apple", "password");
+
+        const bool use_asc = asc.complete();
+        const bool use_legacy = !use_asc && !apple_id.empty() && !team_id.empty();
+
+        if (env_file_loaded) {
+            std::cout << "Loaded notary credentials from "
+                      << pulp::cli::notary::redact_path(env_path.string()) << "\n";
+        }
+        if (use_asc) {
+            std::cout << "Notary flow: App Store Connect API key (notarytool --key ...).\n"
+                      << "  key      : " << pulp::cli::notary::redact_path(asc.key_path)
+                      << " (from " << asc.key_path_source << ")\n"
+                      << "  key-id   : " << asc.key_id
+                      << " (from " << asc.key_id_source << ")\n"
+                      << "  issuer   : " << asc.issuer_id
+                      << " (from " << asc.issuer_id_source << ")\n";
+        } else if (use_legacy) {
+            if (password.empty()) password = "@keychain:AC_PASSWORD";
+            std::cout << "Notary flow: legacy Apple ID + Team ID (notarytool --apple-id ...).\n"
+                      << "  apple-id : " << apple_id << "\n"
+                      << "  team-id  : " << team_id << "\n";
+        } else {
+            std::cerr << "Error: no notary credentials resolved.\n\n";
+            std::cerr << "  Preferred (App Store Connect API key):\n";
+            std::cerr << "    pulp ship notarize --api-key /path/AuthKey_X.p8 \\\n";
+            std::cerr << "                       --api-key-id X --api-issuer <uuid>\n";
+            std::cerr << "    Or store in ~/.config/pulp/secrets/notary.env:\n";
+            std::cerr << "      PULP_NOTARY_KEY_PATH=\"$HOME/.config/pulp/secrets/AuthKey_X.p8\"\n";
+            std::cerr << "      PULP_NOTARY_KEY_ID=\"X\"\n";
+            std::cerr << "      PULP_NOTARY_ISSUER_ID=\"<uuid>\"\n\n";
+            std::cerr << "  Legacy (Apple ID + app-specific password):\n";
+            std::cerr << "    pulp ship notarize --apple-id you@example.com --team-id ABCDE12345\n";
+            std::cerr << "    Stash password in Keychain:\n";
+            std::cerr << "      security add-generic-password -s AC_PASSWORD -a you@example.com -w\n";
             return 1;
         }
-        if (password.empty()) password = "@keychain:AC_PASSWORD";
+
+        if (dry_run) {
+            // Build the same notarytool argv the real path would
+            // shell out, so callers (and our shell-out test) can
+            // verify the resolution without involving Apple. We use
+            // a placeholder bundle when no bundles are present.
+            std::string sample_bundle = bundles.empty()
+                ? std::string("<bundle>") : bundles.front();
+            std::string cmd = "xcrun notarytool submit \"" + sample_bundle + "\"";
+            if (use_asc) {
+                cmd += " --key \"" + asc.key_path + "\""
+                    +  " --key-id \"" + asc.key_id + "\""
+                    +  " --issuer \"" + asc.issuer_id + "\"";
+            } else {
+                cmd += " --apple-id \"" + apple_id + "\""
+                    +  " --team-id \"" + team_id + "\""
+                    +  " --password \"" + password + "\"";
+            }
+            cmd += " --wait";
+            std::cout << "(--dry-run) would invoke:\n  " << cmd << "\n";
+            return 0;
+        }
 
         int success_count = 0;
         for (auto& path : bundles) {
             auto name = fs::path(path).filename().string();
             std::cout << "Submitting " << name << " for notarization...\n";
-            auto uuid = pulp::ship::notarize_submit(path, apple_id, team_id, password);
+            auto uuid = use_asc
+                ? pulp::ship::notarize_submit_asc(path, asc.key_path,
+                                                  asc.key_id, asc.issuer_id)
+                : pulp::ship::notarize_submit(path, apple_id, team_id, password);
             if (!uuid) { std::cerr << "  Submission FAILED\n"; continue; }
             std::cout << "  Request UUID: " << *uuid << "\n";
             auto status = pulp::ship::notarize_check(*uuid);
@@ -600,6 +713,7 @@ int cmd_ship(const std::vector<std::string>& args) {
 #else
         std::string target = "macos";
         std::string identity, apple_id, team_id, password, version;
+        std::string api_key, api_key_id, api_issuer;
         bool want_pkg = false, want_dmg = false;
         bool skip_sign = false, skip_package = false, skip_notarize = false;
 
@@ -614,6 +728,12 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], team_id)) return 2;
             } else if (args[i] == "--password") {
                 if (!take_ship_value(args, i, sub, args[i], password)) return 2;
+            } else if (args[i] == "--api-key") {
+                if (!take_ship_value(args, i, sub, args[i], api_key)) return 2;
+            } else if (args[i] == "--api-key-id") {
+                if (!take_ship_value(args, i, sub, args[i], api_key_id)) return 2;
+            } else if (args[i] == "--api-issuer") {
+                if (!take_ship_value(args, i, sub, args[i], api_issuer)) return 2;
             } else if (args[i] == "--version") {
                 if (!take_ship_value(args, i, sub, args[i], version)) return 2;
             } else if (args[i] == "--pkg") {
@@ -698,6 +818,9 @@ int cmd_ship(const std::vector<std::string>& args) {
         // fallback chain and the helpful "where to find these" hint.
         std::cout << "── Stage 3/4: notarize ────────────────────────────\n";
         std::vector<std::string> nz_args = {"notarize"};
+        if (!api_key.empty())     { nz_args.push_back("--api-key");     nz_args.push_back(api_key); }
+        if (!api_key_id.empty())  { nz_args.push_back("--api-key-id");  nz_args.push_back(api_key_id); }
+        if (!api_issuer.empty())  { nz_args.push_back("--api-issuer");  nz_args.push_back(api_issuer); }
         if (!apple_id.empty()) { nz_args.push_back("--apple-id"); nz_args.push_back(apple_id); }
         if (!team_id.empty())  { nz_args.push_back("--team-id");  nz_args.push_back(team_id); }
         if (!password.empty()) { nz_args.push_back("--password"); nz_args.push_back(password); }
@@ -1016,8 +1139,11 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "             --identity \"Developer ID Application: ...\"  (macOS/Windows)\n";
     std::cout << "             --target android --keystore key.jks  (Android)\n";
     std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
-    std::cout << "             --apple-id you@example.com --team-id ABCDE12345\n";
-    std::cout << "             --staple  (staple only, skip submission)\n";
+    std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
+    std::cout << "             --apple-id you@example.com --team-id ABCDE12345        (legacy)\n";
+    std::cout << "             --env-file <path>  (override ~/.config/pulp/secrets/notary.env)\n";
+    std::cout << "             --staple   (staple only, skip submission)\n";
+    std::cout << "             --dry-run  (print resolved notarytool argv, no submission)\n";
     std::cout << "  package    Create installers for the target platform\n";
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";

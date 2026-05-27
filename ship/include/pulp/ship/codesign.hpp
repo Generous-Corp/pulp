@@ -26,11 +26,27 @@ bool check_notarization(const std::string& path);
 bool codesign(const std::string& path, const std::string& identity,
               const std::string& entitlements = "");
 
-// Submit for notarization (async — returns request UUID)
+// Submit for notarization (async — returns request UUID).
+//
+// Legacy `--apple-id` / `--team-id` / app-specific-password flow.
+// `password` is normally `@keychain:AC_PASSWORD` so Apple's notarytool
+// reads the secret from the macOS Keychain.
 std::optional<std::string> notarize_submit(const std::string& path,
                                            const std::string& apple_id,
                                            const std::string& team_id,
                                            const std::string& password);
+
+// Submit using App Store Connect API key (the modern, preferred flow).
+// `key_path` is the on-disk path to the `.p8` private key, `key_id` is
+// the Apple Key ID, and `issuer_id` is the Apple Issuer UUID. Same
+// return contract as `notarize_submit` above — std::nullopt on failure,
+// otherwise the submission UUID. rcodesign on Linux accepts the same
+// trio via `--api-key-path`; this overload covers the macOS path
+// through `xcrun notarytool submit --key/--key-id/--issuer`.
+std::optional<std::string> notarize_submit_asc(const std::string& path,
+                                                const std::string& key_path,
+                                                const std::string& key_id,
+                                                const std::string& issuer_id);
 
 // Check notarization status
 struct NotarizationStatus {

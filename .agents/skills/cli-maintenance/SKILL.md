@@ -231,6 +231,46 @@ cli-maintenance untouched still trips skill-sync. Keep this section
 present so the gate stays satisfiable by the topical edit alone.
 pulp #709 / `--from claude` is the worked example.
 
+### Adding a credential flag backed by an env-file (`pulp ship notarize` pattern)
+
+When a CLI command needs to consume a credential the user wants to
+persist outside `~/.pulp/config.toml` (e.g. App Store Connect API key,
+ASIO licence file, S3 access keys), follow the lane established for
+`pulp ship notarize --api-key/--api-key-id/--api-issuer`:
+
+1. **Parser** in `tools/cli/notary_env.{hpp,cpp}` (or a sibling file).
+   Hand-roll a tiny bash-style `KEY=VALUE` parser. Support `# comments`,
+   blank lines, `"double quoted"` (with `$HOME` expansion) and
+   `'single quoted'` (literal) values, `export KEY=val` prefix, and
+   trailing ` # inline comment` on bare values. Keep it stdlib-only so
+   the unit test can link it directly without dragging `pulp::runtime`
+   into the test binary.
+2. **Resolver** with a pluggable `getenv` lambda. Layer **CLI flag >
+   env var > parsed file > config.toml**, and record the source of
+   each value (`"cli"` / `"env"` / `"file"`) so the CLI can print
+   diagnostics like `key-id: ABC (from file)`. Cred path values must
+   be redacted to the trailing filename (`…/AuthKey_X.p8`) — never log
+   the secret material itself.
+3. **Default path**: `$HOME/.config/pulp/secrets/<name>.env`,
+   overridable via `PULP_<NAME>_ENV` env var and a `--env-file <path>`
+   flag (the env var is the test hook; the flag is for CI sandboxes).
+4. **`--dry-run`** that short-circuits before the real side effect and
+   prints the assembled subprocess argv. Lets the shell-out test
+   verify resolution without touching the external service.
+5. **Test layers**: a pure-stdlib unit test for the parser + resolver
+   (compiled directly against the source, no `pulp::runtime` link),
+   plus shell-out cases in `test/test_cli_*_shellout.cpp` covering
+   `--dry-run` with CLI flags, with an env file, with CLI overriding
+   env file, and the no-creds error path.
+6. **Skill + doc updates**: extend the topical SKILL.md (here,
+   `ship/SKILL.md`) with the resolution precedence table, and add the
+   new flags to `docs/reference/cli.md` + `docs/status/cli-commands.yaml`.
+
+Reference implementation: PR landing `feature/asc-notary-key-flow`
+(2026-05-26). Files: `tools/cli/notary_env.{hpp,cpp}`,
+`tools/cli/cmd_ship.cpp` (`notarize` block), `test/test_notary_env.cpp`,
+`test/test_cli_ship_shellout.cpp` ASC-key cases.
+
 ## Removing a CLI Command
 
 - [ ] Remove from `cmd_*.cpp` and command table in `pulp_cli.cpp`

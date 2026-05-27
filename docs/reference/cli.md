@@ -668,6 +668,8 @@ pulp ship sign --identity "Developer ID Application: ..."
 pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship package --version 1.0.0
 pulp ship check
+pulp ship notarize --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
+pulp ship notarize --dry-run                     # print resolved argv, no submit
 ```
 
 **Subcommands**:
@@ -675,12 +677,48 @@ pulp ship check
 | Subcommand | What it does |
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU) |
+| `notarize` | Submit signed bundles to Apple notarytool (macOS) |
 | `package`  | Create `.pkg` installers in `artifacts/` |
 | `check`    | Check signing status of all built plugins |
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
 
 `package` creates per-format `.pkg` files using `pkgbuild`. macOS only.
+
+#### `pulp ship notarize`
+
+Two credential lanes are supported. The App Store Connect API key flow is
+preferred (Apple's modern, scope-controlled path); the legacy Apple-ID +
+app-specific-password flow remains as a fallback for existing users.
+
+**Preferred — App Store Connect API key** (`xcrun notarytool submit
+--key/--key-id/--issuer`):
+
+| Flag             | Env var                  | notary.env key             |
+|------------------|--------------------------|----------------------------|
+| `--api-key`      | `PULP_NOTARY_KEY_PATH`   | `PULP_NOTARY_KEY_PATH`     |
+| `--api-key-id`   | `PULP_NOTARY_KEY_ID`     | `PULP_NOTARY_KEY_ID`       |
+| `--api-issuer`   | `PULP_NOTARY_ISSUER_ID`  | `PULP_NOTARY_ISSUER_ID`    |
+
+**Legacy** (`xcrun notarytool submit --apple-id/--team-id/--password`):
+
+| Flag            | Env var          | config.toml             |
+|-----------------|------------------|-------------------------|
+| `--apple-id`    | `PULP_APPLE_ID`  | `signing.apple.apple_id`|
+| `--team-id`     | `PULP_TEAM_ID`   | `signing.apple.team_id` |
+| `--password`    | —                | `signing.apple.password` (default `@keychain:AC_PASSWORD`) |
+
+**Resolution precedence** (highest wins): CLI flag → environment variable →
+`~/.config/pulp/secrets/notary.env` (override path via `PULP_NOTARY_ENV` or
+`--env-file <path>`) → `~/.pulp/config.toml` (legacy fields only).
+
+The ASC lane wins when all three pieces resolve. Otherwise the legacy lane
+applies when `--apple-id` + `--team-id` resolve. If neither lane is complete,
+the command prints both setup recipes and exits non-zero.
+
+Other flags: `--staple` (skip submission, staple already-notarized bundles),
+`--dry-run` (print the resolved `xcrun notarytool` argv and exit 0; never
+contacts Apple — useful in CI and for verifying credential resolution).
 
 ### pr
 

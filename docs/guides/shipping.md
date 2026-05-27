@@ -15,7 +15,9 @@ Never install a plugin to system folders without passing validation first.
 ## Prerequisites
 
 - Apple Developer ID certificate (Developer ID Application)
-- Apple ID with app-specific password for notarization
+- Either an App Store Connect API key (`.p8`, preferred) or an Apple ID with
+  app-specific password for notarization. Store ASC creds in
+  `~/.config/pulp/secrets/notary.env` — see Step 4.
 - Xcode command-line tools installed
 
 ## Step 1: Build
@@ -75,23 +77,55 @@ Runs `codesign --verify --deep --strict` on each bundle.
 
 ## Step 4: Notarize
 
-Notarization is handled via the `pulp::ship` API:
+The preferred CLI path uses an App Store Connect API key (`.p8`):
+
+```bash
+pulp ship notarize --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+                   --api-key-id XXX \
+                   --api-issuer 5e8f0b95-3e2f-48e7-b7c2-52e7c220502a
+```
+
+Stash the credentials once in `~/.config/pulp/secrets/notary.env` and the
+CLI resolves them automatically:
+
+```bash
+# ~/.config/pulp/secrets/notary.env  (chmod 600)
+PULP_NOTARY_KEY_PATH="$HOME/.config/pulp/secrets/AuthKey_XXX.p8"
+PULP_NOTARY_KEY_ID="XXX"
+PULP_NOTARY_ISSUER_ID="5e8f0b95-3e2f-48e7-b7c2-52e7c220502a"
+```
+
+Then:
+
+```bash
+pulp ship notarize             # picks creds up from notary.env automatically
+pulp ship notarize --dry-run   # print the resolved notarytool argv, no submit
+```
+
+The legacy Apple-ID + app-specific-password lane still works:
+
+```bash
+pulp ship notarize --apple-id you@example.com --team-id ABCDE12345
+# password defaults to @keychain:AC_PASSWORD — store via
+#   security add-generic-password -s AC_PASSWORD -a you@example.com -w
+```
+
+Programmatic API:
 
 ```cpp
 #include <pulp/ship/codesign.hpp>
 
-// Submit for notarization
-auto uuid = pulp::ship::notarize_submit(
+// App Store Connect API key (preferred)
+auto uuid = pulp::ship::notarize_submit_asc(
     "build/CLAP/MyPlugin.clap",
-    "your@apple.id",
-    "TEAMID",
-    "xxxx-xxxx-xxxx-xxxx"  // app-specific password
-);
+    "/path/to/AuthKey_XXX.p8", "XXX", "5e8f0b95-...");
 
-// Check status (poll until complete)
+// Legacy Apple-ID flow
+// auto uuid = pulp::ship::notarize_submit(
+//     "build/CLAP/MyPlugin.clap", "you@apple.id", "TEAMID",
+//     "@keychain:AC_PASSWORD");
+
 auto status = pulp::ship::notarize_check(*uuid);
-
-// Staple the ticket
 pulp::ship::notarize_staple("build/CLAP/MyPlugin.clap");
 ```
 

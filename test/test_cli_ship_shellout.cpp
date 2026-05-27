@@ -185,6 +185,10 @@ struct ShipShelloutFixture {
     ScopedEnvVar pulp_sign_identity;
     ScopedEnvVar pulp_apple_id;
     ScopedEnvVar pulp_team_id;
+    ScopedEnvVar pulp_notary_env;
+    ScopedEnvVar pulp_notary_key_path;
+    ScopedEnvVar pulp_notary_key_id;
+    ScopedEnvVar pulp_notary_issuer_id;
 
     ShipShelloutFixture()
         : home_dir(make_isolated_pulp_home()),
@@ -193,7 +197,11 @@ struct ShipShelloutFixture {
           android_key_pass("ANDROID_KEY_PASS"),
           pulp_sign_identity("PULP_SIGN_IDENTITY"),
           pulp_apple_id("PULP_APPLE_ID"),
-          pulp_team_id("PULP_TEAM_ID") {}
+          pulp_team_id("PULP_TEAM_ID"),
+          pulp_notary_env("PULP_NOTARY_ENV"),
+          pulp_notary_key_path("PULP_NOTARY_KEY_PATH"),
+          pulp_notary_key_id("PULP_NOTARY_KEY_ID"),
+          pulp_notary_issuer_id("PULP_NOTARY_ISSUER_ID") {}
 
     ~ShipShelloutFixture() {
         std::error_code ec;
@@ -940,6 +948,152 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+// ── ASC API key notary flow (2026-05-26) ────────────────────────────
+//
+// `pulp ship notarize --dry-run` prints the resolved `xcrun notarytool`
+// argv without contacting Apple. These tests pin the resolution
+// precedence (CLI > env > file) and verify that the modern
+// `--key/--key-id/--issuer` flags appear in the dry-run output when
+// ASC credentials are present, falling back to the legacy
+// `--apple-id/--team-id/--password` flags when only those are set.
+//
+// Build-cache fixture is enough — `--dry-run` short-circuits before
+// looking for bundles, but the fake CMakeCache.txt is still required
+// by the early `find_project_root()` guard.
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize --dry-run with --api-key flags emits notarytool ASC argv",
+                 "[cli][shellout][ship][notarize][asc-key]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-asc-cli", true);
+
+    auto r = run_pulp_in(root,
+        {"ship", "notarize", "--dry-run",
+         "--api-key", "/path/to/AuthKey_FAKE.p8",
+         "--api-key-id", "FAKEKEYID",
+         "--api-issuer", "fake-issuer-uuid"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "App Store Connect API key"));
+    REQUIRE(contains(combined, "xcrun notarytool submit"));
+    REQUIRE(contains(combined, "--key \"/path/to/AuthKey_FAKE.p8\""));
+    REQUIRE(contains(combined, "--key-id \"FAKEKEYID\""));
+    REQUIRE(contains(combined, "--issuer \"fake-issuer-uuid\""));
+    // Must NOT fall through to the legacy flags
+    REQUIRE_FALSE(contains(combined, "--apple-id"));
+    // Source diagnostics print the resolution origin
+    REQUIRE(contains(combined, "(from cli)"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize --dry-run reads notary.env via --env-file",
+                 "[cli][shellout][ship][notarize][asc-key]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-asc-envfile", true);
+
+    auto env_path = root / "notary.env";
+    {
+        std::ofstream out(env_path);
+        out << "PULP_NOTARY_KEY_ID=\"FILE_KEY_ID\"\n"
+            << "PULP_NOTARY_ISSUER_ID=\"file-issuer-uuid\"\n"
+            << "PULP_NOTARY_KEY_PATH=\"" << (root / "fake.p8").string() << "\"\n";
+    }
+
+    auto r = run_pulp_in(root,
+        {"ship", "notarize", "--dry-run",
+         "--env-file", env_path.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "Loaded notary credentials from"));
+    REQUIRE(contains(combined, "App Store Connect API key"));
+    REQUIRE(contains(combined, "--key-id \"FILE_KEY_ID\""));
+    REQUIRE(contains(combined, "--issuer \"file-issuer-uuid\""));
+    REQUIRE(contains(combined, "(from file)"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize --dry-run CLI flag beats env-file value",
+                 "[cli][shellout][ship][notarize][asc-key][precedence]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-asc-precedence", true);
+
+    auto env_path = root / "notary.env";
+    {
+        std::ofstream out(env_path);
+        out << "PULP_NOTARY_KEY_ID=\"FILE_KEY_ID\"\n"
+            << "PULP_NOTARY_ISSUER_ID=\"file-issuer\"\n"
+            << "PULP_NOTARY_KEY_PATH=\"" << (root / "fake.p8").string() << "\"\n";
+    }
+
+    auto r = run_pulp_in(root,
+        {"ship", "notarize", "--dry-run",
+         "--env-file", env_path.string(),
+         "--api-key-id", "CLI_KEY_ID"});  // overrides file value
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "--key-id \"CLI_KEY_ID\""));
+    REQUIRE_FALSE(contains(combined, "--key-id \"FILE_KEY_ID\""));
+    // Issuer + key path still come from the file
+    REQUIRE(contains(combined, "--issuer \"file-issuer\""));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize with no creds reports both lanes in error",
+                 "[cli][shellout][ship][notarize][asc-key]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-no-creds", true);
+
+    // Point env override at a non-existent file so the resolver finds
+    // no notary.env and the user has no env vars set (fixture clears
+    // them).
+    ScopedEnvVar override("PULP_NOTARY_ENV", (root / "no-such.env").string());
+
+    auto r = run_pulp_in(root, {"ship", "notarize", "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "no notary credentials resolved"));
+    REQUIRE(contains(combined, "App Store Connect API key"));
+    REQUIRE(contains(combined, "--api-key"));
+    REQUIRE(contains(combined, "--apple-id"));  // legacy lane still documented
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize --dry-run falls back to legacy flags when ASC absent",
+                 "[cli][shellout][ship][notarize][legacy]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-legacy", true);
+    ScopedEnvVar override("PULP_NOTARY_ENV", (root / "no-such.env").string());
+
+    auto r = run_pulp_in(root,
+        {"ship", "notarize", "--dry-run",
+         "--apple-id", "you@example.com",
+         "--team-id", "ABCDE12345"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "legacy Apple ID"));
+    REQUIRE(contains(combined, "--apple-id \"you@example.com\""));
+    REQUIRE(contains(combined, "--team-id \"ABCDE12345\""));
+    // Default password fallback should appear
+    REQUIRE(contains(combined, "--password \"@keychain:AC_PASSWORD\""));
+
+    fs::remove_all(root);
+}
+#endif // __APPLE__
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj --sdk macosx skips iOS toolchain",

@@ -420,6 +420,17 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-ship-shellout)
 
+# App Store Connect notary env-file parser. Compiles the parser source
+# directly so the test target stays free of pulp::ship + pulp::runtime
+# link surfaces (notary_env.cpp is intentionally pure stdlib).
+add_executable(pulp-test-notary-env
+    test_notary_env.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/notary_env.cpp)
+target_include_directories(pulp-test-notary-env
+    PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-notary-env PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-notary-env)
+
 # Item 7.4b (macos-plugin-authoring-plan): `pulp build --install`
 # validation gate. The test compiles install_paths_mac.cpp directly
 # so it stays free of cli_common's link surface; the InstallEnv
