@@ -101,7 +101,7 @@ TEST_CASE("tokenize_cpp_line: string literals and escape sequences",
 
     REQUIRE(has_token(toks, line, "const", TokenClass::keyword));
     REQUIRE(has_token(toks, line, "char", TokenClass::type));
-    REQUIRE(has_token(toks, line, R"cpp("hello \"world\"")cpp", TokenClass::string));
+    REQUIRE(has_token(toks, line, "\"hello \\\"world\\\"\"", TokenClass::string));
 }
 
 TEST_CASE("tokenize_cpp_line: preprocessor directives are a whole-line span",
