@@ -414,6 +414,32 @@ float json_float_or(choc::value::ValueView value, float fallback) {
     return json_float(value);
 }
 
+std::unordered_map<std::string, Rect> read_runtime_native_bounds(const fs::path& path) {
+    REQUIRE(fs::exists(path));
+    auto trace = choc::json::parse(read_text(path));
+    REQUIRE(trace.isObject());
+    const auto entries = trace["native_bounds"];
+    REQUIRE(entries.isArray());
+
+    std::unordered_map<std::string, Rect> out;
+    for (uint32_t i = 0; i < entries.size(); ++i) {
+        const auto entry = entries[i];
+        if (!entry.isObject())
+            continue;
+        const auto id = json_string(entry["id"]);
+        const auto bounds = entry["bounds"];
+        if (id.empty() || !bounds.isObject())
+            continue;
+        out[id] = Rect{
+            json_float(bounds["x"]),
+            json_float(bounds["y"]),
+            json_float(bounds["width"]),
+            json_float(bounds["height"])
+        };
+    }
+    return out;
+}
+
 std::string float_attr(float value) {
     std::ostringstream out;
     out << std::setprecision(7) << value;
@@ -1597,14 +1623,18 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
         fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
     const fs::path chainer_ir_path =
         fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path runtime_trace_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/traces/chainer-live-runtime-trace.json";
     REQUIRE(fs::exists(manifest_path));
     REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(runtime_trace_path));
 
     auto route_manifest = choc::json::parse(read_text(manifest_path));
     const auto source_formula = read_chainer_knob_source_formula(
         source_jsx_path_from_route_manifest(route_manifest));
     const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
     auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    const auto live_native_bounds = read_runtime_native_bounds(runtime_trace_path);
     const auto cases = chainer_knob_layout_cases(materialized_ir.root, route_rows);
 
     std::vector<ImportDiagnostic> source_diagnostics;
@@ -1629,10 +1659,14 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
     struct LayoutComparison {
         const PhaseDKnobLayoutCase* item = nullptr;
         Rect source_bounds;
+        Rect live_source_bounds;
         Rect native_bounds;
         float center_delta_px = 0.0f;
         float size_delta_px = 0.0f;
         float source_expected_size_delta_px = 0.0f;
+        float live_center_delta_px = 0.0f;
+        float live_size_delta_px = 0.0f;
+        float live_expected_size_delta_px = 0.0f;
         float native_expected_size_delta_px = 0.0f;
     };
 
@@ -1641,6 +1675,9 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
     float max_center_delta = 0.0f;
     float max_size_delta = 0.0f;
     float max_source_expected_size_delta = 0.0f;
+    float max_live_center_delta = 0.0f;
+    float max_live_size_delta = 0.0f;
+    float max_live_expected_size_delta = 0.0f;
     float max_native_expected_size_delta = 0.0f;
     constexpr float kBoundsTolerancePx = 0.5f;
 
@@ -1650,12 +1687,17 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
         auto* native_knob = find_anchor(*hybrid_view, item.anchor);
         REQUIRE(native_knob != nullptr);
         REQUIRE(dynamic_cast<Knob*>(native_knob) != nullptr);
+        const auto live_it = live_native_bounds.find(item.source_visual_anchor);
+        REQUIRE(live_it != live_native_bounds.end());
 
         const auto source_bounds = absolute_bounds(*source_visual);
+        const auto live_source_bounds = live_it->second;
         const auto native_bounds = absolute_bounds(*native_knob);
 
         const auto source_cx = source_bounds.x + source_bounds.width * 0.5f;
         const auto source_cy = source_bounds.y + source_bounds.height * 0.5f;
+        const auto live_source_cx = live_source_bounds.x + live_source_bounds.width * 0.5f;
+        const auto live_source_cy = live_source_bounds.y + live_source_bounds.height * 0.5f;
         const auto native_cx = native_bounds.x + native_bounds.width * 0.5f;
         const auto native_cy = native_bounds.y + native_bounds.height * 0.5f;
         const auto center_delta = std::max(std::abs(source_cx - native_cx), std::abs(source_cy - native_cy));
@@ -1663,24 +1705,41 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
                                          std::abs(source_bounds.height - native_bounds.height));
         const auto source_expected_size_delta = std::max(std::abs(source_bounds.width - item.expected_size),
                                                          std::abs(source_bounds.height - item.expected_size));
+        const auto live_center_delta = std::max(std::abs(live_source_cx - native_cx),
+                                                std::abs(live_source_cy - native_cy));
+        const auto live_size_delta = std::max(std::abs(live_source_bounds.width - native_bounds.width),
+                                              std::abs(live_source_bounds.height - native_bounds.height));
+        const auto live_expected_size_delta = std::max(std::abs(live_source_bounds.width - item.expected_size),
+                                                       std::abs(live_source_bounds.height - item.expected_size));
         const auto native_expected_size_delta = std::max(std::abs(native_bounds.width - item.expected_size),
                                                          std::abs(native_bounds.height - item.expected_size));
         max_center_delta = std::max(max_center_delta, center_delta);
         max_size_delta = std::max(max_size_delta, size_delta);
         max_source_expected_size_delta = std::max(max_source_expected_size_delta, source_expected_size_delta);
+        max_live_center_delta = std::max(max_live_center_delta, live_center_delta);
+        max_live_size_delta = std::max(max_live_size_delta, live_size_delta);
+        max_live_expected_size_delta = std::max(max_live_expected_size_delta, live_expected_size_delta);
         max_native_expected_size_delta = std::max(max_native_expected_size_delta, native_expected_size_delta);
         comparisons.push_back({&item,
                                source_bounds,
+                               live_source_bounds,
                                native_bounds,
                                center_delta,
                                size_delta,
                                source_expected_size_delta,
+                               live_center_delta,
+                               live_size_delta,
+                               live_expected_size_delta,
                                native_expected_size_delta});
     }
 
     const bool within_threshold = max_center_delta <= kBoundsTolerancePx &&
         max_size_delta <= kBoundsTolerancePx &&
         max_source_expected_size_delta <= kBoundsTolerancePx &&
+        max_native_expected_size_delta <= kBoundsTolerancePx;
+    const bool live_runtime_within_threshold = max_live_center_delta <= kBoundsTolerancePx &&
+        max_live_size_delta <= kBoundsTolerancePx &&
+        max_live_expected_size_delta <= kBoundsTolerancePx &&
         max_native_expected_size_delta <= kBoundsTolerancePx;
     // Prefer reporting native mismatch first if both sides are bad. Current
     // Chainer evidence is source-only collapse while native expected size holds.
@@ -1701,15 +1760,25 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
                << "  \"fixture\": \"chainer-original-layout-hybrid\",\n"
                << "  \"scope\": \"source-materialized-knob-visual-bounds-vs-native-replacement-bounds\",\n"
                << "  \"source_bounds_basis\": \"materialized-ir-first-visual-child\",\n"
+               << "  \"live_bounds_basis\": \"runtime-trace-getLayoutRect-source-visual-anchor\",\n"
                << "  \"native_bounds_basis\": \"original-layout-hybrid-native-knob\",\n"
                << "  \"threshold_px\": " << kBoundsTolerancePx << ",\n"
                << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"live_runtime_classification\": \""
+               << (live_runtime_within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
                << "  \"coordinate_uncertainty_source\": \"" << coordinate_uncertainty_source << "\",\n"
                << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"live_runtime_within_threshold\": "
+               << (live_runtime_within_threshold ? "true" : "false") << ",\n"
                << "  \"knob_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_matched_knob_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_bounds_count\": " << live_native_bounds.size() << ",\n"
                << "  \"max_center_delta_px\": " << std::setprecision(7) << max_center_delta << ",\n"
                << "  \"max_size_delta_px\": " << max_size_delta << ",\n"
                << "  \"max_source_expected_size_delta_px\": " << max_source_expected_size_delta << ",\n"
+               << "  \"max_live_center_delta_px\": " << max_live_center_delta << ",\n"
+               << "  \"max_live_size_delta_px\": " << max_live_size_delta << ",\n"
+               << "  \"max_live_expected_size_delta_px\": " << max_live_expected_size_delta << ",\n"
                << "  \"max_native_expected_size_delta_px\": " << max_native_expected_size_delta << ",\n"
                << "  \"knobs\": [";
         for (std::size_t i = 0; i < comparisons.size(); ++i) {
@@ -1728,6 +1797,11 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
                    << "\"y\": " << row.source_bounds.y << ", "
                    << "\"width\": " << row.source_bounds.width << ", "
                    << "\"height\": " << row.source_bounds.height << "}, "
+                   << "\"live_source_bounds\": {"
+                   << "\"x\": " << row.live_source_bounds.x << ", "
+                   << "\"y\": " << row.live_source_bounds.y << ", "
+                   << "\"width\": " << row.live_source_bounds.width << ", "
+                   << "\"height\": " << row.live_source_bounds.height << "}, "
                    << "\"native_bounds\": {"
                    << "\"x\": " << row.native_bounds.x << ", "
                    << "\"y\": " << row.native_bounds.y << ", "
@@ -1736,6 +1810,9 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
                    << "\"center_delta_px\": " << row.center_delta_px << ", "
                    << "\"size_delta_px\": " << row.size_delta_px << ", "
                    << "\"source_expected_size_delta_px\": " << row.source_expected_size_delta_px << ", "
+                   << "\"live_center_delta_px\": " << row.live_center_delta_px << ", "
+                   << "\"live_size_delta_px\": " << row.live_size_delta_px << ", "
+                   << "\"live_expected_size_delta_px\": " << row.live_expected_size_delta_px << ", "
                    << "\"native_expected_size_delta_px\": " << row.native_expected_size_delta_px
                    << "}";
         }

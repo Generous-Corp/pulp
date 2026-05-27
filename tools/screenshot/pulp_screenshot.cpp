@@ -211,6 +211,76 @@ static const char* runtime_trace_script() {
             };
         });
     }
+    function cloneObject(obj) {
+        var out = {};
+        if (!obj) return out;
+        keys(obj).forEach(function (key) {
+            var value = obj[key];
+            if (value != null && typeof value !== 'function') out[key] = String(value);
+        });
+        return out;
+    }
+    function textPreview(el) {
+        var text = el && el._textContent != null ? String(el._textContent) : '';
+        return text.length > 80 ? text.slice(0, 80) : text;
+    }
+    function rectFor(el) {
+        if (!el || !el._nativeCreated || typeof getLayoutRect !== 'function') return null;
+        try {
+            var r = getLayoutRect(el._id);
+            if (!r) return null;
+            return {
+                x: Number(r.x || 0),
+                y: Number(r.y || 0),
+                width: Number(r.width || 0),
+                height: Number(r.height || 0),
+                top: Number(r.top || 0),
+                right: Number(r.right || 0),
+                bottom: Number(r.bottom || 0),
+                left: Number(r.left || 0)
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+    function nativeBoundsSummary() {
+        if (typeof __nativeElements__ === 'undefined') return [];
+        return keys(__nativeElements__).map(function (id) {
+            var el = __nativeElements__[id];
+            var attrs = cloneObject(el && el._attributes);
+            var bounds = rectFor(el);
+            return {
+                id: id,
+                tag: el && el.tagName ? String(el.tagName).toLowerCase() : '',
+                user_id: el && el._userIdSet ? String(attrs.id || '') : '',
+                class_name: el && el._className ? String(el._className) : '',
+                text: textPreview(el),
+                native_created: !!(el && el._nativeCreated),
+                attributes: attrs,
+                bounds_source: bounds ? 'getLayoutRect' : 'none',
+                bounds: bounds
+            };
+        });
+    }
+    function traceReferenceFrame() {
+        var rootSize = null;
+        if (typeof getRootSize === 'function') {
+            try {
+                var s = getRootSize();
+                if (s) rootSize = { width: Number(s.width || 0), height: Number(s.height || 0) };
+            } catch (e) {
+                rootSize = null;
+            }
+        }
+        var body = (typeof document !== 'undefined') ? document.body : null;
+        return {
+            coordinate_space: 'root-view-css-points',
+            origin: 'top-left',
+            root_size: rootSize,
+            document_body_id: body && body._id ? String(body._id) : '',
+            document_body_bounds: rectFor(body)
+        };
+    }
     var addEventLog = Array.isArray(globalThis.__pulpAddELLog__)
         ? globalThis.__pulpAddELLog__.map(function (entry) {
             return { op: String(entry.op || ''), type: String(entry.type || ''), fn: String(entry.fn || '') };
@@ -218,8 +288,10 @@ static const char* runtime_trace_script() {
         : [];
     var callbacks = callbackSummary();
     var nativeRegistered = nativeRegistrationSummary();
+    var nativeBounds = nativeBoundsSummary();
     return JSON.stringify({
         schema: 'pulp-screenshot-runtime-trace-v1',
+        reference_frame: traceReferenceFrame(),
         callback_count: callbacks.length,
         callbacks: callbacks,
         native_registered_count: nativeRegistered.length,
@@ -229,7 +301,9 @@ static const char* runtime_trace_script() {
         add_event_listener_log_count: addEventLog.length,
         add_event_listener_log: addEventLog,
         dispatch_hits: globalThis.__pulpDispatchHits__ || null,
-        native_element_count: (typeof __nativeElements__ !== 'undefined') ? keys(__nativeElements__).length : 0
+        native_element_count: (typeof __nativeElements__ !== 'undefined') ? keys(__nativeElements__).length : 0,
+        native_bounds_count: nativeBounds.length,
+        native_bounds: nativeBounds
     }, null, 2);
 })()
 )JS";
