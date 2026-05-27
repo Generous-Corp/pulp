@@ -22,10 +22,12 @@
 #include <iomanip>
 #include <iterator>
 #include <map>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -475,19 +477,155 @@ std::string color_for_style_tokens(std::string_view tokens) {
     return "#ff6b35";
 }
 
-std::string chainer_knob_schema_for_style_tokens(std::string_view tokens, float size) {
+struct ChainerKnobSourceFormula {
+    float source_start_angle = -135.0f;
+    float source_sweep_angle = 270.0f;
+    float radius_base_inset = 4.0f;
+    float track_radius_inset = 1.0f;
+    float body_radius_inset = 3.0f;
+    float pointer_radius_inset = 6.0f;
+    float center_dot_radius = 2.0f;
+    float stroke_width = 1.5f;
+    float body_stroke_width = 0.5f;
+    float fill_opacity = 0.45f;
+    std::string track_dash_array = "72 28";
+    std::string track_dash_offset = "36";
+    bool source_guard_passed = false;
+};
+
+float regex_float_or_fail(const std::string& text,
+                          const std::string& pattern,
+                          const char* label) {
+    std::smatch match;
+    INFO(label);
+    INFO(pattern);
+    REQUIRE(std::regex_search(text, match, std::regex(pattern)));
+    REQUIRE(match.size() >= 2);
+    return std::stof(match[1].str());
+}
+
+std::string regex_string_or_fail(const std::string& text,
+                                 const std::string& pattern,
+                                 const char* label) {
+    std::smatch match;
+    INFO(label);
+    INFO(pattern);
+    REQUIRE(std::regex_search(text, match, std::regex(pattern)));
+    REQUIRE(match.size() >= 2);
+    return match[1].str();
+}
+
+ChainerKnobSourceFormula read_chainer_knob_source_formula(const fs::path& source_path) {
+    REQUIRE(fs::exists(source_path));
+    const auto source = read_text(source_path);
+    const auto knob_start = source.find("function Knob({");
+    REQUIRE(knob_start != std::string::npos);
+    const auto fader_start = source.find("function Fader({", knob_start);
+    REQUIRE(fader_start != std::string::npos);
+    const auto body = source.substr(knob_start, fader_start - knob_start);
+
+    ChainerKnobSourceFormula formula;
+    formula.source_start_angle = regex_float_or_fail(
+        body, R"(const angle = (-?[0-9.]+) \+ value \* [0-9.]+;)", "source knob start angle");
+    formula.source_sweep_angle = regex_float_or_fail(
+        body, R"(const angle = -?[0-9.]+ \+ value \* ([0-9.]+);)", "source knob sweep angle");
+    formula.radius_base_inset = regex_float_or_fail(
+        body, R"(r = size / 2 - ([0-9.]+);)", "source knob base radius inset");
+    formula.pointer_radius_inset = regex_float_or_fail(
+        body, R"(Math\.sin\(rad\) \* \(r - ([0-9.]+)\);)", "source knob pointer radius inset");
+    formula.track_radius_inset = regex_float_or_fail(
+        body, R"(Math\.sin\(arcStart\) \* \(r - ([0-9.]+)\);)", "source knob track radius inset");
+    formula.body_radius_inset = regex_float_or_fail(
+        body, R"(r=\{r - ([0-9.]+)\} fill=\{C\.bgMod\})", "source knob body radius inset");
+    formula.center_dot_radius = regex_float_or_fail(
+        body, R"(r=\{([0-9.]+)\} fill=\{color\})", "source knob center dot radius");
+    formula.stroke_width = regex_float_or_fail(
+        body, R"(strokeWidth=\{([0-9.]+)\} opacity=\{0\.45\})", "source knob stroke width");
+    formula.body_stroke_width = regex_float_or_fail(
+        body, R"(r=\{r - [0-9.]+\} fill=\{C\.bgMod\} stroke=\{C\.borderMid\} strokeWidth=\{([0-9.]+)\})",
+        "source knob body stroke width");
+    formula.fill_opacity = regex_float_or_fail(
+        body, R"(fill="none" stroke=\{color\} strokeWidth=\{[0-9.]+\} opacity=\{([0-9.]+)\})",
+        "source knob fill opacity");
+    formula.track_dash_array = regex_string_or_fail(
+        body, R"re(strokeDasharray="([^"]+)")re", "source knob track dash array");
+    formula.track_dash_offset = regex_string_or_fail(
+        body, R"re(strokeDashoffset="([^"]+)")re", "source knob track dash offset");
+
+    REQUIRE(formula.source_start_angle == Catch::Approx(-135.0f));
+    REQUIRE(formula.source_sweep_angle == Catch::Approx(270.0f));
+    REQUIRE(formula.radius_base_inset == Catch::Approx(4.0f));
+    REQUIRE(formula.track_radius_inset == Catch::Approx(1.0f));
+    REQUIRE(formula.body_radius_inset == Catch::Approx(3.0f));
+    REQUIRE(formula.pointer_radius_inset == Catch::Approx(6.0f));
+    REQUIRE(formula.center_dot_radius == Catch::Approx(2.0f));
+    REQUIRE(formula.stroke_width == Catch::Approx(1.5f));
+    REQUIRE(formula.body_stroke_width == Catch::Approx(0.5f));
+    REQUIRE(formula.fill_opacity == Catch::Approx(0.45f));
+    REQUIRE(formula.track_dash_array == "72 28");
+    REQUIRE(formula.track_dash_offset == "36");
+    formula.source_guard_passed = true;
+    return formula;
+}
+
+fs::path source_jsx_path_from_route_manifest(choc::value::ValueView route_manifest) {
+    const auto relative = json_string(route_manifest["inputs"]["sourceJsx"]["path"]);
+    REQUIRE_FALSE(relative.empty());
+    fs::path path(relative);
+    if (path.is_relative())
+        path = fs::path(PULP_REPO_ROOT) / path;
+    REQUIRE(fs::exists(path));
+    return path;
+}
+
+std::string hex_alpha(float alpha) {
+    const auto clamped = std::clamp(alpha, 0.0f, 1.0f);
+    const auto byte = static_cast<int>(std::round(clamped * 255.0f));
+    std::ostringstream out;
+    out << std::hex << std::nouppercase << std::setw(2) << std::setfill('0') << byte;
+    return out.str();
+}
+
+float chainer_source_track_radius(float size, const ChainerKnobSourceFormula& formula) {
+    return std::max(0.0f, size * 0.5f - formula.radius_base_inset - formula.track_radius_inset);
+}
+
+float chainer_source_body_radius(float size, const ChainerKnobSourceFormula& formula) {
+    return std::max(0.0f, size * 0.5f - formula.radius_base_inset - formula.body_radius_inset);
+}
+
+float chainer_source_pointer_radius(float size, const ChainerKnobSourceFormula& formula) {
+    return std::max(0.0f, size * 0.5f - formula.radius_base_inset - formula.pointer_radius_inset);
+}
+
+std::string chainer_knob_schema_for_style_tokens(std::string_view tokens,
+                                                 float size,
+                                                 const ChainerKnobSourceFormula& formula) {
     const auto color = color_for_style_tokens(tokens);
-    const auto fill_color = color + "73";
-    const auto track_radius = std::max(0.0f, size * 0.5f - 5.0f);
-    const auto body_radius = std::max(0.0f, size * 0.5f - 7.0f);
-    const auto pointer_outer_radius = std::max(0.0f, size * 0.5f - 10.0f);
+    const auto fill_color = color + hex_alpha(formula.fill_opacity);
+    const auto track_radius = chainer_source_track_radius(size, formula);
+    const auto body_radius = chainer_source_body_radius(size, formula);
+    const auto pointer_outer_radius = chainer_source_pointer_radius(size, formula);
+    const auto schema_start_angle = -formula.source_start_angle;
+    const auto schema_end_angle = schema_start_angle + formula.source_sweep_angle;
     std::ostringstream out;
     out << "{\"elements\":["
-        << "{\"type\":\"arc\",\"color\":\"#2a2a34\",\"radius\":\"" << float_attr(track_radius) << "\",\"startAngle\":135,\"sweepAngle\":270,\"width\":1.5},"
-        << "{\"type\":\"arc\",\"color\":\"" << fill_color << "\",\"radius\":\"" << float_attr(track_radius) << "\",\"startAngle\":135,\"sweepAngle\":{\"bind\":\"value\",\"range\":[0,270]},\"width\":1.5},"
-        << "{\"type\":\"circle\",\"color\":\"#14141a\",\"radius\":\"" << float_attr(body_radius) << "\",\"strokeColor\":\"#2a2a34\",\"strokeWidth\":0.5},"
-        << "{\"type\":\"line\",\"color\":\"" << color << "\",\"angle\":{\"bind\":\"value\",\"range\":[135,405]},\"innerRadius\":\"0\",\"outerRadius\":\"" << float_attr(pointer_outer_radius) << "\",\"width\":1.5},"
-        << "{\"type\":\"circle\",\"color\":\"" << color << "\",\"radius\":\"2\"}"
+        << "{\"type\":\"arc\",\"color\":\"#2a2a34\",\"radius\":\"" << float_attr(track_radius)
+        << "\",\"startAngle\":" << float_attr(schema_start_angle)
+        << ",\"sweepAngle\":" << float_attr(formula.source_sweep_angle)
+        << ",\"width\":" << float_attr(formula.stroke_width) << "},"
+        << "{\"type\":\"arc\",\"color\":\"" << fill_color << "\",\"radius\":\"" << float_attr(track_radius)
+        << "\",\"startAngle\":" << float_attr(schema_start_angle)
+        << ",\"sweepAngle\":{\"bind\":\"value\",\"range\":[0," << float_attr(formula.source_sweep_angle)
+        << "]},\"width\":" << float_attr(formula.stroke_width) << "},"
+        << "{\"type\":\"circle\",\"color\":\"#14141a\",\"radius\":\"" << float_attr(body_radius)
+        << "\",\"strokeColor\":\"#2a2a34\",\"strokeWidth\":" << float_attr(formula.body_stroke_width) << "},"
+        << "{\"type\":\"line\",\"color\":\"" << color << "\",\"angle\":{\"bind\":\"value\",\"range\":["
+        << float_attr(schema_start_angle) << "," << float_attr(schema_end_angle)
+        << "]},\"innerRadius\":\"0\",\"outerRadius\":\"" << float_attr(pointer_outer_radius)
+        << "\",\"width\":" << float_attr(formula.stroke_width) << "},"
+        << "{\"type\":\"circle\",\"color\":\"" << color << "\",\"radius\":\""
+        << float_attr(formula.center_dot_radius) << "\"}"
         << "]}";
     return out.str();
 }
@@ -508,7 +646,8 @@ void add_chainer_token_colors(DesignIR& ir) {
 }
 
 IRNode lower_chainer_knob_route_to_node(IRNode& materialized_root,
-                                        choc::value::ValueView route) {
+                                        choc::value::ValueView route,
+                                        const ChainerKnobSourceFormula& formula) {
     const auto materialized_path = json_string(route["materialized_ir_path"]);
     auto* materialized_node = node_at_ir_path(materialized_root, materialized_path);
     REQUIRE(materialized_node != nullptr);
@@ -557,7 +696,7 @@ IRNode lower_chainer_knob_route_to_node(IRNode& materialized_root,
     knob.attributes["pulpStyleTokens"] = style_tokens;
     knob.attributes["pulpDefaultValueSource"] =
         route["default_value"].isVoid() ? "phase_c_initial_value_fallback" : "source_default";
-    knob.attributes["pulpWidgetSchema"] = chainer_knob_schema_for_style_tokens(style_tokens, size);
+    knob.attributes["pulpWidgetSchema"] = chainer_knob_schema_for_style_tokens(style_tokens, size, formula);
     knob.attributes["pulpShowInternalLabel"] = "false";
     knob.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
     knob.anchor_strategy = "adapter";
@@ -567,7 +706,8 @@ IRNode lower_chainer_knob_route_to_node(IRNode& materialized_root,
 }
 
 DesignIR lower_chainer_knob_route_to_phase_c_ir(DesignIR materialized_ir,
-                                                choc::value::ValueView route) {
+                                                choc::value::ValueView route,
+                                                const ChainerKnobSourceFormula& formula) {
     const auto size = json_float(route["size"]);
 
     DesignIR ir;
@@ -577,12 +717,13 @@ DesignIR lower_chainer_knob_route_to_phase_c_ir(DesignIR materialized_ir,
     ir.source_version = "phase-c";
     add_chainer_token_colors(ir);
     ir.root = frame_node("phase-c-root", "Chainer One Knob", size + 28.0f, size + 38.0f, LayoutDirection::column);
-    ir.root.children.push_back(lower_chainer_knob_route_to_node(materialized_ir.root, route));
+    ir.root.children.push_back(lower_chainer_knob_route_to_node(materialized_ir.root, route, formula));
     return ir;
 }
 
 DesignIR lower_chainer_knob_routes_to_phase_d_ir(DesignIR materialized_ir,
-                                                 choc::value::ValueView route_rows) {
+                                                 choc::value::ValueView route_rows,
+                                                 const ChainerKnobSourceFormula& formula) {
     DesignIR ir;
     ir.source = DesignSource::jsx;
     ir.capture_method = "phase-d-chainer-all-knobs-route-overlay";
@@ -596,7 +737,7 @@ DesignIR lower_chainer_knob_routes_to_phase_d_ir(DesignIR materialized_ir,
         const auto route = route_rows[i];
         if (json_string(route["source_component_family"]) != "Knob")
             continue;
-        ir.root.children.push_back(lower_chainer_knob_route_to_node(materialized_ir.root, route));
+        ir.root.children.push_back(lower_chainer_knob_route_to_node(materialized_ir.root, route, formula));
     }
     REQUIRE(ir.root.children.size() == 8);
 
@@ -604,7 +745,8 @@ DesignIR lower_chainer_knob_routes_to_phase_d_ir(DesignIR materialized_ir,
 }
 
 DesignIR lower_chainer_knob_routes_to_phase_d_original_layout_ir(DesignIR materialized_ir,
-                                                                 choc::value::ValueView route_rows) {
+                                                                 choc::value::ValueView route_rows,
+                                                                 const ChainerKnobSourceFormula& formula) {
     materialized_ir.capture_method = "phase-d-chainer-original-layout-hybrid-route-overlay";
     materialized_ir.source_adapter = "native-cpp-import-execution-validation";
     materialized_ir.source_version = "phase-d-original-layout-hybrid";
@@ -616,7 +758,7 @@ DesignIR lower_chainer_knob_routes_to_phase_d_original_layout_ir(DesignIR materi
         if (json_string(route["source_component_family"]) != "Knob")
             continue;
         const auto materialized_path = json_string(route["materialized_ir_path"]);
-        auto knob = lower_chainer_knob_route_to_node(materialized_ir.root, route);
+        auto knob = lower_chainer_knob_route_to_node(materialized_ir.root, route, formula);
         *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(knob);
         ++lowered;
     }
@@ -744,8 +886,8 @@ private:
 
 class ChainerKnobSourceShapeView final : public View {
 public:
-    ChainerKnobSourceShapeView(float value, Color color)
-        : value_(std::clamp(value, 0.0f, 1.0f)), color_(color) {}
+    ChainerKnobSourceShapeView(float value, Color color, ChainerKnobSourceFormula formula)
+        : value_(std::clamp(value, 0.0f, 1.0f)), color_(color), formula_(std::move(formula)) {}
 
     void paint(pulp::canvas::Canvas& canvas) override {
         const auto b = local_bounds();
@@ -754,46 +896,48 @@ public:
         const float offset_y = (b.height - size) * 0.5f;
         const float cx = offset_x + size * 0.5f;
         const float cy = offset_y + size * 0.5f;
-        const float r = size * 0.5f - 4.0f;
-        const float track_radius = std::max(0.0f, r - 1.0f);
-        const float body_radius = std::max(0.0f, r - 3.0f);
-        const float pointer_radius = std::max(0.0f, r - 6.0f);
+        const float track_radius = chainer_source_track_radius(size, formula_);
+        const float body_radius = chainer_source_body_radius(size, formula_);
+        const float pointer_radius = chainer_source_pointer_radius(size, formula_);
         constexpr float kPi = 3.14159f;
-        const float start = 135.0f * kPi / 180.0f;
-        const float end = (135.0f + value_ * 270.0f) * kPi / 180.0f;
+        const float schema_start_angle = -formula_.source_start_angle;
+        const float start = schema_start_angle * kPi / 180.0f;
+        const float end = (schema_start_angle + value_ * formula_.source_sweep_angle) * kPi / 180.0f;
 
         canvas.set_line_cap(pulp::canvas::LineCap::round);
         canvas.set_stroke_color(Color::rgba8(42, 42, 52, 255));
-        canvas.set_line_width(1.5f);
-        canvas.stroke_arc(cx, cy, track_radius, start, 405.0f * kPi / 180.0f);
+        canvas.set_line_width(formula_.stroke_width);
+        canvas.stroke_arc(cx, cy, track_radius, start,
+                          (schema_start_angle + formula_.source_sweep_angle) * kPi / 180.0f);
 
         if (value_ > 0.001f) {
-            canvas.set_stroke_color(Color::rgba(color_.r, color_.g, color_.b, 115.0f / 255.0f));
+            canvas.set_stroke_color(Color::rgba(color_.r, color_.g, color_.b, formula_.fill_opacity));
             canvas.stroke_arc(cx, cy, track_radius, start, end);
         }
 
         canvas.set_fill_color(Color::rgba8(20, 20, 26, 255));
         canvas.fill_circle(cx, cy, body_radius);
         canvas.set_stroke_color(Color::rgba8(42, 42, 52, 255));
-        canvas.set_line_width(0.5f);
+        canvas.set_line_width(formula_.body_stroke_width);
         canvas.stroke_circle(cx, cy, body_radius);
 
-        const float source_angle = -135.0f + value_ * 270.0f;
+        const float source_angle = formula_.source_start_angle + value_ * formula_.source_sweep_angle;
         const float source_rad = source_angle * kPi / 180.0f;
         const float x2 = cx + std::sin(source_rad) * pointer_radius;
         const float y2 = cy - std::cos(source_rad) * pointer_radius;
         canvas.set_stroke_color(color_);
-        canvas.set_line_width(1.5f);
+        canvas.set_line_width(formula_.stroke_width);
         canvas.set_line_cap(pulp::canvas::LineCap::round);
         canvas.stroke_line(cx, cy, x2, y2);
 
         canvas.set_fill_color(color_);
-        canvas.fill_circle(cx, cy, 2.0f);
+        canvas.fill_circle(cx, cy, formula_.center_dot_radius);
     }
 
 private:
     float value_ = 0.0f;
     Color color_;
+    ChainerKnobSourceFormula formula_;
 };
 
 std::string diff_messages(const LayoutTreeDiff& diff) {
@@ -942,6 +1086,8 @@ TEST_CASE("Chainer route overlay can lower one knob to typed C++ with binding si
     REQUIRE(overlay.find("\"materialized_ir_path\": \"root/1/2/0/1/0\"") != std::string::npos);
     REQUIRE(overlay.find("\"unique_knob_ir_paths\": 8") != std::string::npos);
     auto route_manifest = choc::json::parse(overlay);
+    const auto source_formula = read_chainer_knob_source_formula(
+        source_jsx_path_from_route_manifest(route_manifest));
     const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
     uint32_t route_index = route_rows.size();
     for (uint32_t i = 0; i < route_rows.size(); ++i) {
@@ -963,7 +1109,8 @@ TEST_CASE("Chainer route overlay can lower one knob to typed C++ with binding si
     REQUIRE(fs::exists(chainer_ir_path));
     auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
 
-    const auto ir = lower_chainer_knob_route_to_phase_c_ir(std::move(materialized_ir), route);
+    const auto ir = lower_chainer_knob_route_to_phase_c_ir(
+        std::move(materialized_ir), route, source_formula);
     CppExportOptions opts;
     opts.header_filename = "phase_c_chainer_one_knob.hpp";
     opts.namespace_name = "pulp::test::phase_c";
@@ -1023,6 +1170,8 @@ TEST_CASE("Chainer route overlay can lower all knobs to typed C++ with binding s
         fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
     REQUIRE(fs::exists(manifest_path));
     auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto source_formula = read_chainer_knob_source_formula(
+        source_jsx_path_from_route_manifest(route_manifest));
     const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
     REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["knob_routes"].getInt64() == 8);
 
@@ -1031,7 +1180,8 @@ TEST_CASE("Chainer route overlay can lower all knobs to typed C++ with binding s
     REQUIRE(fs::exists(chainer_ir_path));
     auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
 
-    const auto ir = lower_chainer_knob_routes_to_phase_d_ir(std::move(materialized_ir), route_rows);
+    const auto ir = lower_chainer_knob_routes_to_phase_d_ir(
+        std::move(materialized_ir), route_rows, source_formula);
     CppExportOptions opts;
     opts.header_filename = "phase_d_chainer_all_knobs.hpp";
     opts.namespace_name = "pulp::test::phase_d";
@@ -1227,6 +1377,8 @@ TEST_CASE("generated Chainer knob schemas match source-shape paint oracle",
         fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
     REQUIRE(fs::exists(manifest_path));
     auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto source_formula = read_chainer_knob_source_formula(
+        source_jsx_path_from_route_manifest(route_manifest));
     const auto cases = chainer_knob_surface_cases(
         route_manifest["source_contract_overlay"]["node_route_rows"]);
 
@@ -1253,7 +1405,7 @@ TEST_CASE("generated Chainer knob schemas match source-shape paint oracle",
     for (const auto& item : cases) {
         const auto accent = hex_color_or(color_for_style_tokens(item.style_tokens),
                                          Color::rgba8(255, 107, 53, 255));
-        auto source = std::make_unique<ChainerKnobSourceShapeView>(item.value, accent);
+        auto source = std::make_unique<ChainerKnobSourceShapeView>(item.value, accent, source_formula);
         set_fixed_surface_size(*source, item.size);
         source_root.add_child(std::move(source));
 
@@ -1337,6 +1489,20 @@ TEST_CASE("generated Chainer knob schemas match source-shape paint oracle",
                << "  \"scope\": \"generated-native-cpp-knob-schema-vs-source-shape-oracle\",\n"
                << "  \"native_surface\": \"generated-cpp-widget-schema\",\n"
                << "  \"source_shape_oracle\": \"transcribed-fixture-knob-formula\",\n"
+               << "  \"source_formula_guard\": {"
+               << "\"passed\": " << (source_formula.source_guard_passed ? "true" : "false") << ", "
+               << "\"source_start_angle\": " << source_formula.source_start_angle << ", "
+               << "\"source_sweep_angle\": " << source_formula.source_sweep_angle << ", "
+               << "\"radius_base_inset\": " << source_formula.radius_base_inset << ", "
+               << "\"track_radius_inset\": " << source_formula.track_radius_inset << ", "
+               << "\"body_radius_inset\": " << source_formula.body_radius_inset << ", "
+               << "\"pointer_radius_inset\": " << source_formula.pointer_radius_inset << ", "
+               << "\"center_dot_radius\": " << source_formula.center_dot_radius << ", "
+               << "\"stroke_width\": " << source_formula.stroke_width << ", "
+               << "\"body_stroke_width\": " << source_formula.body_stroke_width << ", "
+               << "\"fill_opacity\": " << source_formula.fill_opacity << ", "
+               << "\"track_dash_array\": \"" << json_escape(source_formula.track_dash_array) << "\", "
+               << "\"track_dash_offset\": \"" << json_escape(source_formula.track_dash_offset) << "\"},\n"
                << "  \"source_track_ring\": \"approximated_as_importable_sweep_arc\",\n"
                << "  \"threshold\": " << kSurfaceThreshold << ",\n"
                << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_visual_threshold") << "\",\n"
@@ -1392,9 +1558,12 @@ TEST_CASE("Chainer original-layout hybrid classifies knob region visual diff",
     REQUIRE(fs::exists(live_png_path));
 
     auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto source_formula = read_chainer_knob_source_formula(
+        source_jsx_path_from_route_manifest(route_manifest));
     const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
     auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
-    auto hybrid_ir = lower_chainer_knob_routes_to_phase_d_original_layout_ir(std::move(materialized_ir), route_rows);
+    auto hybrid_ir = lower_chainer_knob_routes_to_phase_d_original_layout_ir(
+        std::move(materialized_ir), route_rows, source_formula);
 
     std::vector<ImportDiagnostic> diagnostics;
     auto hybrid_view = build_native_view_tree(hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &diagnostics});
