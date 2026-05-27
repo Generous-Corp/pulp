@@ -140,7 +140,7 @@ jobs:
       # skia-builder's GitHub release assets — neither bootstrap nor
       # actions/checkout's LFS pull populates them, so we fetch here
       # explicitly. Platforms without a published skia-builder asset
-      # (linux-arm64, windows-*) print INFO and continue without GPU;
+      # (windows-*) print INFO and continue without GPU;
       # PULP_REQUIRE_GPU_FOR_SDK is gated on the same condition so
       # configure doesn't trip on them.
 
@@ -212,13 +212,13 @@ jobs:
         # failure. Only enable it for platforms whose Skia binaries we just
         # fetched (matrix-platforms with an entry in fetch_skia_for_release.py's
         # MATRIX_TO_MANIFEST + a published release_assets entry in
-        # tools/deps/manifest.json). darwin-arm64 and linux-x64 are the only
-        # such platforms today; linux-arm64 + windows-* continue to build
-        # without Skia until their assets ship.
+        # tools/deps/manifest.json). darwin-arm64, linux-x64, and linux-arm64
+        # all have published assets today; windows-* continues to build
+        # without Skia until its assets ship.
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           case "${{ matrix.platform }}" in
-            darwin-arm64|linux-x64)
+            darwin-arm64|linux-x64|linux-arm64)
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               ;;
           esac
@@ -309,12 +309,12 @@ jobs:
         if: runner.os == 'Linux'
         # Same PULP_REQUIRE_GPU_FOR_SDK gating as the CLI configure above —
         # the SDK lib must contain the Skia path for platforms where it's
-        # supposed to. linux-x64 has a published skia-builder asset;
-        # linux-arm64 does not (yet) so it must NOT trip the gate.
+        # supposed to. Both linux-x64 and linux-arm64 have published
+        # skia-builder assets and so must trip the gate.
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           case "${{ matrix.platform }}" in
-            linux-x64)
+            linux-x64|linux-arm64)
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               ;;
           esac

@@ -26,11 +26,11 @@ simulator-x86_64) so the device and simulator zips can co-exist in one
 unpack tree. FindSkia.cmake selects the right subdir based on the
 active SDK.
 
-If the manifest has no asset for the requested platform (e.g. linux-arm64,
-windows-*), the script exits 0 with a message — those platforms keep
-their current CG-only behavior until skia-builder publishes assets for
-them. Platforms that DO have assets must succeed (sha256 verified +
-expected library on disk) or the script exits non-zero.
+If the manifest has no asset for the requested platform (e.g. windows-*),
+the script exits 0 with a message — those platforms keep their current
+CG-only behavior until skia-builder publishes assets for them. Platforms
+that DO have assets must succeed (sha256 verified + expected library on
+disk) or the script exits non-zero.
 
 This script intentionally avoids stderr-only output so the workflow log
 shows progress on stdout for either bash or PowerShell.
@@ -164,8 +164,8 @@ def main(argv: list[str]) -> int:
     asset = assets.get(manifest_key)
     if asset is None:
         # Not every release-cli matrix platform has a published skia-builder
-        # asset. linux-arm64 and windows-* are not currently published —
-        # they keep their existing CG-only behavior. Exit 0 so the workflow
+        # asset. windows-* is not currently published — those platforms
+        # keep their existing CG-only behavior. Exit 0 so the workflow
         # step succeeds; PULP_REQUIRE_GPU_FOR_SDK must NOT be set for these
         # platforms (release-cli.yml gates it appropriately).
         print(

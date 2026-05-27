@@ -116,6 +116,10 @@ jobs:
           python3 tools/scripts/test_workflow_build_dirs.py
           python3 tools/scripts/test_fetch_skia_for_release.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
+          # Pulp #47 — guard the linux-arm64 Skia manifest entry against
+          # silent regressions (parallel to the linux-x64 / mac-arm64
+          # entries enforced by tests/test_skia_determinism.py).
+          python3 tools/scripts/test_skia_linux_arm64_asset.py
 
       - name: actionlint
         # Disable shellcheck + pyflakes — the Pulp repo has accumulated

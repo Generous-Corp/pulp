@@ -568,6 +568,10 @@
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
             "sha256": "0c915135e9e2905b4dc5b9349e77e56fc0b1b1e63df6bc99b3c73c97de170898"
           },
+          "linux-arm64": {
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-linux-arm64-gpu-release.zip",
+            "sha256": "PLACEHOLDER_LINUX_ARM64_SHA256"
+          },
           "linux-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m149/skia-build-linux-x64-gpu-release.zip",
             "sha256": "53e2bfb5225148311da9bbcb7e65da4479acf774bc3d40b0341530cdc48e97b6"
