@@ -2,6 +2,13 @@
 
 We welcome contributions. Here's how to get started.
 
+## Help wanted (no Pulp internals required)
+
+Two high-impact ways to contribute that don't require digging into the framework:
+
+- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts: Logic, Reaper (CLAP), Live, Bitwig.
+- **[#3042 — AAX support: Avid SDK access](https://github.com/danielraffel/pulp/issues/3042)** — Pulp's AAX/ProTools lane is blocked on Avid Developer Program approval. If you have access (or are willing to apply), comment so we can coordinate adapter validation.
+
 ## Contributor expectations
 
 Pulp is currently a **single-maintainer project**. Contributors should expect:
