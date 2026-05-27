@@ -37,6 +37,12 @@ std::optional<Config> parse_args_vec(std::vector<std::string> args) {
     return parse_args(static_cast<int>(argv.size()), argv.data());
 }
 
+int run_benchmark_main(std::vector<std::string> args) {
+    auto argv = argv_from(args);
+    return pulp_design_import_benchmark_main_for_test(static_cast<int>(argv.size()),
+                                                      argv.data());
+}
+
 const IRNode* find_ir_node(const IRNode& node, std::string_view id) {
     if (node.stable_anchor_id == id) return &node;
     for (const auto& child : node.children) {
@@ -252,6 +258,16 @@ TEST_CASE("design-import benchmark fixture factory and render path are determini
     REQUIRE(render_frame(fixture->root()) == initial_commands);
 }
 
+TEST_CASE("design-import benchmark fixture factory creates the baked-native lane",
+          "[design-import][benchmark][coverage]") {
+    auto baked_native = make_fixture("baked-native");
+    REQUIRE(baked_native != nullptr);
+    REQUIRE(baked_native->root().id() == "bench-root");
+    REQUIRE(render_frame(baked_native->root()) > 0);
+    baked_native->step(12);
+    REQUIRE(baked_native->js_evaluation_count() == 0);
+}
+
 TEST_CASE("design-import benchmark run_phase records idle and interactive contracts",
           "[design-import][benchmark][coverage]") {
     CountingFixture fixture;
@@ -274,4 +290,25 @@ TEST_CASE("design-import benchmark run_phase records idle and interactive contra
     REQUIRE(interactive.samples > 0);
     REQUIRE(fixture.steps == interactive.samples);
     REQUIRE(fixture.last_frame == interactive.samples - 1);
+}
+
+TEST_CASE("design-import benchmark main writes reports and rejects invalid args",
+          "[design-import][benchmark][coverage]") {
+    auto output = temp_path("main-report");
+    std::filesystem::remove(output);
+
+    REQUIRE(run_benchmark_main({"bench", "--lane", "baked-cpp",
+                                "--idle-ms", "0",
+                                "--interactive-ms", "0",
+                                "--target-fps", "30",
+                                "--output", output.string()}) == 0);
+    REQUIRE(std::filesystem::is_regular_file(output));
+    auto report = read_text(output);
+    REQUIRE(report.find("\"schema\": \"pulp-design-import-benchmark-v1\"") != std::string::npos);
+    REQUIRE(report.find("\"lane\": \"baked-cpp\"") != std::string::npos);
+    REQUIRE(report.find("\"samples\": 0") != std::string::npos);
+
+    REQUIRE(run_benchmark_main({"bench", "--lane", "invalid"}) == 2);
+
+    std::filesystem::remove(output);
 }
