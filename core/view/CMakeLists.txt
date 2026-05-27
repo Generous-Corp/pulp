@@ -335,6 +335,7 @@ target_sources(pulp-view-core PRIVATE
     src/file_browser.cpp
     src/file_chooser.cpp
     src/code_editor.cpp
+    src/code_editor_tokenizer.cpp
     src/table.cpp
     src/toolbar.cpp
     src/concertina_panel.cpp
@@ -344,6 +345,7 @@ target_sources(pulp-view-core PRIVATE
     src/command_registry.cpp
     src/key_mapping_editor.cpp
     src/window_classes.cpp
+    src/bubble_message.cpp
 )
 
 target_sources(pulp-view-script PRIVATE

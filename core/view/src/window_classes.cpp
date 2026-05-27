@@ -186,4 +186,40 @@ std::unique_ptr<AlertWindow> AlertWindow::error(const std::string& title,
     return a;
 }
 
+std::unique_ptr<AlertWindow> AlertWindow::warning(const std::string& title,
+                                                   const std::string& message,
+                                                   ButtonHandler handler) {
+    auto a = std::make_unique<AlertWindow>(title, message, AlertIcon::warning);
+    a->add_button("OK");
+    if (handler) a->set_button_handler(std::move(handler));
+    return a;
+}
+
+AlertWindow::StyleTokens AlertWindow::style_tokens_for(AlertIcon icon) {
+    // Stable identifier names so hosts + themes can agree on a vocab.
+    // `glyph` is an ASCII hint the host can fall back on when an icon
+    // asset is not available.
+    switch (icon) {
+        case AlertIcon::info:
+            return {"alert.info.icon",
+                    "alert.info.accent",
+                    "i"};
+        case AlertIcon::warning:
+            return {"alert.warning.icon",
+                    "alert.warning.accent",
+                    "!"};
+        case AlertIcon::error:
+            return {"alert.error.icon",
+                    "alert.error.accent",
+                    "x"};
+        case AlertIcon::question:
+            return {"alert.question.icon",
+                    "alert.question.accent",
+                    "?"};
+        case AlertIcon::none:
+        default:
+            return {"", "", ""};
+    }
+}
+
 } // namespace pulp::view

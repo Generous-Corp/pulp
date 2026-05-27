@@ -248,6 +248,41 @@ public:
                                               const std::string& message,
                                               ButtonHandler handler = {});
 
+    /// "Warning" alert with a single OK button — sibling of `info` /
+    /// `error` (closes the gap-doc Phase 3 row
+    /// "TooltipWindow + BubbleMessageComponent + AlertWindow styled"
+    /// for the warning variant).
+    static std::unique_ptr<AlertWindow> warning(const std::string& title,
+                                                const std::string& message,
+                                                ButtonHandler handler = {});
+
+    // ── Styled-variant theme tokens ───────────────────────────────────
+
+    /// Theme color-token names the host should look up when painting
+    /// each `AlertIcon`. These names are stable identifiers — themes
+    /// that define them get the styled treatment; themes that do not
+    /// fall back to the default text color. Token names follow the
+    /// `alert.<icon>.<role>` convention.
+    struct StyleTokens {
+        const char* icon_color = "";       ///< Token for the icon glyph color.
+        const char* accent_color = "";     ///< Token for the chrome accent (border / title).
+        const char* glyph = "";            ///< Glyph hint (e.g. "i", "!", "x", "?").
+    };
+
+    /// Returns the style tokens for an icon. The host can use these to
+    /// paint the alert chrome in a theme-driven color without baking
+    /// a specific palette into the alert window itself.
+    ///
+    /// info → "alert.info.icon" + "alert.info.accent" + glyph "i"
+    /// warning → "alert.warning.icon" + "alert.warning.accent" + glyph "!"
+    /// error → "alert.error.icon" + "alert.error.accent" + glyph "x"
+    /// question → "alert.question.icon" + "alert.question.accent" + "?"
+    /// none → empty tokens.
+    static StyleTokens style_tokens_for(AlertIcon icon);
+
+    /// Convenience that returns this alert's styled tokens.
+    StyleTokens style_tokens() const { return style_tokens_for(icon_); }
+
 private:
     std::string title_;
     std::string message_;

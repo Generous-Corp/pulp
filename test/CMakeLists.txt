@@ -1437,6 +1437,10 @@ pulp_add_test_suite(pulp-test-table-list-box LIBRARIES pulp::view)
 # CodeEditor / FileBasedDocument / RecentlyOpenedFilesList tests
 pulp_add_test_suite(pulp-test-code-editor LIBRARIES pulp::view)
 
+# CodeEditor per-language tokenizer (gap-doc Phase 4 row "CodeEditor
+# language coverage")
+pulp_add_test_suite(pulp-test-code-editor-tokenizer LIBRARIES pulp::view)
+
 # PropertiesFile JSON persistence tests
 pulp_add_test_suite(pulp-test-properties SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
 
@@ -2839,8 +2843,19 @@ pulp_add_test_suite(pulp-test-component-dragger LIBRARIES pulp::view)
 # TooltipWindow — transient floating tooltip near cursor (gap-doc P2)
 pulp_add_test_suite(pulp-test-tooltip-window LIBRARIES pulp::view)
 
+# BubbleMessageComponent — floating message bubble anchored to a source
+# view with auto-dismiss (gap-doc Phase 3 sister of TooltipWindow)
+pulp_add_test_suite(pulp-test-bubble-message LIBRARIES pulp::view)
+
 # PreferencesPanel — sidebar-of-pages container (gap-doc P3)
 pulp_add_test_suite(pulp-test-preferences-panel LIBRARIES pulp::view)
+
+# PropertyPanel — typed property editor sister widget (gap-doc Phase 4
+# row "PreferencesPanel + PropertyPanel"). Header-only, links state
+# for PropertiesFile persistence.
+pulp_add_test_suite(pulp-test-property-panel
+    SOURCES test_property_panel.cpp
+    LIBRARIES pulp::view pulp::state)
 
 # UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
 pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
