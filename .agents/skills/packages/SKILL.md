@@ -130,6 +130,28 @@ device, iOS simulator, visionOS device, visionOS simulator, mac-x86_64,
 and `Skia.xcframework` slices upstream does not. While upstream stays on
 m144, this fork is the active dependency; revisit when upstream catches up.
 
+iOS-specific layout gotcha (PR #3011): unlike the mac / linux / windows
+slices, the iOS zips ship libs under a per-arch subdir
+(`build/ios-gpu/lib/Release/{device-arm64,simulator-arm64,simulator-x86_64}/libskia.a`)
+because the device and fat-simulator zips would otherwise collide on
+identical lib names when unpacked into one tree. `FindSkia.cmake` picks
+the right subdir based on `CMAKE_OSX_SYSROOT` + `CMAKE_OSX_ARCHITECTURES`;
+`tools/scripts/fetch_skia_for_release.py` keeps the subdir intact for
+`ios-device-arm64` and `ios-simulator-arm64-x86_64` matrix slices via
+`_IOS_PRESERVE_ARCH_SUBDIR`. Do not extend the flatten step to iOS, and
+do not register a single combined iOS slice without per-arch handling.
+
+Multi-arch simulator builds (`-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64`,
+the default in `tools/cmake/ios.toolchain.cmake` with
+`ONLY_ACTIVE_ARCH=NO`) are intentionally rejected by `FindSkia.cmake`
+because each Skia archive is single-arch — silently picking
+`simulator-arm64` would arch-mismatch the x86_64 link. The fix is
+either to build a single arch (`-DCMAKE_OSX_ARCHITECTURES=arm64`
+with `ONLY_ACTIVE_ARCH=YES`) or to pre-fatten the two simulator
+archives with `lipo` into a combined `simulator/libskia.a` upstream
+of `find_package(Skia)`. The default Pulp iOS smoke (`pulp-ios-sim`,
+Apple Silicon dev machines) only needs `arm64`.
+
 ## Bundled Fonts (and similar opt-in compile-time assets)
 
 Bundled fonts under `external/fonts/*.ttf` (`Inter`, `JetBrains Mono`,

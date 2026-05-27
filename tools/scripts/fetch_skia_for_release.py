@@ -17,7 +17,14 @@ Usage:
     python3 tools/scripts/fetch_skia_for_release.py <matrix-platform>
 
 Where `<matrix-platform>` is one of the release-cli.yml matrix values:
-    darwin-arm64, linux-x64, linux-arm64, windows-x64, windows-arm64
+    darwin-arm64, linux-x64, linux-arm64, windows-x64, windows-arm64,
+    ios-device-arm64, ios-simulator-arm64-x86_64 (Phase iOS-D scaffold)
+
+iOS slices intentionally keep the per-arch subdir under
+`build/ios-gpu/lib/Release/` (device-arm64, simulator-arm64,
+simulator-x86_64) so the device and simulator zips can co-exist in one
+unpack tree. FindSkia.cmake selects the right subdir based on the
+active SDK.
 
 If the manifest has no asset for the requested platform (e.g. linux-arm64,
 windows-*), the script exits 0 with a message — those platforms keep
@@ -64,6 +71,21 @@ MATRIX_TO_MANIFEST = {
     "linux-arm64": "linux-arm64",
     "windows-x64": "win-x64",
     "windows-arm64": "win-arm64",
+    # Phase iOS-D scaffold (planning/2026-05-24-auv3-ios-validation.md):
+    # iOS device + simulator slices share the build/ios-gpu/lib/Release/
+    # tree but keep their arch subdir intact (see expected_library_path
+    # and the post-unpack flatten guard).
+    "ios-device-arm64": "ios-device-arm64",
+    "ios-simulator-arm64-x86_64": "ios-simulator-arm64-x86_64",
+}
+
+# iOS keeps its per-arch subdir under Release/ (device-arm64,
+# simulator-arm64, simulator-x86_64) because flattening would collide
+# library names across slices. The flatten step below is skipped for
+# any matrix entry in this set.
+_IOS_PRESERVE_ARCH_SUBDIR = {
+    "ios-device-arm64",
+    "ios-simulator-arm64-x86_64",
 }
 
 # Expected on-disk relative library path under external/skia-build/.
@@ -73,15 +95,36 @@ def expected_library_path(matrix_platform: str) -> Path:
     if matrix_platform.startswith("darwin"):
         plat_dir = "mac-gpu"
         lib_name = "libskia.a"
+        arch_subdir = ""
     elif matrix_platform.startswith("linux"):
         plat_dir = "linux-gpu"
         lib_name = "libskia.a"
+        arch_subdir = ""
     elif matrix_platform.startswith("windows"):
         plat_dir = "win-gpu"
         lib_name = "skia.lib"
+        arch_subdir = ""
+    elif matrix_platform == "ios-device-arm64":
+        # Phase iOS-D: device + simulator share build/ios-gpu/ and keep
+        # their arch subdir under Release/ to avoid filename collisions.
+        plat_dir = "ios-gpu"
+        lib_name = "libskia.a"
+        arch_subdir = "device-arm64"
+    elif matrix_platform == "ios-simulator-arm64-x86_64":
+        # Fat simulator zip contains both simulator-arm64/ and
+        # simulator-x86_64/. The arm64 slice is what runs on the
+        # local-CI Apple Silicon runners and is the canonical sanity
+        # check; the x86_64 slice ships alongside it untouched.
+        plat_dir = "ios-gpu"
+        lib_name = "libskia.a"
+        arch_subdir = "simulator-arm64"
     else:
         raise SystemExit(f"unknown matrix platform: {matrix_platform!r}")
-    return Path("external/skia-build/build") / plat_dir / "lib" / "Release" / lib_name
+    parts = ["external/skia-build/build", plat_dir, "lib", "Release"]
+    if arch_subdir:
+        parts.append(arch_subdir)
+    parts.append(lib_name)
+    return Path(*parts)
 
 
 def main(argv: list[str]) -> int:
@@ -206,7 +249,17 @@ def main(argv: list[str]) -> int:
     #   external/skia-build/build/<plat>-gpu/lib/Release/<arch>/<lib>
     # Flatten that arch directory into Release/ so FindSkia.cmake's
     # existing layout probe matches without further changes.
-    if not expected_lib.is_file():
+    #
+    # iOS is the deliberate exception: device-arm64, simulator-arm64,
+    # and simulator-x86_64 all ship libskia.a / libdawn_combined.a with
+    # the same names and CANNOT be flattened into one Release/ dir
+    # without collision. For iOS, expected_lib already points inside
+    # the arch subdir, so the flatten loop must be skipped entirely.
+    if matrix_platform in _IOS_PRESERVE_ARCH_SUBDIR:
+        # Nothing to do — the upstream layout is exactly what FindSkia
+        # expects for iOS. Drop into the sanity check below.
+        pass
+    elif not expected_lib.is_file():
         release_dir = expected_lib.parent
         if release_dir.is_dir():
             arch_subdirs = [p for p in release_dir.iterdir() if p.is_dir()]

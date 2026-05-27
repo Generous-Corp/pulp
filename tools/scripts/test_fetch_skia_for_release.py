@@ -102,6 +102,45 @@ class ExpectedLibraryPath(unittest.TestCase):
         with self.assertRaises(SystemExit):
             fetch_skia.expected_library_path("haiku-ppc")
 
+    def test_ios_device_arm64_keeps_arch_subdir(self):
+        # Phase iOS-D: device + simulator zips share build/ios-gpu/, so
+        # the arch subdir under Release/ must be preserved (not flattened).
+        p = fetch_skia.expected_library_path("ios-device-arm64")
+        self.assertEqual(
+            str(p),
+            "external/skia-build/build/ios-gpu/lib/Release/device-arm64/libskia.a",
+        )
+
+    def test_ios_simulator_keeps_arch_subdir(self):
+        # The fat simulator zip ships both simulator-arm64 and
+        # simulator-x86_64; the sanity-check target is the arm64 slice.
+        p = fetch_skia.expected_library_path("ios-simulator-arm64-x86_64")
+        self.assertEqual(
+            str(p),
+            "external/skia-build/build/ios-gpu/lib/Release/simulator-arm64/libskia.a",
+        )
+
+
+class IosMatrixRegistration(unittest.TestCase):
+    """Phase iOS-D: iOS matrix slices must be wired and arch-preserving."""
+
+    def test_ios_keys_present_in_matrix_map(self):
+        self.assertIn("ios-device-arm64", fetch_skia.MATRIX_TO_MANIFEST)
+        self.assertIn(
+            "ios-simulator-arm64-x86_64", fetch_skia.MATRIX_TO_MANIFEST
+        )
+
+    def test_ios_keys_in_preserve_set(self):
+        # The flatten step would collide device-arm64 / simulator-arm64
+        # / simulator-x86_64 libskia.a copies into one Release/ dir.
+        self.assertIn(
+            "ios-device-arm64", fetch_skia._IOS_PRESERVE_ARCH_SUBDIR
+        )
+        self.assertIn(
+            "ios-simulator-arm64-x86_64",
+            fetch_skia._IOS_PRESERVE_ARCH_SUBDIR,
+        )
+
 
 class UnknownMatrixPlatform(unittest.TestCase):
     def test_missing_platform_argument_returns_usage_error(self):
