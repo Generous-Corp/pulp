@@ -236,6 +236,22 @@ TEST_CASE("audio model registry preserves direct HTTP URLs byte-for-byte",
     REQUIRE(resolve_checkpoint_url("https://example.test/").ends_with('/'));
 }
 
+TEST_CASE("audio model registry preserves URL bytes and rejects partial protocols",
+          "[audio][tools][model-registry][coverage]") {
+    REQUIRE(resolve_checkpoint_url("https://cdn.example.test/model.pt#sha256")
+            == "https://cdn.example.test/model.pt#sha256");
+    REQUIRE(resolve_checkpoint_url("http://localhost:8080/checkpoints/music.pt?download=1")
+            == "http://localhost:8080/checkpoints/music.pt?download=1");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/a/b/c/model.ckpt")
+            == "https://huggingface.co/org/repo/resolve/main/a/b/c/model.ckpt");
+
+    REQUIRE(resolve_checkpoint_url("hf:/org/repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("://org/repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("org/repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org//model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/").empty());
+}
+
 TEST_CASE("audio model store reads legacy metadata and malformed records fail closed",
           "[audio][tools][issue-643]") {
     TempDir temp;
@@ -1563,6 +1579,90 @@ TEST_CASE("excerpt find reports unsupported inputs after model resolution",
     auto json = to_json(result);
     REQUIRE(json.find("\"ok\": false") != std::string::npos);
     REQUIRE(json.find("unsupported; WAV only") != std::string::npos);
+}
+
+TEST_CASE("excerpt find records unreadable WAV inputs without writing dry-run bundles",
+          "[audio][tools][excerpt-service][coverage]") {
+    TempDir temp;
+    auto checkpoint = install_active_clap_model(temp);
+    auto corrupt_wav = temp.path / "corrupt.wav";
+    write_text(corrupt_wav, "not a wav payload");
+
+    ExcerptFindRequest request;
+    request.text = "corrupt input";
+    request.input_path = corrupt_wav;
+    request.top_k = 2;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 2;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.bundle_path.empty());
+    REQUIRE(result.requested_model_id == "clap_music_audioset_v1");
+    REQUIRE(result.loaded_model_id == "clap_music_audioset_v1");
+    REQUIRE(result.backend == "null");
+    REQUIRE(result.resolved_checkpoint_path == checkpoint);
+    REQUIRE(result.scanned_file_count == 1);
+    REQUIRE(result.results.empty());
+    REQUIRE(result.skipped_files.size() == 1);
+    REQUIRE(result.skipped_files[0].find("corrupt.wav") != std::string::npos);
+    REQUIRE(result.skipped_files[0].find("failed to read") != std::string::npos);
+}
+
+TEST_CASE("excerpt find reports bundle directory creation failures after ranking",
+          "[audio][tools][excerpt-service][coverage]") {
+    TempDir temp;
+    install_active_clap_model(temp);
+    auto input = temp.path / "input.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
+    auto occupied = temp.path / "occupied";
+    write_text(occupied, "not a directory");
+
+    ExcerptFindRequest request;
+    request.text = "bundle failure";
+    request.input_path = input;
+    request.bundle_out = occupied;
+    request.top_k = 1;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 1;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("failed to create bundle directories") != std::string::npos);
+    REQUIRE(result.bundle_path.string().find("occupied") != std::string::npos);
+    REQUIRE(result.scanned_file_count == 1);
+    REQUIRE(result.results.size() == 1);
+    REQUIRE(result.results[0].rank == 1);
+    REQUIRE(result.results[0].excerpt_file.empty());
+}
+
+TEST_CASE("excerpt find JSON serializer preserves failure diagnostics",
+          "[audio][tools][excerpt-service][coverage]") {
+    ExcerptFindResult result;
+    result.query = "missing model";
+    result.requested_model_id = "clap_music_audioset_v1";
+    result.backend = "null";
+    result.scanned_file_count = 4;
+    result.error = "model is not installed: clap_music_audioset_v1";
+    result.skipped_files.push_back("notes.txt (unsupported; WAV only)");
+
+    auto json = to_json(result);
+
+    REQUIRE(json.find("\"ok\": false") != std::string::npos);
+    REQUIRE(json.find("\"query\": \"missing model\"") != std::string::npos);
+    REQUIRE(json.find("\"requested_model_id\": \"clap_music_audioset_v1\"")
+            != std::string::npos);
+    REQUIRE(json.find("\"backend\": \"null\"") != std::string::npos);
+    REQUIRE(json.find("\"scanned_file_count\": 4") != std::string::npos);
+    REQUIRE(json.find("\"results\": []") != std::string::npos);
+    REQUIRE(json.find("notes.txt (unsupported; WAV only)") != std::string::npos);
+    REQUIRE(json.find("model is not installed: clap_music_audioset_v1")
+            != std::string::npos);
 }
 
 #if !defined(_WIN32)
