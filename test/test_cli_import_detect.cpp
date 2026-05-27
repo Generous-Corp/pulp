@@ -766,6 +766,161 @@ TEST_CASE("render_new_format_json includes removals and empty additions",
           std::string::npos);
 }
 
+TEST_CASE("detect preserves manifest order when matches and confidence tie",
+          "[cli][import-detect][coverage]") {
+    det::ImportsManifest manifest;
+
+    det::FingerprintClause script;
+    script.kind = det::FingerprintClause::Kind::html_script_type;
+    script.raw_kind = "html-script-type";
+    script.value = "module";
+
+    det::SourceEntry first;
+    first.source = "first";
+    first.parser_version = "1.0";
+    det::FormatEntry first_format;
+    first_format.format_version = "a";
+    first_format.parser_version = first.parser_version;
+    first_format.fingerprint = {script};
+    first.formats.push_back(first_format);
+
+    det::SourceEntry second;
+    second.source = "second";
+    second.parser_version = "2.0";
+    det::FormatEntry second_format;
+    second_format.format_version = "b";
+    second_format.parser_version = second.parser_version;
+    second_format.fingerprint = {script};
+    second.formats.push_back(second_format);
+
+    manifest.sources = {first, second};
+
+    det::InputSnapshot snap;
+    snap.script_types = {" Module "};
+    auto result = det::detect(manifest, snap);
+
+    CHECK(result.ok);
+    CHECK(result.source == "first");
+    CHECK(result.format_version == "a");
+    CHECK(result.parser_version == "1.0");
+    CHECK(result.matched_clauses == 1);
+    CHECK(result.total_clauses == 1);
+    REQUIRE(result.matched_kinds.size() == 1);
+    CHECK(result.matched_kinds[0] == "html-script-type");
+}
+
+TEST_CASE("detect reports matched and unmatched clause kinds for partial matches",
+          "[cli][import-detect][coverage]") {
+    det::ImportsManifest manifest;
+    det::SourceEntry source;
+    source.source = "diagnostic";
+    source.parser_version = "1.0";
+
+    det::FormatEntry format;
+    format.format_version = "2026.05";
+    format.parser_version = source.parser_version;
+
+    det::FingerprintClause files;
+    files.kind = det::FingerprintClause::Kind::directory_files;
+    files.raw_kind = "directory-files";
+    files.files = {"code.html"};
+    format.fingerprint.push_back(files);
+
+    det::FingerprintClause token;
+    token.kind = det::FingerprintClause::Kind::tailwind_config_token;
+    token.raw_kind = "tailwind-config-token";
+    token.any_of = {"surface"};
+    format.fingerprint.push_back(token);
+
+    det::FingerprintClause filename;
+    filename.kind = det::FingerprintClause::Kind::filename;
+    filename.raw_kind = "filename";
+    filename.regex = "(?i)^design\\.md$";
+    format.fingerprint.push_back(filename);
+
+    source.formats.push_back(format);
+    manifest.sources.push_back(source);
+
+    det::InputSnapshot snap;
+    snap.is_directory = true;
+    snap.directory_basenames = {"code.html"};
+    snap.tailwind_tokens = {"surface"};
+
+    auto result = det::detect(manifest, snap);
+    CHECK(result.source == "diagnostic");
+    CHECK(result.matched_clauses == 2);
+    CHECK(result.total_clauses == 3);
+    CHECK(result.confidence_pct == 66);
+    CHECK(result.matched_kinds == std::vector<std::string>{"directory-files",
+                                                           "tailwind-config-token"});
+    CHECK(result.unmatched_kinds == std::vector<std::string>{"filename"});
+}
+
+TEST_CASE("snapshot_input prefers code html over sorted html fallbacks",
+          "[cli][import-detect][coverage]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-code-html-priority";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    {
+        std::ofstream f(dir / "a-first.html");
+        f << "<script src=\"first.js\"></script>";
+    }
+    {
+        std::ofstream f(dir / "code.html");
+        f << "<script src=\"code.js\"></script><script type=\"module\"></script>";
+    }
+    {
+        std::ofstream f(dir / "index.html");
+        f << "<script src=\"index.js\"></script>";
+    }
+
+    auto snap = det::snapshot_input(dir);
+    CHECK(snap.is_directory);
+    CHECK(snap.directory_basenames == std::vector<std::string>{"a-first.html",
+                                                              "code.html",
+                                                              "index.html"});
+    REQUIRE(snap.script_srcs.size() == 1);
+    CHECK(snap.script_srcs[0] == "code.js");
+    REQUIRE(snap.script_types.size() == 1);
+    CHECK(snap.script_types[0] == "module");
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("new-format reports keep empty additions when no baseline tokens exist",
+          "[cli][import-detect][coverage]") {
+    det::ImportsManifest manifest;
+    det::SourceEntry source;
+    source.source = "claude";
+    det::FormatEntry fmt;
+    fmt.format_version = "2024.10";
+    det::FingerprintClause script;
+    script.kind = det::FingerprintClause::Kind::html_script_type;
+    script.value = "__bundler/template";
+    fmt.fingerprint.push_back(script);
+    source.formats.push_back(fmt);
+    manifest.sources.push_back(source);
+
+    det::DetectionResult closest;
+    closest.source = "claude";
+    closest.format_version = "2024.10";
+
+    det::InputSnapshot snap;
+    snap.tailwind_tokens = {"unexpected-a", "unexpected-b"};
+
+    auto report = det::build_new_format_report(manifest, snap, closest);
+    CHECK(report.candidate_source == "claude");
+    CHECK(report.candidate_format_version == "2024.10+next");
+    CHECK(report.based_on_source == "claude");
+    CHECK(report.based_on_format_version == "2024.10");
+    CHECK(report.additions.empty());
+
+    auto json = det::render_new_format_json(report);
+    CHECK(json.find("\"fingerprint-additions\": []") != std::string::npos);
+    CHECK(json.find("unexpected-a") == std::string::npos);
+}
+
 TEST_CASE("detect picks the highest-confidence format", "[cli][import-detect][issue-1031]") {
     auto compat = locate_compat_json();
     REQUIRE_FALSE(compat.empty());
