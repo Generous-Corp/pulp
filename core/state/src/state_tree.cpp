@@ -305,10 +305,15 @@ StateTree::SyncedClone::~SyncedClone() {
 void StateTree::SyncedClone::detach() {
     if (!attached_) return;
     for (auto& w : wiring_) {
-        if (w.source) {
-            w.source->remove_listener(w.prop_listener_id);
-            w.source->remove_child_added_listener(w.child_added_listener_id);
-            w.source->remove_child_removed_listener(w.child_removed_listener_id);
+        // The source subtree may have been removed via `remove_child`
+        // and dropped to refcount 0 between attach time and detach. In
+        // that case `lock()` returns null and the listener vector is
+        // already gone with the StateTree, so there is nothing to
+        // remove. Pinned by the dangling-pointer regression test.
+        if (auto src = w.source.lock()) {
+            src->remove_listener(w.prop_listener_id);
+            src->remove_child_added_listener(w.child_added_listener_id);
+            src->remove_child_removed_listener(w.child_removed_listener_id);
         }
     }
     wiring_.clear();
@@ -349,7 +354,10 @@ void StateTree::SyncedClone::attach_recursive(StateTree& src, StateTree& dst) {
             dst_ptr->remove_child(idx);
         });
 
-    wiring_.push_back({&src, prop_id, added_id, removed_id});
+    // weak_ptr so dropped subtrees don't dangle here — see WiringEntry
+    // comment in the header.
+    wiring_.push_back({src.weak_from_this(),
+                       prop_id, added_id, removed_id});
 
     // Recurse on existing children. dst was deep-copied from src in the
     // same shape, so positional zip is safe.

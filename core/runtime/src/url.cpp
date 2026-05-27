@@ -9,6 +9,22 @@ namespace pulp::runtime {
 
 namespace {
 
+// Parse an all-digits port. Returns nullopt on empty, non-digit, leading
+// sign, or > 65535. strtol() alone accepts trailing junk like "80abc",
+// which would silently parse as a valid URL — pinned by the Codex P2
+// review comment "Reject non-numeric URL ports".
+std::optional<uint16_t> parse_port(std::string_view text) {
+    if (text.empty()) return std::nullopt;
+    uint32_t value = 0;
+    for (char c : text) {
+        if (c < '0' || c > '9') return std::nullopt;
+        value = value * 10 + static_cast<uint32_t>(c - '0');
+        if (value > 65535u) return std::nullopt;
+    }
+    if (value == 0) return std::nullopt;
+    return static_cast<uint16_t>(value);
+}
+
 bool is_unreserved(unsigned char c) {
     return std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~';
 }
@@ -148,10 +164,9 @@ std::optional<Url> Url::parse(std::string_view text) {
             if (rb + 1 < host_port.size()) {
                 if (host_port[rb + 1] != ':') return std::nullopt;
                 auto port_text = host_port.substr(rb + 2);
-                if (port_text.empty()) return std::nullopt;
-                long p = std::strtol(std::string(port_text).c_str(), nullptr, 10);
-                if (p <= 0 || p > 65535) return std::nullopt;
-                u.port = static_cast<uint16_t>(p);
+                auto parsed = parse_port(port_text);
+                if (!parsed) return std::nullopt;
+                u.port = *parsed;
             }
         } else {
             size_t colon = host_port.rfind(':');
@@ -163,9 +178,9 @@ std::optional<Url> Url::parse(std::string_view text) {
                 if (port_text.empty()) {
                     // trailing ':' with no port — treat as no port.
                 } else {
-                    long p = std::strtol(std::string(port_text).c_str(), nullptr, 10);
-                    if (p <= 0 || p > 65535) return std::nullopt;
-                    u.port = static_cast<uint16_t>(p);
+                    auto parsed = parse_port(port_text);
+                    if (!parsed) return std::nullopt;
+                    u.port = *parsed;
                 }
             }
         }

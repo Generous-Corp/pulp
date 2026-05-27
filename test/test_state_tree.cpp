@@ -1924,3 +1924,30 @@ TEST_CASE("SyncedClone destructor detaches listeners",
     src->set("x", int64_t(2));
     REQUIRE(captured_clone->get_int("x") == 1);
 }
+
+// Regression for the Codex P1 review comment "Keep synced-clone wiring
+// from dangling after child removal" — when the synced source subtree
+// is removed and no other shared_ptr keeps it alive, the wiring vector
+// must skip listener-removal on the dead node instead of dereferencing
+// a dangling raw pointer.
+TEST_CASE("SyncedClone detach survives removed-and-dropped child subtree",
+          "[state][tree][synced-clone][codex-p1]") {
+    auto src = StateTree::create("root");
+    auto child = StateTree::create("child");
+    child->set("k", int64_t(7));
+    src->add_child(child);
+    auto sync = src->clone_synced();
+
+    // Drop the local shared_ptr to `child` first, then remove it from
+    // its parent — once the parent releases its slot the StateTree's
+    // refcount hits zero and the node is destroyed. The wiring vector
+    // still holds an entry for the dead node.
+    child.reset();
+    src->remove_child(0);
+
+    // Detach must not crash on the now-dead wiring entry. Before the
+    // fix this dereferenced a dangling raw pointer; after the fix the
+    // weak_ptr lock returns null and the entry is skipped.
+    REQUIRE_NOTHROW(sync.detach());
+    REQUIRE_FALSE(sync.is_attached());
+}

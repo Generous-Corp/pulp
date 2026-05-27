@@ -260,8 +260,13 @@ private:
 
     void attach_recursive(StateTree& src, StateTree& dst);
 
+    // Weak handle to the source node. When the source subtree is
+    // removed via `remove_child` and no other shared_ptr keeps it
+    // alive, `lock()` returns null so `detach()` skips deregistration
+    // safely instead of dereferencing a dangling raw pointer.
+    // Pinned by the SyncedClone destructor-safety regression test.
     struct WiringEntry {
-        StateTree* source;        // non-owning — the original side
+        std::weak_ptr<StateTree> source;
         int prop_listener_id;
         int child_added_listener_id;
         int child_removed_listener_id;

@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/result.hpp>
 
+#include <stdexcept>
 #include <string>
 
 using pulp::runtime::Result;
@@ -95,4 +96,45 @@ TEST_CASE("Result operator-> reaches T members", "[runtime][result]") {
     Result<std::string, int> r(Ok(std::string("hello")));
     REQUIRE(r->size() == 5);
     REQUIRE(r->front() == 'h');
+}
+
+// Regression for the Codex P2 review comment "Preserve Result object
+// when assignment construction throws" — earlier implementation
+// destroyed the current member before constructing the new one, so a
+// throwing copy ctor left the union in an indeterminate state.
+namespace {
+
+struct Throwing {
+    static inline bool should_throw = false;
+    int payload = 0;
+    Throwing() = default;
+    explicit Throwing(int p) : payload(p) {}
+    Throwing(const Throwing& o) : payload(o.payload) {
+        if (should_throw) throw std::runtime_error("boom");
+    }
+    Throwing(Throwing&& o) noexcept : payload(o.payload) {}
+    Throwing& operator=(const Throwing&) = default;
+    Throwing& operator=(Throwing&&) noexcept = default;
+};
+
+}  // namespace
+
+TEST_CASE("Result assignment preserves destination on throw",
+          "[runtime][result][codex-p2]") {
+    Result<Throwing, std::string> dst(Ok(Throwing(11)));
+    Result<Throwing, std::string> src(Ok(Throwing(99)));
+
+    Throwing::should_throw = true;
+    try {
+        dst = src;
+        FAIL("expected throw");
+    } catch (const std::runtime_error&) {
+        // expected
+    }
+    Throwing::should_throw = false;
+
+    // Strong guarantee: dst must still hold its original value, and be
+    // safe to access (no UB on destruction at end of scope).
+    REQUIRE(dst.has_value());
+    REQUIRE(dst->payload == 11);
 }

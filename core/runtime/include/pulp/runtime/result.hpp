@@ -112,12 +112,24 @@ public:
         else            new (&storage_.error) E(std::move(other.storage_.error));
     }
 
+    // Strong exception guarantee. If T's or E's copy/move ctor throws,
+    // the destination is left holding its previous value — the old
+    // member is only destroyed AFTER the new one is fully constructed.
+    // Pinned by the Codex P2 review comment "Preserve Result object
+    // when assignment construction throws".
     Result& operator=(const Result& other) {
         if (this != &other) {
-            destroy();
-            has_value_ = other.has_value_;
-            if (has_value_) new (&storage_.value) T(other.storage_.value);
-            else            new (&storage_.error) E(other.storage_.error);
+            if (other.has_value_) {
+                T tmp(other.storage_.value);   // may throw, *this untouched
+                destroy();
+                has_value_ = true;
+                new (&storage_.value) T(std::move(tmp));
+            } else {
+                E tmp(other.storage_.error);
+                destroy();
+                has_value_ = false;
+                new (&storage_.error) E(std::move(tmp));
+            }
         }
         return *this;
     }
@@ -126,10 +138,17 @@ public:
         std::is_nothrow_move_constructible_v<T> &&
         std::is_nothrow_move_constructible_v<E>) {
         if (this != &other) {
-            destroy();
-            has_value_ = other.has_value_;
-            if (has_value_) new (&storage_.value) T(std::move(other.storage_.value));
-            else            new (&storage_.error) E(std::move(other.storage_.error));
+            if (other.has_value_) {
+                T tmp(std::move(other.storage_.value));
+                destroy();
+                has_value_ = true;
+                new (&storage_.value) T(std::move(tmp));
+            } else {
+                E tmp(std::move(other.storage_.error));
+                destroy();
+                has_value_ = false;
+                new (&storage_.error) E(std::move(tmp));
+            }
         }
         return *this;
     }
