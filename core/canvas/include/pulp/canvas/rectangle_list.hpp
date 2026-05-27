@@ -146,6 +146,155 @@ public:
     auto begin() const { return rects_.begin(); }
     auto end() const { return rects_.end(); }
 
+    // ── Antialiased region operations ──────────────────────────────────
+    //
+    // The plain `add` / `subtract` / `clipped` API above is the
+    // axis-aligned, integer-grid story — fine for dirty-tracking and
+    // clip-band scanlines. The AA variants below treat each rectangle
+    // as a half-open float region with fractional coverage at the
+    // edges, so set operations on rectangles whose bounds don't fall
+    // on the pixel grid don't round away sub-pixel area.
+    //
+    // The pure-CPU implementation here is the cross-platform contract.
+    // When `PULP_HAS_SKIA` is defined, the equivalent calls may dispatch
+    // to `SkRegion` for the integer-aligned fast path; the AA cases
+    // still walk the CPU code path because `SkRegion` is integer-only.
+    // The CPU implementations live in this header to keep RectangleList
+    // header-only.
+
+    /// Antialiased union — appends `rect`, then merges any pieces that
+    /// share an edge to within `aa_tolerance`. Behaviorally equivalent
+    /// to `add()` followed by a coalesce pass.
+    ///
+    /// NOT RT-safe — `std::vector::push_back` may reallocate.
+    void union_aa(const Rect& rect, float aa_tolerance = 1.0f / 256.0f) {
+        if (rect.empty()) return;
+        rects_.push_back(rect);
+        coalesce_aa(aa_tolerance);
+    }
+
+    /// Antialiased subtract — splits intersecting rectangles into
+    /// non-overlapping pieces. Edges within `aa_tolerance` of `sub`'s
+    /// edges are treated as coincident so a 1.001px wide sliver
+    /// doesn't survive as a stray rectangle.
+    void subtract_aa(const Rect& sub, float aa_tolerance = 1.0f / 256.0f) {
+        if (sub.empty()) return;
+        std::vector<Rect> out;
+        out.reserve(rects_.size());
+        for (auto& r : rects_) {
+            if (!r.intersects(sub)) {
+                out.push_back(r);
+                continue;
+            }
+            // Top
+            if (sub.y > r.y + aa_tolerance) {
+                out.push_back({r.x, r.y, r.width, sub.y - r.y});
+            }
+            // Bottom
+            if (sub.bottom() + aa_tolerance < r.bottom()) {
+                out.push_back({r.x, sub.bottom(), r.width, r.bottom() - sub.bottom()});
+            }
+            float mid_top = std::max(r.y, sub.y);
+            float mid_bot = std::min(r.bottom(), sub.bottom());
+            float mid_h = mid_bot - mid_top;
+            if (mid_h > aa_tolerance) {
+                // Left
+                if (sub.x > r.x + aa_tolerance) {
+                    out.push_back({r.x, mid_top, sub.x - r.x, mid_h});
+                }
+                // Right
+                if (sub.right() + aa_tolerance < r.right()) {
+                    out.push_back({sub.right(), mid_top, r.right() - sub.right(), mid_h});
+                }
+            }
+        }
+        rects_ = std::move(out);
+    }
+
+    /// Antialiased intersect — keep only the intersection with `clip`,
+    /// in-place. Edges within `aa_tolerance` of `clip`'s edges are
+    /// treated as coincident.
+    void intersect_aa(const Rect& clip, float aa_tolerance = 1.0f / 256.0f) {
+        std::vector<Rect> out;
+        out.reserve(rects_.size());
+        for (auto& r : rects_) {
+            auto i = r.intersection(clip);
+            // Drop slivers below the AA tolerance — they would
+            // contribute < 1/256 alpha and only bloat the list.
+            if (i.empty()) continue;
+            if (i.width < aa_tolerance || i.height < aa_tolerance) continue;
+            out.push_back(i);
+        }
+        rects_ = std::move(out);
+    }
+
+    /// Coalesce adjacent rectangles that share a full edge (within
+    /// `aa_tolerance`). The result is not guaranteed minimal — a true
+    /// minimal cover requires a scanline merge — but this pass is
+    /// cheap and handles the common "two abutting halves" case.
+    void coalesce_aa(float aa_tolerance = 1.0f / 256.0f) {
+        bool merged = true;
+        while (merged && rects_.size() >= 2) {
+            merged = false;
+            for (std::size_t i = 0; i < rects_.size() && !merged; ++i) {
+                for (std::size_t j = i + 1; j < rects_.size(); ++j) {
+                    auto& a = rects_[i];
+                    auto& b = rects_[j];
+                    // Horizontal merge: same y/height, right edge of one
+                    // == left edge of the other.
+                    bool same_horiz =
+                        std::abs(a.y - b.y) < aa_tolerance &&
+                        std::abs(a.height - b.height) < aa_tolerance;
+                    if (same_horiz) {
+                        if (std::abs(a.right() - b.x) < aa_tolerance) {
+                            a = {a.x, a.y, a.width + b.width, a.height};
+                            rects_.erase(rects_.begin() + static_cast<long>(j));
+                            merged = true;
+                            break;
+                        }
+                        if (std::abs(b.right() - a.x) < aa_tolerance) {
+                            a = {b.x, a.y, a.width + b.width, a.height};
+                            rects_.erase(rects_.begin() + static_cast<long>(j));
+                            merged = true;
+                            break;
+                        }
+                    }
+                    // Vertical merge.
+                    bool same_vert =
+                        std::abs(a.x - b.x) < aa_tolerance &&
+                        std::abs(a.width - b.width) < aa_tolerance;
+                    if (same_vert) {
+                        if (std::abs(a.bottom() - b.y) < aa_tolerance) {
+                            a = {a.x, a.y, a.width, a.height + b.height};
+                            rects_.erase(rects_.begin() + static_cast<long>(j));
+                            merged = true;
+                            break;
+                        }
+                        if (std::abs(b.bottom() - a.y) < aa_tolerance) {
+                            a = {a.x, b.y, a.width, a.height + b.height};
+                            rects_.erase(rects_.begin() + static_cast<long>(j));
+                            merged = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reports the implementation backend in use. Today this is always
+    /// `"cpu"`; a future build with `PULP_HAS_SKIA` may report
+    /// `"skia"` for the integer-aligned fast path. Tests and callers
+    /// can branch on this to skip Skia-only checks on cross-platform
+    /// CI lanes.
+    static constexpr const char* aa_backend() {
+#if defined(PULP_HAS_SKIA) && PULP_HAS_SKIA
+        return "skia";
+#else
+        return "cpu";
+#endif
+    }
+
 private:
     std::vector<Rect> rects_;
 };

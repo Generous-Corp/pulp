@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/canvas/rectangle_list.hpp>
 
+#include <string_view>
+
 using namespace pulp::canvas;
 
 namespace {
@@ -514,4 +516,80 @@ TEST_CASE("RectangleList clear allows reuse without stale bounds",
     REQUIRE(rl.size() == 1);
     REQUIRE(rl.bounding_box() == Rect{5, 6, 7, 8});
     REQUIRE(rl.total_area() == Catch::Approx(56.0f));
+}
+
+// ── AA region operation coverage (gap-doc 2026-05-24, P3 row) ──────────
+
+TEST_CASE("RectangleList union_aa appends and coalesces an abutting pair",
+          "[canvas][rect][aa]") {
+    RectangleList rl;
+    rl.add({0, 0, 5, 10});
+    rl.union_aa({5, 0, 5, 10});  // shares right edge of first
+    REQUIRE(rl.size() == 1);
+    require_rect(rl[0], 0, 0, 10, 10);
+}
+
+TEST_CASE("RectangleList coalesce_aa merges vertical pair",
+          "[canvas][rect][aa]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 5});
+    rl.add({0, 5, 10, 5});
+    rl.coalesce_aa();
+    REQUIRE(rl.size() == 1);
+    require_rect(rl[0], 0, 0, 10, 10);
+}
+
+TEST_CASE("RectangleList coalesce_aa tolerates sub-pixel gap",
+          "[canvas][rect][aa]") {
+    RectangleList rl;
+    rl.add({0, 0, 5, 10});
+    rl.add({5.0001f, 0, 5, 10});
+    rl.coalesce_aa(1.0f / 256.0f);
+    REQUIRE(rl.size() == 1);
+    // Coalesced rect anchors on the left input's geometry — width
+    // is the sum, so the merged rect runs to 10 wide.
+    REQUIRE(rl[0].x == Catch::Approx(0.0f));
+    REQUIRE(rl[0].width == Catch::Approx(10.0f));
+    REQUIRE(rl[0].height == Catch::Approx(10.0f));
+}
+
+TEST_CASE("RectangleList subtract_aa drops the AA sliver from a near-edge cut",
+          "[canvas][rect][aa]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 10});
+    // Subtract a region that leaves a 0.001px sliver on the left
+    rl.subtract_aa({0.001f, 0, 10, 10}, 0.01f);
+    REQUIRE(rl.empty());
+}
+
+TEST_CASE("RectangleList intersect_aa drops sub-tolerance slivers",
+          "[canvas][rect][aa]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 10});
+    rl.add({10.0001f, 0, 0.0005f, 10});  // a sliver near the right edge
+    rl.intersect_aa({0, 0, 20, 20}, 1.0f / 256.0f);
+    REQUIRE(rl.size() == 1);
+    require_rect(rl[0], 0, 0, 10, 10);
+}
+
+TEST_CASE("RectangleList subtract_aa center cut produces all four bands",
+          "[canvas][rect][aa]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 10});
+    rl.subtract_aa({3, 2, 4, 5});
+    REQUIRE(rl.size() == 4);
+    REQUIRE(rl.total_area() == Catch::Approx(80.0f));
+}
+
+TEST_CASE("RectangleList aa_backend reports cpu without Skia",
+          "[canvas][rect][aa]") {
+    // The CPU lane is the cross-platform contract. If a build links
+    // Skia and flips PULP_HAS_SKIA on, this assertion changes.
+    const auto* backend = RectangleList::aa_backend();
+#if defined(PULP_HAS_SKIA) && PULP_HAS_SKIA
+    REQUIRE(std::string_view(backend) == "skia");
+#else
+    REQUIRE(std::string_view(backend) == "cpu");
+#endif
+    (void)backend;
 }
