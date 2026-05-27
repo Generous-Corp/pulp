@@ -17,6 +17,7 @@ target_sources(pulp-events PRIVATE
     src/volume_detector.cpp
     src/service_discovery.cpp
     src/push_notifications.cpp
+    src/in_app_purchase.cpp
 )
 
 # Item 6.4b — plugin-mode main-thread cooperation. macOS gets a Cocoa
