@@ -279,10 +279,12 @@ void Meter::set_level(float rms, float peak) {
     current_peak_ = std::clamp(peak, 0.0f, 1.0f);
     ballistics_.display_rms = current_rms_;
     ballistics_.display_peak = current_peak_;
+    request_repaint();
 }
 
 void Meter::update(float raw_peak, float raw_rms, float dt) {
     ballistics_.update(raw_peak, raw_rms, dt);
+    request_repaint();
 }
 
 void Meter::paint(canvas::Canvas& canvas) {

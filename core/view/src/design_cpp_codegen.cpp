@@ -904,12 +904,30 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Fader::Orientation::horizontal);");
             if (auto schema = attr(node, "pulpWidgetSchema"); schema && !schema->empty())
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_widget_schema(" + cpp_string_literal(*schema) + ");");
+            if (auto shape = attr(node, "pulpThumbShape")) {
+                const auto lower = lower_copy(*shape);
+                if (lower == "rectangle" || lower == "rect" || lower == "rounded_rect")
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_thumb_shape(pulp::view::Fader::ThumbShape::rectangle);");
+            }
+            const auto thumb_width = attr_float(node, "pulpThumbWidth");
+            const auto thumb_height = attr_float(node, "pulpThumbHeight");
+            if (thumb_width || thumb_height) {
+                emit_line(out, depth, opts.indent_spaces,
+                          std::string(var) + "->set_thumb_size(" +
+                              float_expr(ctx, thumb_width.value_or(0.0f)) + ", " +
+                              float_expr(ctx, thumb_height.value_or(0.0f)) + ");");
+            }
+            if (auto radius = attr_float(node, "pulpThumbCornerRadius")) {
+                emit_line(out, depth, opts.indent_spaces,
+                          std::string(var) + "->set_thumb_corner_radius(" + float_expr(ctx, *radius) + ");");
+            }
             break;
         }
         case NativeWidgetKind::meter: {
             const auto value = float_expr(ctx, normalized_audio_value(node));
+            const auto peak = float_expr(ctx, attr_float(node, "peak").value_or(normalized_audio_value(node)));
             emit_line(out, depth, opts.indent_spaces,
-                      std::string(var) + "->set_level(/* TODO: bind to meter */ " + value + ", " + value + ");");
+                      std::string(var) + "->set_level(/* TODO: bind to meter */ " + value + ", " + peak + ");");
             if (auto orientation = attr(node, "orientation"); orientation && *orientation == "horizontal")
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Meter::Orientation::horizontal);");
             break;
@@ -1171,6 +1189,9 @@ bool has_binding_manifest_metadata(const IRNode& node) {
              "pulpBindingParamX",
              "pulpBindingModuleY",
              "pulpBindingParamY",
+             "pulpMeterSource",
+             "pulpMeterChannel",
+             "pulpMeterValueKey",
              "pulpEventContract",
              "pulpGestureContract",
              "pulpHostAction",
@@ -1217,6 +1238,13 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         append_json_field_if_present(out, first_field, "x_binding_param", attr(node, "pulpBindingParamX"));
         append_json_field_if_present(out, first_field, "y_binding_module", attr(node, "pulpBindingModuleY"));
         append_json_field_if_present(out, first_field, "y_binding_param", attr(node, "pulpBindingParamY"));
+        append_json_field_if_present(out, first_field, "meter_source", attr(node, "pulpMeterSource"));
+        append_json_field_if_present(out, first_field, "meter_channel", attr(node, "pulpMeterChannel"));
+        append_json_field_if_present(out, first_field, "meter_value_key", attr(node, "pulpMeterValueKey"));
+        append_json_field_if_present(out, first_field, "thumb_shape", attr(node, "pulpThumbShape"));
+        append_json_field_if_present(out, first_field, "thumb_width", attr(node, "pulpThumbWidth"));
+        append_json_field_if_present(out, first_field, "thumb_height", attr(node, "pulpThumbHeight"));
+        append_json_field_if_present(out, first_field, "thumb_corner_radius", attr(node, "pulpThumbCornerRadius"));
         append_json_field_if_present(out, first_field, "event_contract", attr(node, "pulpEventContract"));
         append_json_field_if_present(out, first_field, "gesture_contract", attr(node, "pulpGestureContract"));
         append_json_field_if_present(out, first_field, "host_action", attr(node, "pulpHostAction"));
@@ -1261,6 +1289,9 @@ struct BindingHelperRoute {
     std::string x_binding_param;
     std::string y_binding_module;
     std::string y_binding_param;
+    std::string meter_source;
+    std::string meter_channel;
+    std::string meter_value_key;
     std::string event_contract;
     std::string gesture_contract;
 };
@@ -1272,12 +1303,17 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
     auto param_key = attr(node, "pulpParamKey");
     auto x_param_key = attr(node, "pulpParamKeyX");
     auto y_param_key = attr(node, "pulpParamKeyY");
+    auto meter_source = attr(node, "pulpMeterSource");
+    auto meter_channel = attr(node, "pulpMeterChannel");
     const bool has_single_param = param_key && !param_key->empty();
     const bool has_xy_params = resolved.kind == NativeWidgetKind::xy_pad &&
         x_param_key && !x_param_key->empty() &&
         y_param_key && !y_param_key->empty();
+    const bool has_meter_input = resolved.kind == NativeWidgetKind::meter &&
+        meter_source && !meter_source->empty() &&
+        meter_channel && !meter_channel->empty();
     if (route_id && !route_id->empty() &&
-        (has_single_param || has_xy_params) &&
+        (has_single_param || has_xy_params || has_meter_input) &&
         node.stable_anchor_id && !node.stable_anchor_id->empty()) {
         routes.push_back(BindingHelperRoute{
             .kind = resolved.kind,
@@ -1292,6 +1328,9 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
             .x_binding_param = attr(node, "pulpBindingParamX").value_or(std::string{}),
             .y_binding_module = attr(node, "pulpBindingModuleY").value_or(std::string{}),
             .y_binding_param = attr(node, "pulpBindingParamY").value_or(std::string{}),
+            .meter_source = meter_source.value_or(std::string{}),
+            .meter_channel = meter_channel.value_or(std::string{}),
+            .meter_value_key = attr(node, "pulpMeterValueKey").value_or(std::string{}),
             .event_contract = attr(node, "pulpEventContract").value_or(std::string{}),
             .gesture_contract = attr(node, "pulpGestureContract").value_or(std::string{}),
         });
@@ -1349,9 +1388,20 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    auto emit_meter_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportMeterBindingDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.meter_source) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.meter_channel) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.meter_value_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
     for (const auto& route : routes) {
         if (route.kind != NativeWidgetKind::knob &&
             route.kind != NativeWidgetKind::fader &&
+            route.kind != NativeWidgetKind::meter &&
             route.kind != NativeWidgetKind::toggle_button &&
             route.kind != NativeWidgetKind::xy_pad)
             continue;
@@ -1369,6 +1419,15 @@ void emit_binding_context_helpers(std::ostringstream& out,
                           "if (auto* pad = dynamic_cast<pulp::view::XYPad*>(view)) {");
                 emit_line(out, 3, opts.indent_spaces, "ctx.bind_xy_pad(*pad,");
                 emit_xy_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
+            if (route.kind == NativeWidgetKind::meter) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* meter = dynamic_cast<pulp::view::Meter*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_meter(*meter,");
+                emit_meter_descriptor(route, 3);
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");
                 continue;

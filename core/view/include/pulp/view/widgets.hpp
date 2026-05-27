@@ -397,6 +397,7 @@ private:
 class Fader : public View {
 public:
     enum class Orientation { vertical, horizontal };
+    enum class ThumbShape { circle, rectangle };
 
     Fader() { set_access_role(AccessRole::slider); set_focusable(true); }
 
@@ -415,6 +416,27 @@ public:
 
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
+
+    void set_thumb_shape(ThumbShape shape) {
+        if (thumb_shape_ == shape) return;
+        thumb_shape_ = shape;
+        request_repaint();
+    }
+    ThumbShape thumb_shape() const { return thumb_shape_; }
+
+    void set_thumb_size(float width, float height) {
+        thumb_width_ = std::max(0.0f, width);
+        thumb_height_ = std::max(0.0f, height);
+        request_repaint();
+    }
+    float thumb_width() const { return thumb_width_; }
+    float thumb_height() const { return thumb_height_; }
+
+    void set_thumb_corner_radius(float radius) {
+        thumb_corner_radius_ = std::max(0.0f, radius);
+        request_repaint();
+    }
+    float thumb_corner_radius() const { return thumb_corner_radius_; }
 
     void set_label(std::string text) {
         if (label_ == text) return;
@@ -455,6 +477,10 @@ public:
 private:
     float value_ = 0.0f;
     Orientation orientation_ = Orientation::vertical;
+    ThumbShape thumb_shape_ = ThumbShape::circle;
+    float thumb_width_ = 0.0f;
+    float thumb_height_ = 0.0f;
+    float thumb_corner_radius_ = 0.0f;
     std::string label_;
     ValueAnimation hover_thumb_scale_{1.0f};
     bool dragging_ = false;

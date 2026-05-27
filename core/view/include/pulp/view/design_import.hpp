@@ -23,6 +23,7 @@ namespace pulp::view {
 class View;
 class Knob;
 class Fader;
+class Meter;
 class ToggleButton;
 class XYPad;
 
@@ -382,6 +383,14 @@ struct NativeImportXYPadBindingDescriptor {
     std::string_view gesture_contract;
 };
 
+struct NativeImportMeterBindingDescriptor {
+    std::string_view route_id;
+    std::string_view meter_source;
+    std::string_view channel;
+    std::string_view value_key;
+    std::string_view event_contract;
+};
+
 class NativeImportBindingContext {
 public:
     virtual ~NativeImportBindingContext() = default;
@@ -391,6 +400,10 @@ public:
     }
     virtual void bind_fader(Fader& fader, const NativeImportBindingDescriptor& descriptor) {
         (void)fader;
+        (void)descriptor;
+    }
+    virtual void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& descriptor) {
+        (void)meter;
         (void)descriptor;
     }
     virtual void bind_toggle_button(ToggleButton& button, const NativeImportBindingDescriptor& descriptor) {

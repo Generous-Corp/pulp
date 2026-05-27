@@ -793,13 +793,26 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             }
             if (auto schema = attr(node, "pulpWidgetSchema"); schema && !schema->empty())
                 fader->set_widget_schema(*schema);
+            if (auto shape = attr(node, "pulpThumbShape")) {
+                const auto lower = lower_copy(*shape);
+                if (lower == "rectangle" || lower == "rect" || lower == "rounded_rect")
+                    fader->set_thumb_shape(Fader::ThumbShape::rectangle);
+            }
+            if (auto width = attr_float(node, "pulpThumbWidth")) {
+                fader->set_thumb_size(*width, attr_float(node, "pulpThumbHeight").value_or(0.0f));
+            } else if (auto height = attr_float(node, "pulpThumbHeight")) {
+                fader->set_thumb_size(0.0f, *height);
+            }
+            if (auto radius = attr_float(node, "pulpThumbCornerRadius"))
+                fader->set_thumb_corner_radius(*radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
             return fader;
         }
         case NativeWidgetKind::meter: {
             auto meter = std::make_unique<Meter>();
             const float value = normalized_audio_value(node);
-            meter->set_level(value, value);
+            const float peak = attr_float(node, "peak").value_or(value);
+            meter->set_level(value, peak);
             if (auto orientation = attr(node, "orientation");
                 orientation && lower_copy(*orientation) == "horizontal") {
                 meter->set_orientation(Meter::Orientation::horizontal);

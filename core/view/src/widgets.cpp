@@ -548,18 +548,37 @@ void Fader::paint(canvas::Canvas& canvas) {
         auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
-        float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
-        // Convention: when mapping a 0..1 value to a position with a circular/rect
-        // indicator, inset by the indicator's radius so it stays fully within bounds:
-        //   usable = length - 2 * radius;  pos = radius + value * usable;
-        if (vert) {
-            float usable = track_length - 2.0f * thumb_radius;
-            float thumb_y = thumb_radius + usable - value_ * usable;
-            canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
+        if (thumb_shape_ == ThumbShape::rectangle) {
+            const float scale = hover_thumb_scale_.value();
+            const float default_w = vert ? std::min(b.width, track_width) : 8.0f;
+            const float default_h = vert ? 5.0f : std::min(b.height, track_width);
+            const float thumb_w = std::max(1.0f, (thumb_width_ > 0.0f ? thumb_width_ : default_w) * scale);
+            const float thumb_h = std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
+            const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
+            const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
+            const float axis_center = axis_half + (vert ? (1.0f - value_) : value_) * usable;
+            const float radius = std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f);
+            if (vert) {
+                const float x = (b.width - thumb_w) * 0.5f;
+                canvas.fill_rounded_rect(x, axis_center - thumb_h * 0.5f, thumb_w, thumb_h, radius);
+            } else {
+                const float y = (b.height - thumb_h) * 0.5f;
+                canvas.fill_rounded_rect(axis_center - thumb_w * 0.5f, y, thumb_w, thumb_h, radius);
+            }
         } else {
-            float usable = track_length - 2.0f * thumb_radius;
-            float thumb_x = thumb_radius + value_ * usable;
-            canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
+            float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
+            // Convention: when mapping a 0..1 value to a position with a circular/rect
+            // indicator, inset by the indicator's radius so it stays fully within bounds:
+            //   usable = length - 2 * radius;  pos = radius + value * usable;
+            if (vert) {
+                float usable = track_length - 2.0f * thumb_radius;
+                float thumb_y = thumb_radius + usable - value_ * usable;
+                canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
+            } else {
+                float usable = track_length - 2.0f * thumb_radius;
+                float thumb_x = thumb_radius + value_ * usable;
+                canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
+            }
         }
     }
 

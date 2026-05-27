@@ -49,6 +49,8 @@ std::unique_ptr<pulp::view::View> build_imported_xy_pad_ui();
 void bind_imported_xy_pad_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 std::unique_ptr<pulp::view::View> build_imported_toggle_buttons_ui();
 void bind_imported_toggle_buttons_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
+std::unique_ptr<pulp::view::View> build_imported_meter_ui();
+void bind_imported_meter_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 
 namespace {
 
@@ -174,6 +176,13 @@ struct PhaseDParamEvent {
 struct PhaseDGestureEvent {
     std::string param_key;
     std::string phase;
+};
+
+struct PhaseDMeterEvent {
+    std::string meter_source;
+    std::string channel;
+    float rms = 0.0f;
+    float peak = 0.0f;
 };
 
 class PhaseDKnobBindingContext final : public NativeImportBindingContext {
@@ -302,6 +311,31 @@ public:
         };
     }
 
+    void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& descriptor) override {
+        bound_meters_.push_back({
+            std::string(descriptor.route_id),
+            std::string(descriptor.meter_source),
+            std::string(descriptor.channel),
+            std::string(descriptor.value_key),
+            &meter,
+        });
+    }
+
+    void set_meter_level(std::string_view meter_source,
+                         std::string_view channel,
+                         float rms,
+                         float peak) {
+        for (auto& meter : bound_meters_) {
+            if (meter.meter_source == meter_source && meter.channel == channel) {
+                REQUIRE(meter.meter != nullptr);
+                meter.meter->set_level(rms, peak);
+                meter_events_.push_back({std::string(meter_source), std::string(channel), rms, peak});
+                return;
+            }
+        }
+        FAIL("meter binding not found");
+    }
+
     float normalized(std::string_view param_key) const {
         auto found = param_ids_.find(std::string(param_key));
         REQUIRE(found != param_ids_.end());
@@ -320,6 +354,15 @@ public:
     const std::vector<std::string>& bound_params() const { return bound_params_; }
     const std::vector<PhaseDParamEvent>& events() const { return events_; }
     const std::vector<PhaseDGestureEvent>& gestures() const { return gestures_; }
+    struct BoundMeter {
+        std::string route_id;
+        std::string meter_source;
+        std::string channel;
+        std::string value_key;
+        Meter* meter = nullptr;
+    };
+    const std::vector<BoundMeter>& bound_meters() const { return bound_meters_; }
+    const std::vector<PhaseDMeterEvent>& meter_events() const { return meter_events_; }
 
     bool has_ordered_gesture(std::string_view param_key) const {
         bool saw_begin = false;
@@ -348,6 +391,8 @@ private:
     std::vector<std::string> bound_params_;
     std::vector<PhaseDParamEvent> events_;
     std::vector<PhaseDGestureEvent> gestures_;
+    std::vector<BoundMeter> bound_meters_;
+    std::vector<PhaseDMeterEvent> meter_events_;
 };
 
 IRNode label_node(std::string id,
@@ -740,6 +785,7 @@ std::string color_for_style_tokens(std::string_view tokens) {
     if (tokens.find("C.purple") != std::string_view::npos) return "#9b59ff";
     if (tokens.find("C.green") != std::string_view::npos) return "#3ddc84";
     if (tokens.find("C.amber") != std::string_view::npos) return "#f0a030";
+    if (tokens.find("C.red") != std::string_view::npos) return "#e2504a";
     return "#ff6b35";
 }
 
@@ -909,6 +955,8 @@ void add_chainer_token_colors(DesignIR& ir) {
     ir.tokens.colors["chainer.green.fill"] = "#3ddc8473";
     ir.tokens.colors["chainer.amber"] = "#f0a030";
     ir.tokens.colors["chainer.amber.fill"] = "#f0a03073";
+    ir.tokens.colors["chainer.red"] = "#e2504a";
+    ir.tokens.colors["chainer.red.fill"] = "#e2504a73";
 }
 
 IRNode lower_chainer_knob_route_to_node(IRNode& materialized_root,
@@ -1014,6 +1062,11 @@ IRNode lower_chainer_fader_route_to_node(IRNode& materialized_root,
     fader.audio_default = default_value;
     fader.attributes["value"] = float_attr(value);
     fader.attributes["orientation"] = "vertical";
+    const auto thumb_style = route["thumb_style"];
+    fader.attributes["pulpThumbShape"] = json_string(thumb_style["shape"]);
+    fader.attributes["pulpThumbWidth"] = float_attr(json_float(thumb_style["width"]));
+    fader.attributes["pulpThumbHeight"] = float_attr(json_float(thumb_style["height"]));
+    fader.attributes["pulpThumbCornerRadius"] = float_attr(json_float(thumb_style["corner_radius"]));
     fader.attributes["pulpRouteId"] = json_string(route["id"]);
     fader.attributes["pulpRouteType"] = json_string(route["route_type"]);
     fader.attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
@@ -1149,6 +1202,92 @@ IRNode lower_chainer_toggle_button_route_to_node(IRNode& materialized_root,
     return button;
 }
 
+IRNode* node_at_relative_ir_path(IRNode& root,
+                                 std::string_view root_path,
+                                 std::string_view target_path) {
+    const std::string root_text(root_path);
+    const std::string target_text(target_path);
+    REQUIRE(target_text.rfind(root_text, 0) == 0);
+    REQUIRE(target_text.size() > root_text.size());
+    REQUIRE(target_text[root_text.size()] == '/');
+
+    IRNode* node = &root;
+    std::size_t pos = root_text.size() + 1;
+    while (pos < target_text.size()) {
+        const auto slash = target_text.find('/', pos);
+        const auto part = target_text.substr(pos, slash == std::string::npos ? std::string::npos : slash - pos);
+        REQUIRE_FALSE(part.empty());
+        const auto index = static_cast<std::size_t>(std::stoul(part));
+        REQUIRE(index < node->children.size());
+        node = &node->children[index];
+        pos = slash == std::string::npos ? target_text.size() : slash + 1;
+    }
+    return node;
+}
+
+std::string meter_event_contract_string(choc::value::ValueView route,
+                                        choc::value::ValueView binding) {
+    const auto event = route["event_contracts"][0];
+    return json_string(event["prop"]) + ":" + json_string(event["kind"]) + ":" +
+           json_string(binding["meter_source"]) + "." + json_string(binding["channel"]);
+}
+
+IRNode lower_chainer_meter_route_to_node(IRNode& materialized_root,
+                                         choc::value::ValueView route) {
+    const auto materialized_path = json_string(route["materialized_ir_path"]);
+    auto* materialized_node = node_at_ir_path(materialized_root, materialized_path);
+    REQUIRE(materialized_node != nullptr);
+    REQUIRE(materialized_node->stable_anchor_id.has_value());
+    REQUIRE(*materialized_node->stable_anchor_id == json_string(route["materialized_ir_anchor"]));
+
+    auto wrapper = *materialized_node;
+    wrapper.name = "output meter wrapper";
+    wrapper.audio_widget = AudioWidgetType::none;
+    wrapper.audio_label.clear();
+    wrapper.layout.flex_shrink = 0.0f;
+    wrapper.attributes.clear();
+    wrapper.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
+    wrapper.anchor_strategy = "adapter";
+
+    const auto style_tokens = style_token_string(route);
+    const auto bindings = route["meter_bar_bindings"];
+    REQUIRE(bindings.size() == 2);
+    for (uint32_t i = 0; i < bindings.size(); ++i) {
+        const auto binding = bindings[i];
+        auto* meter = node_at_relative_ir_path(wrapper,
+                                               materialized_path,
+                                               json_string(binding["materialized_ir_path"]));
+        REQUIRE(meter != nullptr);
+        meter->children.clear();
+        meter->type = "meter";
+        meter->name = json_string(binding["channel"]) + " meter";
+        meter->text_content.clear();
+        meter->style.width = json_float(binding["width"]);
+        meter->style.height = json_float(binding["height"]);
+        meter->style.border_color = color_for_style_tokens(style_tokens);
+        meter->layout.flex_shrink = 0.0f;
+        meter->audio_widget = AudioWidgetType::meter;
+        meter->audio_label = json_string(binding["meter_source"]) + "." + json_string(binding["channel"]);
+        meter->attributes["value"] = float_attr(json_float(binding["initial_value"]));
+        meter->attributes["peak"] = float_attr(json_float(binding["peak"]));
+        meter->attributes["orientation"] = "vertical";
+        meter->attributes["pulpRouteId"] = json_string(binding["id"]);
+        meter->attributes["pulpRouteType"] = json_string(route["route_type"]);
+        meter->attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
+        meter->attributes["pulpSourcePath"] = json_string(route["stable_source_path"]);
+        meter->attributes["pulpMeterSource"] = json_string(binding["meter_source"]);
+        meter->attributes["pulpMeterChannel"] = json_string(binding["channel"]);
+        meter->attributes["pulpMeterValueKey"] = json_string(binding["value_key"]);
+        meter->attributes["pulpEventContract"] = meter_event_contract_string(route, binding);
+        meter->attributes["pulpStyleTokens"] = style_tokens;
+        meter->attributes["pulpDefaultValueSource"] = json_string(route["default_value_source"]);
+        meter->stable_anchor_id = json_string(binding["materialized_ir_anchor"]);
+        meter->anchor_strategy = "adapter";
+    }
+
+    return wrapper;
+}
+
 DesignIR lower_chainer_knob_route_to_phase_c_ir(DesignIR materialized_ir,
                                                 choc::value::ValueView route,
                                                 const ChainerKnobSourceFormula& formula) {
@@ -1206,6 +1345,27 @@ DesignIR lower_chainer_toggle_button_routes_to_phase_e_ir(DesignIR materialized_
         ir.root.children.push_back(lower_chainer_toggle_button_route_to_node(materialized_ir.root, route));
     }
     REQUIRE(ir.root.children.size() == 2);
+
+    return ir;
+}
+
+DesignIR lower_chainer_meter_routes_to_phase_e_ir(DesignIR materialized_ir,
+                                                  choc::value::ValueView route_rows) {
+    DesignIR ir;
+    ir.source = DesignSource::jsx;
+    ir.capture_method = "phase-e-chainer-meter-route-overlay";
+    ir.source_adapter = "native-cpp-import-execution-validation";
+    ir.source_version = "phase-e";
+    add_chainer_token_colors(ir);
+    ir.root = frame_node("phase-e-meter-root", "Chainer Meter", 60.0f, 112.0f, LayoutDirection::column);
+
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Meter")
+            continue;
+        ir.root.children.push_back(lower_chainer_meter_route_to_node(materialized_ir.root, route));
+    }
+    REQUIRE(ir.root.children.size() == 1);
 
     return ir;
 }
@@ -1315,6 +1475,27 @@ DesignIR lower_chainer_toggle_button_routes_to_phase_e_original_layout_ir(Design
         ++lowered;
     }
     REQUIRE(lowered == 2);
+    return materialized_ir;
+}
+
+DesignIR lower_chainer_meter_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
+                                                                  choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-meter-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-e-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Meter")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto meter = lower_chainer_meter_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(meter);
+        ++lowered;
+    }
+    REQUIRE(lowered == 1);
     return materialized_ir;
 }
 
@@ -1439,6 +1620,19 @@ struct PhaseEToggleButtonLayoutCase {
     std::string param_key;
     std::string label;
     bool initial_value = false;
+    float expected_width = 0.0f;
+    float expected_height = 0.0f;
+};
+
+struct PhaseEMeterLayoutCase {
+    std::string id;
+    std::string anchor;
+    std::string source_meter_anchor;
+    std::string source_meter_ir_path;
+    std::string meter_source;
+    std::string channel;
+    std::string value_key;
+    float initial_value = 0.0f;
     float expected_width = 0.0f;
     float expected_height = 0.0f;
 };
@@ -1605,6 +1799,49 @@ std::vector<PhaseEToggleButtonLayoutCase> chainer_toggle_button_layout_cases(IRN
         REQUIRE(*source_visual->style.width == Catch::Approx(item.expected_width));
         REQUIRE(*source_visual->style.height == Catch::Approx(item.expected_height));
         cases.push_back(std::move(item));
+    }
+    REQUIRE(cases.size() == 2);
+    return cases;
+}
+
+std::vector<PhaseEMeterLayoutCase> chainer_meter_layout_cases(IRNode& materialized_root,
+                                                              choc::value::ValueView route_rows) {
+    std::vector<PhaseEMeterLayoutCase> cases;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "Meter")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto* wrapper = node_at_ir_path(materialized_root, materialized_path);
+        REQUIRE(wrapper != nullptr);
+        REQUIRE(wrapper->stable_anchor_id.has_value());
+
+        const auto bindings = route["meter_bar_bindings"];
+        REQUIRE(bindings.size() == 2);
+        for (uint32_t j = 0; j < bindings.size(); ++j) {
+            const auto binding = bindings[j];
+            auto* source_meter = node_at_ir_path(materialized_root, json_string(binding["materialized_ir_path"]));
+            REQUIRE(source_meter != nullptr);
+            REQUIRE(source_meter->stable_anchor_id.has_value());
+
+            PhaseEMeterLayoutCase item;
+            item.id = json_string(binding["id"]);
+            item.anchor = json_string(binding["materialized_ir_anchor"]);
+            item.source_meter_anchor = *source_meter->stable_anchor_id;
+            item.source_meter_ir_path = json_string(binding["materialized_ir_path"]);
+            item.meter_source = json_string(binding["meter_source"]);
+            item.channel = json_string(binding["channel"]);
+            item.value_key = json_string(binding["value_key"]);
+            item.initial_value = json_float(binding["initial_value"]);
+            item.expected_width = json_float(binding["width"]);
+            item.expected_height = json_float(binding["height"]);
+
+            REQUIRE(source_meter->style.width.has_value());
+            REQUIRE(source_meter->style.height.has_value());
+            REQUIRE(*source_meter->style.width == Catch::Approx(item.expected_width));
+            REQUIRE(*source_meter->style.height == Catch::Approx(item.expected_height));
+            cases.push_back(std::move(item));
+        }
     }
     REQUIRE(cases.size() == 2);
     return cases;
@@ -2045,6 +2282,9 @@ TEST_CASE("Chainer route overlay can lower all faders to typed C++ with binding 
 
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Fader>()") == 6);
+    REQUIRE(count_occurrences(result.source, "->set_thumb_shape(pulp::view::Fader::ThumbShape::rectangle);") == 6);
+    REQUIRE(count_occurrences(result.source, "->set_thumb_size(17.0f, 5.0f);") == 6);
+    REQUIRE(count_occurrences(result.source, "->set_thumb_corner_radius(1.0f);") == 6);
     REQUIRE(result.header.find("bind_imported_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx)") != std::string::npos);
     REQUIRE(count_occurrences(result.source, "ctx.bind_fader(") == 6);
 
@@ -2089,6 +2329,10 @@ TEST_CASE("Chainer route overlay can lower all faders to typed C++ with binding 
             REQUIRE(entry["gesture_contract"].getString() == std::string("vertical_drag:begin/update/end"));
             REQUIRE(entry["style_tokens"].getString() == std::string(fader.style_tokens));
             REQUIRE(entry["default_value_source"].getString() == std::string("phase_c_initial_value_fallback"));
+            REQUIRE(entry["thumb_shape"].getString() == std::string("rectangle"));
+            REQUIRE(entry["thumb_width"].getString() == std::string("17"));
+            REQUIRE(entry["thumb_height"].getString() == std::string("5"));
+            REQUIRE(entry["thumb_corner_radius"].getString() == std::string("1"));
             break;
         }
         REQUIRE(found);
@@ -2239,6 +2483,84 @@ TEST_CASE("Chainer route overlay can lower toggle buttons to typed C++ with clic
     REQUIRE(compiled);
 }
 
+TEST_CASE("Chainer route overlay can lower meter bars to typed C++ with meter input sidecars",
+          "[view][import][cpp-codegen][native-cpp-phase-e]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["meter_routes"].getInt64() == 1);
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["meter_routes_mapped_to_ir"].getInt64() == 1);
+    REQUIRE(route_manifest["source_contract_overlay"]["validation"]["actual"]["meter_bar_routes"].getInt64() == 2);
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    auto meter_ir = lower_chainer_meter_routes_to_phase_e_ir(std::move(materialized_ir), route_rows);
+
+    CppExportOptions opts;
+    opts.header_filename = "phase_e_chainer_meter.hpp";
+    const auto result = generate_pulp_cpp(meter_ir, meter_ir.asset_manifest, opts);
+
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Meter>()") == 2);
+    REQUIRE(result.source.find("->set_anchor_id(\"pr_6v\")") != std::string::npos);
+    REQUIRE(result.source.find("->set_anchor_id(\"pr_6z\")") != std::string::npos);
+    REQUIRE(result.source.find("->set_level(/* TODO: bind to meter */ 0.72f, 0.72f);") != std::string::npos);
+    REQUIRE(result.source.find("->set_level(/* TODO: bind to meter */ 0.65f, 0.65f);") != std::string::npos);
+    REQUIRE(result.header.find("bind_imported_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx)") != std::string::npos);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_meter(") == 2);
+
+    auto binding_manifest = choc::json::parse(result.binding_manifest);
+    REQUIRE(binding_manifest["entries"].size() == 2);
+
+    struct ExpectedMeter {
+        const char* id;
+        const char* anchor;
+        const char* channel;
+        const char* value_key;
+        const char* event_contract;
+    };
+    const std::vector<ExpectedMeter> expected = {
+        {"chainer.meter.0.output.left", "pr_6v", "L", "left", "meterInput:set_meter_levels:output.L"},
+        {"chainer.meter.0.output.right", "pr_6z", "R", "right", "meterInput:set_meter_levels:output.R"},
+    };
+
+    for (const auto& meter : expected) {
+        bool found = false;
+        for (uint32_t i = 0; i < binding_manifest["entries"].size(); ++i) {
+            const auto entry = binding_manifest["entries"][i];
+            if (json_string(entry["id"]) != meter.id)
+                continue;
+            found = true;
+            REQUIRE(json_string(entry["anchor_id"]) == meter.anchor);
+            REQUIRE(json_string(entry["native_primitive"]) == "meter");
+            REQUIRE(json_string(entry["source_family"]) == "Meter");
+            REQUIRE(json_string(entry["meter_source"]) == "output");
+            REQUIRE(json_string(entry["meter_channel"]) == meter.channel);
+            REQUIRE(json_string(entry["meter_value_key"]) == meter.value_key);
+            REQUIRE(json_string(entry["event_contract"]) == meter.event_contract);
+            REQUIRE(json_string(entry["style_tokens"]) == "C.green,C.amber,C.red");
+            REQUIRE(json_string(entry["default_value_source"]) == "source_default");
+            break;
+        }
+        REQUIRE(found);
+    }
+
+    TempDir tmp("pulp-phase-e-chainer-meter-cpp-codegen");
+    const auto header = tmp.path / "phase_e_chainer_meter.hpp";
+    const auto source = tmp.path / "phase_e_chainer_meter.cpp";
+    const auto object = tmp.path / "phase_e_chainer_meter.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
 TEST_CASE("generated Chainer fader C++ can bind and drag every fader",
           "[view][import][cpp-codegen][native-cpp-phase-e][behavior]") {
     auto root = ::build_imported_fader_ui();
@@ -2267,12 +2589,18 @@ TEST_CASE("generated Chainer fader C++ can bind and drag every fader",
     auto before_png = render_to_png(*root, 260, 116, 1.0f);
     std::map<std::string, float> before_values;
     std::map<std::string, float> after_values;
+    std::map<std::string, std::string> thumb_shapes;
 
     for (const auto& item : expected) {
         auto* view = find_anchor(*root, item.anchor);
         REQUIRE(view != nullptr);
         auto* fader = dynamic_cast<Fader*>(view);
         REQUIRE(fader != nullptr);
+        REQUIRE(fader->thumb_shape() == Fader::ThumbShape::rectangle);
+        REQUIRE(fader->thumb_width() == Catch::Approx(17.0f));
+        REQUIRE(fader->thumb_height() == Catch::Approx(5.0f));
+        REQUIRE(fader->thumb_corner_radius() == Catch::Approx(1.0f));
+        thumb_shapes[item.param_key] = "rectangle";
 
         const auto bounds = absolute_bounds(*fader);
         REQUIRE(bounds.width > 0.0f);
@@ -2338,7 +2666,8 @@ TEST_CASE("generated Chainer fader C++ can bind and drag every fader",
                    << "\"param_key\": \"" << item.param_key << "\", "
                    << "\"before\": " << before_values[item.param_key] << ", "
                    << "\"after\": " << after_values[item.param_key] << ", "
-                   << "\"change_count\": " << ctx.change_count(item.param_key)
+                   << "\"change_count\": " << ctx.change_count(item.param_key) << ", "
+                   << "\"thumb_shape\": \"" << thumb_shapes[item.param_key] << "\""
                    << "}";
         }
         report << "\n  ]\n"
@@ -2524,6 +2853,140 @@ TEST_CASE("generated Chainer toggle button C++ can bind and click both toggle co
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-e-toggle-button-behavior-report.json", report.str());
+    }
+}
+
+TEST_CASE("generated Chainer meter C++ can bind input levels and repaint both meter bars",
+          "[view][import][cpp-codegen][native-cpp-phase-e][behavior]") {
+    auto root = ::build_imported_meter_ui();
+    REQUIRE(root != nullptr);
+
+    PhaseDKnobBindingContext ctx;
+    ::bind_imported_meter_ui(*root, ctx);
+    REQUIRE(ctx.bound_meters().size() == 2);
+
+    root->set_bounds({0.0f, 0.0f, 60.0f, 112.0f});
+    root->layout_children();
+
+    struct ExpectedMeter {
+        const char* anchor;
+        const char* source;
+        const char* channel;
+        const char* value_key;
+        float initial;
+        float after_rms;
+        float after_peak;
+    };
+    const std::vector<ExpectedMeter> expected = {
+        {"pr_6v", "output", "L", "left", 0.72f, 0.95f, 0.98f},
+        {"pr_6z", "output", "R", "right", 0.65f, 0.25f, 0.30f},
+    };
+
+    std::map<std::string, float> before_values;
+    std::map<std::string, float> after_values;
+    struct MeterVisualExtent {
+        float meter_height = 0.0f;
+        float computed_after_top_gap_px = 0.0f;
+        float expected_after_top_gap_px = 0.0f;
+        float computed_full_scale_top_gap_px = 0.0f;
+        bool top_gap_is_level_headroom = false;
+        bool full_scale_fill_is_flush = false;
+    };
+    std::map<std::string, MeterVisualExtent> visual_extents;
+    auto before_png = render_to_png(*root, 60, 112, 1.0f);
+
+    for (const auto& item : expected) {
+        auto* view = find_anchor(*root, item.anchor);
+        REQUIRE(view != nullptr);
+        auto* meter = dynamic_cast<Meter*>(view);
+        REQUIRE(meter != nullptr);
+        REQUIRE(meter->display_rms() == Catch::Approx(item.initial));
+
+        const auto bounds = absolute_bounds(*meter);
+        REQUIRE(bounds.width == Catch::Approx(8.0f));
+        REQUIRE(bounds.height == Catch::Approx(56.0f));
+
+        before_values[item.channel] = meter->display_rms();
+        ctx.set_meter_level(item.source, item.channel, item.after_rms, item.after_peak);
+        after_values[item.channel] = meter->display_rms();
+        REQUIRE(meter->display_rms() == Catch::Approx(item.after_rms));
+        REQUIRE(meter->display_peak() == Catch::Approx(item.after_peak));
+
+        const float computed_after_top_gap_px = bounds.height * (1.0f - meter->display_rms());
+        const float expected_after_top_gap_px = bounds.height * (1.0f - item.after_rms);
+        const float computed_full_scale_top_gap_px = bounds.height * (1.0f - 1.0f);
+        const bool top_gap_is_level_headroom =
+            std::abs(computed_after_top_gap_px - expected_after_top_gap_px) <= 0.01f;
+        const bool full_scale_fill_is_flush = std::abs(computed_full_scale_top_gap_px) <= 0.01f;
+        REQUIRE(top_gap_is_level_headroom);
+        REQUIRE(full_scale_fill_is_flush);
+        visual_extents[item.channel] = {
+            bounds.height,
+            computed_after_top_gap_px,
+            expected_after_top_gap_px,
+            computed_full_scale_top_gap_px,
+            top_gap_is_level_headroom,
+            full_scale_fill_is_flush,
+        };
+    }
+
+    REQUIRE(ctx.meter_events().size() == 2);
+
+    auto after_png = render_to_png(*root, 60, 112, 1.0f);
+    bool visual_smoke_valid = false;
+    CompareResult visual_smoke;
+    if (!before_png.empty() && !after_png.empty()) {
+        visual_smoke = compare_screenshots(before_png, after_png, 8);
+        REQUIRE(visual_smoke.valid);
+        REQUIRE(visual_smoke.similarity < 0.999f);
+        visual_smoke_valid = true;
+    }
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        if (!before_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-meter-before.png", before_png);
+        if (!after_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-meter-after.png", after_png);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-meter-behavior-v1\",\n"
+               << "  \"fixture\": \"chainer-phase-e-meter\",\n"
+               << "  \"scope\": \"generated-native-cpp-meter-widget-and-binding-helper\",\n"
+               << "  \"meter_input_tests\": " << expected.size() << ",\n"
+               << "  \"bound_meter_bars\": " << ctx.bound_meters().size() << ",\n"
+               << "  \"meter_updates\": " << ctx.meter_events().size() << ",\n"
+               << "  \"visual_smoke_valid\": " << (visual_smoke_valid ? "true" : "false") << ",\n"
+               << "  \"visual_smoke_similarity\": " << std::setprecision(7) << visual_smoke.similarity << ",\n"
+               << "  \"meters\": [";
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& item = expected[i];
+            report << "\n    {"
+                   << "\"anchor\": \"" << item.anchor << "\", "
+                   << "\"meter_source\": \"" << item.source << "\", "
+                   << "\"channel\": \"" << item.channel << "\", "
+                   << "\"value_key\": \"" << item.value_key << "\", "
+                   << "\"before\": " << before_values[item.channel] << ", "
+                   << "\"after\": " << after_values[item.channel] << ", "
+                   << "\"meter_height\": " << visual_extents[item.channel].meter_height << ", "
+                   << "\"computed_after_top_gap_px\": "
+                   << visual_extents[item.channel].computed_after_top_gap_px << ", "
+                   << "\"expected_after_top_gap_px\": "
+                   << visual_extents[item.channel].expected_after_top_gap_px << ", "
+                   << "\"computed_full_scale_top_gap_px\": "
+                   << visual_extents[item.channel].computed_full_scale_top_gap_px << ", "
+                   << "\"top_gap_is_level_headroom\": "
+                   << (visual_extents[item.channel].top_gap_is_level_headroom ? "true" : "false") << ", "
+                   << "\"full_scale_fill_is_flush\": "
+                   << (visual_extents[item.channel].full_scale_fill_is_flush ? "true" : "false")
+                   << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-meter-behavior-report.json", report.str());
     }
 }
 
@@ -3222,6 +3685,229 @@ TEST_CASE("Chainer original-layout hybrid classifies toggle button replacement b
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-e-toggle-button-layout-report.json", report.str());
+    }
+}
+
+TEST_CASE("Chainer original-layout hybrid classifies meter bar replacement bounds against live source bars",
+          "[view][import][cpp-codegen][native-cpp-phase-e][layout]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path runtime_trace_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/traces/chainer-live-runtime-trace.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(runtime_trace_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    const auto live_native_bounds = read_runtime_native_bounds(runtime_trace_path);
+    const auto cases = chainer_meter_layout_cases(materialized_ir.root, route_rows);
+
+    std::vector<ImportDiagnostic> source_diagnostics;
+    auto source_view = build_native_view_tree(
+        materialized_ir, materialized_ir.asset_manifest, {.diagnostics_out = &source_diagnostics});
+    REQUIRE(source_view != nullptr);
+
+    auto hybrid_ir = lower_chainer_meter_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    std::vector<ImportDiagnostic> hybrid_diagnostics;
+    auto hybrid_view = build_native_view_tree(
+        hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &hybrid_diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr float kWidth = 1280.0f;
+    constexpr float kHeight = 800.0f;
+    source_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    hybrid_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    source_view->layout_children();
+    hybrid_view->layout_children();
+
+    struct LayoutComparison {
+        const PhaseEMeterLayoutCase* item = nullptr;
+        Rect source_bounds;
+        Rect live_bounds;
+        Rect native_bounds;
+        std::vector<RuntimeAncestorBounds> source_chain;
+        std::vector<RuntimeAncestorBounds> live_source_chain;
+        std::vector<RuntimeAncestorBounds> native_chain;
+        ChainDelta live_native_preserved_first_chain_delta;
+        float center_delta_px = 0.0f;
+        float size_delta_px = 0.0f;
+        float live_center_delta_px = 0.0f;
+        float live_size_delta_px = 0.0f;
+        float source_expected_width_delta_px = 0.0f;
+        float source_expected_height_delta_px = 0.0f;
+        float live_expected_width_delta_px = 0.0f;
+        float live_expected_height_delta_px = 0.0f;
+        float native_expected_width_delta_px = 0.0f;
+        float native_expected_height_delta_px = 0.0f;
+    };
+
+    std::vector<LayoutComparison> comparisons;
+    comparisons.reserve(cases.size());
+    float max_center_delta = 0.0f;
+    float max_size_delta = 0.0f;
+    float max_live_center_delta = 0.0f;
+    float max_live_size_delta = 0.0f;
+    float max_source_expected_width_delta = 0.0f;
+    float max_source_expected_height_delta = 0.0f;
+    float max_live_expected_width_delta = 0.0f;
+    float max_live_expected_height_delta = 0.0f;
+    float max_native_expected_width_delta = 0.0f;
+    float max_native_expected_height_delta = 0.0f;
+    float max_live_native_preserved_chain_center_delta = 0.0f;
+    float max_live_native_preserved_chain_size_delta = 0.0f;
+    std::string max_live_native_preserved_chain_delta_id;
+    constexpr float kBoundsTolerancePx = 1.0f;
+
+    for (const auto& item : cases) {
+        auto* source_meter = find_anchor(*source_view, item.source_meter_anchor);
+        auto* native_meter = find_anchor(*hybrid_view, item.anchor);
+        REQUIRE(source_meter != nullptr);
+        REQUIRE(native_meter != nullptr);
+        REQUIRE(dynamic_cast<Meter*>(native_meter) != nullptr);
+
+        const auto live_source_it = live_native_bounds.find(item.source_meter_anchor);
+        REQUIRE(live_source_it != live_native_bounds.end());
+
+        LayoutComparison row;
+        row.item = &item;
+        row.source_bounds = absolute_bounds(*source_meter);
+        row.live_bounds = live_source_it->second.bounds;
+        row.native_bounds = absolute_bounds(*native_meter);
+        row.source_chain = view_ancestor_chain(*source_meter);
+        row.live_source_chain = live_source_it->second.ancestor_chain;
+        row.native_chain = view_ancestor_chain(*native_meter);
+        row.live_native_preserved_first_chain_delta = first_chain_delta(
+            row.live_source_chain, row.native_chain, kBoundsTolerancePx, item.anchor);
+        row.center_delta_px = center_delta_px(row.source_bounds, row.native_bounds);
+        row.size_delta_px = size_delta_px(row.source_bounds, row.native_bounds);
+        row.live_center_delta_px = center_delta_px(row.live_bounds, row.native_bounds);
+        row.live_size_delta_px = size_delta_px(row.live_bounds, row.native_bounds);
+        row.source_expected_width_delta_px = std::abs(row.source_bounds.width - item.expected_width);
+        row.source_expected_height_delta_px = std::abs(row.source_bounds.height - item.expected_height);
+        row.live_expected_width_delta_px = std::abs(row.live_bounds.width - item.expected_width);
+        row.live_expected_height_delta_px = std::abs(row.live_bounds.height - item.expected_height);
+        row.native_expected_width_delta_px = std::abs(row.native_bounds.width - item.expected_width);
+        row.native_expected_height_delta_px = std::abs(row.native_bounds.height - item.expected_height);
+
+        max_center_delta = std::max(max_center_delta, row.center_delta_px);
+        max_size_delta = std::max(max_size_delta, row.size_delta_px);
+        max_live_center_delta = std::max(max_live_center_delta, row.live_center_delta_px);
+        max_live_size_delta = std::max(max_live_size_delta, row.live_size_delta_px);
+        max_source_expected_width_delta = std::max(max_source_expected_width_delta, row.source_expected_width_delta_px);
+        max_source_expected_height_delta = std::max(max_source_expected_height_delta, row.source_expected_height_delta_px);
+        max_live_expected_width_delta = std::max(max_live_expected_width_delta, row.live_expected_width_delta_px);
+        max_live_expected_height_delta = std::max(max_live_expected_height_delta, row.live_expected_height_delta_px);
+        max_native_expected_width_delta = std::max(max_native_expected_width_delta, row.native_expected_width_delta_px);
+        max_native_expected_height_delta = std::max(max_native_expected_height_delta, row.native_expected_height_delta_px);
+        if (row.live_native_preserved_first_chain_delta.valid) {
+            if (row.live_native_preserved_first_chain_delta.center_delta_px > max_live_native_preserved_chain_center_delta ||
+                row.live_native_preserved_first_chain_delta.size_delta_px > max_live_native_preserved_chain_size_delta) {
+                max_live_native_preserved_chain_delta_id = row.live_native_preserved_first_chain_delta.id;
+            }
+            max_live_native_preserved_chain_center_delta = std::max(
+                max_live_native_preserved_chain_center_delta,
+                row.live_native_preserved_first_chain_delta.center_delta_px);
+            max_live_native_preserved_chain_size_delta = std::max(
+                max_live_native_preserved_chain_size_delta,
+                row.live_native_preserved_first_chain_delta.size_delta_px);
+        }
+        comparisons.push_back(std::move(row));
+    }
+
+    const bool within_threshold = max_center_delta <= kBoundsTolerancePx &&
+        max_size_delta <= kBoundsTolerancePx &&
+        max_source_expected_width_delta <= kBoundsTolerancePx &&
+        max_source_expected_height_delta <= kBoundsTolerancePx &&
+        max_native_expected_width_delta <= kBoundsTolerancePx &&
+        max_native_expected_height_delta <= kBoundsTolerancePx;
+    const bool live_runtime_within_threshold = max_live_center_delta <= kBoundsTolerancePx &&
+        max_live_size_delta <= kBoundsTolerancePx &&
+        max_live_expected_width_delta <= kBoundsTolerancePx &&
+        max_live_expected_height_delta <= kBoundsTolerancePx &&
+        max_native_expected_width_delta <= kBoundsTolerancePx &&
+        max_native_expected_height_delta <= kBoundsTolerancePx;
+    REQUIRE(live_runtime_within_threshold);
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-meter-layout-bounds-v1\",\n"
+               << "  \"fixture\": \"chainer-original-layout-hybrid-meter\",\n"
+               << "  \"scope\": \"source-meter-bars-vs-native-replacement-bounds\",\n"
+               << "  \"source_bounds_basis\": \"materialized-ir-meter-bar-track\",\n"
+               << "  \"live_bounds_basis\": \"runtime-trace-meter-bar-track\",\n"
+               << "  \"native_bounds_basis\": \"original-layout-hybrid-native-meter\",\n"
+               << "  \"threshold_px\": " << kBoundsTolerancePx << ",\n"
+               << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"live_runtime_classification\": \""
+               << (live_runtime_within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"live_runtime_within_threshold\": "
+               << (live_runtime_within_threshold ? "true" : "false") << ",\n"
+               << "  \"meter_bar_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_matched_meter_bar_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_bounds_count\": " << live_native_bounds.size() << ",\n"
+               << "  \"max_center_delta_px\": " << std::setprecision(7) << max_center_delta << ",\n"
+               << "  \"max_size_delta_px\": " << max_size_delta << ",\n"
+               << "  \"max_live_center_delta_px\": " << max_live_center_delta << ",\n"
+               << "  \"max_live_size_delta_px\": " << max_live_size_delta << ",\n"
+               << "  \"max_source_expected_width_delta_px\": " << max_source_expected_width_delta << ",\n"
+               << "  \"max_source_expected_height_delta_px\": " << max_source_expected_height_delta << ",\n"
+               << "  \"max_live_expected_width_delta_px\": " << max_live_expected_width_delta << ",\n"
+               << "  \"max_live_expected_height_delta_px\": " << max_live_expected_height_delta << ",\n"
+               << "  \"max_native_expected_width_delta_px\": " << max_native_expected_width_delta << ",\n"
+               << "  \"max_native_expected_height_delta_px\": " << max_native_expected_height_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_center_delta_px\": "
+               << max_live_native_preserved_chain_center_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_size_delta_px\": "
+               << max_live_native_preserved_chain_size_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_delta_id\": \""
+               << json_escape(max_live_native_preserved_chain_delta_id) << "\",\n"
+               << "  \"meters\": [";
+        for (std::size_t i = 0; i < comparisons.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& row = comparisons[i];
+            report << "\n    {"
+                   << "\"id\": \"" << json_escape(row.item->id) << "\", "
+                   << "\"anchor\": \"" << json_escape(row.item->anchor) << "\", "
+                   << "\"source_meter_anchor\": \"" << json_escape(row.item->source_meter_anchor) << "\", "
+                   << "\"source_meter_ir_path\": \"" << json_escape(row.item->source_meter_ir_path) << "\", "
+                   << "\"meter_source\": \"" << json_escape(row.item->meter_source) << "\", "
+                   << "\"channel\": \"" << json_escape(row.item->channel) << "\", "
+                   << "\"value_key\": \"" << json_escape(row.item->value_key) << "\", "
+                   << "\"initial_value\": " << row.item->initial_value << ", "
+                   << "\"expected_width\": " << row.item->expected_width << ", "
+                   << "\"expected_height\": " << row.item->expected_height << ", "
+                   << "\"source_bounds\": ";
+            append_rect_json(report, row.source_bounds);
+            report << ", \"live_bounds\": ";
+            append_rect_json(report, row.live_bounds);
+            report << ", \"native_bounds\": ";
+            append_rect_json(report, row.native_bounds);
+            report << ", \"center_delta_px\": " << row.center_delta_px
+                   << ", \"size_delta_px\": " << row.size_delta_px
+                   << ", \"live_center_delta_px\": " << row.live_center_delta_px
+                   << ", \"live_size_delta_px\": " << row.live_size_delta_px
+                   << ", \"source_expected_width_delta_px\": " << row.source_expected_width_delta_px
+                   << ", \"source_expected_height_delta_px\": " << row.source_expected_height_delta_px
+                   << ", \"live_expected_width_delta_px\": " << row.live_expected_width_delta_px
+                   << ", \"live_expected_height_delta_px\": " << row.live_expected_height_delta_px
+                   << ", \"native_expected_width_delta_px\": " << row.native_expected_width_delta_px
+                   << ", \"native_expected_height_delta_px\": " << row.native_expected_height_delta_px
+                   << ", \"live_native_preserved_first_chain_delta\": ";
+            append_chain_delta_json(report, row.live_native_preserved_first_chain_delta);
+            report << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-meter-layout-report.json", report.str());
     }
 }
 
