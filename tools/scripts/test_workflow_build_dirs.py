@@ -34,7 +34,10 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn('ctest --test-dir "$PULP_BUILD_DIR"', text)
         self.assertIn('ctest --test-dir "%PULP_BUILD_DIR%"', text)
         self.assertIn('label_exclude="validation|slow"', text)
-        self.assertIn('set "PULP_CTEST_LABEL_EXCLUDE=validation|slow"', text)
+        self.assertIn(
+            'set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"',
+            text,
+        )
 
         self.assertNotIn("working-directory: build", text)
 
@@ -48,7 +51,11 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
         self.assertIn(
-            'if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow"',
+            'if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"',
+            text,
+        )
+        self.assertIn(
+            'if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"',
             text,
         )
 

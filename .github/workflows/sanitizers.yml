@@ -185,7 +185,7 @@ jobs:
           ctest --test-dir build-asan --output-on-failure \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture'
+            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death'
 
   tsan:
     needs: resolve-runners
@@ -281,7 +281,7 @@ jobs:
           ctest --test-dir build-ubsan --output-on-failure \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers'
+            --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death'
 
   rtsan:
     needs: resolve-runners

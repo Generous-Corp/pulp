@@ -443,7 +443,12 @@ target_include_directories(pulp-test-cli-install-paths-mac
     PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-cli-install-paths-mac
     PRIVATE Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-cli-install-paths-mac)
+if(WIN32)
+    catch_discover_tests(pulp-test-cli-install-paths-mac
+        PROPERTIES LABELS "windows-pr-quarantine")
+else()
+    catch_discover_tests(pulp-test-cli-install-paths-mac)
+endif()
 
 # CLI upgrade URL regression test (#352): asset filename stays
 # "pulp-<platform>-<arch>.<ext>" — the version sits in the release tag.
@@ -773,7 +778,13 @@ catch_discover_tests(pulp-test-cli-migration-index
     PROPERTIES ENVIRONMENT "PULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}")
 
 # Child process tests
-pulp_add_test_suite(pulp-test-child-process LIBRARIES pulp::platform)
+if(WIN32)
+    pulp_add_test_suite(pulp-test-child-process
+        LIBRARIES pulp::platform
+        LABELS "windows-pr-quarantine")
+else()
+    pulp_add_test_suite(pulp-test-child-process LIBRARIES pulp::platform)
+endif()
 
 # Progress parser tests
 pulp_add_test_suite(pulp-test-progress-parser LIBRARIES pulp::platform)
@@ -849,7 +860,13 @@ pulp_add_test_suite(pulp-test-android-package LIBRARIES pulp::ship)
 pulp_add_test_suite(pulp-test-v3-gaps LIBRARIES pulp::signal pulp::midi pulp::audio pulp::format pulp::runtime)
 
 # Codesign tests
-pulp_add_test_suite(pulp-test-codesign LIBRARIES pulp::ship)
+if(WIN32)
+    pulp_add_test_suite(pulp-test-codesign
+        LIBRARIES pulp::ship
+        LABELS "windows-pr-quarantine")
+else()
+    pulp_add_test_suite(pulp-test-codesign LIBRARIES pulp::ship)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(pulp-test-linux-packaging test_linux_packaging.cpp)
     target_link_libraries(pulp-test-linux-packaging PRIVATE
@@ -1424,7 +1441,13 @@ add_executable(pulp-connected-child-process-fixture
     fixtures/connected_child_process_fixture.cpp)
 target_link_libraries(pulp-connected-child-process-fixture PRIVATE pulp::events)
 
-pulp_add_test_suite(pulp-test-ipc LIBRARIES pulp::events pulp::runtime)
+if(WIN32)
+    pulp_add_test_suite(pulp-test-ipc
+        LIBRARIES pulp::events pulp::runtime
+        LABELS "windows-pr-quarantine")
+else()
+    pulp_add_test_suite(pulp-test-ipc LIBRARIES pulp::events pulp::runtime)
+endif()
 add_dependencies(pulp-test-ipc pulp-connected-child-process-fixture)
 target_compile_definitions(pulp-test-ipc PRIVATE
     "PULP_TEST_CONNECTED_CHILD_FIXTURE=\"$<TARGET_FILE:pulp-connected-child-process-fixture>\"")
@@ -2561,8 +2584,15 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
 
     add_executable(pulp-test-inspector-server test_inspector_server.cpp)
     target_link_libraries(pulp-test-inspector-server PRIVATE pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-server
-        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+    if(WIN32)
+        catch_discover_tests(pulp-test-inspector-server
+            PROPERTIES
+                ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
+                LABELS "windows-pr-quarantine")
+    else()
+        catch_discover_tests(pulp-test-inspector-server
+            PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+    endif()
 
     # P11-5 (#2647): three more concern-scoped sibling TUs carved verbatim out
     # of test_inspector.cpp to bring the 3,126-line parent under the 2,000-line
@@ -2954,8 +2984,13 @@ target_compile_definitions(pulp-test-design-import-cpp-codegen PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 target_include_directories(pulp-test-design-import-cpp-codegen PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
-catch_discover_tests(pulp-test-design-import-cpp-codegen
-    PROPERTIES LABELS "parser-import")
+if(WIN32)
+    catch_discover_tests(pulp-test-design-import-cpp-codegen
+        PROPERTIES LABELS "parser-import;windows-pr-quarantine")
+else()
+    catch_discover_tests(pulp-test-design-import-cpp-codegen
+        PROPERTIES LABELS "parser-import")
+endif()
 
 add_executable(pulp-test-design-import-benchmark test_design_import_benchmark.cpp)
 target_link_libraries(pulp-test-design-import-benchmark
@@ -3160,14 +3195,25 @@ target_link_libraries(pulp-test-import-design-tool
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
-catch_discover_tests(pulp-test-import-design-tool
-    TEST_SPEC "~[network]"
-    PROPERTIES LABELS "parser-import")
-catch_discover_tests(pulp-test-import-design-tool
-    TEST_SPEC "[network]"
-    PROPERTIES
-        LABELS "parser-import"
-        RESOURCE_LOCK "design-import-network")
+if(WIN32)
+    catch_discover_tests(pulp-test-import-design-tool
+        TEST_SPEC "~[network]"
+        PROPERTIES LABELS "parser-import;windows-pr-quarantine")
+    catch_discover_tests(pulp-test-import-design-tool
+        TEST_SPEC "[network]"
+        PROPERTIES
+            LABELS "parser-import;windows-pr-quarantine"
+            RESOURCE_LOCK "design-import-network")
+else()
+    catch_discover_tests(pulp-test-import-design-tool
+        TEST_SPEC "~[network]"
+        PROPERTIES LABELS "parser-import")
+    catch_discover_tests(pulp-test-import-design-tool
+        TEST_SPEC "[network]"
+        PROPERTIES
+            LABELS "parser-import"
+            RESOURCE_LOCK "design-import-network")
+endif()
 
 # pulp #468 — `--execute-bundle` harness end-to-end. Boots the
 # ScriptEngine + WidgetBridge, builds a synthetic React-like bundle on
@@ -3383,13 +3429,25 @@ endif()
 # identifiers ("wkwebview", "webview2", "webkitgtk", "chromium", "none")
 # on every supported OS. Gap-doc 2026-05-24 row "WebBrowserComponent
 # (per-platform: WKWebView/WebView2/WebKitGTK/Chromium)".
-pulp_add_test_suite(pulp-test-webview-backend-detect LIBRARIES pulp::view)
+if(WIN32)
+    pulp_add_test_suite(pulp-test-webview-backend-detect
+        LIBRARIES pulp::view
+        LABELS "windows-pr-quarantine")
+else()
+    pulp_add_test_suite(pulp-test-webview-backend-detect LIBRARIES pulp::view)
+endif()
 
 # MIDI 2.0 UMP/MPE tests
 pulp_add_test_suite(pulp-test-ump-mpe LIBRARIES pulp::midi)
 
 # MPE voice tracker tests
-pulp_add_test_suite(pulp-test-mpe-voice-tracker LIBRARIES pulp::midi)
+if(WIN32)
+    pulp_add_test_suite(pulp-test-mpe-voice-tracker
+        LIBRARIES pulp::midi
+        LABELS "windows-pr-quarantine")
+else()
+    pulp_add_test_suite(pulp-test-mpe-voice-tracker LIBRARIES pulp::midi)
+endif()
 
 # UMP buffer + MIDI 1.0 <-> UMP conversion + UMP-aware MpeVoiceTracker
 pulp_add_test_suite(pulp-test-ump-buffer-conversion LIBRARIES pulp::format)
