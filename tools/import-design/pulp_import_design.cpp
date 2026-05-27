@@ -1152,6 +1152,8 @@ int main(int argc, char* argv[]) {
                         // exports (3.1 MB Spectr app + 1.1 MB react-dom +
                         // 0.1 MB react with growth headroom).
                         ropts.max_total_js_bytes = 16 * 1024 * 1024;
+                        ropts.runtime_snapshot_viewport_width = render_width;
+                        ropts.runtime_snapshot_viewport_height = render_height;
                         ir = parse_claude_html_with_runtime(content, ropts);
                     } else {
                         ir = parse_claude_html(content);
@@ -1200,6 +1202,8 @@ int main(int argc, char* argv[]) {
                     ClaudeRuntimeOptions ropts;
                     ropts.error_out = &runtime_error;
                     ropts.max_total_js_bytes = 16 * 1024 * 1024;
+                    ropts.runtime_snapshot_viewport_width = render_width;
+                    ropts.runtime_snapshot_viewport_height = render_height;
                     ir = parse_claude_html_with_runtime(envelope, ropts);
                     const auto fallback_reason = !runtime_error.empty()
                         ? runtime_error

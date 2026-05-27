@@ -636,6 +636,12 @@ struct ClaudeRuntimeOptions {
     /// static parser. Empty when `parse_claude_html_with_runtime` returns
     /// a non-empty IR.
     std::string* error_out = nullptr;
+
+    /// Optional viewport used when a runtime-native tree is frozen into
+    /// DesignIR. When both values are positive, the bridge root is laid out
+    /// at this size before computed view bounds are captured.
+    int runtime_snapshot_viewport_width = 0;
+    int runtime_snapshot_viewport_height = 0;
 };
 
 /// Run the Claude Design bundle in a headless JS engine and harvest the

@@ -517,12 +517,15 @@ float size_delta_px(Rect a, Rect b) {
 
 ChainDelta first_chain_delta(const std::vector<RuntimeAncestorBounds>& expected,
                              const std::vector<RuntimeAncestorBounds>& actual,
-                             float threshold_px) {
+                             float threshold_px,
+                             std::string_view ignored_id = {}) {
     std::unordered_map<std::string, Rect> actual_by_id;
     for (const auto& entry : actual)
         actual_by_id[entry.id] = entry.bounds;
 
     for (const auto& entry : expected) {
+        if (!ignored_id.empty() && entry.id == ignored_id)
+            continue;
         const auto found = actual_by_id.find(entry.id);
         if (found == actual_by_id.end())
             continue;
@@ -1809,6 +1812,7 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
         std::size_t live_native_common_ancestor_count = 0;
         ChainDelta source_live_first_chain_delta;
         ChainDelta live_native_first_chain_delta;
+        ChainDelta live_native_preserved_first_chain_delta;
         float center_delta_px = 0.0f;
         float size_delta_px = 0.0f;
         float source_expected_size_delta_px = 0.0f;
@@ -1832,6 +1836,9 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
     float max_live_native_chain_center_delta = 0.0f;
     float max_live_native_chain_size_delta = 0.0f;
     std::string max_live_native_chain_delta_id;
+    float max_live_native_preserved_chain_center_delta = 0.0f;
+    float max_live_native_preserved_chain_size_delta = 0.0f;
+    std::string max_live_native_preserved_chain_delta_id;
     constexpr float kBoundsTolerancePx = 0.5f;
 
     for (const auto& item : cases) {
@@ -1853,6 +1860,8 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
             live_source_chain, source_chain, kBoundsTolerancePx);
         const auto live_native_first_chain_delta = first_chain_delta(
             live_source_chain, native_chain, kBoundsTolerancePx);
+        const auto live_native_preserved_first_chain_delta = first_chain_delta(
+            live_source_chain, native_chain, kBoundsTolerancePx, item.anchor);
         const auto source_live_common_ancestor_count = common_chain_id_count(live_source_chain, source_chain);
         const auto live_native_common_ancestor_count = common_chain_id_count(live_source_chain, native_chain);
 
@@ -1898,6 +1907,18 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
             max_live_native_chain_size_delta = std::max(
                 max_live_native_chain_size_delta, live_native_first_chain_delta.size_delta_px);
         }
+        if (live_native_preserved_first_chain_delta.valid) {
+            if (live_native_preserved_first_chain_delta.center_delta_px > max_live_native_preserved_chain_center_delta ||
+                live_native_preserved_first_chain_delta.size_delta_px > max_live_native_preserved_chain_size_delta) {
+                max_live_native_preserved_chain_delta_id = live_native_preserved_first_chain_delta.id;
+            }
+            max_live_native_preserved_chain_center_delta = std::max(
+                max_live_native_preserved_chain_center_delta,
+                live_native_preserved_first_chain_delta.center_delta_px);
+            max_live_native_preserved_chain_size_delta = std::max(
+                max_live_native_preserved_chain_size_delta,
+                live_native_preserved_first_chain_delta.size_delta_px);
+        }
         comparisons.push_back({&item,
                                source_bounds,
                                live_source_bounds,
@@ -1909,6 +1930,7 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
                                live_native_common_ancestor_count,
                                source_live_first_chain_delta,
                                live_native_first_chain_delta,
+                               live_native_preserved_first_chain_delta,
                                center_delta,
                                size_delta,
                                source_expected_size_delta,
@@ -1970,6 +1992,12 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
                << "  \"max_live_native_chain_center_delta_px\": " << max_live_native_chain_center_delta << ",\n"
                << "  \"max_live_native_chain_size_delta_px\": " << max_live_native_chain_size_delta << ",\n"
                << "  \"max_live_native_chain_delta_id\": \"" << json_escape(max_live_native_chain_delta_id) << "\",\n"
+               << "  \"max_live_native_preserved_chain_center_delta_px\": "
+               << max_live_native_preserved_chain_center_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_size_delta_px\": "
+               << max_live_native_preserved_chain_size_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_delta_id\": \""
+               << json_escape(max_live_native_preserved_chain_delta_id) << "\",\n"
                << "  \"knobs\": [";
         for (std::size_t i = 0; i < comparisons.size(); ++i) {
             if (i != 0)
@@ -2010,6 +2038,8 @@ TEST_CASE("Chainer original-layout hybrid classifies knob replacement bounds aga
             append_chain_delta_json(report, row.source_live_first_chain_delta);
             report << ", \"live_native_first_chain_delta\": ";
             append_chain_delta_json(report, row.live_native_first_chain_delta);
+            report << ", \"live_native_preserved_first_chain_delta\": ";
+            append_chain_delta_json(report, row.live_native_preserved_first_chain_delta);
             report << ", \"source_ancestor_chain\": ";
             append_chain_json(report, row.source_chain);
             report << ", \"live_source_ancestor_chain\": ";

@@ -525,6 +525,17 @@ size_t count_ir_nodes(const IRNode& n) {
     return total;
 }
 
+void layout_runtime_snapshot_root_if_requested(View& root, const ClaudeRuntimeOptions& opts) {
+    if (opts.runtime_snapshot_viewport_width <= 0 || opts.runtime_snapshot_viewport_height <= 0)
+        return;
+
+    root.set_bounds({0.0f,
+                     0.0f,
+                     static_cast<float>(opts.runtime_snapshot_viewport_width),
+                     static_cast<float>(opts.runtime_snapshot_viewport_height)});
+    root.layout_children();
+}
+
 std::string color_to_hex(Color color) {
     std::ostringstream out;
     out << '#'
@@ -541,6 +552,70 @@ LayoutDirection ir_direction(FlexDirection direction) {
     return (direction == FlexDirection::row || direction == FlexDirection::row_reverse)
         ? LayoutDirection::row
         : LayoutDirection::column;
+}
+
+LayoutAlign ir_align(FlexAlign align) {
+    switch (align) {
+        case FlexAlign::center: return LayoutAlign::center;
+        case FlexAlign::end: return LayoutAlign::flex_end;
+        case FlexAlign::stretch: return LayoutAlign::stretch;
+        case FlexAlign::start:
+        case FlexAlign::auto_:
+        case FlexAlign::baseline:
+        default: return LayoutAlign::flex_start;
+    }
+}
+
+LayoutAlign ir_justify(FlexJustify justify) {
+    switch (justify) {
+        case FlexJustify::center: return LayoutAlign::center;
+        case FlexJustify::end_: return LayoutAlign::flex_end;
+        case FlexJustify::space_between: return LayoutAlign::space_between;
+        case FlexJustify::space_around:
+        case FlexJustify::space_evenly:
+            return LayoutAlign::space_around;
+        case FlexJustify::start:
+        default: return LayoutAlign::flex_start;
+    }
+}
+
+std::optional<std::string> ir_align_self(FlexAlign align) {
+    switch (align) {
+        case FlexAlign::center: return std::string("center");
+        case FlexAlign::end: return std::string("flex-end");
+        case FlexAlign::stretch: return std::string("stretch");
+        case FlexAlign::baseline: return std::string("baseline");
+        case FlexAlign::start: return std::string("flex-start");
+        case FlexAlign::auto_:
+        default: return std::nullopt;
+    }
+}
+
+void capture_view_border_style(const View& view, IRNode& node) {
+    if (view.has_border()) {
+        node.style.border_color = color_to_hex(view.border_color());
+        node.style.border_width = view.border_width();
+        if (view.corner_radius() != 0.0f)
+            node.style.border_radius = view.corner_radius();
+    }
+
+    if (view.has_border_sides()) {
+        node.style.border_top_color = color_to_hex(view.border_top_color());
+        node.style.border_right_color = color_to_hex(view.border_right_color());
+        node.style.border_bottom_color = color_to_hex(view.border_bottom_color());
+        node.style.border_left_color = color_to_hex(view.border_left_color());
+        if (view.has_border_top_set()) node.style.border_top_width = view.border_top_width();
+        if (view.has_border_right_set()) node.style.border_right_width = view.border_right_width();
+        if (view.has_border_bottom_set()) node.style.border_bottom_width = view.border_bottom_width();
+        if (view.has_border_left_set()) node.style.border_left_width = view.border_left_width();
+    }
+
+    if (view.has_corner_radii()) {
+        node.style.border_top_left_radius = view.corner_radius_tl();
+        node.style.border_top_right_radius = view.corner_radius_tr();
+        node.style.border_bottom_right_radius = view.corner_radius_br();
+        node.style.border_bottom_left_radius = view.corner_radius_bl();
+    }
 }
 
 IRNode view_to_ir_node(const View& view, std::string_view path) {
@@ -595,11 +670,22 @@ IRNode view_to_ir_node(const View& view, std::string_view path) {
 
     const auto& flex = view.flex();
     node.layout.direction = ir_direction(flex.direction);
+    node.layout.justify = ir_justify(flex.justify_content);
+    node.layout.align = ir_align(flex.align_items);
+    node.layout.align_self = ir_align_self(flex.align_self);
     node.layout.gap = flex.gap;
     node.layout.padding_top = flex.padding_top >= 0 ? flex.padding_top : flex.padding;
     node.layout.padding_right = flex.padding_right >= 0 ? flex.padding_right : flex.padding;
     node.layout.padding_bottom = flex.padding_bottom >= 0 ? flex.padding_bottom : flex.padding;
     node.layout.padding_left = flex.padding_left >= 0 ? flex.padding_left : flex.padding;
+    const auto margin_top = flex.margin_top >= 0 ? flex.margin_top : flex.margin;
+    const auto margin_right = flex.margin_right >= 0 ? flex.margin_right : flex.margin;
+    const auto margin_bottom = flex.margin_bottom >= 0 ? flex.margin_bottom : flex.margin;
+    const auto margin_left = flex.margin_left >= 0 ? flex.margin_left : flex.margin;
+    if (margin_top != 0.0f) node.layout.margin_top = margin_top;
+    if (margin_right != 0.0f) node.layout.margin_right = margin_right;
+    if (margin_bottom != 0.0f) node.layout.margin_bottom = margin_bottom;
+    if (margin_left != 0.0f) node.layout.margin_left = margin_left;
     if (flex.flex_grow != 0.0f) node.layout.flex_grow = flex.flex_grow;
     if (flex.flex_shrink != 1.0f) node.layout.flex_shrink = flex.flex_shrink;
 
@@ -612,6 +698,7 @@ IRNode view_to_ir_node(const View& view, std::string_view path) {
     if (flex.max_width > 0) node.style.max_width = flex.max_width;
     if (flex.max_height > 0) node.style.max_height = flex.max_height;
     if (view.has_background_color()) node.style.background_color = color_to_hex(view.background_color());
+    capture_view_border_style(view, node);
 
     for (size_t i = 0; i < view.child_count(); ++i) {
         const auto* child = view.child_at(i);
@@ -1340,6 +1427,7 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
         } catch (...) {
             return static_fallback("microtask drain failed: unknown exception");
         }
+        layout_runtime_snapshot_root_if_requested(root, opts);
 
         // Walk the materialized DOM into a JSON tree.
         std::string walked;

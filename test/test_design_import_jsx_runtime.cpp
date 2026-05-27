@@ -124,6 +124,16 @@ bool ir_contains_text(const IRNode& n, const std::string& needle) {
     return false;
 }
 
+const IRNode* find_ir_node_by_anchor(const IRNode& n, const std::string& anchor) {
+    if (n.stable_anchor_id && *n.stable_anchor_id == anchor)
+        return &n;
+    for (const auto& c : n.children) {
+        if (const auto* found = find_ir_node_by_anchor(c, anchor))
+            return found;
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 TEST_CASE("[jsx-experiment] Chainer JSX bundle materializes through Claude runtime harness",
@@ -212,6 +222,71 @@ TEST_CASE("[jsx-experiment] native live bundle can freeze through baked snapshot
     REQUIRE(ir.source_adapter == "claude-native-view");
     REQUIRE(count_ir_nodes(ir.root) > 9);
     REQUIRE(ir_contains_text(ir.root, "CHAINER native snapshot"));
+}
+
+TEST_CASE("[jsx-experiment] native live bundle freezes after requested viewport layout",
+          "[view][import][jsx]") {
+    std::string native_bundle =
+        "(function(){\n"
+        "  createCol('native-panel', '');\n"
+        "  createLabel('caption', 'native viewport', 'native-panel');\n"
+        "  setFlex('caption', 'margin_bottom', 8);\n"
+        "  setBorderBottomColor('caption', '#112233');\n"
+        "  setBorderBottomWidth('caption', 1);\n"
+        "  createRow('wrap-row', 'native-panel');\n"
+        "  setFlex('wrap-row', 'flex_wrap', 'wrap');\n"
+        "  for (var i = 0; i < 8; ++i) {\n"
+        "    var id = 'tile-' + i;\n"
+        "    createCol(id, 'wrap-row');\n"
+        "    setFlex(id, 'width', 120);\n"
+        "    setFlex(id, 'height', 20);\n"
+        "    setFlex(id, 'flex_shrink', 0);\n"
+        "  }\n"
+        "  createCol('align-host', 'native-panel');\n"
+        "  setFlex('align-host', 'width', 260);\n"
+        "  setFlex('align-host', 'align_items', 'center');\n"
+        "  createCol('centered-child', 'align-host');\n"
+        "  setFlex('centered-child', 'width', 120);\n"
+        "  setFlex('centered-child', 'height', 20);\n"
+        "})();\n";
+    native_bundle.append(256, ' ');
+
+    auto bundle = parse_jsx_react(native_bundle, "NativeViewportSmoke");
+    REQUIRE(bundle.has_value());
+
+    std::string err;
+    ClaudeRuntimeOptions opts;
+    opts.error_out = &err;
+    opts.runtime_snapshot_viewport_width = 260;
+    opts.runtime_snapshot_viewport_height = 180;
+    auto ir = parse_claude_html_with_runtime(synthesize_runtime_envelope(*bundle), opts);
+
+    INFO("runtime error_out: " << err);
+    INFO("capture_method: " << ir.capture_method);
+    REQUIRE(err.empty());
+    REQUIRE(ir.capture_method == "runtime_native_snapshot");
+
+    const auto* panel = find_ir_node_by_anchor(ir.root, "native-panel");
+    const auto* caption = find_ir_node_by_anchor(ir.root, "caption");
+    const auto* wrap = find_ir_node_by_anchor(ir.root, "wrap-row");
+    const auto* align_host = find_ir_node_by_anchor(ir.root, "align-host");
+    REQUIRE(panel != nullptr);
+    REQUIRE(caption != nullptr);
+    REQUIRE(wrap != nullptr);
+    REQUIRE(align_host != nullptr);
+    REQUIRE(panel->style.width);
+    REQUIRE(caption->layout.margin_bottom);
+    REQUIRE(wrap->style.width);
+    REQUIRE(wrap->style.height);
+    REQUIRE(*panel->style.width == 260.0f);
+    REQUIRE(*caption->layout.margin_bottom == 8.0f);
+    REQUIRE(caption->style.border_bottom_width);
+    REQUIRE(caption->style.border_bottom_color);
+    REQUIRE(*caption->style.border_bottom_width == 1.0f);
+    REQUIRE(*caption->style.border_bottom_color == "#112233");
+    REQUIRE(align_host->layout.align == LayoutAlign::center);
+    REQUIRE(*wrap->style.width == 260.0f);
+    REQUIRE(*wrap->style.height > 20.0f);
 }
 
 TEST_CASE("[jsx-experiment] TypeScript .tsx bundle materializes through Claude runtime harness",
