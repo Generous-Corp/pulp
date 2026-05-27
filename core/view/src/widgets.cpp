@@ -249,19 +249,33 @@ void Fader::on_mouse_leave() {
 }
 
 void Fader::on_mouse_event(const MouseEvent& event) {
-    if (!event.is_down) { dragging_ = false; return; }
+    if (!event.is_down) {
+        on_mouse_up(event.position);
+        return;
+    }
+    on_mouse_down(event.position);
+}
+
+void Fader::on_mouse_down(Point pos) {
+    if (!dragging_ && on_gesture_begin) on_gesture_begin();
     dragging_ = true;
     auto b = local_bounds();
     float new_val;
     if (orientation_ == Orientation::horizontal) {
-        new_val = std::clamp(event.position.x / b.width, 0.0f, 1.0f);
+        new_val = std::clamp(pos.x / b.width, 0.0f, 1.0f);
     } else {
-        new_val = std::clamp(1.0f - event.position.y / b.height, 0.0f, 1.0f);
+        new_val = std::clamp(1.0f - pos.y / b.height, 0.0f, 1.0f);
     }
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
     }
+}
+
+void Fader::on_mouse_up(Point) {
+    if (!dragging_) return;
+    dragging_ = false;
+    if (on_gesture_end) on_gesture_end();
 }
 
 void Fader::on_mouse_drag(Point pos) {

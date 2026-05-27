@@ -694,14 +694,24 @@ void View::simulate_drag(Point start, Point end, int steps) {
     }
     if (!target) return;
 
-    target->on_mouse_down(start);
+    auto to_target_local = [this, target](Point p) {
+        View* v = target;
+        while (v && v != this) {
+            p.x -= v->bounds().x;
+            p.y -= v->bounds().y;
+            v = v->parent();
+        }
+        return p;
+    };
+
+    target->on_mouse_down(to_target_local(start));
     for (int i = 1; i <= steps; ++i) {
         float t = static_cast<float>(i) / steps;
         Point p = {start.x + (end.x - start.x) * t,
                    start.y + (end.y - start.y) * t};
-        target->on_mouse_drag(p);
+        target->on_mouse_drag(to_target_local(p));
     }
-    target->on_mouse_up(end);
+    target->on_mouse_up(to_target_local(end));
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {

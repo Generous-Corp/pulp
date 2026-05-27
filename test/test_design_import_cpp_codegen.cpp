@@ -43,6 +43,8 @@ namespace fs = std::filesystem;
 
 std::unique_ptr<pulp::view::View> build_imported_ui();
 void bind_imported_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
+std::unique_ptr<pulp::view::View> build_imported_fader_ui();
+void bind_imported_fader_ui(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);
 
 namespace {
 
@@ -202,6 +204,34 @@ public:
             events_.push_back({param_key, normalized});
         };
         knob.on_gesture_end = [this, id] {
+            store_.end_gesture(id);
+        };
+    }
+
+    void bind_fader(Fader& fader, const NativeImportBindingDescriptor& descriptor) override {
+        const auto param_key = std::string(descriptor.param_key);
+        const auto route_id = std::string(descriptor.route_id);
+
+        auto id = static_cast<pulp::state::ParamID>(param_ids_.size() + 1u);
+        pulp::state::ParamInfo info;
+        info.id = id;
+        info.name = param_key;
+        info.range = {0.0f, 1.0f, fader.value()};
+        store_.add_parameter(info);
+        store_.set_normalized(id, fader.value());
+
+        param_ids_[param_key] = id;
+        param_keys_by_id_[id] = param_key;
+        route_ids_[param_key] = route_id;
+        bound_params_.push_back(param_key);
+        fader.on_gesture_begin = [this, id] {
+            store_.begin_gesture(id);
+        };
+        fader.on_change = [this, id, param_key](float normalized) {
+            store_.set_normalized(id, normalized);
+            events_.push_back({param_key, normalized});
+        };
+        fader.on_gesture_end = [this, id] {
             store_.end_gesture(id);
         };
     }
@@ -1644,6 +1674,114 @@ TEST_CASE("Chainer route overlay can lower all faders to typed C++ with binding 
     const bool compiled = compile_generated_source(source, object, &diagnostics);
     INFO(diagnostics);
     REQUIRE(compiled);
+}
+
+TEST_CASE("generated Chainer fader C++ can bind and drag every fader",
+          "[view][import][cpp-codegen][native-cpp-phase-e][behavior]") {
+    auto root = ::build_imported_fader_ui();
+    REQUIRE(root != nullptr);
+
+    PhaseDKnobBindingContext ctx;
+    ::bind_imported_fader_ui(*root, ctx);
+    REQUIRE(ctx.bound_params().size() == 6);
+
+    root->set_bounds({0.0f, 0.0f, 260.0f, 116.0f});
+    root->layout_children();
+
+    struct ExpectedFader {
+        const char* anchor;
+        const char* param_key;
+    };
+    const std::vector<ExpectedFader> expected = {
+        {"pr_3e", "env_a"},
+        {"pr_3k", "env_d"},
+        {"pr_3q", "env_s"},
+        {"pr_3w", "env_r"},
+        {"pr_64", "send_level"},
+        {"pr_6a", "return_level"},
+    };
+
+    auto before_png = render_to_png(*root, 260, 116, 1.0f);
+    std::map<std::string, float> before_values;
+    std::map<std::string, float> after_values;
+
+    for (const auto& item : expected) {
+        auto* view = find_anchor(*root, item.anchor);
+        REQUIRE(view != nullptr);
+        auto* fader = dynamic_cast<Fader*>(view);
+        REQUIRE(fader != nullptr);
+
+        const auto bounds = absolute_bounds(*fader);
+        REQUIRE(bounds.width > 0.0f);
+        REQUIRE(bounds.height > 0.0f);
+
+        const auto before = fader->value();
+        before_values[item.param_key] = before;
+        const Point start{bounds.x + bounds.width * 0.5f, bounds.y + bounds.height - 4.0f};
+        const Point end{start.x, bounds.y + 4.0f};
+        root->simulate_drag(start, end, 6);
+
+        const auto after = fader->value();
+        after_values[item.param_key] = after;
+        REQUIRE(after > before);
+        REQUIRE(ctx.normalized(item.param_key) == Catch::Approx(after));
+        REQUIRE(ctx.change_count(item.param_key) > 0);
+        REQUIRE(ctx.has_ordered_gesture(item.param_key));
+    }
+
+    auto after_png = render_to_png(*root, 260, 116, 1.0f);
+    bool visual_smoke_valid = false;
+    CompareResult visual_smoke;
+    if (!before_png.empty() && !after_png.empty()) {
+        visual_smoke = compare_screenshots(before_png, after_png, 8);
+        REQUIRE(visual_smoke.valid);
+        REQUIRE(visual_smoke.similarity < 0.999f);
+        visual_smoke_valid = true;
+    }
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        if (!before_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-faders-before.png", before_png);
+        if (!after_png.empty())
+            write_bytes(dir / "reports" / "screenshots" / "chainer-phase-e-faders-after.png", after_png);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-fader-behavior-v1\",\n"
+               << "  \"fixture\": \"chainer-phase-e-faders\",\n"
+               << "  \"scope\": \"generated-native-cpp-fader-widget-and-binding-helper\",\n"
+               << "  \"headless_drag_tests\": " << expected.size() << ",\n"
+               << "  \"bound_faders\": " << ctx.bound_params().size() << ",\n"
+               << "  \"parameter_updates\": " << ctx.events().size() << ",\n"
+               << "  \"gesture_events\": " << ctx.gestures().size() << ",\n"
+               << "  \"gesture_begin_events\": "
+               << std::count_if(ctx.gestures().begin(), ctx.gestures().end(), [](const PhaseDGestureEvent& event) {
+                      return event.phase == "begin";
+                  }) << ",\n"
+               << "  \"gesture_end_events\": "
+               << std::count_if(ctx.gestures().begin(), ctx.gestures().end(), [](const PhaseDGestureEvent& event) {
+                      return event.phase == "end";
+                  }) << ",\n"
+               << "  \"visual_smoke_valid\": " << (visual_smoke_valid ? "true" : "false") << ",\n"
+               << "  \"visual_smoke_similarity\": " << std::setprecision(7) << visual_smoke.similarity << ",\n"
+               << "  \"faders\": [";
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& item = expected[i];
+            report << "\n    {"
+                   << "\"anchor\": \"" << item.anchor << "\", "
+                   << "\"param_key\": \"" << item.param_key << "\", "
+                   << "\"before\": " << before_values[item.param_key] << ", "
+                   << "\"after\": " << after_values[item.param_key] << ", "
+                   << "\"change_count\": " << ctx.change_count(item.param_key)
+                   << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-fader-behavior-report.json", report.str());
+    }
 }
 
 TEST_CASE("generated Chainer all-knob C++ can bind and drag every knob",

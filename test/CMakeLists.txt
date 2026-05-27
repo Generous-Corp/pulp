@@ -2893,10 +2893,16 @@ if(APPLE AND NOT PULP_IOS)
         PROPERTIES LABELS "parser-import")
 endif()
 
+set(CHAINER_PHASE_E_FADERS_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-e-faders.cpp)
+set_source_files_properties(${CHAINER_PHASE_E_FADERS_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_imported_fader_ui;bake_asset_manifest=bake_fader_asset_manifest;bind_imported_ui=bind_imported_fader_ui")
+
 add_executable(pulp-test-design-import-cpp-codegen
     test_design_import_cpp_codegen.cpp
     fixtures/design_import_generated_cpp_fixture.cpp
-    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-d-all-knobs.cpp)
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-d-all-knobs.cpp
+    ${CHAINER_PHASE_E_FADERS_CPP})
 target_link_libraries(pulp-test-design-import-cpp-codegen
     PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-cpp-codegen PRIVATE

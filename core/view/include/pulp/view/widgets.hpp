@@ -425,10 +425,14 @@ public:
 
     /// Called when the value changes.
     std::function<void(float)> on_change;
+    std::function<void()> on_gesture_begin;
+    std::function<void()> on_gesture_end;
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_up(Point pos) override;
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
 
