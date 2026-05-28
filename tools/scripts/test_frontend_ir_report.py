@@ -71,8 +71,14 @@ class FrontendIrReportTests(unittest.TestCase):
                             {
                                 "param_key": "gain",
                                 "binding_contract_id": "binding.gain",
+                                "module": "OSC",
+                                "param": "gain",
                             }
                         ],
+                        "initial_value": 0.25,
+                        "value": 0.5,
+                        "default_value": 0.0,
+                        "default_value_source": "prop.default",
                         "event_contracts": [
                             {
                                 "kind": "set_param",
@@ -133,6 +139,13 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["nodes"][0]["source_span"]["line"], 10)
         self.assertEqual(report["source"]["spans"][0]["node_id"], "knob.1")
         self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["id"], "gain")
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["source_binding_id"], "binding.gain")
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["module"], "OSC")
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["param"], "gain")
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["initial_value"], 0.25)
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["value"], 0.5)
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["range"]["default"], 0.0)
+        self.assertEqual(report["nodes"][0]["state"]["parameters"][0]["default_source"], "prop.default")
         self.assertEqual(report["routes"][0]["chosen_route"], "native_cpp")
         self.assertFalse(report["routes"][0]["requires_js_engine"])
         self.assertIn("validation_refs", report["routes"][0])
@@ -144,6 +157,14 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertNotIn("source_css_values", report["validation"]["style_counts"])
         self.assertEqual(report["validation"]["style_counts"]["source_style_attributes"], 3)
         self.assertEqual(report["validation"]["style_counts"]["source_style_keys"], 2)
+        self.assertEqual(report["validation"]["state_counts"]["parameters"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["parameters_with_value"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["parameters_with_initial_value"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["parameters_with_default"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["parameters_with_source_binding_id"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["parameters_with_module_param"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["meters"], 0)
+        self.assertEqual(report["validation"]["state_counts"]["local_ui_state_keys"], 0)
         self.assertEqual(report["validation"]["route_counts"]["nodes_total"], 9)
         self.assertEqual(report["validation"]["route_counts"]["route_rows_total"], 1)
         self.assertEqual(report["validation"]["route_counts"]["route_rows_native_cpp"], 1)
@@ -261,6 +282,8 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["validation"]["style_counts"]["source_css_values"], 5)
         self.assertEqual(report["validation"]["style_counts"]["source_style_objects"], 2)
         self.assertEqual(report["validation"]["style_counts"]["source_conditional_style_values"], 1)
+        self.assertEqual(report["validation"]["state_counts"]["parameters"], 0)
+        self.assertEqual(report["validation"]["state_counts"]["local_ui_state_keys"], 1)
         self.assertEqual(report["validation"]["route_counts"]["route_rows_native_html"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["primitive_layout"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["with_state_contracts"], 1)
@@ -275,6 +298,26 @@ class FrontendIrReportTests(unittest.TestCase):
     def test_boolean_values_are_not_numeric_evidence(self) -> None:
         with self.assertRaisesRegex(ValueError, "validation.route_counts.bad"):
             fir.validate_count_map({"bad": True}, "validation.route_counts")
+        with self.assertRaisesRegex(ValueError, "validation.state_counts.bad"):
+            fir.validate_frontend_ir({
+                "schema": "pulp-frontend-ir-v0",
+                "source": {
+                    "kind": "jsx",
+                    "path": "fixtures/UI.jsx",
+                    "source_of_truth": "local_file",
+                    "counts": {},
+                },
+                "design_ir": {
+                    "path": "reports/generated/ui-ir.json",
+                },
+                "nodes": [],
+                "routes": [],
+                "validation": {
+                    "source_counts": {},
+                    "style_counts": {},
+                    "state_counts": {"bad": True},
+                },
+            })
 
         row = {
             "id": "node.bool",

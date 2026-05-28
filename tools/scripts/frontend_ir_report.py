@@ -143,6 +143,8 @@ def validate_frontend_ir(report: dict[str, Any]) -> None:
         validate_count_map(validation.get("primitive_counts"), "validation.primitive_counts")
     if "resource_counts" in validation:
         validate_count_map(validation.get("resource_counts"), "validation.resource_counts")
+    if "state_counts" in validation:
+        validate_count_map(validation.get("state_counts"), "validation.state_counts")
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -616,7 +618,7 @@ def state_for_row(row: dict[str, Any]) -> dict[str, Any]:
         param_id = binding.get("param_key") or binding.get("binding_contract_id")
         if not isinstance(param_id, str) or not param_id:
             continue
-        parameters.append({
+        parameter: dict[str, Any] = {
             "id": param_id,
             "kind": "parameter",
             "gesture_policy": ",".join(
@@ -627,7 +629,29 @@ def state_for_row(row: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(boundary, str)
             ),
             "route_usage": [route_name(row.get("route_type"))],
-        })
+        }
+        for source_key, target_key in (
+            ("binding_contract_id", "source_binding_id"),
+            ("module", "module"),
+            ("param", "param"),
+        ):
+            value = binding.get(source_key)
+            if isinstance(value, str) and value:
+                parameter[target_key] = value
+        for source_key, target_key in (
+            ("value", "value"),
+            ("initial_value", "initial_value"),
+        ):
+            value = row.get(source_key)
+            if is_finite_number(value):
+                parameter[target_key] = float(value)
+        default_value = row.get("default_value")
+        if is_finite_number(default_value):
+            parameter["range"] = {"default": float(default_value)}
+        default_source = row.get("default_value_source")
+        if isinstance(default_source, str) and default_source:
+            parameter["default_source"] = default_source
+        parameters.append(parameter)
 
     derived = {}
     label = row.get("label")
@@ -754,6 +778,47 @@ def style_counts(nodes: list[dict[str, Any]], source_counts: dict[str, int] | No
     return counts
 
 
+def state_counts(nodes: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {
+        "parameters": 0,
+        "parameters_with_value": 0,
+        "parameters_with_initial_value": 0,
+        "parameters_with_default": 0,
+        "parameters_with_source_binding_id": 0,
+        "parameters_with_module_param": 0,
+        "meters": 0,
+        "local_ui_state_keys": 0,
+    }
+    for node in nodes:
+        state = node.get("state", {})
+        if not isinstance(state, dict):
+            continue
+        parameters = state.get("parameters", [])
+        if isinstance(parameters, list):
+            counts["parameters"] += len(parameters)
+            for parameter in parameters:
+                if not isinstance(parameter, dict):
+                    continue
+                if is_finite_number(parameter.get("value")):
+                    counts["parameters_with_value"] += 1
+                if is_finite_number(parameter.get("initial_value")):
+                    counts["parameters_with_initial_value"] += 1
+                if isinstance(parameter.get("range"), dict) and is_finite_number(parameter["range"].get("default")):
+                    counts["parameters_with_default"] += 1
+                if isinstance(parameter.get("source_binding_id"), str) and parameter["source_binding_id"]:
+                    counts["parameters_with_source_binding_id"] += 1
+                if (isinstance(parameter.get("module"), str) and parameter["module"] and
+                        isinstance(parameter.get("param"), str) and parameter["param"]):
+                    counts["parameters_with_module_param"] += 1
+        meters = state.get("meters", [])
+        if isinstance(meters, list):
+            counts["meters"] += len(meters)
+        local_ui = state.get("local_ui", {})
+        if isinstance(local_ui, dict):
+            counts["local_ui_state_keys"] += len(local_ui)
+    return counts
+
+
 def artifact_ref_from_manifest(route_manifest: dict[str, Any], key: str, kind: str) -> dict[str, Any] | None:
     value = route_manifest.get("inputs", {}).get(key)
     if not isinstance(value, dict):
@@ -841,6 +906,7 @@ def build_frontend_ir(
         "validation": {
             "source_counts": counts,
             "style_counts": style_counts(nodes, counts),
+            "state_counts": state_counts(nodes),
             "route_counts": route_counts(route_manifest, rows),
             "primitive_counts": primitive_counts(rows),
             "resource_counts": resource_counts(resources),
