@@ -336,7 +336,10 @@ xcrun simctl install booted build-ios-sim/AUv3/Release-iphonesimulator/PulpSineS
 xcrun simctl launch --console booted com.pulp.examples.sinesynth.host
 
 # Physical iPad (signed)
-source ~/.config/pulp/secrets/notary.env
+# Prefer the validated sourceable helper — it errors clearly on missing
+# keys / unfilled placeholders. See docs/guides/ios-dev-signing.md for
+# the full reusable dev-signing stub (schema template + one-time setup).
+. tools/scripts/source_dev_creds.sh
 cmake -S . -B build-ios-device -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \

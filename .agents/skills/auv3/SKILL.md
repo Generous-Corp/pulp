@@ -358,6 +358,12 @@ You MUST:
 
 The full recipe is in `tools/scripts/sign-notarize-auv3-mac.sh`.
 
+For the reusable dev-signing cred layout that step 5 consumes
+(`PULP_TEAM_ID` / `PULP_NOTARY_*`), see
+[`docs/guides/ios-dev-signing.md`](../../../docs/guides/ios-dev-signing.md) —
+schema template + sourceable helper, no per-user identifiers in
+committed code.
+
 **Diagnostic for silent Pluginkit rejection:**
 
 ```bash

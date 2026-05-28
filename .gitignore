@@ -89,6 +89,18 @@ tools/local-ci/results/
 .env
 .env.*
 !.env.example
+# Apple signing / notarization creds — see docs/guides/ios-dev-signing.md.
+# Real creds live at ~/.config/pulp/secrets/ (chmod 600). Belt-and-
+# suspenders against accidental commits inside the repo too.
+secrets/
+*.notary.env
+*.p8
+*.p12
+# Keep the committed schema-only template; rule must come AFTER the
+# broad `secrets/` glob above so the negation actually takes effect.
+!templates/secrets/
+!templates/secrets/notary.env.example
+templates/secrets/notary.env
 examples/web-demos/wasm-build/build/
 /.private/
 test/assets/
