@@ -1874,6 +1874,28 @@ DesignIR lower_chainer_toggle_button_routes_to_phase_e_original_layout_ir(Design
     return materialized_ir;
 }
 
+DesignIR lower_chainer_chain_selection_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
+                                                                            choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-chain-selection-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-e-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        const auto family = json_string(route["source_component_family"]);
+        if (family != "ChainModule" && family != "ChainInfoRow")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto choice = lower_chainer_chain_selection_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(choice);
+        ++lowered;
+    }
+    REQUIRE(lowered == 17);
+    return materialized_ir;
+}
+
 DesignIR lower_chainer_meter_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
                                                                   choc::value::ValueView route_rows) {
     materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-meter-route-overlay";
@@ -2029,6 +2051,19 @@ struct PhaseEMeterLayoutCase {
     std::string channel;
     std::string value_key;
     float initial_value = 0.0f;
+    float expected_width = 0.0f;
+    float expected_height = 0.0f;
+};
+
+struct PhaseEChainSelectionLayoutCase {
+    std::string id;
+    std::string anchor;
+    std::string source_family;
+    std::string source_visual_anchor;
+    std::string source_visual_ir_path;
+    std::string param_key;
+    std::string choice_value;
+    std::string choice_label;
     float expected_width = 0.0f;
     float expected_height = 0.0f;
 };
@@ -2240,6 +2275,52 @@ std::vector<PhaseEMeterLayoutCase> chainer_meter_layout_cases(IRNode& materializ
         }
     }
     REQUIRE(cases.size() == 2);
+    return cases;
+}
+
+std::vector<PhaseEChainSelectionLayoutCase> chainer_chain_selection_layout_cases(
+    IRNode& materialized_root,
+    choc::value::ValueView route_rows) {
+    std::vector<PhaseEChainSelectionLayoutCase> cases;
+    std::size_t module_count = 0;
+    std::size_t info_row_count = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        const auto family = json_string(route["source_component_family"]);
+        if (family != "ChainModule" && family != "ChainInfoRow")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto* source_visual = node_at_ir_path(materialized_root, materialized_path);
+        REQUIRE(source_visual != nullptr);
+        REQUIRE(source_visual->stable_anchor_id.has_value());
+        REQUIRE(source_visual->style.width.has_value());
+        REQUIRE(source_visual->style.height.has_value());
+
+        const auto binding = route["parameter_bindings"][0];
+        PhaseEChainSelectionLayoutCase item;
+        item.id = json_string(route["id"]);
+        item.anchor = json_string(route["materialized_ir_anchor"]);
+        item.source_family = family;
+        item.source_visual_anchor = *source_visual->stable_anchor_id;
+        item.source_visual_ir_path = materialized_path;
+        item.param_key = json_string(binding["param_key"]);
+        item.choice_value = json_string(route["choice_value"]);
+        item.choice_label = json_string(route["choice_label"]);
+        item.expected_width = json_float_or(route["width"], *source_visual->style.width);
+        item.expected_height = json_float_or(route["height"], *source_visual->style.height);
+
+        REQUIRE(item.source_visual_anchor == item.anchor);
+        REQUIRE(*source_visual->style.width == Catch::Approx(item.expected_width));
+        REQUIRE(*source_visual->style.height == Catch::Approx(item.expected_height));
+        if (family == "ChainModule")
+            ++module_count;
+        else
+            ++info_row_count;
+        cases.push_back(std::move(item));
+    }
+    REQUIRE(module_count == 9);
+    REQUIRE(info_row_count == 8);
+    REQUIRE(cases.size() == 17);
     return cases;
 }
 
@@ -4983,6 +5064,291 @@ TEST_CASE("Chainer original-layout hybrid classifies meter bar replacement bound
         report << "\n  ]\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-e-meter-layout-report.json", report.str());
+    }
+}
+
+TEST_CASE("Chainer original-layout hybrid classifies chain selection replacement bounds against live source choices",
+          "[view][import][cpp-codegen][native-cpp-phase-e][layout]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path runtime_trace_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/traces/chainer-live-runtime-trace.json";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(runtime_trace_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    const auto live_native_bounds = read_runtime_native_bounds(runtime_trace_path);
+    const auto cases = chainer_chain_selection_layout_cases(materialized_ir.root, route_rows);
+
+    std::vector<ImportDiagnostic> source_diagnostics;
+    auto source_view = build_native_view_tree(
+        materialized_ir, materialized_ir.asset_manifest, {.diagnostics_out = &source_diagnostics});
+    REQUIRE(source_view != nullptr);
+
+    auto hybrid_ir = lower_chainer_chain_selection_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    std::vector<ImportDiagnostic> hybrid_diagnostics;
+    auto hybrid_view = build_native_view_tree(
+        hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &hybrid_diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr float kWidth = 1280.0f;
+    constexpr float kHeight = 800.0f;
+    source_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    hybrid_view->set_bounds({0.0f, 0.0f, kWidth, kHeight});
+    source_view->layout_children();
+    hybrid_view->layout_children();
+
+    struct LayoutComparison {
+        const PhaseEChainSelectionLayoutCase* item = nullptr;
+        Rect source_bounds;
+        Rect live_bounds;
+        Rect native_bounds;
+        std::vector<RuntimeAncestorBounds> source_chain;
+        std::vector<RuntimeAncestorBounds> live_source_chain;
+        std::vector<RuntimeAncestorBounds> native_chain;
+        ChainDelta source_live_first_chain_delta;
+        ChainDelta live_native_first_chain_delta;
+        ChainDelta live_native_preserved_first_chain_delta;
+        std::size_t source_live_common_ancestor_count = 0;
+        std::size_t live_native_common_ancestor_count = 0;
+        float center_delta_px = 0.0f;
+        float size_delta_px = 0.0f;
+        float live_center_delta_px = 0.0f;
+        float live_size_delta_px = 0.0f;
+        float source_expected_width_delta_px = 0.0f;
+        float source_expected_height_delta_px = 0.0f;
+        float live_expected_width_delta_px = 0.0f;
+        float live_expected_height_delta_px = 0.0f;
+        float native_expected_width_delta_px = 0.0f;
+        float native_expected_height_delta_px = 0.0f;
+    };
+
+    std::vector<LayoutComparison> comparisons;
+    comparisons.reserve(cases.size());
+    float max_center_delta = 0.0f;
+    float max_size_delta = 0.0f;
+    float max_live_center_delta = 0.0f;
+    float max_live_size_delta = 0.0f;
+    float max_source_expected_width_delta = 0.0f;
+    float max_source_expected_height_delta = 0.0f;
+    float max_live_expected_width_delta = 0.0f;
+    float max_live_expected_height_delta = 0.0f;
+    float max_native_expected_width_delta = 0.0f;
+    float max_native_expected_height_delta = 0.0f;
+    float max_source_live_chain_center_delta = 0.0f;
+    float max_source_live_chain_size_delta = 0.0f;
+    float max_live_native_chain_center_delta = 0.0f;
+    float max_live_native_chain_size_delta = 0.0f;
+    std::string max_live_native_chain_delta_id;
+    float max_live_native_preserved_chain_center_delta = 0.0f;
+    float max_live_native_preserved_chain_size_delta = 0.0f;
+    std::string max_live_native_preserved_chain_delta_id;
+    std::size_t module_count = 0;
+    std::size_t info_row_count = 0;
+    constexpr float kBoundsTolerancePx = 0.5f;
+
+    for (const auto& item : cases) {
+        auto* source_choice = find_anchor(*source_view, item.source_visual_anchor);
+        auto* native_choice = find_anchor(*hybrid_view, item.anchor);
+        REQUIRE(source_choice != nullptr);
+        REQUIRE(native_choice != nullptr);
+        REQUIRE(dynamic_cast<ToggleButton*>(native_choice) != nullptr);
+
+        const auto live_source_it = live_native_bounds.find(item.source_visual_anchor);
+        REQUIRE(live_source_it != live_native_bounds.end());
+
+        LayoutComparison row;
+        row.item = &item;
+        row.source_bounds = absolute_bounds(*source_choice);
+        row.live_bounds = live_source_it->second.bounds;
+        row.native_bounds = absolute_bounds(*native_choice);
+        row.source_chain = view_ancestor_chain(*source_choice);
+        row.live_source_chain = live_source_it->second.ancestor_chain;
+        row.native_chain = view_ancestor_chain(*native_choice);
+        row.source_live_first_chain_delta = first_chain_delta(
+            row.live_source_chain, row.source_chain, kBoundsTolerancePx);
+        row.live_native_first_chain_delta = first_chain_delta(
+            row.live_source_chain, row.native_chain, kBoundsTolerancePx);
+        row.live_native_preserved_first_chain_delta = first_chain_delta(
+            row.live_source_chain, row.native_chain, kBoundsTolerancePx, item.anchor);
+        row.source_live_common_ancestor_count = common_chain_id_count(row.live_source_chain, row.source_chain);
+        row.live_native_common_ancestor_count = common_chain_id_count(row.live_source_chain, row.native_chain);
+        row.center_delta_px = center_delta_px(row.source_bounds, row.native_bounds);
+        row.size_delta_px = size_delta_px(row.source_bounds, row.native_bounds);
+        row.live_center_delta_px = center_delta_px(row.live_bounds, row.native_bounds);
+        row.live_size_delta_px = size_delta_px(row.live_bounds, row.native_bounds);
+        row.source_expected_width_delta_px = std::abs(row.source_bounds.width - item.expected_width);
+        row.source_expected_height_delta_px = std::abs(row.source_bounds.height - item.expected_height);
+        row.live_expected_width_delta_px = std::abs(row.live_bounds.width - item.expected_width);
+        row.live_expected_height_delta_px = std::abs(row.live_bounds.height - item.expected_height);
+        row.native_expected_width_delta_px = std::abs(row.native_bounds.width - item.expected_width);
+        row.native_expected_height_delta_px = std::abs(row.native_bounds.height - item.expected_height);
+
+        max_center_delta = std::max(max_center_delta, row.center_delta_px);
+        max_size_delta = std::max(max_size_delta, row.size_delta_px);
+        max_live_center_delta = std::max(max_live_center_delta, row.live_center_delta_px);
+        max_live_size_delta = std::max(max_live_size_delta, row.live_size_delta_px);
+        max_source_expected_width_delta = std::max(max_source_expected_width_delta, row.source_expected_width_delta_px);
+        max_source_expected_height_delta = std::max(max_source_expected_height_delta, row.source_expected_height_delta_px);
+        max_live_expected_width_delta = std::max(max_live_expected_width_delta, row.live_expected_width_delta_px);
+        max_live_expected_height_delta = std::max(max_live_expected_height_delta, row.live_expected_height_delta_px);
+        max_native_expected_width_delta = std::max(max_native_expected_width_delta, row.native_expected_width_delta_px);
+        max_native_expected_height_delta = std::max(max_native_expected_height_delta, row.native_expected_height_delta_px);
+        if (row.source_live_first_chain_delta.valid) {
+            max_source_live_chain_center_delta = std::max(
+                max_source_live_chain_center_delta, row.source_live_first_chain_delta.center_delta_px);
+            max_source_live_chain_size_delta = std::max(
+                max_source_live_chain_size_delta, row.source_live_first_chain_delta.size_delta_px);
+        }
+        if (row.live_native_first_chain_delta.valid) {
+            if (row.live_native_first_chain_delta.center_delta_px > max_live_native_chain_center_delta ||
+                row.live_native_first_chain_delta.size_delta_px > max_live_native_chain_size_delta) {
+                max_live_native_chain_delta_id = row.live_native_first_chain_delta.id;
+            }
+            max_live_native_chain_center_delta = std::max(
+                max_live_native_chain_center_delta, row.live_native_first_chain_delta.center_delta_px);
+            max_live_native_chain_size_delta = std::max(
+                max_live_native_chain_size_delta, row.live_native_first_chain_delta.size_delta_px);
+        }
+        if (row.live_native_preserved_first_chain_delta.valid) {
+            if (row.live_native_preserved_first_chain_delta.center_delta_px >
+                    max_live_native_preserved_chain_center_delta ||
+                row.live_native_preserved_first_chain_delta.size_delta_px >
+                    max_live_native_preserved_chain_size_delta) {
+                max_live_native_preserved_chain_delta_id =
+                    row.live_native_preserved_first_chain_delta.id;
+            }
+            max_live_native_preserved_chain_center_delta = std::max(
+                max_live_native_preserved_chain_center_delta,
+                row.live_native_preserved_first_chain_delta.center_delta_px);
+            max_live_native_preserved_chain_size_delta = std::max(
+                max_live_native_preserved_chain_size_delta,
+                row.live_native_preserved_first_chain_delta.size_delta_px);
+        }
+        if (item.source_family == "ChainModule")
+            ++module_count;
+        else if (item.source_family == "ChainInfoRow")
+            ++info_row_count;
+        comparisons.push_back(std::move(row));
+    }
+
+    REQUIRE(module_count == 9);
+    REQUIRE(info_row_count == 8);
+    const bool within_threshold = max_center_delta <= kBoundsTolerancePx &&
+        max_size_delta <= kBoundsTolerancePx &&
+        max_source_expected_width_delta <= kBoundsTolerancePx &&
+        max_source_expected_height_delta <= kBoundsTolerancePx &&
+        max_native_expected_width_delta <= kBoundsTolerancePx &&
+        max_native_expected_height_delta <= kBoundsTolerancePx;
+    const bool live_runtime_within_threshold = max_live_center_delta <= kBoundsTolerancePx &&
+        max_live_size_delta <= kBoundsTolerancePx &&
+        max_live_expected_width_delta <= kBoundsTolerancePx &&
+        max_live_expected_height_delta <= kBoundsTolerancePx &&
+        max_native_expected_width_delta <= kBoundsTolerancePx &&
+        max_native_expected_height_delta <= kBoundsTolerancePx;
+    REQUIRE(live_runtime_within_threshold);
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-e-chain-selection-layout-bounds-v1\",\n"
+               << "  \"fixture\": \"chainer-original-layout-hybrid-chain-selection\",\n"
+               << "  \"scope\": \"source-chain-choice-surface-vs-native-replacement-bounds\",\n"
+               << "  \"source_bounds_basis\": \"materialized-ir-chain-choice-surface\",\n"
+               << "  \"live_bounds_basis\": \"runtime-trace-chain-choice-surface\",\n"
+               << "  \"native_bounds_basis\": \"original-layout-hybrid-native-choice-button\",\n"
+               << "  \"threshold_px\": " << kBoundsTolerancePx << ",\n"
+               << "  \"classification\": \"" << (within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"live_runtime_classification\": \""
+               << (live_runtime_within_threshold ? "within_threshold" : "failed_bounds_threshold") << "\",\n"
+               << "  \"within_threshold\": " << (within_threshold ? "true" : "false") << ",\n"
+               << "  \"live_runtime_within_threshold\": "
+               << (live_runtime_within_threshold ? "true" : "false") << ",\n"
+               << "  \"choice_count\": " << comparisons.size() << ",\n"
+               << "  \"chain_module_count\": " << module_count << ",\n"
+               << "  \"chain_info_row_count\": " << info_row_count << ",\n"
+               << "  \"live_runtime_matched_choice_count\": " << comparisons.size() << ",\n"
+               << "  \"live_runtime_bounds_count\": " << live_native_bounds.size() << ",\n"
+               << "  \"max_center_delta_px\": " << std::setprecision(7) << max_center_delta << ",\n"
+               << "  \"max_size_delta_px\": " << max_size_delta << ",\n"
+               << "  \"max_source_expected_width_delta_px\": " << max_source_expected_width_delta << ",\n"
+               << "  \"max_source_expected_height_delta_px\": " << max_source_expected_height_delta << ",\n"
+               << "  \"max_live_center_delta_px\": " << max_live_center_delta << ",\n"
+               << "  \"max_live_size_delta_px\": " << max_live_size_delta << ",\n"
+               << "  \"max_live_expected_width_delta_px\": " << max_live_expected_width_delta << ",\n"
+               << "  \"max_live_expected_height_delta_px\": " << max_live_expected_height_delta << ",\n"
+               << "  \"max_native_expected_width_delta_px\": " << max_native_expected_width_delta << ",\n"
+               << "  \"max_native_expected_height_delta_px\": " << max_native_expected_height_delta << ",\n"
+               << "  \"max_source_live_chain_center_delta_px\": " << max_source_live_chain_center_delta << ",\n"
+               << "  \"max_source_live_chain_size_delta_px\": " << max_source_live_chain_size_delta << ",\n"
+               << "  \"max_live_native_chain_center_delta_px\": " << max_live_native_chain_center_delta << ",\n"
+               << "  \"max_live_native_chain_size_delta_px\": " << max_live_native_chain_size_delta << ",\n"
+               << "  \"max_live_native_chain_delta_id\": \""
+               << json_escape(max_live_native_chain_delta_id) << "\",\n"
+               << "  \"max_live_native_preserved_chain_center_delta_px\": "
+               << max_live_native_preserved_chain_center_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_size_delta_px\": "
+               << max_live_native_preserved_chain_size_delta << ",\n"
+               << "  \"max_live_native_preserved_chain_delta_id\": \""
+               << json_escape(max_live_native_preserved_chain_delta_id) << "\",\n"
+               << "  \"choices\": [";
+        for (std::size_t i = 0; i < comparisons.size(); ++i) {
+            if (i != 0)
+                report << ",";
+            const auto& row = comparisons[i];
+            report << "\n    {"
+                   << "\"id\": \"" << json_escape(row.item->id) << "\", "
+                   << "\"anchor\": \"" << json_escape(row.item->anchor) << "\", "
+                   << "\"source_family\": \"" << json_escape(row.item->source_family) << "\", "
+                   << "\"source_visual_anchor\": \"" << json_escape(row.item->source_visual_anchor) << "\", "
+                   << "\"source_visual_ir_path\": \"" << json_escape(row.item->source_visual_ir_path) << "\", "
+                   << "\"param_key\": \"" << json_escape(row.item->param_key) << "\", "
+                   << "\"choice_value\": \"" << json_escape(row.item->choice_value) << "\", "
+                   << "\"choice_label\": \"" << json_escape(row.item->choice_label) << "\", "
+                   << "\"expected_width\": " << row.item->expected_width << ", "
+                   << "\"expected_height\": " << row.item->expected_height << ", "
+                   << "\"source_bounds\": ";
+            append_rect_json(report, row.source_bounds);
+            report << ", \"live_bounds\": ";
+            append_rect_json(report, row.live_bounds);
+            report << ", \"native_bounds\": ";
+            append_rect_json(report, row.native_bounds);
+            report << ", \"center_delta_px\": " << row.center_delta_px
+                   << ", \"size_delta_px\": " << row.size_delta_px
+                   << ", \"live_center_delta_px\": " << row.live_center_delta_px
+                   << ", \"live_size_delta_px\": " << row.live_size_delta_px
+                   << ", \"source_expected_width_delta_px\": " << row.source_expected_width_delta_px
+                   << ", \"source_expected_height_delta_px\": " << row.source_expected_height_delta_px
+                   << ", \"live_expected_width_delta_px\": " << row.live_expected_width_delta_px
+                   << ", \"live_expected_height_delta_px\": " << row.live_expected_height_delta_px
+                   << ", \"native_expected_width_delta_px\": " << row.native_expected_width_delta_px
+                   << ", \"native_expected_height_delta_px\": " << row.native_expected_height_delta_px
+                   << ", \"source_live_common_ancestor_count\": " << row.source_live_common_ancestor_count
+                   << ", \"live_native_common_ancestor_count\": " << row.live_native_common_ancestor_count
+                   << ", \"source_live_first_chain_delta\": ";
+            append_chain_delta_json(report, row.source_live_first_chain_delta);
+            report << ", \"live_native_first_chain_delta\": ";
+            append_chain_delta_json(report, row.live_native_first_chain_delta);
+            report << ", \"live_native_preserved_first_chain_delta\": ";
+            append_chain_delta_json(report, row.live_native_preserved_first_chain_delta);
+            report << ", \"source_ancestor_chain\": ";
+            append_chain_json(report, row.source_chain);
+            report << ", \"live_source_ancestor_chain\": ";
+            append_chain_json(report, row.live_source_chain);
+            report << ", \"native_ancestor_chain\": ";
+            append_chain_json(report, row.native_chain);
+            report << "}";
+        }
+        report << "\n  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-e-chain-selection-layout-report.json", report.str());
     }
 }
 
