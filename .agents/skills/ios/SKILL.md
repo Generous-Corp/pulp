@@ -364,7 +364,7 @@ the user's iPad has no plugin" report.
 
 ## Follow-ups / Known Gaps
 
-- Full `pulp-view` iOS build requires gating `hot_reload.hpp`.
+- ~~Full `pulp-view` iOS build requires gating `hot_reload.hpp`.~~ Done 2026-05-27: `choc::file::Watcher` (FSEventStream-based) is now `#if !TARGET_OS_IPHONE`-gated and `HotReloader` ships a no-op iOS stub.
 - ~~`pulp_add_ios_auv3()` ships the `.appex`; host-app target generation~~ Done in Phase iOS-B via `pulp_add_ios_host_app()`.
 - Device-target code signing is documented but not scripted.
 - Visual regression for iOS UIs not wired up yet (see #330, #249).
