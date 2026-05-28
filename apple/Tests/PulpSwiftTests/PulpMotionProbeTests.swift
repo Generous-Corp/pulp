@@ -119,6 +119,36 @@ final class PulpMotionProbeTests: XCTestCase {
         XCTAssertFalse(probe.isAttached)
     }
 
+    func testGeometryProbeDefaultOptionsUseFrameMetricAndThirtyFps() {
+        let recorder = MotionBackendRecorder()
+        recorder.nextTraceId = 515
+        PulpMotionRuntime.installTestBackend(recorder.backend)
+
+        let probe = PulpMotionGeometryProbe(view: "Defaulted")
+
+        XCTAssertTrue(probe.isAttached)
+        XCTAssertEqual(probe.name, "Defaulted")
+        XCTAssertEqual(probe.metricName, "frame")
+        XCTAssertEqual(recorder.registrations.count, 1)
+        XCTAssertEqual(recorder.registrations[0].view, "Defaulted")
+        XCTAssertEqual(recorder.registrations[0].fps, 30)
+        XCTAssertEqual(recorder.events, ["set:swiftui:Defaulted", "register:Defaulted:30", "clear"])
+
+        probe.update(minX: -1, minY: -2, width: 10, height: 20)
+        XCTAssertEqual(recorder.geometryUpdates.count, 1)
+        XCTAssertEqual(recorder.geometryUpdates[0].traceId, 515)
+        XCTAssertEqual(recorder.geometryUpdates[0].metric, "frame")
+        XCTAssertEqual(recorder.geometryUpdates[0].minX, -1)
+        XCTAssertEqual(recorder.geometryUpdates[0].minY, -2)
+        XCTAssertEqual(recorder.geometryUpdates[0].width, 10)
+        XCTAssertEqual(recorder.geometryUpdates[0].height, 20)
+
+        probe.detach()
+        probe.detach()
+        XCTAssertEqual(recorder.detachedTraceIds, [515])
+        XCTAssertFalse(probe.isAttached)
+    }
+
 #if canImport(SwiftUI)
     @available(iOS 14.0, macOS 11.0, tvOS 14.0, watchOS 7.0, *)
     func testSwiftUIViewModifierStoresTraceConfiguration() {

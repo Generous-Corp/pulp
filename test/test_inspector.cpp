@@ -194,6 +194,65 @@ TEST_CASE("ViewInspector type_name", "[view][inspector]") {
     REQUIRE(ViewInspector::type_name(sp) == "SpectrumView");
 }
 
+TEST_CASE("InspectorWindow public controls clamp and toggle deterministic state",
+          "[view][inspector][window][coverage][requested]") {
+    View root;
+    root.set_id("root");
+    root.set_bounds({0, 0, 640, 480});
+
+    InspectorWindow window(root);
+    REQUIRE_FALSE(window.selection_readonly());
+    REQUIRE(window.active_tool() == 0);
+
+    window.set_selection_readonly(true);
+    REQUIRE(window.selection_readonly());
+    window.set_selection_readonly(false);
+    REQUIRE_FALSE(window.selection_readonly());
+
+    window.set_active_tool(1);
+    REQUIRE(window.active_tool() == 1);
+    window.set_active_tool(0);
+    REQUIRE(window.active_tool() == 0);
+    window.set_active_tool(-1);
+    REQUIRE(window.active_tool() == 0);
+    window.set_active_tool(42);
+    REQUIRE(window.active_tool() == 0);
+}
+
+TEST_CASE("CollapsableSection toggles only from header mouse-down events",
+          "[view][inspector][window][coverage][requested]") {
+    CollapsableSection section("Layout", true);
+    section.set_bounds({0, 0, 200, 120});
+
+    REQUIRE(section.is_expanded());
+    REQUIRE(section.content() != nullptr);
+    REQUIRE(section.content()->visible());
+
+    MouseEvent move;
+    move.position = {8, 8};
+    move.is_down = false;
+    section.on_mouse_event(move);
+    REQUIRE(section.is_expanded());
+    REQUIRE(section.content()->visible());
+
+    MouseEvent content_click;
+    content_click.position = {8, 48};
+    content_click.is_down = true;
+    section.on_mouse_event(content_click);
+    REQUIRE(section.is_expanded());
+
+    MouseEvent header_click;
+    header_click.position = {8, 8};
+    header_click.is_down = true;
+    section.on_mouse_event(header_click);
+    REQUIRE_FALSE(section.is_expanded());
+    REQUIRE_FALSE(section.content()->visible());
+
+    section.set_expanded(true);
+    REQUIRE(section.is_expanded());
+    REQUIRE(section.content()->visible());
+}
+
 TEST_CASE("ViewInspector count_views", "[view][inspector]") {
     View root;
     root.add_child(std::make_unique<Knob>());
