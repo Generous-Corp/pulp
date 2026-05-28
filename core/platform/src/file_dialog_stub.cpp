@@ -57,7 +57,12 @@ bool FileDialog::has_backend() {
 #endif
 }
 
-#if !defined(__APPLE__)
+// macOS has the real impl in file_dialog_mac.mm; every other platform
+// (iOS, Windows, Linux, Android) needs the stub bodies here so the link
+// resolves. iOS specifically has no native UIDocumentPicker backend
+// wired yet — the stub routes through the registered backend (or
+// returns nullopt when no host has registered one). Track in #316.
+#if !(defined(__APPLE__) && TARGET_OS_OSX)
 
 std::optional<std::string> FileDialog::open_file(
     const std::string& title,
@@ -99,6 +104,6 @@ std::optional<std::string> FileDialog::choose_folder(
     return g_backend.choose_folder(title, default_path);
 }
 
-#endif // !defined(__APPLE__)
+#endif // !(defined(__APPLE__) && TARGET_OS_OSX)
 
 } // namespace pulp::platform
