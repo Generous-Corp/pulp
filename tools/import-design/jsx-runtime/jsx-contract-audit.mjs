@@ -818,6 +818,7 @@ export function auditJsxContract(source, options = {}) {
         },
         materiality,
         proof,
+        jsx_nodes: components,
         native_candidates: nativeCandidates,
         expanded_native_candidates: expandedNativeCandidates,
         event_contracts: eventContracts,
