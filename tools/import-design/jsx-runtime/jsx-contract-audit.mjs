@@ -160,6 +160,69 @@ function setParamKeyFromCall(node) {
     return first?.type === 'StringLiteral' ? first.value : null;
 }
 
+function reactUseStateSetter(node) {
+    if (!node || node.type !== 'VariableDeclarator') return null;
+    if (node.id?.type !== 'ArrayPattern') return null;
+    if (node.init?.type !== 'CallExpression') return null;
+    const callee = node.init.callee;
+    if (callee?.type !== 'Identifier' || callee.name !== 'useState') return null;
+    const state = node.id.elements?.[0];
+    const setter = node.id.elements?.[1];
+    if (state?.type !== 'Identifier' || setter?.type !== 'Identifier') return null;
+    return { state: state.name, setter: setter.name };
+}
+
+function eventValueRead(node) {
+    if (node?.type !== 'MemberExpression') return false;
+    const pathText = memberPath(node);
+    return pathText.endsWith('.currentTarget.value') || pathText.endsWith('.target.value');
+}
+
+function reactStateSetterContract(expr, stateSetters, src = '') {
+    if (expr?.type === 'ArrowFunctionExpression') return reactStateSetterContract(expr.body, stateSetters, src);
+    if (expr?.type !== 'CallExpression') return null;
+    const setter = expr.callee?.type === 'Identifier' ? expr.callee.name : '';
+    const state = stateSetters.get(setter);
+    if (!state) return null;
+    const arg = expr.arguments?.[0];
+    const base = {
+        setter,
+        state_key: state,
+        value_expression: arg ? expressionText(src, arg) : '',
+        value_kind: arg?.type || '',
+    };
+    if (arg?.type === 'UnaryExpression' && arg.operator === '!' && arg.argument?.type === 'Identifier') {
+        return {
+            kind: 'set_state_toggle',
+            ...base,
+            toggles_state_key: arg.argument.name,
+            confidence: arg.argument.name === state ? 0.9 : 0.65,
+        };
+    }
+    if (arg?.type === 'CallExpression' && arg.callee?.type === 'Identifier' && arg.callee.name === 'Number') {
+        const first = arg.arguments?.[0];
+        if (eventValueRead(first)) {
+            return {
+                kind: 'set_state_from_event_value',
+                ...base,
+                value_source: 'event.currentTarget.value',
+                value_coercion: 'Number',
+                confidence: 0.9,
+            };
+        }
+    }
+    const literal = staticLiteral(arg);
+    if (['string', 'number', 'boolean', 'null'].includes(literal.kind)) {
+        return {
+            kind: 'set_state_literal',
+            ...base,
+            value: literal.value,
+            confidence: 0.8,
+        };
+    }
+    return { kind: 'set_state', ...base, confidence: 0.55 };
+}
+
 function nestedSetParamContract(expr) {
     const direct = setParamKeyFromCall(expr);
     if (direct) return { kind: 'set_param_factory', param_key: direct };
@@ -511,7 +574,7 @@ function styleObjectContract(node, src) {
     return { property_count: properties.length, spread_count: spreads, properties };
 }
 
-function jsxAttributeContract(attr, src) {
+function jsxAttributeContract(attr, src, stateSetters = new Map()) {
     const name = jsxName(attr.name);
     if (attr.type !== 'JSXAttribute') return null;
     const raw = expressionText(src, attr);
@@ -533,7 +596,9 @@ function jsxAttributeContract(attr, src) {
         const withSource = valueNode;
         if (withSource) withSource.__source = src;
         const event = nestedSetParamContract(withSource);
-        out.event_contract = event || { kind: 'handler', expression: out.expression };
+        out.event_contract = event ||
+            reactStateSetterContract(withSource, stateSetters, src) ||
+            { kind: 'handler', expression: out.expression };
     }
     const paramKey = paramsMemberKey(valueNode);
     if (paramKey) out.param_key = paramKey;
@@ -570,6 +635,12 @@ export function auditJsxContract(source, options = {}) {
     const ternaries = [];
     const setParamCalls = [];
     const styleContracts = [];
+    const stateSetters = new Map();
+
+    visit(ast, (node) => {
+        const setter = reactUseStateSetter(node);
+        if (setter) stateSetters.set(setter.setter, setter.state);
+    });
 
     visit(ast, (node) => {
         if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
@@ -600,7 +671,7 @@ export function auditJsxContract(source, options = {}) {
         if (node.type === 'JSXElement') {
             const name = jsxName(node.openingElement.name);
             const attrs = (node.openingElement.attributes || [])
-                .map((attr) => jsxAttributeContract(attr, source))
+                .map((attr) => jsxAttributeContract(attr, source, stateSetters))
                 .filter(Boolean);
             const component = {
                 name,
@@ -676,10 +747,15 @@ export function auditJsxContract(source, options = {}) {
         component.attributes
             .filter((attr) => attr.event_contract)
             .map((attr) => ({ element: component.name, prop: attr.name, line: attr.line, ...attr.event_contract })));
+    const setStateEvents = eventContracts.filter((event) => event.kind?.startsWith('set_state'));
+    const hostNativeControlCandidates = eventContracts.filter((event) =>
+        (event.element === 'input' && event.kind === 'set_state_from_event_value') ||
+        (event.element === 'button' && event.kind === 'set_state_toggle'));
 
     const materiality = {
         parser_source_locations: components.filter((component) => component.line !== null).length,
         native_candidate_components: nativeCandidates.length,
+        host_native_control_candidates: hostNativeControlCandidates.length,
         expanded_native_candidate_instances: expandedNativeCandidates.length,
         expanded_choice_instances: expandedNativeCandidates.filter((candidate) => candidate.choice_value !== undefined).length,
         expanded_param_instances: expandedNativeCandidates.filter((candidate) => candidate.value_param_key).length,
@@ -689,6 +765,7 @@ export function auditJsxContract(source, options = {}) {
         conditional_style_values: cssValueRows.filter((row) => row.state === 'conditional_static' || row.branch).length,
         event_contracts: eventContracts.length,
         set_param_events: eventContracts.filter((event) => event.kind === 'set_param' || event.kind === 'set_param_factory').length,
+        set_state_events: setStateEvents.length,
         map_literal_expansions: mapCalls.filter((call) => Array.isArray(call.literal_values) && call.literal_values.length > 0).length,
         svg_vector_nodes: svg.length,
     };
@@ -725,6 +802,7 @@ export function auditJsxContract(source, options = {}) {
             parse_errors: ast.errors?.length || 0,
             jsx_elements: components.length,
             component_counts: componentCounts,
+            state_setters: Object.fromEntries([...stateSetters.entries()].map(([setter, state]) => [state, setter])),
             arrays: Object.fromEntries(Object.entries(arrays).map(([name, data]) => [name, data.values])),
             map_calls: mapCalls.length,
             ternaries: ternaries.length,
@@ -762,6 +840,7 @@ function markdownReport(audit) {
     lines.push('');
     lines.push(`- Materially useful: ${audit.proof.source_contract_extraction_is_materially_useful ? 'yes' : 'no'}`);
     lines.push(`- Native candidate components: ${audit.materiality.native_candidate_components}`);
+    lines.push(`- Host native control candidates: ${audit.materiality.host_native_control_candidates}`);
     lines.push(`- Expanded native instances from source maps: ${audit.materiality.expanded_native_candidate_instances}`);
     lines.push(`- Expanded choice instances: ${audit.materiality.expanded_choice_instances}`);
     lines.push(`- Normalized CSS values: ${audit.materiality.style_values_normalized}`);
