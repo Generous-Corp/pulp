@@ -361,6 +361,21 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         )
         set_target_properties(${target}_AUv3 PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Info.plist"
+            # When the target is `add_executable` + `XCODE_PRODUCT_TYPE
+            # app-extension`, Xcode's default is `GENERATE_INFOPLIST_FILE=YES`,
+            # which synthesizes a fresh Info.plist and overrides our
+            # MACOSX_BUNDLE_INFO_PLIST setting on older Xcode versions
+            # (observed on Xcode 16 / iOS SDK 18.5 — the github-hosted
+            # macos-15 runner). The synthesized plist drops the custom
+            # NSExtension dict the AUv3 host needs to register the audio
+            # component, which then makes
+            # `AVAudioUnitComponentManager.components(matching:)` return
+            # zero matches and the host can never instantiate the AU.
+            # Force-disable INFOPLIST generation AND set the file
+            # explicitly via the XCODE_ATTRIBUTE so both old and new
+            # Xcode honor the same template.
+            XCODE_ATTRIBUTE_GENERATE_INFOPLIST_FILE "NO"
+            XCODE_ATTRIBUTE_INFOPLIST_FILE "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Info.plist"
         )
     endif()
 
