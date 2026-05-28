@@ -1874,6 +1874,48 @@ DesignIR lower_chainer_toggle_button_routes_to_phase_e_original_layout_ir(Design
     return materialized_ir;
 }
 
+DesignIR lower_chainer_waveform_display_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
+                                                                             choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-waveform-display-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-e-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "WaveformDisplay")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto waveform = lower_chainer_waveform_display_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(waveform);
+        ++lowered;
+    }
+    REQUIRE(lowered == 1);
+    return materialized_ir;
+}
+
+DesignIR lower_chainer_waveform_choice_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
+                                                                            choc::value::ValueView route_rows) {
+    materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-waveform-choice-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-e-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
+
+    std::size_t lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        if (json_string(route["source_component_family"]) != "WaveformChoice")
+            continue;
+        const auto materialized_path = json_string(route["materialized_ir_path"]);
+        auto choice = lower_chainer_waveform_choice_route_to_node(materialized_ir.root, route);
+        *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(choice);
+        ++lowered;
+    }
+    REQUIRE(lowered == 4);
+    return materialized_ir;
+}
+
 DesignIR lower_chainer_chain_selection_routes_to_phase_e_original_layout_ir(DesignIR materialized_ir,
                                                                             choc::value::ValueView route_rows) {
     materialized_ir.capture_method = "phase-e-chainer-original-layout-hybrid-chain-selection-route-overlay";
@@ -1935,6 +1977,144 @@ DesignIR lower_chainer_fader_routes_to_phase_e_original_layout_ir(DesignIR mater
         ++lowered;
     }
     REQUIRE(lowered == 6);
+    return materialized_ir;
+}
+
+struct PhaseFRouteSummary {
+    std::size_t knobs = 0;
+    std::size_t faders = 0;
+    std::size_t xy_pads = 0;
+    std::size_t led_buttons = 0;
+    std::size_t waveform_displays = 0;
+    std::size_t waveform_choices = 0;
+    std::size_t meter_wrappers = 0;
+    std::size_t meter_bars = 0;
+    std::size_t chain_modules = 0;
+    std::size_t chain_info_rows = 0;
+    std::vector<std::string> crop_anchors;
+
+    std::size_t route_rows() const {
+        return knobs + faders + xy_pads + led_buttons + waveform_displays +
+               waveform_choices + meter_wrappers + chain_modules + chain_info_rows;
+    }
+
+    std::size_t native_control_count() const {
+        return knobs + faders + xy_pads + led_buttons + waveform_displays +
+               waveform_choices + meter_bars + chain_modules + chain_info_rows;
+    }
+};
+
+bool is_phase_f_route_family(std::string_view family) {
+    return family == "Knob" || family == "Fader" || family == "XYPad" ||
+           family == "LEDButton" || family == "WaveformDisplay" ||
+           family == "WaveformChoice" || family == "Meter" ||
+           family == "ChainModule" || family == "ChainInfoRow";
+}
+
+bool ir_path_is_prefix(std::string_view parent, std::string_view child) {
+    return child.size() > parent.size() &&
+           child.rfind(parent, 0) == 0 &&
+           child[parent.size()] == '/';
+}
+
+void validate_phase_f_route_replacement_overlaps(choc::value::ValueView route_rows) {
+    struct RoutePath {
+        std::string id;
+        std::string family;
+        std::string path;
+    };
+
+    std::vector<RoutePath> paths;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        const auto family = json_string(route["source_component_family"]);
+        if (!is_phase_f_route_family(family))
+            continue;
+        paths.push_back({
+            json_string(route["id"]),
+            family,
+            json_string(route["materialized_ir_path"]),
+        });
+    }
+
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        for (std::size_t j = i + 1; j < paths.size(); ++j) {
+            INFO(paths[i].id << " " << paths[i].family << " " << paths[i].path);
+            INFO(paths[j].id << " " << paths[j].family << " " << paths[j].path);
+            REQUIRE(paths[i].path != paths[j].path);
+            REQUIRE_FALSE(ir_path_is_prefix(paths[i].path, paths[j].path));
+            REQUIRE_FALSE(ir_path_is_prefix(paths[j].path, paths[i].path));
+        }
+    }
+}
+
+PhaseFRouteSummary summarize_phase_f_route_rows(choc::value::ValueView route_rows) {
+    PhaseFRouteSummary summary;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        const auto family = json_string(route["source_component_family"]);
+        if (!is_phase_f_route_family(family))
+            continue;
+
+        if (family == "Knob") ++summary.knobs;
+        else if (family == "Fader") ++summary.faders;
+        else if (family == "XYPad") ++summary.xy_pads;
+        else if (family == "LEDButton") ++summary.led_buttons;
+        else if (family == "WaveformDisplay") ++summary.waveform_displays;
+        else if (family == "WaveformChoice") ++summary.waveform_choices;
+        else if (family == "Meter") ++summary.meter_wrappers;
+        else if (family == "ChainModule") ++summary.chain_modules;
+        else if (family == "ChainInfoRow") ++summary.chain_info_rows;
+
+        summary.crop_anchors.push_back(json_string(route["materialized_ir_anchor"]));
+        if (family == "Meter") {
+            const auto bindings = route["meter_bar_bindings"];
+            for (uint32_t j = 0; j < bindings.size(); ++j) {
+                summary.crop_anchors.push_back(json_string(bindings[j]["materialized_ir_anchor"]));
+                ++summary.meter_bars;
+            }
+        }
+    }
+    return summary;
+}
+
+DesignIR lower_chainer_routes_to_phase_f_original_layout_ir(DesignIR materialized_ir,
+                                                            choc::value::ValueView route_rows,
+                                                            const ChainerKnobSourceFormula& formula) {
+    validate_phase_f_route_replacement_overlaps(route_rows);
+    const auto summary = summarize_phase_f_route_rows(route_rows);
+    REQUIRE(summary.knobs == 8);
+    REQUIRE(summary.faders == 6);
+    REQUIRE(summary.xy_pads == 1);
+    REQUIRE(summary.led_buttons == 2);
+    REQUIRE(summary.waveform_displays == 1);
+    REQUIRE(summary.waveform_choices == 4);
+    REQUIRE(summary.meter_wrappers == 1);
+    REQUIRE(summary.meter_bars == 2);
+    REQUIRE(summary.chain_modules == 9);
+    REQUIRE(summary.chain_info_rows == 8);
+
+    materialized_ir = lower_chainer_knob_routes_to_phase_d_original_layout_ir(
+        std::move(materialized_ir), route_rows, formula);
+    materialized_ir = lower_chainer_fader_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    materialized_ir = lower_chainer_xy_pad_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    materialized_ir = lower_chainer_toggle_button_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    materialized_ir = lower_chainer_waveform_display_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    materialized_ir = lower_chainer_waveform_choice_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    materialized_ir = lower_chainer_meter_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+    materialized_ir = lower_chainer_chain_selection_routes_to_phase_e_original_layout_ir(
+        std::move(materialized_ir), route_rows);
+
+    materialized_ir.capture_method = "phase-f-chainer-original-layout-hybrid-route-overlay";
+    materialized_ir.source_adapter = "native-cpp-import-execution-validation";
+    materialized_ir.source_version = "phase-f-original-layout-hybrid";
+    add_chainer_token_colors(materialized_ir);
     return materialized_ir;
 }
 
@@ -6044,6 +6224,173 @@ TEST_CASE("Chainer original-layout hybrid classifies knob region visual diff",
                << "\"diff_pixels\": " << changed.diff_pixels << "}\n"
                << "}\n";
         write_text(dir / "reports" / "chainer-phase-d-live-visual-report.json", report.str());
+    }
+}
+
+TEST_CASE("Chainer Phase F original-layout hybrid classifies full routed-control visual diff",
+          "[view][import][cpp-codegen][native-cpp-phase-f][visual]") {
+    const fs::path manifest_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/chainer-route-manifest.json";
+    const fs::path chainer_ir_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/generated/chainer-ir.json";
+    const fs::path live_png_path =
+        fs::path(PULP_REPO_ROOT) / "planning/artifacts/native-ui/nv0/reports/screenshots/chainer-live-coregraphics-1280x800.png";
+    REQUIRE(fs::exists(manifest_path));
+    REQUIRE(fs::exists(chainer_ir_path));
+    REQUIRE(fs::exists(live_png_path));
+
+    auto route_manifest = choc::json::parse(read_text(manifest_path));
+    const auto source_formula = read_chainer_knob_source_formula(
+        source_jsx_path_from_route_manifest(route_manifest));
+    const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
+    const auto route_summary = summarize_phase_f_route_rows(route_rows);
+    auto materialized_ir = parse_design_ir_json(read_text(chainer_ir_path));
+    auto hybrid_ir = lower_chainer_routes_to_phase_f_original_layout_ir(
+        std::move(materialized_ir), route_rows, source_formula);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto hybrid_view = build_native_view_tree(hybrid_ir, hybrid_ir.asset_manifest, {.diagnostics_out = &diagnostics});
+    REQUIRE(hybrid_view != nullptr);
+
+    constexpr uint32_t kWidth = 1280;
+    constexpr uint32_t kHeight = 800;
+    hybrid_view->set_bounds({0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight)});
+    hybrid_view->layout_children();
+
+    std::vector<Rect> routed_bounds;
+    std::vector<std::string> missing_crop_anchors;
+    for (const auto& anchor : route_summary.crop_anchors) {
+        auto* view = find_anchor(*hybrid_view, anchor);
+        if (view == nullptr) {
+            missing_crop_anchors.push_back(anchor);
+            continue;
+        }
+        const auto bounds = absolute_bounds(*view);
+        if (bounds.width > 0.0f && bounds.height > 0.0f)
+            routed_bounds.push_back(bounds);
+    }
+    INFO("missing Phase F crop anchors: " << missing_crop_anchors.size());
+    REQUIRE(missing_crop_anchors.empty());
+    REQUIRE_FALSE(routed_bounds.empty());
+
+    auto hybrid_png = render_to_png(*hybrid_view, kWidth, kHeight, 1.0f);
+    if (hybrid_png.empty())
+        SKIP("native screenshot renderer unavailable for Phase F hybrid visual gate");
+    const auto live_png = read_bytes(live_png_path);
+    REQUIRE_FALSE(live_png.empty());
+
+    auto full_result = compare_screenshots(live_png, hybrid_png, 32);
+    REQUIRE(full_result.valid);
+    auto full_changed = diff_bounds(live_png, hybrid_png, 32);
+    auto full_diff = generate_diff_image(live_png, hybrid_png, 32);
+    REQUIRE_FALSE(full_diff.empty());
+
+    const auto crop_rect = expanded_crop(union_bounds(routed_bounds), 18.0f, kWidth, kHeight);
+    const bool full_diff_overlaps_crop = crop_intersects_diff(crop_rect, full_changed);
+    auto live_crop = crop_png(live_png, crop_rect.x, crop_rect.y, crop_rect.width, crop_rect.height);
+    auto hybrid_crop = crop_png(hybrid_png, crop_rect.x, crop_rect.y, crop_rect.width, crop_rect.height);
+    REQUIRE_FALSE(live_crop.empty());
+    REQUIRE_FALSE(hybrid_crop.empty());
+
+    auto routed_result = compare_screenshots(live_crop, hybrid_crop, 32);
+    REQUIRE(routed_result.valid);
+    auto routed_diff = generate_diff_image(live_crop, hybrid_crop, 32);
+    REQUIRE_FALSE(routed_diff.empty());
+    auto routed_changed = diff_bounds(live_crop, hybrid_crop, 32);
+
+    constexpr float kHybridThreshold = 0.90f;
+    const bool routed_region_within_threshold = routed_result.passes(kHybridThreshold);
+    const bool full_within_threshold = full_result.passes(kHybridThreshold);
+    const char* classification = routed_region_within_threshold ? "within_threshold" : "classified_difference";
+    const char* classification_reason = routed_region_within_threshold
+        ? "routed_native_hybrid_regions_match_live_runtime_threshold"
+        : "routed_native_hybrid_regions_still_differ_from_live_runtime";
+    const char* visual_credibility = routed_region_within_threshold ? "credible" : "not_yet_credible";
+    const char* visual_credibility_reason = routed_region_within_threshold
+        ? "routed_region_similarity_met_working_threshold"
+        : "routed_region_similarity_below_working_threshold";
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_D_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-f-original-layout-hybrid.png",
+                    hybrid_png);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-f-full-diff.png",
+                    full_diff);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-f-live-routed-region.png",
+                    live_crop);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-f-hybrid-routed-region.png",
+                    hybrid_crop);
+        write_bytes(dir / "reports" / "screenshots" / "chainer-phase-f-routed-region-diff.png",
+                    routed_diff);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-f-hybrid-visual-v1\",\n"
+               << "  \"fixture\": \"chainer-phase-f-original-layout-hybrid\",\n"
+               << "  \"scope\": \"full-live-runtime-vs-original-layout-native-hybrid\",\n"
+               << "  \"comparison_mode\": \"materialized-ir-with-routed-native-replacements\",\n"
+               << "  \"threshold\": " << kHybridThreshold << ",\n"
+               << "  \"classification\": \"" << classification << "\",\n"
+               << "  \"classification_reason\": \"" << classification_reason << "\",\n"
+               << "  \"within_threshold\": " << (routed_region_within_threshold ? "true" : "false") << ",\n"
+               << "  \"full_within_threshold\": " << (full_within_threshold ? "true" : "false") << ",\n"
+               << "  \"visual_credibility\": \"" << visual_credibility << "\",\n"
+               << "  \"visual_credibility_reason\": \"" << visual_credibility_reason << "\",\n"
+               << "  \"continue_to_g_visual_criterion_met\": "
+               << (routed_region_within_threshold ? "true" : "false") << ",\n"
+               << "  \"full_similarity\": " << std::setprecision(7) << full_result.similarity << ",\n"
+               << "  \"full_mean_error\": " << full_result.mean_error << ",\n"
+               << "  \"full_diff_pixels\": " << full_result.diff_pixels << ",\n"
+               << "  \"full_total_pixels\": " << full_result.total_pixels << ",\n"
+               << "  \"routed_region_similarity\": " << routed_result.similarity << ",\n"
+               << "  \"routed_region_mean_error\": " << routed_result.mean_error << ",\n"
+               << "  \"routed_region_diff_pixels\": " << routed_result.diff_pixels << ",\n"
+               << "  \"routed_region_total_pixels\": " << routed_result.total_pixels << ",\n"
+               << "  \"routed_region_within_threshold\": "
+               << (routed_region_within_threshold ? "true" : "false") << ",\n"
+               << "  \"crop_rect\": {"
+               << "\"x\": " << crop_rect.x << ", "
+               << "\"y\": " << crop_rect.y << ", "
+               << "\"width\": " << crop_rect.width << ", "
+               << "\"height\": " << crop_rect.height << "},\n"
+               << "  \"full_diff_bounds\": {"
+               << "\"valid\": " << (full_changed.valid ? "true" : "false") << ", "
+               << "\"x\": " << full_changed.x << ", "
+               << "\"y\": " << full_changed.y << ", "
+               << "\"width\": " << full_changed.width << ", "
+               << "\"height\": " << full_changed.height << ", "
+               << "\"diff_pixels\": " << full_changed.diff_pixels << "},\n"
+               << "  \"full_diff_overlaps_crop\": " << (full_diff_overlaps_crop ? "true" : "false") << ",\n"
+               << "  \"routed_diff_bounds\": {"
+               << "\"valid\": " << (routed_changed.valid ? "true" : "false") << ", "
+               << "\"x\": " << routed_changed.x << ", "
+               << "\"y\": " << routed_changed.y << ", "
+               << "\"width\": " << routed_changed.width << ", "
+               << "\"height\": " << routed_changed.height << ", "
+               << "\"diff_pixels\": " << routed_changed.diff_pixels << "},\n"
+               << "  \"lowered_family_counts\": {\n"
+               << "    \"knob\": " << route_summary.knobs << ",\n"
+               << "    \"fader\": " << route_summary.faders << ",\n"
+               << "    \"xy_pad\": " << route_summary.xy_pads << ",\n"
+               << "    \"led_button\": " << route_summary.led_buttons << ",\n"
+               << "    \"waveform_display\": " << route_summary.waveform_displays << ",\n"
+               << "    \"waveform_choice\": " << route_summary.waveform_choices << ",\n"
+               << "    \"meter_wrapper\": " << route_summary.meter_wrappers << ",\n"
+               << "    \"meter_bar\": " << route_summary.meter_bars << ",\n"
+               << "    \"chain_module\": " << route_summary.chain_modules << ",\n"
+               << "    \"chain_info_row\": " << route_summary.chain_info_rows << "\n"
+               << "  },\n"
+               << "  \"lowered_route_row_count\": " << route_summary.route_rows() << ",\n"
+               << "  \"lowered_native_control_count\": " << route_summary.native_control_count() << ",\n"
+               << "  \"routed_crop_anchor_count\": " << route_summary.crop_anchors.size() << ",\n"
+               << "  \"missing_crop_anchors\": [],\n"
+               << "  \"scope_boundaries\": [\n"
+               << "    \"compares rendered native view tree built from hybrid IR, not compiled exported C++ output\",\n"
+               << "    \"does not prove behavior parity beyond existing family behavior artifacts\",\n"
+               << "    \"does not prove runtime JS isolation or startup/frame/binary-size cost gates\"\n"
+               << "  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "chainer-phase-f-hybrid-visual-report.json", report.str());
     }
 }
 
