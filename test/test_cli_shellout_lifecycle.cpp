@@ -332,6 +332,104 @@ TEST_CASE("pulp sdk install validates parser errors before side effects",
     fs::remove_all(home);
 }
 
+TEST_CASE("pulp sdk status and clean report cache state deterministically",
+          "[cli][shellout][sdk][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-sdk-status-home");
+    ScopedEnvVar scoped_pulp_home("PULP_HOME");
+    scoped_pulp_home.set(home.string());
+
+    auto empty_status = run_pulp({"sdk", "status"}, 10000);
+    REQUIRE_FALSE(empty_status.timed_out);
+    REQUIRE(empty_status.exit_code == 0);
+    REQUIRE(empty_status.stderr_output.empty());
+    REQUIRE(empty_status.stdout_output.find("Pulp SDK Status") != std::string::npos);
+    REQUIRE(empty_status.stdout_output.find("No SDK versions installed") != std::string::npos);
+    REQUIRE(empty_status.stdout_output.find("Run: pulp sdk install") != std::string::npos);
+
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    write_text(home / "cache" / "latest_release.txt",
+               "0.0.1\n" + std::to_string(now) + "\n");
+    write_text(home / "sdk" / "1.2.3" / "version.txt", "1.2.3\n");
+    write_text(home / "sdk-local" / "macos-arm64" / "2.0.0" / "lib" / "cmake" /
+                   "Pulp" / "PulpConfig.cmake",
+               "# fixture\n");
+    write_text(home / "sdk-build" / "transient" / "marker.txt", "build cache\n");
+
+    auto populated_status = run_pulp({"sdk", "status"}, 10000);
+    REQUIRE_FALSE(populated_status.timed_out);
+    REQUIRE(populated_status.exit_code == 0);
+    REQUIRE(populated_status.stderr_output.empty());
+    REQUIRE(populated_status.stdout_output.find("v1.2.3 (downloaded)") != std::string::npos);
+    REQUIRE(populated_status.stdout_output.find("v2.0.0 (local build, macos-arm64)") !=
+            std::string::npos);
+    REQUIRE(populated_status.stdout_output.find("No SDK versions installed") ==
+            std::string::npos);
+
+    auto clean = run_pulp({"sdk", "clean"}, 10000);
+    REQUIRE_FALSE(clean.timed_out);
+    REQUIRE(clean.exit_code == 0);
+    REQUIRE(clean.stderr_output.empty());
+    REQUIRE(clean.stdout_output.find("Removed 3 SDK cache directories.") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(home / "sdk"));
+    REQUIRE_FALSE(fs::exists(home / "sdk-local"));
+    REQUIRE_FALSE(fs::exists(home / "sdk-build"));
+
+    auto clean_again = run_pulp({"sdk", "clean"}, 10000);
+    REQUIRE_FALSE(clean_again.timed_out);
+    REQUIRE(clean_again.exit_code == 0);
+    REQUIRE(clean_again.stderr_output.empty());
+    REQUIRE(clean_again.stdout_output.find("Removed 0 SDK cache directories.") !=
+            std::string::npos);
+
+    fs::remove_all(home);
+}
+
+TEST_CASE("pulp status quotes source checkout paths before reading Git metadata",
+          "[cli][shellout][status][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto root = unique_temp_dir("pulp status path with spaces and quote ' fixture");
+    fs::create_directories(root / "core");
+    fs::create_directories(root / "test");
+    fs::create_directories(root / "examples" / "ExampleOne");
+    write_text(root / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\n"
+               "project(StatusFixture VERSION 1.0.0)\n");
+    write_text(root / "test" / "status_fixture.cpp", "int status_fixture = 0;\n");
+
+    auto init = exec("git", {"init", "-b", "status-fixture", root.string()}, 10000);
+    REQUIRE_FALSE(init.timed_out);
+    REQUIRE(init.exit_code == 0);
+
+    const auto bin = fs::absolute(pulp_binary());
+    REQUIRE(fs::exists(bin));
+    auto previous = fs::current_path();
+    fs::current_path(root);
+    auto status = exec(bin.string(), {"status"}, 10000);
+    fs::current_path(previous);
+
+    REQUIRE_FALSE(status.timed_out);
+    INFO("stdout: " << status.stdout_output);
+    INFO("stderr: " << status.stderr_output);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stderr_output.empty());
+    REQUIRE(status.stdout_output.find("Pulp Project Status") != std::string::npos);
+    const auto reported_root = fs::weakly_canonical(root);
+    REQUIRE(status.stdout_output.find("Root: " + reported_root.string()) !=
+            std::string::npos);
+    REQUIRE(status.stdout_output.find("Mode: source-tree mode") != std::string::npos);
+    REQUIRE(status.stdout_output.find("Branch: status-fixture") != std::string::npos);
+    REQUIRE(status.stdout_output.find("Build: not configured") != std::string::npos);
+    REQUIRE(status.stdout_output.find("Source files: 0 impl, 0 headers") != std::string::npos);
+    REQUIRE(status.stdout_output.find("Test files: 1") != std::string::npos);
+    REQUIRE(status.stdout_output.find("Examples: 1") != std::string::npos);
+
+    fs::remove_all(root);
+}
+
 TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty cache",
           "[cli][shellout][upgrade][codecov]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

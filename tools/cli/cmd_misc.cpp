@@ -238,8 +238,10 @@ int cmd_status(const std::vector<std::string>& args) {
         std::cout << "Mode detail: repo/examples build against the current checkout\n";
     }
 
-    auto branch = exec_output("git -C " + root.string() + " branch --show-current 2>/dev/null");
-    auto commit = exec_output("git -C " + root.string() + " log --oneline -1 2>/dev/null");
+    auto branch = exec_output("git -C " + shell_quote(root.string()) +
+                              " branch --show-current 2>/dev/null");
+    auto commit = exec_output("git -C " + shell_quote(root.string()) +
+                              " log --oneline -1 2>/dev/null");
     if (!branch.empty()) std::cout << "Branch: " << branch << "\n";
     if (!commit.empty()) std::cout << "Commit: " << commit << "\n";
 
