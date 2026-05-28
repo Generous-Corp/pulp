@@ -450,13 +450,13 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
                           effective_config.screenshot_path, cap.delay);
     }
 
-    // Blocks until the window is closed. The close callback above has
-    // already fired bridge->close() (before stop() reset processor_),
-    // so on_view_closed ran while both processor and released view were
-    // still alive. Calling close() again here is a no-op because it's
-    // idempotent after the first close() clears view_.
+    // Blocks until the window is closed. Most window-close paths have
+    // already fired bridge->close(), but application-quit paths can return
+    // from the event loop without going through that callback. Close here
+    // while the processor is still alive; the call is idempotent.
     window->run_event_loop();
 
+    bridge->close();
     stop();
     return true;
 }
