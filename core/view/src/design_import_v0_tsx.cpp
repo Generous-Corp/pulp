@@ -434,7 +434,8 @@ bool is_v0_host_jsx_tag(const std::string& tag) {
         "div", "section", "header", "main", "footer", "nav", "article", "aside", "form",
         "h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "label", "small", "strong",
         "em", "code", "button", "input", "textarea", "select", "option", "img", "canvas",
-        "svg", "path", "rect", "line", "circle", "polyline", "polygon", "progress", "meter"
+        "svg", "path", "rect", "line", "circle", "polyline", "polygon", "progress", "meter",
+        "view", "text", "pressable"
     };
     return kTags.count(tag) != 0;
 }
@@ -452,7 +453,8 @@ std::string ir_type_for_v0_jsx_tag(const std::string& tag) {
         tag == "code" || tag == "option") {
         return "text";
     }
-    if (tag == "button") return "button";
+    if (tag == "text") return "text";
+    if (tag == "button" || tag == "pressable") return "button";
     if (tag == "input" || tag == "textarea" || tag == "select") return tag;
     if (tag == "img") return "image";
     if (tag == "canvas") return "canvas";
@@ -582,6 +584,11 @@ void apply_v0_jsx_attribute(IRNode& node,
         node.attributes["for"] = value;
         return;
     }
+    if (key == "onPress" || key == "onpress") {
+        node.attributes[key] = value.empty() ? "handler" : value;
+        node.attributes["onClick"] = node.attributes[key];
+        return;
+    }
     if (key == "onClick" || key == "onclick" ||
         key == "onChange" || key == "onInput" ||
         key == "onPointerDown" || key == "onMouseDown") {
@@ -624,6 +631,8 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
     const auto on_input = attr_value(node, "onInput");
     const auto on_click = attr_value(node, "onClick");
     const auto on_click_lower = attr_value(node, "onclick");
+    const auto on_press = attr_value(node, "onPress");
+    const auto on_press_lower = attr_value(node, "onpress");
     const auto on_pointer = attr_value(node, "onPointerDown");
     const auto on_mouse = attr_value(node, "onMouseDown");
 
@@ -634,6 +643,8 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
     if (!state_key && on_input) state_key = state_from_event_expression(*on_input, contracts);
     if (!state_key && on_click) state_key = state_from_event_expression(*on_click, contracts);
     if (!state_key && on_click_lower) state_key = state_from_event_expression(*on_click_lower, contracts);
+    if (!state_key && on_press) state_key = state_from_event_expression(*on_press, contracts);
+    if (!state_key && on_press_lower) state_key = state_from_event_expression(*on_press_lower, contracts);
     if (!state_key && on_pointer) state_key = state_from_event_expression(*on_pointer, contracts);
     if (!state_key && on_mouse) state_key = state_from_event_expression(*on_mouse, contracts);
 
@@ -656,8 +667,8 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
     } else if (lower_tag == "select") {
         set_contract_attr(node, "pulpEventContract", on_change ? "select:onChange:setState" : "select:value");
         set_contract_attr(node, "pulpGestureContract", "select:choose");
-    } else if (lower_tag == "button") {
-        if (on_click || on_click_lower)
+    } else if (lower_tag == "button" || lower_tag == "pressable") {
+        if (on_click || on_click_lower || on_press || on_press_lower)
             set_contract_attr(node, "pulpEventContract", "button:onClick:setState");
         set_contract_attr(node, "pulpGestureContract", "button:click");
     } else if (lower_tag == "meter" || lower_tag == "progress") {

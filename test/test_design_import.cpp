@@ -1145,6 +1145,47 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"range:onChange:setState\"") != std::string::npos);
 }
 
+TEST_CASE("parse_v0_tsx maps React Native primitives into baked C++ contracts",
+          "[view][import][cpp-codegen]") {
+    auto ir = parse_v0_tsx(R"tsx(
+        import React, { useState } from 'react';
+        import { Pressable, Text, View } from 'react-native';
+
+        export default function GainStage() {
+            const [armed, setArmed] = useState(true);
+            return (
+                <View testID="rn-gain-stage">
+                    <Pressable accessibilityLabel="Toggle bypass" onPress={() => setArmed(!armed)}>
+                        <Text>{armed ? 'ARMED' : 'BYPASS'}</Text>
+                    </Pressable>
+                </View>
+            );
+        }
+    )tsx");
+
+    REQUIRE_FALSE(has_import_diagnostic(ir.diagnostics, "fallback-used"));
+
+    const auto* pressable = find_descendant(ir.root, [](const IRNode& node) {
+        return node.type == "button" && node.attributes.find("onPress") != node.attributes.end();
+    });
+    REQUIRE(pressable != nullptr);
+    REQUIRE(pressable->attributes.at("jsxTag") == "pressable");
+    REQUIRE(pressable->attributes.at("pulpValueKey") == "armed");
+    REQUIRE(pressable->attributes.at("pulpInitialValue") == "true");
+    REQUIRE(pressable->attributes.at("pulpEventContract") == "button:onClick:setState");
+    REQUIRE(pressable->attributes.at("pulpGestureContract") == "button:click");
+
+    const auto* text = find_descendant(ir.root, [](const IRNode& node) {
+        return node.type == "text" && node.attributes.find("jsxTag") != node.attributes.end() &&
+               node.attributes.at("jsxTag") == "text";
+    });
+    REQUIRE(text != nullptr);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.binding_manifest.find("\"value_key\": \"armed\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"event_contract\": \"button:onClick:setState\"") != std::string::npos);
+}
+
 TEST_CASE("JSX snapshot dynamic API scanner detects non-deterministic APIs",
           "[view][import][diagnostics]") {
     auto scan = detect_jsx_snapshot_dynamic_apis(
