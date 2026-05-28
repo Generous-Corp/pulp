@@ -942,8 +942,12 @@ if(NOT PULP_IOS)
 endif()
 # ARA scaffolding (workstream 06 slice 6.1)
 pulp_add_test_suite(pulp-test-ara LIBRARIES pulp::format)
-# CLAP ARA extension end-to-end (workstream 06 A2a)
-pulp_add_test_suite(pulp-test-clap-ara-extension LIBRARIES pulp::format)
+# CLAP ARA extension end-to-end (workstream 06 A2a). This suite instantiates
+# PulpClapPlugin directly, so it must see the same layout as pulp-format's
+# desktop CLAP adapter TU.
+pulp_add_test_suite(pulp-test-clap-ara-extension
+    LIBRARIES pulp::format
+    COMPILE_DEFINITIONS PULP_CLAP_GUI=1)
 # Processor ARA hook (workstream 06 slice 6.3a)
 pulp_add_test_suite(pulp-test-processor-ara-hook LIBRARIES pulp::format)
 # Processor bus-layout validation + processBlock precision contract +
@@ -1753,6 +1757,7 @@ if(PULP_HAS_CLAP)
     # / 62% CI" reports on PR #627.
     add_executable(pulp-test-clap-midi-events test_clap_midi_events.cpp)
     target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-midi-events PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-midi-events)
 
     # Item 3.4 (macOS plan) — pin the CLAP host-facing API contract that
