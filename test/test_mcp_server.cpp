@@ -376,6 +376,49 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic",
 #endif
 }
 
+TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
+          "[mcp][shell][coverage][requested]") {
+#if defined(_WIN32)
+    auto ok = exec("cmd /c echo|set /p=pulp-mcp");
+#else
+    auto ok = exec("printf 'pulp-mcp'");
+#endif
+    REQUIRE(ok == "pulp-mcp");
+
+#if defined(_WIN32)
+    auto failed = exec("cmd /c exit 7");
+#else
+    auto failed = exec("sh -c 'exit 7'");
+#endif
+    REQUIRE(failed.find("Command failed with status") != std::string::npos);
+}
+
+TEST_CASE("MCP find_project_root walks upward and reports absence",
+          "[mcp][shell][coverage][requested]") {
+    TempDir temp;
+    auto project = temp.path / "project";
+    auto nested = project / "plugins" / "demo";
+    std::filesystem::create_directories(nested);
+    std::filesystem::create_directories(project / "core");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.25)\n";
+    }
+
+    {
+        ScopedCurrentPath cwd(nested);
+        REQUIRE(std::filesystem::weakly_canonical(find_project_root()) ==
+                std::filesystem::weakly_canonical(project));
+    }
+
+    auto not_project = temp.path / "not-project" / "child";
+    std::filesystem::create_directories(not_project);
+    {
+        ScopedCurrentPath cwd(not_project);
+        REQUIRE(find_project_root().empty());
+    }
+}
+
 TEST_CASE("MCP protocol handles initialize ping notification and unknown methods",
           "[mcp][protocol]") {
     auto initialize = handle_request(R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON");
@@ -1052,6 +1095,107 @@ TEST_CASE("MCP pulp_audio_model_list returns the structured tool-payload envelop
     // include an inner "error":"" field as part of its model-status
     // payload, so we look for the JSON-RPC -32601 error code rather
     // than the bare "error" key.
+    REQUIRE(response.find(R"JSON("code":-32601)JSON") == std::string::npos);
+}
+
+TEST_CASE("MCP audio tools return structured diagnostics without a project root",
+          "[mcp][tools][audio][coverage][requested]") {
+    TempDir home;
+    ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+    TempDir cwd_dir;
+    ScopedCurrentPath cwd(cwd_dir.path);
+
+    auto status = handle_request(tool_call("61", "pulp_audio_model_status"));
+    require_contains(status, R"JSON("id":61)JSON");
+    require_contains(status, R"JSON("structuredContent")JSON");
+    require_contains(status, R"JSON("state_file_found": false)JSON");
+    require_contains(status, R"JSON("loadable": false)JSON");
+    require_contains(status, "no configured audio model");
+    REQUIRE(status.find(R"JSON("code":-32601)JSON") == std::string::npos);
+
+    auto list = handle_request(tool_call("62", "pulp_audio_model_list"));
+    require_contains(list, R"JSON("id":62)JSON");
+    require_contains(list, R"JSON("structuredContent")JSON");
+    require_contains(list, R"JSON("active_model_id": "")JSON");
+    require_contains(list, R"JSON("status": "not_installed")JSON");
+    require_contains(list, "clap_music_audioset_v1");
+    REQUIRE(list.find(R"JSON("code":-32601)JSON") == std::string::npos);
+
+    auto activate = handle_request(tool_call(
+        "63", "pulp_audio_model_activate",
+        R"JSON({"model_id":"definitely_missing_model"})JSON"));
+    require_contains(activate, R"JSON("id":63)JSON");
+    require_contains(activate, R"JSON("structuredContent")JSON");
+    require_contains(activate, R"JSON("ok": false)JSON");
+    require_contains(activate, "unknown model_id: definitely_missing_model");
+}
+
+TEST_CASE("MCP audio excerpt-find validates request fields through the handler",
+          "[mcp][tools][audio][coverage][requested]") {
+    TempDir home;
+    ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+    TempDir temp;
+    ScopedCurrentPath cwd(temp.path);
+    auto input = temp.path / "input.wav";
+    {
+        std::ofstream file(input);
+        file << "not needed for pre-audio validation";
+    }
+
+    auto only_text = handle_request(tool_call(
+        "64", "pulp_audio_excerpt_find",
+        R"JSON({"text":"texture"})JSON"));
+    require_contains(only_text, R"JSON("id":64)JSON");
+    require_contains(only_text, "Error: text and input_path are required");
+    REQUIRE(only_text.find(R"JSON("structuredContent")JSON") == std::string::npos);
+
+    auto only_input = handle_request(tool_call(
+        "65", "pulp_audio_excerpt_find",
+        std::string(R"JSON({"input_path":")JSON") + input.string() + R"JSON("})JSON"));
+    require_contains(only_input, R"JSON("id":65)JSON");
+    require_contains(only_input, "Error: text and input_path are required");
+
+    auto bad_top = handle_request(tool_call(
+        "66", "pulp_audio_excerpt_find",
+        std::string(R"JSON({"text":"texture","input_path":")JSON") + input.string()
+            + R"JSON(","top":0})JSON"));
+    require_contains(bad_top, R"JSON("id":66)JSON");
+    require_contains(bad_top, R"JSON("structuredContent")JSON");
+    require_contains(bad_top, R"JSON("ok": false)JSON");
+    require_contains(bad_top, "top and max_candidates_per_file must be >= 1");
+
+    auto bad_window = handle_request(tool_call(
+        "67", "pulp_audio_excerpt_find",
+        std::string(R"JSON({"text":"texture","input_path":")JSON") + input.string()
+            + R"JSON(","window_ms":0})JSON"));
+    require_contains(bad_window, R"JSON("id":67)JSON");
+    require_contains(bad_window, "window_ms and hop_ms must be >= 1");
+
+    auto unknown_model = handle_request(tool_call(
+        "68", "pulp_audio_excerpt_find",
+        std::string(R"JSON({"text":"texture","input_path":")JSON") + input.string()
+            + R"JSON(","model_id":"missing_model"})JSON"));
+    require_contains(unknown_model, R"JSON("id":68)JSON");
+    require_contains(unknown_model, R"JSON("query": "texture")JSON");
+    require_contains(unknown_model, "unknown model_id: missing_model");
+    REQUIRE(unknown_model.find(R"JSON("code":-32601)JSON") == std::string::npos);
+}
+
+TEST_CASE("MCP audio read-bundle reports missing bundles as structured content",
+          "[mcp][tools][audio][coverage][requested]") {
+    TempDir home;
+    ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
+    TempDir temp;
+
+    auto response = handle_request(tool_call(
+        "69", "pulp_audio_read_bundle",
+        std::string(R"JSON({"bundle_path":")JSON")
+            + (temp.path / "missing-bundle").string() + R"JSON("})JSON"));
+
+    require_contains(response, R"JSON("id":69)JSON");
+    require_contains(response, R"JSON("structuredContent")JSON");
+    require_contains(response, R"JSON("ok": false)JSON");
+    require_contains(response, "bundle path does not exist");
     REQUIRE(response.find(R"JSON("code":-32601)JSON") == std::string::npos);
 }
 

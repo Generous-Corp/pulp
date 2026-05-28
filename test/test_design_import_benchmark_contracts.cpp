@@ -148,6 +148,27 @@ TEST_CASE("design-import benchmark argument parser clamps timing knobs",
     REQUIRE(config->target_fps == 1);
 }
 
+TEST_CASE("design-import benchmark argument parser uses last explicit option",
+          "[design-import][benchmark][coverage][requested]") {
+    auto config = parse_args_vec({"bench",
+                                  "--lane", "live",
+                                  "--lane=baked-cpp",
+                                  "--idle-ms=10",
+                                  "--idle-ms", "20",
+                                  "--interactive-ms=30",
+                                  "--interactive-ms", "40",
+                                  "--target-fps=60",
+                                  "--target-fps", "120",
+                                  "--output", "first.json",
+                                  "--output=second.json"});
+    REQUIRE(config.has_value());
+    REQUIRE(config->lane == "baked-cpp");
+    REQUIRE(config->idle_ms == 20);
+    REQUIRE(config->interactive_ms == 40);
+    REQUIRE(config->target_fps == 120);
+    REQUIRE(config->output_path == std::filesystem::path("second.json"));
+}
+
 TEST_CASE("design-import benchmark JSON report contains escaped config and metrics",
           "[design-import][benchmark][coverage]") {
     Config config;

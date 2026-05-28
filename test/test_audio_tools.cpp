@@ -1676,6 +1676,51 @@ TEST_CASE("excerpt find JSON serializer preserves failure diagnostics",
             != std::string::npos);
 }
 
+TEST_CASE("excerpt find JSON serializer preserves ranked bundle metadata",
+          "[audio][tools][excerpt-service][coverage][requested]") {
+    ExcerptFindResult result;
+    result.ok = true;
+    result.bundle_path = "/tmp/pulp-audio-bundle";
+    result.query = "tight snare";
+    result.requested_model_id = "clap_music_audioset_v1";
+    result.loaded_model_id = "clap_music_audioset_v1";
+    result.backend = "null";
+    result.resolved_checkpoint_path = "/models/clap.pt";
+    result.scanned_file_count = 2;
+
+    BundleResult item;
+    item.rank = 1;
+    item.score = 0.875;
+    item.source_file = "/audio/loop.wav";
+    item.source_duration_ms = 250.0;
+    item.start_ms = 1000.0;
+    item.end_ms = 1250.0;
+    item.excerpt_file = "excerpts/rank-01-loop-1.000-1.250.wav";
+    result.results.push_back(item);
+    result.skipped_files.push_back("/audio/readme.txt (unsupported; WAV only)");
+
+    auto json = to_json(result);
+
+    REQUIRE(json.find("\"ok\": true") != std::string::npos);
+    REQUIRE(json.find("\"bundle_path\": \"/tmp/pulp-audio-bundle\"") != std::string::npos);
+    REQUIRE(json.find("\"requested_model_id\": \"clap_music_audioset_v1\"")
+            != std::string::npos);
+    REQUIRE(json.find("\"loaded_model_id\": \"clap_music_audioset_v1\"")
+            != std::string::npos);
+    REQUIRE(json.find("\"resolved_checkpoint_path\": \"/models/clap.pt\"")
+            != std::string::npos);
+    REQUIRE(json.find("\"scanned_file_count\": 2") != std::string::npos);
+    REQUIRE(json.find("\"rank\": 1") != std::string::npos);
+    REQUIRE(json.find("\"score\": 0.875") != std::string::npos);
+    REQUIRE(json.find("\"source_file\": \"/audio/loop.wav\"") != std::string::npos);
+    REQUIRE(json.find("\"source_duration_ms\": 250") != std::string::npos);
+    REQUIRE(json.find("\"start_ms\": 1000") != std::string::npos);
+    REQUIRE(json.find("\"end_ms\": 1250") != std::string::npos);
+    REQUIRE(json.find("\"excerpt_file\": \"excerpts/rank-01-loop-1.000-1.250.wav\"")
+            != std::string::npos);
+    REQUIRE(json.find("/audio/readme.txt (unsupported; WAV only)") != std::string::npos);
+}
+
 #if !defined(_WIN32)
 TEST_CASE("excerpt find skips unreadable recursive subdirectories", "[audio][tools]") {
     TempDir temp;

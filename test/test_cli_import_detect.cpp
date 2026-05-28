@@ -773,6 +773,38 @@ TEST_CASE("snapshot_input falls back to sorted html candidates with attribute fo
     fs::remove_all(dir);
 }
 
+TEST_CASE("snapshot_input captures unquoted script attributes and sorted directory names",
+          "[cli][import-detect][coverage][requested]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-unquoted-script-attrs";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    {
+        std::ofstream f(dir / "index.html");
+        f << "<script src=plain.js type=module></script>\n"
+          << "<script src='single.js' type='application/json'></script>\n"
+          << "<script data-src=ignored.js></script>\n";
+    }
+    {
+        std::ofstream f(dir / "DESIGN.md");
+        f << "---\nname: Demo\n---\n";
+    }
+    {
+        std::ofstream f(dir / "z-last.txt");
+        f << "fixture";
+    }
+
+    auto snap = det::snapshot_input(dir);
+    REQUIRE(snap.is_directory);
+    REQUIRE(snap.directory_basenames == std::vector<std::string>{"DESIGN.md", "index.html", "z-last.txt"});
+    REQUIRE(snap.script_srcs == std::vector<std::string>{"plain.js", "single.js"});
+    REQUIRE(snap.script_types == std::vector<std::string>{"module", "application/json"});
+    REQUIRE(std::find(snap.script_srcs.begin(), snap.script_srcs.end(), "ignored.js")
+            == snap.script_srcs.end());
+
+    fs::remove_all(dir);
+}
+
 TEST_CASE("new-format reports cap unknown tailwind tokens and keep fallbacks stable",
           "[cli][import-detect][coverage]") {
     det::ImportsManifest manifest;

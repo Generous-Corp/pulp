@@ -366,3 +366,28 @@ TEST_CASE("security identity parser preserves quoted display names",
     REQUIRE(unbalanced.empty());
 #endif
 }
+
+TEST_CASE("mac codesign parsers ignore unrelated command noise",
+          "[ship][codesign][coverage][requested]") {
+#ifdef __APPLE__
+    auto details = pulp::ship::detail::parse_codesign_details(R"DETAILS(
+warning: unable to build chain to self-signed root
+Executable=/tmp/Pulp.app/Contents/MacOS/Pulp
+Authority=Developer ID Application: Pulp Audio LLC (ABCDE12345)
+note: some unrelated diagnostic
+TeamIdentifier=ABCDE12345
+)DETAILS");
+    REQUIRE(details.identity == "Developer ID Application: Pulp Audio LLC (ABCDE12345)");
+    REQUIRE(details.team_id == "ABCDE12345");
+
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(R"NOTARY(
+id = 12345678-abcd-4abc-9def-123456789abc
+status: Accepted
+)NOTARY").has_value());
+
+    auto pending = pulp::ship::detail::parse_notarytool_status("status: Uploaded\nstatusSummary: In progress");
+    REQUIRE_FALSE(pending.complete);
+    REQUIRE_FALSE(pending.success);
+    REQUIRE(pending.message.find("Uploaded") != std::string::npos);
+#endif
+}
