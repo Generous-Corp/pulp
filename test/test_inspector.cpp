@@ -2065,6 +2065,60 @@ TEST_CASE("Inspector overlay and window public header toggles are direct contrac
     REQUIRE_FALSE(window.selection_readonly());
 }
 
+TEST_CASE("InspectorOverlay auxiliary panel toggles are stable public contracts",
+          "[inspect][overlay][coverage][requested]") {
+    View root;
+    root.set_bounds({0, 0, 320, 200});
+
+    InspectorOverlay overlay(root);
+    REQUIRE_FALSE(overlay.tweaks_panel_visible());
+    overlay.set_tweaks_panel_visible(true);
+    REQUIRE(overlay.tweaks_panel_visible());
+    overlay.toggle_tweaks_panel();
+    REQUIRE_FALSE(overlay.tweaks_panel_visible());
+    REQUIRE(overlay.tweak_row_count() == 0);
+
+    REQUIRE_FALSE(overlay.drift_drawer_open());
+    overlay.set_drift_drawer_open(true);
+    REQUIRE(overlay.drift_drawer_open());
+    overlay.toggle_drift_drawer();
+    REQUIRE_FALSE(overlay.drift_drawer_open());
+    REQUIRE(overlay.drift_count() == 0);
+    REQUIRE(overlay.drifted().empty());
+
+    REQUIRE_FALSE(overlay.reconcile_tab_visible());
+    overlay.set_reconcile_tab_visible(true);
+    REQUIRE(overlay.reconcile_tab_visible());
+    overlay.toggle_reconcile_tab();
+    REQUIRE_FALSE(overlay.reconcile_tab_visible());
+    REQUIRE(overlay.reconcile_row_count() == 0);
+    REQUIRE(overlay.reconcile_report().total() == 0);
+    REQUIRE(std::string(InspectorOverlay::reconcile_status_str(
+                InspectorOverlay::ReconcileStatus::locked_to_source)) == "locked-to-source");
+    REQUIRE(std::string(InspectorOverlay::reconcile_status_str(
+                InspectorOverlay::ReconcileStatus::drifted)) == "drifted");
+    REQUIRE(std::string(InspectorOverlay::reconcile_status_str(
+                InspectorOverlay::ReconcileStatus::unresolvable)) == "unresolvable");
+
+    REQUIRE_FALSE(overlay.atlas_viewer_visible());
+    overlay.set_atlas_viewer_visible(true);
+    REQUIRE(overlay.atlas_viewer_visible());
+    overlay.toggle_atlas_viewer();
+    REQUIRE_FALSE(overlay.atlas_viewer_visible());
+    REQUIRE(overlay.atlas_row_count() == 0);
+    REQUIRE(overlay.atlas_inventory() == nullptr);
+
+    REQUIRE_FALSE(overlay.zoom_active());
+    overlay.set_zoom_active(true);
+    REQUIRE(overlay.zoom_active());
+    overlay.toggle_zoom();
+    REQUIRE_FALSE(overlay.zoom_active());
+    overlay.set_zoom_factor(1);
+    REQUIRE(overlay.zoom_factor() == 4);
+    overlay.set_zoom_factor(99);
+    REQUIRE(overlay.zoom_factor() == 40);
+}
+
 TEST_CASE("InspectorWindow rebuilds tree and theme sections only from live roots",
           "[inspect][window][coverage][headers]") {
     View first_root;

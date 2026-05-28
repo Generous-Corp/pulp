@@ -478,6 +478,38 @@ TEST_CASE("InspectorServer returns protocol errors for invalid JSON frames",
     server.stop();
 }
 
+TEST_CASE("InspectorServer drops valid requests when no handler is installed",
+          "[inspect][server][coverage][requested]") {
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    RecordingClient client;
+    REQUIRE(client.connect(*port));
+    REQUIRE(wait_for_client_count(server, 1));
+    REQUIRE(server.client_count() == 1);
+
+    REQUIRE(client.conn.send_message(encode_message(
+        make_request(88, "Inspector.unhandled", R"({"quiet":true})"))));
+
+    REQUIRE_FALSE(client.wait_for_message_count(1));
+    REQUIRE(client.message_count() == 0);
+    REQUIRE(server.client_count() == 1);
+
+    server.broadcast(make_event("Inspector.afterUnhandled", R"({"ok":true})"));
+
+    InspectorMessage event;
+    REQUIRE(decode_message(client.wait_for_message(0), event));
+    REQUIRE(event.id == 0);
+    REQUIRE(event.method == "Inspector.afterUnhandled");
+    const auto event_json = choc::json::parse(event.params_json);
+    REQUIRE(event_json["ok"].getBool());
+
+    client.conn.disconnect();
+    REQUIRE(wait_for_client_count(server, 0));
+    server.stop();
+}
+
 TEST_CASE("InspectorServer broadcasts events to every connected client",
           "[inspect][server]") {
     InspectorServer server;
