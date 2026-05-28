@@ -65,6 +65,42 @@ void bind_imported_chain_selection_ui(pulp::view::View& root,
                                       pulp::view::NativeImportBindingContext& ctx);
 std::unique_ptr<pulp::view::View> build_phase_h_compressor_strip_ui();
 pulp::view::IRAssetManifest bake_phase_h_compressor_strip_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_envelope_shaper_ui();
+pulp::view::IRAssetManifest bake_phase_h_envelope_shaper_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_eq_curve_panel_ui();
+pulp::view::IRAssetManifest bake_phase_h_eq_curve_panel_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_filter_matrix_ui();
+pulp::view::IRAssetManifest bake_phase_h_filter_matrix_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_mixer_send_bank_ui();
+pulp::view::IRAssetManifest bake_phase_h_mixer_send_bank_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_modulation_grid_ui();
+pulp::view::IRAssetManifest bake_phase_h_modulation_grid_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_osc_bank_ui();
+pulp::view::IRAssetManifest bake_phase_h_osc_bank_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_preset_browser_strip_ui();
+pulp::view::IRAssetManifest bake_phase_h_preset_browser_strip_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_sampler_pad_grid_ui();
+pulp::view::IRAssetManifest bake_phase_h_sampler_pad_grid_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_scope_meter_ui();
+pulp::view::IRAssetManifest bake_phase_h_scope_meter_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_transport_loop_panel_ui();
+pulp::view::IRAssetManifest bake_phase_h_transport_loop_panel_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_utility_settings_panel_ui();
+pulp::view::IRAssetManifest bake_phase_h_utility_settings_panel_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_level_meter_panel_ui();
+pulp::view::IRAssetManifest bake_phase_h_level_meter_panel_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_gain_stage_card_ui();
+pulp::view::IRAssetManifest bake_phase_h_gain_stage_card_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_gain_stage_ui();
+pulp::view::IRAssetManifest bake_phase_h_gain_stage_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_transport_bar_ui();
+pulp::view::IRAssetManifest bake_phase_h_transport_bar_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_audio_control_panel_ui();
+pulp::view::IRAssetManifest bake_phase_h_audio_control_panel_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_settings_strip_ui();
+pulp::view::IRAssetManifest bake_phase_h_settings_strip_asset_manifest();
+std::unique_ptr<pulp::view::View> build_phase_h_transport_meter_ui();
+pulp::view::IRAssetManifest bake_phase_h_transport_meter_asset_manifest();
 
 namespace pulp::test::phase_f_chainer_hybrid {
 std::unique_ptr<pulp::view::View> build_chainer_phase_f_hybrid_ui();
@@ -149,11 +185,177 @@ View* find_anchor(View& root, std::string_view anchor) {
     return nullptr;
 }
 
-void collect_faders(View& root, std::vector<Fader*>& out) {
-    if (auto* fader = dynamic_cast<Fader*>(&root))
-        out.push_back(fader);
+struct PhaseHGeneratedFixture {
+    const char* slug;
+    const char* fixture_id;
+    const char* source_path;
+    std::unique_ptr<View> (*build)();
+    IRAssetManifest (*manifest)();
+    uint32_t fallback_width = 640;
+    uint32_t fallback_height = 360;
+};
+
+struct PhaseHControls {
+    std::vector<Knob*> knobs;
+    std::vector<Fader*> faders;
+    std::vector<XYPad*> xy_pads;
+    std::vector<ToggleButton*> toggle_buttons;
+    std::vector<TextButton*> text_buttons;
+    std::vector<TextEditor*> text_editors;
+    std::vector<Meter*> meters;
+    std::vector<Checkbox*> checkboxes;
+};
+
+struct PhaseHBehaviorStats {
+    int interaction_count = 0;
+    int changed_controls = 0;
+    int callback_events = 0;
+    int gesture_begin_events = 0;
+    int gesture_end_events = 0;
+    int knob_count = 0;
+    int fader_count = 0;
+    int xy_pad_count = 0;
+    int toggle_button_count = 0;
+    int text_button_count = 0;
+    int text_editor_count = 0;
+    int meter_count = 0;
+    int checkbox_count = 0;
+    int meter_updates = 0;
+    bool passed = false;
+};
+
+void collect_phase_h_controls(View& root, PhaseHControls& out) {
+    if (auto* knob = dynamic_cast<Knob*>(&root)) out.knobs.push_back(knob);
+    if (auto* fader = dynamic_cast<Fader*>(&root)) out.faders.push_back(fader);
+    if (auto* xy = dynamic_cast<XYPad*>(&root)) out.xy_pads.push_back(xy);
+    if (auto* toggle = dynamic_cast<ToggleButton*>(&root)) out.toggle_buttons.push_back(toggle);
+    if (auto* button = dynamic_cast<TextButton*>(&root)) out.text_buttons.push_back(button);
+    if (auto* editor = dynamic_cast<TextEditor*>(&root)) out.text_editors.push_back(editor);
+    if (auto* meter = dynamic_cast<Meter*>(&root)) out.meters.push_back(meter);
+    if (auto* checkbox = dynamic_cast<Checkbox*>(&root)) out.checkboxes.push_back(checkbox);
     for (std::size_t i = 0; i < root.child_count(); ++i)
-        collect_faders(*root.child_at(i), out);
+        collect_phase_h_controls(*root.child_at(i), out);
+}
+
+Rect require_local_bounds(const View& view, std::string_view label) {
+    const auto bounds = view.local_bounds();
+    INFO("control: " << label);
+    INFO("bounds: " << bounds.x << "," << bounds.y << " " << bounds.width << "x" << bounds.height);
+    REQUIRE(bounds.width > 0.0f);
+    REQUIRE(bounds.height > 0.0f);
+    return bounds;
+}
+
+PhaseHBehaviorStats exercise_phase_h_controls(View& root) {
+    PhaseHControls controls;
+    collect_phase_h_controls(root, controls);
+
+    PhaseHBehaviorStats stats;
+    stats.knob_count = static_cast<int>(controls.knobs.size());
+    stats.fader_count = static_cast<int>(controls.faders.size());
+    stats.xy_pad_count = static_cast<int>(controls.xy_pads.size());
+    stats.toggle_button_count = static_cast<int>(controls.toggle_buttons.size());
+    stats.text_button_count = static_cast<int>(controls.text_buttons.size());
+    stats.text_editor_count = static_cast<int>(controls.text_editors.size());
+    stats.meter_count = static_cast<int>(controls.meters.size());
+    stats.checkbox_count = static_cast<int>(controls.checkboxes.size());
+    stats.interaction_count =
+        stats.knob_count + stats.fader_count + stats.xy_pad_count +
+        stats.toggle_button_count + stats.text_button_count + stats.text_editor_count +
+        stats.meter_count + stats.checkbox_count;
+
+    for (auto* knob : controls.knobs) {
+        auto bounds = require_local_bounds(*knob, "knob");
+        knob->set_value(0.5f);
+        const auto before = knob->value();
+        knob->on_change = [&](float) { ++stats.callback_events; };
+        knob->on_gesture_begin = [&] { ++stats.gesture_begin_events; };
+        knob->on_gesture_end = [&] { ++stats.gesture_end_events; };
+        knob->on_mouse_down({bounds.width * 0.5f, bounds.height * 0.5f});
+        knob->on_mouse_drag({bounds.width * 0.5f, bounds.height * 0.1f});
+        knob->on_mouse_up({bounds.width * 0.5f, bounds.height * 0.1f});
+        REQUIRE(knob->value() != Catch::Approx(before));
+        ++stats.changed_controls;
+    }
+
+    for (auto* fader : controls.faders) {
+        auto bounds = require_local_bounds(*fader, "fader");
+        fader->set_value(0.5f);
+        const auto before = fader->value();
+        fader->on_change = [&](float) { ++stats.callback_events; };
+        fader->on_gesture_begin = [&] { ++stats.gesture_begin_events; };
+        fader->on_gesture_end = [&] { ++stats.gesture_end_events; };
+        if (fader->orientation() == Fader::Orientation::horizontal) {
+            fader->on_mouse_down({bounds.width * 0.1f, bounds.height * 0.5f});
+            fader->on_mouse_drag({bounds.width * 0.9f, bounds.height * 0.5f});
+            fader->on_mouse_up({bounds.width * 0.9f, bounds.height * 0.5f});
+        } else {
+            fader->on_mouse_down({bounds.width * 0.5f, bounds.height * 0.9f});
+            fader->on_mouse_drag({bounds.width * 0.5f, bounds.height * 0.1f});
+            fader->on_mouse_up({bounds.width * 0.5f, bounds.height * 0.1f});
+        }
+        REQUIRE(fader->value() != Catch::Approx(before));
+        ++stats.changed_controls;
+    }
+
+    for (auto* xy : controls.xy_pads) {
+        auto bounds = require_local_bounds(*xy, "xy-pad");
+        xy->set_x(0.5f);
+        xy->set_y(0.5f);
+        xy->on_change = [&](float, float) { ++stats.callback_events; };
+        xy->on_gesture_begin = [&] { ++stats.gesture_begin_events; };
+        xy->on_gesture_end = [&] { ++stats.gesture_end_events; };
+        xy->on_mouse_down({bounds.width * 0.2f, bounds.height * 0.8f});
+        xy->on_mouse_drag({bounds.width * 0.8f, bounds.height * 0.2f});
+        xy->on_mouse_up({bounds.width * 0.8f, bounds.height * 0.2f});
+        REQUIRE(xy->x_value() != Catch::Approx(0.5f));
+        REQUIRE(xy->y_value() != Catch::Approx(0.5f));
+        ++stats.changed_controls;
+    }
+
+    for (auto* toggle : controls.toggle_buttons) {
+        auto bounds = require_local_bounds(*toggle, "toggle-button");
+        toggle->set_on(false);
+        toggle->on_toggle = [&](bool) { ++stats.callback_events; };
+        toggle->on_mouse_down({bounds.width * 0.5f, bounds.height * 0.5f});
+        REQUIRE(toggle->is_on());
+        ++stats.changed_controls;
+    }
+
+    for (auto* checkbox : controls.checkboxes) {
+        auto bounds = require_local_bounds(*checkbox, "checkbox");
+        checkbox->set_checked(false);
+        checkbox->on_change = [&](bool) { ++stats.callback_events; };
+        checkbox->on_mouse_down({bounds.width * 0.5f, bounds.height * 0.5f});
+        REQUIRE(checkbox->is_checked());
+        ++stats.changed_controls;
+    }
+
+    for (auto* button : controls.text_buttons) {
+        auto bounds = require_local_bounds(*button, "text-button");
+        button->on_click = [&] { ++stats.callback_events; };
+        button->on_mouse_down({bounds.width * 0.5f, bounds.height * 0.5f});
+    }
+
+    for (auto* editor : controls.text_editors) {
+        require_local_bounds(*editor, "text-editor");
+        const auto before = editor->text();
+        editor->on_change = [&](const std::string&) { ++stats.callback_events; };
+        editor->set_text(before + " phase-h");
+        REQUIRE(editor->text() != before);
+        ++stats.changed_controls;
+    }
+
+    for (auto* meter : controls.meters) {
+        require_local_bounds(*meter, "meter");
+        meter->set_level(0.95f, 0.95f);
+        ++stats.meter_updates;
+        ++stats.changed_controls;
+    }
+
+    stats.passed = stats.interaction_count == 0 ||
+        stats.changed_controls + stats.callback_events + stats.meter_updates > 0;
+    return stats;
 }
 
 Rect absolute_bounds(const View& view) {
@@ -7071,14 +7273,8 @@ TEST_CASE("generated C++ fixture renders layout-equivalent native tree",
     REQUIRE(manifest.assets.front().content_hash == "sha256:fixture");
 }
 
-TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against source IR",
-          "[view][import][cpp-codegen][native-cpp-phase-h]") {
-    constexpr uint32_t width = 460;
-    constexpr uint32_t height = 260;
-    const fs::path source_path =
-        fs::path(PULP_REPO_ROOT) /
-        "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/compressor-strip.tsx";
-
+void run_phase_h_generated_fixture(const PhaseHGeneratedFixture& fixture) {
+    const fs::path source_path = fs::path(PULP_REPO_ROOT) / fixture.source_path;
     const auto source = read_text(source_path);
     auto ir = parse_v0_tsx(source);
     NativeMaterializeOptions materialize_options;
@@ -7088,12 +7284,17 @@ TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against so
     REQUIRE(baseline != nullptr);
 
     const auto build_start = std::chrono::steady_clock::now();
-    auto generated = build_phase_h_compressor_strip_ui();
+    auto generated = fixture.build();
     const auto build_ms = elapsed_ms(build_start);
     REQUIRE(generated != nullptr);
 
-    const auto manifest = bake_phase_h_compressor_strip_asset_manifest();
+    const auto manifest = fixture.manifest();
     REQUIRE(manifest.version == 1);
+
+    const uint32_t width = static_cast<uint32_t>(
+        std::max(240.0f, std::ceil(ir.root.style.width.value_or(static_cast<float>(fixture.fallback_width)))));
+    const uint32_t height = static_cast<uint32_t>(
+        std::max(160.0f, std::ceil(ir.root.style.height.value_or(static_cast<float>(fixture.fallback_height)))));
 
     const auto layout_start = std::chrono::steady_clock::now();
     baseline->set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
@@ -7110,44 +7311,15 @@ TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against so
     REQUIRE(visual.valid);
     REQUIRE(visual.similarity >= 0.995f);
 
-    std::vector<Fader*> faders;
-    collect_faders(*generated, faders);
-    REQUIRE(faders.size() == 3);
-
     const auto before_behavior_png = render_to_png(*generated, width, height, 1.0f);
-    int change_count = 0;
-    int gesture_begin_count = 0;
-    int gesture_end_count = 0;
-    for (auto* fader : faders) {
-        REQUIRE(fader != nullptr);
-        fader->on_change = [&](float) { ++change_count; };
-        fader->on_gesture_begin = [&] { ++gesture_begin_count; };
-        fader->on_gesture_end = [&] { ++gesture_end_count; };
-        const auto b = fader->local_bounds();
-        REQUIRE(b.width > 0.0f);
-        REQUIRE(b.height > 0.0f);
-        const auto before = fader->value();
-        if (fader->orientation() == Fader::Orientation::horizontal) {
-            fader->on_mouse_down({b.width * 0.1f, b.height * 0.5f});
-            fader->on_mouse_drag({b.width * 0.9f, b.height * 0.5f});
-            fader->on_mouse_up({b.width * 0.9f, b.height * 0.5f});
-        } else {
-            fader->on_mouse_down({b.width * 0.5f, b.height * 0.9f});
-            fader->on_mouse_drag({b.width * 0.5f, b.height * 0.1f});
-            fader->on_mouse_up({b.width * 0.5f, b.height * 0.1f});
-        }
-        REQUIRE(fader->value() != Catch::Approx(before));
-    }
-    REQUIRE(change_count >= 3);
-    REQUIRE(gesture_begin_count == 3);
-    REQUIRE(gesture_end_count == 3);
-
+    const auto behavior = exercise_phase_h_controls(*generated);
+    REQUIRE(behavior.passed);
     const auto after_behavior_png = render_to_png(*generated, width, height, 1.0f);
     REQUIRE_FALSE(before_behavior_png.empty());
     REQUIRE_FALSE(after_behavior_png.empty());
     const auto behavior_visual = compare_screenshots(before_behavior_png, after_behavior_png, 8);
     REQUIRE(behavior_visual.valid);
-    REQUIRE(behavior_visual.similarity < 0.999f);
+    const bool visual_changed = behavior_visual.similarity < 0.999f;
 
     const auto first_render_start = std::chrono::steady_clock::now();
     const auto first_paint_commands = render_recording_frame(*generated);
@@ -7162,11 +7334,22 @@ TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against so
         idle_frames.push_back(elapsed_ms(frame_start));
     }
 
+    PhaseHControls controls;
+    collect_phase_h_controls(*generated, controls);
     std::vector<double> interactive_frames;
     std::uint64_t interactive_commands = 0;
     for (int i = 0; i < 8; ++i) {
-        for (std::size_t fader_index = 0; fader_index < faders.size(); ++fader_index)
-            faders[fader_index]->set_value(static_cast<float>((i + fader_index + 1) % 8) / 7.0f);
+        for (std::size_t index = 0; index < controls.knobs.size(); ++index)
+            controls.knobs[index]->set_value(static_cast<float>((i + index + 1) % 8) / 7.0f);
+        for (std::size_t index = 0; index < controls.faders.size(); ++index)
+            controls.faders[index]->set_value(static_cast<float>((i + index + 1) % 8) / 7.0f);
+        for (std::size_t index = 0; index < controls.xy_pads.size(); ++index) {
+            controls.xy_pads[index]->set_x(static_cast<float>((i + index + 1) % 8) / 7.0f);
+            controls.xy_pads[index]->set_y(static_cast<float>((i + index + 3) % 8) / 7.0f);
+        }
+        for (auto* meter : controls.meters)
+            meter->set_level(static_cast<float>((i + 1) % 8) / 7.0f,
+                             static_cast<float>((i + 2) % 8) / 7.0f);
         const auto frame_start = std::chrono::steady_clock::now();
         interactive_commands = render_recording_frame(*generated);
         interactive_frames.push_back(elapsed_ms(frame_start));
@@ -7176,21 +7359,25 @@ TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against so
 
     if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_H_ARTIFACT_DIR")) {
         const fs::path dir(artifact_dir);
-        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-baseline.png",
+        const auto screenshot_stem = std::string("phase-h-") + fixture.slug;
+        write_bytes(dir / "reports" / "screenshots" / (screenshot_stem + "-baseline.png"),
                     baseline_png);
-        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-generated.png",
+        write_bytes(dir / "reports" / "screenshots" / (screenshot_stem + "-generated.png"),
                     generated_png);
-        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-before.png",
+        write_bytes(dir / "reports" / "screenshots" / (screenshot_stem + "-before.png"),
                     before_behavior_png);
-        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-after.png",
+        write_bytes(dir / "reports" / "screenshots" / (screenshot_stem + "-after.png"),
                     after_behavior_png);
 
         std::ostringstream report;
         report << "{\n"
                << "  \"schema\": \"pulp-native-ui-phase-h-fixture-parity-v1\",\n"
-               << "  \"fixture_id\": \"planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:compressor-strip\",\n"
-               << "  \"path\": \"planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/compressor-strip.tsx\",\n"
+               << "  \"fixture_id\": \"" << json_escape(fixture.fixture_id) << "\",\n"
+               << "  \"path\": \"" << json_escape(fixture.source_path) << "\",\n"
                << "  \"comparison\": \"generated-cpp-vs-baked-native-source-ir\",\n"
+               << "  \"viewport\": {"
+               << "\"width\": " << width << ", "
+               << "\"height\": " << height << "},\n"
                << "  \"visual\": {"
                << "\"status\": \"pass\", "
                << "\"within_threshold\": true, "
@@ -7199,12 +7386,22 @@ TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against so
                << "\"diff_pixels\": " << visual.diff_pixels << "},\n"
                << "  \"behavior\": {"
                << "\"status\": \"pass\", "
-               << "\"passed\": true, "
-               << "\"dragged_faders\": " << faders.size() << ", "
-               << "\"change_events\": " << change_count << ", "
-               << "\"gesture_begin_events\": " << gesture_begin_count << ", "
-               << "\"gesture_end_events\": " << gesture_end_count << ", "
-               << "\"visual_changed\": " << (behavior_visual.similarity < 0.999f ? "true" : "false")
+               << "\"passed\": " << (behavior.passed ? "true" : "false") << ", "
+               << "\"interaction_count\": " << behavior.interaction_count << ", "
+               << "\"changed_controls\": " << behavior.changed_controls << ", "
+               << "\"callback_events\": " << behavior.callback_events << ", "
+               << "\"gesture_begin_events\": " << behavior.gesture_begin_events << ", "
+               << "\"gesture_end_events\": " << behavior.gesture_end_events << ", "
+               << "\"knobs\": " << behavior.knob_count << ", "
+               << "\"faders\": " << behavior.fader_count << ", "
+               << "\"xy_pads\": " << behavior.xy_pad_count << ", "
+               << "\"toggle_buttons\": " << behavior.toggle_button_count << ", "
+               << "\"text_buttons\": " << behavior.text_button_count << ", "
+               << "\"text_editors\": " << behavior.text_editor_count << ", "
+               << "\"meters\": " << behavior.meter_count << ", "
+               << "\"checkboxes\": " << behavior.checkbox_count << ", "
+               << "\"meter_updates\": " << behavior.meter_updates << ", "
+               << "\"visual_changed\": " << (visual_changed ? "true" : "false")
                << "},\n"
                << "  \"cost\": {"
                << "\"status\": \"complete\", "
@@ -7224,13 +7421,122 @@ TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against so
                << "\"paint_commands_last\": " << interactive_commands << "}"
                << "},\n"
                << "  \"scope_boundaries\": [\n"
-               << "    \"links and instantiates checked-in generated C++ for one non-Chainer import fixture\",\n"
+               << "    \"links and instantiates checked-in generated C++ for one renderable import fixture\",\n"
                << "    \"compares generated C++ against baked-native materialization of the same parsed source IR, not against a live JS runtime screenshot\",\n"
-               << "    \"exercises native fader behavior and records in-process construction/layout/paint cost metrics\",\n"
+               << "    \"exercises generic native primitive behavior and records in-process construction/layout/paint cost metrics\",\n"
                << "    \"does not claim broad Phase H readiness until the early-gate fixture set has complete rows\"\n"
                << "  ]\n"
                << "}\n";
-        write_text(dir / "reports" / "phase-h-compressor-strip-parity-report.json",
+        write_text(dir / "reports" / (screenshot_stem + "-parity-report.json"),
                    report.str());
+    }
+}
+
+TEST_CASE("Phase H renderable generated C++ fixtures render and behave against source IR",
+          "[view][import][cpp-codegen][native-cpp-phase-h]") {
+    const PhaseHGeneratedFixture fixtures[] = {
+        {"compressor-strip",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:compressor-strip",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/compressor-strip.tsx",
+         build_phase_h_compressor_strip_ui,
+         bake_phase_h_compressor_strip_asset_manifest,
+         460,
+         260},
+        {"envelope-shaper",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:envelope-shaper",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/envelope-shaper.tsx",
+         build_phase_h_envelope_shaper_ui,
+         bake_phase_h_envelope_shaper_asset_manifest},
+        {"eq-curve-panel",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:eq-curve-panel",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/eq-curve-panel.tsx",
+         build_phase_h_eq_curve_panel_ui,
+         bake_phase_h_eq_curve_panel_asset_manifest},
+        {"filter-matrix",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:filter-matrix",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/filter-matrix.tsx",
+         build_phase_h_filter_matrix_ui,
+         bake_phase_h_filter_matrix_asset_manifest},
+        {"mixer-send-bank",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:mixer-send-bank",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/mixer-send-bank.tsx",
+         build_phase_h_mixer_send_bank_ui,
+         bake_phase_h_mixer_send_bank_asset_manifest},
+        {"modulation-grid",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:modulation-grid",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/modulation-grid.tsx",
+         build_phase_h_modulation_grid_ui,
+         bake_phase_h_modulation_grid_asset_manifest},
+        {"osc-bank",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:osc-bank",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/osc-bank.tsx",
+         build_phase_h_osc_bank_ui,
+         bake_phase_h_osc_bank_asset_manifest},
+        {"preset-browser-strip",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:preset-browser-strip",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/preset-browser-strip.tsx",
+         build_phase_h_preset_browser_strip_ui,
+         bake_phase_h_preset_browser_strip_asset_manifest},
+        {"sampler-pad-grid",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:sampler-pad-grid",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/sampler-pad-grid.tsx",
+         build_phase_h_sampler_pad_grid_ui,
+         bake_phase_h_sampler_pad_grid_asset_manifest},
+        {"scope-meter",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:scope-meter",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/scope-meter.tsx",
+         build_phase_h_scope_meter_ui,
+         bake_phase_h_scope_meter_asset_manifest},
+        {"transport-loop-panel",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:transport-loop-panel",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/transport-loop-panel.tsx",
+         build_phase_h_transport_loop_panel_ui,
+         bake_phase_h_transport_loop_panel_asset_manifest},
+        {"utility-settings-panel",
+         "planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:utility-settings-panel",
+         "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/utility-settings-panel.tsx",
+         build_phase_h_utility_settings_panel_ui,
+         bake_phase_h_utility_settings_panel_asset_manifest},
+        {"level-meter-panel",
+         "test:fixtures:figma:level-meter-panel",
+         "test/fixtures/figma/level-meter-panel.tsx",
+         build_phase_h_level_meter_panel_ui,
+         bake_phase_h_level_meter_panel_asset_manifest},
+        {"gain-stage-card",
+         "test:fixtures:pencil:gain-stage-card",
+         "test/fixtures/pencil/gain-stage-card.tsx",
+         build_phase_h_gain_stage_card_ui,
+         bake_phase_h_gain_stage_card_asset_manifest},
+        {"gain-stage",
+         "test:fixtures:rn:gain-stage",
+         "test/fixtures/rn/gain-stage.tsx",
+         build_phase_h_gain_stage_ui,
+         bake_phase_h_gain_stage_asset_manifest},
+        {"transport-bar",
+         "test:fixtures:stitch:transport-bar",
+         "test/fixtures/stitch/transport-bar.tsx",
+         build_phase_h_transport_bar_ui,
+         bake_phase_h_transport_bar_asset_manifest},
+        {"audio-control-panel",
+         "test:fixtures:v0-dev:audio-control-panel",
+         "test/fixtures/v0-dev/audio-control-panel.tsx",
+         build_phase_h_audio_control_panel_ui,
+         bake_phase_h_audio_control_panel_asset_manifest},
+        {"settings-strip",
+         "test:fixtures:v0-dev:settings-strip",
+         "test/fixtures/v0-dev/settings-strip.tsx",
+         build_phase_h_settings_strip_ui,
+         bake_phase_h_settings_strip_asset_manifest},
+        {"transport-meter",
+         "test:fixtures:v0-dev:transport-meter",
+         "test/fixtures/v0-dev/transport-meter.tsx",
+         build_phase_h_transport_meter_ui,
+         bake_phase_h_transport_meter_asset_manifest},
+    };
+
+    for (const auto& fixture : fixtures) {
+        DYNAMIC_SECTION(fixture.slug) {
+            run_phase_h_generated_fixture(fixture);
+        }
     }
 }

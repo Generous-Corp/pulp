@@ -496,6 +496,25 @@ TEST_CASE("Grid: parse_template 'none' is empty and never throws (issue-2704)",
     REQUIRE(mixed[1].type == GridTrack::Type::fr);
 }
 
+TEST_CASE("Grid: parse_template expands simple repeat tracks",
+          "[layout][grid]") {
+    auto repeated = GridStyle::parse_template("repeat(4, 1fr)");
+    REQUIRE(repeated.size() == 4);
+    for (const auto& track : repeated) {
+        REQUIRE(track.type == GridTrack::Type::fr);
+        REQUIRE(track.value == 1.0f);
+    }
+
+    auto mixed = GridStyle::parse_template("70px repeat(3, 1fr)");
+    REQUIRE(mixed.size() == 4);
+    REQUIRE(mixed[0].type == GridTrack::Type::fixed);
+    REQUIRE(mixed[0].value == 70.0f);
+    for (std::size_t i = 1; i < mixed.size(); ++i) {
+        REQUIRE(mixed[i].type == GridTrack::Type::fr);
+        REQUIRE(mixed[i].value == 1.0f);
+    }
+}
+
 TEST_CASE("Layout: width 0% lays out at zero, not intrinsic (issue-2704)",
           "[layout][w3c][issue-2704]") {
     View root;

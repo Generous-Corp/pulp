@@ -512,8 +512,16 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
 }
 
 void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection> parent_direction) {
-    if (node.layout.display && *node.layout.display == "grid")
+    if (node.layout.display && *node.layout.display == "grid") {
         view.set_layout_mode(LayoutMode::grid);
+        auto& grid = view.grid();
+        if (auto it = node.attributes.find("pulpGridTemplateColumns"); it != node.attributes.end())
+            grid.template_columns = GridStyle::parse_template(it->second);
+        if (auto it = node.attributes.find("pulpGridTemplateRows"); it != node.attributes.end())
+            grid.template_rows = GridStyle::parse_template(it->second);
+        grid.column_gap = node.layout.column_gap.value_or(node.layout.gap);
+        grid.row_gap = node.layout.row_gap.value_or(node.layout.gap);
+    }
 
     auto& flex = view.flex();
     flex.direction = node.layout.direction == LayoutDirection::row

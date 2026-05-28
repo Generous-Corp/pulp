@@ -1107,12 +1107,17 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
                         {enabled ? "ON" : "OFF"}
                     </button>
                     <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={() => setEnabled(!enabled)} />
+                    <input
                         type="range"
                         min={0}
                         max={1}
                         step={0.01}
                         value={gain}
                         onChange={(event) => setGain(Number(event.currentTarget.value))} />
+                    <meter value={gain} />
                 </section>
             );
         }
@@ -1140,11 +1145,61 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
     REQUIRE(range->style.width == 120.0f);
     REQUIRE(range->style.height == 20.0f);
 
+    const auto* checkbox = find_descendant(ir.root, [](const IRNode& node) {
+        auto type = node.attributes.find("type");
+        return node.type == "input" && type != node.attributes.end() && type->second == "checkbox";
+    });
+    REQUIRE(checkbox != nullptr);
+    REQUIRE(checkbox->attributes.at("pulpValueKey") == "enabled");
+    REQUIRE(checkbox->attributes.at("pulpInitialValue") == "true");
+    REQUIRE(checkbox->attributes.at("pulpEventContract") == "checkbox:onChange:setState");
+    REQUIRE(checkbox->attributes.at("pulpGestureContract") == "checkbox:toggle");
+    REQUIRE(checkbox->style.width == 18.0f);
+    REQUIRE(checkbox->style.height == 18.0f);
+
+    const auto* meter = find_descendant(ir.root, [](const IRNode& node) {
+        return node.type == "meter";
+    });
+    REQUIRE(meter != nullptr);
+    REQUIRE(meter->attributes.at("pulpMeterValueKey") == "gain");
+    REQUIRE(meter->style.width == 12.0f);
+    REQUIRE(meter->style.height == 64.0f);
+
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
     REQUIRE(result.binding_manifest.find("\"value_key\": \"enabled\"") != std::string::npos);
     REQUIRE(result.binding_manifest.find("\"value_key\": \"gain\"") != std::string::npos);
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"button:onClick:setState\"") != std::string::npos);
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"range:onChange:setState\"") != std::string::npos);
+}
+
+TEST_CASE("parse_v0_tsx preserves grid template source contracts",
+          "[view][import][cpp-codegen]") {
+    auto ir = parse_v0_tsx(R"tsx(
+        export default function GridPanel() {
+            return (
+                <section style={{ width: 420 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "70px repeat(3, 1fr)", gap: 6 }}>
+                        <span>Label</span>
+                        <button type="button">A</button>
+                        <button type="button">B</button>
+                        <button type="button">C</button>
+                    </div>
+                </section>
+            );
+        }
+    )tsx");
+
+    const auto* grid = find_descendant(ir.root, [](const IRNode& node) {
+        return node.layout.display && *node.layout.display == "grid";
+    });
+    REQUIRE(grid != nullptr);
+    REQUIRE(grid->attributes.at("pulpGridTemplateColumns") == "70px repeat(3, 1fr)");
+    REQUIRE(grid->layout.gap == 6.0f);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("GridStyle::parse_template(\"70px repeat(3, 1fr)\")") != std::string::npos);
+    REQUIRE(result.source.find("grid.column_gap = 6.0f;") != std::string::npos);
+    REQUIRE(result.source.find("grid.row_gap = 6.0f;") != std::string::npos);
 }
 
 TEST_CASE("parse_v0_tsx maps React Native primitives into baked C++ contracts",

@@ -97,6 +97,29 @@ TEST_CASE("Grid: auto row wrapping with 2 columns", "[layout][grid]") {
     REQUIRE_THAT(root.child_at(3)->bounds().y, WithinAbs(30.0f, 1.0f));
 }
 
+TEST_CASE("Grid: implicit auto rows expand nested container content", "[layout][grid]") {
+    View root;
+    root.set_bounds({0, 0, 200, 400});
+    root.set_layout_mode(LayoutMode::grid);
+    root.grid().template_columns = GridStyle::parse_template("1fr");
+    root.grid().row_gap = 6;
+
+    auto card = std::make_unique<View>();
+    card->flex().direction = FlexDirection::column;
+    card->flex().gap = 4;
+    card->flex().padding = 5;
+    card->add_child(make_box(0, 40));
+    card->add_child(make_box(0, 20));
+
+    root.add_child(std::move(card));
+    root.add_child(make_box(0, 50));
+    root.layout_children();
+
+    REQUIRE_THAT(root.child_at(0)->bounds().height, WithinAbs(74.0f, 1.0f));
+    REQUIRE_THAT(root.child_at(1)->bounds().y, WithinAbs(80.0f, 1.0f));
+    REQUIRE_THAT(root.child_at(1)->bounds().height, WithinAbs(30.0f, 1.0f));
+}
+
 TEST_CASE("Grid: auto wrapping with 3 columns and 7 items", "[layout][grid]") {
     View root;
     root.set_bounds({0, 0, 300, 400});

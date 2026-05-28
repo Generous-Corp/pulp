@@ -2935,6 +2935,78 @@ set(PHASE_H_COMPRESSOR_STRIP_CPP
     ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/compressor-strip-af557c0a.cpp)
 set_source_files_properties(${PHASE_H_COMPRESSOR_STRIP_CPP} PROPERTIES
     COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_compressor_strip_ui;bake_asset_manifest=bake_phase_h_compressor_strip_asset_manifest")
+set(PHASE_H_ENVELOPE_SHAPER_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/envelope-shaper-dac8070a.cpp)
+set_source_files_properties(${PHASE_H_ENVELOPE_SHAPER_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_envelope_shaper_ui;bake_asset_manifest=bake_phase_h_envelope_shaper_asset_manifest")
+set(PHASE_H_EQ_CURVE_PANEL_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/eq-curve-panel-328aec03.cpp)
+set_source_files_properties(${PHASE_H_EQ_CURVE_PANEL_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_eq_curve_panel_ui;bake_asset_manifest=bake_phase_h_eq_curve_panel_asset_manifest")
+set(PHASE_H_FILTER_MATRIX_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/filter-matrix-212a6450.cpp)
+set_source_files_properties(${PHASE_H_FILTER_MATRIX_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_filter_matrix_ui;bake_asset_manifest=bake_phase_h_filter_matrix_asset_manifest")
+set(PHASE_H_MIXER_SEND_BANK_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/mixer-send-bank-25199df9.cpp)
+set_source_files_properties(${PHASE_H_MIXER_SEND_BANK_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_mixer_send_bank_ui;bake_asset_manifest=bake_phase_h_mixer_send_bank_asset_manifest")
+set(PHASE_H_MODULATION_GRID_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/modulation-grid-ebdc2fd6.cpp)
+set_source_files_properties(${PHASE_H_MODULATION_GRID_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_modulation_grid_ui;bake_asset_manifest=bake_phase_h_modulation_grid_asset_manifest")
+set(PHASE_H_OSC_BANK_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/osc-bank-797fb21c.cpp)
+set_source_files_properties(${PHASE_H_OSC_BANK_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_osc_bank_ui;bake_asset_manifest=bake_phase_h_osc_bank_asset_manifest")
+set(PHASE_H_PRESET_BROWSER_STRIP_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/preset-browser-strip-da8feca8.cpp)
+set_source_files_properties(${PHASE_H_PRESET_BROWSER_STRIP_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_preset_browser_strip_ui;bake_asset_manifest=bake_phase_h_preset_browser_strip_asset_manifest")
+set(PHASE_H_SAMPLER_PAD_GRID_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/sampler-pad-grid-61913f62.cpp)
+set_source_files_properties(${PHASE_H_SAMPLER_PAD_GRID_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_sampler_pad_grid_ui;bake_asset_manifest=bake_phase_h_sampler_pad_grid_asset_manifest")
+set(PHASE_H_SCOPE_METER_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/scope-meter-3ec5c9f2.cpp)
+set_source_files_properties(${PHASE_H_SCOPE_METER_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_scope_meter_ui;bake_asset_manifest=bake_phase_h_scope_meter_asset_manifest")
+set(PHASE_H_TRANSPORT_LOOP_PANEL_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/transport-loop-panel-406e254b.cpp)
+set_source_files_properties(${PHASE_H_TRANSPORT_LOOP_PANEL_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_transport_loop_panel_ui;bake_asset_manifest=bake_phase_h_transport_loop_panel_asset_manifest")
+set(PHASE_H_UTILITY_SETTINGS_PANEL_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/utility-settings-panel-2f1bc7f9.cpp)
+set_source_files_properties(${PHASE_H_UTILITY_SETTINGS_PANEL_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_utility_settings_panel_ui;bake_asset_manifest=bake_phase_h_utility_settings_panel_asset_manifest")
+set(PHASE_H_LEVEL_METER_PANEL_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/level-meter-panel-facea92b.cpp)
+set_source_files_properties(${PHASE_H_LEVEL_METER_PANEL_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_level_meter_panel_ui;bake_asset_manifest=bake_phase_h_level_meter_panel_asset_manifest")
+set(PHASE_H_GAIN_STAGE_CARD_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/gain-stage-card-0931cecc.cpp)
+set_source_files_properties(${PHASE_H_GAIN_STAGE_CARD_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_gain_stage_card_ui;bake_asset_manifest=bake_phase_h_gain_stage_card_asset_manifest")
+set(PHASE_H_GAIN_STAGE_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/gain-stage-ac2bbdaa.cpp)
+set_source_files_properties(${PHASE_H_GAIN_STAGE_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_gain_stage_ui;bake_asset_manifest=bake_phase_h_gain_stage_asset_manifest")
+set(PHASE_H_TRANSPORT_BAR_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/transport-bar-81c21381.cpp)
+set_source_files_properties(${PHASE_H_TRANSPORT_BAR_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_transport_bar_ui;bake_asset_manifest=bake_phase_h_transport_bar_asset_manifest")
+set(PHASE_H_AUDIO_CONTROL_PANEL_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/audio-control-panel-adc7dbbd.cpp)
+set_source_files_properties(${PHASE_H_AUDIO_CONTROL_PANEL_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_audio_control_panel_ui;bake_asset_manifest=bake_phase_h_audio_control_panel_asset_manifest")
+set(PHASE_H_SETTINGS_STRIP_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/settings-strip-73630672.cpp)
+set_source_files_properties(${PHASE_H_SETTINGS_STRIP_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_settings_strip_ui;bake_asset_manifest=bake_phase_h_settings_strip_asset_manifest")
+set(PHASE_H_TRANSPORT_METER_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/transport-meter-0d11742c.cpp)
+set_source_files_properties(${PHASE_H_TRANSPORT_METER_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_transport_meter_ui;bake_asset_manifest=bake_phase_h_transport_meter_asset_manifest")
 
 add_executable(pulp-test-design-import-cpp-codegen
     test_design_import_cpp_codegen.cpp
@@ -2948,7 +3020,25 @@ add_executable(pulp-test-design-import-cpp-codegen
     ${CHAINER_PHASE_E_METER_CPP}
     ${CHAINER_PHASE_E_CHAIN_SELECTION_CPP}
     ${CHAINER_PHASE_F_HYBRID_CPP}
-    ${PHASE_H_COMPRESSOR_STRIP_CPP})
+    ${PHASE_H_COMPRESSOR_STRIP_CPP}
+    ${PHASE_H_ENVELOPE_SHAPER_CPP}
+    ${PHASE_H_EQ_CURVE_PANEL_CPP}
+    ${PHASE_H_FILTER_MATRIX_CPP}
+    ${PHASE_H_MIXER_SEND_BANK_CPP}
+    ${PHASE_H_MODULATION_GRID_CPP}
+    ${PHASE_H_OSC_BANK_CPP}
+    ${PHASE_H_PRESET_BROWSER_STRIP_CPP}
+    ${PHASE_H_SAMPLER_PAD_GRID_CPP}
+    ${PHASE_H_SCOPE_METER_CPP}
+    ${PHASE_H_TRANSPORT_LOOP_PANEL_CPP}
+    ${PHASE_H_UTILITY_SETTINGS_PANEL_CPP}
+    ${PHASE_H_LEVEL_METER_PANEL_CPP}
+    ${PHASE_H_GAIN_STAGE_CARD_CPP}
+    ${PHASE_H_GAIN_STAGE_CPP}
+    ${PHASE_H_TRANSPORT_BAR_CPP}
+    ${PHASE_H_AUDIO_CONTROL_PANEL_CPP}
+    ${PHASE_H_SETTINGS_STRIP_CPP}
+    ${PHASE_H_TRANSPORT_METER_CPP})
 target_link_libraries(pulp-test-design-import-cpp-codegen
     PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-cpp-codegen PRIVATE

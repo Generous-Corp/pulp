@@ -4,10 +4,13 @@
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 namespace pulp::view {
 
@@ -1203,8 +1206,23 @@ void View::simulate_hover(Point root_pos) {
 
 std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl) {
     std::vector<GridTrack> tracks;
-    std::istringstream ss(tmpl);
+    std::vector<std::string> tokens;
     std::string token;
+    int paren_depth = 0;
+    for (const char ch : tmpl) {
+        if (std::isspace(static_cast<unsigned char>(ch)) && paren_depth == 0) {
+            if (!token.empty()) {
+                tokens.push_back(token);
+                token.clear();
+            }
+            continue;
+        }
+        if (ch == '(') ++paren_depth;
+        if (ch == ')' && paren_depth > 0) --paren_depth;
+        token.push_back(ch);
+    }
+    if (!token.empty()) tokens.push_back(token);
+
     // Parse a numeric prefix without throwing; std::stof on a non-numeric
     // token (e.g. the CSS initial value `none`) used to throw out of
     // WidgetBridge::load_script (#2704). Returns false for unparseable tokens.
@@ -1217,11 +1235,32 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl) {
             return false;
         }
     };
-    while (ss >> token) {
+    auto trim = [](std::string s) {
+        auto first = s.find_first_not_of(" \t\r\n");
+        auto last = s.find_last_not_of(" \t\r\n");
+        if (first == std::string::npos) return std::string{};
+        return s.substr(first, last - first + 1);
+    };
+    for (const auto& raw_token : tokens) {
+        token = raw_token;
         // `none` is the CSS initial value for grid-template-* — no explicit
         // tracks. Skip it (and any other non-track keyword) rather than throw.
         if (token == "none") continue;
-        if (token.back() == 'r' && token.size() > 2 && token[token.size()-2] == 'f') {
+        if (token.rfind("repeat(", 0) == 0 && token.size() > 8 && token.back() == ')') {
+            const auto inner = token.substr(7, token.size() - 8);
+            const auto comma = inner.find(',');
+            if (comma != std::string::npos) {
+                float count_value = 0.0f;
+                const auto count_token = trim(inner.substr(0, comma));
+                const auto repeated_template = trim(inner.substr(comma + 1));
+                if (try_parse(count_token, count_value) && count_value > 0.0f) {
+                    const auto repeated_tracks = parse_template(repeated_template);
+                    const int count = std::min(64, static_cast<int>(std::floor(count_value)));
+                    for (int i = 0; i < count; ++i)
+                        tracks.insert(tracks.end(), repeated_tracks.begin(), repeated_tracks.end());
+                }
+            }
+        } else if (token.back() == 'r' && token.size() > 2 && token[token.size()-2] == 'f') {
             // "1fr", "2.5fr"
             float val = 0.0f;
             if (try_parse(token.substr(0, token.size() - 2), val))
@@ -1303,6 +1342,53 @@ std::vector<GridStyle::NamedArea> GridStyle::parse_template_areas(const std::str
 
 // ── Grid layout algorithm ───────────────────────────────────────────────────
 
+constexpr float kDefaultGridAutoRowHeight = 30.0f;
+
+static float content_height_for_grid_auto_row(const View& view) {
+    const auto& fs = view.flex();
+
+    if (view.child_count() == 0)
+        return 0.0f;
+
+    if (fs.preferred_height > 0.0f)
+        return fs.preferred_height;
+
+    float height = view.intrinsic_height();
+    if (height > 0.0f)
+        return height;
+
+    float child_height = 0.0f;
+    for (std::size_t i = 0; i < view.child_count(); ++i) {
+        const auto* child = view.child_at(i);
+        if (!child->visible()) continue;
+
+        const auto& cf = child->flex();
+        float h = cf.preferred_height;
+        if (h <= 0.0f)
+            h = child->intrinsic_height();
+        if (h <= 0.0f)
+            h = content_height_for_grid_auto_row(*child);
+
+        if (h > 0.0f)
+            child_height = std::max(child_height, h + cf.margin_t() + cf.margin_b());
+    }
+
+    if (child_height <= 0.0f)
+        return 0.0f;
+
+    const float pt = fs.padding_top >= 0 ? fs.padding_top : fs.padding;
+    const float pb = fs.padding_bottom >= 0 ? fs.padding_bottom : fs.padding;
+    return child_height + pt + pb;
+}
+
+static bool grid_row_uses_auto_content_height(const std::vector<GridTrack>& rows, int row) {
+    if (row < 0)
+        return false;
+    if (row >= static_cast<int>(rows.size()))
+        return true;
+    return rows[static_cast<std::size_t>(row)].type == GridTrack::Type::auto_;
+}
+
 static void layout_grid(View& parent) {
     auto area = parent.local_bounds();
     auto& gs = parent.grid();
@@ -1363,6 +1449,48 @@ static void layout_grid(View& parent) {
         ? static_cast<int>((children.size() + static_cast<size_t>(num_cols) - 1) / static_cast<size_t>(num_cols))
         : static_cast<int>(rows.size());
 
+    auto child_grid_position = [num_cols, num_rows_needed](size_t child_index, const View& child) {
+        const auto& child_grid = child.grid();
+
+        int col = child_grid.grid_column_start > 0
+            ? child_grid.grid_column_start - 1
+            : static_cast<int>(child_index) % num_cols;
+        int row = child_grid.grid_row_start > 0
+            ? child_grid.grid_row_start - 1
+            : static_cast<int>(child_index) / num_cols;
+
+        if (col >= num_cols) col = num_cols - 1;
+        if (row >= num_rows_needed) row = num_rows_needed - 1;
+        if (col < 0) col = 0;
+        if (row < 0) row = 0;
+        return std::pair<int, int>{col, row};
+    };
+
+    std::vector<float> auto_row_min_heights(static_cast<size_t>(num_rows_needed), 0.0f);
+    for (size_t ci = 0; ci < children.size(); ++ci) {
+        auto* child = children[ci];
+        auto [col, row_idx] = child_grid_position(ci, *child);
+        (void)col;
+
+        const float content_h = content_height_for_grid_auto_row(*child);
+        if (content_h <= 0.0f)
+            continue;
+
+        const auto& child_grid = child->grid();
+        int row_end = child_grid.grid_row_end > 0 ? child_grid.grid_row_end - 1 : row_idx + 1;
+        row_end = std::clamp(row_end, row_idx + 1, num_rows_needed);
+        const int row_span = std::max(1, row_end - row_idx);
+        const float spanned_gaps = row_span > 1 ? row_gap * static_cast<float>(row_span - 1) : 0.0f;
+        const float per_row_h = std::max(0.0f, (content_h - spanned_gaps) / static_cast<float>(row_span));
+
+        for (int row = row_idx; row < row_end; ++row) {
+            if (!grid_row_uses_auto_content_height(rows, row))
+                continue;
+            auto& min_h = auto_row_min_heights[static_cast<size_t>(row)];
+            min_h = std::max(min_h, per_row_h);
+        }
+    }
+
     // Resolve row heights
     std::vector<float> row_heights(static_cast<size_t>(num_rows_needed), 0);
     float total_fixed_h = 0;
@@ -1390,11 +1518,17 @@ static void layout_grid(View& parent) {
             if (t.type == GridTrack::Type::fr && total_fr_h > 0) {
                 row_heights[static_cast<size_t>(i)] = remaining_h * (t.value / total_fr_h);
             } else if (t.type == GridTrack::Type::auto_) {
-                row_heights[static_cast<size_t>(i)] = 30.0f;  // Default auto row height
+                row_heights[static_cast<size_t>(i)] = std::max(
+                    kDefaultGridAutoRowHeight,
+                    auto_row_min_heights[static_cast<size_t>(i)]
+                );
             }
         } else {
             // Implicit rows (auto-generated) — use auto height
-            row_heights[static_cast<size_t>(i)] = 30.0f;
+            row_heights[static_cast<size_t>(i)] = std::max(
+                kDefaultGridAutoRowHeight,
+                auto_row_min_heights[static_cast<size_t>(i)]
+            );
         }
     }
 
@@ -1403,20 +1537,7 @@ static void layout_grid(View& parent) {
         auto* child = children[ci];
         auto& child_grid = child->grid();
 
-        int col, row_idx;
-        if (child_grid.grid_column_start > 0) {
-            col = child_grid.grid_column_start - 1;  // CSS is 1-based
-        } else {
-            col = static_cast<int>(ci) % num_cols;
-        }
-        if (child_grid.grid_row_start > 0) {
-            row_idx = child_grid.grid_row_start - 1;
-        } else {
-            row_idx = static_cast<int>(ci) / num_cols;
-        }
-
-        if (col >= num_cols) col = num_cols - 1;
-        if (row_idx >= num_rows_needed) row_idx = num_rows_needed - 1;
+        auto [col, row_idx] = child_grid_position(ci, *child);
 
         // Compute position from column/row offsets
         float x = area.x;

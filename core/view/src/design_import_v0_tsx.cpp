@@ -351,6 +351,10 @@ void apply_jsx_style_property(IRNode& node,
         set_number(node.style.max_height);
     } else if (key == "display") {
         node.layout.display = value;
+    } else if (key == "gridTemplateColumns") {
+        node.attributes["pulpGridTemplateColumns"] = value;
+    } else if (key == "gridTemplateRows") {
+        node.attributes["pulpGridTemplateRows"] = value;
     } else if (key == "flexDirection") {
         node.layout.direction = (value == "row" || value == "row-reverse")
             ? LayoutDirection::row
@@ -702,6 +706,10 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
         } else if (subtype == "checkbox") {
             set_contract_attr(node, "pulpEventContract", on_change ? "checkbox:onChange:setState" : "checkbox:checked");
             set_contract_attr(node, "pulpGestureContract", "checkbox:toggle");
+            if (!node.style.width)
+                node.style.width = 18.0f;
+            if (!node.style.height)
+                node.style.height = 18.0f;
         }
     } else if (lower_tag == "select") {
         set_contract_attr(node, "pulpEventContract", on_change ? "select:onChange:setState" : "select:value");
@@ -715,6 +723,10 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
             set_contract_attr(node, lower_tag == "meter" ? "pulpMeterValueKey" : "pulpValueKey", *state_key);
         set_contract_attr(node, "pulpRouteType", "native_cpp");
         set_contract_attr(node, "pulpSourceFamily", lower_tag);
+        if (!node.style.width)
+            node.style.width = lower_tag == "meter" ? 12.0f : 120.0f;
+        if (!node.style.height)
+            node.style.height = lower_tag == "meter" ? 64.0f : 12.0f;
     }
 
     for (auto& child : node.children)

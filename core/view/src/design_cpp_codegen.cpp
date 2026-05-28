@@ -544,8 +544,29 @@ void emit_common_layout(std::ostringstream& out,
               "flex.justify_content = " + flex_justify_expr(node.layout.justify) + ";");
     emit_line(out, depth, opts.indent_spaces,
               "flex.align_items = " + flex_align_expr(node.layout.align) + ";");
-    if (node.layout.display && *node.layout.display == "grid")
+    if (node.layout.display && *node.layout.display == "grid") {
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_layout_mode(pulp::view::LayoutMode::grid);");
+        emit_line(out, depth, opts.indent_spaces, "{");
+        emit_line(out, depth + 1, opts.indent_spaces, "auto& grid = " + std::string(var) + "->grid();");
+        if (auto it = node.attributes.find("pulpGridTemplateColumns"); it != node.attributes.end()) {
+            emit_line(out, depth + 1, opts.indent_spaces,
+                      "grid.template_columns = pulp::view::GridStyle::parse_template(" +
+                          cpp_string_literal(it->second) + ");");
+        }
+        if (auto it = node.attributes.find("pulpGridTemplateRows"); it != node.attributes.end()) {
+            emit_line(out, depth + 1, opts.indent_spaces,
+                      "grid.template_rows = pulp::view::GridStyle::parse_template(" +
+                          cpp_string_literal(it->second) + ");");
+        }
+        if (node.layout.column_gap || node.layout.gap != 0.0f)
+            emit_line(out, depth + 1, opts.indent_spaces,
+                      "grid.column_gap = " +
+                          format_float(node.layout.column_gap.value_or(node.layout.gap)) + ";");
+        if (node.layout.row_gap || node.layout.gap != 0.0f)
+            emit_line(out, depth + 1, opts.indent_spaces,
+                      "grid.row_gap = " + format_float(node.layout.row_gap.value_or(node.layout.gap)) + ";");
+        emit_line(out, depth, opts.indent_spaces, "}");
+    }
     if (node.layout.gap != 0.0f)
         emit_line(out, depth, opts.indent_spaces, "flex.gap = " + format_float(node.layout.gap) + ";");
     emit_optional_float(out, depth, opts, "flex", "row_gap", node.layout.row_gap);
