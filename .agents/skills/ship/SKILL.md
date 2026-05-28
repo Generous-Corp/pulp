@@ -111,6 +111,10 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
    pulp ship notarize --dry-run        # prints resolved notarytool argv, no submit
    ```
 
+   For the full reusable dev-signing stub (schema template + sourceable
+   helper + per-plug-in setup), see
+   [`docs/guides/ios-dev-signing.md`](../../../docs/guides/ios-dev-signing.md).
+
 2. **Legacy Apple-ID + app-specific password** — kept working as a fallback.
 
    ```bash
