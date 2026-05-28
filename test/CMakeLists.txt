@@ -2659,6 +2659,12 @@ endif()
 # Widget bridge tests
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES pulp::view)
 
+# Widget bridge — source-level API contract. Keeps JS-native function
+# registrations unique so late registrations cannot silently replace
+# earlier behavior.
+pulp_add_test_suite(pulp-test-widget-bridge-api-contracts
+    COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+
 # Widget bridge — runtime-import handlers (pulp #468 follow-up).
 # Split out of test_widget_bridge.cpp in the Phase 5 P5-1 first cut so
 # the 14k-line god-test file shrinks toward per-surface modules.

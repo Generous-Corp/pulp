@@ -6804,28 +6804,6 @@ void WidgetBridge::register_api() {
         return choc::value::createString(ai_cli_command_);
     });
 
-    // Shell exec (for Claude CLI)
-    // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
-    // getLayoutRect(id) → {x, y, width, height, top, left, right, bottom}
-    // pulp #1899 — see the matching note on the earlier getLayoutRect
-    // registration. Both bindings must force a layout pass; whichever
-    // wins the engine_.register_function override needs the same
-    // semantics so React-imported trees get correct bounds in mount-
-    // time effects.
-    engine_.register_function("getLayoutRect", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        root_.layout_children();
-        auto* v = id.empty() ? &root_ : widget(id);
-        return make_layout_rect_value(v);
-    });
-
-    engine_.register_function("getLayoutAncestorRects", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        root_.layout_children();
-        auto* v = id.empty() ? &root_ : widget(id);
-        return make_layout_ancestor_chain_value(v);
-    });
-
     // getComputedValue(id, prop) → string
     engine_.register_function("getComputedValue", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -6840,6 +6818,8 @@ void WidgetBridge::register_api() {
         return choc::value::createString("");
     });
 
+    // Shell exec
+    // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
     engine_.register_function("exec", [](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
         if (cmd.empty()) return choc::value::createString("");
