@@ -42,8 +42,25 @@ struct ScratchDir {
     ScratchDir& operator=(const ScratchDir&) = delete;
 };
 
+struct CurrentPathGuard {
+    fs::path previous;
+
+    explicit CurrentPathGuard(const fs::path& next)
+        : previous(fs::current_path()) {
+        fs::current_path(next);
+    }
+
+    ~CurrentPathGuard() {
+        std::error_code ec;
+        fs::current_path(previous, ec);
+    }
+
+    CurrentPathGuard(const CurrentPathGuard&) = delete;
+    CurrentPathGuard& operator=(const CurrentPathGuard&) = delete;
+};
+
 void write_file(const fs::path& path, const std::string& body) {
-    fs::create_directories(path.parent_path());
+    if (!path.parent_path().empty()) fs::create_directories(path.parent_path());
     std::ofstream out(path, std::ios::binary);
     REQUIRE(out.good());
     out << body;
@@ -375,4 +392,94 @@ TEST_CASE("pulp-scan-worker reports one JSON object per target scan",
     REQUIRE(result.stdout_output.find_first_not_of("\r\n", closing_brace + 1)
             == std::string::npos);
     REQUIRE(result.stdout_output.find("\n{") == std::string::npos);
+}
+
+TEST_CASE("pulp-scan-worker matches relative bundle paths from the current directory",
+          "[host][scan-worker][coverage][requested]") {
+    ScratchDir scratch("relative-vst3");
+    CurrentPathGuard cwd(scratch.path);
+    fs::create_directories("Relative.vst3/Contents/Resources");
+
+    auto result = run_worker({"Relative.vst3"});
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.stdout_output.empty());
+    REQUIRE(result.stdout_output.front() == '{');
+    REQUIRE(result.stdout_output.back() == '\n');
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"name\":\"Relative\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"unique_id\":\"Relative\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"format\":\"vst3\""));
+    REQUIRE(result.stdout_output.find("unsupported bundle extension") == std::string::npos);
+    REQUIRE(result.stderr_output.find("unsupported bundle extension") == std::string::npos);
+}
+
+TEST_CASE("pulp-scan-worker matches dot-prefixed bundle paths without leaking siblings",
+          "[host][scan-worker][coverage][requested]") {
+    ScratchDir scratch("dot-relative-clap");
+    CurrentPathGuard cwd(scratch.path);
+    write_file("Target.clap", "not a dynamic library");
+    write_file("Sibling.clap", "not a dynamic library");
+
+    auto result = run_worker({"./Target.clap"});
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.stdout_output.empty());
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"name\":\"Target\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"unique_id\":\"Target\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"format\":\"clap\""));
+    REQUIRE(result.stdout_output.find("Sibling") == std::string::npos);
+    REQUIRE(result.stdout_output.find("\"name\":\"Target\"") != std::string::npos);
+    const bool mentions_target_path =
+        result.stdout_output.find("\"path\":\"./Target.clap\"") != std::string::npos
+        || result.stdout_output.find("Target.clap") != std::string::npos;
+    REQUIRE(mentions_target_path);
+    REQUIRE(result.stderr_output.find("unsupported bundle extension") == std::string::npos);
+}
+
+TEST_CASE("pulp-scan-worker normalizes parent-directory segments before filtering",
+          "[host][scan-worker][coverage][requested]") {
+    ScratchDir scratch("parent-segment-vst3");
+    auto plugins = scratch.path / "plugins";
+    auto nested = plugins / "nested";
+    auto target = plugins / "Normalized.vst3";
+    auto sibling = plugins / "Other.vst3";
+    fs::create_directories(target / "Contents" / "Resources");
+    fs::create_directories(sibling / "Contents" / "Resources");
+    fs::create_directories(nested);
+
+    const auto routed = (nested / ".." / "Normalized.vst3").string();
+    auto result = run_worker({routed});
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.stdout_output.empty());
+    REQUIRE(result.stdout_output.back() == '\n');
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"name\":\"Normalized\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"unique_id\":\"Normalized\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"format\":\"vst3\""));
+    REQUIRE(result.stdout_output.find("Other") == std::string::npos);
+    REQUIRE(result.stdout_output.find(json_escaped(sibling.string())) == std::string::npos);
+    REQUIRE(result.stderr_output.find("unsupported bundle extension") == std::string::npos);
+}
+
+TEST_CASE("pulp-scan-worker normalizes CLAP parent segments before filtering",
+          "[host][scan-worker][coverage][requested]") {
+    ScratchDir scratch("parent-segment-clap");
+    auto plugins = scratch.path / "plugins";
+    auto nested = plugins / "nested";
+    auto target = plugins / "Normalized Clap.clap";
+    auto sibling = plugins / "Other Clap.clap";
+    fs::create_directories(nested);
+    write_file(target, "not a dynamic library");
+    write_file(sibling, "not a dynamic library");
+
+    const auto routed = (nested / ".." / "Normalized Clap.clap").string();
+    auto result = run_worker({routed});
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.stdout_output.empty());
+    REQUIRE(result.stdout_output.front() == '{');
+    REQUIRE(result.stdout_output.back() == '\n');
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"name\":\"Normalized Clap\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"unique_id\":\"Normalized Clap\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("\"format\":\"clap\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring("Normalized Clap.clap"));
+    REQUIRE(result.stdout_output.find("Other Clap") == std::string::npos);
+    REQUIRE(result.stdout_output.find(json_escaped(sibling.string())) == std::string::npos);
+    REQUIRE(result.stderr_output.find("unsupported bundle extension") == std::string::npos);
 }

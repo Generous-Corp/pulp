@@ -20,11 +20,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace {
+namespace fs = std::filesystem;
 
 std::string json_escape(std::string_view text) {
     std::string escaped;
@@ -80,6 +82,17 @@ void write_json_descriptor(const pulp::host::PluginInfo& info) {
     std::printf("\"format\":\"%s\"}\n", fmt);
 }
 
+fs::path normalized_bundle_path(const std::string& path) {
+    std::error_code ec;
+    auto canonical = fs::weakly_canonical(fs::path(path), ec);
+    if (!ec) return canonical;
+    return fs::absolute(fs::path(path), ec).lexically_normal();
+}
+
+bool same_bundle_path(const std::string& lhs, const std::string& rhs) {
+    return normalized_bundle_path(lhs) == normalized_bundle_path(rhs);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -95,8 +108,9 @@ int main(int argc, char** argv) {
     // Route through the public scan() API with the containing folder
     // added to extra_paths. Filtering to the exact bundle keeps us from
     // reporting other plug-ins that happen to live alongside it.
-    auto slash = path.find_last_of("/\\");
-    std::string dir = (slash == std::string::npos) ? "." : path.substr(0, slash);
+    const fs::path input_path(path);
+    const auto parent = input_path.parent_path();
+    std::string dir = parent.empty() ? "." : parent.string();
 
     pulp::host::PluginScanner scanner;
     pulp::host::ScanOptions opts;
@@ -116,7 +130,9 @@ int main(int argc, char** argv) {
     auto infos = scanner.scan(opts);
     // Keep only the descriptor(s) for our target bundle.
     std::vector<pulp::host::PluginInfo> filtered;
-    for (const auto& i : infos) if (i.path == path) filtered.push_back(i);
+    for (const auto& i : infos) {
+        if (same_bundle_path(i.path, path)) filtered.push_back(i);
+    }
 
     for (const auto& info : filtered) {
         write_json_descriptor(info);
