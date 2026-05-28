@@ -324,6 +324,16 @@ TEST_CASE("design-debug option validation fails before expensive render setup",
     REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
                               "--capture-backend", "unknown"}) == 1);
     REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--width", "wide"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--height", "tall"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--scale", "huge"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--delay-ms", "soon"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--after-delay-ms", "later"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
                               "--script", (temp / "missing.js").string()}) == 1);
     REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
                               "--script", script.string(),
