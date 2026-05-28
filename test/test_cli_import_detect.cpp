@@ -911,7 +911,7 @@ TEST_CASE("render_new_format_json escapes generated string fields",
     report.candidate_source = "stitch\"beta";
     report.candidate_format_version = "2026.06\\next";
     report.based_on_source = "base\nsource";
-    report.based_on_format_version = "2026.05\tlegacy";
+    report.based_on_format_version = "2026.05\r\tlegacy";
     report.additions = {"brand\"primary", "path\\token"};
     report.removals = {std::string("drop") + static_cast<char>(0x1f)};
 
@@ -922,7 +922,7 @@ TEST_CASE("render_new_format_json escapes generated string fields",
     CHECK(json.find("\"path\\\\token\"") != std::string::npos);
     CHECK(json.find("\"drop\\u001f\"") != std::string::npos);
     CHECK(json.find("\"source\": \"base\\nsource\"") != std::string::npos);
-    CHECK(json.find("\"format-version\": \"2026.05\\tlegacy\"") != std::string::npos);
+    CHECK(json.find("\"format-version\": \"2026.05\\r\\tlegacy\"") != std::string::npos);
 }
 
 TEST_CASE("detect preserves manifest order when matches and confidence tie",
