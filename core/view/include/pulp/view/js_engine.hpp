@@ -43,6 +43,13 @@ struct HostObjectDescriptor {
     std::vector<HostObjectMethod> methods;
 };
 
+struct JsEngineCreationStats {
+    uint64_t total = 0;
+    uint64_t quickjs = 0;
+    uint64_t jsc = 0;
+    uint64_t v8 = 0;
+};
+
 // Which JS engine backend is active
 enum class JsEngineType {
     quickjs,
@@ -195,5 +202,10 @@ std::unique_ptr<JsEngine> create_default_js_engine();
 
 // Query which engines are available in this build
 bool is_engine_available(JsEngineType type);
+
+// Diagnostic hook used by native-import validation to prove that a generated
+// C++ view path did not initialize a scripting backend while building/rendering.
+JsEngineCreationStats js_engine_creation_stats();
+void reset_js_engine_creation_stats_for_tests();
 
 } // namespace pulp::view

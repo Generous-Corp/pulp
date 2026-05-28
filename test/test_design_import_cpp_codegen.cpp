@@ -6,6 +6,7 @@
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/js_engine.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -6587,6 +6588,7 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
     const auto route_rows = route_manifest["source_contract_overlay"]["node_route_rows"];
     const auto route_summary = summarize_phase_f_route_rows(route_rows);
 
+    reset_js_engine_creation_stats_for_tests();
     auto root = pulp::test::phase_f_chainer_hybrid::build_chainer_phase_f_hybrid_ui();
     REQUIRE(root != nullptr);
 
@@ -6603,6 +6605,8 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
     constexpr uint32_t kHeight = 800;
     root->set_bounds({0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight)});
     root->layout_children();
+    const auto js_stats_after_build = js_engine_creation_stats();
+    REQUIRE(js_stats_after_build.total == 0);
 
     std::vector<Rect> routed_bounds;
     std::vector<std::string> missing_crop_anchors;
@@ -6623,6 +6627,8 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
     auto linked_png = render_to_png(*root, kWidth, kHeight, 1.0f);
     if (linked_png.empty())
         SKIP("native screenshot renderer unavailable for linked Phase F C++ visual gate");
+    const auto js_stats_after_render = js_engine_creation_stats();
+    REQUIRE(js_stats_after_render.total == 0);
     const auto live_png = read_bytes(live_png_path);
     REQUIRE_FALSE(live_png.empty());
 
@@ -6672,6 +6678,13 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
                << "  \"compiled_into_test_binary\": true,\n"
                << "  \"build_function_resolved\": true,\n"
                << "  \"binding_function_resolved\": true,\n"
+               << "  \"js_engine_creations_after_build\": " << js_stats_after_build.total << ",\n"
+               << "  \"js_engine_creations_after_render\": " << js_stats_after_render.total << ",\n"
+               << "  \"js_engine_creation_stats\": {"
+               << "\"total\": " << js_stats_after_render.total << ", "
+               << "\"quickjs\": " << js_stats_after_render.quickjs << ", "
+               << "\"jsc\": " << js_stats_after_render.jsc << ", "
+               << "\"v8\": " << js_stats_after_render.v8 << "},\n"
                << "  \"threshold\": " << kHybridThreshold << ",\n"
                << "  \"classification\": \"" << classification << "\",\n"
                << "  \"classification_reason\": \"" << classification_reason << "\",\n"
@@ -6716,7 +6729,8 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
                << "  \"missing_crop_anchors\": [],\n"
                << "  \"scope_boundaries\": [\n"
                << "    \"proves the checked-in generated Phase F C++ source is linked into this test binary and can build a native view tree\",\n"
-               << "    \"links through the normal view test target, so this is not a cpp-only no-JS-runtime proof\",\n"
+               << "    \"proves this linked generated C++ build/render path does not initialize a JS engine in the test harness\",\n"
+               << "    \"links through the normal view test target, so this is not a no-JS-symbol-linkage proof\",\n"
                << "    \"does not replace the live runtime fallback for unsupported imports\"\n"
                << "  ]\n"
                << "}\n";
