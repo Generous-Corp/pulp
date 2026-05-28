@@ -195,7 +195,7 @@ std::string handle_status(const std::string& /*params_json*/) {
     std::ostringstream out;
     out << "Pulp Project: " << root.string() << "\n";
 
-    auto branch = exec("git -C " + root.string() + " branch --show-current 2>/dev/null");
+    auto branch = exec("git -C " + shell_quote(root.string()) + " branch --show-current 2>/dev/null");
     if (!branch.empty()) {
         while (!branch.empty() && branch.back() == '\n') branch.pop_back();
         out << "Branch: " << branch << "\n";

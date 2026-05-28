@@ -703,6 +703,31 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
                      "Import design defaults: --mode baked (config:import_design.default_mode), --emit ir-json (implied by config:import_design.default_mode)");
 }
 
+TEST_CASE("MCP status quotes project roots before reading Git branch",
+          "[mcp][tools][shell][coverage][requested]") {
+#if defined(_WIN32)
+    SKIP("POSIX shell quoting assertion is only used on non-Windows");
+#else
+    TempDir scratch;
+    const auto project = scratch.path / "Project With Spaces And 'Quotes'";
+    std::filesystem::create_directories(project / "core");
+    std::filesystem::create_directories(project / "test");
+    std::filesystem::create_directories(project / "build");
+    std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+
+    REQUIRE(std::system(("git -C " + shell_quote(project.string()) +
+                         " init --quiet").c_str()) == 0);
+    REQUIRE(std::system(("git -C " + shell_quote(project.string()) +
+                         " checkout -b mcp-status-quoted-root --quiet").c_str()) == 0);
+
+    ScopedCurrentPath cwd(project);
+    auto response = handle_request(tool_call("37", "pulp_status"));
+    require_contains(response, R"JSON("id":37)JSON");
+    require_contains(response, "Project With Spaces And 'Quotes'");
+    require_contains(response, "Branch: mcp-status-quoted-root");
+#endif
+}
+
 TEST_CASE("MCP status resolves import-design defaults from config and env",
           "[mcp][tools][import-design][codecov]") {
     ScopedCurrentPath cwd(repo_root_path());
