@@ -381,6 +381,20 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     std::string ind = indent(depth, opts.indent_spaces);
     std::string pid = parent_id.empty() ? "''" : ("'" + parent_id + "'");
 
+    // Emit setPosition('absolute') + setLeft/setTop/setRight/setBottom for
+    // nodes whose IRStyle indicates absolute positioning (Figma plugin import
+    // lane: children of non-auto-layout frames). The target may be the node
+    // id or a wrapper id (e.g. audio-widget col_id).
+    auto emit_position_if_absolute = [&](const std::string& target_id) {
+        const auto& s = node.style;
+        if (!s.position || *s.position != "absolute") return;
+        ss << ind << "setPosition('" << target_id << "', 'absolute');\n";
+        if (s.left)   ss << ind << "setLeft('"   << target_id << "', " << *s.left   << ");\n";
+        if (s.top)    ss << ind << "setTop('"    << target_id << "', " << *s.top    << ");\n";
+        if (s.right)  ss << ind << "setRight('"  << target_id << "', " << *s.right  << ");\n";
+        if (s.bottom) ss << ind << "setBottom('" << target_id << "', " << *s.bottom << ");\n";
+    };
+
     // Phase 0a: emit the anchor trail in bridge-native-JS codegen too. Same
     // gate + format as generate_node(), so downstream tooling has one
     // pattern to grep for regardless of which codegen mode produced
@@ -432,6 +446,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // Create a wrapper column for the widget + value label
         std::string col_id = id + "_col";
         ss << ind << "createCol('" << col_id << "', " << pid << ");\n";
+        emit_position_if_absolute(col_id);
         ss << ind << "setFlex('" << col_id << "', 'align_items', 'center');\n";
         ss << ind << "setFlex('" << col_id << "', 'gap', 4);\n";
 
@@ -560,6 +575,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     if (is_text) {
         // Text node → createLabel with explicit height (Yoga requirement)
         ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";  // pulp #81
+        emit_position_if_absolute(id);
 
         float font_h = node.style.font_size.value_or(14.0f);
         float label_h = std::max(font_h * 1.4f, kMinLabelHeight);
@@ -583,6 +599,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
         ss << ind << (is_row ? "createRow" : "createCol")
            << "('" << id << "', " << pid << ");\n";
+        emit_position_if_absolute(id);
 
         // Yoga: every container MUST have explicit height
         // Priority: _layoutHeight (from snapshot_layout) > style.height > fill > computed
