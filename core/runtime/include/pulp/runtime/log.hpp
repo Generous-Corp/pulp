@@ -48,6 +48,14 @@ inline void log_impl(LogLevel level, std::string_view message) {
 
 } // namespace detail
 
+/// Log a plain string with no formatting. Use this from translation units
+/// where `<format>` is a problem (e.g. the iOS AUv3 .appex on iPhone 16
+/// SDKs, where `std::format` instantiation hits a libc++ availability
+/// error for `long double to_chars` even at deployment target 16.4).
+inline void log_message(LogLevel level, std::string_view message) {
+    detail::log_impl(level, message);
+}
+
 template<typename... Args>
 void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
     auto msg = std::format(fmt, std::forward<Args>(args)...);

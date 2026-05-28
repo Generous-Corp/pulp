@@ -28,7 +28,7 @@
 #       BUNDLE_ID       com.pulp.examples.sinesynth.host
 #       NAME            "PulpSineSynth Host"       # optional, defaults to target
 #       VERSION         0.1.0                       # optional, defaults to "1.0.0"
-#       DEPLOYMENT_TARGET 16.4                      # optional, defaults to 16.0
+#       DEPLOYMENT_TARGET 16.4                      # optional, defaults to 16.4
 #       SOURCES         HostApp/PulpHostApp.swift HostApp/ContentView.swift
 #           # optional — defaults to the shipped templates/ios-auv3/HostApp/ pair
 #   )
@@ -85,7 +85,12 @@ function(pulp_add_ios_host_app target)
         set(HOST_VERSION "1.0.0")
     endif()
     if(NOT HOST_DEPLOYMENT_TARGET)
-        set(HOST_DEPLOYMENT_TARGET "16.0")
+        # 16.4 minimum: matches the AUv3 .appex floor in PulpAuv3.cmake.
+        # iOS 16.3+ is the libc++ `_LIBCPP_AVAILABILITY_TO_CHARS_FLOATING_POINT`
+        # availability gate; anything below that breaks any TU that
+        # includes `<format>` and calls `std::format` (e.g. every
+        # `pulp::runtime::log_*` call in the AUv3 link surface).
+        set(HOST_DEPLOYMENT_TARGET "16.4")
     endif()
 
     # Default sources: the shipped SwiftUI HostApp template. Plug-in

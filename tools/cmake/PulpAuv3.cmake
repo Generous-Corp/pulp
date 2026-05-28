@@ -377,7 +377,17 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         PREFIX ""
         SUFFIX ".appex"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
+        # 16.4 minimum: libc++ `_LIBCPP_AVAILABILITY_TO_CHARS_FLOATING_POINT`
+        # (the LLVM 15 ABI marker) is iOS 16.3+. Below that, ANY translation
+        # unit that includes `<format>` and instantiates `std::format(...)` /
+        # `make_format_args(...)` triggers a long-double `to_chars`
+        # availability error during template instantiation — even when the
+        # call site passes no floating-point args. `pulp::runtime::log_*`
+        # uses `std::format` end-to-end, so `core/format/src/au_*.mm` could
+        # never link with the previous 16.0 floor. Match the rest of the
+        # tree (`CMAKE_OSX_DEPLOYMENT_TARGET=16.4`) so the AUv3 .appex
+        # shares the same libc++ availability surface.
+        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.4"
         # Stash the AudioComponentDescription on the target so
         # pulp_add_ios_host_app(...) can read them back without
         # re-deriving from the Info.plist on disk. This is the
