@@ -233,6 +233,35 @@ TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
     std::filesystem::remove_all(tmp);
 }
 
+TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
+          "[inspect][server][coverage][requested]") {
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     ("pulp-inspector-invalid-env-test-" +
+                      std::to_string(socket_port_seed()));
+    std::filesystem::create_directories(tmp);
+    ScopedEnv tmpdir(discovery_env_name());
+    ScopedEnv port_env("PULP_INSPECTOR_PORT");
+    tmpdir.set(tmp.string());
+    port_env.set("not-a-port");
+
+    InspectorServer server;
+    if (!server.start(0)) {
+        std::filesystem::remove_all(tmp);
+        SKIP("default inspector port is already in use");
+    }
+
+    REQUIRE(server.port() == 9147);
+
+    const auto file = inspector_port_file(tmp);
+    std::ifstream in(file);
+    std::string contents;
+    in >> contents;
+    REQUIRE(contents == "9147");
+
+    server.stop();
+    std::filesystem::remove_all(tmp);
+}
+
 TEST_CASE("InspectorServer rejects a port already owned by another server",
           "[inspect][server]") {
     InspectorServer first;

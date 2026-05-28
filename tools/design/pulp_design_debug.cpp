@@ -344,48 +344,58 @@ int main(int argc, char* argv[]) {
         opts.design_tool_bin = find_default_design_tool_bin(repo_root);
     }
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--prompt" && i + 1 < argc) opts.prompt = argv[++i];
-        else if (arg == "--target" && i + 1 < argc) opts.target = argv[++i];
-        else if (arg == "--script" && i + 1 < argc) opts.script_path = argv[++i];
-        else if (arg == "--output-dir" && i + 1 < argc) opts.output_dir = argv[++i];
-        else if (arg == "--response-file" && i + 1 < argc) opts.response_file = argv[++i];
-        else if (arg == "--provider" && i + 1 < argc) opts.provider = argv[++i];
-        else if (arg == "--model" && i + 1 < argc) opts.model = argv[++i];
-        else if (arg == "--reasoning-effort" && i + 1 < argc) opts.reasoning_effort = argv[++i];
-        else if (arg == "--ai-cli" && i + 1 < argc) opts.ai_cli = argv[++i];
-        else if (arg == "--width" && i + 1 < argc) opts.width = static_cast<uint32_t>(std::stoul(argv[++i]));
-        else if (arg == "--height" && i + 1 < argc) opts.height = static_cast<uint32_t>(std::stoul(argv[++i]));
-        else if (arg == "--scale" && i + 1 < argc) opts.scale = std::stof(argv[++i]);
-        else if (arg == "--design-tool-bin" && i + 1 < argc) opts.design_tool_bin = argv[++i];
-        else if (arg == "--delay-ms" && i + 1 < argc) opts.delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
-        else if (arg == "--after-delay-ms" && i + 1 < argc) opts.after_delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
-        else if (arg == "--capture-backend" && i + 1 < argc) {
-            auto value = std::string(argv[++i]);
-            if (value == "coregraphics") {
-                opts.capture_mode = CaptureMode::headless_coregraphics;
-                opts.capture_backend = ScreenshotBackend::coregraphics;
-            } else if (value == "skia") {
-                opts.capture_mode = CaptureMode::headless_skia;
-                opts.capture_backend = ScreenshotBackend::skia;
-            } else if (value == "live-gpu") {
-                opts.capture_mode = CaptureMode::live_gpu;
-                opts.capture_backend = ScreenshotBackend::skia;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--prompt" && i + 1 < argc) opts.prompt = argv[++i];
+            else if (arg == "--target" && i + 1 < argc) opts.target = argv[++i];
+            else if (arg == "--script" && i + 1 < argc) opts.script_path = argv[++i];
+            else if (arg == "--output-dir" && i + 1 < argc) opts.output_dir = argv[++i];
+            else if (arg == "--response-file" && i + 1 < argc) opts.response_file = argv[++i];
+            else if (arg == "--provider" && i + 1 < argc) opts.provider = argv[++i];
+            else if (arg == "--model" && i + 1 < argc) opts.model = argv[++i];
+            else if (arg == "--reasoning-effort" && i + 1 < argc) opts.reasoning_effort = argv[++i];
+            else if (arg == "--ai-cli" && i + 1 < argc) opts.ai_cli = argv[++i];
+            else if (arg == "--width" && i + 1 < argc) opts.width = static_cast<uint32_t>(std::stoul(argv[++i]));
+            else if (arg == "--height" && i + 1 < argc) opts.height = static_cast<uint32_t>(std::stoul(argv[++i]));
+            else if (arg == "--scale" && i + 1 < argc) opts.scale = std::stof(argv[++i]);
+            else if (arg == "--design-tool-bin" && i + 1 < argc) opts.design_tool_bin = argv[++i];
+            else if (arg == "--delay-ms" && i + 1 < argc) opts.delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
+            else if (arg == "--after-delay-ms" && i + 1 < argc) opts.after_delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
+            else if (arg == "--capture-backend" && i + 1 < argc) {
+                auto value = std::string(argv[++i]);
+                if (value == "coregraphics") {
+                    opts.capture_mode = CaptureMode::headless_coregraphics;
+                    opts.capture_backend = ScreenshotBackend::coregraphics;
+                } else if (value == "skia") {
+                    opts.capture_mode = CaptureMode::headless_skia;
+                    opts.capture_backend = ScreenshotBackend::skia;
+                } else if (value == "live-gpu") {
+                    opts.capture_mode = CaptureMode::live_gpu;
+                    opts.capture_backend = ScreenshotBackend::skia;
+                }
+                else {
+                    std::cerr << "Unknown capture backend: " << value << "\n";
+                    return 1;
+                }
             }
-            else {
-                std::cerr << "Unknown capture backend: " << value << "\n";
+            else if (arg == "--help" || arg == "-h") {
+                print_usage();
+                return 0;
+            } else {
+                std::cerr << "Unknown option: " << arg << "\n";
+                print_usage();
                 return 1;
             }
         }
-        else if (arg == "--help" || arg == "-h") {
-            print_usage();
-            return 0;
-        } else {
-            std::cerr << "Unknown option: " << arg << "\n";
-            print_usage();
-            return 1;
-        }
+    } catch (const std::exception& e) {
+        std::cerr << "Invalid option value: " << e.what() << "\n";
+        print_usage();
+        return 1;
+    } catch (...) {
+        std::cerr << "Invalid option value\n";
+        print_usage();
+        return 1;
     }
 
     if (opts.prompt.empty()) {
