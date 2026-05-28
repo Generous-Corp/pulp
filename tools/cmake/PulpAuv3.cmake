@@ -305,7 +305,13 @@ endfunction()
 
 # ── iOS monolithic .appex (legacy Phase 3 shape) ──────────────────────────
 function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufacturer_code plugin_code au_type au_tag au_version_int auv3_entry)
-    add_library(${target}_AUv3 MODULE
+    # iOS App Extension target: MUST be add_executable (MH_EXECUTE) not
+    # add_library MODULE (MH_BUNDLE). PluginKit posix_spawn's the .appex's
+    # binary directly; a bundle Mach-O triggers ENOEXEC ("Exec format
+    # error") at launch time, surfacing as OSStatus 4 from
+    # AVAudioUnit.instantiate. Use NSExtensionMain as the entry point —
+    # standard iOS App Extension convention.
+    add_executable(${target}_AUv3
         ${PULP_${target}_CORE_OBJECTS}
         ${_PULP_FORMAT_SOURCE_DIR}/au_adapter.mm
         ${_PULP_FORMAT_SOURCE_DIR}/au_entry.mm
@@ -321,6 +327,12 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         "-framework AVFoundation"
         "-framework CoreAudioKit"
         "-framework UIKit"
+    )
+    # Entry point: NSExtensionMain (provided by Foundation on iOS app
+    # extensions). -e _NSExtensionMain replaces the default _main entry.
+    target_link_options(${target}_AUv3 PRIVATE
+        "-e" "_NSExtensionMain"
+        "-fapplication-extension"
     )
     target_include_directories(${target}_AUv3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     _pulp_apply_macho_exports(${target}_AUv3 "${target}_AUv3"
@@ -394,12 +406,14 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     set_target_properties(${target}_AUv3 PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION "appex"
+        XCODE_PRODUCT_TYPE "com.apple.product-type.app-extension"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AUv3"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AUv3"
         OUTPUT_NAME "${name}"
         PREFIX ""
-        SUFFIX ".appex"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
         XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${_pulp_ios_min}"
+        XCODE_ATTRIBUTE_WRAPPER_EXTENSION "appex"
         # Stash the AudioComponentDescription on the target so
         # pulp_add_ios_host_app(...) can read them back without
         # re-deriving from the Info.plist on disk. This is the

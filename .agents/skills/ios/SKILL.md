@@ -519,6 +519,39 @@ GPU-plugin-view-host work):
   + CSS animations; liveness token; GpuSurface resized PHYSICAL, SkiaSurface
   LOGICAL+scale; CPU fallback in the factory when `is_gpu_backed()` is false.
 
+### Sim audio loop validation — recordVideo does NOT capture audio
+
+`xcrun simctl io booted recordVideo` produces a video-only `.mov` —
+the Simulator routes audio natively through the Mac's output device
+but never into the recording. This caught the 2026-05-27 iOS AUv3
+audio-path bringup loop: HostApp launched cleanly, all `PULP_` triage
+prints showed `INSTANTIATE_OK`/`NOTE: ON`/`engine.start`-succeeded,
+but the recorded video file was silent. Don't waste cycles trying to
+get audio out of `recordVideo`.
+
+Options for audio-path validation on iOS:
+
+1. **Trust the wiring proof.** When the HostApp prints
+   `PULP_INSTANTIATE_OK`, `PULP_MIDI_BLOCK: ready`,
+   `PULP_NOTE: ON`, and `engine.start()` returns without throwing,
+   the audio path is wired. The Sim renders through CoreAudio →
+   Mac output device → host speakers; an empty audio buffer would
+   manifest as `engine.start` failing or `INSTANTIATE_ERROR`. For
+   most regressions this proof is sufficient.
+2. **Mac audio routing tool.** BlackHole or Loopback can capture the
+   Mac's output device into an audio file; combine with `recordVideo`
+   for an A/V record. Worth the setup time only for true audio QA.
+3. **Real device + headphone jack / mic.** Authoritative — installs
+   the same `.appex` PluginKit registers on real iOS, plays through
+   the device's own audio hardware. Required for any audio-quality
+   judgement (the Sim's `mainMixerNode` resamples; not a faithful
+   reproduction of the device).
+
+When debugging "did the plug-in actually produce sound?" prefer
+option 1 + option 3 over chasing a Sim audio capture. See
+`.agents/skills/auv3/SKILL.md` "iOS AUv3 diagnostic recipe" for the
+chain of `PULP_` prints to grep.
+
 ## See Also
 
 - `android` skill — parallel structure for Android NDK.
