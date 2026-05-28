@@ -376,6 +376,49 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic",
 #endif
 }
 
+TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
+          "[mcp][shell][coverage][requested]") {
+#if defined(_WIN32)
+    auto ok = exec("cmd /c echo|set /p=pulp-mcp");
+#else
+    auto ok = exec("printf 'pulp-mcp'");
+#endif
+    REQUIRE(ok == "pulp-mcp");
+
+#if defined(_WIN32)
+    auto failed = exec("cmd /c exit 7");
+#else
+    auto failed = exec("sh -c 'exit 7'");
+#endif
+    REQUIRE(failed.find("Command failed with status") != std::string::npos);
+}
+
+TEST_CASE("MCP find_project_root walks upward and reports absence",
+          "[mcp][shell][coverage][requested]") {
+    TempDir temp;
+    auto project = temp.path / "project";
+    auto nested = project / "plugins" / "demo";
+    std::filesystem::create_directories(nested);
+    std::filesystem::create_directories(project / "core");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.25)\n";
+    }
+
+    {
+        ScopedCurrentPath cwd(nested);
+        REQUIRE(std::filesystem::weakly_canonical(find_project_root()) ==
+                std::filesystem::weakly_canonical(project));
+    }
+
+    auto not_project = temp.path / "not-project" / "child";
+    std::filesystem::create_directories(not_project);
+    {
+        ScopedCurrentPath cwd(not_project);
+        REQUIRE(find_project_root().empty());
+    }
+}
+
 TEST_CASE("MCP protocol handles initialize ping notification and unknown methods",
           "[mcp][protocol]") {
     auto initialize = handle_request(R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON");
