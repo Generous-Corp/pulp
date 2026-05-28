@@ -677,19 +677,44 @@ def routes_from_rows(rows: list[Any]) -> list[dict[str, Any]]:
     return routes
 
 
+def iter_style_values(style: dict[str, Any]) -> list[dict[str, Any]]:
+    values = []
+    for bucket in ("layout", "typography"):
+        entries = style.get(bucket, {})
+        if isinstance(entries, dict):
+            values.extend(value for value in entries.values() if isinstance(value, dict))
+
+    paint = style.get("paint_layers", [])
+    if isinstance(paint, list):
+        values.extend(value for value in paint if isinstance(value, dict))
+
+    variants = style.get("variants", {})
+    if isinstance(variants, dict):
+        for entries in variants.values():
+            if isinstance(entries, dict):
+                values.extend(value for value in entries.values() if isinstance(value, dict))
+    return values
+
+
 def style_counts(nodes: list[dict[str, Any]], source_counts: dict[str, int] | None = None) -> dict[str, int]:
     supported = 0
     unsupported = 0
+    support_counts: dict[str, int] = {}
     for node in nodes:
         style = node.get("style", {})
         if not isinstance(style, dict):
             continue
-        layout = style.get("layout", {})
-        if isinstance(layout, dict):
-            supported += len(layout)
-        paint = style.get("paint_layers", [])
-        if isinstance(paint, list):
-            supported += len(paint)
+        values = iter_style_values(style)
+        supported += len(values)
+        for value in values:
+            support = value.get("support", {})
+            if not isinstance(support, dict):
+                continue
+            for backend, status in support.items():
+                if not isinstance(backend, str) or not isinstance(status, str):
+                    continue
+                key = f"support_{metric_key(backend)}_{metric_key(status)}"
+                support_counts[key] = support_counts.get(key, 0) + 1
         fallback = style.get("fallback_reasons", [])
         if isinstance(fallback, list):
             unsupported += len(fallback)
@@ -697,6 +722,7 @@ def style_counts(nodes: list[dict[str, Any]], source_counts: dict[str, int] | No
         "supported": supported,
         "unsupported": unsupported,
     }
+    counts.update(dict(sorted(support_counts.items())))
     if source_counts:
         for source_keys, style_key in (
             (("css_values",), "source_css_values"),
