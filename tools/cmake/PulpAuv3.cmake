@@ -369,6 +369,18 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
                 "${CMAKE_BINARY_DIR}/AUv3/${target}.entitlements")
     endif()
 
+    # iOS deployment target: prefer the user-supplied
+    # CMAKE_OSX_DEPLOYMENT_TARGET (e.g. -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4)
+    # so the .appex matches the rest of the build. Fall back to 16.3 — the
+    # minimum the iPhoneSimulator26.x SDK's libc++ allows for `std::format`
+    # / `std::to_chars` floating-point overloads (older targets fail with
+    # "'to_chars' is unavailable: introduced in iOS 16.3 simulator" when
+    # any TU instantiates std::format, e.g. core/runtime/log.hpp).
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(_pulp_ios_min "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    else()
+        set(_pulp_ios_min "16.3")
+    endif()
     set_target_properties(${target}_AUv3 PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION "appex"
@@ -377,7 +389,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         PREFIX ""
         SUFFIX ".appex"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
+        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${_pulp_ios_min}"
         # Stash the AudioComponentDescription on the target so
         # pulp_add_ios_host_app(...) can read them back without
         # re-deriving from the Info.plist on disk. This is the

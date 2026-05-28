@@ -16,6 +16,14 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+// iOS skip: pulp::host is not linked or installed on iOS (App Store policy
+// disallows dlopen of third-party plugins), so the host scanner headers are
+// not on the include path there. `__has_include` lets downstream code
+// include this header unconditionally and key feature presence on the
+// `PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL` macro defined below.
+#if defined(__has_include) && __has_include(<pulp/host/scanner.hpp>)
+#define PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL 1
+
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/scan_blacklist.hpp>
 
@@ -760,3 +768,7 @@ private:
 };
 
 } // namespace pulp::view
+
+#else  // !__has_include(<pulp/host/scanner.hpp>)
+#define PULP_VIEW_HAS_PLUGIN_MANAGER_PANEL 0
+#endif

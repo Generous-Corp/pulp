@@ -57,7 +57,14 @@ bool FileDialog::has_backend() {
 #endif
 }
 
-#if !defined(__APPLE__)
+// iOS has no built-in file_dialog backend (no `file_dialog_ios.mm` yet —
+// #316 P2). Without these definitions the link step for any iOS bundle
+// that pulls pulp-view-core fails on Undefined symbols for
+// FileDialog::{open_file, save_file, choose_folder}. Provide the same
+// backend-routed fallback that the non-Apple stub uses so the symbols
+// exist; until a real UIDocumentPicker impl lands callers get an honest
+// "no backend installed" nullopt instead of a link error.
+#if !defined(__APPLE__) || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
 
 std::optional<std::string> FileDialog::open_file(
     const std::string& title,
@@ -99,6 +106,6 @@ std::optional<std::string> FileDialog::choose_folder(
     return g_backend.choose_folder(title, default_path);
 }
 
-#endif // !defined(__APPLE__)
+#endif // !defined(__APPLE__) || iOS
 
 } // namespace pulp::platform

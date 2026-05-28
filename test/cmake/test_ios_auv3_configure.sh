@@ -26,12 +26,24 @@ trap 'rm -rf "${build_dir}"' EXIT
 log="${build_dir}/configure.log"
 
 set +e
+# 1200s configure ceiling (20 min) — fresh worktrees on the self-hosted
+# runner spend 4–5 minutes on libc header detection (alloca / float /
+# iconv / inttypes / ...), 1–2 minutes on mbedtls FetchContent unpack
+# (which writes nothing to the log until it finishes), 1–2 minutes on
+# Yoga / SheenBidi / yaml-cpp, plus the Xcode generator's try-compile
+# sweep. Observed cold-cache configure on a Mac mini: ~530s; second
+# run with FetchContent caches warm: ~75s. 1200s leaves headroom for
+# slower hosts. Old 90s / 240s / 600s ceilings all silently flipped
+# the test to SKIP on cold runs and masked real failures (the
+# 2026-05-27 iPad walkthrough exposed this). The CTest outer TIMEOUT
+# is 2700s, so a 1200s configure still leaves 25 minutes for the
+# .appex + HostApp build step that follows.
 if command -v gtimeout >/dev/null 2>&1; then
-    timeout_cmd=(gtimeout 90s)
+    timeout_cmd=(gtimeout 1200s)
 elif command -v timeout >/dev/null 2>&1; then
-    timeout_cmd=(timeout 90s)
+    timeout_cmd=(timeout 1200s)
 elif command -v perl >/dev/null 2>&1; then
-    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 90)
+    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 1200)
 else
     timeout_cmd=()
 fi
@@ -53,7 +65,7 @@ status=$?
 set -e
 
 if [[ ${status} -eq 124 || ${status} -eq 142 ]]; then
-    echo "SKIP: iOS Simulator configure exceeded 90s; likely Xcode generator hang"
+    echo "SKIP: iOS Simulator configure exceeded 1200s; likely Xcode generator hang"
     tail -n 80 "${log}" >&2
     exit 77
 fi
@@ -100,10 +112,16 @@ fi
 # not just configure. Configure-only smoke can't catch link-time regressions
 # like the libc++ `to_chars` availability error that landed on iOS-26-SDK
 # hosts — the same error class the iOS plan documents as the Phase iOS-A
-# blocker. Build is opt-in via PULP_IOS_AUV3_SMOKE_BUILD=1 because the
-# build step adds ~3-5 min on a cold cache; CI's nightly-full-build lane
-# flips it ON, PR fast-lane stays at configure-only.
-if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-0}" == "1" ]]; then
+# blocker.
+#
+# 2026-05-27: flipped from opt-in to default-on after an iPad walkthrough
+# discovered configure-green but link-broken state (pulp-view-core missed
+# pulp::audio in its PUBLIC link list; graph_editor_view.hpp unconditionally
+# included <pulp/host/signal_graph.hpp> despite pulp::host being skipped on
+# iOS). The build step adds ~3–5 min on a cold cache. Set
+# PULP_IOS_AUV3_SMOKE_BUILD=0 to fall back to configure-only when
+# iterating locally on a slow machine; CI keeps the default behavior.
+if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-1}" == "1" ]]; then
     echo "INFO: PULP_IOS_AUV3_SMOKE_BUILD=1 — proceeding to .appex build"
 
     build_log="${build_dir}/build.log"

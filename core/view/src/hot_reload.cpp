@@ -3,7 +3,40 @@
 #include <sstream>
 #include <system_error>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if !defined(TARGET_OS_IPHONE)
+#define TARGET_OS_IPHONE 0
+#endif
+
 namespace pulp::view {
+
+// iOS: hot reload is a dev-time feature that depends on
+// `choc::file::Watcher`, which uses macOS `FSEventStream*` APIs not
+// available on iOS. Provide no-op constructors so `scripted_ui.cpp`
+// (and any other caller that owns a `HotReloader` member) still links;
+// the iOS AUv3 / HostApp paths always pass `enable_hot_reload = false`
+// so the object never actually gets constructed there.
+#if TARGET_OS_IPHONE
+
+HotReloader::HotReloader(const std::filesystem::path& js_file, ReloadCallback on_reload)
+    : watched_path_(js_file)
+    , entry_file_(js_file.filename().string())
+    , on_reload_(std::move(on_reload))
+{}
+
+HotReloader::HotReloader(const std::filesystem::path& directory,
+                         const std::string& entry_file,
+                         ReloadCallback on_reload)
+    : watched_path_(directory)
+    , entry_file_(entry_file)
+    , on_reload_(std::move(on_reload))
+{}
+
+HotReloader::~HotReloader() = default;
+
+#else  // !TARGET_OS_IPHONE
 
 HotReloader::HotReloader(const std::filesystem::path& js_file, ReloadCallback on_reload)
     : watched_path_(js_file)
@@ -42,6 +75,8 @@ HotReloader::HotReloader(const std::filesystem::path& directory,
 
 HotReloader::~HotReloader() = default;
 
+#endif  // TARGET_OS_IPHONE
+
 bool HotReloader::poll_reload() {
     std::string code;
     {
@@ -58,6 +93,7 @@ bool HotReloader::poll_reload() {
     return true;
 }
 
+#if !TARGET_OS_IPHONE
 void HotReloader::on_file_changed(const choc::file::Watcher::Event& event) {
     // Only react to .js file modifications
     if (event.eventType != choc::file::Watcher::EventType::modified)
@@ -82,6 +118,7 @@ void HotReloader::on_file_changed(const choc::file::Watcher::Event& event) {
     pending_code_ = std::move(code);
     has_pending_ = true;
 }
+#endif  // !TARGET_OS_IPHONE
 
 std::string HotReloader::read_file(const std::filesystem::path& path) {
     std::ifstream file(path);

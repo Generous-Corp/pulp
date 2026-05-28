@@ -18,11 +18,32 @@ if(APPLE AND NOT PULP_IOS)
                 ${CMAKE_SOURCE_DIR})
     set_tests_properties(cmake-ios-auv3-configure PROPERTIES
         SKIP_RETURN_CODE 77
-        TIMEOUT 1800
+        # 2700s (45 min) outer budget — configure-only on a warm cache
+        # finishes in ~1 min, but the default-on .appex + HostApp build
+        # (PULP_IOS_AUV3_SMOKE_BUILD=1, the post-2026-05-27 default)
+        # takes 9–10 minutes on cold caches, on top of a 530s configure
+        # pass that runs mbedtls / Highway / Yoga FetchContent unpacks
+        # before Xcode finishes generating. The shell script's internal
+        # timeouts are tighter (600s configure + 1500s build).
+        TIMEOUT 2700
         # Tagged `slow` for fast-CI exclusion (#1589): a fresh-cache
         # configure spends ~3 minutes downloading + unpacking iOS-leg
         # FetchContent sources before the actual smoke fires. Full-CI
         # (push to main / nightly / workflow_dispatch) still runs it.
+        LABELS slow)
+
+    # iOS HostApp link-time regression test. Companion to the AUv3
+    # configure smoke above; this one always builds the HostApp .app
+    # and asserts the produced bundle has a real Info.plist + Mach-O
+    # executable + embedded .appex. Catches "pulp-view-core does not
+    # link on iOS" regressions like the 2026-05-26 walkthrough that
+    # exposed missing pulp::audio and unguarded pulp::host includes.
+    add_test(NAME cmake-ios-hostapp-links
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_hostapp_links.sh
+                ${CMAKE_SOURCE_DIR})
+    set_tests_properties(cmake-ios-hostapp-links PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 2700
         LABELS slow)
 endif()
 

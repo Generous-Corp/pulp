@@ -12,28 +12,39 @@
 #include <pulp/view/accessibility.hpp>
 #import <UIKit/UIKit.h>
 
-namespace pulp::view {
+#include <vector>
 
 // ── Role mapping ────────────────────────────────────────────────────────
+//
+// `@interface` / `@implementation` declarations may only appear at file
+// scope (clang error: "Objective-C declarations may only appear in
+// global scope"). Keep the C++ helpers and the Obj-C bridge class at
+// the top level here and re-enter `namespace pulp::view` further down
+// for the C++ entry point that the rest of pulp-view calls.
 
-static UIAccessibilityTraits access_role_to_traits(View::AccessRole role) {
+namespace {
+
+UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
+    using AccessRole = pulp::view::View::AccessRole;
     switch (role) {
-        case View::AccessRole::slider:
+        case AccessRole::slider:
             return UIAccessibilityTraitAdjustable;
-        case View::AccessRole::toggle:
+        case AccessRole::toggle:
             return UIAccessibilityTraitButton;
-        case View::AccessRole::label:
+        case AccessRole::label:
             return UIAccessibilityTraitStaticText;
-        case View::AccessRole::group:
+        case AccessRole::group:
             return UIAccessibilityTraitNone;
-        case View::AccessRole::meter:
+        case AccessRole::meter:
             return UIAccessibilityTraitUpdatesFrequently;
-        case View::AccessRole::image:
+        case AccessRole::image:
             return UIAccessibilityTraitImage;
         default:
             return UIAccessibilityTraitNone;
     }
 }
+
+}  // namespace
 
 // ── PulpAccessibilityElement ────────────────────────────────────────────
 
@@ -58,7 +69,7 @@ static UIAccessibilityTraits access_role_to_traits(View::AccessRole role) {
 
 - (UIAccessibilityTraits)accessibilityTraits {
     if (!_pulpView) return UIAccessibilityTraitNone;
-    return pulp::view::access_role_to_traits(_pulpView->access_role());
+    return access_role_to_traits(_pulpView->access_role());
 }
 
 - (CGRect)accessibilityFrame {
@@ -99,9 +110,13 @@ static UIAccessibilityTraits access_role_to_traits(View::AccessRole role) {
 
 @end
 
+namespace pulp::view {
+
 // ── Helper: collect accessible views ────────────────────────────────────
 
-static void collect_accessible_views(View& root, std::vector<View*>& out) {
+namespace {
+
+void collect_accessible_views(View& root, std::vector<View*>& out) {
     for (size_t i = 0; i < root.child_count(); ++i) {
         auto* child = root.child_at(i);
         if (child->access_role() != View::AccessRole::none)
@@ -109,6 +124,8 @@ static void collect_accessible_views(View& root, std::vector<View*>& out) {
         collect_accessible_views(*const_cast<View*>(child), out);
     }
 }
+
+}  // namespace
 
 /// Create accessibility elements for all accessible views in the tree.
 /// Called by the hosting UIView to populate its accessibility container.

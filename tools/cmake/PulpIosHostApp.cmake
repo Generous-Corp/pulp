@@ -85,7 +85,16 @@ function(pulp_add_ios_host_app target)
         set(HOST_VERSION "1.0.0")
     endif()
     if(NOT HOST_DEPLOYMENT_TARGET)
-        set(HOST_DEPLOYMENT_TARGET "16.0")
+        # Prefer the user-supplied root-build deployment target if set
+        # (e.g. -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4). Default to 16.3 —
+        # the minimum the iPhoneSimulator26.x SDK's libc++ allows for
+        # `std::format` / `std::to_chars` floating-point overloads
+        # (see PulpAuv3.cmake for the matching deployment-target floor).
+        if(CMAKE_OSX_DEPLOYMENT_TARGET)
+            set(HOST_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        else()
+            set(HOST_DEPLOYMENT_TARGET "16.3")
+        endif()
     endif()
 
     # Default sources: the shipped SwiftUI HostApp template. Plug-in
@@ -212,12 +221,18 @@ function(pulp_add_ios_host_app target)
             XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${_host_entitlements_out}")
     endif()
 
+    # CoreAudioTypes is part of AudioToolbox on iOS — it is NOT a
+    # top-level framework (unlike macOS where it ships under
+    # /System/Library/Frameworks/CoreAudioTypes.framework). Linking it
+    # standalone fails with "framework 'CoreAudioTypes' not found" on
+    # the iPhoneSimulator26.x SDK. AudioToolbox is sufficient for the
+    # AudioComponentDescription / AVAudioUnitComponent types the HostApp
+    # uses.
     target_link_libraries(${target} PRIVATE
         "-framework UIKit"
         "-framework SwiftUI"
         "-framework AVFoundation"
         "-framework AudioToolbox"
-        "-framework CoreAudioTypes"
     )
 
     # ── Embed the .appex into Contents/PlugIns ──────────────────────────

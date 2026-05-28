@@ -9,6 +9,15 @@
 // transitions through one block of silence and back without tearing.
 //
 // Phase 2 of planning/signal-graph-followups-plan.md.
+//
+// iOS skip: pulp::host is not linked on iOS (App Store policy disallows
+// dlopen of third-party plugins). `__has_include` short-circuits the entire
+// declaration on platforms where the host headers are not on the include
+// path — downstream code that conditionally instantiates GraphEditorView
+// must mirror the same guard.
+
+#if defined(__has_include) && __has_include(<pulp/host/signal_graph.hpp>)
+#define PULP_VIEW_HAS_GRAPH_EDITOR_VIEW 1
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/view/view.hpp>
@@ -94,3 +103,7 @@ private:
 };
 
 } // namespace pulp::view::widgets
+
+#else  // !__has_include(<pulp/host/signal_graph.hpp>)
+#define PULP_VIEW_HAS_GRAPH_EDITOR_VIEW 0
+#endif

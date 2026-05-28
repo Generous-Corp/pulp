@@ -351,17 +351,107 @@ xcrun devicectl device install app --device <DEVICE_UDID> \
 ### Smoke test coverage
 
 `test/cmake/test_ios_auv3_configure.sh` exercises both helpers:
-- Configure-only (default fast lane): asserts the `PulpSineSynth_HostApp` Xcode target is emitted and the `pulp_add_ios_host_app()` status line fires.
-- `PULP_IOS_AUV3_SMOKE_BUILD=1` (nightly-full-build lane): builds the HostApp `.app`, confirms the `.appex` is embedded under `PlugIns/`, and validates the HostApp `Info.plist` carries the matching `AudioComponents.subtype`.
+- Default behavior (since 2026-05-27): configures + builds both the AUv3 `.appex` and the HostApp `.app`, asserts the `.appex` is embedded under `PlugIns/`, and validates the HostApp `Info.plist` carries the matching `AudioComponents.subtype`. This catches link-time regressions that configure-only smoke cannot — for example a missing `pulp::audio` PUBLIC link in `core/view` or an unguarded `<pulp/host/*>` include in a view header (both real iPad-walkthrough regressions).
+- Override with `PULP_IOS_AUV3_SMOKE_BUILD=0` to fall back to configure-only when iterating locally on a slow machine.
+
+`test/cmake/test_ios_hostapp_links.sh` is the companion link-time
+regression test — it always builds the HostApp and asserts the
+produced bundle has a real Info.plist (lint-clean, non-empty
+`CFBundleIdentifier`), a real Mach-O executable at
+`CFBundleExecutable`, and an embedded `.appex` under `PlugIns/`. Use
+this script directly when triaging a "configure smoke is green but
+the user's iPad has no plugin" report.
 
 ## Follow-ups / Known Gaps
 
-- Full `pulp-view` iOS build requires gating `hot_reload.hpp`.
+- ~~Full `pulp-view` iOS build requires gating `hot_reload.hpp`.~~ Done 2026-05-27: `choc::file::Watcher` (FSEventStream-based) is now `#if !TARGET_OS_IPHONE`-gated and `HotReloader` ships a no-op iOS stub.
 - ~~`pulp_add_ios_auv3()` ships the `.appex`; host-app target generation~~ Done in Phase iOS-B via `pulp_add_ios_host_app()`.
 - Device-target code signing is documented but not scripted.
 - Visual regression for iOS UIs not wired up yet (see #330, #249).
 
 ## Gotchas
+
+### Cross-subsystem deps in `pulp-view-core` must hold on iOS
+
+`pulp::host` is intentionally not added on iOS (App Store policy plus
+`std::format` / `long double to_chars` libc++ availability on the
+iPhoneSimulator SDK). That guard lives in the root `CMakeLists.txt`
+and in `core/view/CMakeLists.txt`'s `pulp-view-core` link list. Two
+follow-on contracts must hold for `pulp-view-core` to actually link
+on iOS:
+
+1. Every `pulp::*` library that a view source `#include`s must be in
+   the PUBLIC link list. The iOS lane catches this only if the smoke
+   actually builds the HostApp (it does as of 2026-05-27). A real
+   regression from PR #3059 was `visualizers.cpp` including
+   `<pulp/audio/audio_thumbnail.hpp>` without `pulp::audio` being
+   linked.
+2. Any view header that includes `<pulp/host/...>` must wrap that
+   include in `#if defined(__has_include) && __has_include(<pulp/host/...>)`
+   so transitive consumers on iOS get a clean "feature absent" macro
+   rather than a "file not found" error. Affected headers today:
+   `core/view/include/pulp/view/widgets/graph_editor_view.hpp`,
+   `core/view/include/pulp/view/plugin_manager_panel.hpp`,
+   `core/view/include/pulp/view/hosted_editor_attachment.hpp`. Each
+   defines a `PULP_VIEW_HAS_*` companion macro downstream code can
+   key off.
+
+If you add a new view source or header that pulls from `pulp::audio`,
+`pulp::host`, or any other subsystem that may be conditionally
+absent, the iOS HostApp link smoke
+(`test/cmake/test_ios_hostapp_links.sh`) is the canonical local
+reproducer.
+
+### `add_compile_options(-Wall ...)` must be gated to C/C++/ObjC languages
+
+The Swift driver rejects clang's `-Wall` / `-Wextra` / `-Wpedantic`
+flags with `Driver threw unknown argument: '-Wall' without emitting
+errors`. The root `CMakeLists.txt` adds these via `add_compile_options`,
+which (without a language genex) attaches them to **every** language in
+the build — including any Swift target like the iOS HostApp's
+`PulpHostApp.swift`. Always wrap with
+`$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wall>` etc. so Swift sees
+only the flags it understands.
+
+### iOS deployment target must be ≥ 16.3 for `std::format`
+
+The iPhoneSimulator26.x SDK's libc++ marks `std::to_chars` for floating-
+point types as `introduced in iOS 16.3 simulator`. `std::format`
+unconditionally instantiates `to_chars` for `float` / `double` / `long
+double` as part of its formatter type list, so any TU that includes
+`<pulp/runtime/log.hpp>` (which uses `std::format`) fails to compile if
+the active `IPHONEOS_DEPLOYMENT_TARGET` is below 16.3 — even when the
+caller passes only strings. `pulp_add_ios_auv3()` and
+`pulp_add_ios_host_app()` both default to the user-supplied
+`CMAKE_OSX_DEPLOYMENT_TARGET` when present, otherwise pin to `16.3`.
+Don't lower either floor below 16.3 unless `std::format` is removed
+from `core/runtime/log.hpp` first.
+
+### iOS link line: don't link `CoreAudioTypes` standalone
+
+On macOS, `CoreAudioTypes` ships as
+`/System/Library/Frameworks/CoreAudioTypes.framework`. On iOS it
+**does not exist as a top-level framework** — the same headers ship
+inside `AudioToolbox.framework`. Linking it standalone fails with
+`framework 'CoreAudioTypes' not found` on `iphonesimulator26.x`.
+Link `AudioToolbox` only; the `AudioComponentDescription` /
+`AVAudioUnitComponent` types resolve through that.
+
+### `FileDialog` / `PopupMenu` stubs must compile on iOS
+
+`core/platform/src/file_dialog_stub.cpp` defines
+`FileDialog::open_file` / `save_file` / `choose_folder` under
+`#if !defined(__APPLE__)` and `core/platform/src/popup_menu_stub.cpp`
+defines `PopupMenu::show` / `show_at_view` under the same guard.
+macOS has native impls in `file_dialog_mac.mm` / `popup_menu_mac.mm`;
+iOS has neither (UIDocumentPicker + UIMenu wiring are
+follow-ups). Without an explicit iOS branch the link step fails on
+`Undefined symbols` for any iOS bundle that pulls `pulp-view-core`
+(WidgetBridge wires both into the JS bridge). The fix is to widen the
+`#if` to also include iOS:
+`#if !defined(__APPLE__) || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)`.
+Callers see `nullopt` / empty results — honest "unsupported" signaling
+— until the native UIDocumentPicker impl lands.
 
 ### `PulpAUViewController::dealloc` — never call `_bridge->close()` explicitly
 

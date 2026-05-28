@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.270.2
+    VERSION 0.270.4
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -105,10 +105,21 @@ set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept ou
 set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
+# Gate to C/C++/Obj-C(++) compile languages only. Swift's driver rejects
+# clang-style `-Wall` / `-Wextra` / `-Wpedantic` (iOS HostApp + any future
+# Swift target would otherwise fail with "Driver threw unknown argument:
+# '-Wall' without emitting errors"). The `$<COMPILE_LANGUAGE:...>` genex
+# scopes warnings to languages that actually understand them.
 if(MSVC)
-    add_compile_options(/W4 /wd4100)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:/W4>"
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:/wd4100>")
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wall>"
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wextra>"
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wpedantic>"
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>")
 endif()
 
 # ── Windows runtime library (Tier A Slice 12) ──────────────────────────────
