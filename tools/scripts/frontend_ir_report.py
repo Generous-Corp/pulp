@@ -67,6 +67,19 @@ def validate_source_span(value: Any, field: str) -> None:
             expect(is_positive_int(value[key]), f"{field}.{key} must be a positive integer")
 
 
+def validate_resource(value: Any, field: str) -> None:
+    expect(isinstance(value, dict), f"{field} must be an object")
+    expect(isinstance(value.get("id"), str) and bool(value["id"]), f"{field}.id must be a string")
+    expect(isinstance(value.get("original_uri"), str) and bool(value["original_uri"]),
+           f"{field}.original_uri must be a string")
+    expect(isinstance(value.get("route_usage"), list), f"{field}.route_usage must be an array")
+    for index, route in enumerate(value["route_usage"]):
+        expect(route in ROUTES, f"{field}.route_usage[{index}] is invalid")
+    validate_sha(value.get("sha256"), f"{field}.sha256")
+    if "byte_size" in value:
+        expect(is_non_negative_int(value["byte_size"]), f"{field}.byte_size must be a non-negative integer")
+
+
 def validate_frontend_ir(report: dict[str, Any]) -> None:
     expect(report.get("schema") == "pulp-frontend-ir-v0", "schema must be pulp-frontend-ir-v0")
     for key in ("source", "design_ir", "nodes", "routes", "validation"):
@@ -99,6 +112,11 @@ def validate_frontend_ir(report: dict[str, Any]) -> None:
         if "source_span" in node:
             validate_source_span(node["source_span"], f"nodes[{index}].source_span")
 
+    if "resources" in report:
+        expect(isinstance(report["resources"], list), "resources must be an array")
+        for index, resource in enumerate(report["resources"]):
+            validate_resource(resource, f"resources[{index}]")
+
     expect(isinstance(report["routes"], list), "routes must be an array")
     for index, route in enumerate(report["routes"]):
         expect(isinstance(route, dict), f"routes[{index}] must be an object")
@@ -123,6 +141,8 @@ def validate_frontend_ir(report: dict[str, Any]) -> None:
         validate_count_map(validation.get("route_counts"), "validation.route_counts")
     if "primitive_counts" in validation:
         validate_count_map(validation.get("primitive_counts"), "validation.primitive_counts")
+    if "resource_counts" in validation:
+        validate_count_map(validation.get("resource_counts"), "validation.resource_counts")
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -193,6 +213,15 @@ def route_rows(route_manifest: dict[str, Any]) -> list[Any]:
     return rows if isinstance(rows, list) else []
 
 
+def routes_present(rows: list[Any]) -> list[str]:
+    found = sorted({
+        route_name(row.get("route_type"))
+        for row in rows
+        if isinstance(row, dict)
+    })
+    return found or [ROUTE_HYBRID]
+
+
 def row_node_id(row: dict[str, Any], index: int) -> str:
     value = row.get("id")
     if isinstance(value, str) and value:
@@ -208,6 +237,10 @@ def row_node_id(row: dict[str, Any], index: int) -> str:
 
 def metric_key(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_").lower() or "unknown"
+
+
+def resource_id_key(value: str) -> str:
+    return metric_key(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value))
 
 
 def inline_source_audit(route_manifest: dict[str, Any]) -> dict[str, Any]:
@@ -372,6 +405,96 @@ def primitive_counts(rows: list[Any]) -> dict[str, int]:
             counts["with_state_contracts"] = counts.get("with_state_contracts", 0) + 1
         if row.get("style_token_references"):
             counts["with_style_token_references"] = counts.get("with_style_token_references", 0) + 1
+    return counts
+
+
+def route_usage_for_input(key: str, rows: list[Any]) -> list[str]:
+    normalized = resource_id_key(key)
+    if normalized in {"bundle", "runtime_trace"}:
+        return [ROUTE_LIVE_JS]
+    if normalized in {"materialized_audit", "cpp", "native_audit"}:
+        return [ROUTE_NATIVE_CPP]
+    if normalized in {"ir", "source_jsx", "source_audit"}:
+        return routes_present(rows)
+    return routes_present(rows)
+
+
+def path_byte_size(path: str, repo_root: pathlib.Path) -> int | None:
+    candidate = pathlib.Path(path)
+    if not candidate.is_absolute():
+        candidate = repo_root / candidate
+    try:
+        if candidate.is_file():
+            return candidate.stat().st_size
+    except OSError:
+        return None
+    return None
+
+
+def input_resource(key: str, value: Any, rows: list[Any], repo_root: pathlib.Path,
+                   requested_by: str) -> dict[str, Any] | None:
+    path_value = ""
+    sha = ""
+    if isinstance(value, dict):
+        path = value.get("path")
+        if isinstance(path, str) and path:
+            path_value = path
+        candidate_sha = value.get("sha256")
+        if isinstance(candidate_sha, str):
+            sha = candidate_sha
+    elif isinstance(value, str) and value and ("/" in value or "." in pathlib.Path(value).name):
+        path_value = value
+
+    if not path_value:
+        return None
+
+    resource: dict[str, Any] = {
+        "id": f"input.{resource_id_key(key)}",
+        "original_uri": path_value,
+        "resolved_uri": path_value,
+        "requested_by": [requested_by],
+        "route_usage": route_usage_for_input(key, rows),
+        "transforms": [],
+        "watch": key in {"sourceJsx", "bundle", "sourceAudit"},
+    }
+    if sha:
+        resource["sha256"] = sha
+    byte_size = path_byte_size(path_value, repo_root)
+    if byte_size is not None:
+        resource["byte_size"] = byte_size
+    return resource
+
+
+def resources_from_manifest(route_manifest: dict[str, Any], rows: list[Any], repo_root: pathlib.Path) -> list[dict[str, Any]]:
+    inputs = route_manifest.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return []
+    requested_by = str(route_manifest.get("fixture") or route_manifest.get("schema") or "route_manifest")
+    resources = []
+    for key, value in inputs.items():
+        resource = input_resource(key, value, rows, repo_root, requested_by)
+        if resource is not None:
+            resources.append(resource)
+    return resources
+
+
+def resource_counts(resources: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {
+        "total": len(resources),
+        "with_sha256": 0,
+        "with_byte_size": 0,
+        "watchable": 0,
+    }
+    for resource in resources:
+        if resource.get("sha256"):
+            counts["with_sha256"] += 1
+        if is_non_negative_int(resource.get("byte_size")):
+            counts["with_byte_size"] += 1
+        if resource.get("watch") is True:
+            counts["watchable"] += 1
+        for route in resource.get("route_usage", []) or []:
+            if isinstance(route, str):
+                counts[f"route_usage_{route}"] = counts.get(f"route_usage_{route}", 0) + 1
     return counts
 
 
@@ -651,6 +774,7 @@ def build_frontend_ir(
 
     counts = count_map(source_audit, rows)
     nodes = nodes_from_rows(rows)
+    resources = resources_from_manifest(route_manifest, rows, repo_root)
     source_of_truth = overlay.get("source", {}).get("source_of_truth")
     source_of_truth = normalize_source_of_truth(source_of_truth)
 
@@ -683,7 +807,7 @@ def build_frontend_ir(
             "kind": "route_manifest",
         },
         "nodes": nodes,
-        "resources": [],
+        "resources": resources,
         "tokens": {},
         "tweaks": [],
         "routes": routes_from_rows(rows),
@@ -700,6 +824,7 @@ def build_frontend_ir(
             "style_counts": style_counts(nodes),
             "route_counts": route_counts(route_manifest, rows),
             "primitive_counts": primitive_counts(rows),
+            "resource_counts": resource_counts(resources),
             "compile": {
                 "status": "not_run",
             },

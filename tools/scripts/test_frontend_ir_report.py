@@ -151,6 +151,16 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["validation"]["primitive_counts"]["primitive_knob"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["with_parameter_bindings"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["with_event_contracts"], 1)
+        self.assertEqual([resource["id"] for resource in report["resources"]],
+                         ["input.source_jsx", "input.ir"])
+        self.assertEqual(report["resources"][0]["route_usage"], ["native_cpp"])
+        self.assertEqual(report["resources"][1]["route_usage"], ["native_cpp"])
+        self.assertTrue(report["resources"][0]["watch"])
+        self.assertFalse(report["resources"][1]["watch"])
+        self.assertEqual(report["validation"]["resource_counts"]["total"], 2)
+        self.assertEqual(report["validation"]["resource_counts"]["with_sha256"], 2)
+        self.assertEqual(report["validation"]["resource_counts"]["watchable"], 1)
+        self.assertEqual(report["validation"]["resource_counts"]["route_usage_native_cpp"], 2)
         self.assertTrue(report["validation"]["binary_dependencies"]["js_engine_present"])
         fir.validate_frontend_ir(report)
 
@@ -247,6 +257,11 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["validation"]["route_counts"]["route_rows_native_html"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["primitive_layout"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["with_state_contracts"], 1)
+        self.assertEqual([resource["id"] for resource in report["resources"]], ["input.source_jsx"])
+        self.assertEqual(report["resources"][0]["route_usage"], ["native_cpp", "native_html"])
+        self.assertEqual(report["validation"]["resource_counts"]["total"], 1)
+        self.assertEqual(report["validation"]["resource_counts"]["route_usage_native_cpp"], 1)
+        self.assertEqual(report["validation"]["resource_counts"]["route_usage_native_html"], 1)
         self.assertIn("did not provide a DesignIR", " ".join(report["validation"]["notes"]))
         fir.validate_frontend_ir(report)
 
@@ -311,6 +326,10 @@ class FrontendIrReportTests(unittest.TestCase):
             root = pathlib.Path(td)
             route_manifest_path = root / "reports/route.json"
             output_path = root / "reports/frontend-ir.json"
+            (root / "fixtures").mkdir()
+            (root / "fixtures/UI.jsx").write_text("export default function UI() { return null; }\n", encoding="utf-8")
+            (root / "reports/generated").mkdir(parents=True)
+            (root / "reports/generated/ui-ir.json").write_text("{}\n", encoding="utf-8")
             write_json(
                 route_manifest_path,
                 {
@@ -351,6 +370,8 @@ class FrontendIrReportTests(unittest.TestCase):
             self.assertEqual(report["source"]["counts"]["jsx_elements"], 3)
             self.assertEqual(report["source"]["counts"]["materiality_event_contracts"], 2)
             self.assertIn("runtime_array_maps", report["source"]["dynamic_risks"])
+            self.assertEqual(report["validation"]["resource_counts"]["with_byte_size"], 2)
+            self.assertEqual(report["resources"][0]["byte_size"], len("export default function UI() { return null; }\n"))
             self.assertEqual(report["routes"], [])
 
 
