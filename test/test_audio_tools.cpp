@@ -59,6 +59,12 @@ void write_text(const fs::path& path, const std::string& text) {
     output << text;
 }
 
+std::string read_text(const fs::path& path) {
+    std::ifstream input(path);
+    REQUIRE(input.good());
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
 pulp::audio::AudioFileData make_audio(uint32_t sample_rate, uint64_t frame_count) {
     pulp::audio::AudioFileData data;
     data.sample_rate = sample_rate;
@@ -1719,6 +1725,54 @@ TEST_CASE("excerpt find JSON serializer preserves ranked bundle metadata",
     REQUIRE(json.find("\"excerpt_file\": \"excerpts/rank-01-loop-1.000-1.250.wav\"")
             != std::string::npos);
     REQUIRE(json.find("/audio/readme.txt (unsupported; WAV only)") != std::string::npos);
+}
+
+TEST_CASE("excerpt find bundle metadata falls back to registered model fields",
+          "[audio][tools][excerpt-service][model-registry][coverage][requested]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "backend": "clap",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+    write_text(temp.path / "audio" / "model-state.json", R"JSON({
+  "active_model_id": "clap_music_audioset_v1"
+}
+)JSON");
+
+    auto input = temp.path / "fallback.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.text = "fallback metadata";
+    request.input_path = input;
+    request.bundle_out = temp.path / "bundles";
+    request.top_k = 1;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 1;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.requested_model_id == "clap_music_audioset_v1");
+    REQUIRE(result.loaded_model_id == "clap_music_audioset_v1");
+    REQUIRE(result.resolved_checkpoint_path == checkpoint);
+    REQUIRE(result.results.size() == 1);
+
+    auto bundle = read_excerpt_bundle(result.bundle_path);
+    REQUIRE(bundle.ok);
+    REQUIRE(bundle.requested_model_id == "clap_music_audioset_v1");
+    REQUIRE(bundle.loaded_model_id == "clap_music_audioset_v1");
+    REQUIRE(bundle.backend == "null");
+
+    auto model_json = read_text(result.bundle_path / "model.json");
+    REQUIRE(model_json.find("\"checkpoint_ref\": \"hf://lukewys/laion_clap/music.pt\"")
+            != std::string::npos);
+    REQUIRE(model_json.find("\"resolved_checkpoint_path\": \"" + checkpoint.generic_string() + "\"")
+            != std::string::npos);
 }
 
 #if !defined(_WIN32)

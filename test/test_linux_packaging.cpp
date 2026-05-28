@@ -165,6 +165,31 @@ TEST_CASE("Linux packaging tarballs support LV2-only bundles",
     REQUIRE_FALSE(fs::exists(extract / "Docs" / "readme.txt"));
 }
 
+TEST_CASE("Linux packaging tarballs preserve nested plugin payloads only",
+          "[ship][linux-package][coverage][requested]") {
+    TempDir temp("nested-plugin-payloads");
+    auto build = temp.path / "build";
+    write_file(build / "VST3" / "Nested.vst3" / "Contents" / "Resources" / "preset.json", "preset");
+    write_file(build / "CLAP" / "Nested.clap" / "resources" / "skin.png", "png");
+    write_file(build / "LV2" / "Nested.lv2" / "resources" / "manifest.ttl", "ttl");
+    write_file(build / "vst3" / "lowercase.vst3", "ignored");
+    write_file(build / "Other" / "Nested.vst3", "ignored");
+
+    auto output = temp.path / "nested.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Nested", build.string(), output.string()));
+
+    auto extract = temp.path / "extract";
+    fs::create_directories(extract);
+    auto unpack = run_sh("tar xzf " + quote(output) + " -C " + quote(extract));
+    REQUIRE(unpack.exit_code == 0);
+
+    REQUIRE(read_file(extract / "VST3" / "Nested.vst3" / "Contents" / "Resources" / "preset.json") == "preset");
+    REQUIRE(read_file(extract / "CLAP" / "Nested.clap" / "resources" / "skin.png") == "png");
+    REQUIRE(read_file(extract / "LV2" / "Nested.lv2" / "resources" / "manifest.ttl") == "ttl");
+    REQUIRE_FALSE(fs::exists(extract / "vst3" / "lowercase.vst3"));
+    REQUIRE_FALSE(fs::exists(extract / "Other" / "Nested.vst3"));
+}
+
 TEST_CASE("Linux packaging tarball command quotes paths with spaces",
           "[ship][linux-package][coverage]") {
     TempDir temp("space-tarball");
@@ -320,4 +345,34 @@ TEST_CASE("Linux packaging deb generation removes stale staging before writing",
     REQUIRE_THAT(contents.stdout_output,
                  ContainsSubstring("./usr/lib/vst3/Fresh.vst3/Contents/module.txt"));
     REQUIRE(contents.stdout_output.find("stale.txt") == std::string::npos);
+}
+
+TEST_CASE("Linux packaging deb preserves recursive plugin directories only",
+          "[ship][linux-package][coverage][requested]") {
+    if (!command_available("dpkg-deb"))
+        SKIP("dpkg-deb is required to inspect generated deb archives");
+
+    TempDir temp("deb-recursive-plugin-dirs");
+    auto build = temp.path / "build";
+    write_file(build / "VST3" / "Nested.vst3" / "Contents" / "Resources" / "preset.json", "preset");
+    write_file(build / "CLAP" / "Nested.clap" / "resources" / "skin.png", "png");
+    write_file(build / "LV2" / "Nested.lv2" / "resources" / "manifest.ttl", "ttl");
+    write_file(build / "vst3" / "lowercase.vst3", "ignored");
+    write_file(build / "Docs" / "manual.txt", "ignored");
+
+    auto output = temp.path / "nested.deb";
+    REQUIRE(pulp::ship::create_deb("pulp-nested", "2.0.0", build.string(),
+                                   output.string(), "Pulp Tests"));
+    REQUIRE_FALSE(fs::exists(build / "deb-staging"));
+
+    auto contents = run_sh("dpkg-deb --contents " + quote(output));
+    REQUIRE(contents.exit_code == 0);
+    REQUIRE_THAT(contents.stdout_output,
+                 ContainsSubstring("./usr/lib/vst3/Nested.vst3/Contents/Resources/preset.json"));
+    REQUIRE_THAT(contents.stdout_output,
+                 ContainsSubstring("./usr/lib/clap/Nested.clap/resources/skin.png"));
+    REQUIRE_THAT(contents.stdout_output,
+                 ContainsSubstring("./usr/lib/lv2/Nested.lv2/resources/manifest.ttl"));
+    REQUIRE(contents.stdout_output.find("lowercase.vst3") == std::string::npos);
+    REQUIRE(contents.stdout_output.find("manual.txt") == std::string::npos);
 }
