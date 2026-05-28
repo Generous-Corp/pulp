@@ -104,6 +104,29 @@ TEST_CASE("pulp-scan-worker rejects unsupported bundle extensions",
     REQUIRE(result.stdout_output.empty());
 }
 
+TEST_CASE("pulp-scan-worker rejects extension variants before scanning",
+          "[host][scan-worker][coverage][requested]") {
+    ScratchDir scratch("extension-variants");
+    auto upper_vst3 = scratch.path / "Upper.VST3";
+    auto partial = scratch.path / "Almost.vst3.tmp";
+    fs::create_directories(upper_vst3 / "Contents" / "Resources");
+    write_file(partial, "not a plugin");
+
+    auto upper_result = run_worker({upper_vst3.string()});
+    REQUIRE(upper_result.exit_code == 3);
+    REQUIRE_THAT(upper_result.stderr_output,
+                 ContainsSubstring("unsupported bundle extension"));
+    REQUIRE_THAT(upper_result.stderr_output, ContainsSubstring("Upper.VST3"));
+    REQUIRE(upper_result.stdout_output.empty());
+
+    auto partial_result = run_worker({partial.string()});
+    REQUIRE(partial_result.exit_code == 3);
+    REQUIRE_THAT(partial_result.stderr_output,
+                 ContainsSubstring("unsupported bundle extension"));
+    REQUIRE_THAT(partial_result.stderr_output, ContainsSubstring("Almost.vst3.tmp"));
+    REQUIRE(partial_result.stdout_output.empty());
+}
+
 TEST_CASE("pulp-scan-worker emits JSON for a manifest-free VST3 bundle",
           "[host][scan-worker][issue-493]") {
     ScratchDir scratch("vst3");

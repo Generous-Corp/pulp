@@ -153,6 +153,41 @@ TEST_CASE("pulp_motion bridge normalizes null C strings",
     REQUIRE(baseline->metric_name.empty());
 }
 
+TEST_CASE("pulp_motion bridge normalizes null provenance and geometry names",
+          "[motion][swift-bridge][coverage][requested]") {
+    BridgeFixture fx;
+
+    pulp_motion_set_ambient_provenance(nullptr, nullptr, nullptr, 0);
+    pulp_motion_publish_value("Card", "opacity", 0.0, 0.001, 3);
+    pulp_motion_publish_value("Card", "opacity", 1.0, 0.001, 3);
+
+    const auto* opacity = first_of(fx.buffer, SampleEvent::Kind::Baseline, "opacity");
+    REQUIRE(opacity != nullptr);
+    REQUIRE(opacity->view_name == "Card");
+    REQUIRE(opacity->provenance.source_kind.empty());
+    REQUIRE(opacity->provenance.source_id.empty());
+    REQUIRE(opacity->provenance.source_file.empty());
+    REQUIRE(opacity->provenance.source_line == 0);
+
+    const int id = pulp_motion_register_geometry_trace(nullptr, -10);
+    REQUIRE(id > 0);
+
+    pulp_motion_update_geometry(id, "bounds", 1.0, 2.0, 3.0, 4.0);
+    pulp_motion_update_geometry(id, "bounds", 5.0, 6.0, 7.0, 8.0);
+
+    const auto* bounds = first_of(fx.buffer, SampleEvent::Kind::Baseline, "bounds");
+    REQUIRE(bounds != nullptr);
+    REQUIRE(bounds->view_name == "swiftui");
+    REQUIRE(bounds->metric_name == "bounds");
+    REQUIRE(bounds->components.size() == 4);
+    REQUIRE(bounds->components[0].first == "height");
+    REQUIRE(bounds->components[1].first == "minX");
+    REQUIRE(bounds->components[2].first == "minY");
+    REQUIRE(bounds->components[3].first == "width");
+
+    pulp_motion_detach_trace(id);
+}
+
 // ── Ambient provenance ────────────────────────────────────────────────
 
 TEST_CASE("pulp_motion_set_ambient_provenance stamps subsequent publishes",
