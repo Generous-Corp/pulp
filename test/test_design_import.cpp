@@ -1182,6 +1182,7 @@ TEST_CASE("parse_v0_tsx maps React Native primitives into baked C++ contracts",
     REQUIRE(text != nullptr);
 
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE_FALSE(result.source.ends_with("\n\n"));
     REQUIRE(result.binding_manifest.find("\"value_key\": \"armed\"") != std::string::npos);
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"button:onClick:setState\"") != std::string::npos);
 }

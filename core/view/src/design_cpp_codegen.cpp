@@ -1109,6 +1109,15 @@ void emit_namespace_close(std::ostringstream& out, std::string_view ns) {
         out << "}  // namespace " << ns << "\n";
 }
 
+std::string trim_trailing_blank_lines(std::string text) {
+    while (text.size() >= 2 &&
+           text[text.size() - 1] == '\n' &&
+           text[text.size() - 2] == '\n') {
+        text.pop_back();
+    }
+    return text;
+}
+
 std::string token_basename(std::string_view symbol) {
     constexpr std::string_view kPrefix = "tokens::";
     if (symbol.rfind(kPrefix, 0) == 0)
@@ -1728,7 +1737,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
     if (emit_binding_helpers)
         emit_binding_context_helpers(source, opts, binding_helper_routes);
     emit_namespace_close(source, opts.namespace_name);
-    result.source = source.str();
+    result.source = trim_trailing_blank_lines(source.str());
     result.binding_manifest = build_binding_manifest_json(ir, resolved);
     return result;
 }
