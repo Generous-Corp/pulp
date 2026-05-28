@@ -55,7 +55,7 @@ fi
 # Configure.
 set +e
 if [[ ${#timeout_cmd[@]} -gt 0 ]]; then
-    "${timeout_cmd[@]}" 600 cmake \
+    "${timeout_cmd[@]}" 1200 cmake \
         -S "${pulp_root}" \
         -B "${build_dir}/build" \
         -G Xcode \
@@ -87,7 +87,7 @@ status=$?
 set -e
 
 if [[ ${status} -eq 124 || ${status} -eq 142 ]]; then
-    echo "SKIP: iOS Simulator configure exceeded 600s; likely Xcode generator hang"
+    echo "SKIP: iOS Simulator configure exceeded 1200s; likely Xcode generator hang"
     tail -n 80 "${configure_log}" >&2
     exit 77
 fi

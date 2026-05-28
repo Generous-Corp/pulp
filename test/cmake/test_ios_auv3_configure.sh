@@ -26,20 +26,24 @@ trap 'rm -rf "${build_dir}"' EXIT
 log="${build_dir}/configure.log"
 
 set +e
-# 600s configure ceiling — fresh worktrees on the self-hosted runner
-# routinely spend 4–5 minutes on header detection (mbedtls, etc.) +
-# FetchContent unpacks on a cold cache before the Xcode generator
-# finishes its try-compile sweep. The old 90s ceiling was silently
-# flipping the test to SKIP on cold runs and masking real failures
-# (the 2026-05-27 iPad walkthrough exposed this). The CTest outer
-# TIMEOUT is 1800s, so a 600s configure leaves ~20 minutes for the
+# 1200s configure ceiling (20 min) — fresh worktrees on the self-hosted
+# runner spend 4–5 minutes on libc header detection (alloca / float /
+# iconv / inttypes / ...), 1–2 minutes on mbedtls FetchContent unpack
+# (which writes nothing to the log until it finishes), 1–2 minutes on
+# Yoga / SheenBidi / yaml-cpp, plus the Xcode generator's try-compile
+# sweep. Observed cold-cache configure on a Mac mini: ~530s; second
+# run with FetchContent caches warm: ~75s. 1200s leaves headroom for
+# slower hosts. Old 90s / 240s / 600s ceilings all silently flipped
+# the test to SKIP on cold runs and masked real failures (the
+# 2026-05-27 iPad walkthrough exposed this). The CTest outer TIMEOUT
+# is 2700s, so a 1200s configure still leaves 25 minutes for the
 # .appex + HostApp build step that follows.
 if command -v gtimeout >/dev/null 2>&1; then
-    timeout_cmd=(gtimeout 600s)
+    timeout_cmd=(gtimeout 1200s)
 elif command -v timeout >/dev/null 2>&1; then
-    timeout_cmd=(timeout 600s)
+    timeout_cmd=(timeout 1200s)
 elif command -v perl >/dev/null 2>&1; then
-    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 600)
+    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 1200)
 else
     timeout_cmd=()
 fi
@@ -61,7 +65,7 @@ status=$?
 set -e
 
 if [[ ${status} -eq 124 || ${status} -eq 142 ]]; then
-    echo "SKIP: iOS Simulator configure exceeded 600s; likely Xcode generator hang"
+    echo "SKIP: iOS Simulator configure exceeded 1200s; likely Xcode generator hang"
     tail -n 80 "${log}" >&2
     exit 77
 fi
