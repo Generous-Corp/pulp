@@ -65,6 +65,21 @@ std::string read_text(const fs::path& path) {
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
+std::string json_escape(std::string_view text) {
+    std::string out;
+    for (char ch : text) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += ch; break;
+        }
+    }
+    return out;
+}
+
 pulp::audio::AudioFileData make_audio(uint32_t sample_rate, uint64_t frame_count) {
     pulp::audio::AudioFileData data;
     data.sample_rate = sample_rate;
@@ -1771,7 +1786,8 @@ TEST_CASE("excerpt find bundle metadata falls back to registered model fields",
     auto model_json = read_text(result.bundle_path / "model.json");
     REQUIRE(model_json.find("\"checkpoint_ref\": \"hf://lukewys/laion_clap/music.pt\"")
             != std::string::npos);
-    REQUIRE(model_json.find("\"resolved_checkpoint_path\": \"" + checkpoint.generic_string() + "\"")
+    REQUIRE(model_json.find("\"resolved_checkpoint_path\": \""
+                            + json_escape(checkpoint.string()) + "\"")
             != std::string::npos);
 }
 
