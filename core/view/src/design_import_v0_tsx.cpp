@@ -7,9 +7,12 @@
 #include <cstdlib>
 #include <map>
 #include <optional>
+#include <regex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace pulp::view {
@@ -42,6 +45,11 @@ ImportDiagnostic make_v0_import_diagnostic(ImportDiagnosticSeverity severity,
     diagnostic.message = std::move(message);
     return diagnostic;
 }
+
+struct V0SourceContracts {
+    std::unordered_map<std::string, std::string> setter_to_state;
+    std::unordered_map<std::string, std::string> state_initial_values;
+};
 
 std::optional<float> parse_jsx_css_number(std::string_view raw) {
     auto value = trim_ascii_ws(raw);
@@ -85,6 +93,74 @@ std::string strip_jsx_value_quotes(std::string value) {
         return out;
     }
     return value;
+}
+
+bool is_identifier_like(std::string_view value) {
+    if (value.empty()) return false;
+    const auto first = static_cast<unsigned char>(value.front());
+    if (!(std::isalpha(first) || value.front() == '_' || value.front() == '$')) return false;
+    for (char c : value.substr(1)) {
+        const auto ch = static_cast<unsigned char>(c);
+        if (!(std::isalnum(ch) || c == '_' || c == '$')) return false;
+    }
+    return true;
+}
+
+std::string normalize_state_initial_value(std::string value) {
+    value = strip_jsx_value_quotes(std::move(value));
+    if (value.size() > 120) return {};
+    return value;
+}
+
+V0SourceContracts extract_v0_source_contracts(const std::string& tsx) {
+    V0SourceContracts contracts;
+    const std::regex state_re(
+        R"(const\s*\[\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\]\s*=\s*useState\s*\(([^)]*)\))");
+    for (auto it = std::sregex_iterator(tsx.begin(), tsx.end(), state_re);
+         it != std::sregex_iterator(); ++it) {
+        const auto state_key = (*it)[1].str();
+        const auto setter = (*it)[2].str();
+        const auto initial = normalize_state_initial_value((*it)[3].str());
+        contracts.setter_to_state[setter] = state_key;
+        if (!initial.empty())
+            contracts.state_initial_values[state_key] = initial;
+    }
+    return contracts;
+}
+
+std::optional<std::string> state_from_value_expression(std::string_view expression,
+                                                       const V0SourceContracts& contracts) {
+    auto value = trim_ascii_ws(expression);
+    if (is_identifier_like(value) && contracts.state_initial_values.count(value) != 0)
+        return value;
+    if (auto bracket = value.find('['); bracket != std::string::npos) {
+        const auto base = trim_ascii_ws(std::string_view(value).substr(0, bracket));
+        if (is_identifier_like(base) && contracts.state_initial_values.count(base) != 0)
+            return value;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> state_from_event_expression(std::string_view expression,
+                                                       const V0SourceContracts& contracts) {
+    for (const auto& [setter, state_key] : contracts.setter_to_state) {
+        const auto needle = setter + "(";
+        if (expression.find(needle) != std::string_view::npos)
+            return state_key;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> attr_value(const IRNode& node, std::string_view key) {
+    if (auto it = node.attributes.find(std::string(key)); it != node.attributes.end())
+        return it->second;
+    return std::nullopt;
+}
+
+void set_contract_attr(IRNode& node, std::string key, std::string value) {
+    if (value.empty()) return;
+    if (auto it = node.attributes.find(key); it == node.attributes.end() || it->second.empty())
+        node.attributes[std::move(key)] = std::move(value);
 }
 
 LayoutAlign parse_jsx_layout_align(const std::string& value) {
@@ -507,8 +583,9 @@ void apply_v0_jsx_attribute(IRNode& node,
         return;
     }
     if (key == "onClick" || key == "onclick" ||
+        key == "onChange" || key == "onInput" ||
         key == "onPointerDown" || key == "onMouseDown") {
-        node.attributes[key] = "handler";
+        node.attributes[key] = value.empty() ? "handler" : value;
         return;
     }
     if (key == "width") {
@@ -518,6 +595,80 @@ void apply_v0_jsx_attribute(IRNode& node,
     }
     if (!key.empty())
         node.attributes[key] = value;
+}
+
+std::string input_contract_family(const IRNode& node) {
+    const auto subtype = to_lower(attr_value(node, "type").value_or("text"));
+    if (subtype == "range") return "input:range";
+    if (subtype == "checkbox") return "input:checkbox";
+    return "input:" + subtype;
+}
+
+void attach_v0_value_contract(IRNode& node,
+                              const std::string& state_key,
+                              const V0SourceContracts& contracts) {
+    set_contract_attr(node, "pulpValueKey", state_key);
+    if (auto it = contracts.state_initial_values.find(state_key);
+        it != contracts.state_initial_values.end()) {
+        set_contract_attr(node, "pulpInitialValue", it->second);
+        set_contract_attr(node, "pulpDefaultValueSource", "useState");
+    }
+}
+
+void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts) {
+    const auto tag = attr_value(node, "jsxTag").value_or(node.name);
+    const auto lower_tag = to_lower(tag);
+    const auto value_expr = attr_value(node, "value");
+    const auto checked_expr = attr_value(node, "checked");
+    const auto on_change = attr_value(node, "onChange");
+    const auto on_input = attr_value(node, "onInput");
+    const auto on_click = attr_value(node, "onClick");
+    const auto on_click_lower = attr_value(node, "onclick");
+    const auto on_pointer = attr_value(node, "onPointerDown");
+    const auto on_mouse = attr_value(node, "onMouseDown");
+
+    std::optional<std::string> state_key;
+    if (value_expr) state_key = state_from_value_expression(*value_expr, contracts);
+    if (!state_key && checked_expr) state_key = state_from_value_expression(*checked_expr, contracts);
+    if (!state_key && on_change) state_key = state_from_event_expression(*on_change, contracts);
+    if (!state_key && on_input) state_key = state_from_event_expression(*on_input, contracts);
+    if (!state_key && on_click) state_key = state_from_event_expression(*on_click, contracts);
+    if (!state_key && on_click_lower) state_key = state_from_event_expression(*on_click_lower, contracts);
+    if (!state_key && on_pointer) state_key = state_from_event_expression(*on_pointer, contracts);
+    if (!state_key && on_mouse) state_key = state_from_event_expression(*on_mouse, contracts);
+
+    if (state_key) {
+        attach_v0_value_contract(node, *state_key, contracts);
+        set_contract_attr(node, "pulpRouteType", "native_cpp");
+        set_contract_attr(node, "pulpSourceFamily",
+                          lower_tag == "input" ? input_contract_family(node) : lower_tag);
+    }
+
+    if (lower_tag == "input") {
+        const auto subtype = to_lower(attr_value(node, "type").value_or("text"));
+        if (subtype == "range") {
+            set_contract_attr(node, "pulpEventContract", on_change ? "range:onChange:setState" : "range:value");
+            set_contract_attr(node, "pulpGestureContract", "range:drag");
+        } else if (subtype == "checkbox") {
+            set_contract_attr(node, "pulpEventContract", on_change ? "checkbox:onChange:setState" : "checkbox:checked");
+            set_contract_attr(node, "pulpGestureContract", "checkbox:toggle");
+        }
+    } else if (lower_tag == "select") {
+        set_contract_attr(node, "pulpEventContract", on_change ? "select:onChange:setState" : "select:value");
+        set_contract_attr(node, "pulpGestureContract", "select:choose");
+    } else if (lower_tag == "button") {
+        if (on_click || on_click_lower)
+            set_contract_attr(node, "pulpEventContract", "button:onClick:setState");
+        set_contract_attr(node, "pulpGestureContract", "button:click");
+    } else if (lower_tag == "meter" || lower_tag == "progress") {
+        if (value_expr && state_key)
+            set_contract_attr(node, lower_tag == "meter" ? "pulpMeterValueKey" : "pulpValueKey", *state_key);
+        set_contract_attr(node, "pulpRouteType", "native_cpp");
+        set_contract_attr(node, "pulpSourceFamily", lower_tag);
+    }
+
+    for (auto& child : node.children)
+        attach_v0_source_contracts(child, contracts);
 }
 
 void add_v0_jsx_text(IRNode& parent, std::string_view raw_text) {
@@ -690,6 +841,8 @@ DesignIR parse_v0_tsx(const std::string& tsx) {
         auto promoted_root = std::move(ir.root.children.front());
         ir.root = std::move(promoted_root);
     }
+
+    attach_v0_source_contracts(ir.root, extract_v0_source_contracts(tsx));
 
     ir.diagnostics.push_back(make_v0_import_diagnostic(
         ImportDiagnosticSeverity::warning,

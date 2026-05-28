@@ -1093,6 +1093,58 @@ TEST_CASE("parse_v0_tsx preserves inline-style host controls for baked C++",
     REQUIRE(result.source.find("std::make_unique<pulp::view::SvgPathWidget>") != std::string::npos);
 }
 
+TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ manifest",
+          "[view][import][cpp-codegen]") {
+    auto ir = parse_v0_tsx(R"tsx(
+        import { useState } from "react";
+
+        export default function ControlStrip() {
+            const [gain, setGain] = useState(0.65);
+            const [enabled, setEnabled] = useState(true);
+            return (
+                <section>
+                    <button type="button" onClick={() => setEnabled(!enabled)}>
+                        {enabled ? "ON" : "OFF"}
+                    </button>
+                    <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={gain}
+                        onChange={(event) => setGain(Number(event.currentTarget.value))} />
+                </section>
+            );
+        }
+    )tsx");
+
+    REQUIRE_FALSE(has_import_diagnostic(ir.diagnostics, "fallback-used"));
+
+    const auto* button = find_descendant(ir.root, [](const IRNode& node) {
+        return node.type == "button";
+    });
+    REQUIRE(button != nullptr);
+    REQUIRE(button->attributes.at("pulpValueKey") == "enabled");
+    REQUIRE(button->attributes.at("pulpInitialValue") == "true");
+    REQUIRE(button->attributes.at("pulpEventContract") == "button:onClick:setState");
+
+    const auto* range = find_descendant(ir.root, [](const IRNode& node) {
+        auto type = node.attributes.find("type");
+        return node.type == "input" && type != node.attributes.end() && type->second == "range";
+    });
+    REQUIRE(range != nullptr);
+    REQUIRE(range->attributes.at("pulpValueKey") == "gain");
+    REQUIRE(range->attributes.at("pulpInitialValue") == "0.65");
+    REQUIRE(range->attributes.at("pulpEventContract") == "range:onChange:setState");
+    REQUIRE(range->attributes.at("pulpGestureContract") == "range:drag");
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.binding_manifest.find("\"value_key\": \"enabled\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"value_key\": \"gain\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"event_contract\": \"button:onClick:setState\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"event_contract\": \"range:onChange:setState\"") != std::string::npos);
+}
+
 TEST_CASE("JSX snapshot dynamic API scanner detects non-deterministic APIs",
           "[view][import][diagnostics]") {
     auto scan = detect_jsx_snapshot_dynamic_apis(
