@@ -973,11 +973,10 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 // Hosts (Logic, MainStage, GarageBand) probe `supportedViewConfigurations:`
 // with a set of candidate window sizes and pick one via
 // `selectViewConfiguration:`. For a fixed-design GPU editor (the common
-// Pulp shape), we accept configurations whose aspect ratio is close to the
-// processor's design aspect, and we prefer the smallest config that can
-// contain the design viewport. The view controller's
-// `set_design_viewport` + `set_fixed_aspect_ratio` then scales the actual
-// paint at the host-chosen size.
+// Pulp shape), we accept configurations that are close to the processor's
+// design aspect *and* large enough to contain the design viewport. The view
+// controller's `set_design_viewport` + `set_fixed_aspect_ratio` then scales
+// the actual paint at the host-chosen size.
 //
 // preferredContentSize remains authoritative for the initial editor size
 // when no host-selected configuration applies. Don't put an internal corner
@@ -1005,6 +1004,9 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
     // wrong-aspect candidates, loose enough to land on Logic's defaults.
     constexpr double kAspectTolerance = 0.05;
 
+    NSMutableIndexSet *aspectMatches = [NSMutableIndexSet indexSet];
+    NSMutableIndexSet *largeEnoughFallbacks = [NSMutableIndexSet indexSet];
+
     for (NSUInteger i = 0; i < availableViewConfigurations.count; ++i) {
         AUAudioUnitViewConfiguration *cfg = availableViewConfigurations[i];
         const double w = static_cast<double>(cfg.width);
@@ -1013,24 +1015,31 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 
         const double cfg_aspect = w / h;
         const double aspect_delta = std::abs(cfg_aspect - design_aspect) / design_aspect;
-        if (aspect_delta <= kAspectTolerance) {
-            [result addIndex:i];
+        if (aspect_delta <= kAspectTolerance && w >= design_w && h >= design_h) {
+            [aspectMatches addIndex:i];
             continue;
         }
 
         // Even on an aspect mismatch, accept configurations large enough to
-        // contain the design viewport — the controller will letterbox via
-        // set_design_viewport. Preferred only when at least one aspect-match
-        // option exists; if none do, the host needs some option to land on.
+        // contain the design viewport, but only as a fallback when no
+        // aspect-correct option exists. Returning both lets hosts choose a
+        // wrong-aspect "large enough" config first, which opens fixed-design
+        // editors with avoidable top/bottom padding in Logic/REAPER AUv3.
         if (w >= design_w && h >= design_h) {
-            [result addIndex:i];
+            [largeEnoughFallbacks addIndex:i];
         }
     }
 
-    // If nothing matched (extreme aspect / undersized configs), fall back to
-    // accepting everything rather than telling the host we have no UI.
-    if (result.count == 0) {
-        [result addIndexesInRange:NSMakeRange(0, availableViewConfigurations.count)];
+    if (aspectMatches.count > 0) {
+        [result addIndexes:aspectMatches];
+    } else if (largeEnoughFallbacks.count > 0) {
+        [result addIndexes:largeEnoughFallbacks];
+    } else {
+        // If every candidate is too small or wrong for a fixed-design editor,
+        // return an empty set. CoreAudioKit defines that as "use the largest
+        // available view configuration"; accepting undersized configs lets
+        // hosts open a truncated/padded editor and never revisit the design
+        // size.
     }
     return result;
 }

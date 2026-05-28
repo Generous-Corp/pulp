@@ -1,4 +1,5 @@
 #import <AudioToolbox/AudioToolbox.h>
+#import <CoreAudioKit/CoreAudioKit.h>
 #import <Foundation/Foundation.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -127,12 +128,23 @@ public:
     std::string plugin_state;
 };
 
+class TestAUWideEditorProcessor : public TestAUEffectProcessor {
+public:
+    pulp::format::ViewSize view_size() const override {
+        return pulp::format::view_size_from_design(900, 520);
+    }
+};
+
 std::unique_ptr<pulp::format::Processor> create_effect_processor() {
     return std::make_unique<TestAUEffectProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
     return std::make_unique<TestAUInstrumentProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
+    return std::make_unique<TestAUWideEditorProcessor>();
 }
 
 void require_plst_blob(const uint8_t* bytes, std::size_t size) {
@@ -954,6 +966,77 @@ TEST_CASE("AU v3 per-method audit invariants",
         // drift bug the AU v2 path used to hit.
         REQUIRE([unit pulpProcessor] != nullptr);
         REQUIRE([unit pulpStore] != nullptr);
+
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 view configurations prefer aspect-correct editor sizes",
+          "[au][auv3][view-config][resize]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_wide_editor_processor);
+
+        NSError* err = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&err];
+        REQUIRE(unit != nil);
+        REQUIRE(err == nil);
+
+        NSArray<AUAudioUnitViewConfiguration*>* mixedConfigs = @[
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:486
+                                                          height:290
+                                               hostHasController:NO] autorelease],
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1024
+                                                          height:768
+                                               hostHasController:NO] autorelease],
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:900
+                                                          height:520
+                                               hostHasController:NO] autorelease],
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1366
+                                                          height:1024
+                                               hostHasController:NO] autorelease],
+        ];
+
+        NSIndexSet* supported = [unit supportedViewConfigurations:mixedConfigs];
+        REQUIRE(supported != nil);
+        REQUIRE([supported containsIndex:2]);
+        REQUIRE_FALSE([supported containsIndex:0]);
+        REQUIRE_FALSE([supported containsIndex:1]);
+        REQUIRE_FALSE([supported containsIndex:3]);
+
+        NSArray<AUAudioUnitViewConfiguration*>* noAspectMatchConfigs = @[
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1024
+                                                          height:768
+                                               hostHasController:NO] autorelease],
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1366
+                                                          height:1024
+                                               hostHasController:NO] autorelease],
+        ];
+
+        NSIndexSet* fallback = [unit supportedViewConfigurations:noAspectMatchConfigs];
+        REQUIRE(fallback != nil);
+        REQUIRE([fallback containsIndex:0]);
+        REQUIRE([fallback containsIndex:1]);
+
+        NSArray<AUAudioUnitViewConfiguration*>* undersizedConfigs = @[
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:486
+                                                          height:290
+                                               hostHasController:NO] autorelease],
+            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:640
+                                                          height:370
+                                               hostHasController:NO] autorelease],
+        ];
+
+        NSIndexSet* undersized = [unit supportedViewConfigurations:undersizedConfigs];
+        REQUIRE(undersized != nil);
+        REQUIRE(undersized.count == 0u);
 
         [unit release];
     }

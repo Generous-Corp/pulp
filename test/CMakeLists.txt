@@ -1816,6 +1816,7 @@ if(APPLE AND PULP_HAS_AUSDK)
         Catch2::Catch2WithMain
         "-framework AudioToolbox"
         "-framework AVFoundation"
+        "-framework CoreAudioKit"
         "-framework Foundation"
     )
     set_target_properties(pulp-test-au-plugin-state PROPERTIES

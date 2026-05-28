@@ -585,11 +585,33 @@ directly while cfprefsd is killed.
 `set_fixed_aspect_ratio(w/h)` so the editor paints at design size and
 host-driven window resize is letterboxed proportionally.
 
+On macOS, the view controller's root view must be created at the
+compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available.
+REAPER can choose the initial AUv3 container from `loadView` /
+`viewDidLoad` before `createAudioUnit` provides the processor; falling
+back to `400x300` there opens imported/scripted UIs in a small padded
+window even though the later `ViewBridge` reports the correct design
+size.
+
+REAPER can also shrink the controller view after the first editor build
+on its in-process AUv3 path. The macOS controller has a one-shot initial
+size sync after attaching `PluginViewHost`: if the first live layout is
+smaller than the design viewport, it re-applies `preferredContentSize`,
+expands the host window by the exact view delta, and resizes the root
+view to the design. Keep this limited to initial attach; manual host
+resize must continue through `viewDidLayout` without being forced back.
+
 `PulpAudioUnit::supportedViewConfigurations:` accepts configurations
-within ~5% aspect tolerance of the design (a JUCE forum thread
-documents that Logic 10.6.1 probes 1024x768 / 1366x1024 — accepting
-at least one fixes a known Logic reopen-size bug). Falls back to
-accepting all configurations if none match the aspect floor.
+within ~5% aspect tolerance of the design only when they are also large
+enough to contain that design (a JUCE forum thread documents that Logic
+10.6.1 probes 1024x768 / 1366x1024 — accepting at least one fixes a
+known Logic reopen-size bug). If any aspect-correct, large-enough
+configuration exists, return only those; wrong-aspect "large enough"
+configs are fallbacks, otherwise Logic/REAPER can choose one first and
+open fixed-design editors with avoidable top/bottom padding. If every
+candidate is undersized for a fixed-design editor, return an empty set
+so CoreAudioKit falls back to the largest available view configuration
+instead of treating the tiny default as supported.
 
 Padding at the top/bottom (or left/right) of the editor in a host
 window is the **expected letterbox** when the host gives us a window

@@ -30,6 +30,54 @@
 #include <algorithm>
 #include <memory>
 
+namespace {
+
+NSSize pulp_auv3_initial_editor_size() {
+#if defined(PULP_PLUGIN_DESIGN_W) && defined(PULP_PLUGIN_DESIGN_H)
+    if (PULP_PLUGIN_DESIGN_W > 0 && PULP_PLUGIN_DESIGN_H > 0) {
+        return NSMakeSize(static_cast<CGFloat>(PULP_PLUGIN_DESIGN_W),
+                          static_cast<CGFloat>(PULP_PLUGIN_DESIGN_H));
+    }
+#endif
+    return NSMakeSize(400, 300);
+}
+
+void pulp_auv3_apply_preferred_size(NSViewController *controller,
+                                    NSSize size,
+                                    bool resize_view_frame) {
+    if (!controller || size.width <= 0.0 || size.height <= 0.0) return;
+    controller.preferredContentSize = size;
+    if (!resize_view_frame || !controller.isViewLoaded) return;
+
+    NSView *view = controller.view;
+    NSRect frame = view.frame;
+    frame.size = size;
+    [view setFrame:frame];
+    [view setNeedsLayout:YES];
+}
+
+bool pulp_auv3_is_undersized(NSSize current, NSSize design) {
+    return current.width > 0.0 && current.height > 0.0 &&
+           design.width > 0.0 && design.height > 0.0 &&
+           (current.width < design.width || current.height < design.height);
+}
+
+void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
+    if (!view || !view.window) return;
+    NSSize current = view.bounds.size;
+    if (!pulp_auv3_is_undersized(current, design)) return;
+
+    NSRect frame = view.window.frame;
+    const CGFloat delta_w = std::max<CGFloat>(0.0, design.width - current.width);
+    const CGFloat delta_h = std::max<CGFloat>(0.0, design.height - current.height);
+    frame.size.width += delta_w;
+    frame.size.height += delta_h;
+    frame.origin.y -= delta_h;
+    [view.window setFrame:frame display:YES animate:NO];
+}
+
+} // namespace
+
 /// AUViewController subclass + AUAudioUnitFactory for macOS AU v3.
 /// Apple's current pattern: the view controller IS the factory. Info.plist
 /// sets NSExtensionPrincipalClass = PulpAUMacViewController and
@@ -39,6 +87,8 @@
 @end
 
 @implementation PulpAUMacViewController {
+    NSSize _designSize;
+    NSUInteger _initialSizeSyncAttempts;
     // Ivar order is load-bearing — see -dealloc in
     // au_view_controller_ios.mm for the same contract. _viewHost holds
     // `View& root_` and MUST be destroyed before whichever object owns
@@ -51,9 +101,12 @@
 
 - (void)loadView {
     // We're not loading from a NIB — create the root NSView ourselves so
-    // `viewDidLoad` finds a sized container even before the host attaches
-    // us to a window.
-    NSView *root = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    // `viewDidLoad` finds a correctly sized container even before the host
+    // attaches us to a window. REAPER's in-process AUv3 path can choose the
+    // initial container from this frame before createAudioUnit has provided
+    // the processor, so use compile-time design dimensions when available.
+    const NSSize initial = pulp_auv3_initial_editor_size();
+    NSView *root = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, initial.width, initial.height)];
     root.wantsLayer = YES;
     root.layer.backgroundColor = NSColor.blackColor.CGColor;
     self.view = root;
@@ -64,7 +117,9 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.preferredContentSize = NSMakeSize(400, 300);
+    _designSize = NSZeroSize;
+    _initialSizeSyncAttempts = 0;
+    pulp_auv3_apply_preferred_size(self, pulp_auv3_initial_editor_size(), true);
     [self rebuildEditorIfReady];
 }
 
@@ -183,7 +238,25 @@
         root = _fallbackView.get();
     }
 
-    self.preferredContentSize = NSMakeSize(w, h);
+    // If the host has not attached the controller yet, update the root frame
+    // too so preferredContentSize and the actual view bounds agree. REAPER's
+    // in-process AUv3 path can attach first and hand us its small default
+    // container; on that first build, expand the root to the design before
+    // attaching the GPU host. Later user/host resize still flows through
+    // viewDidLayout without being forced back to the design size.
+    const NSSize designSize = NSMakeSize(w, h);
+    _designSize = designSize;
+    _initialSizeSyncAttempts = 0;
+    NSSize currentSize = self.view.bounds.size;
+    const bool currentUndersized = pulp_auv3_is_undersized(currentSize, designSize);
+    const bool resizeInitialRoot = self.view.window == nil || currentUndersized;
+    if (currentUndersized) {
+        pulp::runtime::log_info("AU mac: expanding undersized initial root {}x{} to design {}x{}",
+                                static_cast<int>(currentSize.width),
+                                static_cast<int>(currentSize.height),
+                                w, h);
+    }
+    pulp_auv3_apply_preferred_size(self, designSize, resizeInitialRoot);
 
     pulp::view::PluginViewHost::Options opts;
     opts.size = {w, h};
@@ -222,7 +295,40 @@
     pulp::runtime::log_info("AU mac: editor attached, design={}x{}, mode={}, gpu={}",
                             w, h, mode, _viewHost->is_gpu_backed());
 
+    [self scheduleInitialSizeSync];
     [self resizeEditorToViewBounds];
+}
+
+- (void)scheduleInitialSizeSync {
+    if (_initialSizeSyncAttempts >= 3) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self runInitialSizeSync];
+    });
+}
+
+- (void)runInitialSizeSync {
+    if (!_viewHost || _designSize.width <= 0.0 || _designSize.height <= 0.0) return;
+    if (_initialSizeSyncAttempts >= 3) return;
+    ++_initialSizeSyncAttempts;
+
+    NSSize currentSize = self.view.bounds.size;
+    if (!pulp_auv3_is_undersized(currentSize, _designSize)) return;
+
+    pulp::runtime::log_info("AU mac: correcting undersized initial layout {}x{} to design {}x{}",
+                            static_cast<int>(currentSize.width),
+                            static_cast<int>(currentSize.height),
+                            static_cast<int>(_designSize.width),
+                            static_cast<int>(_designSize.height));
+    pulp_auv3_expand_window_for_view(self.view, _designSize);
+    pulp_auv3_apply_preferred_size(self, _designSize, true);
+    [self resizeEditorToViewBounds];
+
+    if (_initialSizeSyncAttempts < 3) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            [self runInitialSizeSync];
+        });
+    }
 }
 
 - (void)resizeEditorToViewBounds {
