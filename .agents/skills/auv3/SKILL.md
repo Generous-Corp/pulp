@@ -218,6 +218,113 @@ extension's loaded `AUAudioUnit` once KVO fires on
 `NSExtensionMain`-style Info.plist — see `docs/guides/ios-auv3-guidance.md`
 and the `ios` skill for the extension target wiring.
 
+### iOS AUv3 spawn-chain gotchas (learned the hard way 2026-05-27)
+
+iOS AUv3 was historically "scaffolded but never actually loaded" — the
+CMake helper and HostApp template both had multiple bugs that silently
+prevented `AVAudioUnit.instantiate` from succeeding. The chain that has
+to be right end-to-end:
+
+1. **`.appex` binary type must be `MH_EXECUTE`, not `MH_BUNDLE`.**
+   `add_library(... MODULE ...)` produces `MH_BUNDLE`. PluginKit's
+   `posix_spawn` rejects bundles with **`ENOEXEC` ("Exec format
+   error")**, surfaced to the host as **OSStatus 4** from
+   `AVAudioUnit.instantiate`. Fix in `tools/cmake/PulpAuv3.cmake`
+   `_pulp_add_auv3_ios`:
+   ```cmake
+   add_executable(${target}_AUv3 ...)
+   target_link_options(${target}_AUv3 PRIVATE
+       "-e" "_NSExtensionMain" "-fapplication-extension")
+   set_target_properties(${target}_AUv3 PROPERTIES
+       XCODE_PRODUCT_TYPE "com.apple.product-type.app-extension"
+       XCODE_ATTRIBUTE_WRAPPER_EXTENSION "appex"
+       BUNDLE TRUE BUNDLE_EXTENSION "appex"
+       RUNTIME_OUTPUT_DIRECTORY "...")
+   ```
+   Verify with `file <appex>/<exec>` — must say `Mach-O 64-bit executable`,
+   NOT `Mach-O 64-bit bundle`.
+
+2. **HostApp must use `.loadOutOfProcess` on iOS.** The default
+   in-process load is unsupported for AUv3 extensions on iOS;
+   `AVAudioUnit.instantiate(with: desc, options: [])` returns OSStatus 4.
+   Use `.loadOutOfProcess` (Apple's "Incorporating Audio Effects and
+   Instruments" sample documents this in a comment).
+
+3. **HostApp's `AudioComponentDescription` filter must match the
+   extension exactly.** The shipped template literally filtered for
+   `kAudioUnitType_Effect` + subtype `Pu_E` — would never find any
+   instrument plug-in. Plug-in authors copying the template must update
+   the four-CC values to match their own AUv3's Info.plist
+   `AudioComponents` entry. Better fix: derive these from
+   `AVAudioUnitComponentManager.components(matching:)` against a
+   permissive description.
+
+4. **Embedded `.appex` bundle ID must be a child of the HostApp's bundle
+   ID.** Apple enforces parent-child: extension bundle ID must START
+   with the containing app's bundle ID + `.` + suffix. Otherwise install
+   fails with **"Mismatched bundle IDs"**. The Pulp helper currently
+   derives the `.appex` bundle ID from the AUv3 target's `BUNDLE_ID` —
+   plug-in authors must set that arg to a child of the HostApp's
+   bundle ID, not to a sibling.
+
+5. **HostApp entitlements containing `com.apple.security.application-groups`
+   require an explicit (non-wildcard) App ID with App Groups capability
+   enabled in Apple Developer**. Wildcard App IDs cannot use App Groups.
+   For pure plug-in development testing, strip the entitlement.
+
+6. **Instruments (aumu) need MIDI to make sound.** Discovery + load is
+   not enough; the host must call `audioUnit.scheduleMIDIEventBlock`
+   with a `noteOn` byte sequence (`0x90, <key>, <vel>`). Apple's
+   `SimplePlayEngine.InstrumentPlayer` is the reference. Without this,
+   `engine.start()` succeeds but the synth sits silently waiting for
+   MIDI input.
+
+7. **Simulator PluginKit caches stale registrations between launches.**
+   After a successful `INSTANTIATE_OK` once, a `terminate + relaunch`
+   without `uninstall + install` may flip to `INSTANTIATE_ERROR Code=4`
+   because PluginKit's database points at the old install UUID. **Real
+   device audio validation is authoritative; Sim is for build/discovery
+   smoke only.**
+
+### iOS AUv3 diagnostic recipe
+
+When the HostApp shows "(no AUv3 found)" or instantiate fails silently:
+
+```swift
+// Drop these prints into ContentView.discover():
+let components = AVAudioUnitComponentManager.shared().components(matching: desc)
+print("PULP_DISCOVER: matching=\(components.count) type=\(...) sub=\(...) mfr=\(...)")
+let all = AVAudioUnitComponentManager.shared().components(matching: AudioComponentDescription())
+print("PULP_DISCOVER_ALL: \(all.count) total")
+for c in all where c.manufacturerName == "Pulp" { print("PULP_DISCOVER_ALL_PULP: \(c.name)") }
+AVAudioUnit.instantiate(with: desc, options: .loadOutOfProcess) { node, error in
+    if let e = error { print("PULP_INSTANTIATE_ERROR: \(e)") }
+    guard let node = node else { return }
+    print("PULP_INSTANTIATE_OK: \(node.auAudioUnit.componentName ?? "?")")
+}
+```
+
+Then launch via XcodeBuildMCP `launch_app_sim` (returns `runtimeLogPath`
+capturing stdout); `grep PULP_ <runtimeLogPath>` shows the chain.
+
+If `matching=0` → check #3 (descriptor mismatch).
+If `matching=N` but `INSTANTIATE_ERROR Code=4` →
+  - Check #1 (`file <appex>/<exec>` says `bundle` not `executable`).
+  - Check #2 (`options: []` instead of `.loadOutOfProcess`).
+  - Check spawn errors: `xcrun simctl spawn booted log show --last 30s
+    --predicate 'eventMessage CONTAINS "PulpSineSynth" AND (eventMessage
+    CONTAINS "Exec format" OR eventMessage CONTAINS "posix_spawn")'`.
+
+### iOS AUv3 audio validation
+
+Simulator does NOT capture audio in `simctl io booted recordVideo`
+(video-only). For audio verification you need either:
+- Real device + headphones / mic capture
+- Sim audio loopback via a Mac audio routing tool (BlackHole, Loopback)
+- Or accept that "PULP_INSTANTIATE_OK + PULP_NOTE: ON + engine.start
+  succeeded" proves the wiring; trust the synth code path that's
+  already tested at the unit level
+
 ### Two CMake entry points: keep signatures in lockstep
 
 `pulp_add_plugin(...)` (the general entry) and `pulp_add_ios_auv3(...)`

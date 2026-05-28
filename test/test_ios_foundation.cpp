@@ -9,6 +9,11 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
 using namespace pulp;
 using Catch::Approx;
 
@@ -147,6 +152,62 @@ TEST_CASE("PluginViewHost::Size custom values", "[ios][view]") {
 }
 
 // ── Platform-specific feature flags ─────────────────────────────────────────
+
+// ── AUv3 HostApp template shape (PR #3095, Codex P2) ───────────────────────
+//
+// Regression test for the Codex review finding on
+// templates/ios-auv3/HostApp/ContentView.swift:99: "Match the embedded
+// component descriptor exactly". The previous template filtered AUv3
+// components by Pulp manufacturer only and returned the first hit,
+// which made the picker non-deterministic when more than one Pulp AUv3
+// was installed on the same device or simulator. The fix reads the
+// HostApp's own Info.plist AudioComponents[0] entry (mirrored from
+// the AUv3 extension target by pulp_add_ios_host_app()) and matches on
+// the full type/subtype/manufacturer descriptor.
+//
+// We can't compile-test the Swift template from C++ in this suite (it
+// only builds under an iOS Simulator CMake configure), so the test
+// asserts the shipped template carries the new descriptor-mirror code
+// path. This catches the class of regression where someone deletes the
+// Info.plist lookup and falls back to the old manufacturer-only filter
+// without updating the test.
+TEST_CASE("ios-auv3 HostApp template matches the embedded descriptor exactly",
+          "[ios][auv3][template][issue-3095]") {
+#ifndef PULP_SOURCE_DIR
+    SUCCEED("PULP_SOURCE_DIR not defined — skipping template-shape assertion");
+    return;
+#else
+    namespace fs = std::filesystem;
+    fs::path template_path = fs::path{PULP_SOURCE_DIR}
+        / "templates" / "ios-auv3" / "HostApp" / "ContentView.swift";
+
+    REQUIRE(fs::exists(template_path));
+
+    std::ifstream in{template_path};
+    REQUIRE(in.good());
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string body = ss.str();
+
+    // The host MUST read AudioComponents[0] back from the HostApp's own
+    // Info.plist via Bundle.main. If this string disappears the template
+    // has regressed to the non-deterministic manufacturer-only filter.
+    REQUIRE(body.find("AudioComponents") != std::string::npos);
+    REQUIRE(body.find("Bundle.main.object(forInfoDictionaryKey:") != std::string::npos);
+
+    // The filter must compare componentType, componentSubType, and
+    // componentManufacturer — the three fields that uniquely identify
+    // a specific Pulp AUv3 across plug-ins shipped by the same vendor.
+    REQUIRE(body.find("componentType == target.componentType") != std::string::npos);
+    REQUIRE(body.find("componentSubType == target.componentSubType") != std::string::npos);
+    REQUIRE(body.find("componentManufacturer == target.componentManufacturer") != std::string::npos);
+
+    // The manufacturer-only path must remain available as a labelled
+    // fallback so HostApps that intentionally strip the AudioComponents
+    // key (debugging-only overrides) still surface a usable plug-in.
+    REQUIRE(body.find("fallback manufacturer-only") != std::string::npos);
+#endif
+}
 
 TEST_CASE("Apple platform features are consistent", "[ios][platform]") {
     if constexpr (platform::is_apple) {

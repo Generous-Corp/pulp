@@ -3437,8 +3437,11 @@ target_include_directories(pulp-test-negative-path PRIVATE
 )
 catch_discover_tests(pulp-test-negative-path)
 
-# iOS foundation tests (platform detection, safe area geometry, touch events)
+# iOS foundation tests (platform detection, safe area geometry, touch events,
+# AUv3 HostApp template shape).
 pulp_add_test_suite(pulp-test-ios-foundation LIBRARIES pulp::view pulp::platform)
+target_compile_definitions(pulp-test-ios-foundation PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 # Identity/UUID tests
 pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
