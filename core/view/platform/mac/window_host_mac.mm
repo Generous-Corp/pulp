@@ -94,10 +94,34 @@ static void mark_cocoa_dispatchers_stopping() {
                  tokens.end());
 }
 
+static void post_cocoa_stop_event() {
+    NSEvent* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                        location:NSZeroPoint
+                                   modifierFlags:0
+                                       timestamp:0
+                                    windowNumber:0
+                                         context:nil
+                                         subtype:0
+                                           data1:0
+                                           data2:0];
+    [NSApp postEvent:event atStart:NO];
+}
+
 static void request_cocoa_app_stop() {
     mark_cocoa_dispatchers_stopping();
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSApp stop:nil];
+        post_cocoa_stop_event();
+    });
+}
+
+static void request_hidden_cocoa_window_close(NSWindow* window) {
+    mark_cocoa_dispatchers_stopping();
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (window != nil)
+            [window close];
+        [NSApp stop:nil];
+        post_cocoa_stop_event();
     });
 }
 
@@ -192,11 +216,14 @@ static void install_app_menu(NSString* appName) {
 // so none of them can run a `std::function` (`on_click` / `on_global_click`)
 // whose closure references freed bridge/engine state.
 - (void)prepareForTeardown;
+- (void)setRelativeMouseMode:(BOOL)enabled;
 @end
 
 @implementation PulpView {
     pulp::view::View* _dragTarget;
     pulp::view::View* _focusedView;
+    pulp::view::Point _relativeMouseWindowPoint;
+    BOOL _relativeMouseMode;
     // pulp #2502 — liveness token for `mouseUp:`'s deferred-click blocks.
     // The block dispatched onto the main queue captures a COPY of this
     // `shared_ptr`, which keeps the `atomic<bool>` alive independently of
@@ -240,8 +267,13 @@ static void install_app_menu(NSString* appName) {
 - (void)prepareForTeardown {
     self.rootView = nullptr;
     _dragTarget = nullptr;
+    _relativeMouseMode = NO;
     if (_deferredClickAlive)
         _deferredClickAlive->store(false);
+}
+
+- (void)setRelativeMouseMode:(BOOL)enabled {
+    _relativeMouseMode = enabled;
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -308,6 +340,13 @@ static void install_app_menu(NSString* appName) {
     // NSView is not flipped, so Y=0 is bottom. Convert to top-down for the view tree.
     float viewHeight = static_cast<float>(self.bounds.size.height);
     pulp::view::Point pt{static_cast<float>(p.x), viewHeight - static_cast<float>(p.y)};
+    if (_relativeMouseMode) {
+        _relativeMouseWindowPoint.x += static_cast<float>(event.deltaX);
+        _relativeMouseWindowPoint.y += static_cast<float>(event.deltaY);
+        pt = _relativeMouseWindowPoint;
+    } else {
+        _relativeMouseWindowPoint = pt;
+    }
     // pulp #59/#63/#64/#65 — when a design viewport is in effect, inverse-
     // transform window-space coords into root-space before hit_test sees
     // them. Identity when no viewport is set.
@@ -1677,6 +1716,7 @@ public:
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
+            [window_ setReleasedWhenClosed:NO];
 
             // pulp #1382 — NSWindow's default backgroundColor is
             // [NSColor windowBackgroundColor] which is white in macOS
@@ -1845,7 +1885,13 @@ public:
     }
 
     void invalidate_input_state() override { [view_ clearInteractionState]; }
-    void request_close() override { request_app_close(window_); }
+    void request_close() override {
+        if (options_initially_hidden_ && window_) {
+            request_hidden_cocoa_window_close(window_);
+            return;
+        }
+        request_app_close(window_);
+    }
 
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
@@ -1931,6 +1977,7 @@ public:
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
+            [window_ setReleasedWhenClosed:NO];
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
             // Apply multi-window type configuration (Phase 6)
@@ -2140,6 +2187,10 @@ public:
     }
 
     void request_close() override {
+        if (options_initially_hidden_ && window_) {
+            request_hidden_cocoa_window_close(window_);
+            return;
+        }
         request_app_close(window_);
     }
 
@@ -2209,12 +2260,19 @@ public:
     // ── Platform feature overrides ──────────────────────────────────────
 
     void set_mouse_relative_mode(bool enabled) override {
+        [metal_view_ setRelativeMouseMode:enabled ? YES : NO];
         if (enabled) {
             CGAssociateMouseAndMouseCursorPosition(false);
-            [NSCursor hide];
+            if (!s_cursor_hidden) {
+                [NSCursor hide];
+                s_cursor_hidden = true;
+            }
         } else {
             CGAssociateMouseAndMouseCursorPosition(true);
-            [NSCursor unhide];
+            if (s_cursor_hidden) {
+                [NSCursor unhide];
+                s_cursor_hidden = false;
+            }
         }
     }
 

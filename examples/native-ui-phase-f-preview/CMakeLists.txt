@@ -11,7 +11,7 @@ target_include_directories(pulp-native-ui-phase-f-preview PRIVATE
     "${PULP_PHASE_F_PREVIEW_GENERATED_DIR}")
 
 target_link_libraries(pulp-native-ui-phase-f-preview PRIVATE
-    pulp::standalone)
+    pulp::view-core)
 
 target_compile_features(pulp-native-ui-phase-f-preview PRIVATE cxx_std_20)
 

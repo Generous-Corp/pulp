@@ -1,15 +1,12 @@
 #include "chainer-phase-f-hybrid.hpp"
 
-#include <pulp/audio/buffer.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/format/standalone.hpp>
-#include <pulp/midi/buffer.hpp>
-#include <pulp/runtime/log.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
-#include <algorithm>
+#include <fstream>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -142,78 +139,63 @@ private:
     std::unordered_map<std::string, std::string> choice_values_;
 };
 
-class PreviewProcessor final : public pulp::format::Processor {
-public:
-    pulp::format::PluginDescriptor descriptor() const override {
-        return {
-            .name = "Pulp Native UI Phase F Preview",
-            .manufacturer = "Pulp",
-            .bundle_id = "com.pulp.native-ui-phase-f-preview",
-            .version = "0.1.0",
-            .category = pulp::format::PluginCategory::Effect,
-            .input_buses = {{"Audio In", 2}},
-            .output_buses = {{"Audio Out", 2}},
-        };
-    }
-
-    void define_parameters(pulp::state::StateStore&) override {}
-    void prepare(const pulp::format::PrepareContext&) override {}
-
-    void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
-        for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
-            auto out = output.channel(channel);
-            std::fill(out.begin(), out.end(), 0.0f);
-        }
-    }
-
-    pulp::format::ViewSize view_size() const override {
-        return {1280, 800, 900, 560, 1920, 1200};
-    }
-
-    std::unique_ptr<pulp::view::View> create_view() override {
-        binding_context_.reset();
-        auto root = pulp::test::phase_f_chainer_hybrid::build_chainer_phase_f_hybrid_ui();
-        if (root != nullptr) {
-            pulp::test::phase_f_chainer_hybrid::bind_chainer_phase_f_hybrid_ui(
-                *root, binding_context_);
-            binding_context_.prime_dynamic_surfaces();
-        }
-        return root;
-    }
-
-private:
-    PreviewBindingContext binding_context_;
-};
-
-std::unique_ptr<pulp::format::Processor> create_preview_processor() {
-    return std::make_unique<PreviewProcessor>();
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
-    pulp::runtime::log_info("Pulp Native UI Phase F Preview");
-
-    pulp::format::StandaloneConfig config;
-    config.output_channels = 2;
-    config.input_channels = 0;
-    config.show_settings_tab = false;
-
+    std::string screenshot_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         constexpr std::string_view prefix = "--screenshot=";
         if (arg.rfind(prefix, 0) == 0) {
-            config.headless = true;
-            config.screenshot_path = arg.substr(prefix.size());
-            config.screenshot_frame_delay = 6;
+            screenshot_path = arg.substr(prefix.size());
         }
     }
 
-    pulp::format::StandaloneApp app(create_preview_processor);
-    app.set_config(config);
-    return app.run_with_editor(true) ? 0 : 1;
+    PreviewBindingContext binding_context;
+    auto root = pulp::test::phase_f_chainer_hybrid::build_chainer_phase_f_hybrid_ui();
+    if (!root) {
+        std::cerr << "failed to build generated native UI\n";
+        return 1;
+    }
+
+    pulp::test::phase_f_chainer_hybrid::bind_chainer_phase_f_hybrid_ui(*root, binding_context);
+    binding_context.prime_dynamic_surfaces();
+    root->set_requires_gpu_host(true);
+
+    pulp::view::WindowOptions options;
+    options.title = "Pulp Native UI Phase F Preview";
+    options.width = 1280.0f;
+    options.height = 800.0f;
+    options.min_width = 900.0f;
+    options.min_height = 560.0f;
+    options.resizable = true;
+    options.use_gpu = true;
+    options.initially_hidden = !screenshot_path.empty();
+
+    auto window = pulp::view::WindowHost::create(*root, options);
+    if (!window) {
+        std::cerr << "failed to create native GPU window host\n";
+        return 1;
+    }
+
+    window->set_design_viewport(900.0f, 520.0f);
+    window->set_fixed_aspect_ratio(900.0f / 520.0f);
+    window->set_close_callback([] {});
+
+    if (!screenshot_path.empty()) {
+        int frame_count = 0;
+        window->set_idle_callback([&] {
+            if (++frame_count < 6)
+                return;
+
+            auto png = window->capture_back_buffer_png();
+            std::ofstream out(screenshot_path, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(png.data()),
+                      static_cast<std::streamsize>(png.size()));
+            window->request_close();
+        });
+    }
+
+    window->run_event_loop();
+    return 0;
 }
