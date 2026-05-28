@@ -1,0 +1,15 @@
+{
+  "library_version": "0.1.0",
+  "library_file_url": "https://www.figma.com/community/file/PENDING-Pulp-library-publish",
+  "required_plugin_version": ">=0.1.0",
+  "widgets": {
+    "knob": {
+      "_note": "component_set_key gets filled in by hand AFTER the Pulp Figma library file is built and we read the key via the plugin or the REST API. Until then, the plugin treats Pulp / Knob name-prefix matches as a fallback recognition path.",
+      "component_set_key": "TBD-paste-after-library-publish",
+      "name_prefix": "Pulp / Knob",
+      "supported_property_definitions": ["label", "value", "min", "max", "units", "binding"],
+      "supported_variant_axes": ["size", "state"],
+      "since_library_version": "0.1.0"
+    }
+  }
+}

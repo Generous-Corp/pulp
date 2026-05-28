@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/schemas/figma-plugin-export-v1.json",
+  "title": "Pulp Figma Plugin Export",
+  "description": "Envelope emitted by the 'Design for Pulp' Figma plugin. Consumed by `pulp import-design --from figma-plugin --file <path>`. See planning/2026-05-28-pulp-figma-plugin-strategy.md §7.2 for the parser mapping to Pulp's DesignIR.",
+  "type": "object",
+  "required": ["format_version", "parser_version", "compat_schema_version", "provenance", "root"],
+  "properties": {
+    "$schema": { "type": "string", "format": "uri" },
+    "format_version": {
+      "type": "string",
+      "description": "Export format identity. Bumped on incompatible JSON-shape changes.",
+      "const": "2026.05-figma-plugin-v1"
+    },
+    "parser_version": {
+      "type": "string",
+      "description": "Plugin emitter version. Bumped independently as the plugin gains coverage."
+    },
+    "compat_schema_version": {
+      "type": "string",
+      "description": "Pulp compat.json schema version this export was generated against."
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["adapter", "version", "source_uri"],
+      "properties": {
+        "adapter": { "type": "string", "const": "figma-plugin" },
+        "version": { "type": "string", "description": "Plugin version that produced this export." },
+        "source_uri": {
+          "type": "string",
+          "description": "URN of the Figma file + node, e.g. figma://<fileKey>/<nodeId>",
+          "pattern": "^figma://[A-Za-z0-9]+/[0-9]+:[0-9]+$"
+        },
+        "exported_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "library_manifest": {
+      "type": "object",
+      "description": "Pulp Figma Library version metadata at time of export. Plugin reads tools/figma-plugin/library-manifest.json and copies the active section here.",
+      "properties": {
+        "library_version": { "type": "string" },
+        "required_plugin_version": { "type": "string" },
+        "widget_keys": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "description": "Figma ComponentSetNode.key for each Pulp library widget"
+          }
+        }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "description": "Design tokens extracted from Figma variables. Maps to IRTokens in Pulp.",
+      "properties": {
+        "colors": { "type": "object", "additionalProperties": { "type": "string" } },
+        "dimensions": { "type": "object", "additionalProperties": { "type": "number" } },
+        "strings": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "asset_manifest": {
+      "type": "object",
+      "description": "Maps to IRAssetManifest after Phase 4 adds asset_manifest to DesignIR.",
+      "required": ["version", "assets"],
+      "properties": {
+        "version": { "type": "integer", "const": 1 },
+        "assets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/asset" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "Maps to ImportDiagnostic[]. Plugin records unsupported features here so the importer can surface them without re-running detection.",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+    "root": { "$ref": "#/$defs/node" }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["type", "name", "figma_node_id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Node kind. Pulp library widgets get specific kinds (knob, fader, meter, ...). Everything else is one of the generic types.",
+          "enum": [
+            "frame", "text", "image", "vector", "button", "input",
+            "knob", "fader", "meter", "xy_pad", "waveform", "spectrum",
+            "label", "panel", "col", "row"
+          ]
+        },
+        "name": { "type": "string" },
+        "figma_node_id": {
+          "type": "string",
+          "pattern": "^[0-9]+:[0-9]+$",
+          "description": "Native Figma node id. Populates IRNode.source_node_id after parsing."
+        },
+        "content": {
+          "type": "string",
+          "description": "Text content (when type=text). Maps to IRNode.text_content."
+        },
+        "style": { "$ref": "#/$defs/style" },
+        "layout": { "$ref": "#/$defs/layout" },
+        "audio": { "$ref": "#/$defs/audio" },
+        "binding": { "$ref": "#/$defs/binding" },
+        "figma": { "$ref": "#/$defs/figma_metadata" },
+        "asset_ref": {
+          "type": "string",
+          "description": "When type=image, references asset_manifest.assets[*].asset_id"
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node" }
+        }
+      }
+    },
+    "style": {
+      "type": "object",
+      "description": "Snake_case keys. Parser maps to IRStyle (which uses the same snake_case in C++).",
+      "properties": {
+        "background_color": { "type": "string" },
+        "background_gradient": { "type": "string" },
+        "background_image": { "type": "string" },
+        "background_repeat": { "type": "string" },
+        "color": { "type": "string" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "border_radius": { "type": "number" },
+        "border": { "type": "string" },
+        "border_color": { "type": "string" },
+        "border_width": { "type": "number" },
+        "border_style": { "type": "string" },
+        "box_shadow": { "type": "string" },
+        "filter": { "type": "string" },
+        "backdrop_filter": { "type": "string" },
+        "font_family": { "type": "string" },
+        "font_size": { "type": "number" },
+        "font_weight": { "type": "integer" },
+        "font_style": { "type": "string", "enum": ["normal", "italic"] },
+        "text_align": { "type": "string" },
+        "letter_spacing": { "type": "number" },
+        "line_height": { "type": "number" },
+        "text_transform": { "type": "string" },
+        "text_decoration": { "type": "string" },
+        "white_space": { "type": "string" },
+        "overflow": { "type": "string" },
+        "cursor": { "type": "string" },
+        "position": { "type": "string", "enum": ["absolute", "relative", "static"] },
+        "top": { "type": "number" },
+        "right": { "type": "number" },
+        "bottom": { "type": "number" },
+        "left": { "type": "number" },
+        "z_index": { "type": "integer" },
+        "transform": { "type": "string" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "min_width": { "type": "number" },
+        "min_height": { "type": "number" },
+        "max_width": { "type": "number" },
+        "max_height": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "description": "Maps to IRLayout. Padding is nested as an object here; parser flattens to padding_top/right/bottom/left.",
+      "properties": {
+        "display": { "type": "string", "enum": ["flex", "grid", "none"] },
+        "direction": { "type": "string", "enum": ["row", "column"] },
+        "gap": { "type": "number" },
+        "row_gap": { "type": "number" },
+        "column_gap": { "type": "number" },
+        "padding": {
+          "type": "object",
+          "properties": {
+            "top": { "type": "number" },
+            "right": { "type": "number" },
+            "bottom": { "type": "number" },
+            "left": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "margin": {
+          "type": "object",
+          "properties": {
+            "top": { "type": "number" },
+            "right": { "type": "number" },
+            "bottom": { "type": "number" },
+            "left": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "justify": { "type": "string", "enum": ["flex_start", "flex_end", "center", "stretch", "space_between", "space_around"] },
+        "align": { "type": "string", "enum": ["flex_start", "flex_end", "center", "stretch", "space_between", "space_around"] },
+        "wrap": { "type": "boolean" },
+        "flex_grow": { "type": "number" },
+        "flex_shrink": { "type": "number" },
+        "aspect_ratio": { "type": "number" },
+        "width_mode": { "type": "string", "enum": ["fixed", "hug", "fill"] },
+        "height_mode": { "type": "string", "enum": ["fixed", "hug", "fill"] }
+      },
+      "additionalProperties": false
+    },
+    "audio": {
+      "type": "object",
+      "description": "Present when node.type is one of the audio-widget kinds (knob/fader/meter/xy_pad/waveform/spectrum). Parser maps to IRNode.audio_label/audio_min/audio_max/audio_default and audio_widget enum (derived from node.type).",
+      "properties": {
+        "label": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "default": { "type": "number" },
+        "value_domain": {
+          "type": "string",
+          "enum": ["normalized", "raw"],
+          "default": "normalized",
+          "description": "normalized = 0..1 (param-range mapping applied at runtime); raw = values are in real units (passed through to setParam)."
+        },
+        "step": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "description": "Audio param / event / theme binding metadata. Carries forward into IRNode.attributes['binding'] as a JSON-encoded string and is consumed by the binding resolver (bindParam JS helper + `pulp bindings check`).",
+      "required": ["kind", "key", "source", "resolved"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["param", "event", "theme", "none"] },
+        "key": { "type": "string", "description": "Designer-supplied identifier. Matches against ParamInfo.name for kind=param. Blank means TODO_BIND." },
+        "source": { "type": "string", "enum": ["figma-component-property", "figma-name-suffix", "none"] },
+        "resolved": { "type": "boolean", "description": "False initially; flipped to true by `pulp bindings` after StateStore registration check." }
+      },
+      "additionalProperties": false
+    },
+    "figma_metadata": {
+      "type": "object",
+      "description": "Figma-specific metadata captured at extraction. Parser flattens to IRNode.attributes['figma:*'] keys as JSON-encoded strings.",
+      "properties": {
+        "component_key": { "type": "string" },
+        "component_set_name": { "type": "string" },
+        "main_component_id": { "type": "string" },
+        "main_component_name": { "type": "string" },
+        "library_widget_kind": { "type": "string" },
+        "library_version": { "type": "string" },
+        "component_properties": { "type": "object", "additionalProperties": true },
+        "variant_properties": { "type": "object", "additionalProperties": { "type": "string" } },
+        "parent_id": { "type": ["string", "null"] },
+        "z_order": { "type": "integer" },
+        "absolute_transform": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "number" } }
+        },
+        "visible": { "type": "boolean", "default": true },
+        "locked": { "type": "boolean", "default": false },
+        "blend_mode": { "type": "string" },
+        "mask": { "type": "boolean", "description": "True if this node is a mask layer. Pulp does not support masks; importer emits opaque + diagnostic." }
+      },
+      "additionalProperties": true
+    },
+    "asset": {
+      "type": "object",
+      "description": "Maps to IRAssetRef.",
+      "required": ["asset_id", "original_uri", "content_hash", "mime"],
+      "properties": {
+        "asset_id": { "type": "string", "description": "Stable handle used by nodes via asset_ref." },
+        "original_uri": { "type": "string" },
+        "original_uri_aliases": { "type": "array", "items": { "type": "string" } },
+        "local_path": { "type": "string", "description": "Path relative to the JSON file." },
+        "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "sha256 of resolved bytes." },
+        "mime": { "type": "string" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "font_family": { "type": "string", "description": "For font references (no bytes)." },
+        "license": { "type": "string" },
+        "source_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "description": "Maps to ImportDiagnostic.",
+      "required": ["severity", "code", "kind"],
+      "properties": {
+        "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+        "code": { "type": "string" },
+        "path": { "type": "string", "description": "Pointer into the JSON tree, e.g. /root/children/4" },
+        "message": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "unsupported_property",
+            "unresolved_asset",
+            "snapshot_semantics_warning",
+            "legacy_field_shortcut",
+            "capture_partial",
+            "fallback_used",
+            "recognition_unavailable"
+          ]
+        },
+        "anchor_id": { "type": "string" },
+        "property": { "type": "string" }
+      }
+    }
+  }
+}

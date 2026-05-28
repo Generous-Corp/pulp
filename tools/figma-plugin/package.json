@@ -1,0 +1,21 @@
+{
+  "name": "@pulp/figma-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Design for Pulp — Figma plugin that exports designs to the Pulp audio plugin framework",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:watch": "node scripts/build.mjs --watch",
+    "gen-types": "node scripts/gen-types.mjs",
+    "typecheck:code": "tsc -p src/code.tsconfig.json",
+    "typecheck:ui": "tsc -p src/ui.tsconfig.json",
+    "typecheck": "npm run typecheck:code && npm run typecheck:ui"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.115.0",
+    "esbuild": "^0.24.0",
+    "json-schema-to-typescript": "^15.0.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["es2017", "dom"],
+    "types": [],
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["ui.ts", "types.ts"]
+}

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Design for Pulp</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 12px;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        line-height: 1.4;
+      }
+      h1 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 6px;
+      }
+      .subtitle {
+        color: #888;
+        margin: 0 0 16px;
+        font-size: 11px;
+      }
+      .panel {
+        border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        border-radius: 4px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+      }
+      .panel h2 {
+        font-size: 12px;
+        font-weight: 600;
+        margin: 0 0 6px;
+      }
+      #status {
+        font-weight: 500;
+      }
+      #info {
+        color: #888;
+        font-size: 11px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        margin-top: 6px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      button {
+        font: inherit;
+        padding: 6px 12px;
+        border-radius: 4px;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        background: transparent;
+        cursor: pointer;
+      }
+      button:hover {
+        background: color-mix(in srgb, currentColor 8%, transparent);
+      }
+      .privacy {
+        font-size: 10px;
+        color: #888;
+        line-height: 1.4;
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Design for Pulp</h1>
+    <p class="subtitle">Export Figma designs as Pulp web-compat JS.</p>
+
+    <div class="panel">
+      <h2>Status</h2>
+      <div id="status">Initializing…</div>
+      <div id="info"></div>
+      <div class="row">
+        <button id="btn-refresh">Refresh selection</button>
+        <button id="btn-close">Close</button>
+      </div>
+    </div>
+
+    <p class="privacy">
+      This plugin runs entirely on your machine. It does not send any data over
+      the network. Source: <a href="https://github.com/danielraffel/pulp" target="_blank" rel="noopener">pulp on GitHub</a>.
+    </p>
+
+    <script>
+      /*__UI_SCRIPT__*/
+    </script>
+  </body>
+</html>
