@@ -288,7 +288,34 @@ TEST_CASE("pulp_motion_update_geometry with a non-default metric also emits",
     pulp_motion_update_geometry(id, "scroll", 0.0, 100.0, 320.0, 480.0);
     pulp_motion_update_geometry(id, "scroll", 0.0, 200.0, 320.0, 480.0);
 
-    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "scroll") >= 1);
+    const auto* baseline = first_of(fx.buffer, SampleEvent::Kind::Baseline, "scroll");
+    REQUIRE(baseline != nullptr);
+    REQUIRE(baseline->view_name == "ScrollView");
+    REQUIRE(baseline->components.size() == 4);
+    REQUIRE(baseline->components[0].first == "height");
+    REQUIRE(baseline->components[1].first == "minX");
+    REQUIRE(baseline->components[2].first == "minY");
+    REQUIRE(baseline->components[3].first == "width");
+
+    pulp_motion_detach_trace(id);
+}
+
+TEST_CASE("pulp_motion_update_geometry keeps frame metrics on the sampled trace only",
+          "[motion][swift-bridge][coverage][requested]") {
+    BridgeFixture fx;
+
+    const int id = pulp_motion_register_geometry_trace("FrameOnly", 60);
+    REQUIRE(id > 0);
+
+    pulp_motion_update_geometry(id, "frame", 1.0, 2.0, 3.0, 4.0);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") == 0);
+
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") == 1);
+    const auto* baseline = first_of(fx.buffer, SampleEvent::Kind::Baseline, "frame");
+    REQUIRE(baseline != nullptr);
+    REQUIRE(baseline->view_name == "FrameOnly");
+    REQUIRE(baseline->components.size() == 4);
 
     pulp_motion_detach_trace(id);
 }

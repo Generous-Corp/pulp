@@ -303,6 +303,16 @@ Submission ID received
     REQUIRE(lower.has_value());
     REQUIRE(*lower == "abcdefab-1234-5678-9abc-def012345678");
 
+    auto upper = pulp::ship::detail::parse_notarytool_submit_id(
+        "id: ABCDEFAB-1234-5678-9ABC-DEF012345678\nstatus: Accepted");
+    REQUIRE(upper.has_value());
+    REQUIRE(*upper == "ABCDEFAB-1234-5678-9ABC-DEF012345678");
+
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id("id: abc").has_value());
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(
+        "id: abcdefab-1234-5678-9abc-def012345678-extra").has_value());
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(
+        "id: abcdefab-1234-5678-9abc-def01234567g").has_value());
     REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id("id: NOT-A-UUID").has_value());
     REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id("status: Invalid").has_value());
 #endif
