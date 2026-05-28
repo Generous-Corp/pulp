@@ -516,6 +516,23 @@ TEST_CASE("MCP wire output never contains embedded newlines",
     }
 }
 
+TEST_CASE("MCP JSON scalar extraction rejects partial typed values",
+          "[mcp][json][coverage][requested]") {
+    const std::string payload =
+        R"JSON({"whole":12,"partial":"12x","truth":true,"lie":false,"nil":null,"float":3.25,"badFloat":"3.25x","quoted":"hello \"pulp\""})JSON";
+
+    REQUIRE(extract_raw(payload, "whole") == "12");
+    REQUIRE(extract_string(payload, "quoted") == R"JSON(hello \"pulp\")JSON");
+    REQUIRE(extract_int(payload, "whole", -1) == 12);
+    REQUIRE(extract_int(payload, "partial", -1) == -1);
+    REQUIRE(extract_double(payload, "float", -1.0) == 3.25);
+    REQUIRE(extract_double(payload, "badFloat", -1.0) == -1.0);
+    REQUIRE(extract_bool(payload, "truth", false));
+    REQUIRE_FALSE(extract_bool(payload, "lie", true));
+    REQUIRE(extract_bool(payload, "nil", true));
+    REQUIRE_FALSE(extract_bool(payload, "missing", false));
+}
+
 TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":4,"method":"tools/list"})JSON");
     require_contains(tools, R"JSON("id":4)JSON");

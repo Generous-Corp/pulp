@@ -530,6 +530,9 @@ PulpMotionRuntime.installBackend(backend)
 
 In unit tests, install a recording backend instead — `swift test
 --package-path apple` runs the facade with no C++ host linked.
+For the C bridge itself, `pulp-test-motion-swift-bridge` covers the
+`pulp_motion_*` ABI plus invalid state-buffer guards; run it whenever
+`apple/Sources/PulpSwift/PulpBridge.cpp` changes.
 
 ### Off-by-default contract
 

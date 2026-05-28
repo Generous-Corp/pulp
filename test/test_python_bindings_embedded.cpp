@@ -302,6 +302,8 @@ assert processed.shape == audio.shape
 assert processed.dtype == np.float32
 assert np.allclose(processed, audio)
 assert raises(RuntimeError, lambda: host.process_numpy(np.array([1.0, 2.0], dtype=np.float32)))
+assert raises(RuntimeError, lambda: host.process_numpy(
+    np.zeros((1, 2, 3), dtype=np.float32)))
 
 midi_in = pulp.MidiBuffer()
 midi_in.add(pulp.MidiEvent.note_on(1, 64, 100))
@@ -311,6 +313,9 @@ assert isinstance(midi_out, pulp.MidiBuffer)
 assert midi_out.empty()
 assert raises(RuntimeError, lambda: host.process_numpy_midi(
     np.array([1.0, 2.0], dtype=np.float32), midi_in))
+assert raises(RuntimeError, lambda: host.process_numpy_midi(
+    np.zeros((1, 2, 3), dtype=np.float32), midi_in))
+assert raises(TypeError, lambda: host.process_numpy_midi(audio, object()))
 
 host.release()
 )PY";

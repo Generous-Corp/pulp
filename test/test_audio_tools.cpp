@@ -290,12 +290,52 @@ TEST_CASE("audio model registry preserves URL bytes and rejects partial protocol
 TEST_CASE("audio model registry preserves concrete Hugging Face file paths",
           "[audio][tools][model-registry][coverage][requested]") {
     REQUIRE(resolve_checkpoint_url(" hf://org/repo/model.pt").empty());
-    REQUIRE(resolve_checkpoint_url("hf://org/repo//")
-            == "https://huggingface.co/org/repo/resolve/main//");
-    REQUIRE(resolve_checkpoint_url("hf://org/repo/\t")
-            == "https://huggingface.co/org/repo/resolve/main/\t");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo//").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/\t").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/path/\nmodel.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo/model.pt")
             == "https://huggingface.co/org/repo/resolve/main/model.pt");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/path/to/model.pt")
+            == "https://huggingface.co/org/repo/resolve/main/path/to/model.pt");
+}
+
+TEST_CASE("excerpt service validates request shape before scanning inputs",
+          "[audio][tools][excerpt-service][coverage][requested]") {
+    TempDir temp;
+    install_active_clap_model(temp);
+    fs::create_directories(temp.path / "inputs");
+
+    ExcerptFindRequest request;
+    request.input_path = temp.path / "inputs";
+    request.text = "";
+    auto missing_text = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(missing_text.ok);
+    REQUIRE(missing_text.error == "text query is required");
+
+    request.text = "kick transient";
+    request.top_k = 0;
+    auto bad_top = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(bad_top.ok);
+    REQUIRE(bad_top.error == "top and max_candidates_per_file must be >= 1");
+
+    request.top_k = 1;
+    request.max_candidates_per_file = 0;
+    auto bad_limit = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(bad_limit.ok);
+    REQUIRE(bad_limit.error == "top and max_candidates_per_file must be >= 1");
+
+    request.max_candidates_per_file = 1;
+    request.window_ms = 0;
+    auto bad_window = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(bad_window.ok);
+    REQUIRE(bad_window.error == "window_ms and hop_ms must be >= 1");
+
+    request.window_ms = 1000;
+    request.hop_ms = 250;
+    auto no_wavs = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(no_wavs.ok);
+    REQUIRE(no_wavs.scanned_file_count == 0);
+    REQUIRE(no_wavs.error == "no supported WAV inputs found");
 }
 
 TEST_CASE("audio model store reads legacy metadata and malformed records fail closed",
@@ -1800,9 +1840,12 @@ TEST_CASE("excerpt find bundle metadata falls back to registered model fields",
     auto model_json = read_text(result.bundle_path / "model.json");
     REQUIRE(model_json.find("\"checkpoint_ref\": \"hf://lukewys/laion_clap/music.pt\"")
             != std::string::npos);
-    REQUIRE(model_json.find("\"resolved_checkpoint_path\": \""
-                            + json_escape(checkpoint.string()) + "\"")
-            != std::string::npos);
+    const auto native_path = "\"resolved_checkpoint_path\": \""
+                           + json_escape(checkpoint.string()) + "\"";
+    const auto generic_path = "\"resolved_checkpoint_path\": \""
+                            + json_escape(checkpoint.generic_string()) + "\"";
+    REQUIRE((model_json.find(native_path) != std::string::npos
+             || model_json.find(generic_path) != std::string::npos));
 }
 
 #if !defined(_WIN32)

@@ -1033,6 +1033,12 @@ If confidence is below 80%, the CLI emits a warning and an invitation to run `--
 pulp import-design --file <path> --report-new-format > stitch-2026-XX.json
 ```
 
+`--report-new-format` emits JSON directly from detection strings. Keep every
+source/version/token field JSON-escaped when touching
+`tools/import-design/import_detect.cpp`; the regression test is
+`render_new_format_json escapes generated string fields` in
+`pulp-test-cli-import-detect`.
+
 Hand-edit the resulting JSON into a new entry under `compat.json[imports/<source>/detected-formats]`. The `notes` field is mandatory — describe the upstream change in one line.
 
 ### Adding a fixture

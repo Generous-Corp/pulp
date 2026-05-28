@@ -50,6 +50,11 @@ std::optional<std::string> notarize_submit(const std::string&, const std::string
     return std::nullopt;
 }
 
+std::optional<std::string> notarize_submit_asc(const std::string&, const std::string&,
+                                               const std::string&, const std::string&) {
+    return std::nullopt;
+}
+
 NotarizationStatus notarize_check(const std::string&) { return {}; }
 bool notarize_staple(const std::string&) { return false; }
 

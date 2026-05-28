@@ -2,6 +2,17 @@
 
 namespace pulp::tools::audio {
 
+namespace {
+
+bool has_control_byte(std::string_view text) {
+    for (unsigned char ch : text) {
+        if (ch < 0x20) return true;
+    }
+    return false;
+}
+
+} // namespace
+
 const std::vector<RegisteredModel>& registered_models() {
     static const std::vector<RegisteredModel> models = {{
         .model_id = "clap_music_audioset_v1",
@@ -36,6 +47,7 @@ std::string resolve_checkpoint_url(const std::string& checkpoint_ref) {
         auto user_repo = path.substr(0, second_slash);   // "user/repo"
         auto file_path = path.substr(second_slash + 1);  // "path/to/file"
         if (file_path.empty()) return {};
+        if (file_path.starts_with('/') || has_control_byte(file_path)) return {};
         return "https://huggingface.co/" + user_repo + "/resolve/main/" + file_path;
     }
     // Handle direct URLs
