@@ -73,33 +73,39 @@ export class AssetCache {
   }
 
   /// Capture a vector / shape node by rasterizing or exporting as SVG.
-  /// Format defaults to SVG_STRING for vector-like nodes (smaller, infinitely
-  /// scalable). Use PNG for image-like raster captures.
+  /// Returns { assetId } on success, { error: <reason> } on failure so the
+  /// caller can emit a diagnostic.
   async captureExportedNode(
     node: SceneNode,
     format: "SVG_STRING" | "PNG" = "SVG_STRING",
-  ): Promise<string | null> {
-    if (!("exportAsync" in node)) return null;
+  ): Promise<{ assetId: string } | { error: string }> {
+    if (!("exportAsync" in node)) return { error: "node does not support exportAsync" };
     const exportable = node as ExportMixin;
     let data: Uint8Array;
     let mime: string;
     try {
       if (format === "SVG_STRING") {
         const svgStr = await exportable.exportAsync({ format: "SVG_STRING" });
+        if (!svgStr || svgStr.length < 50) {
+          return { error: `SVG export produced ${svgStr?.length ?? 0} bytes; likely empty/degenerate node` };
+        }
         data = textToBytes(svgStr);
         mime = "image/svg+xml";
       } else {
         data = await exportable.exportAsync({ format: "PNG" });
+        if (!data || data.length < 50) {
+          return { error: `PNG export produced ${data?.length ?? 0} bytes; likely empty/degenerate node` };
+        }
         mime = "image/png";
       }
-    } catch {
-      return null;
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
     }
     const sha = await sha256Hex(data);
     const cached = this.byHash.get(sha);
     if (cached) {
       cached.original_uri_aliases.push(`figma://nodeExport/${node.id}/${format}`);
-      return cached.asset_id;
+      return { assetId: cached.asset_id };
     }
     const assetId = `${format === "SVG_STRING" ? "svg" : "png"}-${sha.slice(0, 12)}`;
     const dim = format === "PNG" ? peekImageSize(data, "image/png") : svgSize(data);
@@ -114,7 +120,7 @@ export class AssetCache {
       original_uri_aliases: [],
     };
     this.byHash.set(sha, entry);
-    return assetId;
+    return { assetId };
   }
 }
 

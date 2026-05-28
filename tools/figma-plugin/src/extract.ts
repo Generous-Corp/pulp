@@ -157,29 +157,63 @@ async function walk(
   if (ex.style.background_image && ex.style.background_image.startsWith("pending:")) {
     const imgHash = ex.style.background_image.substring("pending:".length);
     const assetId = await ctx.assets.captureImageFill(imgHash);
+    delete ex.style.background_image;
     if (assetId) {
-      ex.style.background_image = undefined;
       ex.asset_ref = assetId;
       ex.type = "image";
     } else {
-      ex.style.background_image = undefined;
       pushDiag(ctx, "warning", "image-fill-unresolved", "unresolved_asset",
         `Image fill with hash ${imgHash} could not be fetched.`);
     }
   }
 
   // Vector-like nodes → SVG asset export (Phase 2a slice 2).
-  if (
+  const isVectorLike =
     node.type === "VECTOR" ||
     node.type === "BOOLEAN_OPERATION" ||
     node.type === "STAR" ||
     node.type === "POLYGON" ||
-    node.type === "LINE"
+    node.type === "LINE";
+  if (isVectorLike) {
+    // Skip exports for degenerate (sub-pixel) vectors — they're invisible strokes / artifacts.
+    const bounds = ex.absolute_bounds;
+    const tiny = bounds.w < 1 && bounds.h < 1;
+    if (!tiny) {
+      const res = await ctx.assets.captureExportedNode(node, "SVG_STRING");
+      if ("assetId" in res) {
+        ex.asset_ref = res.assetId;
+        ex.type = "image";
+      } else {
+        pushDiag(ctx, "info", "vector-export-failed", "capture_partial",
+          `Vector ${node.name}: ${res.error}`);
+      }
+    }
+  }
+
+  // FRAME-as-illustration heuristic: if a frame's recursive content is purely
+  // vector nodes (no text, no instances, no nested non-vector frames), export
+  // the whole frame as a single SVG. Catches "shape illustration" frames like
+  // Torus / Triangle / Pentagon / Cube where Figma stitches several vectors
+  // into one visual.
+  if (
+    !isVectorLike &&
+    !ex.asset_ref &&
+    (node.type === "FRAME" || node.type === "GROUP") &&
+    "children" in node &&
+    (node as ChildrenMixin).children.length > 0 &&
+    isPureVectorIllustration(node)
   ) {
-    const assetId = await ctx.assets.captureExportedNode(node, "SVG_STRING");
-    if (assetId) {
-      ex.asset_ref = assetId;
-      ex.type = "image"; // type=image makes the importer route this through asset rendering
+    const res = await ctx.assets.captureExportedNode(node, "SVG_STRING");
+    if ("assetId" in res) {
+      ex.asset_ref = res.assetId;
+      ex.type = "image";
+      // We replaced the frame with its rasterized illustration; drop the children
+      // so the importer doesn't double-render.
+      ex.children = [];
+      return ex;
+    } else {
+      pushDiag(ctx, "info", "illustration-export-failed", "capture_partial",
+        `Illustration frame ${node.name}: ${res.error}`);
     }
   }
 
@@ -510,6 +544,36 @@ function pushDiag(
 
 function pathOf(ctx: WalkCtx): string {
   return ctx.pathStack.join("");
+}
+
+/// Heuristic: returns true if the node and all its recursive descendants are
+/// vector-like primitives (or empty frames wrapping them). Used to detect
+/// "shape illustration" frames that should export as a single SVG.
+function isPureVectorIllustration(node: SceneNode): boolean {
+  if (!("children" in node)) return false;
+  const children = (node as ChildrenMixin).children;
+  if (children.length === 0) return false;
+  for (const child of children) {
+    const t = child.type;
+    if (
+      t === "VECTOR" ||
+      t === "BOOLEAN_OPERATION" ||
+      t === "LINE" ||
+      t === "STAR" ||
+      t === "POLYGON" ||
+      t === "ELLIPSE" ||
+      t === "RECTANGLE"
+    ) {
+      continue;
+    }
+    if (t === "FRAME" || t === "GROUP") {
+      if (!isPureVectorIllustration(child)) return false;
+      continue;
+    }
+    // text, instance, image, anything else → not a pure illustration
+    return false;
+  }
+  return true;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
