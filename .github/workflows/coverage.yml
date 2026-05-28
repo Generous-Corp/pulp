@@ -462,7 +462,7 @@ jobs:
         shell: bash
         env:
           CMAKE_GENERATOR: ${{ matrix.os == 'windows' && 'Ninja' || '' }}
-          PULP_COVERAGE_CMAKE_ARGS: ${{ matrix.os == 'linux' && '-DPULP_BUILD_PYTHON=ON' || '' }}
+          PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON' || '' }}
           # Coverage workflow targets C++ source coverage. The Rust CLI
           # (#778, Phase 8 PR #1) gets its own `cli-rust` Codecov tier
           # via a separate cargo-llvm-cov job (planned in PR #783) —

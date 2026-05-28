@@ -337,3 +337,33 @@ TEST_CASE("pulp-screenshot main handles early non-render exits",
     const auto missing_arg = missing_script.string();
     REQUIRE(run_screenshot_cli({"--script", missing_arg.c_str()}) == 1);
 }
+
+TEST_CASE("pulp-screenshot main renders demo files and base64 output",
+          "[tools][screenshot][coverage][requested]") {
+    auto output = temp_file_path("demo-output.png");
+    std::filesystem::remove(output);
+    const auto output_arg = output.string();
+
+    REQUIRE(run_screenshot_cli({
+        "--demo",
+        "--output", output_arg.c_str(),
+        "--width", "96",
+        "--height", "64",
+        "--scale", "1",
+        "--theme", "light",
+        "--backend", "default"
+    }) == 0);
+    REQUIRE(std::filesystem::is_regular_file(output));
+    REQUIRE(std::filesystem::file_size(output) > 8);
+
+    REQUIRE(run_screenshot_cli({
+        "--demo",
+        "--base64",
+        "--width", "48",
+        "--height", "32",
+        "--scale", "1",
+        "--backend", "default"
+    }) == 0);
+
+    std::filesystem::remove(output);
+}

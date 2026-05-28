@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(SwiftUI)
+import SwiftUI
+#endif
 @testable import PulpSwift
 
 final class PulpMotionProbeTests: XCTestCase {
@@ -88,6 +91,57 @@ final class PulpMotionProbeTests: XCTestCase {
         XCTAssertTrue(recorder.geometryUpdates.isEmpty)
         XCTAssertTrue(recorder.detachedTraceIds.isEmpty)
     }
+
+    func testGeometryProbePublishesMultipleRectsUntilDetached() {
+        let recorder = MotionBackendRecorder()
+        recorder.nextTraceId = 314
+        PulpMotionRuntime.installTestBackend(recorder.backend)
+
+        let probe = PulpMotionGeometryProbe(view: "Canvas", fps: 60,
+                                            metric: "scroll")
+
+        probe.update(minX: 0, minY: 0, width: 100, height: 200)
+        probe.update(minX: 5, minY: 10, width: 110, height: 210)
+        probe.detach()
+        probe.update(minX: 99, minY: 99, width: 99, height: 99)
+
+        XCTAssertEqual(recorder.registrations.count, 1)
+        XCTAssertEqual(recorder.registrations[0].view, "Canvas")
+        XCTAssertEqual(recorder.registrations[0].fps, 60)
+        XCTAssertEqual(recorder.geometryUpdates.count, 2)
+        XCTAssertEqual(recorder.geometryUpdates.map(\.traceId), [314, 314])
+        XCTAssertEqual(recorder.geometryUpdates.map(\.metric), ["scroll", "scroll"])
+        XCTAssertEqual(recorder.geometryUpdates[1].minX, 5)
+        XCTAssertEqual(recorder.geometryUpdates[1].minY, 10)
+        XCTAssertEqual(recorder.geometryUpdates[1].width, 110)
+        XCTAssertEqual(recorder.geometryUpdates[1].height, 210)
+        XCTAssertEqual(recorder.detachedTraceIds, [314])
+        XCTAssertFalse(probe.isAttached)
+    }
+
+#if canImport(SwiftUI)
+    @available(iOS 14.0, macOS 11.0, tvOS 14.0, watchOS 7.0, *)
+    func testSwiftUIViewModifierStoresTraceConfiguration() {
+        let metrics = [
+            Trace.geometry("frame"),
+            Trace.scrollGeometry("scroll"),
+            Trace.value("opacity", 0.5, epsilon: 0.01, precision: 2),
+        ]
+        let modifier = PulpMotionTraceModifier(name: "Panel",
+                                               fps: 24,
+                                               metrics: metrics)
+
+        XCTAssertEqual(modifier.name, "Panel")
+        XCTAssertEqual(modifier.fps, 24)
+        XCTAssertEqual(modifier.metrics.count, 3)
+        XCTAssertEqual(modifier.metrics.map(\.name), ["frame", "scroll", "opacity"])
+
+        _ = Text("Panel").pulpMotionTrace("Panel", fps: 24) {
+            Trace.geometry("frame")
+            Trace.value("opacity", 0.5)
+        }
+    }
+#endif
 }
 
 private final class MotionBackendRecorder {

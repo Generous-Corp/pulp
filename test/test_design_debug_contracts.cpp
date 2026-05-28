@@ -339,3 +339,71 @@ TEST_CASE("design-debug option validation fails before expensive render setup",
     std::error_code ec;
     std::filesystem::remove_all(temp, ec);
 }
+
+TEST_CASE("design-debug headless response-file run writes report artifacts",
+          "[tools][design-debug][coverage][requested]") {
+    auto temp = make_temp_dir("headless-run");
+    auto script = temp / "debug-tool.js";
+    auto response = temp / "response.txt";
+    auto output = temp / "artifacts";
+
+    REQUIRE(write_text_file(script, R"JS(
+createLabel('target1', 'Before', 10, 10, 120, 24);
+function setDesignDebugTarget(id) { globalThis.__target = id; }
+function clearInspectedComponent() { globalThis.__target = 'all'; }
+function setDesignDebugAIConfig(provider, model, effort) {
+  globalThis.__provider = provider;
+  globalThis.__model = model;
+  globalThis.__effort = effort;
+}
+function buildDesignChatPrompt(prompt) {
+  return 'prompt:' + prompt + ':' + globalThis.__target;
+}
+function applyDesignChatResponse(response) {
+  setText('target1', response);
+  return 'applied:' + response;
+}
+function getDesignDebugStateJson() {
+  return '{"targetBounds":{"x":10,"y":10,"width":120,"height":24}}';
+}
+)JS"));
+    REQUIRE(write_text_file(response, "After"));
+
+    const auto exit_code = run_design_debug({
+        "pulp-design-debug",
+        "--prompt", "make label explicit",
+        "--target", "target1",
+        "--script", script.string(),
+        "--response-file", response.string(),
+        "--output-dir", output.string(),
+        "--provider", "test-provider",
+        "--model", "test-model",
+        "--reasoning-effort", "low",
+        "--width", "180",
+        "--height", "80",
+        "--scale", "1"
+    });
+
+    REQUIRE(exit_code == 0);
+    REQUIRE(std::filesystem::exists(output / "latest-report.json"));
+    REQUIRE(std::filesystem::exists(output / "latest-run.json"));
+    REQUIRE(std::filesystem::exists(output / "runs.jsonl"));
+
+    auto report = read_file(output / "latest-report.json");
+    REQUIRE(report.find(R"("tool": "pulp-design-debug")") != std::string::npos);
+    REQUIRE(report.find(R"("provider": "test-provider")") != std::string::npos);
+    REQUIRE(report.find(R"("model": "test-model")") != std::string::npos);
+    REQUIRE(report.find(R"("target": "target1")") != std::string::npos);
+    REQUIRE(report.find(R"("target_found": true)") != std::string::npos);
+    REQUIRE(report.find(R"("apply_summary": "applied:After")") != std::string::npos);
+    REQUIRE(report.find(R"("target_before_image": )") != std::string::npos);
+    REQUIRE(report.find(R"("target_after_image": )") != std::string::npos);
+    REQUIRE(report.find(R"("target_region_changed": true)") != std::string::npos);
+
+    auto run_log = read_file(output / "runs.jsonl");
+    REQUIRE(run_log.find(R"("target":"target1")") != std::string::npos);
+    REQUIRE(run_log.find("make label explicit") != std::string::npos);
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
+}
