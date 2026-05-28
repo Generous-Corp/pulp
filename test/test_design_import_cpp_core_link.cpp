@@ -2,7 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/text_editor.hpp>
 
 #include <string>
 #include <string_view>
@@ -52,6 +54,20 @@ public:
         ++waveform_displays;
     }
 
+    void bind_text_editor(pulp::view::TextEditor&,
+                          const pulp::view::NativeImportTextBindingDescriptor& descriptor) override {
+        if (!descriptor.value_key.empty())
+            text_value_keys.insert(std::string(descriptor.value_key));
+        ++text_inputs;
+    }
+
+    void bind_host_action(pulp::view::TextButton&,
+                          const pulp::view::NativeImportHostActionDescriptor& descriptor) override {
+        if (!descriptor.action.empty())
+            host_actions_seen.insert(std::string(descriptor.action));
+        ++host_actions;
+    }
+
     int knobs = 0;
     int faders = 0;
     int xy_pads = 0;
@@ -59,8 +75,12 @@ public:
     int choices = 0;
     int meters = 0;
     int waveform_displays = 0;
+    int text_inputs = 0;
+    int host_actions = 0;
     std::unordered_set<std::string> param_keys;
     std::unordered_set<std::string> meter_channels;
+    std::unordered_set<std::string> text_value_keys;
+    std::unordered_set<std::string> host_actions_seen;
 
 private:
     void add_param(std::string_view key) {
@@ -85,6 +105,8 @@ TEST_CASE("Phase F generated Chainer C++ links through view-core only") {
     REQUIRE(bindings.choices == 21);
     REQUIRE(bindings.meters == 2);
     REQUIRE(bindings.waveform_displays == 1);
+    REQUIRE(bindings.text_inputs == 1);
+    REQUIRE(bindings.host_actions == 2);
     REQUIRE(bindings.param_keys.size() == 20);
     for (const auto* key : {
              "osc_freq",
@@ -113,4 +135,7 @@ TEST_CASE("Phase F generated Chainer C++ links through view-core only") {
     REQUIRE(bindings.meter_channels.size() == 2);
     REQUIRE(bindings.meter_channels.count("L") == 1);
     REQUIRE(bindings.meter_channels.count("R") == 1);
+    REQUIRE(bindings.text_value_keys.count("presetName") == 1);
+    REQUIRE(bindings.host_actions_seen.count("export_preset_json") == 1);
+    REQUIRE(bindings.host_actions_seen.count("save_preset") == 1);
 }

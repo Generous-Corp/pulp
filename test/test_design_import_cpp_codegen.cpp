@@ -10,6 +10,8 @@
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/buttons.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -210,6 +212,16 @@ struct PhaseDWaveformDisplayEvent {
     std::string shape;
 };
 
+struct PhaseDTextEvent {
+    std::string value_key;
+    std::string text;
+};
+
+struct PhaseDHostActionEvent {
+    std::string action;
+    std::string payload_contract;
+};
+
 class PhaseDKnobBindingContext final : public NativeImportBindingContext {
 public:
     PhaseDKnobBindingContext() {
@@ -377,6 +389,36 @@ public:
         });
     }
 
+    void bind_text_editor(TextEditor& editor,
+                          const NativeImportTextBindingDescriptor& descriptor) override {
+        const auto value_key = std::string(descriptor.value_key);
+        bound_text_inputs_.push_back({
+            std::string(descriptor.route_id),
+            value_key,
+            std::string(descriptor.initial_value),
+            &editor,
+        });
+        editor.on_change = [this, value_key](const std::string& text) {
+            text_events_.push_back({value_key, text});
+        };
+    }
+
+    void bind_host_action(TextButton& button,
+                          const NativeImportHostActionDescriptor& descriptor) override {
+        bound_host_actions_.push_back({
+            std::string(descriptor.route_id),
+            std::string(descriptor.action),
+            std::string(descriptor.label),
+            std::string(descriptor.payload_contract),
+            &button,
+        });
+        const auto action = std::string(descriptor.action);
+        const auto payload_contract = std::string(descriptor.payload_contract);
+        button.on_click = [this, action, payload_contract] {
+            host_action_events_.push_back({action, payload_contract});
+        };
+    }
+
     void set_meter_level(std::string_view meter_source,
                          std::string_view channel,
                          float rms,
@@ -453,6 +495,25 @@ public:
     const std::vector<BoundWaveformDisplay>& bound_waveform_displays() const {
         return bound_waveform_displays_;
     }
+    struct BoundTextInput {
+        std::string route_id;
+        std::string value_key;
+        std::string initial_value;
+        TextEditor* editor = nullptr;
+    };
+    const std::vector<BoundTextInput>& bound_text_inputs() const { return bound_text_inputs_; }
+    const std::vector<PhaseDTextEvent>& text_events() const { return text_events_; }
+    struct BoundHostAction {
+        std::string route_id;
+        std::string action;
+        std::string label;
+        std::string payload_contract;
+        TextButton* button = nullptr;
+    };
+    const std::vector<BoundHostAction>& bound_host_actions() const { return bound_host_actions_; }
+    const std::vector<PhaseDHostActionEvent>& host_action_events() const {
+        return host_action_events_;
+    }
 
     bool has_ordered_gesture(std::string_view param_key) const {
         bool saw_begin = false;
@@ -507,6 +568,10 @@ private:
     std::vector<PhaseDMeterEvent> meter_events_;
     std::vector<BoundWaveformDisplay> bound_waveform_displays_;
     std::vector<PhaseDWaveformDisplayEvent> waveform_display_events_;
+    std::vector<BoundTextInput> bound_text_inputs_;
+    std::vector<PhaseDTextEvent> text_events_;
+    std::vector<BoundHostAction> bound_host_actions_;
+    std::vector<PhaseDHostActionEvent> host_action_events_;
 };
 
 IRNode label_node(std::string id,
@@ -890,6 +955,29 @@ std::string event_contract_string(choc::value::ValueView route) {
     if (!event["value"].isVoid())
         out += ":" + json_string(event["value"]);
     return out;
+}
+
+std::string text_event_contract_string(choc::value::ValueView route) {
+    const auto event = route["event_contracts"][0];
+    return json_string(event["prop"]) + ":" + json_string(event["kind"]) + ":" +
+           json_string(event["value_key"]);
+}
+
+std::string text_focus_contract_string(choc::value::ValueView route) {
+    const auto focus = route["focus_contracts"][0];
+    std::string out = json_string(focus["kind"]) + ":";
+    const auto boundaries = focus["boundaries"];
+    for (uint32_t i = 0; i < boundaries.size(); ++i) {
+        if (i != 0) out += "/";
+        out += json_string(boundaries[i]);
+    }
+    return out;
+}
+
+std::string host_action_event_contract_string(choc::value::ValueView route) {
+    const auto event = route["event_contracts"][0];
+    return json_string(event["prop"]) + ":" + json_string(event["kind"]) + ":" +
+           json_string(event["action"]);
 }
 
 std::string gesture_contract_string(choc::value::ValueView route) {
@@ -1563,6 +1651,70 @@ IRNode lower_chainer_meter_route_to_node(IRNode& materialized_root,
     return wrapper;
 }
 
+IRNode lower_chainer_text_input_route_to_node(IRNode& materialized_root,
+                                              choc::value::ValueView route) {
+    const auto materialized_path = json_string(route["materialized_ir_path"]);
+    auto* source = node_at_ir_path(materialized_root, materialized_path);
+    REQUIRE(source != nullptr);
+    REQUIRE(source->stable_anchor_id.has_value());
+    REQUIRE(*source->stable_anchor_id == json_string(route["materialized_ir_anchor"]));
+
+    auto editor = *source;
+    editor.children.clear();
+    editor.type = "text_editor";
+    editor.name = "preset name";
+    editor.text_content = json_string(route["initial_value"]);
+    editor.layout.flex_shrink = 0.0f;
+    editor.attributes.clear();
+    editor.attributes["value"] = json_string(route["initial_value"]);
+    editor.attributes["pulpRouteId"] = json_string(route["id"]);
+    editor.attributes["pulpRouteType"] = json_string(route["route_type"]);
+    editor.attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
+    editor.attributes["pulpSourcePath"] = json_string(route["stable_source_path"]);
+    editor.attributes["pulpValueKey"] = json_string(route["value_key"]);
+    editor.attributes["pulpInitialValue"] = json_string(route["initial_value"]);
+    editor.attributes["pulpPlaceholder"] = json_string(route["placeholder"]);
+    editor.attributes["pulpEventContract"] = text_event_contract_string(route);
+    editor.attributes["pulpFocusContract"] = text_focus_contract_string(route);
+    editor.attributes["pulpStyleTokens"] = style_token_string(route);
+    editor.attributes["pulpDefaultValueSource"] = json_string(route["default_value_source"]);
+    editor.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
+    editor.anchor_strategy = "adapter";
+    return editor;
+}
+
+IRNode lower_chainer_host_action_route_to_node(IRNode& materialized_root,
+                                               choc::value::ValueView route) {
+    const auto materialized_path = json_string(route["materialized_ir_path"]);
+    auto* source = node_at_ir_path(materialized_root, materialized_path);
+    REQUIRE(source != nullptr);
+    REQUIRE(source->stable_anchor_id.has_value());
+    REQUIRE(*source->stable_anchor_id == json_string(route["materialized_ir_anchor"]));
+
+    auto button = *source;
+    const auto label = json_string(route["label"]);
+    button.children.clear();
+    button.type = "text_button";
+    button.name = label + " host action";
+    button.text_content = label;
+    button.layout.flex_shrink = 0.0f;
+    button.attributes.clear();
+    button.attributes["pulpRouteId"] = json_string(route["id"]);
+    button.attributes["pulpRouteType"] = json_string(route["route_type"]);
+    button.attributes["pulpSourceFamily"] = json_string(route["source_component_family"]);
+    button.attributes["pulpSourcePath"] = json_string(route["stable_source_path"]);
+    button.attributes["pulpHostAction"] = json_string(route["host_action"]);
+    button.attributes["pulpHostActionLabel"] = label;
+    button.attributes["pulpPayloadContract"] = json_string(route["payload_contract"]);
+    button.attributes["pulpEventContract"] = host_action_event_contract_string(route);
+    button.attributes["pulpGestureContract"] = gesture_contract_string(route);
+    button.attributes["pulpStyleTokens"] = style_token_string(route);
+    button.attributes["pulpDefaultValueSource"] = json_string(route["default_value_source"]);
+    button.stable_anchor_id = json_string(route["materialized_ir_anchor"]);
+    button.anchor_strategy = "adapter";
+    return button;
+}
+
 DesignIR lower_chainer_knob_route_to_phase_c_ir(DesignIR materialized_ir,
                                                 choc::value::ValueView route,
                                                 const ChainerKnobSourceFormula& formula) {
@@ -1998,16 +2150,20 @@ struct PhaseFRouteSummary {
     std::size_t meter_bars = 0;
     std::size_t chain_modules = 0;
     std::size_t chain_info_rows = 0;
+    std::size_t text_inputs = 0;
+    std::size_t host_actions = 0;
     std::vector<std::string> crop_anchors;
 
     std::size_t route_rows() const {
         return knobs + faders + xy_pads + led_buttons + waveform_displays +
-               waveform_choices + meter_wrappers + chain_modules + chain_info_rows;
+               waveform_choices + meter_wrappers + chain_modules + chain_info_rows +
+               text_inputs + host_actions;
     }
 
     std::size_t native_control_count() const {
         return knobs + faders + xy_pads + led_buttons + waveform_displays +
-               waveform_choices + meter_bars + chain_modules + chain_info_rows;
+               waveform_choices + meter_bars + chain_modules + chain_info_rows +
+               text_inputs + host_actions;
     }
 };
 
@@ -2015,7 +2171,8 @@ bool is_phase_f_route_family(std::string_view family) {
     return family == "Knob" || family == "Fader" || family == "XYPad" ||
            family == "LEDButton" || family == "WaveformDisplay" ||
            family == "WaveformChoice" || family == "Meter" ||
-           family == "ChainModule" || family == "ChainInfoRow";
+           family == "ChainModule" || family == "ChainInfoRow" ||
+           family == "TextInput" || family == "HostAction";
 }
 
 bool ir_path_is_prefix(std::string_view parent, std::string_view child) {
@@ -2072,6 +2229,8 @@ PhaseFRouteSummary summarize_phase_f_route_rows(choc::value::ValueView route_row
         else if (family == "Meter") ++summary.meter_wrappers;
         else if (family == "ChainModule") ++summary.chain_modules;
         else if (family == "ChainInfoRow") ++summary.chain_info_rows;
+        else if (family == "TextInput") ++summary.text_inputs;
+        else if (family == "HostAction") ++summary.host_actions;
 
         summary.crop_anchors.push_back(json_string(route["materialized_ir_anchor"]));
         if (family == "Meter") {
@@ -2100,6 +2259,8 @@ DesignIR lower_chainer_routes_to_phase_f_original_layout_ir(DesignIR materialize
     REQUIRE(summary.meter_bars == 2);
     REQUIRE(summary.chain_modules == 9);
     REQUIRE(summary.chain_info_rows == 8);
+    REQUIRE(summary.text_inputs == 1);
+    REQUIRE(summary.host_actions == 2);
 
     materialized_ir = lower_chainer_knob_routes_to_phase_d_original_layout_ir(
         std::move(materialized_ir), route_rows, formula);
@@ -2117,6 +2278,23 @@ DesignIR lower_chainer_routes_to_phase_f_original_layout_ir(DesignIR materialize
         std::move(materialized_ir), route_rows);
     materialized_ir = lower_chainer_chain_selection_routes_to_phase_e_original_layout_ir(
         std::move(materialized_ir), route_rows);
+    std::size_t text_and_host_lowered = 0;
+    for (uint32_t i = 0; i < route_rows.size(); ++i) {
+        const auto route = route_rows[i];
+        const auto family = json_string(route["source_component_family"]);
+        if (family == "TextInput") {
+            const auto materialized_path = json_string(route["materialized_ir_path"]);
+            auto editor = lower_chainer_text_input_route_to_node(materialized_ir.root, route);
+            *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(editor);
+            ++text_and_host_lowered;
+        } else if (family == "HostAction") {
+            const auto materialized_path = json_string(route["materialized_ir_path"]);
+            auto action = lower_chainer_host_action_route_to_node(materialized_ir.root, route);
+            *node_at_ir_path(materialized_ir.root, materialized_path) = std::move(action);
+            ++text_and_host_lowered;
+        }
+    }
+    REQUIRE(text_and_host_lowered == 3);
 
     materialized_ir.capture_method = "phase-f-chainer-original-layout-hybrid-route-overlay";
     materialized_ir.source_adapter = "native-cpp-import-execution-validation";
@@ -6385,7 +6563,9 @@ TEST_CASE("Chainer Phase F original-layout hybrid classifies full routed-control
                << "    \"meter_wrapper\": " << route_summary.meter_wrappers << ",\n"
                << "    \"meter_bar\": " << route_summary.meter_bars << ",\n"
                << "    \"chain_module\": " << route_summary.chain_modules << ",\n"
-               << "    \"chain_info_row\": " << route_summary.chain_info_rows << "\n"
+               << "    \"chain_info_row\": " << route_summary.chain_info_rows << ",\n"
+               << "    \"text_input\": " << route_summary.text_inputs << ",\n"
+               << "    \"host_action\": " << route_summary.host_actions << "\n"
                << "  },\n"
                << "  \"lowered_route_row_count\": " << route_summary.route_rows() << ",\n"
                << "  \"lowered_native_control_count\": " << route_summary.native_control_count() << ",\n"
@@ -6433,6 +6613,10 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::WaveformView>()") ==
             route_summary.waveform_displays);
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::Meter>()") == route_summary.meter_bars);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::TextEditor>()") ==
+            route_summary.text_inputs);
+    REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::TextButton>(") ==
+            route_summary.host_actions);
     REQUIRE(count_occurrences(result.source, "std::make_unique<pulp::view::ToggleButton>()") ==
             route_summary.led_buttons + route_summary.waveform_choices +
                 route_summary.chain_modules + route_summary.chain_info_rows);
@@ -6444,6 +6628,8 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
             route_summary.waveform_choices + route_summary.chain_modules + route_summary.chain_info_rows);
     REQUIRE(count_occurrences(result.source, "ctx.bind_meter(") == route_summary.meter_bars);
     REQUIRE(count_occurrences(result.source, "ctx.bind_waveform_display(") == route_summary.waveform_displays);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_text_editor(") == route_summary.text_inputs);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_host_action(") == route_summary.host_actions);
     REQUIRE(result.source.find("build_native_view_tree") == std::string::npos);
     REQUIRE(result.source.find("serialize_design_ir") == std::string::npos);
     REQUIRE(result.source.find("ScriptEngine") == std::string::npos);
@@ -6459,6 +6645,8 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
     int param_key_count = 0;
     int meter_source_count = 0;
     int xy_axis_count = 0;
+    int text_value_key_count = 0;
+    int host_action_count = 0;
     for (uint32_t i = 0; i < binding_manifest["entries"].size(); ++i) {
         const auto entry = binding_manifest["entries"][i];
         ++primitive_counts[json_string(entry["native_primitive"])];
@@ -6474,6 +6662,10 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
             ++meter_source_count;
         if (!entry["x_param_key"].isVoid() && !entry["y_param_key"].isVoid())
             xy_axis_count += 2;
+        if (!entry["value_key"].isVoid() && !json_string(entry["value_key"]).empty())
+            ++text_value_key_count;
+        if (!entry["host_action"].isVoid() && !json_string(entry["host_action"]).empty())
+            ++host_action_count;
     }
 
     REQUIRE(primitive_counts["knob"] == static_cast<int>(route_summary.knobs));
@@ -6484,6 +6676,8 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
                              route_summary.chain_modules + route_summary.chain_info_rows));
     REQUIRE(primitive_counts["waveform"] == static_cast<int>(route_summary.waveform_displays));
     REQUIRE(primitive_counts["meter"] == static_cast<int>(route_summary.meter_bars));
+    REQUIRE(primitive_counts["text_editor"] == static_cast<int>(route_summary.text_inputs));
+    REQUIRE(primitive_counts["text_button"] == static_cast<int>(route_summary.host_actions));
     REQUIRE(route_type_count == static_cast<int>(route_summary.native_control_count()));
     REQUIRE(source_family_count == static_cast<int>(route_summary.native_control_count()));
     REQUIRE(event_contract_count == static_cast<int>(route_summary.native_control_count()));
@@ -6493,6 +6687,8 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
                                                 route_summary.chain_modules + route_summary.chain_info_rows));
     REQUIRE(meter_source_count == static_cast<int>(route_summary.meter_bars));
     REQUIRE(xy_axis_count == 2);
+    REQUIRE(text_value_key_count == static_cast<int>(route_summary.text_inputs));
+    REQUIRE(host_action_count == static_cast<int>(route_summary.host_actions));
 
     TempDir tmp("pulp-phase-f-chainer-hybrid-cpp-codegen");
     const auto header = tmp.path / "chainer-phase-f-hybrid.hpp";
@@ -6539,7 +6735,9 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
                << route_summary.led_buttons + route_summary.waveform_choices +
                       route_summary.chain_modules + route_summary.chain_info_rows << ",\n"
                << "    \"waveform\": " << route_summary.waveform_displays << ",\n"
-               << "    \"meter\": " << route_summary.meter_bars << "\n"
+               << "    \"meter\": " << route_summary.meter_bars << ",\n"
+               << "    \"text_editor\": " << route_summary.text_inputs << ",\n"
+               << "    \"text_button\": " << route_summary.host_actions << "\n"
                << "  },\n"
                << "  \"binding_helper_counts\": {\n"
                << "    \"knob\": " << count_occurrences(result.source, "ctx.bind_knob(") << ",\n"
@@ -6548,7 +6746,9 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
                << "    \"toggle_button\": " << count_occurrences(result.source, "ctx.bind_toggle_button(") << ",\n"
                << "    \"choice_button\": " << count_occurrences(result.source, "ctx.bind_choice_button(") << ",\n"
                << "    \"waveform\": " << count_occurrences(result.source, "ctx.bind_waveform_display(") << ",\n"
-               << "    \"meter\": " << count_occurrences(result.source, "ctx.bind_meter(") << "\n"
+               << "    \"meter\": " << count_occurrences(result.source, "ctx.bind_meter(") << ",\n"
+               << "    \"text_editor\": " << count_occurrences(result.source, "ctx.bind_text_editor(") << ",\n"
+               << "    \"host_action\": " << count_occurrences(result.source, "ctx.bind_host_action(") << "\n"
                << "  },\n"
                << "  \"binding_manifest_entry_count\": " << binding_manifest["entries"].size() << ",\n"
                << "  \"binding_primitive_counts\": {\n"
@@ -6557,7 +6757,9 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
                << "    \"xy_pad\": " << primitive_counts["xy_pad"] << ",\n"
                << "    \"toggle_button\": " << primitive_counts["toggle_button"] << ",\n"
                << "    \"waveform\": " << primitive_counts["waveform"] << ",\n"
-               << "    \"meter\": " << primitive_counts["meter"] << "\n"
+               << "    \"meter\": " << primitive_counts["meter"] << ",\n"
+               << "    \"text_editor\": " << primitive_counts["text_editor"] << ",\n"
+               << "    \"text_button\": " << primitive_counts["text_button"] << "\n"
                << "  },\n"
                << "  \"binding_route_type_entries\": " << route_type_count << ",\n"
                << "  \"binding_source_family_entries\": " << source_family_count << ",\n"
@@ -6565,6 +6767,8 @@ TEST_CASE("Chainer Phase F original-layout hybrid exports and compiles generated
                << "  \"binding_param_key_entries\": " << param_key_count << ",\n"
                << "  \"binding_meter_source_entries\": " << meter_source_count << ",\n"
                << "  \"binding_xy_axis_entries\": " << xy_axis_count << ",\n"
+               << "  \"binding_text_value_key_entries\": " << text_value_key_count << ",\n"
+               << "  \"binding_host_action_entries\": " << host_action_count << ",\n"
                << "  \"scope_boundaries\": [\n"
                << "    \"proves the Phase F hybrid IR exports to C++ and compiles as an object file\",\n"
                << "    \"does not prove this generated source has been linked into a runnable binary\",\n"
@@ -6600,6 +6804,20 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
             route_summary.waveform_choices + route_summary.chain_modules + route_summary.chain_info_rows);
     REQUIRE(ctx.bound_meters().size() == route_summary.meter_bars);
     REQUIRE(ctx.bound_waveform_displays().size() == route_summary.waveform_displays);
+    REQUIRE(ctx.bound_text_inputs().size() == route_summary.text_inputs);
+    REQUIRE(ctx.bound_host_actions().size() == route_summary.host_actions);
+    REQUIRE(ctx.bound_text_inputs()[0].value_key == "presetName");
+    REQUIRE(ctx.bound_text_inputs()[0].initial_value == "polywave_ms_split_v1");
+    REQUIRE(ctx.bound_text_inputs()[0].editor != nullptr);
+    ctx.bound_text_inputs()[0].editor->set_text("polywave_ms_split_v1");
+    REQUIRE(ctx.text_events().size() == 1);
+    REQUIRE(ctx.text_events()[0].value_key == "presetName");
+    REQUIRE(ctx.text_events()[0].text == "polywave_ms_split_v1");
+    for (const auto& action : ctx.bound_host_actions()) {
+        REQUIRE(action.button != nullptr);
+        action.button->on_click();
+    }
+    REQUIRE(ctx.host_action_events().size() == route_summary.host_actions);
 
     constexpr uint32_t kWidth = 1280;
     constexpr uint32_t kHeight = 800;
@@ -6724,6 +6942,8 @@ TEST_CASE("linked Chainer Phase F generated C++ builds and classifies visual dif
                << "  \"bound_choices\": " << ctx.bound_choices().size() << ",\n"
                << "  \"bound_meters\": " << ctx.bound_meters().size() << ",\n"
                << "  \"bound_waveform_displays\": " << ctx.bound_waveform_displays().size() << ",\n"
+               << "  \"bound_text_inputs\": " << ctx.bound_text_inputs().size() << ",\n"
+               << "  \"bound_host_actions\": " << ctx.bound_host_actions().size() << ",\n"
                << "  \"lowered_native_control_count\": " << route_summary.native_control_count() << ",\n"
                << "  \"routed_crop_anchor_count\": " << route_summary.crop_anchors.size() << ",\n"
                << "  \"missing_crop_anchors\": [],\n"

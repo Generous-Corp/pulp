@@ -868,7 +868,13 @@ void emit_widget_specific(std::ostringstream& out,
             emit_label_style(out, depth, ctx, var, node.style);
             break;
         case NativeWidgetKind::text_editor:
-            if (!text.empty())
+            if (auto placeholder = attr(node, "pulpPlaceholder"); placeholder && !placeholder->empty())
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->placeholder = " + cpp_string_literal(*placeholder) + ";");
+            if (auto initial_value = attr(node, "pulpInitialValue"); initial_value && !initial_value->empty())
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(*initial_value) + ");");
+            else if (auto value = attr(node, "value"); value && !value->empty())
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(*value) + ");");
+            else if (!text.empty())
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(text) + ");");
             break;
         case NativeWidgetKind::checkbox:
@@ -1232,6 +1238,12 @@ bool has_binding_manifest_metadata(const IRNode& node) {
              "pulpMeterChannel",
              "pulpMeterValueKey",
              "pulpWaveformShape",
+             "pulpValueKey",
+             "pulpInitialValue",
+             "pulpPlaceholder",
+             "pulpFocusContract",
+             "pulpPayloadContract",
+             "pulpHostActionLabel",
              "pulpTypeLabel",
              "pulpDescription",
              "pulpEventContract",
@@ -1286,6 +1298,12 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         append_json_field_if_present(out, first_field, "meter_channel", attr(node, "pulpMeterChannel"));
         append_json_field_if_present(out, first_field, "meter_value_key", attr(node, "pulpMeterValueKey"));
         append_json_field_if_present(out, first_field, "waveform_shape", attr(node, "pulpWaveformShape"));
+        append_json_field_if_present(out, first_field, "value_key", attr(node, "pulpValueKey"));
+        append_json_field_if_present(out, first_field, "initial_value", attr(node, "pulpInitialValue"));
+        append_json_field_if_present(out, first_field, "placeholder", attr(node, "pulpPlaceholder"));
+        append_json_field_if_present(out, first_field, "focus_contract", attr(node, "pulpFocusContract"));
+        append_json_field_if_present(out, first_field, "payload_contract", attr(node, "pulpPayloadContract"));
+        append_json_field_if_present(out, first_field, "host_action_label", attr(node, "pulpHostActionLabel"));
         append_json_field_if_present(out, first_field, "component_type_label", attr(node, "pulpTypeLabel"));
         append_json_field_if_present(out, first_field, "description", attr(node, "pulpDescription"));
         append_json_field_if_present(out, first_field, "thumb_shape", attr(node, "pulpThumbShape"));
@@ -1350,6 +1368,13 @@ struct BindingHelperRoute {
     std::string meter_channel;
     std::string meter_value_key;
     std::string waveform_shape;
+    std::string value_key;
+    std::string initial_value;
+    std::string placeholder;
+    std::string focus_contract;
+    std::string host_action;
+    std::string host_action_label;
+    std::string payload_contract;
     std::string event_contract;
     std::string gesture_contract;
 };
@@ -1365,6 +1390,8 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
     auto meter_channel = attr(node, "pulpMeterChannel");
     auto choice_value = attr(node, "pulpChoiceValue");
     auto waveform_shape = attr(node, "pulpWaveformShape");
+    auto value_key = attr(node, "pulpValueKey");
+    auto host_action = attr(node, "pulpHostAction");
     const bool has_single_param = param_key && !param_key->empty();
     const bool has_scalar_param_control =
         (resolved.kind == NativeWidgetKind::knob ||
@@ -1381,8 +1408,13 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
         meter_channel && !meter_channel->empty();
     const bool has_waveform_input = resolved.kind == NativeWidgetKind::waveform &&
         has_single_param && waveform_shape && !waveform_shape->empty();
+    const bool has_text_input = resolved.kind == NativeWidgetKind::text_editor &&
+        value_key && !value_key->empty();
+    const bool has_host_action = resolved.kind == NativeWidgetKind::text_button &&
+        host_action && !host_action->empty();
     if (route_id && !route_id->empty() &&
-        (has_scalar_param_control || has_choice_param || has_xy_params || has_meter_input || has_waveform_input) &&
+        (has_scalar_param_control || has_choice_param || has_xy_params || has_meter_input ||
+         has_waveform_input || has_text_input || has_host_action) &&
         node.stable_anchor_id && !node.stable_anchor_id->empty()) {
         routes.push_back(BindingHelperRoute{
             .kind = resolved.kind,
@@ -1403,6 +1435,13 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
             .meter_channel = meter_channel.value_or(std::string{}),
             .meter_value_key = attr(node, "pulpMeterValueKey").value_or(std::string{}),
             .waveform_shape = waveform_shape.value_or(std::string{}),
+            .value_key = value_key.value_or(std::string{}),
+            .initial_value = attr(node, "pulpInitialValue").value_or(std::string{}),
+            .placeholder = attr(node, "pulpPlaceholder").value_or(std::string{}),
+            .focus_contract = attr(node, "pulpFocusContract").value_or(std::string{}),
+            .host_action = host_action.value_or(std::string{}),
+            .host_action_label = attr(node, "pulpHostActionLabel").value_or(std::string{}),
+            .payload_contract = attr(node, "pulpPayloadContract").value_or(std::string{}),
             .event_contract = attr(node, "pulpEventContract").value_or(std::string{}),
             .gesture_contract = attr(node, "pulpGestureContract").value_or(std::string{}),
         });
@@ -1490,13 +1529,37 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    auto emit_text_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportTextBindingDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.value_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.initial_value) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.placeholder) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.focus_contract));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
+    auto emit_host_action_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportHostActionDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.host_action) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.host_action_label) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.payload_contract) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.gesture_contract));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
     for (const auto& route : routes) {
         if (route.kind != NativeWidgetKind::knob &&
             route.kind != NativeWidgetKind::fader &&
             route.kind != NativeWidgetKind::meter &&
             route.kind != NativeWidgetKind::toggle_button &&
             route.kind != NativeWidgetKind::xy_pad &&
-            route.kind != NativeWidgetKind::waveform)
+            route.kind != NativeWidgetKind::waveform &&
+            route.kind != NativeWidgetKind::text_editor &&
+            route.kind != NativeWidgetKind::text_button)
             continue;
         emit_line(out, 1, opts.indent_spaces,
                   "if (auto* view = find_imported_view_by_anchor(root, " +
@@ -1530,6 +1593,24 @@ void emit_binding_context_helpers(std::ostringstream& out,
                           "if (auto* waveform = dynamic_cast<pulp::view::WaveformView*>(view)) {");
                 emit_line(out, 3, opts.indent_spaces, "ctx.bind_waveform_display(*waveform,");
                 emit_waveform_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
+            if (route.kind == NativeWidgetKind::text_editor) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* editor = dynamic_cast<pulp::view::TextEditor*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_text_editor(*editor,");
+                emit_text_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
+            if (route.kind == NativeWidgetKind::text_button) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* button = dynamic_cast<pulp::view::TextButton*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_host_action(*button,");
+                emit_host_action_descriptor(route, 3);
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");
                 continue;

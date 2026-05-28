@@ -25,6 +25,8 @@ class Knob;
 class Fader;
 class Meter;
 class ToggleButton;
+class TextButton;
+class TextEditor;
 class XYPad;
 class WaveformView;
 
@@ -408,6 +410,24 @@ struct NativeImportWaveformBindingDescriptor {
     std::string_view event_contract;
 };
 
+struct NativeImportTextBindingDescriptor {
+    std::string_view route_id;
+    std::string_view value_key;
+    std::string_view initial_value;
+    std::string_view placeholder;
+    std::string_view event_contract;
+    std::string_view focus_contract;
+};
+
+struct NativeImportHostActionDescriptor {
+    std::string_view route_id;
+    std::string_view action;
+    std::string_view label;
+    std::string_view payload_contract;
+    std::string_view event_contract;
+    std::string_view gesture_contract;
+};
+
 class NativeImportBindingContext {
 public:
     virtual ~NativeImportBindingContext() = default;
@@ -438,6 +458,14 @@ public:
     virtual void bind_waveform_display(WaveformView& waveform,
                                        const NativeImportWaveformBindingDescriptor& descriptor) {
         (void)waveform;
+        (void)descriptor;
+    }
+    virtual void bind_text_editor(TextEditor& editor, const NativeImportTextBindingDescriptor& descriptor) {
+        (void)editor;
+        (void)descriptor;
+    }
+    virtual void bind_host_action(TextButton& button, const NativeImportHostActionDescriptor& descriptor) {
+        (void)button;
         (void)descriptor;
     }
 };

@@ -1,6 +1,8 @@
 #include "chainer-phase-f-hybrid.hpp"
 
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
@@ -22,6 +24,8 @@ public:
         waveform_displays_.clear();
         meters_.clear();
         values_.clear();
+        text_values_.clear();
+        host_actions_.clear();
     }
 
     void bind_knob(pulp::view::Knob& knob,
@@ -91,6 +95,30 @@ public:
         waveform_displays_.push_back({std::string(descriptor.param_key), &waveform});
     }
 
+    void bind_text_editor(pulp::view::TextEditor& editor,
+                          const pulp::view::NativeImportTextBindingDescriptor& descriptor) override {
+        const auto key = std::string(descriptor.value_key);
+        if (!key.empty())
+            text_values_[key] = editor.text();
+        editor.on_change = [this, key](const std::string& text) {
+            if (!key.empty())
+                text_values_[key] = text;
+        };
+    }
+
+    void bind_host_action(pulp::view::TextButton& button,
+                          const pulp::view::NativeImportHostActionDescriptor& descriptor) override {
+        const auto action = std::string(descriptor.action);
+        const auto payload = std::string(descriptor.payload_contract);
+        host_actions_.push_back(action);
+        button.on_click = [action, payload] {
+            std::cerr << "native host action: " << action;
+            if (!payload.empty())
+                std::cerr << " payload=" << payload;
+            std::cerr << "\\n";
+        };
+    }
+
     void prime_dynamic_surfaces() {
         for (auto& meter : meters_) {
             if (meter.widget == nullptr)
@@ -137,6 +165,8 @@ private:
     std::vector<WaveformDisplay> waveform_displays_;
     std::unordered_map<std::string, float> values_;
     std::unordered_map<std::string, std::string> choice_values_;
+    std::unordered_map<std::string, std::string> text_values_;
+    std::vector<std::string> host_actions_;
 };
 
 }  // namespace
