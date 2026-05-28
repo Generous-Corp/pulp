@@ -367,3 +367,29 @@ TEST_CASE("pulp-screenshot main renders demo files and base64 output",
 
     std::filesystem::remove(output);
 }
+
+TEST_CASE("pulp-screenshot main renders script files through the CLI path",
+          "[tools][screenshot][coverage][requested]") {
+    auto script = temp_file_path("script-render.js");
+    auto output = temp_file_path("script-output.png");
+    std::filesystem::remove(script);
+    std::filesystem::remove(output);
+    write_bytes(script, "createLabel('title', 'Script Render', 4, 4, 120, 24);\n");
+
+    const auto script_arg = script.string();
+    const auto output_arg = output.string();
+    REQUIRE(run_screenshot_cli({
+        "--script", script_arg.c_str(),
+        "--output", output_arg.c_str(),
+        "--width", "160",
+        "--height", "64",
+        "--scale", "1",
+        "--theme", "dark",
+        "--backend", "default"
+    }) == 0);
+    REQUIRE(std::filesystem::is_regular_file(output));
+    REQUIRE(std::filesystem::file_size(output) > 8);
+
+    std::filesystem::remove(script);
+    std::filesystem::remove(output);
+}

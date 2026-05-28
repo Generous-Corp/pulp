@@ -421,3 +421,54 @@ function getDesignDebugStateJson() {
     std::error_code ec;
     std::filesystem::remove_all(temp, ec);
 }
+
+TEST_CASE("design-debug response-file run accepts explicit CoreGraphics capture",
+          "[tools][design-debug][coverage][requested]") {
+#if !defined(__APPLE__)
+    SKIP("CoreGraphics capture is macOS-only");
+#endif
+
+    auto temp = make_temp_dir("coregraphics-run");
+    auto script = temp / "debug-tool.js";
+    auto response = temp / "response.txt";
+    auto output = temp / "artifacts";
+
+    REQUIRE(write_text_file(script, R"JS(
+createLabel('target1', 'Before', 8, 8, 110, 24);
+function setDesignDebugTarget(id) { globalThis.__target = id; }
+function clearInspectedComponent() { globalThis.__target = 'all'; }
+function setDesignDebugAIConfig(provider, model, effort) {}
+function buildDesignChatPrompt(prompt) { return 'prompt:' + prompt; }
+function applyDesignChatResponse(response) {
+  setText('target1', response);
+  return 'applied:' + response;
+}
+function getDesignDebugStateJson() {
+  return '{"targetBounds":{"x":8,"y":8,"width":110,"height":24}}';
+}
+)JS"));
+    REQUIRE(write_text_file(response, "After"));
+
+    const auto exit_code = run_design_debug({
+        "pulp-design-debug",
+        "--prompt", "use coregraphics",
+        "--target", "target1",
+        "--script", script.string(),
+        "--response-file", response.string(),
+        "--output-dir", output.string(),
+        "--capture-backend", "coregraphics",
+        "--width", "150",
+        "--height", "70",
+        "--scale", "1"
+    });
+
+    REQUIRE(exit_code == 0);
+    auto report = read_file(output / "latest-report.json");
+    REQUIRE(report.find(R"("render_backend": "coregraphics-headless")") != std::string::npos);
+    REQUIRE(report.find(R"("requested_capture_backend": "coregraphics")") != std::string::npos);
+    REQUIRE(report.find(R"("target_found": true)") != std::string::npos);
+    REQUIRE(report.find(R"("target_region_changed": true)") != std::string::npos);
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
+}

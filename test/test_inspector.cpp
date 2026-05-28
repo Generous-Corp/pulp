@@ -475,11 +475,17 @@ TEST_CASE("Protocol: decode rejects invalid field types without partial output",
     msg.params_json = "stale";
 
     REQUIRE_FALSE(decode_message(R"({"id":"not-an-int","method":"DOM.search"})", msg));
+    REQUIRE(msg.id == 0);
+    REQUIRE(msg.method.empty());
+    REQUIRE(msg.params_json.empty());
 
     msg.id = 99;
     msg.method = "stale";
     msg.params_json = "stale";
     REQUIRE_FALSE(decode_message(R"({"id":20,"method":42})", msg));
+    REQUIRE(msg.id == 20);
+    REQUIRE(msg.method.empty());
+    REQUIRE(msg.params_json.empty());
 }
 
 // ── InspectorOverlay ────────────────────────────────────────────────────────
