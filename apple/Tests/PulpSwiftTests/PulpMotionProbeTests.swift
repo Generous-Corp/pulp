@@ -149,6 +149,31 @@ final class PulpMotionProbeTests: XCTestCase {
         XCTAssertFalse(probe.isAttached)
     }
 
+    func testGeometryProbeUsesCustomMetricForEveryUpdateUntilDetach() {
+        let recorder = MotionBackendRecorder()
+        recorder.nextTraceId = 616
+        PulpMotionRuntime.installTestBackend(recorder.backend)
+
+        let probe = PulpMotionGeometryProbe(view: "Envelope", fps: 15,
+                                            metric: "visibleBounds")
+
+        probe.update(minX: 1, minY: 2, width: 3, height: 4)
+        probe.update(minX: 5, minY: 6, width: 7, height: 8)
+        probe.detach()
+        probe.update(minX: 9, minY: 10, width: 11, height: 12)
+
+        XCTAssertEqual(recorder.registrations.count, 1)
+        XCTAssertEqual(recorder.registrations[0].view, "Envelope")
+        XCTAssertEqual(recorder.registrations[0].fps, 15)
+        XCTAssertEqual(recorder.geometryUpdates.count, 2)
+        XCTAssertEqual(recorder.geometryUpdates.map(\.traceId), [616, 616])
+        XCTAssertEqual(recorder.geometryUpdates.map(\.metric), ["visibleBounds", "visibleBounds"])
+        XCTAssertEqual(recorder.geometryUpdates[0].minX, 1)
+        XCTAssertEqual(recorder.geometryUpdates[1].width, 7)
+        XCTAssertEqual(recorder.detachedTraceIds, [616])
+        XCTAssertFalse(probe.isAttached)
+    }
+
 #if canImport(SwiftUI)
     @available(iOS 14.0, macOS 11.0, tvOS 14.0, watchOS 7.0, *)
     func testSwiftUIViewModifierStoresTraceConfiguration() {

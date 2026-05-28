@@ -206,6 +206,24 @@ TEST_CASE("InspectorServer starts on an explicit port and writes discovery file"
     std::filesystem::remove_all(tmp);
 }
 
+TEST_CASE("InspectorServer pre-start operations are inert",
+          "[inspect][server][coverage][requested]") {
+    InspectorServer server;
+
+    REQUIRE(server.port() == 0);
+    REQUIRE(server.client_count() == 0);
+    REQUIRE_NOTHROW(server.broadcast(
+        make_event("Inspector.noClients", R"({"ok":true})")));
+    REQUIRE_NOTHROW(server.stop());
+    REQUIRE(server.client_count() == 0);
+
+    server.set_request_handler([](const InspectorMessage& request) {
+        return make_response(request.id, R"({"unexpected":true})");
+    });
+    REQUIRE_NOTHROW(server.broadcast(
+        make_event("Inspector.noClientsAfterHandler", R"({"ok":true})")));
+}
+
 TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
           "[inspect][server]") {
     auto candidate = find_bindable_port();
