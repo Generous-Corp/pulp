@@ -42,6 +42,10 @@ Slice 6 (#551).
 
 ## GitHub workflow gotchas
 
+- The required `macos` alias in `.github/workflows/build.yml` mirrors the
+  macOS matrix leg by polling the Actions jobs API. Keep that poll retry-safe:
+  API failures or malformed JSON must log and continue the loop, not trip
+  `set -euo pipefail` before the macOS leg has a chance to report.
 - `.github/workflows/release-dry-run.yml` (P9-2, #2576) exercises the release
   build → `package_cli.py` → `pulp ship appcast` chain on a synthetic version
   (`0.0.0-dryrun`) WITHOUT publishing — no GitHub release, no signing/notarize,

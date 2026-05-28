@@ -884,8 +884,30 @@ jobs:
           fi
           conclusion=""
           for attempt in $(seq 1 180); do
-            conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-              --jq '.jobs[] | select(.name | startswith("macOS")) | .conclusion' | head -1)
+            jobs_json="$(mktemp)"
+            jobs_err="$(mktemp)"
+            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" >"$jobs_json" 2>"$jobs_err"; then
+              if ! conclusion=$(python3 - "$jobs_json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              payload = json.load(handle)
+          for job in payload.get("jobs", []):
+              if job.get("name", "").startswith("macOS"):
+                  print(job.get("conclusion") or "")
+                  break
+          PY
+              ); then
+                echo "Could not parse jobs API response; retrying."
+                conclusion=""
+              fi
+            else
+              echo "Jobs API request failed; retrying."
+              cat "$jobs_err"
+              conclusion=""
+            fi
+            rm -f "$jobs_json" "$jobs_err"
             if [ -n "$conclusion" ] && [ "$conclusion" != "null" ]; then
               break
             fi

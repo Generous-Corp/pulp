@@ -129,6 +129,15 @@ share `$HOME`). `--dry-run` is the safest way to verify credential
 resolution — it prints which surface each value came from
 (`(from cli)` / `(from env)` / `(from file)`) and never contacts Apple.
 
+When changing `ship/include/pulp/ship/codesign.hpp`, keep every platform
+implementation in lockstep. Linux intentionally returns no-op / false /
+`std::nullopt` for signing and notarization entry points, but it still must
+define every public overload, including App Store Connect
+`notarize_submit_asc(...)`; otherwise Linux-only package tests are the first
+place the API parity break appears. Keep this covered in
+`test/test_linux_packaging.cpp` alongside the macOS parser tests in
+`test/test_codesign.cpp`.
+
 ### Android: Build → Package (includes Gradle build + optional signing) → Verify
 
 ```bash

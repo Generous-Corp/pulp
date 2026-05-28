@@ -32,10 +32,10 @@ SigningInfo parse_codesign_details(const std::string& output) {
 
 std::optional<std::string> parse_notarytool_submit_id(const std::string& output) {
     std::regex uuid_re(
-        R"(id: ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\s|$))");
+        R"((^|\n)\s*id:\s+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\s|$))");
     std::smatch match;
     if (std::regex_search(output, match, uuid_re))
-        return match[1].str();
+        return match[2].str();
     return std::nullopt;
 }
 

@@ -87,6 +87,15 @@ TEST_CASE("notarization staple on nonexistent path is false",
     REQUIRE_FALSE(notarize_staple("/nonexistent/binary"));
 }
 
+TEST_CASE("ASC notarization submit fails closed for missing inputs",
+          "[ship][codesign][coverage][requested]") {
+    auto request = notarize_submit_asc("/nonexistent/archive.zip",
+                                       "/nonexistent/AuthKey_TEST.p8",
+                                       "TESTKEY123",
+                                       "12345678-1234-1234-1234-123456789abc");
+    REQUIRE_FALSE(request.has_value());
+}
+
 TEST_CASE("create_pkg on nonexistent component is false",
           "[ship][codesign][coverage][issue-644]") {
     auto output = (fs::temp_directory_path() / "pulp-missing-component.pkg").string();
@@ -318,6 +327,30 @@ Submission ID received
 #endif
 }
 
+TEST_CASE("notarytool submit parser keeps UUID boundaries strict",
+          "[ship][codesign][coverage][requested]") {
+#ifdef __APPLE__
+    auto tab_boundary = pulp::ship::detail::parse_notarytool_submit_id(
+        "id: 12345678-abcd-4abc-9def-123456789abc\tstatus: Accepted");
+    REQUIRE(tab_boundary.has_value());
+    REQUIRE(*tab_boundary == "12345678-abcd-4abc-9def-123456789abc");
+
+    auto trailing_newline = pulp::ship::detail::parse_notarytool_submit_id(
+        "createdDate: today\nid: 87654321-abcd-4abc-9def-123456789abc\n");
+    REQUIRE(trailing_newline.has_value());
+    REQUIRE(*trailing_newline == "87654321-abcd-4abc-9def-123456789abc");
+
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(
+        "request id: 12345678-abcd-4abc-9def-123456789abc").has_value());
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(
+        "id:12345678-abcd-4abc-9def-123456789abc").has_value());
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(
+        "id: 12345678-abcd-4abc-9def-123456789abc-extra").has_value());
+    REQUIRE_FALSE(pulp::ship::detail::parse_notarytool_submit_id(
+        "id: 12345678-abcd-4abc-9def-123456789ab").has_value());
+#endif
+}
+
 TEST_CASE("notarytool status parser classifies terminal states",
           "[ship][codesign][coverage][phase3]") {
 #ifdef __APPLE__
@@ -340,6 +373,28 @@ TEST_CASE("notarytool status parser classifies terminal states",
     REQUIRE_FALSE(progress.complete);
     REQUIRE_FALSE(progress.success);
     REQUIRE(progress.message == "status: In Progress");
+#endif
+}
+
+TEST_CASE("notarytool status parser preserves raw diagnostic output",
+          "[ship][codesign][coverage][requested]") {
+#ifdef __APPLE__
+    const std::string invalid_log = R"(status: Invalid
+issues:
+  - path: Pulp.vst3
+    message: unsigned nested helper
+)";
+    auto invalid = pulp::ship::detail::parse_notarytool_status(invalid_log);
+    REQUIRE(invalid.complete);
+    REQUIRE_FALSE(invalid.success);
+    REQUIRE(invalid.message == invalid_log);
+    REQUIRE(invalid.message.find("unsigned nested helper") != std::string::npos);
+
+    const std::string uploaded_log = "status: Uploaded\nid: pending";
+    auto uploaded = pulp::ship::detail::parse_notarytool_status(uploaded_log);
+    REQUIRE_FALSE(uploaded.complete);
+    REQUIRE_FALSE(uploaded.success);
+    REQUIRE(uploaded.message == uploaded_log);
 #endif
 }
 
@@ -374,6 +429,27 @@ TEST_CASE("security identity parser preserves quoted display names",
   2) BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB No opening quote"
 )IDENTITIES");
     REQUIRE(unbalanced.empty());
+#endif
+}
+
+TEST_CASE("security identity parser ignores unquoted validity summaries",
+          "[ship][codesign][coverage][requested]") {
+#ifdef __APPLE__
+    auto identities = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
+Policy: Code Signing
+  1) ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD "Developer ID Application: Pulp, Inc. (ABCDE12345)"
+  2) FEDCBAFEDCBAFEDCBAFEDCBAFEDCBAFEDCBAFEDC "Apple Development: Local Tester (VWXYZ98765)"
+     2 valid identities found
+     0 revoked identities found
+)IDENTITIES");
+    REQUIRE(identities.size() == 2);
+    REQUIRE(identities[0] == "Developer ID Application: Pulp, Inc. (ABCDE12345)");
+    REQUIRE(identities[1] == "Apple Development: Local Tester (VWXYZ98765)");
+
+    auto quoted_summary = pulp::ship::detail::parse_signing_identities(
+        "     \"summary in quotes\" should be preserved by the low-level parser\n");
+    REQUIRE(quoted_summary.size() == 1);
+    REQUIRE(quoted_summary[0] == "summary in quotes");
 #endif
 }
 

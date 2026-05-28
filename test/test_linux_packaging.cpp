@@ -77,6 +77,11 @@ TEST_CASE("Linux packaging exposes no-op signing surface honestly",
     REQUIRE_FALSE(pulp::ship::codesign("/tmp/missing", "identity", ""));
     REQUIRE_FALSE(pulp::ship::codesign("/tmp/missing", "identity", "entitlements.plist"));
     REQUIRE_FALSE(pulp::ship::notarize_submit("/tmp/missing", "apple", "team", "password").has_value());
+    REQUIRE_FALSE(pulp::ship::notarize_submit_asc("/tmp/missing",
+                                                  "/tmp/AuthKey_TEST.p8",
+                                                  "TESTKEY123",
+                                                  "12345678-1234-1234-1234-123456789abc")
+                  .has_value());
 
     auto status = pulp::ship::notarize_check("request-id");
     REQUIRE_FALSE(status.complete);
@@ -188,6 +193,31 @@ TEST_CASE("Linux packaging tarballs preserve nested plugin payloads only",
     REQUIRE(read_file(extract / "LV2" / "Nested.lv2" / "resources" / "manifest.ttl") == "ttl");
     REQUIRE_FALSE(fs::exists(extract / "vst3" / "lowercase.vst3"));
     REQUIRE_FALSE(fs::exists(extract / "Other" / "Nested.vst3"));
+}
+
+TEST_CASE("Linux packaging tarballs preserve format directory boundaries",
+          "[ship][linux-package][coverage][requested]") {
+    TempDir temp("format-boundaries");
+    auto build = temp.path / "build";
+    write_file(build / "VST3" / "Format.vst3" / "Contents" / "module.txt", "vst3");
+    write_file(build / "CLAP" / "Format.clap", "clap");
+    write_file(build / "LV2" / "Format.lv2" / "manifest.ttl", "lv2");
+    write_file(build / "VST3.backup" / "Old.vst3" / "Contents" / "module.txt", "old");
+    write_file(build / "CLAP.tmp" / "Old.clap", "old");
+    write_file(build / "LV2-disabled" / "Old.lv2" / "manifest.ttl", "old");
+
+    auto output = temp.path / "format-boundaries.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("Format", build.string(), output.string()));
+
+    auto listing = run_sh("tar tzf " + quote(output));
+    REQUIRE(listing.exit_code == 0);
+    REQUIRE_THAT(listing.stdout_output,
+                 ContainsSubstring("VST3/Format.vst3/Contents/module.txt"));
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("CLAP/Format.clap"));
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("LV2/Format.lv2/manifest.ttl"));
+    REQUIRE(listing.stdout_output.find("VST3.backup") == std::string::npos);
+    REQUIRE(listing.stdout_output.find("CLAP.tmp") == std::string::npos);
+    REQUIRE(listing.stdout_output.find("LV2-disabled") == std::string::npos);
 }
 
 TEST_CASE("Linux packaging tarball command quotes paths with spaces",
@@ -375,4 +405,35 @@ TEST_CASE("Linux packaging deb preserves recursive plugin directories only",
                  ContainsSubstring("./usr/lib/lv2/Nested.lv2/resources/manifest.ttl"));
     REQUIRE(contents.stdout_output.find("lowercase.vst3") == std::string::npos);
     REQUIRE(contents.stdout_output.find("manual.txt") == std::string::npos);
+}
+
+TEST_CASE("Linux packaging deb control keeps package metadata literal",
+          "[ship][linux-package][coverage][requested]") {
+    if (!command_available("dpkg-deb"))
+        SKIP("dpkg-deb is required to inspect generated deb archives");
+
+    TempDir temp("deb-metadata-literal");
+    auto build = temp.path / "build";
+    write_file(build / "CLAP" / "Literal.clap", "clap");
+
+    auto output = temp.path / "literal.deb";
+    REQUIRE(pulp::ship::create_deb("pulp-literal", "2026.5.28+coverage",
+                                   build.string(), output.string(),
+                                   "Pulp Tests"));
+    REQUIRE_FALSE(fs::exists(build / "deb-staging"));
+
+    auto control = run_sh("dpkg-deb --field " + quote(output));
+    REQUIRE(control.exit_code == 0);
+    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Package: pulp-literal"));
+    REQUIRE_THAT(control.stdout_output,
+                 ContainsSubstring("Version: 2026.5.28+coverage"));
+    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Maintainer: Pulp Tests"));
+    REQUIRE_THAT(control.stdout_output,
+                 ContainsSubstring("Description: pulp-literal audio plugin"));
+
+    auto contents = run_sh("dpkg-deb --contents " + quote(output));
+    REQUIRE(contents.exit_code == 0);
+    REQUIRE_THAT(contents.stdout_output, ContainsSubstring("./usr/lib/clap/Literal.clap"));
+    REQUIRE(contents.stdout_output.find("./usr/lib/vst3/") == std::string::npos);
+    REQUIRE(contents.stdout_output.find("./usr/lib/lv2/") == std::string::npos);
 }
