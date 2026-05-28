@@ -1137,6 +1137,8 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
     REQUIRE(range->attributes.at("pulpInitialValue") == "0.65");
     REQUIRE(range->attributes.at("pulpEventContract") == "range:onChange:setState");
     REQUIRE(range->attributes.at("pulpGestureContract") == "range:drag");
+    REQUIRE(range->style.width == 120.0f);
+    REQUIRE(range->style.height == 20.0f);
 
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
     REQUIRE(result.binding_manifest.find("\"value_key\": \"enabled\"") != std::string::npos);

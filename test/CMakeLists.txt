@@ -2931,6 +2931,11 @@ set_source_files_properties(${CHAINER_PHASE_E_CHAIN_SELECTION_CPP} PROPERTIES
 set(CHAINER_PHASE_F_HYBRID_CPP
     ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-f-hybrid.cpp)
 
+set(PHASE_H_COMPRESSOR_STRIP_CPP
+    ${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/import-cpp-probes/generated/compressor-strip-af557c0a.cpp)
+set_source_files_properties(${PHASE_H_COMPRESSOR_STRIP_CPP} PROPERTIES
+    COMPILE_DEFINITIONS "build_imported_ui=build_phase_h_compressor_strip_ui;bake_asset_manifest=bake_phase_h_compressor_strip_asset_manifest")
+
 add_executable(pulp-test-design-import-cpp-codegen
     test_design_import_cpp_codegen.cpp
     fixtures/design_import_generated_cpp_fixture.cpp
@@ -2942,7 +2947,8 @@ add_executable(pulp-test-design-import-cpp-codegen
     ${CHAINER_PHASE_E_WAVEFORM_DISPLAY_CHOICES_CPP}
     ${CHAINER_PHASE_E_METER_CPP}
     ${CHAINER_PHASE_E_CHAIN_SELECTION_CPP}
-    ${CHAINER_PHASE_F_HYBRID_CPP})
+    ${CHAINER_PHASE_F_HYBRID_CPP}
+    ${PHASE_H_COMPRESSOR_STRIP_CPP})
 target_link_libraries(pulp-test-design-import-cpp-codegen
     PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-cpp-codegen PRIVATE

@@ -695,6 +695,10 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
         if (subtype == "range") {
             set_contract_attr(node, "pulpEventContract", on_change ? "range:onChange:setState" : "range:value");
             set_contract_attr(node, "pulpGestureContract", "range:drag");
+            if (!node.style.width)
+                node.style.width = 120.0f;
+            if (!node.style.height)
+                node.style.height = 20.0f;
         } else if (subtype == "checkbox") {
             set_contract_attr(node, "pulpEventContract", on_change ? "checkbox:onChange:setState" : "checkbox:checked");
             set_contract_attr(node, "pulpGestureContract", "checkbox:toggle");

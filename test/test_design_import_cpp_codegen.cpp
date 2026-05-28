@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <choc/text/choc_JSON.h>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
@@ -62,6 +63,8 @@ void bind_imported_meter_ui(pulp::view::View& root, pulp::view::NativeImportBind
 std::unique_ptr<pulp::view::View> build_imported_chain_selection_ui();
 void bind_imported_chain_selection_ui(pulp::view::View& root,
                                       pulp::view::NativeImportBindingContext& ctx);
+std::unique_ptr<pulp::view::View> build_phase_h_compressor_strip_ui();
+pulp::view::IRAssetManifest bake_phase_h_compressor_strip_asset_manifest();
 
 namespace pulp::test::phase_f_chainer_hybrid {
 std::unique_ptr<pulp::view::View> build_chainer_phase_f_hybrid_ui();
@@ -118,6 +121,24 @@ std::string read_text(const fs::path& path) {
     return ss.str();
 }
 
+double elapsed_ms(std::chrono::steady_clock::time_point start,
+                  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now()) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+double median_ms(std::vector<double> values) {
+    if (values.empty()) return 0.0;
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2];
+}
+
+std::uint64_t render_recording_frame(View& root) {
+    root.layout_children();
+    pulp::canvas::RecordingCanvas canvas;
+    root.paint_all(canvas);
+    return static_cast<std::uint64_t>(canvas.command_count());
+}
+
 View* find_anchor(View& root, std::string_view anchor) {
     if (root.anchor_id() == anchor)
         return &root;
@@ -126,6 +147,13 @@ View* find_anchor(View& root, std::string_view anchor) {
             return found;
     }
     return nullptr;
+}
+
+void collect_faders(View& root, std::vector<Fader*>& out) {
+    if (auto* fader = dynamic_cast<Fader*>(&root))
+        out.push_back(fader);
+    for (std::size_t i = 0; i < root.child_count(); ++i)
+        collect_faders(*root.child_at(i), out);
 }
 
 Rect absolute_bounds(const View& view) {
@@ -7041,4 +7069,168 @@ TEST_CASE("generated C++ fixture renders layout-equivalent native tree",
     REQUIRE(manifest.assets.size() == 1);
     REQUIRE(manifest.assets.front().asset_id == "logo");
     REQUIRE(manifest.assets.front().content_hash == "sha256:fixture");
+}
+
+TEST_CASE("Phase H compressor-strip generated C++ renders and behaves against source IR",
+          "[view][import][cpp-codegen][native-cpp-phase-h]") {
+    constexpr uint32_t width = 460;
+    constexpr uint32_t height = 260;
+    const fs::path source_path =
+        fs::path(PULP_REPO_ROOT) /
+        "planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/compressor-strip.tsx";
+
+    const auto source = read_text(source_path);
+    auto ir = parse_v0_tsx(source);
+    NativeMaterializeOptions materialize_options;
+    std::vector<ImportDiagnostic> diagnostics;
+    materialize_options.diagnostics_out = &diagnostics;
+    auto baseline = build_native_view_tree(ir, ir.asset_manifest, materialize_options);
+    REQUIRE(baseline != nullptr);
+
+    const auto build_start = std::chrono::steady_clock::now();
+    auto generated = build_phase_h_compressor_strip_ui();
+    const auto build_ms = elapsed_ms(build_start);
+    REQUIRE(generated != nullptr);
+
+    const auto manifest = bake_phase_h_compressor_strip_asset_manifest();
+    REQUIRE(manifest.version == 1);
+
+    const auto layout_start = std::chrono::steady_clock::now();
+    baseline->set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+    generated->set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+    baseline->layout_children();
+    generated->layout_children();
+    const auto layout_ms = elapsed_ms(layout_start);
+
+    const auto baseline_png = render_to_png(*baseline, width, height, 1.0f);
+    const auto generated_png = render_to_png(*generated, width, height, 1.0f);
+    REQUIRE_FALSE(baseline_png.empty());
+    REQUIRE_FALSE(generated_png.empty());
+    const auto visual = compare_screenshots(baseline_png, generated_png, 8);
+    REQUIRE(visual.valid);
+    REQUIRE(visual.similarity >= 0.995f);
+
+    std::vector<Fader*> faders;
+    collect_faders(*generated, faders);
+    REQUIRE(faders.size() == 3);
+
+    const auto before_behavior_png = render_to_png(*generated, width, height, 1.0f);
+    int change_count = 0;
+    int gesture_begin_count = 0;
+    int gesture_end_count = 0;
+    for (auto* fader : faders) {
+        REQUIRE(fader != nullptr);
+        fader->on_change = [&](float) { ++change_count; };
+        fader->on_gesture_begin = [&] { ++gesture_begin_count; };
+        fader->on_gesture_end = [&] { ++gesture_end_count; };
+        const auto b = fader->local_bounds();
+        REQUIRE(b.width > 0.0f);
+        REQUIRE(b.height > 0.0f);
+        const auto before = fader->value();
+        if (fader->orientation() == Fader::Orientation::horizontal) {
+            fader->on_mouse_down({b.width * 0.1f, b.height * 0.5f});
+            fader->on_mouse_drag({b.width * 0.9f, b.height * 0.5f});
+            fader->on_mouse_up({b.width * 0.9f, b.height * 0.5f});
+        } else {
+            fader->on_mouse_down({b.width * 0.5f, b.height * 0.9f});
+            fader->on_mouse_drag({b.width * 0.5f, b.height * 0.1f});
+            fader->on_mouse_up({b.width * 0.5f, b.height * 0.1f});
+        }
+        REQUIRE(fader->value() != Catch::Approx(before));
+    }
+    REQUIRE(change_count >= 3);
+    REQUIRE(gesture_begin_count == 3);
+    REQUIRE(gesture_end_count == 3);
+
+    const auto after_behavior_png = render_to_png(*generated, width, height, 1.0f);
+    REQUIRE_FALSE(before_behavior_png.empty());
+    REQUIRE_FALSE(after_behavior_png.empty());
+    const auto behavior_visual = compare_screenshots(before_behavior_png, after_behavior_png, 8);
+    REQUIRE(behavior_visual.valid);
+    REQUIRE(behavior_visual.similarity < 0.999f);
+
+    const auto first_render_start = std::chrono::steady_clock::now();
+    const auto first_paint_commands = render_recording_frame(*generated);
+    const auto first_render_ms = elapsed_ms(first_render_start);
+    REQUIRE(first_paint_commands > 0);
+
+    std::vector<double> idle_frames;
+    std::uint64_t idle_commands = 0;
+    for (int i = 0; i < 8; ++i) {
+        const auto frame_start = std::chrono::steady_clock::now();
+        idle_commands = render_recording_frame(*generated);
+        idle_frames.push_back(elapsed_ms(frame_start));
+    }
+
+    std::vector<double> interactive_frames;
+    std::uint64_t interactive_commands = 0;
+    for (int i = 0; i < 8; ++i) {
+        for (std::size_t fader_index = 0; fader_index < faders.size(); ++fader_index)
+            faders[fader_index]->set_value(static_cast<float>((i + fader_index + 1) % 8) / 7.0f);
+        const auto frame_start = std::chrono::steady_clock::now();
+        interactive_commands = render_recording_frame(*generated);
+        interactive_frames.push_back(elapsed_ms(frame_start));
+    }
+    REQUIRE(idle_commands > 0);
+    REQUIRE(interactive_commands > 0);
+
+    if (const char* artifact_dir = std::getenv("PULP_NATIVE_UI_PHASE_H_ARTIFACT_DIR")) {
+        const fs::path dir(artifact_dir);
+        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-baseline.png",
+                    baseline_png);
+        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-generated.png",
+                    generated_png);
+        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-before.png",
+                    before_behavior_png);
+        write_bytes(dir / "reports" / "screenshots" / "phase-h-compressor-strip-after.png",
+                    after_behavior_png);
+
+        std::ostringstream report;
+        report << "{\n"
+               << "  \"schema\": \"pulp-native-ui-phase-h-fixture-parity-v1\",\n"
+               << "  \"fixture_id\": \"planning:artifacts:native-ui:nv0:corpus-fixtures:renderable:compressor-strip\",\n"
+               << "  \"path\": \"planning/artifacts/native-ui/nv0/corpus-fixtures/renderable/compressor-strip.tsx\",\n"
+               << "  \"comparison\": \"generated-cpp-vs-baked-native-source-ir\",\n"
+               << "  \"visual\": {"
+               << "\"status\": \"pass\", "
+               << "\"within_threshold\": true, "
+               << "\"similarity\": " << visual.similarity << ", "
+               << "\"threshold\": 0.995, "
+               << "\"diff_pixels\": " << visual.diff_pixels << "},\n"
+               << "  \"behavior\": {"
+               << "\"status\": \"pass\", "
+               << "\"passed\": true, "
+               << "\"dragged_faders\": " << faders.size() << ", "
+               << "\"change_events\": " << change_count << ", "
+               << "\"gesture_begin_events\": " << gesture_begin_count << ", "
+               << "\"gesture_end_events\": " << gesture_end_count << ", "
+               << "\"visual_changed\": " << (behavior_visual.similarity < 0.999f ? "true" : "false")
+               << "},\n"
+               << "  \"cost\": {"
+               << "\"status\": \"complete\", "
+               << "\"complete\": true, "
+               << "\"startup\": {"
+               << "\"build_ms\": " << build_ms << ", "
+               << "\"layout_ms\": " << layout_ms << ", "
+               << "\"first_frame_render_ms\": " << first_render_ms << ", "
+               << "\"first_frame_paint_commands\": " << first_paint_commands << "}, "
+               << "\"idle\": {"
+               << "\"samples\": " << idle_frames.size() << ", "
+               << "\"frame_ms_median\": " << median_ms(idle_frames) << ", "
+               << "\"paint_commands_last\": " << idle_commands << "}, "
+               << "\"interactive\": {"
+               << "\"samples\": " << interactive_frames.size() << ", "
+               << "\"frame_ms_median\": " << median_ms(interactive_frames) << ", "
+               << "\"paint_commands_last\": " << interactive_commands << "}"
+               << "},\n"
+               << "  \"scope_boundaries\": [\n"
+               << "    \"links and instantiates checked-in generated C++ for one non-Chainer import fixture\",\n"
+               << "    \"compares generated C++ against baked-native materialization of the same parsed source IR, not against a live JS runtime screenshot\",\n"
+               << "    \"exercises native fader behavior and records in-process construction/layout/paint cost metrics\",\n"
+               << "    \"does not claim broad Phase H readiness until the early-gate fixture set has complete rows\"\n"
+               << "  ]\n"
+               << "}\n";
+        write_text(dir / "reports" / "phase-h-compressor-strip-parity-report.json",
+                   report.str());
+    }
 }
