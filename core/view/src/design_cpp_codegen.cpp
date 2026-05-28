@@ -243,21 +243,6 @@ bool attr_bool(const IRNode& node, std::string_view key) {
     return lower == "true" || lower == "1" || lower == "yes" || lower == "on";
 }
 
-float normalized_audio_default(const IRNode& node) {
-    if (node.audio_max > node.audio_min)
-        return std::clamp((node.audio_default - node.audio_min) /
-                              (node.audio_max - node.audio_min),
-                          0.0f,
-                          1.0f);
-    return std::clamp(node.audio_default, 0.0f, 1.0f);
-}
-
-float normalized_audio_value(const IRNode& node) {
-    if (auto value = attr_float(node, "value"))
-        return std::clamp(*value, 0.0f, 1.0f);
-    return normalized_audio_default(node);
-}
-
 std::optional<std::string> first_asset_id(const IRNode& node) {
     for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId"}) {
         auto value = attr(node, key);
@@ -796,14 +781,6 @@ void emit_label_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_multi_line(true);");
 }
 
-bool is_horizontal(const IRNode& node) {
-    if (auto orientation = attr(node, "orientation"); orientation && lower_copy(*orientation) == "horizontal")
-        return true;
-    if (auto type = attr(node, "type"); type && lower_copy(*type) == "range")
-        return true;
-    return node.style.width && node.style.height && *node.style.width >= *node.style.height;
-}
-
 void emit_svg_paint(std::ostringstream& out,
                     int depth,
                     const EmitContext& ctx,
@@ -883,69 +860,66 @@ void emit_widget_specific(std::ostringstream& out,
                           const ResolvedNativeNode& resolved,
                           const IRAssetManifest& manifest) {
     const auto& opts = ctx.opts;
-    const auto text = resolved.text.value_or(node.text_content);
+    const auto semantics = imported_widget_semantics(node, resolved);
+    const auto& text = semantics.text;
     switch (resolved.kind) {
         case NativeWidgetKind::label:
             emit_label_style(out, depth, ctx, var, node.style);
             break;
         case NativeWidgetKind::text_editor:
-            if (auto placeholder = attr(node, "pulpPlaceholder"); placeholder && !placeholder->empty())
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->placeholder = " + cpp_string_literal(*placeholder) + ";");
-            if (auto initial_value = attr(node, "pulpInitialValue"); initial_value && !initial_value->empty())
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(*initial_value) + ");");
-            else if (auto value = attr(node, "value"); value && !value->empty())
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(*value) + ");");
-            else if (!text.empty())
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(text) + ");");
+            if (semantics.text_placeholder)
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->placeholder = " + cpp_string_literal(*semantics.text_placeholder) + ";");
+            if (semantics.text_value)
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text(" + cpp_string_literal(*semantics.text_value) + ");");
             break;
         case NativeWidgetKind::checkbox:
-            if (attr_bool(node, "checked"))
+            if (semantics.checked)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_checked(true);");
             break;
         case NativeWidgetKind::toggle_button:
             if (!text.empty())
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_label(" + cpp_string_literal(text) + ");");
-            if (attr_bool(node, "checked") || attr_bool(node, "value"))
+            if (semantics.toggle_on)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on(true);");
-            if (auto color = attr(node, "pulpOnBackgroundColor"); color) {
-                if (auto expr = color_expr(ctx, *color); !expr.empty())
+            if (semantics.toggle_on_background_color) {
+                if (auto expr = color_expr(ctx, *semantics.toggle_on_background_color); !expr.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on_background_color(" + expr + ");");
             }
-            if (auto color = attr(node, "pulpOffBackgroundColor"); color) {
-                if (auto expr = color_expr(ctx, *color); !expr.empty())
+            if (semantics.toggle_off_background_color) {
+                if (auto expr = color_expr(ctx, *semantics.toggle_off_background_color); !expr.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_off_background_color(" + expr + ");");
             }
-            if (auto color = attr(node, "pulpOnTextColor"); color) {
-                if (auto expr = color_expr(ctx, *color); !expr.empty())
+            if (semantics.toggle_on_text_color) {
+                if (auto expr = color_expr(ctx, *semantics.toggle_on_text_color); !expr.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on_text_color(" + expr + ");");
             }
-            if (auto color = attr(node, "pulpOffTextColor"); color) {
-                if (auto expr = color_expr(ctx, *color); !expr.empty())
+            if (semantics.toggle_off_text_color) {
+                if (auto expr = color_expr(ctx, *semantics.toggle_off_text_color); !expr.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_off_text_color(" + expr + ");");
             }
-            if (auto color = attr(node, "pulpOnBorderColor"); color) {
-                if (auto expr = color_expr(ctx, *color); !expr.empty())
+            if (semantics.toggle_on_border_color) {
+                if (auto expr = color_expr(ctx, *semantics.toggle_on_border_color); !expr.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_on_border_color(" + expr + ");");
             }
-            if (auto color = attr(node, "pulpOffBorderColor"); color) {
-                if (auto expr = color_expr(ctx, *color); !expr.empty())
+            if (semantics.toggle_off_border_color) {
+                if (auto expr = color_expr(ctx, *semantics.toggle_off_border_color); !expr.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_off_border_color(" + expr + ");");
             }
-            if (auto radius = attr_float(node, "pulpCornerRadius"))
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius(" + float_expr(ctx, *radius) + ");");
-            if (auto size = attr_float(node, "pulpFontSize"))
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_size(" + float_expr(ctx, *size) + ");");
+            if (semantics.toggle_corner_radius)
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius(" + float_expr(ctx, *semantics.toggle_corner_radius) + ");");
+            if (semantics.toggle_font_size)
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_size(" + float_expr(ctx, *semantics.toggle_font_size) + ");");
             break;
         case NativeWidgetKind::knob: {
             if (!text.empty())
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_label(" + cpp_string_literal(text) + ");");
-            const auto value = float_expr(ctx, normalized_audio_value(node));
-            const auto default_value = float_expr(ctx, normalized_audio_default(node));
+            const auto value = float_expr(ctx, semantics.normalized_value);
+            const auto default_value = float_expr(ctx, semantics.normalized_default);
             emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_value(/* TODO: bind to param */ " + value + ");");
             emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_default_value(" + default_value + ");");
-            if (auto schema = attr(node, "pulpWidgetSchema"); schema && !schema->empty())
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_widget_schema(" + cpp_string_literal(*schema) + ");");
-            if (auto show_label = attr(node, "pulpShowInternalLabel"); show_label && lower_copy(*show_label) == "false")
+            if (semantics.widget_schema)
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_widget_schema(" + cpp_string_literal(*semantics.widget_schema) + ");");
+            if (!semantics.show_internal_label)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_show_label(false);");
             break;
         }
@@ -954,51 +928,48 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_label(" + cpp_string_literal(text) + ");");
             emit_line(out, depth, opts.indent_spaces,
                       std::string(var) + "->set_value(/* TODO: bind to param */ " +
-                          float_expr(ctx, normalized_audio_value(node)) + ");");
-            if (is_horizontal(node))
+                          float_expr(ctx, semantics.normalized_value) + ");");
+            if (semantics.horizontal)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Fader::Orientation::horizontal);");
-            if (auto schema = attr(node, "pulpWidgetSchema"); schema && !schema->empty())
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_widget_schema(" + cpp_string_literal(*schema) + ");");
-            if (auto shape = attr(node, "pulpThumbShape")) {
-                const auto lower = lower_copy(*shape);
-                if (lower == "rectangle" || lower == "rect" || lower == "rounded_rect")
+            if (semantics.widget_schema)
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_widget_schema(" + cpp_string_literal(*semantics.widget_schema) + ");");
+            if (semantics.fader_thumb_shape) {
+                if (*semantics.fader_thumb_shape == ImportedFaderThumbShape::rectangle)
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_thumb_shape(pulp::view::Fader::ThumbShape::rectangle);");
-                else if (lower == "circle" || lower == "round" || lower == "dot")
+                else if (*semantics.fader_thumb_shape == ImportedFaderThumbShape::circle)
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_thumb_shape(pulp::view::Fader::ThumbShape::circle);");
             }
-            const auto thumb_width = attr_float(node, "pulpThumbWidth");
-            const auto thumb_height = attr_float(node, "pulpThumbHeight");
-            if (thumb_width || thumb_height) {
+            if (semantics.fader_thumb_width || semantics.fader_thumb_height) {
                 emit_line(out, depth, opts.indent_spaces,
                           std::string(var) + "->set_thumb_size(" +
-                              float_expr(ctx, thumb_width.value_or(0.0f)) + ", " +
-                              float_expr(ctx, thumb_height.value_or(0.0f)) + ");");
+                              float_expr(ctx, semantics.fader_thumb_width.value_or(0.0f)) + ", " +
+                              float_expr(ctx, semantics.fader_thumb_height.value_or(0.0f)) + ");");
             }
-            if (auto radius = attr_float(node, "pulpThumbCornerRadius")) {
+            if (semantics.fader_thumb_corner_radius) {
                 emit_line(out, depth, opts.indent_spaces,
-                          std::string(var) + "->set_thumb_corner_radius(" + float_expr(ctx, *radius) + ");");
+                          std::string(var) + "->set_thumb_corner_radius(" + float_expr(ctx, *semantics.fader_thumb_corner_radius) + ");");
             }
             break;
         }
         case NativeWidgetKind::meter: {
-            const auto value = float_expr(ctx, normalized_audio_value(node));
-            const auto peak = float_expr(ctx, attr_float(node, "peak").value_or(normalized_audio_value(node)));
+            const auto value = float_expr(ctx, semantics.normalized_value);
+            const auto peak = float_expr(ctx, semantics.peak_value);
             emit_line(out, depth, opts.indent_spaces,
                       std::string(var) + "->set_level(/* TODO: bind to meter */ " + value + ", " + peak + ");");
-            if (auto orientation = attr(node, "orientation"); orientation && lower_copy(*orientation) == "horizontal")
+            if (semantics.horizontal)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Meter::Orientation::horizontal);");
             break;
         }
         case NativeWidgetKind::xy_pad:
-            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_x(" + float_expr(ctx, attr_float(node, "x").value_or(0.5f)) + ");");
-            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_y(" + float_expr(ctx, attr_float(node, "y").value_or(0.5f)) + ");");
-            if (auto label = attr(node, "xLabel")) emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_x_label(" + cpp_string_literal(*label) + ");");
-            if (auto label = attr(node, "yLabel")) emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_y_label(" + cpp_string_literal(*label) + ");");
+            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_x(" + float_expr(ctx, semantics.x_value) + ");");
+            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_y(" + float_expr(ctx, semantics.y_value) + ");");
+            if (semantics.x_label) emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_x_label(" + cpp_string_literal(*semantics.x_label) + ");");
+            if (semantics.y_label) emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_y_label(" + cpp_string_literal(*semantics.y_label) + ");");
             break;
         case NativeWidgetKind::waveform:
-            if (auto shape = attr(node, "pulpWaveformShape"); shape && !shape->empty())
+            if (semantics.waveform_shape)
                 emit_line(out, depth, opts.indent_spaces,
-                          std::string(var) + "->set_preview_shape(" + cpp_string_literal(*shape) + ");");
+                          std::string(var) + "->set_preview_shape(" + cpp_string_literal(*semantics.waveform_shape) + ");");
             break;
         case NativeWidgetKind::image_view:
             if (auto asset_id = first_asset_id(node)) {

@@ -748,7 +748,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                                   const NativeMaterializeOptions& options,
                                   std::string_view path,
                                   std::vector<ImportDiagnostic>& diagnostics) {
-    const auto text = resolved.text.value_or(node.text_content);
+    const auto semantics = imported_widget_semantics(node, resolved);
+    const auto& text = semantics.text;
     switch (resolved.kind) {
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
@@ -759,118 +760,100 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return std::make_unique<TextButton>(text);
         case NativeWidgetKind::text_editor: {
             auto editor = std::make_unique<TextEditor>();
-            if (auto placeholder = attr(node, "pulpPlaceholder"); placeholder && !placeholder->empty())
-                editor->placeholder = *placeholder;
-            if (auto initial_value = attr(node, "pulpInitialValue"); initial_value && !initial_value->empty())
-                editor->set_text(*initial_value);
-            else if (auto value = attr(node, "value"); value && !value->empty())
-                editor->set_text(*value);
-            else if (!text.empty())
-                editor->set_text(text);
+            if (semantics.text_placeholder)
+                editor->placeholder = *semantics.text_placeholder;
+            if (semantics.text_value)
+                editor->set_text(*semantics.text_value);
             return editor;
         }
         case NativeWidgetKind::checkbox: {
             auto checkbox = std::make_unique<Checkbox>();
-            checkbox->set_checked(attr_bool(node, "checked"));
+            checkbox->set_checked(semantics.checked);
             return checkbox;
         }
         case NativeWidgetKind::toggle_button: {
             auto button = std::make_unique<ToggleButton>();
             if (!text.empty()) button->set_label(text);
-            button->set_on(attr_bool(node, "checked") || attr_bool(node, "value"));
-            if (auto color = attr(node, "pulpOnBackgroundColor"); color) {
-                if (auto parsed = parse_hex_color(*color)) button->set_on_background_color(*parsed);
+            button->set_on(semantics.toggle_on);
+            if (semantics.toggle_on_background_color) {
+                if (auto parsed = parse_hex_color(*semantics.toggle_on_background_color)) button->set_on_background_color(*parsed);
             }
-            if (auto color = attr(node, "pulpOffBackgroundColor"); color) {
-                if (auto parsed = parse_hex_color(*color)) button->set_off_background_color(*parsed);
+            if (semantics.toggle_off_background_color) {
+                if (auto parsed = parse_hex_color(*semantics.toggle_off_background_color)) button->set_off_background_color(*parsed);
             }
-            if (auto color = attr(node, "pulpOnTextColor"); color) {
-                if (auto parsed = parse_hex_color(*color)) button->set_on_text_color(*parsed);
+            if (semantics.toggle_on_text_color) {
+                if (auto parsed = parse_hex_color(*semantics.toggle_on_text_color)) button->set_on_text_color(*parsed);
             }
-            if (auto color = attr(node, "pulpOffTextColor"); color) {
-                if (auto parsed = parse_hex_color(*color)) button->set_off_text_color(*parsed);
+            if (semantics.toggle_off_text_color) {
+                if (auto parsed = parse_hex_color(*semantics.toggle_off_text_color)) button->set_off_text_color(*parsed);
             }
-            if (auto color = attr(node, "pulpOnBorderColor"); color) {
-                if (auto parsed = parse_hex_color(*color)) button->set_on_border_color(*parsed);
+            if (semantics.toggle_on_border_color) {
+                if (auto parsed = parse_hex_color(*semantics.toggle_on_border_color)) button->set_on_border_color(*parsed);
             }
-            if (auto color = attr(node, "pulpOffBorderColor"); color) {
-                if (auto parsed = parse_hex_color(*color)) button->set_off_border_color(*parsed);
+            if (semantics.toggle_off_border_color) {
+                if (auto parsed = parse_hex_color(*semantics.toggle_off_border_color)) button->set_off_border_color(*parsed);
             }
-            if (auto radius = attr_float(node, "pulpCornerRadius"))
-                button->set_corner_radius(*radius);
-            if (auto size = attr_float(node, "pulpFontSize"))
-                button->set_font_size(*size);
+            if (semantics.toggle_corner_radius)
+                button->set_corner_radius(*semantics.toggle_corner_radius);
+            if (semantics.toggle_font_size)
+                button->set_font_size(*semantics.toggle_font_size);
             return button;
         }
         case NativeWidgetKind::knob: {
             auto knob = std::make_unique<Knob>();
             if (!text.empty()) knob->set_label(text);
-            knob->set_value(normalized_audio_value(node));
-            knob->set_default_value(normalized_audio_default(node));
-            if (auto schema = attr(node, "pulpWidgetSchema"); schema && !schema->empty())
-                knob->set_widget_schema(*schema);
-            if (auto show_label = attr(node, "pulpShowInternalLabel");
-                show_label && lower_copy(*show_label) == "false") {
+            knob->set_value(semantics.normalized_value);
+            knob->set_default_value(semantics.normalized_default);
+            if (semantics.widget_schema)
+                knob->set_widget_schema(*semantics.widget_schema);
+            if (!semantics.show_internal_label)
                 knob->set_show_label(false);
-            }
             if (options.preview_mode) knob->set_render_style(WidgetRenderStyle::minimal);
             return knob;
         }
         case NativeWidgetKind::fader: {
             auto fader = std::make_unique<Fader>();
             if (!text.empty()) fader->set_label(text);
-            fader->set_value(normalized_audio_value(node));
-            if (auto orientation = attr(node, "orientation");
-                orientation && lower_copy(*orientation) == "horizontal") {
+            fader->set_value(semantics.normalized_value);
+            if (semantics.horizontal)
                 fader->set_orientation(Fader::Orientation::horizontal);
-            } else if (auto type = attr(node, "type"); type && lower_copy(*type) == "range") {
-                fader->set_orientation(Fader::Orientation::horizontal);
-            } else if (node.style.width && node.style.height && *node.style.width >= *node.style.height) {
-                fader->set_orientation(Fader::Orientation::horizontal);
-            }
-            if (auto schema = attr(node, "pulpWidgetSchema"); schema && !schema->empty())
-                fader->set_widget_schema(*schema);
-            if (auto shape = attr(node, "pulpThumbShape")) {
-                const auto lower = lower_copy(*shape);
-                if (lower == "rectangle" || lower == "rect" || lower == "rounded_rect")
+            if (semantics.widget_schema)
+                fader->set_widget_schema(*semantics.widget_schema);
+            if (semantics.fader_thumb_shape) {
+                if (*semantics.fader_thumb_shape == ImportedFaderThumbShape::rectangle)
                     fader->set_thumb_shape(Fader::ThumbShape::rectangle);
-                else if (lower == "circle" || lower == "round" || lower == "dot")
+                else if (*semantics.fader_thumb_shape == ImportedFaderThumbShape::circle)
                     fader->set_thumb_shape(Fader::ThumbShape::circle);
             }
-            if (auto width = attr_float(node, "pulpThumbWidth")) {
-                fader->set_thumb_size(*width, attr_float(node, "pulpThumbHeight").value_or(0.0f));
-            } else if (auto height = attr_float(node, "pulpThumbHeight")) {
-                fader->set_thumb_size(0.0f, *height);
+            if (semantics.fader_thumb_width || semantics.fader_thumb_height) {
+                fader->set_thumb_size(semantics.fader_thumb_width.value_or(0.0f),
+                                      semantics.fader_thumb_height.value_or(0.0f));
             }
-            if (auto radius = attr_float(node, "pulpThumbCornerRadius"))
-                fader->set_thumb_corner_radius(*radius);
+            if (semantics.fader_thumb_corner_radius)
+                fader->set_thumb_corner_radius(*semantics.fader_thumb_corner_radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
             return fader;
         }
         case NativeWidgetKind::meter: {
             auto meter = std::make_unique<Meter>();
-            const float value = normalized_audio_value(node);
-            const float peak = attr_float(node, "peak").value_or(value);
-            meter->set_level(value, peak);
-            if (auto orientation = attr(node, "orientation");
-                orientation && lower_copy(*orientation) == "horizontal") {
+            meter->set_level(semantics.normalized_value, semantics.peak_value);
+            if (semantics.horizontal)
                 meter->set_orientation(Meter::Orientation::horizontal);
-            }
             if (options.preview_mode) meter->set_render_style(WidgetRenderStyle::minimal);
             return meter;
         }
         case NativeWidgetKind::xy_pad: {
             auto pad = std::make_unique<XYPad>();
-            pad->set_x(attr_float(node, "x").value_or(0.5f));
-            pad->set_y(attr_float(node, "y").value_or(0.5f));
-            if (auto label = attr(node, "xLabel")) pad->set_x_label(*label);
-            if (auto label = attr(node, "yLabel")) pad->set_y_label(*label);
+            pad->set_x(semantics.x_value);
+            pad->set_y(semantics.y_value);
+            if (semantics.x_label) pad->set_x_label(*semantics.x_label);
+            if (semantics.y_label) pad->set_y_label(*semantics.y_label);
             return pad;
         }
         case NativeWidgetKind::waveform: {
             auto waveform = std::make_unique<WaveformView>();
-            if (auto shape = attr(node, "pulpWaveformShape"))
-                waveform->set_preview_shape(*shape);
+            if (semantics.waveform_shape)
+                waveform->set_preview_shape(*semantics.waveform_shape);
             return waveform;
         }
         case NativeWidgetKind::spectrum:
@@ -994,6 +977,82 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::svg_line: return "svg_line";
     }
     return "view";
+}
+
+ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
+                                                  const ResolvedNativeNode& resolved) {
+    ImportedWidgetSemantics out;
+    out.text = resolved.text.value_or(node.text_content);
+
+    auto non_empty_attr = [&](std::string_view key) -> std::optional<std::string> {
+        auto value = attr(node, key);
+        if (value && !value->empty()) return value;
+        return std::nullopt;
+    };
+
+    out.text_placeholder = non_empty_attr("pulpPlaceholder");
+    if (auto value = non_empty_attr("pulpInitialValue"))
+        out.text_value = value;
+    else if (auto value = non_empty_attr("value"))
+        out.text_value = value;
+    else if (!out.text.empty())
+        out.text_value = out.text;
+
+    out.checked = attr_bool(node, "checked");
+    out.toggle_on = out.checked || attr_bool(node, "value");
+    out.toggle_on_background_color = non_empty_attr("pulpOnBackgroundColor");
+    out.toggle_off_background_color = non_empty_attr("pulpOffBackgroundColor");
+    out.toggle_on_text_color = non_empty_attr("pulpOnTextColor");
+    out.toggle_off_text_color = non_empty_attr("pulpOffTextColor");
+    out.toggle_on_border_color = non_empty_attr("pulpOnBorderColor");
+    out.toggle_off_border_color = non_empty_attr("pulpOffBorderColor");
+    out.toggle_corner_radius = attr_float(node, "pulpCornerRadius");
+    out.toggle_font_size = attr_float(node, "pulpFontSize");
+
+    out.normalized_value = normalized_audio_value(node);
+    out.normalized_default = normalized_audio_default(node);
+    out.peak_value = attr_float(node, "peak").value_or(out.normalized_value);
+
+    if (resolved.kind == NativeWidgetKind::fader) {
+        if (auto orientation = attr(node, "orientation");
+            orientation && lower_copy(*orientation) == "horizontal") {
+            out.horizontal = true;
+        } else if (auto type = attr(node, "type"); type && lower_copy(*type) == "range") {
+            out.horizontal = true;
+        } else if (node.style.width && node.style.height && *node.style.width >= *node.style.height) {
+            out.horizontal = true;
+        }
+    } else if (resolved.kind == NativeWidgetKind::meter) {
+        if (auto orientation = attr(node, "orientation");
+            orientation && lower_copy(*orientation) == "horizontal") {
+            out.horizontal = true;
+        }
+    }
+
+    out.widget_schema = non_empty_attr("pulpWidgetSchema");
+    if (auto show_label = attr(node, "pulpShowInternalLabel");
+        show_label && lower_copy(*show_label) == "false") {
+        out.show_internal_label = false;
+    }
+
+    if (auto shape = attr(node, "pulpThumbShape")) {
+        const auto lower = lower_copy(*shape);
+        if (lower == "rectangle" || lower == "rect" || lower == "rounded_rect")
+            out.fader_thumb_shape = ImportedFaderThumbShape::rectangle;
+        else if (lower == "circle" || lower == "round" || lower == "dot")
+            out.fader_thumb_shape = ImportedFaderThumbShape::circle;
+    }
+    out.fader_thumb_width = attr_float(node, "pulpThumbWidth");
+    out.fader_thumb_height = attr_float(node, "pulpThumbHeight");
+    out.fader_thumb_corner_radius = attr_float(node, "pulpThumbCornerRadius");
+
+    out.x_value = attr_float(node, "x").value_or(0.5f);
+    out.y_value = attr_float(node, "y").value_or(0.5f);
+    out.x_label = non_empty_attr("xLabel");
+    out.y_label = non_empty_attr("yLabel");
+    out.waveform_shape = non_empty_attr("pulpWaveformShape");
+
+    return out;
 }
 
 ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
