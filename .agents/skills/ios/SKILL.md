@@ -351,8 +351,16 @@ xcrun devicectl device install app --device <DEVICE_UDID> \
 ### Smoke test coverage
 
 `test/cmake/test_ios_auv3_configure.sh` exercises both helpers:
-- Configure-only (default fast lane): asserts the `PulpSineSynth_HostApp` Xcode target is emitted and the `pulp_add_ios_host_app()` status line fires.
-- `PULP_IOS_AUV3_SMOKE_BUILD=1` (nightly-full-build lane): builds the HostApp `.app`, confirms the `.appex` is embedded under `PlugIns/`, and validates the HostApp `Info.plist` carries the matching `AudioComponents.subtype`.
+- Default behavior (since 2026-05-27): configures + builds both the AUv3 `.appex` and the HostApp `.app`, asserts the `.appex` is embedded under `PlugIns/`, and validates the HostApp `Info.plist` carries the matching `AudioComponents.subtype`. This catches link-time regressions that configure-only smoke cannot — for example a missing `pulp::audio` PUBLIC link in `core/view` or an unguarded `<pulp/host/*>` include in a view header (both real iPad-walkthrough regressions).
+- Override with `PULP_IOS_AUV3_SMOKE_BUILD=0` to fall back to configure-only when iterating locally on a slow machine.
+
+`test/cmake/test_ios_hostapp_links.sh` is the companion link-time
+regression test — it always builds the HostApp and asserts the
+produced bundle has a real Info.plist (lint-clean, non-empty
+`CFBundleIdentifier`), a real Mach-O executable at
+`CFBundleExecutable`, and an embedded `.appex` under `PlugIns/`. Use
+this script directly when triaging a "configure smoke is green but
+the user's iPad has no plugin" report.
 
 ## Follow-ups / Known Gaps
 
@@ -362,6 +370,37 @@ xcrun devicectl device install app --device <DEVICE_UDID> \
 - Visual regression for iOS UIs not wired up yet (see #330, #249).
 
 ## Gotchas
+
+### Cross-subsystem deps in `pulp-view-core` must hold on iOS
+
+`pulp::host` is intentionally not added on iOS (App Store policy plus
+`std::format` / `long double to_chars` libc++ availability on the
+iPhoneSimulator SDK). That guard lives in the root `CMakeLists.txt`
+and in `core/view/CMakeLists.txt`'s `pulp-view-core` link list. Two
+follow-on contracts must hold for `pulp-view-core` to actually link
+on iOS:
+
+1. Every `pulp::*` library that a view source `#include`s must be in
+   the PUBLIC link list. The iOS lane catches this only if the smoke
+   actually builds the HostApp (it does as of 2026-05-27). A real
+   regression from PR #3059 was `visualizers.cpp` including
+   `<pulp/audio/audio_thumbnail.hpp>` without `pulp::audio` being
+   linked.
+2. Any view header that includes `<pulp/host/...>` must wrap that
+   include in `#if defined(__has_include) && __has_include(<pulp/host/...>)`
+   so transitive consumers on iOS get a clean "feature absent" macro
+   rather than a "file not found" error. Affected headers today:
+   `core/view/include/pulp/view/widgets/graph_editor_view.hpp`,
+   `core/view/include/pulp/view/plugin_manager_panel.hpp`,
+   `core/view/include/pulp/view/hosted_editor_attachment.hpp`. Each
+   defines a `PULP_VIEW_HAS_*` companion macro downstream code can
+   key off.
+
+If you add a new view source or header that pulls from `pulp::audio`,
+`pulp::host`, or any other subsystem that may be conditionally
+absent, the iOS HostApp link smoke
+(`test/cmake/test_ios_hostapp_links.sh`) is the canonical local
+reproducer.
 
 ### `PulpAUViewController::dealloc` — never call `_bridge->close()` explicitly
 

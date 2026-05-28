@@ -277,7 +277,6 @@ target_sources(pulp-view-core PRIVATE
     src/accessibility_tree.cpp
     src/image_cache.cpp
     src/resizable_shell.cpp
-    src/graph_editor_view.cpp
     src/theme.cpp
     src/theme_contrast.cpp
     src/theme_presets.cpp
@@ -443,7 +442,7 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script)
 endforeach()
 unset(_pulp_view_target)
 
-target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform)
+target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio)
 # pulp::host is iOS-restricted: iOS sandbox disallows dlopen of arbitrary
 # third-party plugins (no VST3 / CLAP / LV2 hosting), and pulling host into
 # the link line on iOS surfaces a `long double to_chars` libc++ availability
@@ -455,6 +454,13 @@ target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::stat
 # 2026-05-24 iOS AUv3 validation Phase iOS-A build smoke.
 if(NOT IOS)
     target_link_libraries(pulp-view-core PUBLIC pulp::host)
+    # graph_editor_view.cpp uses host::SignalGraph / host::Connection / host::GraphNode
+    # directly, so its translation unit only compiles when pulp::host is linked.
+    # iOS skips the source entirely; the header is also iOS-guarded so any
+    # downstream consumer that includes <pulp/view/widgets/graph_editor_view.hpp>
+    # on iOS gets a clean compile-time skip rather than a "file not found" on
+    # <pulp/host/signal_graph.hpp>.
+    target_sources(pulp-view-core PRIVATE src/graph_editor_view.cpp)
 endif()
 target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 # pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +

@@ -26,12 +26,17 @@ trap 'rm -rf "${build_dir}"' EXIT
 log="${build_dir}/configure.log"
 
 set +e
+# 240s configure ceiling — fresh worktrees on the self-hosted runner
+# can spend ~180s on header detection + FetchContent unpack on a cold
+# cache before the Xcode generator finishes. The old 90s ceiling was
+# silently flipping the test to SKIP on cold runs and masking real
+# failures (the 2026-05-27 iPad walkthrough exposed this).
 if command -v gtimeout >/dev/null 2>&1; then
-    timeout_cmd=(gtimeout 90s)
+    timeout_cmd=(gtimeout 240s)
 elif command -v timeout >/dev/null 2>&1; then
-    timeout_cmd=(timeout 90s)
+    timeout_cmd=(timeout 240s)
 elif command -v perl >/dev/null 2>&1; then
-    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 90)
+    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 240)
 else
     timeout_cmd=()
 fi
@@ -53,7 +58,7 @@ status=$?
 set -e
 
 if [[ ${status} -eq 124 || ${status} -eq 142 ]]; then
-    echo "SKIP: iOS Simulator configure exceeded 90s; likely Xcode generator hang"
+    echo "SKIP: iOS Simulator configure exceeded 240s; likely Xcode generator hang"
     tail -n 80 "${log}" >&2
     exit 77
 fi
@@ -100,10 +105,16 @@ fi
 # not just configure. Configure-only smoke can't catch link-time regressions
 # like the libc++ `to_chars` availability error that landed on iOS-26-SDK
 # hosts — the same error class the iOS plan documents as the Phase iOS-A
-# blocker. Build is opt-in via PULP_IOS_AUV3_SMOKE_BUILD=1 because the
-# build step adds ~3-5 min on a cold cache; CI's nightly-full-build lane
-# flips it ON, PR fast-lane stays at configure-only.
-if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-0}" == "1" ]]; then
+# blocker.
+#
+# 2026-05-27: flipped from opt-in to default-on after an iPad walkthrough
+# discovered configure-green but link-broken state (pulp-view-core missed
+# pulp::audio in its PUBLIC link list; graph_editor_view.hpp unconditionally
+# included <pulp/host/signal_graph.hpp> despite pulp::host being skipped on
+# iOS). The build step adds ~3–5 min on a cold cache. Set
+# PULP_IOS_AUV3_SMOKE_BUILD=0 to fall back to configure-only when
+# iterating locally on a slow machine; CI keeps the default behavior.
+if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-1}" == "1" ]]; then
     echo "INFO: PULP_IOS_AUV3_SMOKE_BUILD=1 — proceeding to .appex build"
 
     build_log="${build_dir}/build.log"

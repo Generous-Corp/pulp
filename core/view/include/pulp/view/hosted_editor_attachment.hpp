@@ -24,6 +24,13 @@
 // embedding on this platform, create() returns nullptr and the host can fall
 // back to a separate top-level window (Phase 6.5 DocumentWindow et al).
 
+// iOS skip: pulp::host (and therefore plugin_slot.hpp) is not on the include
+// path on iOS — iOS bundles never host third-party plugins. Use
+// `__has_include` so downstream code can include the header unconditionally
+// and key off PULP_VIEW_HAS_HOSTED_EDITOR_ATTACHMENT.
+#if defined(__has_include) && __has_include(<pulp/host/plugin_slot.hpp>)
+#define PULP_VIEW_HAS_HOSTED_EDITOR_ATTACHMENT 1
+
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -162,3 +169,7 @@ private:
 };
 
 } // namespace pulp::view
+
+#else  // !__has_include(<pulp/host/plugin_slot.hpp>)
+#define PULP_VIEW_HAS_HOSTED_EDITOR_ATTACHMENT 0
+#endif

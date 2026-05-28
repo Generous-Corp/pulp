@@ -24,6 +24,20 @@ if(APPLE AND NOT PULP_IOS)
         # FetchContent sources before the actual smoke fires. Full-CI
         # (push to main / nightly / workflow_dispatch) still runs it.
         LABELS slow)
+
+    # iOS HostApp link-time regression test. Companion to the AUv3
+    # configure smoke above; this one always builds the HostApp .app
+    # and asserts the produced bundle has a real Info.plist + Mach-O
+    # executable + embedded .appex. Catches "pulp-view-core does not
+    # link on iOS" regressions like the 2026-05-26 walkthrough that
+    # exposed missing pulp::audio and unguarded pulp::host includes.
+    add_test(NAME cmake-ios-hostapp-links
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_hostapp_links.sh
+                ${CMAKE_SOURCE_DIR})
+    set_tests_properties(cmake-ios-hostapp-links PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 1800
+        LABELS slow)
 endif()
 
 # AU v2 component-type selection smoke — hardens the aufx→aumf flip
