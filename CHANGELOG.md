@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02720"></a>
+## [0.272.0] - 2026-05-28
+
+- feat(ios): Phase iOS-D.1 — minimal 2D GPU AUv3 proof + FindSkia iOS framework split + GPU-required hard-fail ([#3100](https://github.com/danielraffel/pulp/pull/3100))
+- test(tools): cover requested debug surfaces ([#3102](https://github.com/danielraffel/pulp/pull/3102))
+- fix(ios): AUv3 audio path — MH_EXECUTE binary, .loadOutOfProcess host load, MIDI event wiring ([#3095](https://github.com/danielraffel/pulp/pull/3095))
+- test(python): cover binding export contracts ([#3099](https://github.com/danielraffel/pulp/pull/3099))
+- test(coverage): cover requested surfaces batch ([#3096](https://github.com/danielraffel/pulp/pull/3096))
+
 <a id="v02710"></a>
 ## [0.271.0] - 2026-05-28
 
@@ -3109,6 +3118,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.272.0]: https://github.com/danielraffel/pulp/releases/tag/v0.272.0
 [0.271.0]: https://github.com/danielraffel/pulp/releases/tag/v0.271.0
 [0.270.4]: https://github.com/danielraffel/pulp/releases/tag/v0.270.4
 [0.270.2]: https://github.com/danielraffel/pulp/releases/tag/v0.270.2
