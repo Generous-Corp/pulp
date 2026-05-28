@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02704"></a>
+## [0.270.4] - 2026-05-27
+
+- fix(view): unblock full iOS Simulator build of pulp-view-* lib chain + flip smoke to true build ([#3088](https://github.com/danielraffel/pulp/pull/3088))
+- feature/coverage mcp requested 20260527 ([#3083](https://github.com/danielraffel/pulp/pull/3083))
+- test: cover requested packaging and import surfaces ([#3082](https://github.com/danielraffel/pulp/pull/3082))
+- test(inspect): cover overlay color hex formatting ([#3075](https://github.com/danielraffel/pulp/pull/3075))
+- test(coverage): cover bridge and python binding edges ([#3073](https://github.com/danielraffel/pulp/pull/3073))
+
 <a id="v02702"></a>
 ## [0.270.2] - 2026-05-27
 
@@ -3092,6 +3101,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.270.4]: https://github.com/danielraffel/pulp/releases/tag/v0.270.4
 [0.270.2]: https://github.com/danielraffel/pulp/releases/tag/v0.270.2
 [0.270.1]: https://github.com/danielraffel/pulp/releases/tag/v0.270.1
 [0.270.0]: https://github.com/danielraffel/pulp/releases/tag/v0.270.0
