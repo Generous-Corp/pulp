@@ -7,7 +7,7 @@
     "noImplicitAny": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "lib": ["es2017", "dom"],
+    "lib": ["es2019", "dom"],
     "types": [],
     "noEmit": true,
     "rootDir": "."

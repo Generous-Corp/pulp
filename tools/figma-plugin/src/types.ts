@@ -5,10 +5,20 @@
 export type PulpFigmaUIMessage =
   | { type: "ping" }
   | { type: "get-selection-summary" }
+  | { type: "export" }
   | { type: "close" };
 
 export type PulpSandboxMessage =
   | { type: "ready"; pluginVersion: string }
   | { type: "pong"; figmaVersion: string; editorType: string; documentName: string }
   | { type: "selection-summary"; count: number; names: string[]; firstTypeIfAny: string | null }
+  | { type: "progress"; stage: "extracting" | "serializing"; message: string }
+  | {
+      type: "export-result";
+      nodeCount: number;
+      diagnosticCount: number;
+      truncated: boolean;
+      suggestedName: string;
+      json: string;
+    }
   | { type: "error"; message: string };

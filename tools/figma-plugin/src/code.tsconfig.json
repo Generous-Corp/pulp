@@ -7,10 +7,10 @@
     "noImplicitAny": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "lib": ["es2017"],
+    "lib": ["es2019"],
     "types": ["@figma/plugin-typings"],
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["code.ts", "types.ts"]
+  "include": ["code.ts", "types.ts", "extract.ts", "extract-model.ts", "serialize.ts"]
 }
