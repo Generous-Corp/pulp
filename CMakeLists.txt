@@ -105,10 +105,26 @@ set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept ou
 set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
+# Wrap warning flags in $<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX> so they
+# don't leak into the Swift driver — the iOS HostApp target (Phase iOS-B,
+# `pulp_add_ios_host_app()`) compiles Swift sources, and unwrapped
+# `-Wall` is rejected by `swiftc` with:
+#   "error: Driver threw unknown argument: '-Wall' without emitting errors"
+# `add_compile_options` defaults to ALL configured languages, so the
+# generator expression is required even though the flags only make
+# sense for C-family compilers.
 if(MSVC)
-    add_compile_options(/W4 /wd4100)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX>:/W4>
+        $<$<COMPILE_LANGUAGE:C,CXX>:/wd4100>
+    )
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wpedantic>
+        $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>
+    )
 endif()
 
 # ── Windows runtime library (Tier A Slice 12) ──────────────────────────────
