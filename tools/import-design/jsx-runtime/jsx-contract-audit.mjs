@@ -10,6 +10,9 @@ import * as csstree from 'css-tree';
 
 const require = createRequire(import.meta.url);
 
+const AUDIT_SCHEMA = 'pulp-jsx-contract-audit-v1';
+const TOOL_ID = 'pulp-jsx-contract-audit';
+
 const SKIP_KEYS = new Set([
     'type', 'start', 'end', 'loc', 'range', 'extra', 'errors',
     'leadingComments', 'innerComments', 'trailingComments', 'comments',
@@ -862,7 +865,8 @@ export function auditJsxContract(source, options = {}) {
     };
 
     return {
-        tool: 'pulp-jsx-contract-audit',
+        schema: AUDIT_SCHEMA,
+        tool: TOOL_ID,
         input: {
             file: sourceFile,
             bytes: Buffer.byteLength(source, 'utf8'),
@@ -914,6 +918,7 @@ function markdownReport(audit) {
     lines.push('# JSX Source Contract Audit');
     lines.push('');
     lines.push(`Input: \`${audit.input.file}\``);
+    lines.push(`Schema: \`${audit.schema || 'unknown'}\``);
     lines.push(`Parsers: \`${audit.parsers.jsx.name} ${audit.parsers.jsx.version}\`, \`${audit.parsers.css.name} ${audit.parsers.css.version}\``);
     lines.push('');
     lines.push('## Result');
