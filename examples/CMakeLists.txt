@@ -111,6 +111,9 @@ add_subdirectory(stream-demo)
 # iOS AUv3 example (workstream 05 slice 5.1) — gated on CMAKE_SYSTEM_NAME=iOS
 if(IOS)
     add_subdirectory(ios-auv3-synth)
+    # Phase iOS-D.1 — minimal 2D GPU AUv3 proof
+    # (planning/2026-05-24-auv3-ios-validation.md).
+    add_subdirectory(ios-auv3-gpu-smoke)
 endif()
 
 # ARA pitch tracker example (workstream 06 slice A3)

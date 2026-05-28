@@ -526,6 +526,17 @@ if(APPLE)
             "-framework CoreGraphics"
             "-framework QuartzCore"
         )
+        # Phase iOS-D.1 — wire iOS GPU window host (window_host_ios.mm's
+        # IOSGpuWindowHost branch). Mirrors the mac branch below:
+        # `pulp::render` exposes Dawn / Skia Graphite + the GpuSurface
+        # interface, and the Metal framework backs the CAMetalLayer.
+        # `pulp::render` is gated by PULP_HAS_SKIA so a no-Skia iOS
+        # configure (CG-only) still links cleanly.
+        if(PULP_HAS_SKIA)
+            target_link_libraries(pulp-view-core PRIVATE pulp::render
+                "-framework Metal"
+            )
+        endif()
     else()
         target_sources(pulp-view-core PRIVATE
             platform/mac/window_host_mac.mm

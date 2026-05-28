@@ -256,10 +256,26 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
             # via clang's driver, so adding it here is a no-op for native
             # builds and a fix for the cross lane.
             # See planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
-            set_property(TARGET skia::skia APPEND PROPERTY
-                INTERFACE_LINK_LIBRARIES
-                    "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOKit;-framework IOSurface;-framework QuartzCore;objc"
-            )
+            #
+            # iOS / macOS framework split (Phase iOS-D.1, crosscheck
+            # planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md):
+            #   * macOS exposes IOKit; iOS does not (UIKit replaces it),
+            #     and linking `-framework IOKit` against the iPhoneOS /
+            #     iPhoneSimulator SDK fails with "framework not found".
+            #   * The remaining frameworks (Metal, MetalKit, CoreFoundation,
+            #     CoreGraphics, CoreText, Foundation, IOSurface, QuartzCore)
+            #     are available on both platforms — split is IOKit only.
+            if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+                set_property(TARGET skia::skia APPEND PROPERTY
+                    INTERFACE_LINK_LIBRARIES
+                        "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOSurface;-framework QuartzCore;objc"
+                )
+            else()
+                set_property(TARGET skia::skia APPEND PROPERTY
+                    INTERFACE_LINK_LIBRARIES
+                        "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOKit;-framework IOSurface;-framework QuartzCore;objc"
+                )
+            endif()
         elseif(ANDROID)
             set_property(TARGET skia::skia APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES

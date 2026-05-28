@@ -380,9 +380,23 @@ private:
 
 // ── IOSGpuWindowHost (GPU rendering via Dawn/Skia Graphite) ─────────────
 
+// Close the `namespace pulp::view {` opened around IOSWindowHost so the
+// Skia / Dawn / runtime headers below resolve at the global ::pulp::*
+// scope. Phase iOS-D.1: previously the includes were emitted INSIDE the
+// open namespace, which nested everything as
+// `pulp::view::pulp::render::*` and made every later use of
+// `render::GpuSurface` fail to resolve (it became
+// `pulp::view::render::GpuSurface`, which does not exist). The bug went
+// undetected because no iOS build had `PULP_HAS_SKIA` defined until
+// Phase iOS-D.1 wired the iOS Skia/Dawn link.
+}  // namespace pulp::view
+
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/runtime/log.hpp>
+
+namespace pulp::view {
 
 // Forward decl for the display-link bridge.
 class IOSGpuWindowHost;
@@ -534,30 +548,37 @@ public:
             uint32_t pw = static_cast<uint32_t>(bounds.width * scale);
             uint32_t ph = static_cast<uint32_t>(bounds.height * scale);
 
-            // Initialize GPU surface with Metal layer
-            render::GpuSurface::Config gpu_config;
-            gpu_config.width = pw;
-            gpu_config.height = ph;
-            gpu_config.native_surface_handle = (__bridge void*)[metal_view_ metalLayer];
-
-            gpu_surface_ = std::make_unique<render::GpuSurface>();
-            if (!gpu_surface_->initialize(gpu_config)) {
-                runtime::log_error("iOS GPU: GpuSurface init failed, falling back to CPU");
-                gpu_surface_.reset();
+            // Initialize GPU surface with Metal layer.
+            // GpuSurface is an abstract interface — use the create_dawn()
+            // factory, not std::make_unique. SkiaSurface::create() takes
+            // a GpuSurface& and a Config struct that exposes only width,
+            // height, and scale_factor (it queries the GPU side for the
+            // Dawn device/queue handles internally). Phase iOS-D.1.
+            gpu_surface_ = render::GpuSurface::create_dawn();
+            if (!gpu_surface_) {
+                runtime::log_error("iOS GPU: GpuSurface::create_dawn() returned null, "
+                                   "falling back to CPU");
             } else {
-                // Initialize Skia surface sharing Dawn device
-                render::SkiaSurface::Config skia_config;
-                skia_config.width = pw;
-                skia_config.height = ph;
-                skia_config.dawn_device = gpu_surface_->dawn_device_handle();
-                skia_config.dawn_queue = gpu_surface_->dawn_queue_handle();
-                skia_config.dawn_instance = gpu_surface_->dawn_instance_handle();
+                render::GpuSurface::Config gpu_config{};
+                gpu_config.width = pw;
+                gpu_config.height = ph;
+                gpu_config.native_surface_handle = (__bridge void*)[metal_view_ metalLayer];
 
-                skia_surface_ = std::make_unique<render::SkiaSurface>();
-                if (!skia_surface_->initialize(skia_config)) {
-                    runtime::log_error("iOS GPU: SkiaSurface init failed");
-                    skia_surface_.reset();
+                if (!gpu_surface_->initialize(gpu_config)) {
+                    runtime::log_error("iOS GPU: GpuSurface init failed, falling back to CPU");
                     gpu_surface_.reset();
+                } else {
+                    CGFloat layer_scale = metal_view_.metalLayer.contentsScale;
+                    render::SkiaSurface::Config skia_config{};
+                    skia_config.width = static_cast<uint32_t>(bounds.width);
+                    skia_config.height = static_cast<uint32_t>(bounds.height);
+                    skia_config.scale_factor = static_cast<float>(layer_scale);
+
+                    skia_surface_ = render::SkiaSurface::create(*gpu_surface_, skia_config);
+                    if (!skia_surface_) {
+                        runtime::log_error("iOS GPU: SkiaSurface::create returned null");
+                        gpu_surface_.reset();
+                    }
                 }
             }
 
