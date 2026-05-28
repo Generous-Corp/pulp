@@ -12,11 +12,28 @@ from typing import Any
 
 
 ROUTE_NATIVE_CPP = "native_cpp"
+ROUTE_NATIVE_HTML = "native_html"
+ROUTE_RECORDED_PAINT = "recorded_paint"
 ROUTE_LIVE_JS = "live_js"
 ROUTE_HYBRID = "hybrid"
 ROUTE_UNSUPPORTED = "unsupported"
-ROUTES = {ROUTE_LIVE_JS, "native_html", ROUTE_NATIVE_CPP, "recorded_paint", ROUTE_HYBRID, ROUTE_UNSUPPORTED}
-NATIVE_ROUTES = {"native_html", ROUTE_NATIVE_CPP, "recorded_paint"}
+ROUTES = {
+    ROUTE_LIVE_JS,
+    ROUTE_NATIVE_HTML,
+    ROUTE_NATIVE_CPP,
+    ROUTE_RECORDED_PAINT,
+    ROUTE_HYBRID,
+    ROUTE_UNSUPPORTED,
+}
+NATIVE_ROUTES = {ROUTE_NATIVE_HTML, ROUTE_NATIVE_CPP, ROUTE_RECORDED_PAINT}
+FALLBACK_ROUTES = {ROUTE_LIVE_JS, ROUTE_HYBRID, ROUTE_UNSUPPORTED}
+PLANNED_SUPPORT_ROUTES = {
+    ROUTE_LIVE_JS,
+    ROUTE_NATIVE_HTML,
+    ROUTE_NATIVE_CPP,
+    ROUTE_RECORDED_PAINT,
+    ROUTE_HYBRID,
+}
 SOURCE_TRUTHS = {"archived_fixture", "local_file", "mcp_payload", "generated", "runtime_capture"}
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
@@ -129,7 +146,7 @@ def validate_frontend_ir(report: dict[str, Any]) -> None:
                    f"routes[{index}] native route must set requires_js_engine=false")
             expect(isinstance(route.get("validation_refs"), list) and bool(route["validation_refs"]),
                    f"routes[{index}] native route must include validation_refs")
-        if chosen in {ROUTE_LIVE_JS, ROUTE_HYBRID, ROUTE_UNSUPPORTED}:
+        if chosen in FALLBACK_ROUTES:
             expect(isinstance(route.get("fallback_reason"), str) and bool(route["fallback_reason"]),
                    f"routes[{index}] fallback route must include fallback_reason")
 
@@ -173,11 +190,11 @@ def route_name(value: str | None) -> str:
     if normalized in {ROUTE_LIVE_JS, "live", "runtime_js"}:
         return ROUTE_LIVE_JS
     if normalized in {"native_html", "native_layout", "native_tree", "native_element"}:
-        return "native_html"
+        return ROUTE_NATIVE_HTML
     if normalized == ROUTE_HYBRID:
         return ROUTE_HYBRID
     if normalized in {"recorded", "recorded_paint", "native_custom_paint"}:
-        return "recorded_paint"
+        return ROUTE_RECORDED_PAINT
     return ROUTE_UNSUPPORTED
 
 
@@ -209,10 +226,10 @@ def route_rows(route_manifest: dict[str, Any]) -> list[Any]:
     rows = overlay.get("node_route_rows")
     if isinstance(rows, list) and rows:
         return rows
-    fallback_rows = overlay.get("route_rows")
-    if isinstance(fallback_rows, list):
-        return fallback_rows
-    return rows if isinstance(rows, list) else []
+    rows = overlay.get("route_rows")
+    if isinstance(rows, list):
+        return rows
+    return []
 
 
 def routes_present(rows: list[Any]) -> list[str]:
@@ -416,8 +433,6 @@ def route_usage_for_input(key: str, rows: list[Any]) -> list[str]:
         return [ROUTE_LIVE_JS]
     if normalized in {"materialized_audit", "cpp", "native_audit"}:
         return [ROUTE_NATIVE_CPP]
-    if normalized in {"ir", "source_jsx", "source_audit"}:
-        return routes_present(rows)
     return routes_present(rows)
 
 
@@ -567,13 +582,7 @@ def source_spans(source_audit: dict[str, Any], rows: list[Any], source_path: str
 
 
 def support_for_route(route: str) -> dict[str, str]:
-    support = {
-        "live_js": "planned",
-        "native_html": "planned",
-        "native_cpp": "planned",
-        "recorded_paint": "planned",
-        "hybrid": "planned",
-    }
+    support = {name: "planned" for name in sorted(PLANNED_SUPPORT_ROUTES)}
     if route in support:
         support[route] = "present"
     return support
@@ -726,12 +735,12 @@ def routes_from_rows(rows: list[Any]) -> list[dict[str, Any]]:
             }],
             "reason": f"source contract maps to {semantic_role(row)}",
             "requires_js_engine": chosen in {ROUTE_LIVE_JS, ROUTE_HYBRID},
-            "requires_gpu": chosen in {ROUTE_NATIVE_CPP, "native_html", "recorded_paint", ROUTE_HYBRID},
+            "requires_gpu": chosen in {ROUTE_NATIVE_CPP, ROUTE_NATIVE_HTML, ROUTE_RECORDED_PAINT, ROUTE_HYBRID},
         }
-        if chosen in {ROUTE_NATIVE_CPP, "native_html", "recorded_paint"}:
+        if chosen in NATIVE_ROUTES:
             route["requires_js_engine"] = False
             route["validation_refs"] = [f"route_manifest:{node_id}"]
-        if chosen in {ROUTE_LIVE_JS, ROUTE_HYBRID, ROUTE_UNSUPPORTED}:
+        if chosen in FALLBACK_ROUTES:
             route["fallback_reason"] = fallback if isinstance(fallback, str) and fallback else "requires live or unsupported behavior"
         routes.append(route)
     return routes
