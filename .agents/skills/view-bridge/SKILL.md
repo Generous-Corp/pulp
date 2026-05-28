@@ -645,10 +645,15 @@ honoring the `PULP_DISABLE_PLUGIN_GPU` runtime opt-out. Hardcoding
 back to the AutoUi CPU path (the GPU-plugin-view-host work, 2026-05).
 
 Rules when touching an adapter's editor-attach path:
-- A custom `Processor::create_view()` that paints via the GPU (scripted React
-  UI, WebGPU/Three.js canvas) MUST call `view->set_requires_gpu_host(true)` on
-  its root, or `decide_gpu_host` returns `mode=autoui` and it gets CPU. The
-  framework scripted-UI root (`editor_ui.hpp`) already sets it.
+- A custom `Processor::create_view()` that owns a `ScriptedUiSession` MUST
+  override `Processor::active_scripted_ui()` so `ViewBridge` reports
+  `uses_script_ui()`, adapters log `mode=scripted`, select the GPU host, and
+  `make_scripted_idle_pump` can poll that session. Chainer-style generated
+  processors use this path.
+- A custom non-scripted GPU view (WebGPU/Three.js canvas, hand-built Skia view)
+  MUST call `view->set_requires_gpu_host(true)` on its root, or
+  `decide_gpu_host` returns `mode=autoui` and it gets CPU. The framework
+  scripted-UI root (`editor_ui.hpp`) already sets it.
 - After `PluginViewHost::create(...)`, call
   `format::warn_if_unexpected_cpu_fallback(decision, host.get())` — it screams
   (`runtime::log_error`) if GPU was requested but the host fell back to CPU.

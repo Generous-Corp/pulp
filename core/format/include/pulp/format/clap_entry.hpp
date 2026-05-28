@@ -14,7 +14,7 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
-#ifdef PULP_CLAP_GUI
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #endif
@@ -266,7 +266,7 @@ inline const clap_plugin_tail_t tail_ext = { .get = tail_get };
 
 // ── GUI extension (only in plugin targets that define PULP_CLAP_GUI) ──
 
-#ifdef PULP_CLAP_GUI
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 
 inline bool gui_is_api_supported(const clap_plugin_t*, const char* api, bool is_floating) {
     if (pulp::format::detail::editor_launch_blocked_by_environment()) return false;
@@ -561,7 +561,7 @@ inline const clap_plugin_gui_t gui_ext = {
 
 // ── Extension dispatch ─────────────────────────────────────────────────
 inline const void* get_extension(const clap_plugin_t*, const char* id) {
-#ifdef PULP_CLAP_GUI
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     if (strcmp(id, CLAP_EXT_GUI) == 0) {
         if (pulp::format::detail::editor_launch_blocked_by_environment()) return nullptr;
         return &gui_ext;

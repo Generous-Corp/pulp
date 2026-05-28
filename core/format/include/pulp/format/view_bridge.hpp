@@ -97,10 +97,11 @@ public:
     bool uses_script_ui() const { return uses_script_ui_; }
 
     /// Access the scripted UI session, if the primary view was built from
-    /// a JS script (via `PULP_UI_SCRIPT_PATH`). Returns nullptr otherwise,
-    /// including when the processor supplied a custom `create_view()`.
-    view::ScriptedUiSession* scripted_ui() { return scripted_ui_.get(); }
-    const view::ScriptedUiSession* scripted_ui() const { return scripted_ui_.get(); }
+    /// a JS script. This includes the framework-owned `PULP_UI_SCRIPT_PATH`
+    /// path and custom processors that expose a session through
+    /// `Processor::active_scripted_ui()`.
+    view::ScriptedUiSession* scripted_ui();
+    const view::ScriptedUiSession* scripted_ui() const;
 
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }

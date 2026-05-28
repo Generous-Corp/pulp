@@ -225,6 +225,33 @@ inline view::WindowHost::ResizeCallback make_standalone_editor_resize_callback(
     };
 }
 
+inline view::WindowHost::ContentSize standalone_design_viewport_size(
+    const ViewSize& size_hints,
+    const StandaloneEditorChrome& chrome) {
+    const auto extra_height = static_cast<uint32_t>(
+        chrome.extra_window_height() > 0.0f ? chrome.extra_window_height() : 0.0f);
+    return {
+        size_hints.preferred_width,
+        size_hints.preferred_height + extra_height,
+    };
+}
+
+inline void configure_standalone_design_viewport(
+    view::WindowHost& window,
+    const ViewSize& size_hints,
+    const StandaloneEditorChrome& chrome) {
+    const auto viewport = standalone_design_viewport_size(size_hints, chrome);
+    if (viewport.width == 0 || viewport.height == 0)
+        return;
+
+    window.set_design_viewport(
+        static_cast<float>(viewport.width),
+        static_cast<float>(viewport.height));
+    window.set_fixed_aspect_ratio(
+        static_cast<float>(viewport.width) /
+        static_cast<float>(viewport.height));
+}
+
 template <typename ResizeFn>
 inline void sync_standalone_editor_host(
     view::WindowHost& window,

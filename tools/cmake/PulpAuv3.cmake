@@ -110,6 +110,11 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
         "-framework Cocoa"
     )
     target_include_directories(${fw_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    _pulp_apply_macho_exports(${fw_target} "${fw_target}"
+        "_OBJC_CLASS_$_PulpAUMacViewController"
+        "_OBJC_METACLASS_$_PulpAUMacViewController"
+        "_OBJC_CLASS_$_PulpAudioUnit"
+        "_OBJC_METACLASS_$_PulpAudioUnit")
 
     # Framework Info.plist
     set(PLUGIN_NAME "${name}")
@@ -318,6 +323,11 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         "-framework UIKit"
     )
     target_include_directories(${target}_AUv3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    _pulp_apply_macho_exports(${target}_AUv3 "${target}_AUv3"
+        "_OBJC_CLASS_$_PulpAUViewController"
+        "_OBJC_METACLASS_$_PulpAUViewController"
+        "_OBJC_CLASS_$_PulpAudioUnit"
+        "_OBJC_METACLASS_$_PulpAudioUnit")
 
     set(PLUGIN_NAME "${name}")
     set(PLUGIN_BUNDLE_ID "${bundle_id}")

@@ -342,6 +342,10 @@ TEST_CASE("design-debug option validation fails before expensive render setup",
 
 TEST_CASE("design-debug headless response-file run writes report artifacts",
           "[tools][design-debug][coverage][requested]") {
+#if !defined(__APPLE__)
+    SKIP("design-debug artifact comparison needs the native screenshot backend");
+#endif
+
     auto temp = make_temp_dir("headless-run");
     auto script = temp / "debug-tool.js";
     auto response = temp / "response.txt";

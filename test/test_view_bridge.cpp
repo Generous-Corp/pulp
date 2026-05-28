@@ -3,6 +3,7 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 #include <functional>
 
@@ -44,6 +45,26 @@ public:
         last_w = w;
         last_h = h;
     }
+};
+
+class ScriptedCustomViewProcessor : public StubProcessor {
+public:
+    view::ScriptedUiSession* active_scripted_ui() override {
+        return scripted_session.get();
+    }
+
+    const view::ScriptedUiSession* active_scripted_ui() const override {
+        return scripted_session.get();
+    }
+
+    std::unique_ptr<view::View> create_view() override {
+        auto root = std::make_unique<view::View>();
+        scripted_session = std::make_unique<view::ScriptedUiSession>(
+            *root, state(), view::ScriptedUiOptions{});
+        return root;
+    }
+
+    std::unique_ptr<view::ScriptedUiSession> scripted_session;
 };
 
 } // namespace
@@ -93,6 +114,31 @@ TEST_CASE("ViewBridge honors custom create_view()", "[view_bridge]") {
     bridge.notify_attached();
     REQUIRE(bridge.view() == raw);
     REQUIRE_FALSE(bridge.uses_script_ui());
+}
+
+TEST_CASE("ViewBridge detects processor-owned scripted custom views",
+          "[view_bridge][scripted-ui]") {
+    ScriptedCustomViewProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.uses_script_ui());
+    REQUIRE(p.scripted_session != nullptr);
+    REQUIRE(bridge.scripted_ui() == p.scripted_session.get());
+
+    const auto& const_bridge = bridge;
+    REQUIRE(const_bridge.scripted_ui() == p.scripted_session.get());
+}
+
+TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
+    StubProcessor p;
+    REQUIRE(p.active_scripted_ui() == nullptr);
+
+    const auto& const_processor = p;
+    REQUIRE(const_processor.active_scripted_ui() == nullptr);
 }
 
 TEST_CASE("ViewBridge primary helpers are idempotent and role-aware",

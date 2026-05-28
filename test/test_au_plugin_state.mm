@@ -376,6 +376,115 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
     }
 }
 
+TEST_CASE("AU v3 render block rejects frame counts above maximumFramesToRender",
+          "[au][auv3][render][bounds]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        AudioBufferList output{};
+        output.mNumberBuffers = 1;
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+
+        const AUAudioFrameCount too_many = unit.maximumFramesToRender + 1;
+        auto status = block(&flags,
+                            &timestamp,
+                            too_many,
+                            0,
+                            &output,
+                            nullptr,
+                            nil);
+        REQUIRE(status == kAudioUnitErr_TooManyFramesToProcess);
+        REQUIRE(processor->process_count == 0);
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 render block substitutes scratch output buffers when host buffers are absent",
+          "[au][auv3][render][scratch]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        constexpr UInt32 kFrames = 8;
+        float undersized = 0.0f;
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 2;
+        output.list.mBuffers[0].mDataByteSize = 0;
+        output.list.mBuffers[0].mData = nullptr;
+        output.list.mBuffers[1].mNumberChannels = 2;
+        output.list.mBuffers[1].mDataByteSize = sizeof(float);
+        output.list.mBuffers[1].mData = &undersized;
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+
+        auto status = block(&flags,
+                            &timestamp,
+                            kFrames,
+                            0,
+                            &output.list,
+                            nullptr,
+                            nil);
+        REQUIRE(status == noErr);
+        REQUIRE(processor->process_count == 1);
+
+        for (UInt32 i = 0; i < output.list.mNumberBuffers; ++i) {
+            REQUIRE(output.list.mBuffers[i].mNumberChannels == 1);
+            REQUIRE(output.list.mBuffers[i].mDataByteSize == kFrames * sizeof(float));
+            REQUIRE(output.list.mBuffers[i].mData != nullptr);
+        }
+        REQUIRE(output.list.mBuffers[1].mData != &undersized);
+
+        [unit release];
+    }
+}
+
 TEST_CASE("AU v2 SaveState accepts pre-existing property lists",
           "[au][auv2][state]") {
     SECTION("effect") {

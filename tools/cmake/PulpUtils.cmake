@@ -119,6 +119,24 @@ function(_pulp_apply_ui_script_definition target ui_script_path)
     )
 endfunction()
 
+function(_pulp_apply_macho_exports target file_stem)
+    if(NOT APPLE)
+        return()
+    endif()
+    if("${ARGN}" STREQUAL "")
+        return()
+    endif()
+
+    set(_pulp_export_file "${CMAKE_CURRENT_BINARY_DIR}/${file_stem}.exports")
+    file(WRITE "${_pulp_export_file}" "")
+    foreach(_pulp_symbol IN LISTS ARGN)
+        file(APPEND "${_pulp_export_file}" "${_pulp_symbol}\n")
+    endforeach()
+
+    target_link_options(${target} PRIVATE
+        "LINKER:-exported_symbols_list,${_pulp_export_file}")
+endfunction()
+
 # ── pulp_add_plugin ─────────────────────────────────────────────────────────
 # Creates plugin targets for each requested format from a single declaration.
 #

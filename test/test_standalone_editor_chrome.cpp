@@ -53,6 +53,9 @@ public:
     ContentSize content_size_{640, 360};
     std::function<void()> idle_callback_;
     ResizeCallback resize_callback_;
+    float design_width_ = 0.0f;
+    float design_height_ = 0.0f;
+    float aspect_ratio_ = 0.0f;
     int repaint_calls_ = 0;
 
     void show() override {}
@@ -65,6 +68,13 @@ public:
     }
     void set_resize_callback(ResizeCallback cb) override {
         resize_callback_ = std::move(cb);
+    }
+    void set_design_viewport(float design_w, float design_h) override {
+        design_width_ = design_w;
+        design_height_ = design_h;
+    }
+    void set_fixed_aspect_ratio(float ratio) override {
+        aspect_ratio_ = ratio;
     }
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
@@ -746,6 +756,44 @@ TEST_CASE("Standalone bridge attach forwards host sizing through bridge resize",
     REQUIRE(bridge.resize_calls_.size() == 2);
     REQUIRE(bridge.resize_calls_[1].width == 900);
     REQUIRE(bridge.resize_calls_[1].height == 468);
+}
+
+TEST_CASE("Standalone design viewport applies proportional window resize",
+          "[standalone][chrome][resize][proportional]") {
+    StubWindowHost window;
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(),
+        StandaloneConfig{.show_settings_tab = false},
+        nullptr,
+        nullptr,
+        nullptr,
+        {});
+
+    ViewSize hints = view_size_from_design(900, 520);
+    configure_standalone_design_viewport(window, hints, chrome);
+
+    REQUIRE(window.design_width_ == Catch::Approx(900.0f));
+    REQUIRE(window.design_height_ == Catch::Approx(520.0f));
+    REQUIRE(window.aspect_ratio_ == Catch::Approx(900.0f / 520.0f));
+}
+
+TEST_CASE("Standalone design viewport includes settings chrome height",
+          "[standalone][chrome][resize][proportional]") {
+    StubWindowHost window;
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(),
+        StandaloneConfig{},
+        nullptr,
+        nullptr,
+        nullptr,
+        {});
+
+    ViewSize hints = view_size_from_design(900, 520);
+    configure_standalone_design_viewport(window, hints, chrome);
+
+    REQUIRE(window.design_width_ == Catch::Approx(900.0f));
+    REQUIRE(window.design_height_ == Catch::Approx(552.0f));
+    REQUIRE(window.aspect_ratio_ == Catch::Approx(900.0f / 552.0f));
 }
 
 TEST_CASE("Standalone log helper formats the chrome mode",

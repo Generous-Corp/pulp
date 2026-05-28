@@ -90,6 +90,16 @@ struct. It owns:
   `PULP_CLAP_GUI`. Editor lifecycle flows through `ViewBridge`; see the
   `view-bridge` skill for the open/attach/close protocol.
 
+`PulpClapPlugin` is consumed from two translation units: the per-plugin
+`clap_entry.cpp` and the shared `clap_adapter.cpp` in `pulp-format`.
+They must see the same GUI define. Desktop plugin builds compile both
+with `PULP_CLAP_GUI=1`; WCLAP/non-GUI builds compile both with
+`PULP_CLAP_GUI=0`. Do not add GUI-only fields under a preprocessor
+condition unless the shared adapter target receives the same condition.
+A layout mismatch presents as random CLAP lifecycle corruption, often a
+REAPER crash in `gui_create()` or `clap_activate()` touching a bogus
+`bridge`/`editor_host` pointer.
+
 ### Parameters
 
 Parameters are defined by the Processor during `define_parameters(store)`
@@ -200,8 +210,9 @@ round-trip parity is trivial to test.
 
 ### Editor
 
-Gated on `PULP_CLAP_GUI` (set for plugin targets, off for the shared
-format lib to keep the core thin). Lifecycle flows through
+Gated on `PULP_CLAP_GUI`; for desktop CLAP, both the shared
+`pulp-format` adapter TU and the per-plugin entry TU must compile with
+the same value. Lifecycle flows through
 `pulp::format::ViewBridge`: `gui_create` → `bridge->open()`, the host
 then calls `gui_set_parent(window)` → `editor_host->attach_to_parent` +
 `bridge->notify_attached()`, `gui_destroy` → `bridge->close()`. See the
@@ -385,12 +396,14 @@ future `CLAP_EVENT_*` additions — the CLAP header does not define
 them as macros. See PR #627's `clap_adapter.cpp` for the canonical
 guard shape.
 
-### GUI is gated on `PULP_CLAP_GUI`
+### GUI layout must match across CLAP TUs
 
-The shared `pulp_format` library is built without `PULP_CLAP_GUI` so
-the adapter stays thin. Only the per-plugin CLAP target turns it on.
-If you add a new GUI-dependent member to `PulpClapPlugin`, wrap it in
-`#ifdef PULP_CLAP_GUI` or the non-GUI builds break.
+Do not use `#ifdef PULP_CLAP_GUI` for CLAP GUI fields or extension
+dispatch; use `#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI`. The WCLAP
+path may define `PULP_CLAP_GUI=0`, and `#ifdef` treats that as enabled.
+The desktop shared adapter and the per-plugin entry must agree on
+whether GUI fields exist in `PulpClapPlugin`, or later lifecycle fields
+shift and hosts crash when opening or activating the editor.
 
 ### ARA CLAP lives outside `CLAP_EXT_*`
 

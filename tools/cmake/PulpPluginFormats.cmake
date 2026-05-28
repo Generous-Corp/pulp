@@ -64,6 +64,10 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     )
     target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
     _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
+    _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
+        "_bundleEntry"
+        "_bundleExit"
+        "_GetPluginFactory")
     target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # VST3 bundle structure
@@ -143,6 +147,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     )
     target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
     _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
+    _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
+        "_clap_entry")
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     set_target_properties(${target}_CLAP PROPERTIES
@@ -319,6 +325,10 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     target_compile_definitions(${target}_AU PRIVATE
         PULP_AU_GUI=1
         PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix})
+    _pulp_apply_macho_exports(${target}_AU "${target}_AU"
+        "_${target}AUFactory"
+        "_OBJC_CLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}"
+        "_OBJC_METACLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}")
     # AudioUnitSDK 1.4 headers use std::expected (C++23). CMAKE_CXX_STANDARD=20
     # at the repo root is authoritative under CMake 3.24's policy — target
     # compile_features are ignored when a lower CXX_STANDARD is already set.

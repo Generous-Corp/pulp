@@ -156,7 +156,12 @@ not apply — `_bridge` is a C++ struct). The block:
 
 1. Zeroes outputs and returns `noErr` if the Processor is null (host
    calling render before `allocateRenderResources` succeeded).
-2. Points `output_ptrs[i]` at `outputData->mBuffers[i].mData`.
+2. Rejects `frameCount > maximumFramesToRender` with
+   `kAudioUnitErr_TooManyFramesToProcess`. If a host or validator
+   passes null or undersized `outputData->mBuffers[i].mData`, the
+   adapter assigns slices from `AUBridge::output_storage`, which is
+   pre-sized in `allocateRenderResources`. Do not heap-allocate in the
+   steady-state render path.
 3. Pulls the main input via `pullInputBlock(…, 0, &input_abl)`. This
    reuses the **output** buffers as the input destination — in-place
    processing is allowed (`canProcessInPlace` returns `YES`).

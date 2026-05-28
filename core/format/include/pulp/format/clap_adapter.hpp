@@ -12,8 +12,13 @@
 #include <pulp/state/preset_manager.hpp>
 #include <clap/clap.h>
 
-// View includes only when building plugin targets (not the shared format lib)
-#ifdef PULP_CLAP_GUI
+// View includes only when building GUI-capable CLAP targets.
+//
+// Important: PulpClapPlugin is shared across clap_entry.hpp (compiled into the
+// plugin module) and clap_adapter.cpp (compiled into pulp-format). Both
+// translation units must see the same PULP_CLAP_GUI value or the instance
+// layout diverges and lifecycle callbacks write through the wrong offsets.
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #endif
@@ -78,7 +83,7 @@ struct PulpClapPlugin {
     // `bridge` owns the view tree and dispatches Processor lifecycle
     // callbacks (on_view_opened/closed/resized). editor_host is the
     // platform-native window surface that hosts bridge->view().
-#ifdef PULP_CLAP_GUI
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     std::unique_ptr<ViewBridge> bridge;
     std::unique_ptr<view::PluginViewHost> editor_host;
 #endif

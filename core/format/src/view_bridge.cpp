@@ -30,6 +30,9 @@ bool ViewBridge::open(std::string* error) {
     auto custom = processor_.create_view();
     if (custom) {
         view_ = std::move(custom);
+        if (processor_.active_scripted_ui()) {
+            uses_script_ui_ = true;
+        }
     } else {
         // Fall back to the scripted-UI or AutoUi default.
         auto instance = build_editor_ui(store_, options_.enable_hot_reload, &last_error_);
@@ -49,6 +52,16 @@ bool ViewBridge::open(std::string* error) {
     attached_ = false;
     released_ = false;
     return true;
+}
+
+view::ScriptedUiSession* ViewBridge::scripted_ui() {
+    if (scripted_ui_) return scripted_ui_.get();
+    return processor_.active_scripted_ui();
+}
+
+const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
+    if (scripted_ui_) return scripted_ui_.get();
+    return processor_.active_scripted_ui();
 }
 
 void ViewBridge::notify_attached() {

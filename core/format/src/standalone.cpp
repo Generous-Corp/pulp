@@ -340,6 +340,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         stop();
         return false;
     }
+    detail::configure_standalone_design_viewport(*window, size_hints, chrome);
 
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();

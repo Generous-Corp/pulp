@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+namespace pulp::view { class ScriptedUiSession; }
+
 namespace pulp::format {
 
 /// Editor size hints (in logical pixels). preferred is used for the
@@ -668,6 +670,13 @@ public:
     /// need to pull `pulp/format/ara.hpp`.
     virtual std::unique_ptr<class AraDocumentController>
     create_ara_document_controller();
+
+    /// Return the active scripted UI session when a custom create_view()
+    /// path owns one. The default framework editor path is tracked by
+    /// ViewBridge directly; processor-owned sessions use this hook so format
+    /// adapters can still select scripted/GPU hosting and poll the session.
+    virtual view::ScriptedUiSession* active_scripted_ui() { return nullptr; }
+    virtual const view::ScriptedUiSession* active_scripted_ui() const { return nullptr; }
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

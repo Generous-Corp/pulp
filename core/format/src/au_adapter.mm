@@ -63,6 +63,7 @@
 #include <array>
 #include <atomic>
 #include <limits>
+#include <vector>
 
 namespace pulp::format::au {
 
@@ -102,6 +103,7 @@ struct AUBridge {
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
     const float* sidechain_ptrs[kMaxChannels] = {};
+    std::vector<float> output_storage;
 
     // Pre-allocated input buffer list for pulling input (stereo max for now)
     struct InputBufferStorage {
@@ -441,6 +443,9 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 
     _bridge.sample_rate = _outputBus.format.sampleRate;
     _bridge.max_frames = self.maximumFramesToRender;
+    _bridge.output_storage.assign(
+        static_cast<std::size_t>(pulp::format::au::kMaxChannels) * _bridge.max_frames,
+        0.0f);
 
     if (_bridge.processor) {
         pulp::format::PrepareContext ctx;
@@ -496,18 +501,42 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         AURenderPullInputBlock __unsafe_unretained pullInputBlock)
     {
         if (!bridge->processor) {
-            for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i)
-                memset(outputData->mBuffers[i].mData, 0, outputData->mBuffers[i].mDataByteSize);
+            if (outputData) {
+                for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
+                    if (outputData->mBuffers[i].mData) {
+                        memset(outputData->mBuffers[i].mData, 0, outputData->mBuffers[i].mDataByteSize);
+                    }
+                }
+            }
             return noErr;
+        }
+        if (!outputData) return noErr;
+        if (frameCount > bridge->max_frames) {
+            return kAudioUnitErr_TooManyFramesToProcess;
         }
         bridge->param_events.clear();
 
         UInt32 outChans = std::min(outputData->mNumberBuffers,
             static_cast<UInt32>(pulp::format::au::kMaxChannels));
 
-        // Output buffer view (no allocation)
-        for (UInt32 i = 0; i < outChans; ++i)
-            bridge->output_ptrs[i] = static_cast<float*>(outputData->mBuffers[i].mData);
+        const std::size_t neededOutputStorage =
+            static_cast<std::size_t>(outChans) * frameCount;
+        if (bridge->output_storage.size() < neededOutputStorage) {
+            bridge->output_storage.assign(neededOutputStorage, 0.0f);
+        }
+
+        // Output buffer view (uses preallocated scratch when the host passes
+        // null mData during validation/probing).
+        for (UInt32 i = 0; i < outChans; ++i) {
+            auto& buffer = outputData->mBuffers[i];
+            if (!buffer.mData || buffer.mDataByteSize < frameCount * sizeof(float)) {
+                buffer.mNumberChannels = 1;
+                buffer.mDataByteSize = frameCount * sizeof(float);
+                buffer.mData = bridge->output_storage.data() +
+                    static_cast<std::size_t>(i) * frameCount;
+            }
+            bridge->output_ptrs[i] = static_cast<float*>(buffer.mData);
+        }
         pulp::audio::BufferView<float> output_view(bridge->output_ptrs, outChans, frameCount);
 
         // Input: pull from upstream if we have input channels
