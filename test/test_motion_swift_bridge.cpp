@@ -133,10 +133,24 @@ TEST_CASE("pulp_motion_publish_components tolerates empty and null inputs",
     const char* keys[1] = {"x"};
     const double vals[1] = {1.0};
     pulp_motion_publish_components("Card", "p", keys, vals, 0, 0.001, 3);
+    pulp_motion_publish_components("Card", "p", keys, vals, -1, 0.001, 3);
     pulp_motion_publish_components("Card", "p", nullptr, vals, 1, 0.001, 3);
     pulp_motion_publish_components("Card", "p", keys, nullptr, 1, 0.001, 3);
 
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "p") == 0);
+}
+
+TEST_CASE("pulp_motion bridge normalizes null C strings",
+          "[motion][swift-bridge][coverage][requested]") {
+    BridgeFixture fx;
+
+    pulp_motion_publish_value(nullptr, nullptr, 0.0, 0.001, 3);
+    pulp_motion_publish_value(nullptr, nullptr, 1.0, 0.001, 3);
+
+    const auto* baseline = first_of(fx.buffer, SampleEvent::Kind::Baseline);
+    REQUIRE(baseline != nullptr);
+    REQUIRE(baseline->view_name.empty());
+    REQUIRE(baseline->metric_name.empty());
 }
 
 // ── Ambient provenance ────────────────────────────────────────────────
@@ -265,4 +279,16 @@ TEST_CASE("pulp_motion geometry registry survives coordinator reset",
     const int fresh = pulp_motion_register_geometry_trace("ViewC", 30);
     REQUIRE(fresh > 0);
     pulp_motion_detach_trace(fresh);
+}
+
+TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids",
+          "[motion][swift-bridge][coverage][requested]") {
+    BridgeFixture fx;
+
+    pulp_motion_update_geometry(123456, "frame", 1.0, 2.0, 3.0, 4.0);
+    pulp_motion_detach_trace(123456);
+    for (int i = 0; i < 4; ++i) fx.clock.tick(1.0f / 60.0f);
+
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") == 0);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Start, "frame") == 0);
 }

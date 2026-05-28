@@ -276,6 +276,14 @@ Runtime Version=15.0.0
         "TeamIdentifier=VWXYZ98765\n");
     REQUIRE(missing_identity.identity.empty());
     REQUIRE(missing_identity.team_id == "VWXYZ98765");
+
+    auto first_authority = pulp::ship::detail::parse_codesign_details(R"(
+Authority=Developer ID Application: First Team (FIRST12345)
+Authority=Developer ID Application: Second Team (SECOND12345)
+TeamIdentifier=FIRST12345
+)");
+    REQUIRE(first_authority.identity == "Developer ID Application: First Team (FIRST12345)");
+    REQUIRE(first_authority.team_id == "FIRST12345");
 #endif
 }
 
@@ -350,5 +358,11 @@ TEST_CASE("security identity parser preserves quoted display names",
 
     auto none = pulp::ship::detail::parse_signing_identities("0 valid identities found\n");
     REQUIRE(none.empty());
+
+    auto unbalanced = pulp::ship::detail::parse_signing_identities(R"IDENTITIES(
+  1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Missing close
+  2) BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB No opening quote"
+)IDENTITIES");
+    REQUIRE(unbalanced.empty());
 #endif
 }

@@ -2026,6 +2026,45 @@ TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
     REQUIRE(selected_callback_called);
 }
 
+TEST_CASE("Inspector overlay and window public header toggles are direct contracts",
+          "[inspect][overlay][window][coverage][requested]") {
+    View root;
+    root.set_bounds({0, 0, 320, 200});
+
+    InspectorOverlay overlay(root);
+    REQUIRE(&overlay.inspected_root() == &root);
+    REQUIRE_FALSE(overlay.is_active());
+    overlay.set_active(true);
+    REQUIRE(overlay.is_active());
+    overlay.toggle();
+    REQUIRE_FALSE(overlay.is_active());
+
+    REQUIRE(overlay.tool() == InspectorOverlay::Tool::select);
+    overlay.toggle_tool();
+    REQUIRE(overlay.tool() == InspectorOverlay::Tool::text);
+    overlay.set_tool(InspectorOverlay::Tool::select);
+    REQUIRE(overlay.tool() == InspectorOverlay::Tool::select);
+
+    REQUIRE_FALSE(overlay.manipulate_only());
+    REQUIRE_FALSE(overlay.dragging_enabled());
+    overlay.set_manipulate_only(true);
+    REQUIRE(overlay.manipulate_only());
+    REQUIRE(overlay.dragging_enabled());
+
+    REQUIRE_FALSE(overlay.has_reparent_source_sink());
+    overlay.set_reparent_source_sink([](const InspectorOverlay::ReparentSourceEdit&) {});
+    REQUIRE(overlay.has_reparent_source_sink());
+    overlay.set_reparent_source_sink({});
+    REQUIRE_FALSE(overlay.has_reparent_source_sink());
+
+    InspectorWindow window(root);
+    REQUIRE_FALSE(window.selection_readonly());
+    window.set_selection_readonly(true);
+    REQUIRE(window.selection_readonly());
+    window.set_selection_readonly(false);
+    REQUIRE_FALSE(window.selection_readonly());
+}
+
 TEST_CASE("InspectorWindow rebuilds tree and theme sections only from live roots",
           "[inspect][window][coverage][headers]") {
     View first_root;

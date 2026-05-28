@@ -326,6 +326,21 @@ TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
     REQUIRE_FALSE(extract_bool(payload, "array", false));
 }
 
+TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated",
+          "[mcp][json][coverage][requested]") {
+    const std::string payload =
+        R"({"tool":"pulp_build","tool_extra":"wrong","text":"a \"quoted\" value","n":17})";
+
+    REQUIRE(extract_string(payload, "tool") == "pulp_build");
+    REQUIRE(extract_string(payload, "tool_extra") == "wrong");
+    REQUIRE(extract_string(payload, "text") == R"(a \"quoted\" value)");
+    REQUIRE(extract_raw(payload, "n") == "17");
+
+    auto wrapped = json_tool_payload(R"({"ok":true,"value":"x"})");
+    require_contains(wrapped, R"("structuredContent":{"ok":true,"value":"x"})");
+    require_contains(wrapped, R"("text":"{\"ok\":true,\"value\":\"x\"}")");
+}
+
 TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
           "[mcp][json][coverage]") {
     const auto error = json_error("null", -32602, "bad \"arg\"\nline");

@@ -152,6 +152,7 @@ assert math.isclose(keyword_range.normalize(0.0), 0.5)
 assert math.isclose(keyword_range.denormalize(0.75), 1.0)
 assert raises(TypeError, lambda: pulp.ParamRange(min=0.0, max=1.0))
 assert raises(TypeError, lambda: pulp.ParamRange(0.0, 1.0, 0.5, 0.25))
+assert raises(TypeError, lambda: pulp.ParamRange("0", 1.0, 0.5))
 param_range.min = -60.0
 param_range.max = 24.0
 param_range.default_value = -12.0
@@ -223,6 +224,8 @@ params = store.all_params()
 assert len(params) == 2
 assert [param.name for param in params] == ["Python Gain", "Python Mix"]
 assert [param.id for param in params] == [8201, 8202]
+params[0].name = "Detached Copy"
+assert store.info(8201).name == "Python Gain"
 assert math.isclose(params[0].range.min, -60.0)
 assert math.isclose(params[0].range.max, 24.0)
 assert math.isclose(params[1].range.default_value, 0.5)
@@ -248,11 +251,14 @@ assert store.deserialize(state_blob)
 assert math.isclose(store.get_value(8201), -12.0)
 assert math.isclose(store.get_normalized(8202), 0.75)
 assert not store.deserialize(b"bad")
+assert not store.deserialize(b"")
 store.reset_to_default(8201)
 store.reset_all_to_defaults()
 assert math.isclose(store.get_value(8201), 0.0)
 assert math.isclose(store.get_value(8202), 0.5)
 assert math.isclose(store.get_default(8201), 0.0)
+assert math.isclose(store.get_value(999999), 0.0)
+assert math.isclose(store.get_normalized(999999), 0.0)
 assert raises(TypeError, lambda: store.set_value("gain", 0.5))
 assert raises(TypeError, lambda: store.set_normalized(8201, "hot"))
 
@@ -270,6 +276,7 @@ assert raises(AttributeError, lambda: setattr(descriptor, "bundle_id", "mutable"
 host.release()
 host.release()
 host.prepare(48000.0, 16, input_channels=1, output_channels=1)
+assert raises(TypeError, lambda: host.prepare(48000.0))
 
 host_state = host.state()
 assert host_state.param_count() == 1
@@ -282,6 +289,7 @@ host_state.set_value(8101, 0.0)
 assert host.load_state(saved)
 assert math.isclose(host_state.get_value(8101), 1.0)
 assert not host.load_state(b"not a valid host state")
+assert not host.load_state(b"")
 assert raises(TypeError, lambda: host.prepare("48000", 16))
 
 import numpy as np

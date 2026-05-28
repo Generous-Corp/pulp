@@ -325,3 +325,15 @@ TEST_CASE("pulp-screenshot main rejects unknown backend before rendering",
     auto exit_code = run_screenshot_cli({"--demo", "--backend", "metal"});
     REQUIRE(exit_code == 1);
 }
+
+TEST_CASE("pulp-screenshot main handles early non-render exits",
+          "[tools][screenshot][coverage]") {
+    REQUIRE(run_screenshot_cli({"--help"}) == 0);
+    REQUIRE(run_screenshot_cli({"--width", "bad", "--help"}) == 0);
+    REQUIRE(run_screenshot_cli({}) == 1);
+
+    auto missing_script = temp_file_path("missing-script.js");
+    std::filesystem::remove(missing_script);
+    const auto missing_arg = missing_script.string();
+    REQUIRE(run_screenshot_cli({"--script", missing_arg.c_str()}) == 1);
+}

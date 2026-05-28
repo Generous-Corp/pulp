@@ -299,3 +299,25 @@ TEST_CASE("Linux packaging deb failures remove staging and preserve inputs",
     REQUIRE(fs::is_regular_file(build / "CLAP" / "Failure.clap"));
     REQUIRE(read_file(build / "CLAP" / "Failure.clap") == "clap");
 }
+
+TEST_CASE("Linux packaging deb generation removes stale staging before writing",
+          "[ship][linux-package][coverage][requested]") {
+    if (!command_available("dpkg-deb"))
+        SKIP("dpkg-deb is required to inspect generated deb archives");
+
+    TempDir temp("deb-stale-staging");
+    auto build = temp.path / "build";
+    write_file(build / "deb-staging" / "stale.txt", "must be removed");
+    write_file(build / "VST3" / "Fresh.vst3" / "Contents" / "module.txt", "fresh");
+
+    auto output = temp.path / "fresh.deb";
+    REQUIRE(pulp::ship::create_deb("pulp-fresh", "9.8.7", build.string(),
+                                   output.string(), "Pulp Tests"));
+    REQUIRE_FALSE(fs::exists(build / "deb-staging"));
+
+    auto contents = run_sh("dpkg-deb --contents " + quote(output));
+    REQUIRE(contents.exit_code == 0);
+    REQUIRE_THAT(contents.stdout_output,
+                 ContainsSubstring("./usr/lib/vst3/Fresh.vst3/Contents/module.txt"));
+    REQUIRE(contents.stdout_output.find("stale.txt") == std::string::npos);
+}

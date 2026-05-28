@@ -4,6 +4,7 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -54,10 +55,20 @@ std::string json_escaped(std::string text) {
         switch (c) {
             case '"': escaped += "\\\""; break;
             case '\\': escaped += "\\\\"; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
             case '\n': escaped += "\\n"; break;
             case '\r': escaped += "\\r"; break;
             case '\t': escaped += "\\t"; break;
-            default: escaped += static_cast<char>(c); break;
+            default:
+                if (c < 0x20) {
+                    char buf[7] = {};
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    escaped += buf;
+                } else {
+                    escaped += static_cast<char>(c);
+                }
+                break;
         }
     }
     return escaped;
@@ -214,6 +225,41 @@ TEST_CASE("pulp-scan-worker escapes fallback JSON descriptor strings",
     REQUIRE_THAT(result.stdout_output, ContainsSubstring(json_field("path", bundle.string())));
     REQUIRE(result.stdout_output.find("Quoted \"Name\"") == std::string::npos);
     REQUIRE(result.stdout_output.find("Name\"\nLine") == std::string::npos);
+#endif
+}
+
+TEST_CASE("pulp-scan-worker test JSON escape helper covers control bytes",
+          "[host][scan-worker][coverage]") {
+    const std::string text = std::string("Quote\" Slash\\ Back") + '\b'
+                           + " Form" + '\f' + " Line\nReturn\rTab\tUnit"
+                           + '\x01' + "End";
+    REQUIRE(json_escaped(text)
+            == "Quote\\\" Slash\\\\ Back\\b Form\\f Line\\nReturn\\rTab\\tUnit\\u0001End");
+}
+
+TEST_CASE("pulp-scan-worker escapes JSON control characters in fallback names",
+          "[host][scan-worker][coverage]") {
+#if defined(_WIN32)
+    SUCCEED("Windows filenames cannot contain the control characters needed for this fallback-name escape path");
+#else
+    ScratchDir scratch("control-clap");
+    const std::string name = std::string("Control") + '\b' + "Back"
+                           + '\f' + "Form" + '\x01' + "Unit";
+    auto bundle = scratch.path / (name + ".clap");
+    write_file(bundle, "not a dynamic library");
+
+    auto result = run_worker({bundle.string()});
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.stdout_output.empty());
+    REQUIRE(result.stdout_output.back() == '\n');
+    REQUIRE_THAT(result.stdout_output,
+                 ContainsSubstring("\"name\":\"Control\\bBack\\fForm\\u0001Unit\""));
+    REQUIRE_THAT(result.stdout_output,
+                 ContainsSubstring("\"unique_id\":\"Control\\bBack\\fForm\\u0001Unit\""));
+    REQUIRE_THAT(result.stdout_output, ContainsSubstring(json_field("path", bundle.string())));
+    REQUIRE(result.stdout_output.find('\b') == std::string::npos);
+    REQUIRE(result.stdout_output.find('\f') == std::string::npos);
+    REQUIRE(result.stdout_output.find('\x01') == std::string::npos);
 #endif
 }
 

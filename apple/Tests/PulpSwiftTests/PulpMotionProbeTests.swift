@@ -53,6 +53,21 @@ final class PulpMotionProbeTests: XCTestCase {
         XCTAssertEqual(recorder.detachedTraceIds, [42])
     }
 
+    func testGeometryProbeDeinitDetachesRegisteredTrace() {
+        let recorder = MotionBackendRecorder()
+        recorder.nextTraceId = 99
+        PulpMotionRuntime.installTestBackend(recorder.backend)
+
+        var probe: PulpMotionGeometryProbe? =
+            PulpMotionGeometryProbe(view: "Deinit", fps: 30)
+        XCTAssertTrue(probe?.isAttached == true)
+        XCTAssertEqual(recorder.detachedTraceIds, [])
+
+        probe = nil
+
+        XCTAssertEqual(recorder.detachedTraceIds, [99])
+    }
+
     func testGeometryProbeRegistrationDeclineClearsAmbientProvenance() {
         let recorder = MotionBackendRecorder()
         recorder.nextTraceId = 0

@@ -312,6 +312,36 @@ TEST_CASE("InspectorServer dispatches requests through the configured handler",
     server.stop();
 }
 
+TEST_CASE("InspectorServer uses the latest installed request handler",
+          "[inspect][server][coverage][requested]") {
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    server.set_request_handler([](const InspectorMessage& request) {
+        return make_response(request.id, R"({"value":"first"})");
+    });
+    server.set_request_handler([](const InspectorMessage& request) {
+        return make_response(request.id, R"({"value":"second"})");
+    });
+
+    RecordingClient client;
+    REQUIRE(client.connect(*port));
+    REQUIRE(wait_for_client_count(server, 1));
+
+    REQUIRE(client.conn.send_message(encode_message(make_request(17, "Echo.latest"))));
+
+    InspectorMessage message;
+    REQUIRE(decode_message(client.wait_for_message(0), message));
+    REQUIRE(message.id == 17);
+    REQUIRE_FALSE(message.is_error);
+    const auto response_json = choc::json::parse(message.params_json);
+    REQUIRE(std::string(response_json["value"].getString()) == "second");
+
+    client.conn.disconnect();
+    server.stop();
+}
+
 TEST_CASE("InspectorServer can refresh its discovery file after startup",
           "[inspect][server]") {
     const auto tmp = std::filesystem::temp_directory_path() /

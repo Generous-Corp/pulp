@@ -137,6 +137,34 @@ TEST_CASE("design-debug repo discovery finds the design tool from nested directo
     std::filesystem::remove_all(temp, ec);
 }
 
+TEST_CASE("design-debug loads ordered design-tool modules from the entry path",
+          "[tools][design-debug][coverage][requested]") {
+    auto temp = make_temp_dir("module-load");
+    auto js_dir = temp / "examples" / "design-tool";
+    REQUIRE(std::filesystem::create_directories(js_dir));
+    REQUIRE(write_text_file(js_dir / "oklch.js", "globalThis.__load = ['oklch'];\n"));
+    for (const char* module : kDesignToolModules) {
+        REQUIRE(write_text_file(js_dir / module,
+                                "globalThis.__load.push('" + std::string(module) + "');\n"));
+    }
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(js_dir / kDesignToolEntry, bridge);
+    auto result = engine.evaluate("JSON.stringify(globalThis.__load)");
+    REQUIRE(result.isString());
+    auto text = std::string(result.getString());
+
+    REQUIRE(text.find("oklch") != std::string::npos);
+    REQUIRE(text.find("design-tool-core.js") != std::string::npos);
+    REQUIRE(text.find("design-tool-export.js") != std::string::npos);
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
+}
+
 TEST_CASE("design-debug capture metadata matches backend behavior",
           "[tools][design-debug][coverage]") {
     REQUIRE(std::string(capture_mode_flag_name(CaptureMode::headless_skia,

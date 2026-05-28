@@ -252,6 +252,17 @@ TEST_CASE("audio model registry preserves URL bytes and rejects partial protocol
     REQUIRE(resolve_checkpoint_url("hf://org/repo/").empty());
 }
 
+TEST_CASE("audio model registry preserves concrete Hugging Face file paths",
+          "[audio][tools][model-registry][coverage][requested]") {
+    REQUIRE(resolve_checkpoint_url(" hf://org/repo/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo//")
+            == "https://huggingface.co/org/repo/resolve/main//");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/\t")
+            == "https://huggingface.co/org/repo/resolve/main/\t");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/model.pt")
+            == "https://huggingface.co/org/repo/resolve/main/model.pt");
+}
+
 TEST_CASE("audio model store reads legacy metadata and malformed records fail closed",
           "[audio][tools][issue-643]") {
     TempDir temp;
@@ -1582,7 +1593,7 @@ TEST_CASE("excerpt find reports unsupported inputs after model resolution",
 }
 
 TEST_CASE("excerpt find records unreadable WAV inputs without writing dry-run bundles",
-          "[audio][tools][excerpt-service][coverage]") {
+          "[audio][tools][excerpt-service][coverage][requested]") {
     TempDir temp;
     auto checkpoint = install_active_clap_model(temp);
     auto corrupt_wav = temp.path / "corrupt.wav";

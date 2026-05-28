@@ -17,6 +17,7 @@
 #include <pulp/audio/audio_thumbnail.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -55,8 +56,10 @@ AudioFileData make_sine(uint32_t sample_rate,
 
 std::filesystem::path unique_wav_path() {
     static int counter = 0;
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
     auto stem = "pulp_test_thumbnail_"
               + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
+              + "_" + std::to_string(tick)
               + "_" + std::to_string(counter++) + ".wav";
     return std::filesystem::temp_directory_path() / stem;
 }
@@ -286,8 +289,10 @@ namespace {
 
 std::filesystem::path unique_cache_dir() {
     static int counter = 0;
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
     auto name = "pulp_test_thumbcache_"
               + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
+              + "_" + std::to_string(tick)
               + "_" + std::to_string(counter++);
     auto p = std::filesystem::temp_directory_path() / name;
     std::error_code ec;

@@ -97,6 +97,11 @@ TEST_CASE("design-import benchmark parse_int accepts complete integers only",
     REQUIRE_FALSE(parse_int("12ms", value));
     REQUIRE_FALSE(parse_int("1.5", value));
     REQUIRE_FALSE(parse_int("abc", value));
+    REQUIRE(parse_int(" 12", value));
+    REQUIRE(value == 12);
+    REQUIRE_FALSE(parse_int("12 ", value));
+    REQUIRE(parse_int("+12", value));
+    REQUIRE(value == 12);
 }
 
 TEST_CASE("design-import benchmark argument parser supports split and equals forms",

@@ -99,6 +99,33 @@ TEST_CASE("parse_compat_json rejects malformed input", "[cli][import-detect][iss
     CHECK_FALSE(det::parse_compat_json("{\"compat-schema-version\":\"0.2\"}").has_value());
 }
 
+TEST_CASE("parse_compat_json preserves sources with empty detected formats",
+          "[cli][import-detect][coverage][requested]") {
+    auto manifest = det::parse_compat_json(R"({
+  "compat-schema-version": "1.0",
+  "imports": {
+    "empty": {"parser-version": "1.0", "detected-formats": []},
+    "bad": {"parser-version": "1.0", "detected-formats": [42, []]},
+    "good": {
+      "parser-version": "1.0",
+      "detected-formats": [{
+        "format-version": "2026.05",
+        "fingerprint": [{"kind": "filename", "regex": ".*\\.html"}]
+      }]
+    }
+  }
+})");
+
+    REQUIRE(manifest.has_value());
+    REQUIRE(manifest->sources.size() == 3);
+    REQUIRE(manifest->sources[0].source == "empty");
+    REQUIRE(manifest->sources[0].formats.empty());
+    REQUIRE(manifest->sources[1].source == "bad");
+    REQUIRE(manifest->sources[1].formats.empty());
+    REQUIRE(manifest->sources[2].source == "good");
+    REQUIRE(manifest->sources[2].formats.size() == 1);
+}
+
 TEST_CASE("parse_compat_json keeps optional format metadata and skips bad shapes",
           "[cli][import-detect][coverage]") {
     auto manifest = det::parse_compat_json(R"({
@@ -670,8 +697,8 @@ TEST_CASE("snapshot_input ignores script-like tags and prefixed attributes",
 }
 
 TEST_CASE("snapshot_input accepts script tag and attribute whitespace boundaries",
-          "[cli][import-detect][coverage]") {
-    auto dir = fs::temp_directory_path() / "pulp-import-detect-script-boundaries";
+          "[cli][import-detect][coverage][requested]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-script-whitespace-boundaries";
     fs::remove_all(dir);
     fs::create_directories(dir);
 
