@@ -206,12 +206,72 @@ def row_node_id(row: dict[str, Any], index: int) -> str:
     return f"row.{index}.{suffix}"
 
 
+def metric_key(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_").lower() or "unknown"
+
+
+def inline_source_audit(route_manifest: dict[str, Any]) -> dict[str, Any]:
+    inputs = route_manifest.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return {}
+    for key in ("sourceAuditSummary", "sourceAudit"):
+        value = inputs.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
 def count_map(source_audit: dict[str, Any], rows: list[Any] | None = None) -> dict[str, int]:
     counts: dict[str, int] = {}
     for key in ("lines", "bytes"):
         value = source_audit.get(key)
         if is_non_negative_int(value):
             counts[key] = value
+
+    input_summary = source_audit.get("input", {})
+    if isinstance(input_summary, dict):
+        value = input_summary.get("bytes")
+        if is_non_negative_int(value):
+            counts.setdefault("bytes", value)
+
+    jsx_summary = source_audit.get("summary", {})
+    if isinstance(jsx_summary, dict):
+        for key in (
+            "parse_errors",
+            "jsx_elements",
+            "map_calls",
+            "ternaries",
+            "set_param_calls",
+            "style_objects",
+            "css_values",
+            "css_values_valid",
+            "css_values_invalid",
+            "svg_vector_nodes",
+            "native_candidate_components",
+            "standard_source_component_instances",
+            "expanded_native_candidate_instances",
+            "expanded_choice_instances",
+        ):
+            value = jsx_summary.get(key)
+            if is_non_negative_int(value):
+                counts[key] = value
+        component_counts = jsx_summary.get("component_counts", {})
+        if isinstance(component_counts, dict):
+            for key, value in component_counts.items():
+                if isinstance(key, str) and is_non_negative_int(value):
+                    counts[f"component_{metric_key(key)}"] = value
+        state_setters = jsx_summary.get("state_setters", {})
+        if isinstance(state_setters, dict):
+            counts["state_setters"] = len(state_setters)
+        arrays = jsx_summary.get("arrays", {})
+        if isinstance(arrays, dict):
+            counts["array_constants"] = len(arrays)
+
+    materiality = source_audit.get("materiality", {})
+    if isinstance(materiality, dict):
+        for key, value in materiality.items():
+            if isinstance(key, str) and is_non_negative_int(value):
+                counts[f"materiality_{metric_key(key)}"] = value
 
     template_counts = source_audit.get("sourceTemplateCounts", {})
     if isinstance(template_counts, dict):
@@ -325,7 +385,7 @@ def dynamic_risks(counts: dict[str, int]) -> list[str]:
         risks.append("react_refs")
     if counts.get("useCallback", 0) > 0:
         risks.append("react_callbacks")
-    if counts.get("mapCalls", 0) > 0:
+    if counts.get("mapCalls", 0) > 0 or counts.get("map_calls", 0) > 0:
         risks.append("runtime_array_maps")
     return risks
 
@@ -579,6 +639,8 @@ def build_frontend_ir(
     if not isinstance(overlay, dict):
         overlay = {}
     rows = route_rows(route_manifest)
+    if not source_audit:
+        source_audit = inline_source_audit(route_manifest)
 
     source_jsx = route_manifest.get("inputs", {}).get("sourceJsx", {})
     if not isinstance(source_jsx, dict):

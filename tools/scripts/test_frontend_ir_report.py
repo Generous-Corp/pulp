@@ -163,6 +163,30 @@ class FrontendIrReportTests(unittest.TestCase):
                     "path": "fixtures/Compressor.tsx",
                     "sha256": "c" * 64,
                 },
+                "sourceAudit": "generated_inline_by_native_ui_phase_h_seed_route_manifests",
+                "sourceAuditSummary": {
+                    "schema": "pulp-source-audit-summary-v1",
+                    "input": {
+                        "bytes": 4096,
+                    },
+                    "summary": {
+                        "jsx_elements": 2,
+                        "map_calls": 1,
+                        "style_objects": 2,
+                        "css_values": 5,
+                        "component_counts": {
+                            "section": 1,
+                            "input": 1,
+                        },
+                        "state_setters": {
+                            "threshold": "setThreshold",
+                        },
+                    },
+                    "materiality": {
+                        "event_contracts": 1,
+                        "set_state_events": 1,
+                    },
+                },
             },
             "source_contract_overlay": {
                 "source": {
@@ -205,6 +229,16 @@ class FrontendIrReportTests(unittest.TestCase):
         )
 
         self.assertEqual(report["source"]["source_of_truth"], "archived_fixture")
+        self.assertEqual(report["source"]["counts"]["bytes"], 4096)
+        self.assertEqual(report["source"]["counts"]["jsx_elements"], 2)
+        self.assertEqual(report["source"]["counts"]["map_calls"], 1)
+        self.assertEqual(report["source"]["counts"]["style_objects"], 2)
+        self.assertEqual(report["source"]["counts"]["css_values"], 5)
+        self.assertEqual(report["source"]["counts"]["component_section"], 1)
+        self.assertEqual(report["source"]["counts"]["component_input"], 1)
+        self.assertEqual(report["source"]["counts"]["state_setters"], 1)
+        self.assertEqual(report["source"]["counts"]["materiality_event_contracts"], 1)
+        self.assertIn("runtime_array_maps", report["source"]["dynamic_risks"])
         self.assertEqual(report["nodes"][0]["id"], "fixtures/Compressor.tsx:24:section[0]")
         self.assertEqual(report["routes"][0]["chosen_route"], "native_html")
         self.assertEqual(report["routes"][1]["chosen_route"], "native_cpp")
@@ -284,6 +318,15 @@ class FrontendIrReportTests(unittest.TestCase):
                     "fixture": "fixture-b",
                     "inputs": {
                         "sourceJsx": {"path": "fixtures/UI.jsx"},
+                        "sourceAuditSummary": {
+                            "summary": {
+                                "jsx_elements": 3,
+                                "map_calls": 1,
+                            },
+                            "materiality": {
+                                "event_contracts": 2,
+                            },
+                        },
                         "ir": {"path": "reports/generated/ui-ir.json"},
                     },
                     "source_contract_overlay": {
@@ -305,6 +348,9 @@ class FrontendIrReportTests(unittest.TestCase):
             report = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual(report["schema"], "pulp-frontend-ir-v0")
             self.assertEqual(report["route_manifest"]["path"], "reports/route.json")
+            self.assertEqual(report["source"]["counts"]["jsx_elements"], 3)
+            self.assertEqual(report["source"]["counts"]["materiality_event_contracts"], 2)
+            self.assertIn("runtime_array_maps", report["source"]["dynamic_risks"])
             self.assertEqual(report["routes"], [])
 
 
