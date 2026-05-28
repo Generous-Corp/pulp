@@ -27,8 +27,14 @@ PluginDescriptor SineSynth::descriptor() const {
 }
 
 void SineSynth::define_parameters(StateStore& store) {
-    freq_param_id_  = store.define(ParamInfo{"freq",  "Frequency", 110.0f, 30.0f, 4000.0f});
-    level_param_id_ = store.define(ParamInfo{"level", "Level",     0.5f,   0.0f, 1.0f});
+    freq_param_id_  = 1;
+    level_param_id_ = 2;
+    store.add_parameter({static_cast<ParamID>(freq_param_id_),
+                         "Frequency", "Hz",
+                         ParamRange{30.0f, 4000.0f, 110.0f}});
+    store.add_parameter({static_cast<ParamID>(level_param_id_),
+                         "Level", "",
+                         ParamRange{0.0f, 1.0f, 0.5f}});
 }
 
 void SineSynth::prepare(const PrepareContext& ctx) {
@@ -57,8 +63,8 @@ void SineSynth::process(BufferView<float>& out,
     const float gate_step  = 0.002f; // ~10 ms AR at 48 kHz
 
     const int n = ctx.num_samples;
-    float* const L = out.channel_data(0);
-    float* const R = out.num_channels() > 1 ? out.channel_data(1) : nullptr;
+    auto L = out.channel(0);
+    const bool has_right = out.num_channels() > 1;
 
     for (int i = 0; i < n; ++i) {
         gate_ += (gate_target_ - gate_) * gate_step;
@@ -66,7 +72,10 @@ void SineSynth::process(BufferView<float>& out,
         phase_ += phase_inc;
         if (phase_ >= kTwoPi) phase_ -= kTwoPi;
         L[i] = s;
-        if (R) R[i] = s;
+    }
+    if (has_right) {
+        auto R = out.channel(1);
+        for (int i = 0; i < n; ++i) R[i] = L[i];
     }
 }
 
