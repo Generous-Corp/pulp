@@ -1153,10 +1153,15 @@ TEST_CASE("parse_v0_tsx maps React Native primitives into baked C++ contracts",
 
         export default function GainStage() {
             const [armed, setArmed] = useState(true);
+            const [gain, setGain] = useState(0.72);
+            const increaseGain = () => setGain(Math.min(1, Number((gain + 0.05).toFixed(2))));
             return (
                 <View testID="rn-gain-stage">
                     <Pressable accessibilityLabel="Toggle bypass" onPress={() => setArmed(!armed)}>
                         <Text>{armed ? 'ARMED' : 'BYPASS'}</Text>
+                    </Pressable>
+                    <Pressable accessibilityLabel="Increase gain" onPress={increaseGain}>
+                        <Text>+</Text>
                     </Pressable>
                 </View>
             );
@@ -1175,6 +1180,19 @@ TEST_CASE("parse_v0_tsx maps React Native primitives into baked C++ contracts",
     REQUIRE(pressable->attributes.at("pulpEventContract") == "button:onClick:setState");
     REQUIRE(pressable->attributes.at("pulpGestureContract") == "button:click");
 
+    const auto* increase = find_descendant(ir.root, [](const IRNode& node) {
+        auto label = node.attributes.find("accessibilityLabel");
+        return node.type == "button" && label != node.attributes.end() &&
+               label->second == "Increase gain";
+    });
+    REQUIRE(increase != nullptr);
+    REQUIRE(increase->attributes.at("pulpValueKey") == "gain");
+    REQUIRE(increase->attributes.at("pulpInitialValue") == "0.72");
+    REQUIRE(increase->attributes.at("pulpRouteType") == "native_cpp");
+    REQUIRE(increase->attributes.at("pulpSourceFamily") == "pressable");
+    REQUIRE(increase->attributes.at("pulpEventContract") == "button:onClick:setState");
+    REQUIRE(increase->attributes.at("pulpGestureContract") == "button:click");
+
     const auto* text = find_descendant(ir.root, [](const IRNode& node) {
         return node.type == "text" && node.attributes.find("jsxTag") != node.attributes.end() &&
                node.attributes.at("jsxTag") == "text";
@@ -1184,6 +1202,8 @@ TEST_CASE("parse_v0_tsx maps React Native primitives into baked C++ contracts",
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
     REQUIRE_FALSE(result.source.ends_with("\n\n"));
     REQUIRE(result.binding_manifest.find("\"value_key\": \"armed\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"value_key\": \"gain\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"source_family\": \"pressable\"") != std::string::npos);
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"button:onClick:setState\"") != std::string::npos);
 }
 

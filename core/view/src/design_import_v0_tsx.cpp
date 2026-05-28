@@ -48,6 +48,7 @@ ImportDiagnostic make_v0_import_diagnostic(ImportDiagnosticSeverity severity,
 
 struct V0SourceContracts {
     std::unordered_map<std::string, std::string> setter_to_state;
+    std::unordered_map<std::string, std::string> handler_to_state;
     std::unordered_map<std::string, std::string> state_initial_values;
 };
 
@@ -112,6 +113,17 @@ std::string normalize_state_initial_value(std::string value) {
     return value;
 }
 
+std::optional<std::string> state_from_setter_call_expression(
+    std::string_view expression,
+    const V0SourceContracts& contracts) {
+    for (const auto& [setter, state_key] : contracts.setter_to_state) {
+        const auto needle = setter + "(";
+        if (expression.find(needle) != std::string_view::npos)
+            return state_key;
+    }
+    return std::nullopt;
+}
+
 V0SourceContracts extract_v0_source_contracts(const std::string& tsx) {
     V0SourceContracts contracts;
     const std::regex state_re(
@@ -124,6 +136,24 @@ V0SourceContracts extract_v0_source_contracts(const std::string& tsx) {
         contracts.setter_to_state[setter] = state_key;
         if (!initial.empty())
             contracts.state_initial_values[state_key] = initial;
+    }
+    const std::regex arrow_handler_re(
+        R"(const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>\s*([^;]+);)");
+    for (auto it = std::sregex_iterator(tsx.begin(), tsx.end(), arrow_handler_re);
+         it != std::sregex_iterator(); ++it) {
+        const auto handler = (*it)[1].str();
+        const auto body = (*it)[2].str();
+        if (auto state_key = state_from_setter_call_expression(body, contracts))
+            contracts.handler_to_state[handler] = *state_key;
+    }
+    const std::regex function_handler_re(
+        R"(function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{([^}]*)\})");
+    for (auto it = std::sregex_iterator(tsx.begin(), tsx.end(), function_handler_re);
+         it != std::sregex_iterator(); ++it) {
+        const auto handler = (*it)[1].str();
+        const auto body = (*it)[2].str();
+        if (auto state_key = state_from_setter_call_expression(body, contracts))
+            contracts.handler_to_state[handler] = *state_key;
     }
     return contracts;
 }
@@ -143,12 +173,17 @@ std::optional<std::string> state_from_value_expression(std::string_view expressi
 
 std::optional<std::string> state_from_event_expression(std::string_view expression,
                                                        const V0SourceContracts& contracts) {
-    for (const auto& [setter, state_key] : contracts.setter_to_state) {
-        const auto needle = setter + "(";
-        if (expression.find(needle) != std::string_view::npos)
+    auto value = trim_ascii_ws(expression);
+    if (is_identifier_like(value)) {
+        if (auto it = contracts.handler_to_state.find(value); it != contracts.handler_to_state.end())
+            return it->second;
+    }
+    for (const auto& [handler, state_key] : contracts.handler_to_state) {
+        const auto needle = handler + "(";
+        if (value.find(needle) != std::string_view::npos)
             return state_key;
     }
-    return std::nullopt;
+    return state_from_setter_call_expression(value, contracts);
 }
 
 std::optional<std::string> attr_value(const IRNode& node, std::string_view key) {
