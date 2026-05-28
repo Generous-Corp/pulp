@@ -713,7 +713,7 @@ def routes_from_rows(rows: list[Any]) -> list[dict[str, Any]]:
     return routes
 
 
-def style_counts(nodes: list[dict[str, Any]]) -> dict[str, int]:
+def style_counts(nodes: list[dict[str, Any]], source_counts: dict[str, int] | None = None) -> dict[str, int]:
     supported = 0
     unsupported = 0
     for node in nodes:
@@ -729,10 +729,29 @@ def style_counts(nodes: list[dict[str, Any]]) -> dict[str, int]:
         fallback = style.get("fallback_reasons", [])
         if isinstance(fallback, list):
             unsupported += len(fallback)
-    return {
+    counts = {
         "supported": supported,
         "unsupported": unsupported,
     }
+    if source_counts:
+        for source_keys, style_key in (
+            (("css_values",), "source_css_values"),
+            (("css_values_valid",), "source_css_values_valid_syntax"),
+            (("css_values_invalid",), "source_css_values_invalid_syntax"),
+            (("style_objects", "inlineStyleObjects"), "source_style_objects"),
+            (("styleAttributes",), "source_style_attributes"),
+            (("style_keys",), "source_style_keys"),
+            (("materiality_style_values_normalized",), "source_style_values_normalized"),
+            (("materiality_css_lexer_matches",), "source_css_lexer_matches"),
+            (("materiality_dynamic_style_values",), "source_dynamic_style_values"),
+            (("materiality_conditional_style_values",), "source_conditional_style_values"),
+        ):
+            for source_key in source_keys:
+                value = source_counts.get(source_key)
+                if is_non_negative_int(value):
+                    counts[style_key] = value
+                    break
+    return counts
 
 
 def artifact_ref_from_manifest(route_manifest: dict[str, Any], key: str, kind: str) -> dict[str, Any] | None:
@@ -821,7 +840,7 @@ def build_frontend_ir(
         },
         "validation": {
             "source_counts": counts,
-            "style_counts": style_counts(nodes),
+            "style_counts": style_counts(nodes, counts),
             "route_counts": route_counts(route_manifest, rows),
             "primitive_counts": primitive_counts(rows),
             "resource_counts": resource_counts(resources),

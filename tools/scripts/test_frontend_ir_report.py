@@ -141,6 +141,9 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["validation"]["source_counts"]["style_keys"], 2)
         self.assertEqual(report["validation"]["source_counts"]["source_contract_rows"], 1)
         self.assertEqual(report["validation"]["style_counts"]["supported"], 2)
+        self.assertNotIn("source_css_values", report["validation"]["style_counts"])
+        self.assertEqual(report["validation"]["style_counts"]["source_style_attributes"], 3)
+        self.assertEqual(report["validation"]["style_counts"]["source_style_keys"], 2)
         self.assertEqual(report["validation"]["route_counts"]["nodes_total"], 9)
         self.assertEqual(report["validation"]["route_counts"]["route_rows_total"], 1)
         self.assertEqual(report["validation"]["route_counts"]["route_rows_native_cpp"], 1)
@@ -195,6 +198,7 @@ class FrontendIrReportTests(unittest.TestCase):
                     "materiality": {
                         "event_contracts": 1,
                         "set_state_events": 1,
+                        "conditional_style_values": 1,
                     },
                 },
             },
@@ -254,6 +258,9 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["routes"][1]["chosen_route"], "native_cpp")
         self.assertEqual(report["nodes"][1]["state"]["local_ui"]["threshold"], "set_state_from_event_value")
         self.assertEqual(report["validation"]["source_counts"]["source_contract_rows"], 2)
+        self.assertEqual(report["validation"]["style_counts"]["source_css_values"], 5)
+        self.assertEqual(report["validation"]["style_counts"]["source_style_objects"], 2)
+        self.assertEqual(report["validation"]["style_counts"]["source_conditional_style_values"], 1)
         self.assertEqual(report["validation"]["route_counts"]["route_rows_native_html"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["primitive_layout"], 1)
         self.assertEqual(report["validation"]["primitive_counts"]["with_state_contracts"], 1)
