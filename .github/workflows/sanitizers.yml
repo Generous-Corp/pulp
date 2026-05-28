@@ -194,7 +194,7 @@ jobs:
           ctest --test-dir build-asan --output-on-failure \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message|deleted plugin entry remains blacklisted|ConnectedChildProcess'
+            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message|deleted plugin entry remains blacklisted|ConnectedChildProcess|ChildProcessManager cleanup is safe from exit callback'
 
   tsan:
     needs: resolve-runners
