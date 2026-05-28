@@ -8,9 +8,11 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -27,6 +29,32 @@ std::string read_text_file(const fs::path& p) {
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+std::string json_escape(std::string_view input) {
+    std::string out;
+    out.reserve(input.size() + 8);
+    for (char ch : input) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) < 0x20) {
+                    std::ostringstream ss;
+                    ss << "\\u" << std::hex << std::setw(4)
+                       << std::setfill('0')
+                       << static_cast<int>(static_cast<unsigned char>(ch));
+                    out += ss.str();
+                } else {
+                    out += ch;
+                }
+                break;
+        }
+    }
+    return out;
 }
 
 FingerprintClause parse_clause(const JsonValue& v) {
@@ -502,14 +530,14 @@ NewFormatReport build_new_format_report(const ImportsManifest& manifest,
 std::string render_new_format_json(const NewFormatReport& r) {
     std::ostringstream o;
     o << "{\n";
-    o << "  \"candidate-source\": \"" << r.candidate_source << "\",\n";
-    o << "  \"candidate-format-version\": \"" << r.candidate_format_version << "\",\n";
+    o << "  \"candidate-source\": \"" << json_escape(r.candidate_source) << "\",\n";
+    o << "  \"candidate-format-version\": \"" << json_escape(r.candidate_format_version) << "\",\n";
     o << "  \"fingerprint-additions\": [";
     if (!r.additions.empty()) {
         o << "\n    {\"kind\": \"tailwind-config-token\", \"any-of\": [";
         for (size_t i = 0; i < r.additions.size(); ++i) {
             if (i) o << ", ";
-            o << "\"" << r.additions[i] << "\"";
+            o << "\"" << json_escape(r.additions[i]) << "\"";
         }
         o << "]}\n  ";
     }
@@ -519,13 +547,13 @@ std::string render_new_format_json(const NewFormatReport& r) {
         o << "\n    ";
         for (size_t i = 0; i < r.removals.size(); ++i) {
             if (i) o << ", ";
-            o << "\"" << r.removals[i] << "\"";
+            o << "\"" << json_escape(r.removals[i]) << "\"";
         }
         o << "\n  ";
     }
     o << "],\n";
-    o << "  \"based-on\": {\"source\": \"" << r.based_on_source
-      << "\", \"format-version\": \"" << r.based_on_format_version << "\"}\n";
+    o << "  \"based-on\": {\"source\": \"" << json_escape(r.based_on_source)
+      << "\", \"format-version\": \"" << json_escape(r.based_on_format_version) << "\"}\n";
     o << "}\n";
     return o.str();
 }

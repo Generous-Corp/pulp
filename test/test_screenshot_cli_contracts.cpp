@@ -335,6 +335,24 @@ TEST_CASE("pulp-screenshot option parser handles malformed non-help invocations"
     REQUIRE(explicit_default.backend_name == "default");
 }
 
+TEST_CASE("pulp-screenshot option parser ignores incomplete trailing switches",
+          "[tools][screenshot][coverage][requested]") {
+    auto options = parse_args({
+        "--script",
+        "--output",
+        "--theme",
+        "--backend",
+        "--base64"
+    });
+
+    REQUIRE(options.script_path == "--output");
+    REQUIRE(options.theme_name == "--backend");
+    REQUIRE(options.output_path == "screenshot.png");
+    REQUIRE(options.backend_was_defaulted);
+    REQUIRE(options.output_base64);
+    REQUIRE(normalize_backend(options));
+}
+
 TEST_CASE("pulp-screenshot main rejects unknown backend before rendering",
           "[tools][screenshot][coverage]") {
     auto exit_code = run_screenshot_cli({"--demo", "--backend", "metal"});

@@ -138,6 +138,10 @@ ignore:
   - "**/cmd_projects.cpp"
   - "**/canvas.hpp"
   - "**/skia_canvas.cpp"
+  # C++ test harnesses sometimes live beside tool sources (for example
+  # tools/scan-worker/test_scan_worker.cpp) instead of under top-level
+  # test/. They are tests, not product coverage surface.
+  - "**/test_*.cpp"
 
 # PR comment. Focused on reach + diff + flags + tree so contributors
 # see "how many lines of THIS PR are covered by THIS PR's tests"

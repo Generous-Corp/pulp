@@ -187,6 +187,20 @@ TEST_CASE("design-import benchmark argument parser uses last explicit option",
     REQUIRE(config->output_path == std::filesystem::path("second.json"));
 }
 
+TEST_CASE("design-import benchmark fixture and phase helpers fail closed",
+          "[design-import][benchmark][coverage][requested]") {
+    REQUIRE(make_fixture("not-a-lane") == nullptr);
+
+    CountingFixture fixture;
+    auto idle = run_phase(fixture, 0, 0, false);
+    REQUIRE(idle.duration_ms == 0);
+    REQUIRE(idle.samples == 0);
+    REQUIRE(idle.paint_commands_last == 0);
+    REQUIRE(fixture.steps == 0);
+    REQUIRE(fixture.last_frame == -1);
+    REQUIRE(fixture.js_evaluation_count() == 10);
+}
+
 TEST_CASE("design-import benchmark JSON report contains escaped config and metrics",
           "[design-import][benchmark][coverage]") {
     Config config;

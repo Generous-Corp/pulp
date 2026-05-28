@@ -354,3 +354,17 @@ TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids",
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") == 0);
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Start, "frame") == 0);
 }
+
+TEST_CASE("PulpBridge state ABI rejects invalid buffers without touching callers",
+          "[motion][swift-bridge][coverage][requested]") {
+    int untouched_size = 1234;
+    REQUIRE(pulp_state_serialize(nullptr) == nullptr);
+    REQUIRE(untouched_size == 1234);
+
+    const uint8_t bytes[] = {0x70, 0x75, 0x6c, 0x70};
+    REQUIRE_FALSE(pulp_state_deserialize(nullptr, 4));
+    REQUIRE_FALSE(pulp_state_deserialize(bytes, 0));
+    REQUIRE_FALSE(pulp_state_deserialize(bytes, -1));
+
+    pulp_free(nullptr);
+}

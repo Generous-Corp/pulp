@@ -156,6 +156,13 @@ pulp ship sign --identity "Your Company"                # Uses signtool
 pulp ship package --version 1.0.0                       # Creates NSIS .exe installer
 ```
 
+Windows does not notarize, but `ship/platform/win/codesign_win.cpp` must
+still define every public notarization symbol from
+`ship/include/pulp/ship/codesign.hpp`. Keep ASC-key
+`notarize_submit_asc(...)` as a fail-closed `std::nullopt` stub so
+`pulp-test-codesign` links on Windows and the cross-platform API surface
+stays in lockstep with macOS/Linux.
+
 ## Android-Specific
 
 ### ABI Selection

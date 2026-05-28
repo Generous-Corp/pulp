@@ -76,6 +76,12 @@ Slice 6 (#551).
   checkout tries to clone the private `planning` submodule with the default
   token and fails before docs deploys. Fix that at the Pages configuration
   layer (`build_type=workflow`), not by weakening normal submodule checkout.
+- `.github/workflows/sanitizers.yml` runs broad ASan/UBSan matrices, but its
+  exclude regex may carry narrow sanitizer-lane skips for non-memory-safety
+  failures that remain covered by regular Build/Test. Keep those skips named
+  exactly to the failing CTest cases and leave comments explaining the
+  alternate coverage path; do not use sanitizer excludes to hide new targeted
+  coverage tests.
 
 ## Current Build-and-Test routing
 
