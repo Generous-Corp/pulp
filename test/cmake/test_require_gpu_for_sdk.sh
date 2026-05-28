@@ -105,4 +105,41 @@ if grep -q "PULP_REQUIRE_GPU_FOR_SDK=ON but Skia binaries were not found" "${cas
 fi
 
 echo "OK case 2: PULP_REQUIRE_GPU_FOR_SDK=OFF (default) configures without Skia"
-echo "OK: PULP_REQUIRE_GPU_FOR_SDK gate behaves correctly (pulp #1817)"
+
+# ── Case 3: PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF contradicts ─
+#
+# Phase iOS-D.1 added an inverse guard (planning/2026-05-28-ios-d-gpu-auv3-
+# crosscheck.md): asking the release lane to enforce GPU while disabling
+# it is a misconfiguration that the SDK consumer can never recover from.
+# Without this guard the previous Case 1 was the only enforcement, and a
+# release lane that flipped both flags would silently ship a CG-only SDK.
+case3_build="${tmp_root}/case3-require-on-gpu-off"
+case3_log="${tmp_root}/case3.log"
+
+set +e
+cmake \
+    -S "${pulp_root}" \
+    -B "${case3_build}" \
+    -DSKIA_DIR="${fake_skia}" \
+    -DPULP_ENABLE_GPU=OFF \
+    -DPULP_REQUIRE_GPU_FOR_SDK=ON \
+    -DPULP_BUILD_TESTS=OFF \
+    -DPULP_BUILD_EXAMPLES=OFF \
+    >"${case3_log}" 2>&1
+case3_status=$?
+set -e
+
+if [[ ${case3_status} -eq 0 ]]; then
+    echo "FAIL: REQUIRE_GPU_FOR_SDK=ON + ENABLE_GPU=OFF should have failed configure but it succeeded" >&2
+    tail -n 60 "${case3_log}" >&2
+    exit 1
+fi
+
+if ! grep -q "PULP_ENABLE_GPU=OFF" "${case3_log}"; then
+    echo "FAIL: expected the contradiction diagnostic to mention PULP_ENABLE_GPU=OFF" >&2
+    tail -n 80 "${case3_log}" >&2
+    exit 1
+fi
+
+echo "OK case 3: PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF correctly failed configure"
+echo "OK: PULP_REQUIRE_GPU_FOR_SDK gate behaves correctly (pulp #1817 + Phase iOS-D.1)"

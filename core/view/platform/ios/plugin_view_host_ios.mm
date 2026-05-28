@@ -308,14 +308,27 @@ private:
 
 // ── GPU-accelerated iOS plugin view host ─────────────────────────────────
 
+// Close the open `namespace pulp::view {` before pulling in Skia / Dawn /
+// Metal headers — otherwise `pulp::render::*` ends up nested as
+// `pulp::view::pulp::render::*` and Metal's Objective-C `@protocol`
+// declarations land inside a C++ namespace, which the compiler rejects
+// ("Objective-C declarations may only appear in global scope"). The
+// bug was inert before Phase iOS-D.1 because no iOS configure had
+// `PULP_HAS_SKIA` defined; turning Skia on for iOS surfaced it
+// immediately.
+}  // namespace pulp::view
+
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/runtime/log.hpp>
 #include <functional>
 #include <memory>
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
+
+namespace pulp::view {
 
 class IOSGpuPluginViewHost;
 
@@ -624,9 +637,9 @@ private:
 }
 @end
 
-namespace pulp::view {
-
 #endif // PULP_HAS_SKIA
+
+namespace pulp::view {
 
 // Factory functions
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {

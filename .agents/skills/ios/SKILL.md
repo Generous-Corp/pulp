@@ -555,6 +555,74 @@ option 1 + option 3 over chasing a Sim audio capture. See
 `.agents/skills/auv3/SKILL.md` "iOS AUv3 diagnostic recipe" for the
 chain of `PULP_` prints to grep.
 
+### iOS GPU (Skia/Dawn) header-namespace gotcha — Phase iOS-D.1
+
+When the iOS configure first turns on Skia (i.e.
+`PULP_ENABLE_GPU=ON` + `PULP_HAS_SKIA` is set), two pre-existing bugs
+in `core/view/platform/ios/{window_host,plugin_view_host}_ios.mm`
+surfaced — they were inert because no prior iOS build had ever defined
+`PULP_HAS_SKIA`:
+
+1. **Skia / Dawn / Metal headers `#include`d inside an open
+   `namespace pulp::view {`.** Symptom is a wall of compile errors
+   from Apple's Metal headers — "Objective-C declarations may only
+   appear in global scope" on every `@protocol`. Cause: the open
+   namespace nests every header symbol under `pulp::view`, and
+   `@protocol` outside the global scope is a hard syntax error.
+   Fix: close the namespace before the `#include` block, reopen it
+   after.
+
+2. **`std::make_unique<render::GpuSurface>()` /
+   `<render::SkiaSurface>()`.** Both classes are abstract — use the
+   factories `render::GpuSurface::create_dawn()` and
+   `render::SkiaSurface::create(GpuSurface&, Config)`. The Config
+   struct exposes only `width` / `height` / `scale_factor`; Dawn
+   device/queue/instance are queried from the GpuSurface internally.
+
+3. **`pulp::render` was not linked into `pulp-view-core` on iOS.** The
+   mac branch in `core/view/CMakeLists.txt` linked `pulp::render`
+   under `if(PULP_HAS_SKIA)`; the iOS branch did not. Phase iOS-D.1
+   adds the same gate.
+
+### iOS GPU AUv3 acceptance log markers — Phase iOS-D.1
+
+A GPU-backed AUv3 view that's actually using Skia/Dawn on iOS emits a
+specific log sequence (see
+`planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md`):
+
+```
+[plugin-gpu-host] adapter mode=custom use_gpu=true ... requires_gpu_host=true
+GpuSurface: created Metal surface from CAMetalLayer
+GpuSurface: Dawn initialized (surface: presentable)
+GpuSurface: backend_type=Metal     ← added by Phase iOS-D.1
+AU iOS: view controller loaded, ... mode=custom, gpu=true
+```
+
+Capture with:
+
+```bash
+xcrun simctl spawn booted log stream \
+  --predicate 'process == "<AppName>" OR eventMessage CONTAINS "GpuSurface" OR eventMessage CONTAINS "[plugin-gpu-host]" OR eventMessage CONTAINS "AU iOS"' \
+  --level debug
+```
+
+Missing `backend_type=Metal` (or `backend_type=Null` / `OpenGL`)
+means GPU init silently fell back to a non-Metal adapter — treat
+that as a P0 since the AUv3 is then rendering through software. The
+first frame may also log a benign
+`WebGPU error (2): First instance (1) must be zero` — that's an
+upstream Skia/Dawn first-frame issue, not a Pulp regression.
+
+### iOS GPU configure hard-fail — `PULP_REQUIRE_GPU_FOR_SDK`
+
+Phase iOS-D.1 extends the existing release-lane guard (pulp #1817) so
+the contradiction `PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF`
+hard-fails at configure time. Test:
+`bash test/cmake/test_require_gpu_for_sdk.sh <pulp-src>` — three
+cases (REQUIRE+ENABLE+missing-Skia fail; REQUIRE off succeeds;
+REQUIRE on + ENABLE off fails). Add a case here whenever a new flag
+contradicts an existing one.
+
 ## See Also
 
 - `android` skill — parallel structure for Android NDK.

@@ -157,6 +157,24 @@ public:
         initialized_ = true;
         runtime::log_info("GpuSurface: Dawn initialized (surface: {})",
             surface_ ? "presentable" : "offscreen-only");
+
+        // Phase iOS-D.1 hard-fail gate
+        // (planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md): log the Dawn
+        // backend type that actually came up. Tests / CI scrape this line
+        // to assert `backend_type=Metal` on Apple platforms; a missing or
+        // unexpected backend means GPU init silently fell back to a
+        // different adapter (Null, OpenGL emulation, etc.) and the editor
+        // is rendering through CPU. The adapter info is queried after
+        // device creation so the result reflects the real selection.
+        if (adapter_) {
+            wgpu::AdapterInfo dawn_info{};
+            adapter_.GetInfo(&dawn_info);
+            runtime::log_info("GpuSurface: backend_type={}",
+                dawn_backend_type_name(dawn_info.backendType));
+        } else {
+            runtime::log_warn(
+                "GpuSurface: backend_type=unknown (adapter unset after init)");
+        }
         return true;
     }
 

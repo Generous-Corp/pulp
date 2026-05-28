@@ -177,6 +177,24 @@ if(PULP_ENABLE_GPU AND PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_HAS_SKIA)
         "fetch) or set PULP_ENABLE_GPU=OFF if you intend a CG-only build.")
 endif()
 
+# Phase iOS-D.1 — `PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF` is a
+# misconfiguration: the consumer asked the release lane to enforce GPU but
+# then disabled it. Without this guard the configure succeeded, the
+# resulting tarball silently #ifdef'd out the GPU code path, and downstream
+# consumers got the same CG-only fallback the option exists to prevent —
+# defeating the whole purpose of the flag. Fail loudly at configure time.
+# (planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md, hard-fail-on-CPU rule.)
+if(PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_ENABLE_GPU)
+    message(FATAL_ERROR
+        "PULP_REQUIRE_GPU_FOR_SDK=ON but PULP_ENABLE_GPU=OFF — these "
+        "options contradict each other. PULP_REQUIRE_GPU_FOR_SDK exists to "
+        "guarantee the SDK release ships with the GPU code path linked, "
+        "and PULP_ENABLE_GPU=OFF #ifdef's that exact path out. Either set "
+        "PULP_ENABLE_GPU=ON (and let the existing FATAL_ERROR above catch "
+        "a missing Skia archive) or set PULP_REQUIRE_GPU_FOR_SDK=OFF for a "
+        "deliberate CG-only build.")
+endif()
+
 # Text shaping requires GPU/Skia — validate even when GPU is off
 if(PULP_TEXT_SHAPING AND NOT PULP_ENABLE_GPU)
     message(WARNING "PULP_TEXT_SHAPING requires PULP_ENABLE_GPU — disabling text shaping")
