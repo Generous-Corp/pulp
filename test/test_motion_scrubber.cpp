@@ -220,6 +220,95 @@ TEST_CASE("MotionScrubber scrub_to / play are no-ops when no fixture loaded",
     REQUIRE(scrub.play() == 0u);
 }
 
+TEST_CASE("MotionScrubber owns only passive replay protocol methods",
+          "[motion-scrubber][protocol][coverage][requested]") {
+    REQUIRE(MotionScrubber::owns_method("Motion.loadFixture"));
+    REQUIRE(MotionScrubber::owns_method("Motion.scrubTo"));
+    REQUIRE(MotionScrubber::owns_method("Motion.play"));
+    REQUIRE(MotionScrubber::owns_method("Motion.pause"));
+
+    REQUIRE_FALSE(MotionScrubber::owns_method("Motion.startTrace"));
+    REQUIRE_FALSE(MotionScrubber::owns_method("Motion.snapshot"));
+    REQUIRE_FALSE(MotionScrubber::owns_method("DOM.getDocument"));
+
+    MotionScrubber scrub;
+    auto resp = scrub.handle(make_request(9, "Motion.notAScrubberMethod", "{}"));
+    REQUIRE(resp.id == 9);
+    REQUIRE(resp.is_error);
+    REQUIRE(resp.params_json.find("Unknown Motion scrubber method") != std::string::npos);
+}
+
+TEST_CASE("MotionScrubber failed fixture load clears stale replay state",
+          "[motion-scrubber][coverage][requested]") {
+    FrameClock clock;
+    const auto good_path = record_sample_fixture("failed-load-reset", clock);
+    const auto bad_path = tmp_fixture_path("bad-version");
+    {
+        std::ofstream out(bad_path);
+        out << R"({"motion_fixture_version":999,"policy":"full","duration_scale":1})"
+            << "\n";
+    }
+
+    MotionScrubber scrub;
+    REQUIRE(scrub.load_fixture(good_path));
+    REQUIRE(scrub.loaded());
+    REQUIRE(scrub.event_count() > 0);
+    REQUIRE(scrub.max_frame() > 0);
+    REQUIRE(scrub.scrub_to(scrub.max_frame()) > 0);
+    REQUIRE(scrub.playhead_frame() == scrub.max_frame());
+
+    REQUIRE_FALSE(scrub.load_fixture(bad_path));
+    REQUIRE_FALSE(scrub.loaded());
+    REQUIRE_FALSE(scrub.playing());
+    REQUIRE(scrub.event_count() == 0);
+    REQUIRE(scrub.playhead_frame() == 0u);
+    REQUIRE(scrub.max_frame() == 0u);
+    REQUIRE(scrub.header().version == 0);
+    REQUIRE(scrub.scrub_to(1) == 0);
+    REQUIRE(scrub.play() == 0);
+
+    std::remove(good_path.c_str());
+    std::remove(bad_path.c_str());
+}
+
+TEST_CASE("MotionScrubber sink removal and pause keep state deterministic",
+          "[motion-scrubber][coverage][requested]") {
+    FrameClock clock;
+    const auto path = record_sample_fixture("sink-removal", clock);
+
+    MotionScrubber scrub;
+    std::vector<SampleEvent> first;
+    std::vector<SampleEvent> second;
+    const int first_id = scrub.add_sink(make_buffer_sink(&first));
+    const int second_id = scrub.add_sink(make_buffer_sink(&second));
+
+    REQUIRE(scrub.load_fixture(path));
+    const auto max_frame = scrub.max_frame();
+    REQUIRE(scrub.scrub_to(max_frame) == scrub.event_count());
+    REQUIRE(first.size() == scrub.event_count());
+    REQUIRE(second.size() == scrub.event_count());
+
+    scrub.remove_sink(first_id);
+    scrub.remove_sink(first_id);
+    first.clear();
+    second.clear();
+    REQUIRE(scrub.play() == scrub.event_count());
+    REQUIRE(scrub.playing());
+    REQUIRE(first.empty());
+    REQUIRE(second.size() == scrub.event_count());
+    REQUIRE(scrub.playhead_frame() == max_frame);
+
+    scrub.remove_sink(second_id);
+    second.clear();
+    scrub.pause();
+    REQUIRE_FALSE(scrub.playing());
+    REQUIRE(scrub.playhead_frame() == max_frame);
+    REQUIRE(scrub.scrub_to(0) > 0);
+    REQUIRE(second.empty());
+
+    std::remove(path.c_str());
+}
+
 // ── Bug-sweep regressions (pre-merge sweep #2142) ────────────────────
 
 // Re-emission used to drop SampleEvent::Kind::Input entirely — the
