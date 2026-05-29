@@ -474,6 +474,34 @@ If `PULP_DISABLE_PLUGIN_EDITOR`, `PULP_HEADLESS`, `PULP_TEST_MODE`, or
 to prevent native editor windows during validation and agent runs; the
 fallback view remains only for preview/no-audioUnit cases.
 
+### Mounting an AUv3 editor inside a SwiftUI HostApp on iOS (iOS-D.2)
+
+On macOS, AU v3 hosts open the editor inside their own window and the
+developer never has to wire SwiftUI to a `UIViewController`. On iOS the
+HostApp container ships with the .appex and has to mount the editor
+itself if the dev wants the in-app smoke to surface the plug-in UI
+(GarageBand iOS / AUM do their own mounting in production).
+
+The contract (proven end-to-end on iPad Pro 13-inch M5 in iOS-D.2):
+
+1. After `AVAudioUnit.instantiate(with:options:.loadOutOfProcess)`
+   succeeds, call `node.auAudioUnit.requestViewController { vc in … }`
+   on the main queue. The XPC view-controller fetch can take 1–2
+   render-loop ticks — render a placeholder SwiftUI label in the
+   meantime, not an empty container.
+2. Wrap the returned `UIViewController` in a
+   `UIViewControllerRepresentable` whose container `UIViewController`
+   adopts the editor as a child VC (`addChild`, pinned constraints,
+   `didMove(toParent:)`). Do NOT try to mount the AUv3's own `view`
+   directly — the editor lifecycle expects the parent VC to be present.
+3. Re-mount on every refresh: the AU host can swap the editor (e.g.
+   after a preset reset), so keep the `setEditor(_:)` pathway live
+   instead of mounting once in `makeUIViewController`.
+
+See `templates/ios-auv3/HostApp/ContentView.swift` for the canonical
+SwiftUI host implementation that ships in the template; the
+`PulpAUv3EditorView` struct is the reference pattern.
+
 ### iOS GPU host must run idle_callback inside the CADisplayLink tick (pulp #1402)
 
 `IOSGpuWindowHost::tick()` (in `core/view/platform/ios/window_host_ios.mm`) is the per-vsync entry point and MUST invoke `idle_callback_()` BEFORE the `needs_repaint` check. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on iOS GPU because `set_idle_callback` was inheriting the `WindowHost` base class no-op (parallel gap to the macOS one fixed in PR #1400 and the Android one in #1404).
