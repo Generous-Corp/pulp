@@ -7,6 +7,10 @@ import argparse
 import json
 import pathlib
 from typing import Any
+from frontend_ir_common import as_dict, as_list, load_json, non_negative_int, write_json
+# Import the canonical native-route set rather than re-typing the string
+# literals — a local copy silently drifts when a route is added to the set.
+from frontend_ir_validation import NATIVE_ROUTES
 
 
 PASS_STATUS = "pass"
@@ -14,7 +18,6 @@ WARN_STATUS = "warn"
 FAIL_STATUS = "fail"
 READY_VERDICT = "ready"
 NOT_READY_VERDICT = "not_ready"
-NATIVE_ROUTES = {"native_cpp", "native_html", "recorded_paint"}
 BINDING_EXPECTED_ROLES = {
     "checkbox",
     "color_picker",
@@ -30,31 +33,6 @@ BINDING_EXPECTED_ROLES = {
     "toggle_button",
     "xy_pad",
 }
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def non_negative_int(value: Any) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
 def check(check_id: str, status: str, message: str, **details: Any) -> dict[str, Any]:

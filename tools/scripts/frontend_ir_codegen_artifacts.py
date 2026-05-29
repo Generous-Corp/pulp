@@ -8,24 +8,12 @@ import hashlib
 import json
 import pathlib
 from typing import Any
+from frontend_ir_common import as_list, load_json, write_json
 
 
 SCHEMA = "pulp-frontend-ir-codegen-artifacts-v0"
 BINDING_SCHEMA = "pulp-native-cpp-binding-manifest-v1"
 NATIVE_CPP_ROUTE = "native_cpp"
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -53,10 +41,6 @@ def artifact_ref(path: pathlib.Path, repo_root: pathlib.Path, kind: str, schema:
     if schema:
         ref["schema"] = schema
     return ref
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def native_cpp_route_ids(report: dict[str, Any]) -> set[str]:

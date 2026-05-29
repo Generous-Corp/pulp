@@ -7,19 +7,7 @@ import argparse
 import json
 import pathlib
 from typing import Any
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+from frontend_ir_common import as_dict, as_list, load_json, write_json
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -27,14 +15,6 @@ def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
         return path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def count_routes(routes: list[Any]) -> dict[str, int]:

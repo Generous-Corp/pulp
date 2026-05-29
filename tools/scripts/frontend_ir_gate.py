@@ -15,6 +15,7 @@ from frontend_ir_validation import (
     ROUTE_UNSUPPORTED,
     validate_frontend_ir,
 )
+from frontend_ir_common import load_json, write_json
 
 
 PASS_STATUS = "pass"
@@ -32,19 +33,6 @@ SOURCE_STYLE_KEYS = (
     "source_style_values_normalized",
     "source_css_lexer_matches",
 )
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def check(check_id: str, status: str, message: str, **details: Any) -> dict[str, Any]:
