@@ -954,11 +954,72 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
+    // ── Separator promotion ─────────────────────────────────────────────
+    // Figma stores 1-pixel vertical lines (column separators, etc.) as a
+    // VECTOR node with effectively-zero width or height plus a 1px stroke.
+    // The figma-plugin extractor captures the bounding-box dims faithfully,
+    // which means we end up with width ≈ 5e-06 — invisible in any renderer.
+    // Promote the stroke weight to the visible dimension and turn the
+    // node into a colored rect (drop the empty PNG fill) so it actually
+    // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 1.
+    {
+        constexpr float kDegenerateAxis = 0.5f;
+        float bw = node.style.border_width.value_or(0.0f);
+        float w = node.style.width.value_or(0.0f);
+        float h = node.style.height.value_or(0.0f);
+        bool degenerate_w = w > 0.0f && w < kDegenerateAxis;
+        bool degenerate_h = h > 0.0f && h < kDegenerateAxis;
+        if (bw >= 1.0f && (degenerate_w || degenerate_h)) {
+            if (degenerate_w) node.style.width  = bw;
+            if (degenerate_h) node.style.height = bw;
+            // Use the stroke color as the rect fill; the captured PNG is
+            // a zero-area image and would render nothing anyway.
+            if (!node.style.background_color && node.style.border_color)
+                node.style.background_color = node.style.border_color;
+            // Strip the asset_ref so codegen's image branch doesn't try to
+            // emit setImageSource on a degenerate PNG.
+            node.attributes.erase("asset_ref");
+            // Demote from "image" to "frame" so codegen emits a styled
+            // container instead of an <img>-style image element.
+            if (node.type == "image") node.type = "frame";
+        }
+    }
+
     // Children
     if (obj.hasObjectMember("children") && obj["children"].isArray()) {
         auto children = obj["children"];
         for (uint32_t i = 0; i < children.size(); ++i)
             node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
+    }
+
+    // ── Inherit rounded corners from rounded parent ─────────────────────
+    // Figma stores a corner radius on the CONTAINER frame and relies on
+    // overflow:clip to round the children that fill it. Pulp's renderer
+    // doesn't clip children to a parent's border-radius, so a gradient
+    // rect that exactly fills a rounded parent ends up with hard corners.
+    // Propagate the parent's radius to any child that has position:abs
+    // at (0,0) and matches the parent's size (or any axis matches and
+    // the other is close), so the gradient/fill child also paints with
+    // rounded corners.
+    if (node.style.border_radius && *node.style.border_radius > 0.0f) {
+        float pr = *node.style.border_radius;
+        float pw = node.style.width.value_or(0.0f);
+        float ph = node.style.height.value_or(0.0f);
+        for (auto& c : node.children) {
+            if (c.style.border_radius && *c.style.border_radius > 0.0f)
+                continue;  // child already has its own radius — respect it
+            float cl = c.style.left.value_or(-1.0f);
+            float ct = c.style.top.value_or(-1.0f);
+            float cw = c.style.width.value_or(0.0f);
+            float ch = c.style.height.value_or(0.0f);
+            constexpr float kFillTol = 1.0f;
+            bool fills_origin = (std::abs(cl) < kFillTol) && (std::abs(ct) < kFillTol);
+            bool fills_size = (pw > 0.0f && std::abs(cw - pw) < kFillTol) &&
+                              (ph > 0.0f && std::abs(ch - ph) < kFillTol);
+            if (fills_origin && fills_size) {
+                c.style.border_radius = pr;
+            }
+        }
     }
 
     // Audio widget detection (deferred until after children are parsed)

@@ -80,6 +80,17 @@ export interface ExtractedStyle {
   bottom?: number;
   width?: number;
   height?: number;
+  /// Render bounds (= bounding box + effect bleed). Present only when the
+  /// node has effects that extend past the bounding box (drop shadows,
+  /// outer strokes). Downstream importers use this to render PNG-captured
+  /// assets at their true visual size instead of being clamped to the
+  /// smaller layout box. dx/dy are offsets from the bounding box origin.
+  render_bounds?: {
+    w: number;
+    h: number;
+    dx: number;
+    dy: number;
+  };
 }
 
 export interface ExtractedLayout {

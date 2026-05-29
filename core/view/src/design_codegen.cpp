@@ -636,6 +636,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
         if (node.style.height)
             ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+        // When the importer flagged this asset as bleed (PNG pixel dims
+        // exceed twice the layout dims by 1.5× — typical drop-shadow case),
+        // tell ImageView to render at natural size centered instead of
+        // stretching the PNG into the smaller layout box. Same effect as
+        // the Knob::paint natural-size fix, generalised through CSS
+        // object-fit:none which ImageView already supports.
+        auto bleed_it = node.attributes.find("asset_bleed");
+        if (bleed_it != node.attributes.end() && bleed_it->second == "1") {
+            ss << ind << "setObjectFit('" << id << "', 'none');\n";
+        }
         ss << "\n";
         return;
     }
@@ -723,7 +733,31 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
         if (node.layout.justify != LayoutAlign::flex_start)
             ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(node.layout.justify) << "');\n";
-        if (node.layout.align != LayoutAlign::stretch)
+        // Baseline override: a row that flexes text children of DIFFERENT
+        // font sizes (typical "BIG_TITLE small_subtitle" header pattern)
+        // visually wants align-items:baseline, not center. Figma's
+        // auto-layout doesn't distinguish — it stores center — but
+        // Yoga supports YGAlignBaseline and the visual difference between
+        // box-center and baseline is significant once font sizes differ
+        // by more than ~2pt. Triggers only on flex-row + 2+ text children
+        // + size variance — leaves all other rows alone.
+        bool baseline_override = false;
+        if (is_row && node.layout.align == LayoutAlign::center) {
+            std::vector<float> text_sizes;
+            for (const auto& child : node.children) {
+                if (child.type == "text" || child.type == "label") {
+                    if (child.style.font_size) text_sizes.push_back(*child.style.font_size);
+                }
+            }
+            if (text_sizes.size() >= 2) {
+                float mn = *std::min_element(text_sizes.begin(), text_sizes.end());
+                float mx = *std::max_element(text_sizes.begin(), text_sizes.end());
+                if (mx - mn >= 1.5f) baseline_override = true;
+            }
+        }
+        if (baseline_override) {
+            ss << ind << "setFlex('" << id << "', 'align_items', 'baseline');\n";
+        } else if (node.layout.align != LayoutAlign::stretch)
             ss << ind << "setFlex('" << id << "', 'align_items', '" << align_to_css(node.layout.align) << "');\n";
 
         // Visual styles
@@ -733,27 +767,102 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
-        if (node.style.box_shadow)
-            ss << ind << "setBoxShadow('" << id << "', '" << js_single_quote_escape(*node.style.box_shadow) << "');\n";
+        if (node.style.box_shadow) {
+            // Parse CSS-style "<ox> <oy> <blur> [<spread>] <color>" into the
+            // bridge's setBoxShadow(id, ox, oy, blur, spread, color, inset?)
+            // signature — passing the raw string makes the bridge fall back
+            // to default (2,4,#00000050) numerics, which doesn't match the
+            // designer's intent.
+            const std::string& s = *node.style.box_shadow;
+            float ox = 0, oy = 0, blur = 0, spread = 0;
+            std::string color = "#00000050";
+            bool inset = false;
+            // Strip trailing/leading whitespace + detect inset.
+            std::string body = s;
+            auto find_lower = [](const std::string& h, const std::string& n) {
+                auto it = std::search(h.begin(), h.end(), n.begin(), n.end(),
+                    [](char a, char b){ return std::tolower(static_cast<unsigned char>(a))
+                                              == std::tolower(static_cast<unsigned char>(b)); });
+                return it == h.end() ? std::string::npos : (size_t)(it - h.begin());
+            };
+            if (auto p = find_lower(body, "inset"); p != std::string::npos) {
+                inset = true;
+                body.erase(p, 5);
+            }
+            // Tokenize: pull color first (hex or rgba(...)), then 3–4 lengths.
+            auto rgba_p = body.find("rgba(");
+            auto rgb_p  = body.find("rgb(");
+            auto hex_p  = body.find('#');
+            if (rgba_p != std::string::npos) {
+                auto end = body.find(')', rgba_p);
+                if (end != std::string::npos) {
+                    color = body.substr(rgba_p, end - rgba_p + 1);
+                    body.erase(rgba_p, end - rgba_p + 1);
+                }
+            } else if (rgb_p != std::string::npos) {
+                auto end = body.find(')', rgb_p);
+                if (end != std::string::npos) {
+                    color = body.substr(rgb_p, end - rgb_p + 1);
+                    body.erase(rgb_p, end - rgb_p + 1);
+                }
+            } else if (hex_p != std::string::npos) {
+                auto end = body.find_first_of(" \t,", hex_p);
+                color = body.substr(hex_p, end == std::string::npos ? std::string::npos : end - hex_p);
+                body.erase(hex_p, end == std::string::npos ? std::string::npos : end - hex_p);
+            }
+            // Collect numeric tokens (strip "px").
+            std::vector<float> nums;
+            std::string tok;
+            auto flush = [&]() {
+                if (tok.empty()) return;
+                // strip "px" suffix
+                if (tok.size() > 2 && tok.substr(tok.size()-2) == "px") tok.resize(tok.size()-2);
+                try { nums.push_back(std::stof(tok)); } catch (...) {}
+                tok.clear();
+            };
+            for (char c : body) {
+                if (std::isspace(static_cast<unsigned char>(c)) || c == ',') flush();
+                else tok.push_back(c);
+            }
+            flush();
+            if (nums.size() >= 2) { ox = nums[0]; oy = nums[1]; }
+            if (nums.size() >= 3) blur = nums[2];
+            if (nums.size() >= 4) spread = nums[3];
+            ss << ind << "setBoxShadow('" << id << "', "
+               << ox << ", " << oy << ", " << blur << ", " << spread
+               << ", '" << js_single_quote_escape(color) << "'"
+               << (inset ? ", true" : "") << ");\n";
+        }
         if (node.style.opacity)
             ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
 
         ss << "\n";
 
-        // Recurse children
-        // For space_between rows, right-align the last text child
+        // Recurse children.
+        // For space_between rows with TWO OR MORE text children (the canonical
+        // "label … value" or "key … units" pattern), right-align the LAST
+        // text child so the value hugs the right edge. The earlier version
+        // applied this to single-text-child rows too, which misfired on
+        // dropdowns like ENVELOPE → "Short Plucks" + chevrons-image:
+        // Short Plucks was the only text and got right-aligned within its
+        // own min-width box, pushing the visible glyphs onto the chevrons.
         bool is_space_between = is_row && node.layout.justify == LayoutAlign::space_between;
+        int text_child_count = 0;
+        if (is_space_between) {
+            for (auto& child : node.children) {
+                if (child.type == "text" || child.type == "label") ++text_child_count;
+            }
+        }
         std::string last_text_child_id;
         for (auto& child : node.children) {
-            // Capture the var_counter before generation to reconstruct this child's ID
-            if (is_space_between && (child.type == "text" || child.type == "label")) {
+            if (is_space_between && text_child_count >= 2 &&
+                (child.type == "text" || child.type == "label")) {
                 std::string child_id = sanitize_var(child.name.empty() ? child.type : child.name);
                 child_id += std::to_string(var_counter);  // counter value before this child runs
                 last_text_child_id = child_id;
             }
             generate_native_node(ss, child, opts, depth + 1, var_counter, id);
         }
-        // Right-align the last label in space_between rows
         if (!last_text_child_id.empty()) {
             std::string child_ind = indent(depth + 1, opts.indent_spaces);
             ss << child_ind << "setTextAlign('" << last_text_child_id << "', 'right');\n\n";

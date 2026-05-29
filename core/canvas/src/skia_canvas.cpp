@@ -807,6 +807,21 @@ void SkiaCanvas::clear_font_features() {
 
 // ── Images ──────────────────────────────────────────────────────────────────
 
+// Upload a raster-decoded SkImage to a Graphite GPU texture when a
+// recorder is attached (live GPU canvas). Without this step the GPU
+// path silently drops draws of raster-backed SkImages with the warning
+// "Couldn't convert SkImage to a Graphite-backed representation".
+// CPU raster canvas (pulp-screenshot) passes recorder_=nullptr and
+// returns the raster image unchanged.
+sk_sp<SkImage> SkiaCanvas::ensure_gpu_image(sk_sp<SkImage> image) const {
+    if (recorder_ && image) {
+        if (auto gpu = SkImages::TextureFromImage(recorder_, image.get())) {
+            return gpu;
+        }
+    }
+    return image;
+}
+
 bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
                                        float x, float y, float w, float h) {
     if (!canvas_ || !data || size == 0) return false;
@@ -814,6 +829,7 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     auto sk_data = SkData::MakeWithoutCopy(data, size);
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
+    image = ensure_gpu_image(std::move(image));
 
     // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
@@ -830,6 +846,7 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
 
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
+    image = ensure_gpu_image(std::move(image));
 
     // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
@@ -855,6 +872,7 @@ bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
     auto sk_data = SkData::MakeWithoutCopy(data, size);
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
+    image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image,
                            SkRect::MakeXYWH(sx, sy, sw, sh),
                            SkRect::MakeXYWH(dx, dy, dw, dh),
@@ -872,6 +890,12 @@ bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
     if (!sk_data) return false;
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
+    // Skia Graphite (the live GPU backend) cannot draw a raster-backed
+    // SkImage directly; it logs "Couldn't convert SkImage to a Graphite-
+    // backed representation" and silently drops the draw. The
+    // ensure_gpu_image helper uploads to a Graphite texture when
+    // recorder_ is set, and no-ops on CPU raster canvases.
+    image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image,
                            SkRect::MakeXYWH(sx, sy, sw, sh),
                            SkRect::MakeXYWH(dx, dy, dw, dh),

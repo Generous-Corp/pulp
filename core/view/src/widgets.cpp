@@ -291,14 +291,26 @@ void Knob::paint(canvas::Canvas& canvas) {
         float fw = static_cast<float>(sprite_strip_->frame_width());
         float fh = static_cast<float>(sprite_strip_->frame_height());
         if (sprite_strip_->source() == SpriteStrip::Source::image_file) {
-            // Skia-cached decode path (Track A1). Let the canvas crop to the
-            // frame's source rect and rescale into the knob's bounds in one
-            // call — no canvas-transform gymnastics required and no raw-pixel
-            // bridge round-trip.
+            // Render the frame at its NATURAL logical size centered on the
+            // layout box. Figma's PNG export captures the node's
+            // absoluteRenderBounds (bounding box + drop-shadow bleed) at a
+            // known scale (2× via the figma-plugin extractor), so the PNG's
+            // intended logical size is pixel_size / kExportScale. Centering
+            // on the layout box lets the shadow halo naturally extend over
+            // neighboring widgets — matching Figma's own behavior where
+            // overlapping shadows reinforce each other. Aspect-cover into
+            // the layout box would clamp the smaller knobs to the box
+            // height and visibly under-scale them relative to a larger
+            // sibling that shares the same shadow ratio.
+            constexpr float kExportScale = 2.0f;
+            float dst_w = fw / kExportScale;
+            float dst_h = fh / kExportScale;
+            float dst_x = (b.width  - dst_w) * 0.5f;
+            float dst_y = (b.height - dst_h) * 0.5f;
             canvas.draw_image_from_file_rect(
                 sprite_strip_->path(),
                 static_cast<float>(fx), static_cast<float>(fy), fw, fh,
-                0, 0, b.width, b.height);
+                dst_x, dst_y, dst_w, dst_h);
         } else {
             // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
             // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded

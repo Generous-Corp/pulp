@@ -1408,6 +1408,31 @@ int main(int argc, char* argv[]) {
                         if (p.is_relative()) p = base_dir / p;
                         n.attributes["asset_path"] = p.lexically_normal().string();
                     }
+                    // Asset-bleed detection (generalization of the Knob
+                    // sprite-strip natural-size fix). The Figma plugin
+                    // exports PNGs at 2× scale; with the bounding-box
+                    // origin point as both bounds, layout_size = PNG_px / 2.
+                    // When the PNG pixel dims exceed twice the layout dims
+                    // by ≥1.5×, the asset has drop-shadow or stroke bleed
+                    // that would visibly squish if fit-to-layout-box. We
+                    // stamp asset_bleed=1 so the codegen emits an explicit
+                    // object-fit:none for ImageView, which honours the
+                    // native pixel size centered.
+                    constexpr float kExportScale = 2.0f;
+                    float layout_w = n.style.width.value_or(0.0f);
+                    float layout_h = n.style.height.value_or(0.0f);
+                    int rw_px = ref->width.value_or(0);
+                    int rh_px = ref->height.value_or(0);
+                    if (rw_px > 0 && rh_px > 0 &&
+                        layout_w > 0.0f && layout_h > 0.0f) {
+                        float natural_w = static_cast<float>(rw_px) / kExportScale;
+                        float natural_h = static_cast<float>(rh_px) / kExportScale;
+                        float rw = natural_w / layout_w;
+                        float rh = natural_h / layout_h;
+                        if (std::max(rw, rh) >= 1.5f) {
+                            n.attributes["asset_bleed"] = "1";
+                        }
+                    }
                 }
             }
             for (auto& c : n.children) resolve_node(c);
@@ -1438,6 +1463,24 @@ int main(int argc, char* argv[]) {
     // once name-based widget detection is consistent across sources.
     if (*source != DesignSource::designmd) {
         if (!write_file(output_file, js)) return 1;
+
+        // Emit a <output>.meta.json sidecar with the root frame's canvas
+        // size + design source. Lets downstream renderers (pulp-screenshot,
+        // tools/scripts/render-figma-import.sh) auto-pick --width/--height
+        // instead of requiring the caller to remember them.
+        float root_w = ir.root.style.width.value_or(0.0f);
+        float root_h = ir.root.style.height.value_or(0.0f);
+        if (root_w > 0.0f && root_h > 0.0f) {
+            fs::path meta_path = fs::path(output_file).string() + ".meta.json";
+            std::ostringstream meta;
+            meta << "{\n"
+                 << "  \"canvas\": { \"width\": " << static_cast<int>(root_w)
+                 << ", \"height\": " << static_cast<int>(root_h) << " },\n"
+                 << "  \"source\": \"" << design_source_name(*source) << "\",\n"
+                 << "  \"script\": \"" << fs::path(output_file).filename().string() << "\"\n"
+                 << "}\n";
+            (void)write_file(meta_path.string(), meta.str());
+        }
     }
 
     // Count elements by type

@@ -366,6 +366,58 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
     s.height = n.absoluteBoundingBox.height;
   }
 
+  // Capture absoluteRenderBounds for nodes with effects (drop shadows
+  // especially). The render-bounds extend past the bounding box by the
+  // bleed of any visual effect. Downstream uses:
+  //  1. widgets.cpp Knob::paint draws PNGs at their natural render-bounds
+  //     size instead of dividing PNG-pixels by a hardcoded export scale.
+  //  2. tools/figma-plugin asset-bleed lint flags assets where the bleed
+  //     ratio (render/bounding) exceeds a threshold so the importer can
+  //     react before the user sees a squished knob.
+  if (
+    "absoluteRenderBounds" in n &&
+    n.absoluteRenderBounds &&
+    "absoluteBoundingBox" in n &&
+    n.absoluteBoundingBox
+  ) {
+    const r = n.absoluteRenderBounds;
+    const b = n.absoluteBoundingBox;
+    // Only emit when the render-bounds materially exceed the bounding box
+    // (drop-shadow bleed, stroke extending beyond, etc.). Skips noise on
+    // exact-fit nodes where the two are identical.
+    const inflated =
+      r.width > b.width + 0.5 ||
+      r.height > b.height + 0.5 ||
+      r.x < b.x - 0.5 ||
+      r.y < b.y - 0.5;
+    if (inflated) {
+      s.render_bounds = {
+        w: r.width,
+        h: r.height,
+        dx: r.x - b.x,  // negative = bleed extends LEFT of bounding box
+        dy: r.y - b.y,  // negative = bleed extends ABOVE bounding box
+      };
+      // Asset-bleed lint — surface the outlier nodes at extraction time so
+      // the importer can react before the user sees a squished knob. The
+      // 1.5× threshold catches drop shadows (typical 2-3× horiz expansion
+      // on knobs) without warning on every node that has any bleed at all.
+      const ratioW = b.width > 0 ? r.width / b.width : 1;
+      const ratioH = b.height > 0 ? r.height / b.height : 1;
+      const peak = Math.max(ratioW, ratioH);
+      if (peak >= 1.5) {
+        pushDiag(
+          ctx,
+          "info",
+          "asset.bleed",
+          "capture_partial",
+          `bleed: "${n.name}" layout ${b.width.toFixed(0)}×${b.height.toFixed(0)} ` +
+            `→ render ${r.width.toFixed(0)}×${r.height.toFixed(0)} ` +
+            `(${ratioW.toFixed(1)}× × ${ratioH.toFixed(1)}×)`,
+        );
+      }
+    }
+  }
+
   // Fills
   if ("fills" in n && Array.isArray(n.fills) && n.fills.length > 0) {
     const fills = n.fills as readonly Paint[];
