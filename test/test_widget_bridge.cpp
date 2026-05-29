@@ -2954,6 +2954,67 @@ TEST_CASE("WidgetBridge gpu_surface late-attach is idempotent and nullable",
     REQUIRE(bridge->has_native_gpu_bridge() == false);
 }
 
+TEST_CASE("WidgetBridge __gpuCanvasConfigureImpl surfaces presentable flag",
+          "[widget_bridge][gpu-canvas][ios-d3b-slice4]") {
+    // iOS-D.3b Slice 4: the configure result must carry a `presentable`
+    // boolean that reflects gpu_surface_->has_surface(). JS uses this to
+    // confirm draws WILL hit the visible swapchain (rather than a silent
+    // offscreen texture — Codex pass-1 finding #3).
+#if PULP_TEST_HAS_GPU_SURFACE
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    pulp::state::StateStore store;
+
+    // No surface attached → presentable=false.
+    auto bridge = std::make_unique<pulp::view::WidgetBridge>(engine, root, store);
+    {
+        auto result = engine.evaluate(
+            "__gpuCanvasConfigureImpl('cv-no-surface', 32, 32, 'bgra8unorm', 0, 'opaque')");
+        REQUIRE_FALSE(result["presentable"].getWithDefault<bool>(true));
+    }
+
+    // Surface attached but has_surface=false (no native_surface_handle in
+    // Config) → presentable=false. This is the macOS-demo-style offscreen
+    // configuration where the bridge still functions but no swapchain is
+    // present.
+    TestGpuSurface offscreen_surface(test_gpu_info(true));
+    pulp::render::GpuSurface::Config offscreen_cfg;
+    offscreen_cfg.width = 64;
+    offscreen_cfg.height = 64;
+    offscreen_cfg.native_surface_handle = nullptr;
+    offscreen_surface.initialize(offscreen_cfg);
+    bridge->attach_gpu_surface(&offscreen_surface);
+    {
+        auto result = engine.evaluate(
+            "__gpuCanvasConfigureImpl('cv-offscreen', 64, 64, 'bgra8unorm', 0, 'opaque')");
+        REQUIRE_FALSE(result["presentable"].getWithDefault<bool>(true));
+        // Describe path mirrors the flag.
+        auto desc = engine.evaluate("__gpuCanvasDescribeCurrentTextureImpl('cv-offscreen')");
+        REQUIRE_FALSE(desc["presentable"].getWithDefault<bool>(true));
+    }
+
+    // Surface attached AND has_surface=true → presentable=true. This is
+    // the iOS path where slice 5 will hook up per-frame
+    // current_texture_handle() acquisition.
+    TestGpuSurface presentable_surface(test_gpu_info(true));
+    pulp::render::GpuSurface::Config presentable_cfg;
+    presentable_cfg.width = 128;
+    presentable_cfg.height = 128;
+    int dummy = 0;
+    presentable_cfg.native_surface_handle = static_cast<void*>(&dummy);
+    presentable_surface.initialize(presentable_cfg);
+    bridge->attach_gpu_surface(&presentable_surface);
+    REQUIRE(presentable_surface.has_surface() == true);
+    {
+        auto result = engine.evaluate(
+            "__gpuCanvasConfigureImpl('cv-presentable', 128, 128, 'bgra8unorm', 0, 'opaque')");
+        REQUIRE(result["presentable"].getWithDefault<bool>(false) == true);
+        auto desc = engine.evaluate("__gpuCanvasDescribeCurrentTextureImpl('cv-presentable')");
+        REQUIRE(desc["presentable"].getWithDefault<bool>(false) == true);
+    }
+#endif  // PULP_TEST_HAS_GPU_SURFACE
+}
+
 TEST_CASE("WidgetBridge ctor with non-null gpu_surface stores it",
           "[widget_bridge][gpu-surface-plumbing][issue-ios-d3b-slice1]") {
 #if PULP_TEST_HAS_GPU_SURFACE

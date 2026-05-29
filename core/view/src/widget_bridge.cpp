@@ -22,6 +22,7 @@
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/log.hpp>
 #include <web_compat_preludes_gen.hpp>
 #include <thread>
 #include <chrono>
@@ -8284,9 +8285,18 @@ void WidgetBridge::register_api() {
         auto usage = static_cast<uint32_t>(args.get<int32_t>(4, 0));
         auto alpha_mode = args.get<std::string>(5, "opaque");
 
+        // iOS-D.3b Slice 4: surface the GpuSurface's presentable/offscreen
+        // distinction to JS. Until slice 5 wires per-frame
+        // current_texture_handle() acquisition into getCurrentTexture(),
+        // configure() returning `presentable: true` is the program's
+        // contract that JS draws WILL hit the visible swapchain rather
+        // than a silent offscreen texture (Codex pass-1 finding #3).
+        const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
+
         auto result = choc::value::createObject("");
         result.addMember("nativeBridge", choc::value::createBool(false));
         result.addMember("configured", choc::value::createBool(false));
+        result.addMember("presentable", choc::value::createBool(presentable));
         result.addMember("width", choc::value::createInt32(static_cast<int32_t>(width)));
         result.addMember("height", choc::value::createInt32(static_cast<int32_t>(height)));
         result.addMember("format", choc::value::createString(format));
@@ -8329,9 +8339,23 @@ void WidgetBridge::register_api() {
         state.usage = static_cast<uint32_t>(texture_desc.usage);
         state.texture = device_ptr->CreateTexture(&texture_desc);
         state.configured = (state.texture != nullptr);
+        if (state.configured) {
+            // PULP_WEBGPU_BRIDGE log markers (slice 4 contract) — surface
+            // the presentable distinction in the runtime log so iPad
+            // device walk-throughs can grep the value without
+            // introspecting the JS-returned object. The `presentable`
+            // value comes from gpu_surface_->has_surface() above.
+            runtime::log_info(
+                "PULP_WEBGPU_BRIDGE: canvas.getContext('webgpu') ok (presentable={}, canvas={})",
+                presentable ? "true" : "false", canvas_id);
+            runtime::log_info(
+                "PULP_WEBGPU_BRIDGE: context.configure ok (format={}, size={}x{})",
+                format, width, height);
+        }
         auto native_result = choc::value::createObject("");
         native_result.addMember("nativeBridge", choc::value::createBool(state.configured));
         native_result.addMember("configured", choc::value::createBool(state.configured));
+        native_result.addMember("presentable", choc::value::createBool(presentable));
         native_result.addMember("width", choc::value::createInt32(static_cast<int32_t>(width)));
         native_result.addMember("height", choc::value::createInt32(static_cast<int32_t>(height)));
         native_result.addMember("format", choc::value::createString(format));
@@ -8342,9 +8366,17 @@ void WidgetBridge::register_api() {
     });
 
     engine_.register_function("__gpuCanvasDescribeCurrentTextureImpl", [this](choc::javascript::ArgumentList args) {
+        // iOS-D.3b Slice 4: surface the presentable flag here too so
+        // JS can verify per-frame that the texture it's about to draw
+        // into IS the visible swapchain (slice 5 wires
+        // gpu_surface_->current_texture_handle() through this path;
+        // slice 4 just plumbs the boolean).
+        const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
+
         auto descriptor = choc::value::createObject("");
         auto canvas_id = args.get<std::string>(0, "");
         descriptor.addMember("nativeBridge", choc::value::createBool(false));
+        descriptor.addMember("presentable", choc::value::createBool(presentable));
         descriptor.addMember("width", choc::value::createInt32(1));
         descriptor.addMember("height", choc::value::createInt32(1));
         descriptor.addMember("format", choc::value::createString("bgra8unorm"));
@@ -8362,6 +8394,7 @@ void WidgetBridge::register_api() {
 
         auto native_descriptor = choc::value::createObject("");
         native_descriptor.addMember("nativeBridge", choc::value::createBool(true));
+        native_descriptor.addMember("presentable", choc::value::createBool(presentable));
         native_descriptor.addMember("width", choc::value::createInt32(static_cast<int32_t>(it->second.width)));
         native_descriptor.addMember("height", choc::value::createInt32(static_cast<int32_t>(it->second.height)));
         native_descriptor.addMember("format", choc::value::createString(it->second.format));
