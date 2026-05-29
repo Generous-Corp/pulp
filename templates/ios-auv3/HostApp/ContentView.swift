@@ -121,17 +121,47 @@ struct ContentView: View {
 struct PulpAUv3EditorView: UIViewControllerRepresentable {
     @ObservedObject var host: PulpAUv3Host
 
+    // Coordinator carries the observer token and a host reference so
+    // dismantleUIViewController (a static method) can unregister the
+    // observer when SwiftUI tears down this representable. Without
+    // that pairing, `host.installEditorObserver { ... }` strongly
+    // captures the container VC; every SwiftUI rebuild (orientation
+    // change, scene reset, iPad split-view shuffle) appends a new
+    // closure to the host's observer list and never removes the old
+    // one, so dead container VCs are kept alive for the lifetime of
+    // the `@StateObject` host.
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIViewController(context: Context) -> EditorContainerViewController {
         let vc = EditorContainerViewController()
-        host.installEditorObserver { editorVC in
-            vc.setEditor(editorVC)
+        let token = host.installEditorObserver { [weak vc] editorVC in
+            vc?.setEditor(editorVC)
         }
+        context.coordinator.host = host
+        context.coordinator.observerToken = token
         return vc
     }
 
     func updateUIViewController(_ uiViewController: EditorContainerViewController, context: Context) {
         // No-op — the container observes host.editorViewController updates
         // through installEditorObserver.
+    }
+
+    static func dismantleUIViewController(
+        _ uiViewController: EditorContainerViewController,
+        coordinator: Coordinator
+    ) {
+        uiViewController.setEditor(nil)
+        if let token = coordinator.observerToken {
+            coordinator.host?.removeEditorObserver(token)
+        }
+        coordinator.observerToken = nil
+        coordinator.host = nil
+    }
+
+    final class Coordinator {
+        var host: PulpAUv3Host?
+        var observerToken: Int?
     }
 
     final class EditorContainerViewController: UIViewController {
@@ -197,17 +227,32 @@ final class PulpAUv3Host: ObservableObject {
     // AUAudioUnit.requestViewController. We hold the most recent VC and
     // notify subscribers so the SwiftUI container can re-mount when the
     // extension finishes loading after the HostApp view tree exists.
+    //
+    // Observer storage is keyed by an opaque token so SwiftUI's
+    // dismantleUIViewController hook can unregister cleanly on view
+    // rebuild — otherwise the closure strongly retains the container
+    // VC and every rebuild leaks one VC for the lifetime of this
+    // `@StateObject` host.
     @Published private(set) var editorViewController: UIViewController?
-    private var editorObservers: [(UIViewController?) -> Void] = []
+    private var editorObservers: [Int: (UIViewController?) -> Void] = [:]
+    private var nextEditorObserverToken: Int = 0
 
-    func installEditorObserver(_ block: @escaping (UIViewController?) -> Void) {
-        editorObservers.append(block)
+    @discardableResult
+    func installEditorObserver(_ block: @escaping (UIViewController?) -> Void) -> Int {
+        let token = nextEditorObserverToken
+        nextEditorObserverToken += 1
+        editorObservers[token] = block
         block(editorViewController)
+        return token
+    }
+
+    func removeEditorObserver(_ token: Int) {
+        editorObservers.removeValue(forKey: token)
     }
 
     fileprivate func setEditorVC(_ vc: UIViewController?) {
         editorViewController = vc
-        for obs in editorObservers { obs(vc) }
+        for obs in editorObservers.values { obs(vc) }
     }
 #endif
 

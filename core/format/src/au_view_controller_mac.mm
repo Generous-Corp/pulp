@@ -269,6 +269,19 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
         if (_viewHost) {
             pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
             _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
+            // Phase iOS-D.3b Slice 1 (cross-platform): hand the host's live
+            // GpuSurface to the scripted-UI session so JS navigator.gpu /
+            // canvas.getContext('webgpu') routes through Pulp's Dawn
+            // instance instead of mocks. See
+            // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+            if (auto* scripted = _bridge->scripted_ui()) {
+                scripted->attach_gpu_surface(_viewHost->gpu_surface());
+                if (_viewHost->gpu_surface()) {
+                    pulp::runtime::log_info(
+                        "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
+                        "via ScriptedUiSession (mac AUv3)");
+                }
+            }
         }
     } else {
         _viewHost = pulp::view::PluginViewHost::create(*root, opts);

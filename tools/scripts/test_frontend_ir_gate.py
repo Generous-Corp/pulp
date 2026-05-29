@@ -178,6 +178,92 @@ class FrontendIrGateTests(unittest.TestCase):
         failures = {item["id"] for item in result["checks"] if item["status"] == "fail"}
         self.assertIn("binary_no_js_engine", failures)
 
+    def test_native_readiness_passes_with_new_claim_shape(self) -> None:
+        # Switch the report to the new `claims[]` provenance shape, drop
+        # the legacy flat fields entirely, and confirm the gate passes
+        # the binary_no_js_engine check on the strength of the claim
+        # alone.
+        report = ready_report()
+        report["validation"]["binary_dependencies"] = {
+            "claims": [
+                {
+                    "dependency": "js_engine",
+                    "status": "absent",
+                    "source": "phase_g_cpp_only",
+                    "proof_artifact": {
+                        "kind": "native_proof",
+                        "path": "reports/native-proof.json",
+                    },
+                },
+            ],
+        }
+
+        result = gate.gate_frontend_ir(report, "native-readiness")
+
+        self.assertEqual(result["verdict"], "ready")
+        passes = {item["id"]: item for item in result["checks"] if item["status"] == "pass"}
+        self.assertIn("binary_no_js_engine", passes)
+        self.assertEqual(
+            passes["binary_no_js_engine"]["message"],
+            "binary dependency claim proves JS engine is absent",
+        )
+
+    def test_native_readiness_rejects_claim_without_proof(self) -> None:
+        # A claim that says `js_engine: absent` but carries no proof
+        # artifact must NOT pass — the whole point of the shape is to
+        # demand provenance, not just a bare status.
+        report = ready_report()
+        report["validation"]["binary_dependencies"] = {
+            "claims": [
+                {
+                    "dependency": "js_engine",
+                    "status": "absent",
+                    "source": "phase_g_cpp_only",
+                },
+            ],
+        }
+
+        result = gate.gate_frontend_ir(report, "native-readiness")
+
+        self.assertEqual(result["verdict"], "not_ready")
+        failures = {item["id"] for item in result["checks"] if item["status"] == "fail"}
+        self.assertIn("binary_no_js_engine", failures)
+
+    def test_native_readiness_unknown_claim_is_not_proof(self) -> None:
+        # `status: unknown` is the "we haven't checked" state; it must
+        # never be treated as a no-JS claim, even if a proof artifact
+        # ref happens to be attached.
+        report = ready_report()
+        report["validation"]["binary_dependencies"] = {
+            "claims": [
+                {
+                    "dependency": "js_engine",
+                    "status": "unknown",
+                    "proof_artifact": {
+                        "kind": "native_proof",
+                        "path": "reports/native-proof.json",
+                    },
+                },
+            ],
+        }
+
+        result = gate.gate_frontend_ir(report, "native-readiness")
+
+        self.assertEqual(result["verdict"], "not_ready")
+        failures = {item["id"] for item in result["checks"] if item["status"] == "fail"}
+        self.assertIn("binary_no_js_engine", failures)
+
+    def test_native_readiness_legacy_flat_shape_still_passes(self) -> None:
+        # Existing artifacts that only carry the legacy flat
+        # `js_engine_present: false` + top-level `proof_artifact` shape
+        # must continue to pass (backward compatibility during
+        # transition).
+        report = ready_report()
+        # ready_report() already uses the legacy flat shape — assert it
+        # passes without touching it.
+        result = gate.gate_frontend_ir(report, "native-readiness")
+        self.assertEqual(result["verdict"], "ready")
+
     def test_native_readiness_fails_route_invalidating_tweak(self) -> None:
         report = ready_report()
         report["tweaks"] = [

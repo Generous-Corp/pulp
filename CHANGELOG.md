@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02770"></a>
+## [0.277.0] - 2026-05-29
+
+- feat(view+format): GpuSurface late-attach into WidgetBridge from plugin hosts (iOS-D.3b Slice 1) ([#3146](https://github.com/danielraffel/pulp/pull/3146))
+- fix(ios-host): pair editor observer registration with dismantle cleanup ([#3139](https://github.com/danielraffel/pulp/pull/3139))
+- refactor(view): single ResolvedBindingPlan for codegen binding outputs ([#3145](https://github.com/danielraffel/pulp/pull/3145))
+- refactor(view): typed NativeBindingMetadata for the pulp* binding contract ([#3144](https://github.com/danielraffel/pulp/pull/3144))
+- refactor(frontend-ir): schema-name registry + gate trust-boundary docstrings ([#3143](https://github.com/danielraffel/pulp/pull/3143))
+
 <a id="v02760"></a>
 ## [0.276.0] - 2026-05-29
 
@@ -3159,6 +3168,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.277.0]: https://github.com/danielraffel/pulp/releases/tag/v0.277.0
 [0.276.0]: https://github.com/danielraffel/pulp/releases/tag/v0.276.0
 [0.275.0]: https://github.com/danielraffel/pulp/releases/tag/v0.275.0
 [0.274.0]: https://github.com/danielraffel/pulp/releases/tag/v0.274.0

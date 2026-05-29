@@ -112,7 +112,7 @@ fs::path install_active_clap_model(const TempDir& temp) {
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
@@ -140,7 +140,7 @@ void write_installed_model_metadata(const fs::path& pulp_home,
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  ")JSON" + std::string(checkpoint_key) + R"JSON(": ")JSON" + checkpoint.string() + R"JSON("
+  ")JSON" + std::string(checkpoint_key) + R"JSON(": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
 }
@@ -442,7 +442,7 @@ TEST_CASE("audio model list reports registry and install state", "[audio][tools]
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
@@ -504,7 +504,7 @@ TEST_CASE("audio model status reports configured checkpoint loadability", "[audi
   "configured_model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
 
@@ -558,7 +558,7 @@ TEST_CASE("audio model status reports incomplete state shapes",
 
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
   "configured_model_id": "clap_music_audioset_v1",
-  "resolved_checkpoint_path": ")JSON" + (temp.path / "missing.pt").string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape((temp.path / "missing.pt").string()) + R"JSON("
 }
 )JSON");
 
@@ -577,7 +577,7 @@ TEST_CASE("audio model status reads legacy model.json and installed metadata fal
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model.json", R"JSON({
@@ -604,7 +604,7 @@ TEST_CASE("audio model activate writes state from installed metadata", "[audio][
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
 
@@ -627,7 +627,7 @@ TEST_CASE("audio model activate falls back to registered metadata",
     write_text(checkpoint, "stub");
     write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
   "model_id": "clap_music_audioset_v1",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
 
@@ -663,7 +663,7 @@ TEST_CASE("audio model activate rejects installed metadata with missing checkpoi
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
 
@@ -694,7 +694,7 @@ TEST_CASE("audio model store accepts overrides and legacy checkpoint metadata",
   "model_id": "clap_music_audioset_v1",
   "backend": "legacy-clap",
   "checkpoint_ref": "manual://legacy",
-  "checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     auto installed = read_installed_model("clap_music_audioset_v1", temp.path);
@@ -1069,7 +1069,7 @@ TEST_CASE("excerpt find writes a deterministic WAV-first bundle", "[audio][tools
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
@@ -1225,7 +1225,7 @@ TEST_CASE("excerpt find reports unsupported inputs after resolving a model",
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
@@ -1316,7 +1316,7 @@ TEST_CASE("excerpt find reports inactive and unavailable installed models",
 
     write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
   "model_id": "clap_music_audioset_v1",
-  "resolved_checkpoint_path": ")JSON" + (temp.path / "missing.pt").string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape((temp.path / "missing.pt").string()) + R"JSON("
 }
 )JSON");
     auto missing_checkpoint = run_excerpt_find(request, temp.path);
@@ -1450,7 +1450,7 @@ TEST_CASE("excerpt find deterministic scores use a stable hash", "[audio][tools]
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
@@ -1825,7 +1825,7 @@ TEST_CASE("excerpt find bundle metadata falls back to registered model fields",
     write_text(checkpoint, "stub");
     write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
   "backend": "clap",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({
@@ -1970,7 +1970,7 @@ TEST_CASE("excerpt find skips unreadable recursive subdirectories", "[audio][too
   "model_id": "clap_music_audioset_v1",
   "backend": "clap",
   "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
-  "resolved_checkpoint_path": ")JSON" + checkpoint.string() + R"JSON("
+  "resolved_checkpoint_path": ")JSON" + json_escape(checkpoint.string()) + R"JSON("
 }
 )JSON");
     write_text(temp.path / "audio" / "model-state.json", R"JSON({

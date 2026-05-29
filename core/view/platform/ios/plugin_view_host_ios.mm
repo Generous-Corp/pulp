@@ -496,6 +496,14 @@ public:
                skia_surface_->is_available();
     }
 
+    // Phase iOS-D.3b Slice 1 (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md).
+    // Mirrors WindowHost::gpu_surface() so a scripted UI mounted inside an
+    // AUv3 editor can route navigator.gpu / canvas.getContext('webgpu')
+    // through the same wgpu::Surface that paints the editor.
+    render::GpuSurface* gpu_surface() const override {
+        return gpu_surface_.get();
+    }
+
     void set_idle_callback(std::function<void()> callback) override {
         idle_callback_ = std::move(callback);
     }

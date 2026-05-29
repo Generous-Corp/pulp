@@ -6,6 +6,10 @@
 #include <functional>
 #include <vector>
 
+namespace pulp::render {
+class GpuSurface;
+}
+
 namespace pulp::view {
 
 // Platform-specific handle types
@@ -79,6 +83,25 @@ public:
     // this after create() to scream when a GPU/scripted editor view
     // silently took the CPU path (see `format/gpu_host_select.hpp`).
     virtual bool is_gpu_backed() const { return false; }
+
+    // Mirrors WindowHost::gpu_surface() (window_host.hpp:142). Returns the
+    // host's live wgpu::Surface backing, or nullptr when the host is CPU,
+    // when GPU init failed, or when no surface has been allocated yet.
+    //
+    // This is the input port for the JS-side `navigator.gpu` /
+    // `canvas.getContext('webgpu')` bridge: WidgetBridge captures this
+    // pointer at construction (or via a later attach call) and forwards it
+    // to __describeNativeAdapterImpl / __createNativeAdapterImpl /
+    // __gpuCanvasConfigureImpl. Without a real surface here, those native
+    // impls return mocks and JS-rendered 3D output is black (per
+    // `threejs-bridge` skill's "gpu_surface MUST be passed to WidgetBridge"
+    // gotcha and Phase iOS-D.3b Slice 1).
+    //
+    // Lifetime: the GpuSurface is owned by the PluginViewHost. Consumers
+    // capture the raw pointer; the WidgetBridge must be destroyed before
+    // the host. See planning/2026-05-29-ios-d3b-threejs-webgpu-program.md
+    // § Slice 1 risks.
+    virtual render::GpuSurface* gpu_surface() const { return nullptr; }
 
     // Native-frame resize notification. AU v2 has no host size callback — the
     // DAW resizes the returned NSView directly. Hosts invoke this callback

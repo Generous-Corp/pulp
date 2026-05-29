@@ -535,3 +535,12 @@ before a host scan does.
   notes.
 - Memory note: CHOC-first policy — prefer `choc::midi` helpers over
   hand-rolled MIDI decode when touching the adapter.
+
+### CLAP editor hands GpuSurface to ScriptedUiSession (Phase iOS-D.3b Slice 1)
+
+`clap_entry.hpp::gui_create` now calls
+`p->bridge->scripted_ui()->attach_gpu_surface(p->editor_host->gpu_surface())`
+right after `PluginViewHost::create()` succeeds. Without this, a
+CLAP plugin whose UI uses Three.js or raw WebGPU JS renders black —
+the JS shim silently falls back to mocks. See the `view-bridge` skill's
+"GpuSurface plumbing into WidgetBridge" section.

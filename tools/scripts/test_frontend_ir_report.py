@@ -752,6 +752,19 @@ class FrontendIrReportTests(unittest.TestCase):
             self.assertEqual(report["validation"]["binary_dependencies"]["source"], "phase_g_cpp_only")
             self.assertTrue(report["validation"]["binary_dependencies"]["target_links_view_core_only"])
             self.assertTrue(report["validation"]["binary_dependencies"]["cpp_only_flag_present"])
+            # New claims[] provenance shape is emitted alongside the
+            # legacy flat fields. Exactly one js_engine claim with
+            # status=absent, source=phase_g_cpp_only, and a proof
+            # artifact reference matching the top-level proof.
+            claims = report["validation"]["binary_dependencies"]["claims"]
+            self.assertEqual(len(claims), 1)
+            self.assertEqual(claims[0]["dependency"], "js_engine")
+            self.assertEqual(claims[0]["status"], "absent")
+            self.assertEqual(claims[0]["source"], "phase_g_cpp_only")
+            self.assertEqual(
+                claims[0]["proof_artifact"],
+                report["validation"]["binary_dependencies"]["proof_artifact"],
+            )
             self.assertEqual(len(report["validation"]["proofs"]), 2)
             self.assertIn("native_proof:reports/native-proof.json", report["routes"][0]["validation_refs"])
 

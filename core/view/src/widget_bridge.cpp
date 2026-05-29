@@ -127,6 +127,25 @@ WidgetBridgeGpuInfo widget_bridge_gpu_info(render::GpuSurface* gpu_surface) {
     return info;
 }
 
+std::string gpu_host_object_update_script(const WidgetBridgeGpuInfo& info) {
+    const auto string_literal = [] (std::string_view text) {
+        return choc::json::toString(choc::value::createString(std::string(text)));
+    };
+    const auto bool_literal = [] (bool value) {
+        return value ? "true" : "false";
+    };
+
+    std::string script;
+    script.reserve(512);
+    script += "if (typeof navigatorGPU !== 'undefined' && navigatorGPU) {";
+    script += "navigatorGPU.backend = " + string_literal(info.backend) + ";";
+    script += "navigatorGPU.backendType = " + string_literal(info.backend_type) + ";";
+    script += "navigatorGPU.available = " + std::string(bool_literal(info.available)) + ";";
+    script += "navigatorGPU.nativeBridge = " + std::string(bool_literal(info.native_bridge)) + ";";
+    script += "}";
+    return script;
+}
+
 #ifdef PULP_HAS_SKIA
 wgpu::TextureFormat texture_format_from_string(const std::string& format) {
     if (format == "rgba16float") return wgpu::TextureFormat::RGBA16Float;
@@ -953,6 +972,36 @@ WidgetBridge::~WidgetBridge() {
     }
     if (callback_alive_) callback_alive_->store(false, std::memory_order_release);
     root_.on_global_click = {};
+}
+
+// Phase iOS-D.3b Slice 1 — late-attach of the GpuSurface for the common
+// case where ScriptedUiSession / ViewBridge is constructed BEFORE the
+// PluginViewHost (and therefore before the surface exists). Mirrors the
+// 4th constructor argument; idempotent.
+void WidgetBridge::attach_gpu_surface(render::GpuSurface* gpu_surface) {
+    if (gpu_surface_ == gpu_surface) return;
+    gpu_surface_ = gpu_surface;
+    const auto gpu_info = widget_bridge_gpu_info(gpu_surface_);
+    if (gpu_surface_ != nullptr) {
+        if (gpu_info.native_bridge) {
+            if (!native_gpu_bridge_state_) {
+                native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
+            }
+        } else {
+            // Surface present but no native bridge available — release any
+            // stale state from a previous attach.
+            native_gpu_bridge_state_.reset();
+        }
+    } else {
+        // Explicit detach: drop the native bridge state so future per-frame
+        // canvas/draw calls fall back to mocks cleanly.
+        native_gpu_bridge_state_.reset();
+    }
+    safe_dispatch_eval(engine_, gpu_host_object_update_script(gpu_info), "gpu surface attach");
+}
+
+bool WidgetBridge::has_native_gpu_bridge() const noexcept {
+    return gpu_surface_ != nullptr && native_gpu_bridge_state_ != nullptr;
 }
 
 void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is_down) {
@@ -8184,10 +8233,9 @@ void WidgetBridge::register_api() {
         return result;
     });
 
-    auto gpu_info = widget_bridge_gpu_info(gpu_surface_);
-
     // WebGPU: getGPUInfo() → device capabilities
-    engine_.register_function("getGPUInfo", [gpu_info](choc::javascript::ArgumentList) {
+    engine_.register_function("getGPUInfo", [this](choc::javascript::ArgumentList) {
+        auto gpu_info = widget_bridge_gpu_info(gpu_surface_);
         auto info = choc::value::createObject("");
         info.addMember("backend", choc::value::createString(gpu_info.backend));
         info.addMember("backendType", choc::value::createString(gpu_info.backend_type));
@@ -8203,29 +8251,32 @@ void WidgetBridge::register_api() {
         return info;
     });
 
+    auto gpu_info = widget_bridge_gpu_info(gpu_surface_);
     HostObjectDescriptor gpu;
     gpu.class_name = "GPU";
     gpu.properties.push_back({"backend", choc::value::createString(gpu_info.backend)});
     gpu.properties.push_back({"backendType", choc::value::createString(gpu_info.backend_type)});
     gpu.properties.push_back({"available", choc::value::createBool(gpu_info.available)});
     gpu.properties.push_back({"nativeBridge", choc::value::createBool(gpu_info.native_bridge)});
-    gpu.methods.push_back({"getPreferredCanvasFormat", [gpu_info](const choc::value::Value*, size_t) {
-        return choc::value::createString(gpu_info.preferred_canvas_format);
+    gpu.methods.push_back({"getPreferredCanvasFormat", [this](const choc::value::Value*, size_t) {
+        return choc::value::createString(widget_bridge_gpu_info(gpu_surface_).preferred_canvas_format);
     }});
     engine_.register_host_object("navigatorGPU", std::move(gpu));
 
-    engine_.register_function("__describeNativeAdapterImpl", [gpu_info](choc::javascript::ArgumentList) {
-        return gpu_descriptor_to_value(gpu_info);
+    engine_.register_function("__describeNativeAdapterImpl", [this](choc::javascript::ArgumentList) {
+        return gpu_descriptor_to_value(widget_bridge_gpu_info(gpu_surface_));
     });
 
-    engine_.register_function("__describeNativeDeviceImpl", [gpu_info](choc::javascript::ArgumentList) {
+    engine_.register_function("__describeNativeDeviceImpl", [this](choc::javascript::ArgumentList) {
+        auto gpu_info = widget_bridge_gpu_info(gpu_surface_);
         auto device = choc::value::createObject("");
         device.addMember("nativeBridge", choc::value::createBool(gpu_info.native_bridge));
         device.addMember("adapterInfo", gpu_adapter_info_to_value(gpu_info));
         return device;
     });
 
-    engine_.register_function("__gpuCanvasConfigureImpl", [this, gpu_info](choc::javascript::ArgumentList args) {
+    engine_.register_function("__gpuCanvasConfigureImpl", [this](choc::javascript::ArgumentList args) {
+        auto gpu_info = widget_bridge_gpu_info(gpu_surface_);
         auto canvas_id = args.get<std::string>(0, "");
         auto width = static_cast<uint32_t>(std::max(1, args.get<int32_t>(1, 1)));
         auto height = static_cast<uint32_t>(std::max(1, args.get<int32_t>(2, 1)));
@@ -9724,8 +9775,8 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         return choc::value::createBool(it->second.configured);
     });
 
-    engine_.register_promise_function("__requestAdapterImpl", [gpu_info](const choc::value::Value*, size_t) {
-        return gpu_descriptor_to_value(gpu_info);
+    engine_.register_promise_function("__requestAdapterImpl", [this](const choc::value::Value*, size_t) {
+        return gpu_descriptor_to_value(widget_bridge_gpu_info(gpu_surface_));
     });
 
     // ── Compute pipeline dispatch ───────────────────────────────────────

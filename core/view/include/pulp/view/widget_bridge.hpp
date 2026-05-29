@@ -56,6 +56,30 @@ public:
                  render::GpuSurface* gpu_surface = nullptr);
     ~WidgetBridge();
 
+    // Attach (or replace) the GPU surface AFTER construction. Mirrors the
+    // 4th constructor argument but for the common case where the WidgetBridge
+    // is built before the host's GpuSurface exists (e.g. AUv3 editor lifecycle:
+    // the format adapter opens ViewBridge / ScriptedUiSession first, then
+    // builds the PluginViewHost — only THEN is `host->gpu_surface()` non-null).
+    //
+    // Phase iOS-D.3b Slice 1 (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md).
+    // Without this attach call, the JS-side navigator.gpu / canvas.getContext
+    // ('webgpu') bridge falls through to mocks and Three.js renders black.
+    //
+    // Lifetime: the GpuSurface must outlive this WidgetBridge. Pass `nullptr`
+    // to detach (e.g. during host teardown). Idempotent — calling with the
+    // same surface twice is a no-op.
+    void attach_gpu_surface(render::GpuSurface* gpu_surface);
+
+    // Read-back accessor for diagnostics + tests. Slice 1 test asserts this
+    // returns non-null after attach.
+    render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
+
+    // Introspection for Slice 1 tests: true iff a GpuSurface is attached AND
+    // its adapter reports `native_bridge=true` (i.e. JS navigator.gpu /
+    // canvas.getContext('webgpu') will route through Pulp's Dawn).
+    bool has_native_gpu_bridge() const noexcept;
+
     // Load and execute a UI script
     void load_script(const std::string& code);
 

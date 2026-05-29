@@ -181,20 +181,56 @@ def native_readiness_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
     binary_dependencies = validation.get("binary_dependencies", {})
     if not isinstance(binary_dependencies, dict):
         binary_dependencies = {}
+
+    # Prefer the explicit `claims[]` provenance shape when present: each
+    # claim names its dependency, status, and the artifact that backs it,
+    # so we can demand that the js_engine claim is BOTH `absent` AND
+    # backed by a proof artifact reference at the per-claim level. Fall
+    # back to the legacy flat shape (`js_engine_present` boolean +
+    # top-level proof/audit artifact refs) for older artifacts that
+    # haven't been regenerated against the new schema yet.
+    claims = binary_dependencies.get("claims")
+    js_claim_absent = False
+    js_claim_proof_present = False
+    if isinstance(claims, list):
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            if claim.get("dependency") != "js_engine":
+                continue
+            if claim.get("status") == "absent":
+                js_claim_absent = True
+                if (refs_real_artifact(claim.get("proof_artifact")) or
+                        refs_real_artifact(claim.get("audit_artifact"))):
+                    js_claim_proof_present = True
+            break
+
     js_present = binary_dependencies.get("js_engine_present")
-    has_binary_proof = (
+    has_legacy_binary_proof = (
         refs_real_artifact(binary_dependencies.get("proof_artifact")) or
         refs_real_artifact(binary_dependencies.get("audit_artifact"))
     )
-    if js_present is False and has_binary_proof:
-        checks.append(check("binary_no_js_engine", PASS_STATUS, "binary dependency proof reports no JS engine"))
+
+    if js_claim_absent and js_claim_proof_present:
+        checks.append(check(
+            "binary_no_js_engine",
+            PASS_STATUS,
+            "binary dependency claim proves JS engine is absent",
+        ))
+    elif js_present is False and has_legacy_binary_proof:
+        checks.append(check(
+            "binary_no_js_engine",
+            PASS_STATUS,
+            "binary dependency proof reports no JS engine",
+        ))
     else:
         checks.append(check(
             "binary_no_js_engine",
             FAIL_STATUS,
             "native readiness requires proof-backed binary evidence that no JS engine is present",
             js_engine_present=js_present,
-            proof_artifact_present=has_binary_proof,
+            js_claim_absent=js_claim_absent,
+            proof_artifact_present=js_claim_proof_present or has_legacy_binary_proof,
         ))
 
     compile_status = str(validation.get("compile", {}).get("status", "")).lower()
