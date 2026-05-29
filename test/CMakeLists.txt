@@ -2197,6 +2197,20 @@ add_executable(pulp-test-threejs-resources test_threejs_resources.cpp)
 target_link_libraries(pulp-test-threejs-resources PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-threejs-resources)
 
+# iOS-D.3b Slice 3: Node-based smoke test for the IIFE bundler.
+# Only registered when Node.js is on PATH — desktop CI hosts have it,
+# fresh / offline builds may not (parallels the optional bundle step
+# in PulpAuv3.cmake).
+find_program(_PULP_NODE_FOR_TESTS NAMES node nodejs)
+if(_PULP_NODE_FOR_TESTS)
+    add_test(NAME pulp_bundle_threejs_for_jsc_smoke
+             COMMAND ${_PULP_NODE_FOR_TESTS}
+                     ${CMAKE_SOURCE_DIR}/tools/scripts/test_bundle_threejs_for_jsc.mjs)
+    set_tests_properties(pulp_bundle_threejs_for_jsc_smoke PROPERTIES
+        TIMEOUT 30
+        LABELS "ios-d3b;node;threejs")
+endif()
+
 # Screenshot tests (macOS only — uses CoreGraphics bitmap context)
 if(APPLE)
     add_executable(pulp-test-screenshot test_screenshot.cpp)
