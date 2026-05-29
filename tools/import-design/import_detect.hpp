@@ -36,15 +36,17 @@ struct FingerprintClause {
         frontmatter_fence,      // {"kind":"frontmatter-fence", "value":"---"}
         frontmatter_key,        // {"kind":"frontmatter-key", "required":"name"}
                                 //   or {"kind":"frontmatter-key", "any-of":["colors","typography"]}
+        json_key_equals,        // {"kind":"json-key-equals", "path":"provenance.adapter", "value":"figma-plugin"}
         unknown,
     };
 
     Kind kind = Kind::unknown;
     std::vector<std::string> files;     // directory-files
     std::string regex;                  // html-script-src, filename
-    std::string value;                  // html-script-type, frontmatter-fence
+    std::string value;                  // html-script-type, frontmatter-fence, json-key-equals
     std::vector<std::string> any_of;    // tailwind-config-token, frontmatter-key
     std::string required;               // frontmatter-key (single required key)
+    std::string path;                   // json-key-equals — dotted path into the parsed JSON
     std::string raw_kind;               // for diagnostics on unknown clauses
 };
 

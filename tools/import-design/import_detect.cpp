@@ -48,6 +48,8 @@ FingerprintClause parse_clause(const JsonValue& v) {
             c.kind = FingerprintClause::Kind::frontmatter_fence;
         else if (k->str_val == "frontmatter-key")
             c.kind = FingerprintClause::Kind::frontmatter_key;
+        else if (k->str_val == "json-key-equals")
+            c.kind = FingerprintClause::Kind::json_key_equals;
     }
     if (auto* files = v.get("files"); files && files->type == JsonValue::Array)
         c.files = files->as_string_array();
@@ -59,6 +61,8 @@ FingerprintClause parse_clause(const JsonValue& v) {
         c.any_of = any->as_string_array();
     if (auto* req = v.get("required"); req && req->type == JsonValue::String)
         c.required = req->str_val;
+    if (auto* pp = v.get("path"); pp && pp->type == JsonValue::String)
+        c.path = pp->str_val;
     return c;
 }
 
@@ -407,6 +411,36 @@ bool match_clause(const FingerprintClause& clause, const InputSnapshot& snap) {
                     if (have == want) return true;
             }
             return false;
+        }
+        case FingerprintClause::Kind::json_key_equals: {
+            // Parse snap.html_text as JSON (the field name is historical —
+            // snapshot_input reads any text file into it). Walk the dotted
+            // path and compare the resulting string value to clause.value.
+            // Returns false on any parse failure / missing key / type
+            // mismatch.
+            if (clause.path.empty() || clause.value.empty() || snap.html_text.empty())
+                return false;
+            try {
+                JsonParser p(snap.html_text);
+                auto root = p.parse();
+                const JsonValue* cur = &root;
+                std::string remaining = clause.path;
+                while (!remaining.empty()) {
+                    auto dot = remaining.find('.');
+                    std::string segment = (dot == std::string::npos)
+                                              ? remaining
+                                              : remaining.substr(0, dot);
+                    if (cur->type != JsonValue::Object) return false;
+                    cur = cur->get(segment);
+                    if (cur == nullptr) return false;
+                    if (dot == std::string::npos) break;
+                    remaining = remaining.substr(dot + 1);
+                }
+                if (cur == nullptr || cur->type != JsonValue::String) return false;
+                return cur->str_val == clause.value;
+            } catch (...) {
+                return false;
+            }
         }
         case FingerprintClause::Kind::unknown:
         default:
