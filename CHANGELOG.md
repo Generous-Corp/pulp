@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02750"></a>
+## [0.275.0] - 2026-05-29
+
+- docs(skills): reword native-import gotchas to stable rationale ([#3136](https://github.com/danielraffel/pulp/pull/3136))
+- fix(audio): reject `..` segments in hf:// checkpoint paths + Windows-safe model.json assertions ([#3131](https://github.com/danielraffel/pulp/pull/3131))
+
 <a id="v02740"></a>
 ## [0.274.0] - 2026-05-29
 
@@ -3146,6 +3152,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.275.0]: https://github.com/danielraffel/pulp/releases/tag/v0.275.0
 [0.274.0]: https://github.com/danielraffel/pulp/releases/tag/v0.274.0
 [0.273.0]: https://github.com/danielraffel/pulp/releases/tag/v0.273.0
 [0.272.1]: https://github.com/danielraffel/pulp/releases/tag/v0.272.1
