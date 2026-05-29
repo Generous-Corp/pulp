@@ -812,8 +812,22 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setFlex('" << id << "', 'padding_left', " << node.layout.padding_left << ");\n";
         }
 
-        if (node.layout.justify != LayoutAlign::flex_start)
-            ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(node.layout.justify) << "');\n";
+        // Single-child space_between → center.
+        // Figma designers commonly mark a flex container "space-between" to
+        // mean "spread items out", then drop a single child in. With one
+        // child, CSS / Yoga space-between degenerates to flex-start, so
+        // the lone item left-aligns instead of centering — visible bug
+        // on every numbered tab button in ELYSIUM ("1" "2" "3" "4" sat
+        // at the left edge of their 29×20 button boxes). When the IR
+        // says space_between AND there's exactly one child, the design
+        // intent is centering — emit that.
+        LayoutAlign effective_justify = node.layout.justify;
+        if (effective_justify == LayoutAlign::space_between &&
+            node.children.size() == 1) {
+            effective_justify = LayoutAlign::center;
+        }
+        if (effective_justify != LayoutAlign::flex_start)
+            ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(effective_justify) << "');\n";
         // Baseline override: a row that flexes text children of DIFFERENT
         // font sizes (typical "BIG_TITLE small_subtitle" header pattern)
         // visually wants align-items:baseline, not center. Figma's

@@ -1156,19 +1156,46 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
         float fh = first.style.height.value_or(0.0f);
         bool is_horizontal_hairline = (fh > 0.0f && fh <= 2.0f && fw > 4.0f);
         size_t non_line_followers = 0;
+        std::vector<float> follower_widths;
         for (size_t i = 1; i < node.children.size(); ++i) {
             const auto& c = node.children[i];
             float cw = c.style.width.value_or(0.0f);
             float ch = c.style.height.value_or(0.0f);
-            if (cw >= 8.0f && ch >= 8.0f) ++non_line_followers;
+            if (cw >= 8.0f && ch >= 8.0f) {
+                ++non_line_followers;
+                follower_widths.push_back(cw);
+            }
         }
         float row_w = node.style.width.value_or(0.0f);
         float row_h = node.style.height.value_or(0.0f);
         if (is_horizontal_hairline && non_line_followers >= 2 && row_w > 0.0f && row_h > 0.0f) {
+            // Compute the span. Default: full row width. Refinement: if the
+            // LAST follower is significantly smaller than the others (≤ 60%
+            // of the median width), it's most likely a trailing "add" /
+            // "more" affordance ("+", "settings cog", etc.) — NOT part of
+            // the connected pipeline. Pull the line's right edge back to
+            // just-past the penultimate widget so the connection visual
+            // ends at the last real item.
+            float span_w = row_w;
+            if (follower_widths.size() >= 3) {
+                std::vector<float> sorted = follower_widths;
+                std::sort(sorted.begin(), sorted.end());
+                float median = sorted[sorted.size() / 2];
+                float last = follower_widths.back();
+                if (median > 0.0f && (last / median) < 0.6f) {
+                    // Trailing widget is most likely an "add" / "more"
+                    // affordance, not part of the connected pipeline.
+                    // Pull the line's right edge back by that widget's
+                    // width + the gap before it, so the connection
+                    // visual ends at the last real item.
+                    float gap = node.layout.gap;
+                    span_w = std::max(median, row_w - last - gap);
+                }
+            }
             first.style.position = "absolute";
             first.style.left = 0.0f;
             first.style.top  = (row_h - fh) * 0.5f;
-            first.style.width  = row_w;          // span the full row
+            first.style.width  = span_w;
             first.style.height = fh;             // keep stroke weight
         }
     }
