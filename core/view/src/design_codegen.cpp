@@ -381,6 +381,20 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     std::string ind = indent(depth, opts.indent_spaces);
     std::string pid = parent_id.empty() ? "''" : ("'" + parent_id + "'");
 
+    // Emit setPosition('absolute') + setLeft/setTop/setRight/setBottom for
+    // nodes whose IRStyle indicates absolute positioning (Figma plugin import
+    // lane: children of non-auto-layout frames). The target may be the node
+    // id or a wrapper id (e.g. audio-widget col_id).
+    auto emit_position_if_absolute = [&](const std::string& target_id) {
+        const auto& s = node.style;
+        if (!s.position || *s.position != "absolute") return;
+        ss << ind << "setPosition('" << target_id << "', 'absolute');\n";
+        if (s.left)   ss << ind << "setLeft('"   << target_id << "', " << *s.left   << ");\n";
+        if (s.top)    ss << ind << "setTop('"    << target_id << "', " << *s.top    << ");\n";
+        if (s.right)  ss << ind << "setRight('"  << target_id << "', " << *s.right  << ");\n";
+        if (s.bottom) ss << ind << "setBottom('" << target_id << "', " << *s.bottom << ");\n";
+    };
+
     // Phase 0a: emit the anchor trail in bridge-native-JS codegen too. Same
     // gate + format as generate_node(), so downstream tooling has one
     // pattern to grep for regardless of which codegen mode produced
@@ -420,6 +434,18 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             }
         }
 
+        // Silver-knob synthesis: in the sprite-strip path the "VALUE" label
+        // typically lives baked into the captured PNG (Figma knob components
+        // include it as a flattened sub-text). When --knob-style=silver
+        // swaps the PNG for native vector rendering there's nothing carrying
+        // that label, so the knob reads as bare metal with no caption.
+        // Synthesize a generic "VALUE" label so the silver path stays
+        // visually parity with sprite. Only fires when both label slots
+        // are empty (we'd never overwrite a real Figma label).
+        if (opts.use_silver_knobs && label_text.empty() && value_text.empty()) {
+            label_text = "VALUE";
+        }
+
         if (opts.include_comments && !label_text.empty())
             ss << ind << "// " << label_text << "\n";
 
@@ -429,29 +455,141 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setWidgetStyle('" << wid << "', 'minimal');\n";
         };
 
-        // Create a wrapper column for the widget + value label
-        std::string col_id = id + "_col";
-        ss << ind << "createCol('" << col_id << "', " << pid << ");\n";
-        ss << ind << "setFlex('" << col_id << "', 'align_items', 'center');\n";
-        ss << ind << "setFlex('" << col_id << "', 'gap', 4);\n";
+        // When the IR has NO inlined label or value text children, the widget
+        // doesn't need its own wrapper column — the parent (typically a Figma
+        // auto-layout row that already arranges siblings) does the layout.
+        // Wrapping in a col with +20 padding for absent labels makes the col
+        // taller than the parent's hugged row height, breaking Yoga's flex
+        // layout (Track A regression on the ELYSIUM knob row: the wrapper
+        // was 28x61 / 62x111 / 28x61 inside a 158x91 parent).
+        bool needs_label_wrapper = !label_text.empty() || !value_text.empty();
+
+        // Create a wrapper column for the widget + value label (only when
+        // there's actual label/value text to stack below the widget).
+        std::string col_id = needs_label_wrapper ? (id + "_col") : parent_id;
+        if (needs_label_wrapper) {
+            ss << ind << "createCol('" << col_id << "', " << pid << ");\n";
+            emit_position_if_absolute(col_id);
+            ss << ind << "setFlex('" << col_id << "', 'align_items', 'center');\n";
+            ss << ind << "setFlex('" << col_id << "', 'gap', 4);\n";
+        } else {
+            // No wrapper. Emit any absolute position on the widget itself.
+            // (emit_position_if_absolute is called below at the createKnob site
+            // by using id directly — we don't need to repeat here.)
+        }
 
         if (wtype == AudioWidgetType::knob) {
-            // shape_width/height = child ellipse size (widget), frame width = column container
-            float shape_w = kMinKnobSize, shape_h = kMinKnobSize;
+            // Knob sizing priority:
+            //   1. node.attributes["shape_width"/"shape_height"] — explicit
+            //      override from designs that ship a non-default child
+            //      ellipse size.
+            //   2. node.style.width / height — figma-plugin lane sets these
+            //      to the actual Figma instance bounds.
+            //   3. kMinKnobSize fallback for purely heuristic detections.
+            // The previous default-min behavior stretched skinned knobs to
+            // 56x56 regardless of source size; with sprite-strip skins
+            // (Track A) that distorted the PNG and overlapped neighbors.
+            float shape_w = node.style.width.value_or(kMinKnobSize);
+            float shape_h = node.style.height.value_or(kMinKnobSize);
             if (node.attributes.count("shape_width"))
                 shape_w = std::stof(node.attributes.at("shape_width"));
             if (node.attributes.count("shape_height"))
                 shape_h = std::stof(node.attributes.at("shape_height"));
-            float frame_w = node.style.width.value_or(shape_w + 20);
+            float frame_w = shape_w;
             float col_h = shape_h + 20 + (value_text.empty() ? 0 : 16);
-            ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
-            ss << ind << "setFlex('" << col_id << "', 'min_width', " << frame_w << ");\n";
+            if (needs_label_wrapper) {
+                ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
+                ss << ind << "setFlex('" << col_id << "', 'min_width', " << frame_w << ");\n";
+            }
             ss << ind << "createKnob('" << id << "', '" << col_id << "');\n";
+            if (!needs_label_wrapper) emit_position_if_absolute(id);
             ss << ind << "setFlex('" << id << "', 'width', " << shape_w << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Clear built-in label — use separate Yoga-positioned labels for exact placement
             ss << ind << "setLabel('" << id << "', ' ');\n";
             ss << ind << "setValue('" << id << "', " << node.audio_default << ");\n";
+            // Track A3 — attach a designer-supplied sprite-strip skin when the
+            // figma-plugin CLI lane (or anyone else) pre-resolved an asset_path
+            // onto this knob node. Frame count defaults to 1 (static body);
+            // a multi-frame strip lets the indicator rotate by value.
+            //
+            // Track D (alt-button): when opts.use_silver_knobs is true,
+            // emit the native-vector silver render style instead. The
+            // sprite-strip PNG path is skipped — the chrome look comes
+            // from canvas primitives + radial gradient + indicator notch
+            // (WidgetRenderStyle::silver). Crisp at any size, no PNG
+            // bleed, no GPU texture upload.
+            //
+            // Per-node override: a Figma node name ending in "@sprite"
+            // or "@silver" overrides the global default for THIS knob
+            // only. Lets a designer mark specific knobs as
+            // pixel-exact-PNG (e.g. a hero knob whose Figma rendering
+            // is intentional) while the rest of the design uses the
+            // crisper vector path. Convention rationale: same `@` style
+            // Figma uses for variants (`Knob/State=hover`) and that
+            // Mitosis / Penpot adopted for code-target hints.
+            // Parse the figma-plugin per-node knob-style suffix.
+            // Tolerates:
+            //   - case variation (`@Sprite`, `@SILVER`)
+            //   - trailing whitespace (Figma's rename UI keeps it)
+            //   - Figma variant separator (`Knob@sprite/State=hover`)
+            //   - Figma's `Knob/Hero@sprite` component-instance pattern
+            // Strictly matches "@sprite" or "@silver" as a complete tag
+            // at the end of the name OR before a variant separator. We
+            // do NOT match inside the middle of the name to avoid
+            // catching layer comments like "Knob@sprite-old-style".
+            bool node_wants_sprite = false;
+            bool node_wants_silver = false;
+            {
+                std::string n = node.name;
+                // Trim trailing whitespace.
+                while (!n.empty() &&
+                       std::isspace(static_cast<unsigned char>(n.back())))
+                    n.pop_back();
+                // Cut at Figma variant separator (`@sprite/State=hover`
+                // → `@sprite`). Only the segment containing the @-tag
+                // matters for the suffix.
+                if (auto slash = n.find_last_of('/'); slash != std::string::npos) {
+                    // Only consider the slash a "variant cut" if there's
+                    // an @-tag before it AND no @-tag after it. Otherwise
+                    // it's part of a component path (`Knob/Hero@sprite`),
+                    // which we want to keep intact for the lowercase
+                    // ends-with check below.
+                    auto post = n.substr(slash + 1);
+                    auto pre = n.substr(0, slash);
+                    if (pre.find('@') != std::string::npos &&
+                        post.find('@') == std::string::npos) {
+                        n = pre;
+                    }
+                }
+                // Lowercase the whole string for case-insensitive matching.
+                for (auto& c : n) c = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(c)));
+                auto ends_with = [&](std::string_view suf) {
+                    if (n.size() < suf.size()) return false;
+                    return n.compare(n.size() - suf.size(), suf.size(), suf) == 0;
+                };
+                if (ends_with("@sprite")) node_wants_sprite = true;
+                else if (ends_with("@silver")) node_wants_silver = true;
+            }
+            bool use_silver_here =
+                node_wants_silver ? true :
+                node_wants_sprite ? false :
+                opts.use_silver_knobs;
+
+            auto skin_it = node.attributes.find("asset_path");
+            if (use_silver_here) {
+                ss << ind << "setWidgetStyle('" << id << "', 'silver');\n";
+            } else if (skin_it != node.attributes.end() && !skin_it->second.empty()) {
+                int frames = 1;
+                auto fc_it = node.attributes.find("sprite_strip_frame_count");
+                if (fc_it != node.attributes.end()) {
+                    try { frames = std::max(1, std::stoi(fc_it->second)); } catch (...) {}
+                }
+                ss << ind << "setKnobSpriteStrip('" << id << "', '"
+                   << js_single_quote_escape(skin_it->second) << "', "
+                   << frames << ", 'vertical');\n";
+            }
             emit_style(id);
             // Per-knob stroke color from child ellipse (used by minimal paint path)
             if (!stroke_color.empty())
@@ -552,18 +690,75 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         return;
     }
 
-    // Container or text node
-    bool is_container = !node.children.empty() || node.type == "frame";
+    // Container, image, or text node
+    bool is_image = (node.type == "image" || node.attributes.count("asset_path") > 0);
+    bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
     bool is_text = (node.type == "text" || node.type == "label");
     bool is_row = (node.layout.direction == LayoutDirection::row);
+
+    if (is_image) {
+        // Image node → createImage + setImageSource. Honors absolute positioning
+        // emitted from the figma-plugin lane. asset_path is pre-resolved to an
+        // absolute filesystem path by the CLI's asset resolution pass; nodes
+        // missing the attribute (legacy callers with bare type=image) fall
+        // through with no source set.
+        if (opts.include_comments && !node.name.empty() && depth > 0)
+            ss << ind << "// " << node.name << "\n";
+        ss << ind << "createImage('" << id << "', " << pid << ");\n";
+        emit_position_if_absolute(id);
+        auto it = node.attributes.find("asset_path");
+        if (it != node.attributes.end() && !it->second.empty()) {
+            ss << ind << "setImageSource('" << id << "', '"
+               << js_single_quote_escape(it->second) << "');\n";
+        }
+        if (node.style.width)
+            ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+        if (node.style.height)
+            ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+        // When the importer flagged this asset as bleed (PNG pixel dims
+        // exceed twice the layout dims by 1.5× — typical drop-shadow case),
+        // tell ImageView to render at natural size centered instead of
+        // stretching the PNG into the smaller layout box. Same effect as
+        // the Knob::paint natural-size fix, generalised through CSS
+        // object-fit:none which ImageView already supports.
+        auto bleed_it = node.attributes.find("asset_bleed");
+        if (bleed_it != node.attributes.end() && bleed_it->second == "1") {
+            ss << ind << "setObjectFit('" << id << "', 'none');\n";
+        }
+        ss << "\n";
+        return;
+    }
 
     if (is_text) {
         // Text node → createLabel with explicit height (Yoga requirement)
         ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";  // pulp #81
+        emit_position_if_absolute(id);
 
+        // Honour the IR-declared height when present. Pre-fix this branch
+        // unconditionally recomputed from font_size, which clobbered Figma's
+        // own label box height — and any absolute-positioned label that
+        // expected to be CENTRED in a slot relied on its own height matching
+        // the slot. Visible bug: the SEARCH input's text+icon sit at design
+        // y=5 / y=6 with IR heights 17 / 15; clobbering the text height to
+        // 14 shifted its glyph baseline up so it no longer aligned with the
+        // icon centre.
         float font_h = node.style.font_size.value_or(14.0f);
-        float label_h = std::max(font_h * 1.4f, kMinLabelHeight);
+        bool ir_height_is_explicit = node.style.height.has_value();
+        float label_h = ir_height_is_explicit
+            ? std::max(*node.style.height, font_h * 1.0f)
+            : std::max(font_h * 1.4f, kMinLabelHeight);
         ss << ind << "setFlex('" << id << "', 'height', " << label_h << ");\n";
+        // When the IR carries an explicit height that's meaningfully taller
+        // than the font (Figma's Auto-Layout / text-frame conventions use
+        // a height-greater-than-font-size to RESERVE a vertical slot the
+        // text is supposed to be CENTRED within), emit setVerticalAlign:
+        // center so Pulp's Label draws its glyphs at the slot's optical
+        // middle. Without this Label defaults to top-aligned, and the
+        // SEARCH input's "Search" text rides above the magnifying-glass
+        // icon instead of baseline-aligning with it.
+        if (ir_height_is_explicit && label_h > font_h * 1.15f) {
+            ss << ind << "setVerticalAlign('" << id << "', 'center');\n";
+        }
 
         if (node.style.font_size)
             ss << ind << "setFontSize('" << id << "', " << *node.style.font_size << ");\n";
@@ -571,6 +766,29 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFontWeight('" << id << "', '" << *node.style.font_weight << "');\n";
         if (node.style.color)
             ss << ind << "setTextColor('" << id << "', '" << *node.style.color << "');\n";
+        if (node.style.font_family)
+            ss << ind << "setFontFamily('" << id << "', '" << js_single_quote_escape(*node.style.font_family) << "');\n";
+        if (node.style.text_transform)
+            ss << ind << "setTextTransform('" << id << "', '" << *node.style.text_transform << "');\n";
+        if (node.style.text_align)
+            ss << ind << "setTextAlign('" << id << "', '" << *node.style.text_align << "');\n";
+        if (node.style.letter_spacing)
+            ss << ind << "setLetterSpacing('" << id << "', " << *node.style.letter_spacing << ");\n";
+        // Inflate min-width when the label is text-transformed to uppercase.
+        // Figma stores the source-text width but renders the transformed
+        // glyphs — uppercase Latin is typically ~15-20% wider than the
+        // original mixed-case. Without compensation the label's reserved
+        // box is too narrow for the rendered glyphs, so the text spills
+        // into the next flex sibling (visible bug: "FILTER & EQHOLLOW
+        // PUNCH" — the EQ label overflows its 77-px slot, painting on
+        // top of the dropdown's "Hollow Punch" text).
+        if (node.style.width) {
+            bool uppercase = node.style.text_transform &&
+                             *node.style.text_transform == "uppercase";
+            float w = *node.style.width;
+            if (uppercase) w *= 1.20f;  // empirical: caps run ~15-20% wider
+            ss << ind << "setFlex('" << id << "', 'min_width', " << w << ");\n";
+        }
 
         ss << "\n";
         return;
@@ -583,6 +801,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
         ss << ind << (is_row ? "createRow" : "createCol")
            << "('" << id << "', " << pid << ");\n";
+        emit_position_if_absolute(id);
 
         // Yoga: every container MUST have explicit height
         // Priority: _layoutHeight (from snapshot_layout) > style.height > fill > computed
@@ -626,33 +845,220 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setFlex('" << id << "', 'padding_left', " << node.layout.padding_left << ");\n";
         }
 
-        if (node.layout.justify != LayoutAlign::flex_start)
-            ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(node.layout.justify) << "');\n";
-        if (node.layout.align != LayoutAlign::stretch)
+        // Single-child space_between → center.
+        // Figma designers commonly mark a flex container "space-between" to
+        // mean "spread items out", then drop a single child in. With one
+        // child, CSS / Yoga space-between degenerates to flex-start, so
+        // the lone item left-aligns instead of centering — visible bug
+        // on every numbered tab button in ELYSIUM ("1" "2" "3" "4" sat
+        // at the left edge of their 29×20 button boxes). When the IR
+        // says space_between AND there's exactly one child, the design
+        // intent is centering — emit that.
+        LayoutAlign effective_justify = node.layout.justify;
+        if (effective_justify == LayoutAlign::space_between &&
+            node.children.size() == 1) {
+            effective_justify = LayoutAlign::center;
+        }
+        if (effective_justify != LayoutAlign::flex_start)
+            ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(effective_justify) << "');\n";
+        // Baseline override: a row that flexes text children of DIFFERENT
+        // font sizes (typical "BIG_TITLE small_subtitle" header pattern)
+        // visually wants align-items:baseline, not center. Figma's
+        // auto-layout doesn't distinguish — it stores center — but
+        // Yoga supports YGAlignBaseline and the visual difference between
+        // box-center and baseline is significant once font sizes differ
+        // by more than ~2pt. Triggers only on flex-row + 2+ text children
+        // + size variance — leaves all other rows alone.
+        bool baseline_override = false;
+        if (is_row && node.layout.align == LayoutAlign::center) {
+            std::vector<float> text_sizes;
+            for (const auto& child : node.children) {
+                if (child.type == "text" || child.type == "label") {
+                    if (child.style.font_size) text_sizes.push_back(*child.style.font_size);
+                }
+            }
+            if (text_sizes.size() >= 2) {
+                float mn = *std::min_element(text_sizes.begin(), text_sizes.end());
+                float mx = *std::max_element(text_sizes.begin(), text_sizes.end());
+                if (mx - mn >= 1.5f) baseline_override = true;
+            }
+        }
+        if (baseline_override) {
+            ss << ind << "setFlex('" << id << "', 'align_items', 'baseline');\n";
+        } else if (node.layout.align != LayoutAlign::stretch)
             ss << ind << "setFlex('" << id << "', 'align_items', '" << align_to_css(node.layout.align) << "');\n";
 
         // Visual styles
         if (node.style.background_color)
             ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+        if (node.style.background_gradient)
+            ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
+        // Emit border (Figma frame stroke) as setBorder(id, color, width).
+        // The codegen was previously dropping these — visible effect: the
+        // 4 column frames inside the ELYSIUM gradient panel each have a
+        // 1px rgba(0,0,0,0.1) border that Figma renders as the thin
+        // vertical separators between GRAINS/CURSOR/RANGE/TUNING. The
+        // bridge's parseColor accepts both hex and rgba(...) so we can
+        // pass border_color verbatim from the IR.
+        if (node.style.border_color && node.style.border_width &&
+            *node.style.border_width > 0.0f) {
+            float br = node.style.border_radius.value_or(0.0f);
+            ss << ind << "setBorder('" << id << "', '"
+               << js_single_quote_escape(*node.style.border_color) << "', "
+               << *node.style.border_width << ", " << br << ");\n";
+        }
+        if (node.style.box_shadow) {
+            // Parse CSS-style "<ox> <oy> <blur> [<spread>] <color>" into the
+            // bridge's setBoxShadow(id, ox, oy, blur, spread, color, inset?)
+            // signature — passing the raw string makes the bridge fall back
+            // to default (2,4,#00000050) numerics, which doesn't match the
+            // designer's intent.
+            const std::string& s = *node.style.box_shadow;
+            float ox = 0, oy = 0, blur = 0, spread = 0;
+            std::string color = "#00000050";
+            bool inset = false;
+            // Strip trailing/leading whitespace + detect inset.
+            std::string body = s;
+            auto find_lower = [](const std::string& h, const std::string& n) {
+                auto it = std::search(h.begin(), h.end(), n.begin(), n.end(),
+                    [](char a, char b){ return std::tolower(static_cast<unsigned char>(a))
+                                              == std::tolower(static_cast<unsigned char>(b)); });
+                return it == h.end() ? std::string::npos : (size_t)(it - h.begin());
+            };
+            if (auto p = find_lower(body, "inset"); p != std::string::npos) {
+                inset = true;
+                body.erase(p, 5);
+            }
+            // Tokenize: pull color first (hex or rgba(...)), then 3–4 lengths.
+            auto rgba_p = body.find("rgba(");
+            auto rgb_p  = body.find("rgb(");
+            auto hex_p  = body.find('#');
+            if (rgba_p != std::string::npos) {
+                auto end = body.find(')', rgba_p);
+                if (end != std::string::npos) {
+                    color = body.substr(rgba_p, end - rgba_p + 1);
+                    body.erase(rgba_p, end - rgba_p + 1);
+                }
+            } else if (rgb_p != std::string::npos) {
+                auto end = body.find(')', rgb_p);
+                if (end != std::string::npos) {
+                    color = body.substr(rgb_p, end - rgb_p + 1);
+                    body.erase(rgb_p, end - rgb_p + 1);
+                }
+            } else if (hex_p != std::string::npos) {
+                auto end = body.find_first_of(" \t,", hex_p);
+                color = body.substr(hex_p, end == std::string::npos ? std::string::npos : end - hex_p);
+                body.erase(hex_p, end == std::string::npos ? std::string::npos : end - hex_p);
+            }
+            // Collect numeric tokens (strip "px").
+            std::vector<float> nums;
+            std::string tok;
+            auto flush = [&]() {
+                if (tok.empty()) return;
+                // strip "px" suffix
+                if (tok.size() > 2 && tok.substr(tok.size()-2) == "px") tok.resize(tok.size()-2);
+                try { nums.push_back(std::stof(tok)); } catch (...) {}
+                tok.clear();
+            };
+            for (char c : body) {
+                if (std::isspace(static_cast<unsigned char>(c)) || c == ',') flush();
+                else tok.push_back(c);
+            }
+            flush();
+            if (nums.size() >= 2) { ox = nums[0]; oy = nums[1]; }
+            if (nums.size() >= 3) blur = nums[2];
+            if (nums.size() >= 4) spread = nums[3];
+            ss << ind << "setBoxShadow('" << id << "', "
+               << ox << ", " << oy << ", " << blur << ", " << spread
+               << ", '" << js_single_quote_escape(color) << "'"
+               << (inset ? ", true" : "") << ");\n";
+        }
+        if (node.style.opacity)
+            ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
 
         ss << "\n";
 
-        // Recurse children
-        // For space_between rows, right-align the last text child
+        // Recurse children.
+        // For space_between rows with TWO OR MORE text children (the canonical
+        // "label … value" or "key … units" pattern), right-align the LAST
+        // text child so the value hugs the right edge. The earlier version
+        // applied this to single-text-child rows too, which misfired on
+        // dropdowns like ENVELOPE → "Short Plucks" + chevrons-image:
+        // Short Plucks was the only text and got right-aligned within its
+        // own min-width box, pushing the visible glyphs onto the chevrons.
         bool is_space_between = is_row && node.layout.justify == LayoutAlign::space_between;
+        int text_child_count = 0;
+        if (is_space_between) {
+            for (auto& child : node.children) {
+                if (child.type == "text" || child.type == "label") ++text_child_count;
+            }
+        }
+        // Cap-height nudge for [small icon, UPPERCASE label] header rows.
+        // Figma vertically centers icons on the label's cap-height optical
+        // centre. CSS / Yoga `align-items: center` uses the line-box math
+        // centre, which sits ~font_size * 0.15 BELOW the cap-glyph optical
+        // centre because the line box reserves descender slack the
+        // uppercase glyphs don't occupy. Pulp's Label::resolved_state()
+        // produces the same math-centre baseline, so the dot ends up
+        // visually below the label glyphs. Generalisable rule: when a row
+        // has align_items: center, at least one uppercase text child, and
+        // any image child whose min-dim ≤ that label's font_size, emit a
+        // negative margin_top on the icon so its centre lifts to the
+        // cap-glyph centre. No hardcoded constants — the nudge is derived
+        // from the label's own font_size.
+        float upper_font_size = 0.0f;
+        if (is_row && node.layout.align == LayoutAlign::center && !baseline_override) {
+            for (const auto& c : node.children) {
+                bool is_txt = (c.type == "text" || c.type == "label");
+                if (!is_txt) continue;
+                if (!c.style.text_transform || *c.style.text_transform != "uppercase")
+                    continue;
+                upper_font_size = std::max(upper_font_size,
+                                           c.style.font_size.value_or(0.0f));
+            }
+        }
+        // In flex with align-items: center, a margin_top of -M shifts the
+        // child's position UP by M/2 (Yoga centers around the margin-
+        // adjusted box). So to lift the icon's centre by font_size * 0.15
+        // (the cap-vs-math centre delta for an uppercase line-box) we
+        // need a -2 × that margin.
+        float cap_nudge = (upper_font_size > 0.0f)
+                              ? std::round(upper_font_size * 0.30f)
+                              : 0.0f;
+
         std::string last_text_child_id;
         for (auto& child : node.children) {
-            // Capture the var_counter before generation to reconstruct this child's ID
-            if (is_space_between && (child.type == "text" || child.type == "label")) {
+            std::string child_var_id_pre;
+            if (is_space_between && text_child_count >= 2 &&
+                (child.type == "text" || child.type == "label")) {
                 std::string child_id = sanitize_var(child.name.empty() ? child.type : child.name);
                 child_id += std::to_string(var_counter);  // counter value before this child runs
                 last_text_child_id = child_id;
             }
+            // Compute the image child's about-to-be-emitted var id so we
+            // can pin a setFlex margin_top onto it after generation.
+            bool is_img_child = (child.type == "image" ||
+                                  child.attributes.count("asset_path") > 0);
+            bool nudge_this_child = false;
+            if (cap_nudge > 0.0f && is_img_child) {
+                float cw = child.style.width.value_or(0.0f);
+                float ch = child.style.height.value_or(0.0f);
+                float small = (cw > 0.0f && ch > 0.0f) ? std::min(cw, ch) : 0.0f;
+                if (small > 0.0f && small <= upper_font_size) {
+                    child_var_id_pre = sanitize_var(child.name.empty() ? child.type : child.name);
+                    child_var_id_pre += std::to_string(var_counter);
+                    nudge_this_child = true;
+                }
+            }
             generate_native_node(ss, child, opts, depth + 1, var_counter, id);
+            if (nudge_this_child) {
+                std::string child_ind = indent(depth + 1, opts.indent_spaces);
+                ss << child_ind << "setFlex('" << child_var_id_pre
+                   << "', 'margin_top', " << -cap_nudge << ");\n";
+            }
         }
-        // Right-align the last label in space_between rows
         if (!last_text_child_id.empty()) {
             std::string child_ind = indent(depth + 1, opts.indent_spaces);
             ss << child_ind << "setTextAlign('" << last_text_child_id << "', 'right');\n\n";

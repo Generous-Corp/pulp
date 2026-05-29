@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["es2019", "webworker"],
+    "types": ["@figma/plugin-typings"],
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["code.ts", "types.ts", "extract.ts", "extract-model.ts", "serialize.ts", "assets.ts", "tokens.ts"]
+}

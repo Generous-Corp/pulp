@@ -1,0 +1,20 @@
+{
+  "name": "Design for Pulp",
+  "id": "design-for-pulp-dev",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "reasoning": "This plugin runs entirely on your machine. It reads your Figma design and exports it as a local file for use with the Pulp audio plugin framework. No data is sent over the network."
+  },
+  "permissions": [],
+  "capabilities": [],
+  "menu": [
+    { "name": "Export to Pulp", "command": "export" },
+    { "separator": true },
+    { "name": "About", "command": "about" }
+  ]
+}

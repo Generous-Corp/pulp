@@ -1,0 +1,4 @@
+{
+  "_note": "Project root tsconfig is a stub. The two sides of the plugin use different libs (sandbox = Figma APIs, UI = DOM), so they're type-checked separately. Run: `tsc -p src/code.tsconfig.json --noEmit && tsc -p src/ui.tsconfig.json --noEmit`.",
+  "files": []
+}

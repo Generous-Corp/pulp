@@ -10,6 +10,7 @@
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/asset_manager.hpp>
+#include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/design_import.hpp>
 #if __has_include(<pulp/render/gpu_surface.hpp>)
 #include <pulp/render/gpu_surface.hpp>
@@ -1663,6 +1664,60 @@ void WidgetBridge::register_api() {
         auto path = args.get<std::string>(1, "");
         if (auto* img = dynamic_cast<ImageView*>(widget(id)))
             img->set_image_path(path);
+        return choc::value::Value();
+    });
+
+    // setKnobSpriteStrip(id, pngPath, frameCount, orientation?) — Track A1
+    //
+    // Industry-standard knob skin pattern: pngPath points to a vertical
+    // (default) or horizontal filmstrip of N frames, each showing the
+    // knob at one step of its 0..1 value range. Frame N is selected at
+    // paint time from the knob's current value. Full Figma visual
+    // fidelity + full interactivity (the knob keeps receiving mouse
+    // input).
+    //
+    // The same wire works for N=1 (single-frame static body) and
+    // N=64+ (smooth rotation). The plugin can use either depending on
+    // whether it generated multi-frame rotational output.
+    engine_.register_function("setKnobSpriteStrip", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto path = args.get<std::string>(1, "");
+        int frame_count = static_cast<int>(args.get<double>(2, 1));
+        std::string orientation_s = args.get<std::string>(3, "vertical");
+
+        auto* k = dynamic_cast<Knob*>(widget(id));
+        if (!k || path.empty() || frame_count <= 0) return choc::value::Value();
+
+        // Strip a file:// prefix if present.
+        if (path.rfind("file://", 0) == 0) path = path.substr(7);
+
+        // Decode once to learn the strip's total pixel dimensions. The actual
+        // per-frame rendering happens in Knob::paint via Skia's cached
+        // decode (draw_image_from_file_rect) — we never round-trip the raw
+        // RGBA bytes through the bridge or through the SpriteStrip object.
+        std::ifstream f(path, std::ios::binary);
+        if (!f.good()) {
+            std::cerr << "[setKnobSpriteStrip] could not open " << path << "\n";
+            return choc::value::Value();
+        }
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+                                    std::istreambuf_iterator<char>());
+        auto img = AssetManager::instance().load_image_from_memory(bytes.data(), bytes.size());
+        if (!img.valid()) {
+            std::cerr << "[setKnobSpriteStrip] PNG decode failed for " << path << "\n";
+            return choc::value::Value();
+        }
+
+        auto strip = std::make_shared<SpriteStrip>();
+        auto orientation = (orientation_s == "horizontal")
+                               ? SpriteStrip::Orientation::horizontal
+                               : SpriteStrip::Orientation::vertical;
+        strip->load_from_file(path,
+                              static_cast<int>(img.width),
+                              static_cast<int>(img.height),
+                              frame_count, orientation);
+        k->set_sprite_strip(std::move(strip));
+        k->request_repaint();
         return choc::value::Value();
     });
 
@@ -3565,12 +3620,16 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setWidgetStyle(id, "standard"|"minimal") — switch rendering mode
+    // setWidgetStyle(id, "standard"|"minimal"|"silver") — switch rendering mode
     // "minimal" draws simple shapes matching design tools (circles, thin tracks)
+    // "silver" draws a skeuomorphic chrome-body knob (figma-import alt path)
     engine_.register_function("setWidgetStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto style_str = args.get<std::string>(1, "standard");
-        auto style = (style_str == "minimal") ? WidgetRenderStyle::minimal : WidgetRenderStyle::standard;
+        WidgetRenderStyle style;
+        if (style_str == "minimal") style = WidgetRenderStyle::minimal;
+        else if (style_str == "silver") style = WidgetRenderStyle::silver;
+        else                          style = WidgetRenderStyle::standard;
         auto* v = widget(id);
         if (auto* k = dynamic_cast<Knob*>(v)) k->set_render_style(style);
         else if (auto* f = dynamic_cast<Fader*>(v)) f->set_render_style(style);
@@ -4151,14 +4210,20 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setCornerRadius(id, corner, radius) — per-corner border-radius
+    // setCornerRadius(id, corner, radius) — per-corner border-radius.
+    // "All" (uniform shorthand) is the codegen default for Figma frames
+    // that carry a single border-radius value; per-corner identifiers
+    // are emitted only when a frame has asymmetric radii. Without the
+    // "All" branch, the figma-plugin lane's setCornerRadius calls fell
+    // through silently and panel corners stayed sharp.
     engine_.register_function("setCornerRadius", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto corner = args.get<std::string>(1, "");
         auto r = static_cast<float>(args.get<double>(2, 0));
         auto* v = id.empty() ? &root_ : widget(id);
         if (v) {
-            if (corner == "TopLeft") v->set_corner_radius_tl(r);
+            if (corner == "All") v->set_border_radius(r);
+            else if (corner == "TopLeft") v->set_corner_radius_tl(r);
             else if (corner == "TopRight") v->set_corner_radius_tr(r);
             else if (corner == "BottomLeft") v->set_corner_radius_bl(r);
             else if (corner == "BottomRight") v->set_corner_radius_br(r);
@@ -6563,22 +6628,69 @@ void WidgetBridge::register_api() {
             else if (inner.substr(0, 7) == "to left") { x0=1; y0=0; x1=0; y1=0; color_start = inner.find(',') + 1; }
             else if (inner.substr(0, 6) == "to top") { x0=0; y0=1; x1=0; y1=0; color_start = inner.find(',') + 1; }
 
-            // Parse color stops
+            // Parse color stops. Paren-aware comma split so we don't shred
+            // tokens like `rgba(228, 237, 246, 1.000) 0.0%`. Per-token, also
+            // peel off any trailing position annotation (Npx, N%) and use it
+            // as the explicit stop position when present.
             std::vector<canvas::Color> colors;
             std::vector<float> positions;
-            std::string colorStr = inner.substr(color_start);
-            std::istringstream ss(colorStr);
-            std::string tok;
-            int count = 0;
             std::vector<std::string> tokens;
-            while (std::getline(ss, tok, ',')) {
-                while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
-                while (!tok.empty() && tok.back() == ' ') tok.pop_back();
-                if (!tok.empty()) tokens.push_back(tok);
+            {
+                std::string colorStr = inner.substr(color_start);
+                std::string cur;
+                int paren = 0;
+                for (char c : colorStr) {
+                    if (c == '(') paren++;
+                    else if (c == ')') paren--;
+                    if (c == ',' && paren <= 0) {
+                        // Trim
+                        while (!cur.empty() && cur.front() == ' ') cur.erase(0, 1);
+                        while (!cur.empty() && cur.back() == ' ') cur.pop_back();
+                        if (!cur.empty()) tokens.push_back(cur);
+                        cur.clear();
+                    } else {
+                        cur.push_back(c);
+                    }
+                }
+                while (!cur.empty() && cur.front() == ' ') cur.erase(0, 1);
+                while (!cur.empty() && cur.back() == ' ') cur.pop_back();
+                if (!cur.empty()) tokens.push_back(cur);
             }
+
             for (size_t i = 0; i < tokens.size(); ++i) {
-                colors.push_back(parseColor(tokens[i]));
-                positions.push_back(tokens.size() > 1 ? static_cast<float>(i) / (tokens.size() - 1) : 0);
+                std::string tok = tokens[i];
+                // Look for explicit position at the END of the token:
+                //   "#aabbcc 30%"     or "rgba(...) 30%"     or "#aabbcc 12px"
+                // The position is whatever comes after the LAST space when the
+                // tail looks like a number followed by % or px (or just a number).
+                std::optional<float> explicitPos;
+                {
+                    auto sp = tok.find_last_of(' ');
+                    if (sp != std::string::npos) {
+                        std::string tail = tok.substr(sp + 1);
+                        // Strip trailing unit
+                        bool isPct = false;
+                        if (!tail.empty() && tail.back() == '%') {
+                            isPct = true;
+                            tail.pop_back();
+                        } else if (tail.size() >= 2 && tail.substr(tail.size() - 2) == "px") {
+                            tail = tail.substr(0, tail.size() - 2);
+                        }
+                        if (!tail.empty() && (std::isdigit(static_cast<unsigned char>(tail[0])) || tail[0] == '.' || tail[0] == '-')) {
+                            try {
+                                float v = std::stof(tail);
+                                explicitPos = isPct ? v / 100.0f : v;
+                                tok = tok.substr(0, sp);
+                                while (!tok.empty() && tok.back() == ' ') tok.pop_back();
+                            } catch (...) {
+                                // not a number; leave tok untouched
+                            }
+                        }
+                    }
+                }
+                colors.push_back(parseColor(tok));
+                positions.push_back(explicitPos.value_or(
+                    tokens.size() > 1 ? static_cast<float>(i) / (tokens.size() - 1) : 0));
             }
             if (!colors.empty()) {
                 v->set_background_gradient_linear(x0, y0, x1, y1, colors, positions);

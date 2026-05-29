@@ -20,6 +20,7 @@
 #include <string_view>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -734,6 +735,17 @@ int main(int argc, char* argv[]) {
     bool validate = false;           // --validate: render + compare after import
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
+    // figma-plugin lane only: knob render style.
+    // Default ON (silver) because the native vector path produces cleaner
+    // results across the board (no PNG bleed artefacts around the bottom
+    // edges of the gradient panel, no shadow-halo "brush stroke" bands
+    // around big knobs, crisp at any scale, works on CPU raster + GPU
+    // Graphite). Sprite is still available via --knob-style=sprite when
+    // a designer wants pixel-exact Figma reproduction.
+    //
+    // Per-node override: a Figma node name ending in `@sprite` or
+    // `@silver` overrides the global default for THAT knob only.
+    bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
@@ -818,6 +830,16 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
             preview_mode = true;
+        } else if (std::strcmp(argv[i], "--knob-style") == 0 && i + 1 < argc) {
+            std::string ks = argv[++i];
+            if (ks == "silver")      use_silver_knobs = true;
+            else if (ks == "sprite") use_silver_knobs = false;
+            // Other values (auto, standard) fall through; auto could
+            // pick by per-design heuristic in the future.
+        } else if (std::strncmp(argv[i], "--knob-style=", 13) == 0) {
+            std::string ks = argv[i] + 13;
+            if (ks == "silver")      use_silver_knobs = true;
+            else if (ks == "sprite") use_silver_knobs = false;
         } else if (std::strcmp(argv[i], "--debug") == 0) {
             debug_json = true;
         } else if (std::strcmp(argv[i], "--debug-output") == 0 && i + 1 < argc) {
@@ -1183,7 +1205,8 @@ int main(int argc, char* argv[]) {
             parsed_serialized_design_ir = true;
         } else {
             switch (*source) {
-                case DesignSource::figma:  ir = parse_figma_json(content); break;
+                case DesignSource::figma:        ir = parse_figma_json(content); break;
+                case DesignSource::figma_plugin: ir = parse_figma_plugin_json(content); break;
                 case DesignSource::stitch: ir = parse_stitch_html(content); break;
                 case DesignSource::v0:     ir = parse_v0_tsx(content); break;
                 case DesignSource::pencil: ir = parse_pencil_json(content); break;
@@ -1399,6 +1422,7 @@ int main(int argc, char* argv[]) {
     opts.include_tokens = include_tokens;
     opts.include_comments = include_comments;
     opts.preview_mode = preview_mode;
+    opts.use_silver_knobs = use_silver_knobs;
 
     // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
     // Default-on. Source-agnostic helper: the extractor takes a raw
@@ -1453,6 +1477,58 @@ int main(int argc, char* argv[]) {
         opts.shortcuts = detected_shortcuts;
     }
 
+    // Resolve asset_ref → absolute file path. For envelopes that include an
+    // asset_manifest with local_path entries (figma-plugin lane), walk the IR
+    // tree and stamp each node's attributes["asset_path"] with the absolute
+    // resolution of asset_manifest[asset_ref].local_path against the input
+    // file's parent directory. Codegen consumes attributes["asset_path"] to
+    // emit setImageSource calls; nodes without a resolvable asset_ref are
+    // left untouched and codegen falls through to its normal frame branch.
+    if (!input_file.empty() && !ir.asset_manifest.assets.empty()) {
+        std::error_code rec;
+        auto base_dir = fs::weakly_canonical(fs::path(input_file), rec).parent_path();
+        if (rec) base_dir = fs::path(input_file).parent_path();
+        std::function<void(IRNode&)> resolve_node = [&](IRNode& n) {
+            auto it = n.attributes.find("asset_ref");
+            if (it != n.attributes.end() && !it->second.empty()) {
+                if (auto* ref = ir.asset_manifest.resolve(it->second)) {
+                    if (ref->local_path && !ref->local_path->empty()) {
+                        fs::path p(*ref->local_path);
+                        if (p.is_relative()) p = base_dir / p;
+                        n.attributes["asset_path"] = p.lexically_normal().string();
+                    }
+                    // Asset-bleed detection (generalization of the Knob
+                    // sprite-strip natural-size fix). The Figma plugin
+                    // exports PNGs at 2× scale; with the bounding-box
+                    // origin point as both bounds, layout_size = PNG_px / 2.
+                    // When the PNG pixel dims exceed twice the layout dims
+                    // by ≥1.5×, the asset has drop-shadow or stroke bleed
+                    // that would visibly squish if fit-to-layout-box. We
+                    // stamp asset_bleed=1 so the codegen emits an explicit
+                    // object-fit:none for ImageView, which honours the
+                    // native pixel size centered.
+                    constexpr float kExportScale = 2.0f;
+                    float layout_w = n.style.width.value_or(0.0f);
+                    float layout_h = n.style.height.value_or(0.0f);
+                    int rw_px = ref->width.value_or(0);
+                    int rh_px = ref->height.value_or(0);
+                    if (rw_px > 0 && rh_px > 0 &&
+                        layout_w > 0.0f && layout_h > 0.0f) {
+                        float natural_w = static_cast<float>(rw_px) / kExportScale;
+                        float natural_h = static_cast<float>(rh_px) / kExportScale;
+                        float rw = natural_w / layout_w;
+                        float rh = natural_h / layout_h;
+                        if (std::max(rw, rh) >= 1.5f) {
+                            n.attributes["asset_bleed"] = "1";
+                        }
+                    }
+                }
+            }
+            for (auto& c : n.children) resolve_node(c);
+        };
+        resolve_node(ir.root);
+    }
+
     auto js = generate_pulp_js(ir, opts);
 
     if (dry_run) {
@@ -1476,6 +1552,24 @@ int main(int argc, char* argv[]) {
     // once name-based widget detection is consistent across sources.
     if (*source != DesignSource::designmd) {
         if (!write_file(output_file, js)) return 1;
+
+        // Emit a <output>.meta.json sidecar with the root frame's canvas
+        // size + design source. Lets downstream renderers (pulp-screenshot,
+        // tools/scripts/render-figma-import.sh) auto-pick --width/--height
+        // instead of requiring the caller to remember them.
+        float root_w = ir.root.style.width.value_or(0.0f);
+        float root_h = ir.root.style.height.value_or(0.0f);
+        if (root_w > 0.0f && root_h > 0.0f) {
+            fs::path meta_path = fs::path(output_file).string() + ".meta.json";
+            std::ostringstream meta;
+            meta << "{\n"
+                 << "  \"canvas\": { \"width\": " << static_cast<int>(root_w)
+                 << ", \"height\": " << static_cast<int>(root_h) << " },\n"
+                 << "  \"source\": \"" << design_source_name(*source) << "\",\n"
+                 << "  \"script\": \"" << fs::path(output_file).filename().string() << "\"\n"
+                 << "}\n";
+            (void)write_file(meta_path.string(), meta.str());
+        }
     }
 
     // Count elements by type

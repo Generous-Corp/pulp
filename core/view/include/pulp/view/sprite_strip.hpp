@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace pulp::view {
@@ -17,6 +18,11 @@ namespace pulp::view {
 class SpriteStrip {
 public:
     enum class Orientation { vertical, horizontal };
+    /// Where the strip's pixel data lives. `raw_pixels` is the legacy
+    /// in-memory RGBA8 path; `image_file` defers decoding to Skia via the
+    /// file path stored in path_ (added for Track A1 figma-plugin imports —
+    /// avoids round-tripping the decoded bytes through the JS bridge).
+    enum class Source { raw_pixels, image_file };
 
     SpriteStrip() = default;
 
@@ -25,18 +31,30 @@ public:
               int total_width, int total_height,
               int frame_count, Orientation orientation = Orientation::vertical) {
         data_.assign(data, data + data_size);
+        path_.clear();
+        source_ = Source::raw_pixels;
         total_width_ = total_width;
         total_height_ = total_height;
         frame_count_ = frame_count;
         orientation_ = orientation;
+        compute_frame_dimensions();
+    }
 
-        if (orientation == Orientation::vertical) {
-            frame_width_ = total_width;
-            frame_height_ = total_height / frame_count;
-        } else {
-            frame_width_ = total_width / frame_count;
-            frame_height_ = total_height;
-        }
+    /// Load from an encoded image file (PNG/JPEG/etc.). The strip caches
+    /// the path; Skia decodes lazily inside the canvas. Caller MUST pass
+    /// the strip's total pixel width/height (Skia will not be re-queried).
+    void load_from_file(std::string file_path,
+                        int total_width, int total_height,
+                        int frame_count,
+                        Orientation orientation = Orientation::vertical) {
+        path_ = std::move(file_path);
+        data_.clear();
+        source_ = Source::image_file;
+        total_width_ = total_width;
+        total_height_ = total_height;
+        frame_count_ = frame_count;
+        orientation_ = orientation;
+        compute_frame_dimensions();
     }
 
     /// Get the frame index for a normalized value [0.0–1.0].
@@ -57,7 +75,12 @@ public:
         }
     }
 
-    bool loaded() const { return !data_.empty() && frame_count_ > 0; }
+    bool loaded() const {
+        if (frame_count_ <= 0) return false;
+        return source_ == Source::raw_pixels ? !data_.empty() : !path_.empty();
+    }
+    Source source() const { return source_; }
+    const std::string& path() const { return path_; }
     int frame_count() const { return frame_count_; }
     int frame_width() const { return frame_width_; }
     int frame_height() const { return frame_height_; }
@@ -72,7 +95,19 @@ public:
     bool interpolate() const { return interpolate_; }
 
 private:
+    void compute_frame_dimensions() {
+        if (orientation_ == Orientation::vertical) {
+            frame_width_ = total_width_;
+            frame_height_ = (frame_count_ > 0) ? total_height_ / frame_count_ : 0;
+        } else {
+            frame_width_ = (frame_count_ > 0) ? total_width_ / frame_count_ : 0;
+            frame_height_ = total_height_;
+        }
+    }
+
     std::vector<uint8_t> data_;
+    std::string path_;
+    Source source_ = Source::raw_pixels;
     int total_width_ = 0;
     int total_height_ = 0;
     int frame_width_ = 0;

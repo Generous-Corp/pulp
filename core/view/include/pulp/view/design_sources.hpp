@@ -43,6 +43,9 @@ SnapshotDynamicApiScan detect_jsx_snapshot_dynamic_apis(std::string_view source)
 /// Parse a Figma export JSON into a DesignIR.
 DesignIR parse_figma_json(const std::string& json);
 
+/// Parse Pulp's "Design for Pulp" Figma-plugin export envelope.
+DesignIR parse_figma_plugin_json(const std::string& json);
+
 /// Parse Stitch HTML export into a DesignIR.
 DesignIR parse_stitch_html(const std::string& html);
 

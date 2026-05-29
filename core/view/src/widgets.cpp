@@ -348,29 +348,51 @@ void Knob::paint(canvas::Canvas& canvas) {
         int frame = sprite_strip_->frame_for_value(value_);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
-        // Draw the frame from the filmstrip as an image
-        // The sprite strip stores raw RGBA8 pixel data; render via draw_image_from_data
-        // by extracting the frame's pixel region
-        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
-                                                  sprite_strip_->frame_height() * 4);
-        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
-                                             fx * 4);
-        if (offset + frame_bytes <= sprite_strip_->data_size()) {
-            // For proper rendering, we'd need to extract and upload just this frame.
-            // For now, render the full strip offset via canvas transform.
-            canvas.save();
-            canvas.clip_rect(0, 0, b.width, b.height);
-            // Scale the frame to fit the knob bounds
-            float sx = b.width / static_cast<float>(sprite_strip_->frame_width());
-            float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
-            canvas.scale(sx, sy);
-            canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-            canvas.draw_image_from_data(sprite_strip_->data(),
-                                         sprite_strip_->data_size(),
-                                         0, 0,
-                                         static_cast<float>(sprite_strip_->total_width()),
-                                         static_cast<float>(sprite_strip_->total_height()));
-            canvas.restore();
+        float fw = static_cast<float>(sprite_strip_->frame_width());
+        float fh = static_cast<float>(sprite_strip_->frame_height());
+        if (sprite_strip_->source() == SpriteStrip::Source::image_file) {
+            // Render the frame at its NATURAL logical size centered on the
+            // layout box. Figma's PNG export captures the node's
+            // absoluteRenderBounds (bounding box + drop-shadow bleed) at a
+            // known scale (2× via the figma-plugin extractor), so the PNG's
+            // intended logical size is pixel_size / kExportScale. Centering
+            // on the layout box lets the shadow halo naturally extend over
+            // neighboring widgets — matching Figma's own behavior where
+            // overlapping shadows reinforce each other. Aspect-cover into
+            // the layout box would clamp the smaller knobs to the box
+            // height and visibly under-scale them relative to a larger
+            // sibling that shares the same shadow ratio.
+            constexpr float kExportScale = 2.0f;
+            float dst_w = fw / kExportScale;
+            float dst_h = fh / kExportScale;
+            float dst_x = (b.width  - dst_w) * 0.5f;
+            float dst_y = (b.height - dst_h) * 0.5f;
+            canvas.draw_image_from_file_rect(
+                sprite_strip_->path(),
+                static_cast<float>(fx), static_cast<float>(fy), fw, fh,
+                dst_x, dst_y, dst_w, dst_h);
+        } else {
+            // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
+            // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded
+            // pixels here will draw nothing. Kept for backward compatibility
+            // and any future raw-pixmap canvas API.
+            size_t frame_bytes = static_cast<size_t>(fw * fh * 4);
+            size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
+                                                 fx * 4);
+            if (offset + frame_bytes <= sprite_strip_->data_size()) {
+                canvas.save();
+                canvas.clip_rect(0, 0, b.width, b.height);
+                float sx = b.width / fw;
+                float sy = b.height / fh;
+                canvas.scale(sx, sy);
+                canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
+                canvas.draw_image_from_data(sprite_strip_->data(),
+                                             sprite_strip_->data_size(),
+                                             0, 0,
+                                             static_cast<float>(sprite_strip_->total_width()),
+                                             static_cast<float>(sprite_strip_->total_height()));
+                canvas.restore();
+            }
         }
         // Fall through to draw labels on top
     }
@@ -404,6 +426,97 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_stroke_color(stroke);
         canvas.set_line_width(2.5f);
         canvas.stroke_circle(cx, cy, full_r);
+    } else if (render_style_ == WidgetRenderStyle::silver) {
+        // ── Silver/chrome skeuomorphic knob (native vector) ────────────────
+        // Mimics the ELYSIUM-style brushed-metal knob from Figma without
+        // PNG sprites. All canvas primitives — works on the CPU raster
+        // path (pulp-screenshot) and the GPU Graphite path (live window).
+        //
+        // Layered top-to-bottom:
+        //   1. Soft drop shadow below the body
+        //   2. Outer dark rim (the knob's edge bezel)
+        //   3. Chrome body — two-circle radial gradient (off-centered light
+        //      source from top-left, fading to mid-grey at bottom-right)
+        //   4. Specular highlight arc at the top of the body
+        //   5. Indicator notch — short white line at the value's rotation
+        //
+        // Rotation: value 0..1 maps to angle range [-135°, +135°] which
+        // matches the classic analog-synth knob convention (Reaktor / U-He
+        // / Ableton stock knobs). Indicator notch sits at that angle from
+        // 35% inner radius to 95% outer radius — long enough to read,
+        // short enough not to dominate.
+        float full_r = std::min(cx, cy) - 2.0f;
+        float body_r = full_r - 1.5f;         // chrome body radius
+        float inner_r = body_r - 1.0f;
+
+        // 1. Drop shadow — soft offset disc below the body
+        for (int i = 4; i >= 1; --i) {
+            float a = 0.06f * static_cast<float>(i);
+            canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, a));
+            canvas.fill_circle(cx, cy + 1.5f + static_cast<float>(i),
+                               full_r + static_cast<float>(i));
+        }
+
+        // 2. Outer dark rim (the edge bezel) — slightly darker than body
+        canvas.set_fill_color(canvas::Color::rgba(0.22f, 0.23f, 0.26f, 1.0f));
+        canvas.fill_circle(cx, cy, full_r);
+
+        // 3. Chrome body — two-circle radial gradient from light source
+        //    at the upper-left to mid-tone toward lower-right. Palette
+        //    tuned to match the Figma reference: highlight ~RGB 200, mid
+        //    body ~150, shadow side ~95. Without the darker mid-body the
+        //    knob looks washed-out and the indicator loses contrast.
+        canvas::Color light = canvas::Color::rgba(0.82f, 0.84f, 0.88f, 1.0f);
+        canvas::Color mid   = canvas::Color::rgba(0.62f, 0.65f, 0.70f, 1.0f);
+        canvas::Color dim   = canvas::Color::rgba(0.40f, 0.43f, 0.49f, 1.0f);
+        canvas::Color grads[3] = { light, mid, dim };
+        float stops[3] = { 0.0f, 0.50f, 1.0f };
+        canvas.set_fill_gradient_radial_two_circles(
+            cx - body_r * 0.30f, cy - body_r * 0.40f, body_r * 0.05f,
+            cx + body_r * 0.25f, cy + body_r * 0.35f, body_r * 1.20f,
+            grads, stops, 3);
+        canvas.fill_circle(cx, cy, body_r);
+        canvas.clear_fill_gradient();
+
+        // 4a. Inner bevel ring — a thin darker stroke just inside the
+        //     body edge creates a "bezel-inside-bezel" effect that reads
+        //     as a precision-machined control. Subtle (alpha 0.35) so it
+        //     doesn't compete with the highlight.
+        canvas.set_stroke_color(canvas::Color::rgba(0.18f, 0.20f, 0.23f, 0.55f));
+        canvas.set_line_width(std::max(1.0f, body_r * 0.04f));
+        canvas.stroke_circle(cx, cy, body_r - body_r * 0.05f);
+
+        // 4b. Specular highlight arc near the top — soft white rim
+        //     suggesting reflected light from above.
+        canvas.set_stroke_color(canvas::Color::rgba(1.0f, 1.0f, 1.0f, 0.55f));
+        canvas.set_line_width(std::max(1.0f, body_r * 0.08f));
+        canvas.set_line_cap(canvas::LineCap::round);
+        // Top half of the body (~225° → 315° in canvas radians; top = 270°).
+        canvas.stroke_arc(cx, cy, inner_r * 0.94f,
+                          3.926990f /* 225° */, 5.497787f /* 315° */);
+
+        // 4c. Lower shadow arc — counterweight to the specular at the
+        //     bottom edge, sells the "rounded body" illusion.
+        canvas.set_stroke_color(canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.30f));
+        canvas.set_line_width(std::max(1.0f, body_r * 0.07f));
+        canvas.stroke_arc(cx, cy, inner_r * 0.94f,
+                          0.785398f /* 45° */, 2.356194f /* 135° */);
+
+        // 5. Indicator notch
+        float angle = -1.5707963f /* -90° */
+                      + (value_ - 0.5f) * 4.7123890f /* 270° total range */;
+        float ind_outer_x = cx + inner_r * 0.95f * std::cos(angle);
+        float ind_outer_y = cy + inner_r * 0.95f * std::sin(angle);
+        float ind_inner_x = cx + inner_r * 0.35f * std::cos(angle);
+        float ind_inner_y = cy + inner_r * 0.35f * std::sin(angle);
+        // Subtle dark backing line for contrast on the bright top arc
+        canvas.set_stroke_color(canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.85f));
+        canvas.set_line_width(std::max(2.5f, body_r * 0.10f));
+        canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
+        // Bright top line — the actual indicator
+        canvas.set_stroke_color(canvas::Color::rgba(0.97f, 0.97f, 0.97f, 1.0f));
+        canvas.set_line_width(std::max(1.5f, body_r * 0.07f));
+        canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
     } else {
         // ── Default C++ paint path ──────────────────────────────────────
 

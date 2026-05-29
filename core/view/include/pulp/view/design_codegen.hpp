@@ -33,6 +33,11 @@ struct CodeGenOptions {
     std::string root_variable = "root";
     int indent_spaces = 2;
 
+    /// When true, audio knobs render as native vector silver/chrome widgets
+    /// (WidgetRenderStyle::silver) instead of PNG sprite-strip images. Per-node
+    /// override via `@sprite` or `@silver` suffix on the Figma layer name.
+    bool use_silver_knobs = true;
+
     /// pulp #2116 V2 — shortcuts pulled from the source by
     /// `extract_keyboard_shortcuts(...)` (Strategy A: synthetic keydown
     /// re-dispatch). The generator emits one `registerShortcut(...)` plus

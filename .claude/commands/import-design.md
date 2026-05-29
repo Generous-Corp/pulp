@@ -197,6 +197,28 @@ Artifact mental model:
 
 Use `--dry-run` to preview without writing files.
 
+## Figma-plugin lane: knob rendering
+
+`--from figma-plugin` accepts a knob render style. Default: silver (native vector); sprite is opt-in.
+
+```bash
+# Default — silver native vector knobs (crisp at any size, no PNG bleed)
+pulp import-design --from figma-plugin --file scene.pulp.json
+
+# Pixel-exact PNG sprite-strip (matches Figma rendering exactly)
+pulp import-design --from figma-plugin --file scene.pulp.json --knob-style=sprite
+```
+
+Per-node override via Figma name suffix:
+- A node named `Knob/Hero@sprite` forces sprite for THAT knob only.
+- A node named `Knob/Send@silver` forces silver for THAT knob only.
+
+Lets a designer cherry-pick one hero knob to be pixel-exact while everything else uses the crisper vector path. Convention matches Figma's own `Knob/State=hover` variant syntax.
+
+**When asking the user**: don't position sprite as a "fallback". Pixel-exact and native-vector are real choices per design. If you're not sure which the user wants, default silver and offer to re-import with `--knob-style=sprite` so they can compare. If they say a specific knob "needs to look like the Figma", suggest adding the `@sprite` suffix on that node's name in the Figma file.
+
+See `.agents/skills/import-design/SKILL.md` § "Knob rendering — silver by default" for the full decision matrix and the failure-mode catalogue from the ELYSIUM port.
+
 ## Bridge Handler Scaffold (Claude Design)
 
 When `--from claude` runs, the CLI also writes `bridge_handlers.cpp` (override path with `--bridge-output`). The scaffold demonstrates how to wire `pulp::view::EditorBridge` so editor JS can `postMessage` into the C++ processor. Replace the `MyPluginEditor` placeholder with your editor class, register one `add_handler("type", ...)` per message kind, and call `bridge_.attach_webview(*panel_)`.

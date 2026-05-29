@@ -354,6 +354,12 @@ private:
     // defaults so non-set callers keep getting kLinear.
     SkSamplingOptions sampling_options_for_image_smoothing() const;
 
+    // Upload a raster-decoded SkImage to a Graphite GPU texture when a
+    // recorder is attached. Returns the input image unchanged on the
+    // CPU raster path or if Graphite upload fails. Centralised so every
+    // draw_image_* method takes the same branch.
+    sk_sp<SkImage> ensure_gpu_image(sk_sp<SkImage> image) const;
+
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
     skgpu::graphite::Recorder* recorder_ = nullptr; // Non-owning — owned by SkiaSurface
     Color fill_color_ = Color::rgba(1.0f, 1.0f, 1.0f);

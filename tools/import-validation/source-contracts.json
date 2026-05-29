@@ -453,6 +453,76 @@
       }
     },
     {
+      "source": "figma-plugin",
+      "display_name": "Pulp Figma Plugin",
+      "kind": "screen-export",
+      "trust": "official",
+      "last_verified": "2026-05-29",
+      "recheck_interval_days": null,
+      "compat": {
+        "mode": "foreign-key",
+        "source": "figma-plugin",
+        "parser_version_owner": "tools/figma-plugin/schema/figma-plugin-export-v1.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "figma-plugin"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "in-tree-figma-plugin-export",
+        "notes": "Pulp's own Figma plugin (tools/figma-plugin) emits a versioned JSON envelope that the C++ parser consumes directly; no MCP intermediate."
+      },
+      "upstream": [
+        {
+          "url": "tools/figma-plugin/schema/figma-plugin-export-v1.json",
+          "kind": "schema",
+          "proves": "Schema for the figma-plugin export envelope: format_version, parser_version, compat_schema_version, provenance, library_manifest?, tokens?, asset_manifest?, diagnostics?, root.",
+          "last_verified": "2026-05-29",
+          "recheck_interval_days": null
+        },
+        {
+          "url": "tools/figma-plugin/docs/testing-against-elysium.md",
+          "kind": "docs",
+          "proves": "End-to-end walkthrough of the figma-plugin export → CLI import lane against the ELYSIUM reference design.",
+          "last_verified": "2026-05-29",
+          "recheck_interval_days": null
+        }
+      ],
+      "detected_artifact_shape": "JSON envelope produced by the Pulp Figma plugin's extract.ts walker.",
+      "runtime_export_shape": "Static JSON; no runtime bundle. Parsed offline by `pulp import-design --from figma-plugin`.",
+      "runtime_requirements": {
+        "sdk_min": "v0.276.0",
+        "surface_refs": [
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime_file": "core/view/src/design_import.cpp",
+        "runtime": null,
+        "static": "parse_figma_plugin_json"
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [],
+        "roundtrip_script": null,
+        "test_targets": [
+          "pulp-test-design-import"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp"
+        ],
+        "test_tags": [],
+        "pulp_render_reference": {
+          "status": "pending",
+          "path": null
+        }
+      }
+    },
+    {
       "source": "v0",
       "display_name": "v0.dev",
       "kind": "screen-export",

@@ -67,6 +67,9 @@ IRNode parse_ir_node(const choc::value::ValueView& obj);
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);
 
+// Parse a DesignIR asset manifest; defined in design_ir_json.cpp.
+IRAssetManifest parse_asset_manifest(const choc::value::ValueView& obj);
+
 // Construct an ImportDiagnostic; defined in design_ir_json.cpp. The default
 // `kind` argument lives here only — the definition omits it.
 ImportDiagnostic make_import_diagnostic(ImportDiagnosticSeverity severity,
