@@ -448,6 +448,43 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_AUv3)
     endif()
+
+    # iOS-D.3b Slice 3: Embed three.iife.js + web-compat-three-shim.js
+    # into the .appex Resources/threejs/ so the JSC engine can load
+    # Three.js via plain `evaluate()` at runtime (iOS public JSC API
+    # has no ESM module loader — see slice 2 / Codex pass-1 finding).
+    #
+    # The bundler script runs at build time, reading the pinned
+    # three.webgpu.js (ESM) and emitting a self-contained IIFE wrapper.
+    # If Node.js is unavailable on the build host, the embed step is
+    # skipped (with a STATUS warning) — the .appex still builds, but
+    # `pulp::view::threejs_iife_source()` will return std::nullopt at
+    # runtime so plugins that try to load Three.js get a clean failure.
+    if(PULP_HAS_THREEJS AND DEFINED threejs_SOURCE_DIR)
+        find_program(_PULP_NODE_EXE NAMES node nodejs)
+        if(_PULP_NODE_EXE)
+            set(_three_in  "${threejs_SOURCE_DIR}/build/three.webgpu.js")
+            set(_three_iife "$<TARGET_BUNDLE_DIR:${target}_AUv3>/Resources/threejs/three.iife.js")
+            set(_three_shim_src "${CMAKE_SOURCE_DIR}/core/view/js/web-compat-three-shim.js")
+            set(_three_shim_out "$<TARGET_BUNDLE_DIR:${target}_AUv3>/Resources/threejs/web-compat-three-shim.js")
+            set(_bundler_script "${CMAKE_SOURCE_DIR}/tools/scripts/bundle_threejs_for_jsc.mjs")
+            add_custom_command(TARGET ${target}_AUv3 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "$<TARGET_BUNDLE_DIR:${target}_AUv3>/Resources/threejs"
+                COMMAND ${_PULP_NODE_EXE} ${_bundler_script}
+                        --input "${_three_in}" --output "${_three_iife}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_three_shim_src}" "${_three_shim_out}"
+                COMMENT "iOS-D.3b: bundle Three.js IIFE + shim into ${target}.appex Resources/threejs"
+                VERBATIM
+            )
+        else()
+            message(STATUS
+                "Pulp iOS-D.3b: node executable not found — skipping "
+                "Three.js IIFE bundling for ${target}.appex. Plugins that "
+                "load Three.js via pulp::view::threejs_iife_source() will "
+                "see std::nullopt at runtime. Install Node.js to enable.")
+        endif()
+    endif()
 endfunction()
 
 # ── pulp_add_ios_auv3 (public iOS helper, unchanged from Phase 3) ─────────
