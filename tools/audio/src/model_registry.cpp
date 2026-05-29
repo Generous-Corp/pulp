@@ -11,6 +11,19 @@ bool has_control_byte(std::string_view text) {
     return false;
 }
 
+bool has_dot_dot_segment(std::string_view path) {
+    std::size_t start = 0;
+    while (start <= path.size()) {
+        auto slash = path.find('/', start);
+        auto seg = path.substr(start,
+            slash == std::string_view::npos ? std::string_view::npos : slash - start);
+        if (seg == "..") return true;
+        if (slash == std::string_view::npos) break;
+        start = slash + 1;
+    }
+    return false;
+}
+
 } // namespace
 
 const std::vector<RegisteredModel>& registered_models() {
@@ -49,6 +62,11 @@ std::string resolve_checkpoint_url(const std::string& checkpoint_ref) {
         if (file_path.empty()) return {};
         if (has_control_byte(user_repo)) return {};
         if (file_path.starts_with('/') || has_control_byte(file_path)) return {};
+        // Reject any `..` path segment. HTTP technically does not normalize
+        // `..` in URL paths, but proxies, CDNs, and redirect handlers
+        // sometimes do, and that would let the resolved URL escape the
+        // intended `resolve/main/<file>` prefix.
+        if (has_dot_dot_segment(file_path)) return {};
         return "https://huggingface.co/" + user_repo + "/resolve/main/" + file_path;
     }
     // Handle direct URLs
