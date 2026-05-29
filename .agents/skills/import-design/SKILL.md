@@ -1255,10 +1255,10 @@ CLI surface:
 
 What's NOT in Phase A: Pulp-framework defaults for the built-in `SettingsPanel` Audio/MIDI sub-tabs (`Cmd+Opt+A` / `Cmd+Opt+M`). Phase B follow-up — needs `TabPanel` select-tab JS API + standalone-only emission gate. Spec: `planning/2026-05-16-default-keyboard-shortcuts.md`.
 
-## Native-import gotchas (PR #3128 review)
+## Native-import gotchas
 
-Non-obvious rules confirmed while fixing review bugs in the import +
-native-codegen path. See `planning/2026-05-29-frontend-ir-review-findings.md`.
+Non-obvious rules in the import + native-codegen path. Each cost a real
+correctness bug before it was made explicit; treat them as invariants.
 
 - **Text-editor value is `<textarea>`-only.** In `imported_widget_semantics`
   (design_import_native_common.cpp), a node's incidental display text
