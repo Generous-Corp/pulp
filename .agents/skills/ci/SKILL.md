@@ -230,11 +230,16 @@ validated SHA — that lives in Shipyard (tracked upstream as Shipyard issue
    already-green PR you just reviewed. (Review comes after green; the green PR
    is exactly when auto-merge fires.)
 3. **After any ship, verify the merge actually carried your latest commits.**
-   Don't trust "merged" — confirm the merge SHA's tree contains your changes:
+   Don't trust "merged" — confirm the merge SHA's tree contains your changes.
    `git fetch origin main` then check a file you changed is present on
-   `origin/main` (e.g. `git show origin/main:<path> | grep <marker>`), or
-   compare `gh api repos/<o>/<r>/pulls/<n> --jq .merge_commit_sha`. If your
-   commits are missing, re-land them as a fresh PR immediately.
+   `origin/main` (e.g. `git show origin/main:<path> | grep <marker>`). If
+   you cross-check via `gh api repos/<o>/<r>/pulls/<n> --jq .merge_commit_sha`,
+   note that the SHA alone does NOT prove your push made it — that field
+   returns the PR's squash/merge commit on the base branch and exists for any
+   merged PR, including the stale-SHA case. The SHA is only useful if you
+   then inspect its tree/diff (`git show <sha>:<path> | grep <marker>` or
+   `git show <sha> --stat | grep <expected-file>`). If your commits are
+   missing, re-land them as a fresh PR immediately.
 4. A degraded/rate-limited `gh pr view ... headRefOid` read can return a stale
    SHA — corroborate branch state with `git ls-remote` / a real `git fetch`
    before concluding the branch moved or was reset.
