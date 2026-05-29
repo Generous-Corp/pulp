@@ -264,8 +264,9 @@ TEST_CASE("audio model registry rejects unsafe Hugging Face file paths",
                                    + static_cast<char>(0x1f) + "model.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo/\rmodel.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo//model.pt").empty());
-    REQUIRE(resolve_checkpoint_url("hf://org/repo/../model.pt")
-            == "https://huggingface.co/org/repo/resolve/main/../model.pt");
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/../model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/path/../model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/path/to/..").empty());
 }
 
 TEST_CASE("audio model registry rejects unsafe Hugging Face owner and repo names",
