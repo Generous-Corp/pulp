@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02800"></a>
+## [0.280.0] - 2026-05-29
+
+- feat(view): iOS-D.3b Slice 4 — surface presentable flag through canvas.getContext('webgpu') paths ([#3157](https://github.com/danielraffel/pulp/pull/3157))
+
 <a id="v02790"></a>
 ## [0.279.0] - 2026-05-29
 
@@ -3182,6 +3187,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.280.0]: https://github.com/danielraffel/pulp/releases/tag/v0.280.0
 [0.279.0]: https://github.com/danielraffel/pulp/releases/tag/v0.279.0
 [0.278.0]: https://github.com/danielraffel/pulp/releases/tag/v0.278.0
 [0.277.0]: https://github.com/danielraffel/pulp/releases/tag/v0.277.0
