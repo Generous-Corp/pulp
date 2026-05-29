@@ -1022,6 +1022,86 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
+    // ── Shadow-driven sibling snap ──────────────────────────────────────
+    // When a frame has a downward drop shadow and an absolutely-positioned
+    // sibling sits just below it with a small gap, the gap exposes the
+    // grandparent's canvas color through the shadow zone — visible as a
+    // thin lighter band between the panel and whatever sits below. Figma's
+    // designer places these tightly because Figma's shadow extends visually
+    // ONTO the sibling below (shadow is drawn on top); the design intent is
+    // visual continuity. Pulp's renderer happily paints the lower sibling
+    // ABOVE the shadow (later in z-order) so closing the geometric gap
+    // gives us the same continuity.
+    //
+    // Rule: for each absolute-positioned child F with style.box_shadow whose
+    // y-offset is > 0 (shadow falls down), look at the next absolute sibling
+    // S beneath it. If 0 < gap < (oy + blur/2), snap S.top up to F.bottom.
+    // The threshold ties the snap distance to the shadow's actual reach, so
+    // the rule fires precisely when the shadow would have overlapped S.
+    auto parse_shadow_offset_blur = [](const std::string& s,
+                                       float& oy, float& blur) {
+        oy = 0.0f; blur = 0.0f;
+        // Format: "<ox>px <oy>px <blur>px [<spread>px] <color>"
+        // Strip optional "inset" keyword.
+        std::string body = s;
+        for (auto& c : body) c = (char)std::tolower((unsigned char)c);
+        if (auto p = body.find("inset"); p != std::string::npos) body.erase(p, 5);
+        // Extract numeric tokens before any color value (rgb/rgba/hex).
+        auto cut = body.find_first_of("#r");  // # or r (rgba/rgb)
+        std::string nums = (cut == std::string::npos) ? body : body.substr(0, cut);
+        std::vector<float> v;
+        std::string tok;
+        auto flush = [&]() {
+            if (tok.empty()) return;
+            if (tok.size() > 2 && tok.compare(tok.size()-2, 2, "px") == 0)
+                tok.resize(tok.size()-2);
+            try { v.push_back(std::stof(tok)); } catch (...) {}
+            tok.clear();
+        };
+        for (char c : nums) {
+            if (std::isspace((unsigned char)c) || c == ',') flush();
+            else tok.push_back(c);
+        }
+        flush();
+        if (v.size() >= 2) oy = v[1];
+        if (v.size() >= 3) blur = v[2];
+    };
+
+    {
+        // Collect absolute-positioned children with their effective Y rects.
+        struct SibRect { size_t idx; float top, bottom; bool has_down_shadow; float shadow_reach; };
+        std::vector<SibRect> abs_siblings;
+        for (size_t i = 0; i < node.children.size(); ++i) {
+            auto& c = node.children[i];
+            bool is_abs = c.style.position && *c.style.position == "absolute";
+            if (!is_abs) continue;
+            float top = c.style.top.value_or(0.0f);
+            float h   = c.style.height.value_or(0.0f);
+            if (h <= 0.0f) continue;
+            float oy = 0.0f, blur = 0.0f;
+            if (c.style.box_shadow)
+                parse_shadow_offset_blur(*c.style.box_shadow, oy, blur);
+            abs_siblings.push_back({i, top, top + h, oy > 0.0f, oy + blur * 0.5f});
+        }
+        std::sort(abs_siblings.begin(), abs_siblings.end(),
+                  [](const SibRect& a, const SibRect& b){ return a.top < b.top; });
+        for (size_t k = 0; k + 1 < abs_siblings.size(); ++k) {
+            const auto& F = abs_siblings[k];
+            auto& S       = abs_siblings[k + 1];
+            if (!F.has_down_shadow) continue;
+            float gap = S.top - F.bottom;
+            if (gap <= 0.0f) continue;
+            if (gap >= F.shadow_reach) continue;
+            // Snap S up so it abuts F's bottom. Mutates the child in place.
+            float new_top = F.bottom;
+            node.children[S.idx].style.top = new_top;
+            // Keep cached bottom in sync for any subsequent pair this loop
+            // iteration would consider (k+2 vs the snapped k+1).
+            S.bottom -= (S.top - new_top);
+            S.top = new_top;
+        }
+    }
+
     // Audio widget detection (deferred until after children are parsed)
     // Rule: a node is an audio widget ONLY if:
     //   1. Its name matches an audio widget pattern (knob, fader, meter, etc.)
