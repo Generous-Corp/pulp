@@ -2191,6 +2191,12 @@ pulp_add_test_suite(pulp-test-js-engine LIBRARIES pulp::view)
 # Theme/design token tests
 pulp_add_test_suite(pulp-test-theme LIBRARIES pulp::view)
 
+# iOS-D.3b Slice 2: Three.js IIFE resources loader contract test.
+# Runs on all platforms; iOS-only behavior is gated inside the test.
+add_executable(pulp-test-threejs-resources test_threejs_resources.cpp)
+target_link_libraries(pulp-test-threejs-resources PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-threejs-resources)
+
 # Screenshot tests (macOS only — uses CoreGraphics bitmap context)
 if(APPLE)
     add_executable(pulp-test-screenshot test_screenshot.cpp)

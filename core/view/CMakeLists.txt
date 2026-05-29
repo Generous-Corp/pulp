@@ -232,6 +232,13 @@ if(APPLE)
     list(APPEND PULP_JS_ENGINE_SOURCES src/js_jsc_engine.mm)
 endif()
 
+# iOS-D.3b Slice 2: NSBundle-based loader for the embedded Three.js
+# IIFE bundle. Only compiled on iOS / iOS Simulator; desktop/macOS
+# lanes use src/threejs_resources_stub.cpp (always returns nullopt).
+if(APPLE AND PULP_IOS)
+    target_sources(pulp-view-core PRIVATE src/threejs_resources_apple.mm)
+endif()
+
 # Set compile definitions for engine availability / defaults
 if(PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_HAS_V8=1)
@@ -271,6 +278,7 @@ endif()
 target_sources(pulp-view-core PRIVATE
     src/accessibility.cpp
     ${PULP_TEXT_ACCESSIBILITY_SOURCE}
+    src/threejs_resources_stub.cpp
     src/table_model.cpp
     src/modulation_matrix.cpp
     src/modulation_matrix_widget.cpp
