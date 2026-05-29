@@ -313,6 +313,18 @@ if(TARGET pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
 
+if(TARGET pulp::inspect)
+    add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
+    target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
+        pulp::platform
+        pulp::inspect
+        Catch2::Catch2WithMain)
+    if(TARGET pulp-cli)
+        add_dependencies(pulp-test-cli-inspect-shellout pulp-cli)
+    endif()
+    catch_discover_tests(pulp-test-cli-inspect-shellout)
+endif()
+
 # P5-4 — `pulp loop` shell-out tests, extracted from test_cli_shellout.cpp
 # to bring the parent TU below the 2k line target. Shares
 # test_cli_shellout_helpers.hpp with the parent and its sibling
