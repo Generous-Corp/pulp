@@ -8,6 +8,7 @@
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 
+#include "design_binding_metadata.hpp"
 #include "design_import_native_common.hpp"
 
 #include <algorithm>
@@ -1265,13 +1266,14 @@ void collect_binding_manifest_entries(std::ostringstream& out,
                                       const ResolvedNativeNode& resolved,
                                       std::string_view ir_path,
                                       bool& first_entry) {
+    const auto md = NativeBindingMetadata::parse(node);
     if (has_binding_manifest_metadata(node)) {
         if (!first_entry)
             out << ",";
         out << "\n    {";
         bool first_field = true;
-        if (auto route_id = attr(node, "pulpRouteId"); route_id && !route_id->empty()) {
-            append_json_field(out, first_field, "id", *route_id);
+        if (md.route_id && !md.route_id->empty()) {
+            append_json_field(out, first_field, "id", *md.route_id);
         } else if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
             append_json_field(out, first_field, "id", *node.stable_anchor_id);
         } else if (!node.name.empty()) {
@@ -1281,50 +1283,50 @@ void collect_binding_manifest_entries(std::ostringstream& out,
         if (node.stable_anchor_id && !node.stable_anchor_id->empty())
             append_json_field(out, first_field, "anchor_id", *node.stable_anchor_id);
         append_json_field(out, first_field, "native_primitive", native_widget_kind_name(resolved.kind));
-        append_json_field_if_present(out, first_field, "route_type", attr(node, "pulpRouteType"));
-        append_json_field_if_present(out, first_field, "source_family", attr(node, "pulpSourceFamily"));
-        append_json_field_if_present(out, first_field, "source_path", attr(node, "pulpSourcePath"));
-        append_json_field_if_present(out, first_field, "param_key", attr(node, "pulpParamKey"));
-        append_json_field_if_present(out, first_field, "binding_module", attr(node, "pulpBindingModule"));
-        append_json_field_if_present(out, first_field, "binding_param", attr(node, "pulpBindingParam"));
-        append_json_field_if_present(out, first_field, "choice_value", attr(node, "pulpChoiceValue"));
-        append_json_field_if_present(out, first_field, "choice_label", attr(node, "pulpChoiceLabel"));
-        append_json_field_if_present(out, first_field, "x_param_key", attr(node, "pulpParamKeyX"));
-        append_json_field_if_present(out, first_field, "y_param_key", attr(node, "pulpParamKeyY"));
-        append_json_field_if_present(out, first_field, "x_binding_module", attr(node, "pulpBindingModuleX"));
-        append_json_field_if_present(out, first_field, "x_binding_param", attr(node, "pulpBindingParamX"));
-        append_json_field_if_present(out, first_field, "y_binding_module", attr(node, "pulpBindingModuleY"));
-        append_json_field_if_present(out, first_field, "y_binding_param", attr(node, "pulpBindingParamY"));
-        append_json_field_if_present(out, first_field, "meter_source", attr(node, "pulpMeterSource"));
-        append_json_field_if_present(out, first_field, "meter_channel", attr(node, "pulpMeterChannel"));
-        append_json_field_if_present(out, first_field, "meter_value_key", attr(node, "pulpMeterValueKey"));
-        append_json_field_if_present(out, first_field, "waveform_shape", attr(node, "pulpWaveformShape"));
-        append_json_field_if_present(out, first_field, "value_key", attr(node, "pulpValueKey"));
-        append_json_field_if_present(out, first_field, "initial_value", attr(node, "pulpInitialValue"));
-        append_json_field_if_present(out, first_field, "placeholder", attr(node, "pulpPlaceholder"));
-        append_json_field_if_present(out, first_field, "focus_contract", attr(node, "pulpFocusContract"));
-        append_json_field_if_present(out, first_field, "payload_contract", attr(node, "pulpPayloadContract"));
-        append_json_field_if_present(out, first_field, "host_action_label", attr(node, "pulpHostActionLabel"));
-        append_json_field_if_present(out, first_field, "component_type_label", attr(node, "pulpTypeLabel"));
-        append_json_field_if_present(out, first_field, "description", attr(node, "pulpDescription"));
-        append_json_field_if_present(out, first_field, "thumb_shape", attr(node, "pulpThumbShape"));
-        append_json_field_if_present(out, first_field, "thumb_width", attr(node, "pulpThumbWidth"));
-        append_json_field_if_present(out, first_field, "thumb_height", attr(node, "pulpThumbHeight"));
-        append_json_field_if_present(out, first_field, "thumb_corner_radius", attr(node, "pulpThumbCornerRadius"));
-        append_json_field_if_present(out, first_field, "on_background_color", attr(node, "pulpOnBackgroundColor"));
-        append_json_field_if_present(out, first_field, "off_background_color", attr(node, "pulpOffBackgroundColor"));
-        append_json_field_if_present(out, first_field, "on_text_color", attr(node, "pulpOnTextColor"));
-        append_json_field_if_present(out, first_field, "off_text_color", attr(node, "pulpOffTextColor"));
-        append_json_field_if_present(out, first_field, "on_border_color", attr(node, "pulpOnBorderColor"));
-        append_json_field_if_present(out, first_field, "off_border_color", attr(node, "pulpOffBorderColor"));
-        append_json_field_if_present(out, first_field, "corner_radius", attr(node, "pulpCornerRadius"));
-        append_json_field_if_present(out, first_field, "font_size", attr(node, "pulpFontSize"));
-        append_json_field_if_present(out, first_field, "event_contract", attr(node, "pulpEventContract"));
-        append_json_field_if_present(out, first_field, "gesture_contract", attr(node, "pulpGestureContract"));
-        append_json_field_if_present(out, first_field, "host_action", attr(node, "pulpHostAction"));
-        append_json_field_if_present(out, first_field, "style_tokens", attr(node, "pulpStyleTokens"));
-        append_json_field_if_present(out, first_field, "default_value_source", attr(node, "pulpDefaultValueSource"));
-        append_json_field_if_present(out, first_field, "fallback_reason", attr(node, "pulpFallbackReason"));
+        append_json_field_if_present(out, first_field, "route_type", md.route_type);
+        append_json_field_if_present(out, first_field, "source_family", md.source_family);
+        append_json_field_if_present(out, first_field, "source_path", md.source_path);
+        append_json_field_if_present(out, first_field, "param_key", md.param_key);
+        append_json_field_if_present(out, first_field, "binding_module", md.binding_module);
+        append_json_field_if_present(out, first_field, "binding_param", md.binding_param);
+        append_json_field_if_present(out, first_field, "choice_value", md.choice_value);
+        append_json_field_if_present(out, first_field, "choice_label", md.choice_label);
+        append_json_field_if_present(out, first_field, "x_param_key", md.x_param_key);
+        append_json_field_if_present(out, first_field, "y_param_key", md.y_param_key);
+        append_json_field_if_present(out, first_field, "x_binding_module", md.x_binding_module);
+        append_json_field_if_present(out, first_field, "x_binding_param", md.x_binding_param);
+        append_json_field_if_present(out, first_field, "y_binding_module", md.y_binding_module);
+        append_json_field_if_present(out, first_field, "y_binding_param", md.y_binding_param);
+        append_json_field_if_present(out, first_field, "meter_source", md.meter_source);
+        append_json_field_if_present(out, first_field, "meter_channel", md.meter_channel);
+        append_json_field_if_present(out, first_field, "meter_value_key", md.meter_value_key);
+        append_json_field_if_present(out, first_field, "waveform_shape", md.waveform_shape);
+        append_json_field_if_present(out, first_field, "value_key", md.value_key);
+        append_json_field_if_present(out, first_field, "initial_value", md.initial_value);
+        append_json_field_if_present(out, first_field, "placeholder", md.placeholder);
+        append_json_field_if_present(out, first_field, "focus_contract", md.focus_contract);
+        append_json_field_if_present(out, first_field, "payload_contract", md.payload_contract);
+        append_json_field_if_present(out, first_field, "host_action_label", md.host_action_label);
+        append_json_field_if_present(out, first_field, "component_type_label", md.type_label);
+        append_json_field_if_present(out, first_field, "description", md.description);
+        append_json_field_if_present(out, first_field, "thumb_shape", md.thumb_shape);
+        append_json_field_if_present(out, first_field, "thumb_width", md.thumb_width);
+        append_json_field_if_present(out, first_field, "thumb_height", md.thumb_height);
+        append_json_field_if_present(out, first_field, "thumb_corner_radius", md.thumb_corner_radius);
+        append_json_field_if_present(out, first_field, "on_background_color", md.on_background_color);
+        append_json_field_if_present(out, first_field, "off_background_color", md.off_background_color);
+        append_json_field_if_present(out, first_field, "on_text_color", md.on_text_color);
+        append_json_field_if_present(out, first_field, "off_text_color", md.off_text_color);
+        append_json_field_if_present(out, first_field, "on_border_color", md.on_border_color);
+        append_json_field_if_present(out, first_field, "off_border_color", md.off_border_color);
+        append_json_field_if_present(out, first_field, "corner_radius", md.corner_radius);
+        append_json_field_if_present(out, first_field, "font_size", md.font_size);
+        append_json_field_if_present(out, first_field, "event_contract", md.event_contract);
+        append_json_field_if_present(out, first_field, "gesture_contract", md.gesture_contract);
+        append_json_field_if_present(out, first_field, "host_action", md.host_action);
+        append_json_field_if_present(out, first_field, "style_tokens", md.style_tokens);
+        append_json_field_if_present(out, first_field, "default_value_source", md.default_value_source);
+        append_json_field_if_present(out, first_field, "fallback_reason", md.fallback_reason);
         out << "\n    }";
         first_entry = false;
     }
@@ -1383,16 +1385,17 @@ struct BindingHelperRoute {
 void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
                                    const IRNode& node,
                                    const ResolvedNativeNode& resolved) {
-    auto route_id = attr(node, "pulpRouteId");
-    auto param_key = attr(node, "pulpParamKey");
-    auto x_param_key = attr(node, "pulpParamKeyX");
-    auto y_param_key = attr(node, "pulpParamKeyY");
-    auto meter_source = attr(node, "pulpMeterSource");
-    auto meter_channel = attr(node, "pulpMeterChannel");
-    auto choice_value = attr(node, "pulpChoiceValue");
-    auto waveform_shape = attr(node, "pulpWaveformShape");
-    auto value_key = attr(node, "pulpValueKey");
-    auto host_action = attr(node, "pulpHostAction");
+    const auto md = NativeBindingMetadata::parse(node);
+    const auto& route_id = md.route_id;
+    const auto& param_key = md.param_key;
+    const auto& x_param_key = md.x_param_key;
+    const auto& y_param_key = md.y_param_key;
+    const auto& meter_source = md.meter_source;
+    const auto& meter_channel = md.meter_channel;
+    const auto& choice_value = md.choice_value;
+    const auto& waveform_shape = md.waveform_shape;
+    const auto& value_key = md.value_key;
+    const auto& host_action = md.host_action;
     const bool has_single_param = param_key && !param_key->empty();
     const bool has_scalar_param_control =
         (resolved.kind == NativeWidgetKind::knob ||
@@ -1422,29 +1425,29 @@ void collect_binding_helper_routes(std::vector<BindingHelperRoute>& routes,
             .anchor_id = *node.stable_anchor_id,
             .route_id = *route_id,
             .param_key = param_key.value_or(std::string{}),
-            .binding_module = attr(node, "pulpBindingModule").value_or(std::string{}),
-            .binding_param = attr(node, "pulpBindingParam").value_or(std::string{}),
+            .binding_module = md.binding_module.value_or(std::string{}),
+            .binding_param = md.binding_param.value_or(std::string{}),
             .choice_value = choice_value.value_or(std::string{}),
-            .choice_label = attr(node, "pulpChoiceLabel").value_or(std::string{}),
+            .choice_label = md.choice_label.value_or(std::string{}),
             .x_param_key = x_param_key.value_or(std::string{}),
             .y_param_key = y_param_key.value_or(std::string{}),
-            .x_binding_module = attr(node, "pulpBindingModuleX").value_or(std::string{}),
-            .x_binding_param = attr(node, "pulpBindingParamX").value_or(std::string{}),
-            .y_binding_module = attr(node, "pulpBindingModuleY").value_or(std::string{}),
-            .y_binding_param = attr(node, "pulpBindingParamY").value_or(std::string{}),
+            .x_binding_module = md.x_binding_module.value_or(std::string{}),
+            .x_binding_param = md.x_binding_param.value_or(std::string{}),
+            .y_binding_module = md.y_binding_module.value_or(std::string{}),
+            .y_binding_param = md.y_binding_param.value_or(std::string{}),
             .meter_source = meter_source.value_or(std::string{}),
             .meter_channel = meter_channel.value_or(std::string{}),
-            .meter_value_key = attr(node, "pulpMeterValueKey").value_or(std::string{}),
+            .meter_value_key = md.meter_value_key.value_or(std::string{}),
             .waveform_shape = waveform_shape.value_or(std::string{}),
             .value_key = value_key.value_or(std::string{}),
-            .initial_value = attr(node, "pulpInitialValue").value_or(std::string{}),
-            .placeholder = attr(node, "pulpPlaceholder").value_or(std::string{}),
-            .focus_contract = attr(node, "pulpFocusContract").value_or(std::string{}),
+            .initial_value = md.initial_value.value_or(std::string{}),
+            .placeholder = md.placeholder.value_or(std::string{}),
+            .focus_contract = md.focus_contract.value_or(std::string{}),
             .host_action = host_action.value_or(std::string{}),
-            .host_action_label = attr(node, "pulpHostActionLabel").value_or(std::string{}),
-            .payload_contract = attr(node, "pulpPayloadContract").value_or(std::string{}),
-            .event_contract = attr(node, "pulpEventContract").value_or(std::string{}),
-            .gesture_contract = attr(node, "pulpGestureContract").value_or(std::string{}),
+            .host_action_label = md.host_action_label.value_or(std::string{}),
+            .payload_contract = md.payload_contract.value_or(std::string{}),
+            .event_contract = md.event_contract.value_or(std::string{}),
+            .gesture_contract = md.gesture_contract.value_or(std::string{}),
         });
     }
 
