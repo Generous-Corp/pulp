@@ -567,10 +567,34 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         return;
     }
 
-    // Container or text node
-    bool is_container = !node.children.empty() || node.type == "frame";
+    // Container, image, or text node
+    bool is_image = (node.type == "image" || node.attributes.count("asset_path") > 0);
+    bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
     bool is_text = (node.type == "text" || node.type == "label");
     bool is_row = (node.layout.direction == LayoutDirection::row);
+
+    if (is_image) {
+        // Image node → createImage + setImageSource. Honors absolute positioning
+        // emitted from the figma-plugin lane. asset_path is pre-resolved to an
+        // absolute filesystem path by the CLI's asset resolution pass; nodes
+        // missing the attribute (legacy callers with bare type=image) fall
+        // through with no source set.
+        if (opts.include_comments && !node.name.empty() && depth > 0)
+            ss << ind << "// " << node.name << "\n";
+        ss << ind << "createImage('" << id << "', " << pid << ");\n";
+        emit_position_if_absolute(id);
+        auto it = node.attributes.find("asset_path");
+        if (it != node.attributes.end() && !it->second.empty()) {
+            ss << ind << "setImageSource('" << id << "', '"
+               << js_single_quote_escape(it->second) << "');\n";
+        }
+        if (node.style.width)
+            ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+        if (node.style.height)
+            ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+        ss << "\n";
+        return;
+    }
 
     if (is_text) {
         // Text node → createLabel with explicit height (Yoga requirement)

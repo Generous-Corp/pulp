@@ -19,6 +19,7 @@
 #include <string_view>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -1385,6 +1386,33 @@ int main(int argc, char* argv[]) {
         }
 
         opts.shortcuts = detected_shortcuts;
+    }
+
+    // Resolve asset_ref → absolute file path. For envelopes that include an
+    // asset_manifest with local_path entries (figma-plugin lane), walk the IR
+    // tree and stamp each node's attributes["asset_path"] with the absolute
+    // resolution of asset_manifest[asset_ref].local_path against the input
+    // file's parent directory. Codegen consumes attributes["asset_path"] to
+    // emit setImageSource calls; nodes without a resolvable asset_ref are
+    // left untouched and codegen falls through to its normal frame branch.
+    if (!input_file.empty() && !ir.asset_manifest.assets.empty()) {
+        std::error_code rec;
+        auto base_dir = fs::weakly_canonical(fs::path(input_file), rec).parent_path();
+        if (rec) base_dir = fs::path(input_file).parent_path();
+        std::function<void(IRNode&)> resolve_node = [&](IRNode& n) {
+            auto it = n.attributes.find("asset_ref");
+            if (it != n.attributes.end() && !it->second.empty()) {
+                if (auto* ref = ir.asset_manifest.resolve(it->second)) {
+                    if (ref->local_path && !ref->local_path->empty()) {
+                        fs::path p(*ref->local_path);
+                        if (p.is_relative()) p = base_dir / p;
+                        n.attributes["asset_path"] = p.lexically_normal().string();
+                    }
+                }
+            }
+            for (auto& c : n.children) resolve_node(c);
+        };
+        resolve_node(ir.root);
     }
 
     auto js = generate_pulp_js(ir, opts);

@@ -667,6 +667,12 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // ID under one of these field names; first non-empty wins. Sources
     // without native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this
     // empty and fall through to the content-hash strategy.
+    // Stash the figma-plugin envelope's per-node asset_ref into attributes so
+    // the codegen can resolve it against asset_manifest at emit time.
+    if (obj.hasObjectMember("asset_ref") && obj["asset_ref"].isString()) {
+        node.attributes["asset_ref"] = std::string(obj["asset_ref"].toString());
+    }
+
     for (const char* k : {"id", "nodeId", "node_id", "source_node_id", "sourceNodeId", "figma_node_id", "figmaNodeId"}) {
         if (!obj.hasObjectMember(k)) continue;
         auto v = obj[k];
@@ -2566,6 +2572,11 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
 
     if (parsed.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(parsed["tokens"]);
+
+    if (parsed.hasObjectMember("asset_manifest"))
+        ir.asset_manifest = parse_asset_manifest(parsed["asset_manifest"]);
+    else if (parsed.hasObjectMember("assetManifest"))
+        ir.asset_manifest = parse_asset_manifest(parsed["assetManifest"]);
 
     IRProvenance provenance{"figma-plugin", ir.source_version, {}};
     if (parsed.hasObjectMember("provenance") && parsed["provenance"].isObject()) {
