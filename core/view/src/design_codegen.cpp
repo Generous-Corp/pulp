@@ -767,6 +767,20 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
+        // Emit border (Figma frame stroke) as setBorder(id, color, width).
+        // The codegen was previously dropping these — visible effect: the
+        // 4 column frames inside the ELYSIUM gradient panel each have a
+        // 1px rgba(0,0,0,0.1) border that Figma renders as the thin
+        // vertical separators between GRAINS/CURSOR/RANGE/TUNING. The
+        // bridge's parseColor accepts both hex and rgba(...) so we can
+        // pass border_color verbatim from the IR.
+        if (node.style.border_color && node.style.border_width &&
+            *node.style.border_width > 0.0f) {
+            float br = node.style.border_radius.value_or(0.0f);
+            ss << ind << "setBorder('" << id << "', '"
+               << js_single_quote_escape(*node.style.border_color) << "', "
+               << *node.style.border_width << ", " << br << ");\n";
+        }
         if (node.style.box_shadow) {
             // Parse CSS-style "<ox> <oy> <blur> [<spread>] <color>" into the
             // bridge's setBoxShadow(id, ox, oy, blur, spread, color, inset?)
