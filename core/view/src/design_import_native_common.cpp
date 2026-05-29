@@ -1,5 +1,7 @@
 #include "design_import_native_common.hpp"
 
+#include "design_binding_metadata.hpp"
+
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/svg_path_widget.hpp>
@@ -984,23 +986,28 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     ImportedWidgetSemantics out;
     out.text = resolved.text.value_or(node.text_content);
 
-    auto non_empty_attr = [&](std::string_view key) -> std::optional<std::string> {
-        auto value = attr(node, key);
+    // Single typed parse of the pulp* binding contract; all pulp* reads below
+    // go through this model. Non-pulp* attributes (checked/value/orientation/
+    // x/y/jsxTag/...) stay on the raw attr() helpers.
+    const auto md = NativeBindingMetadata::parse(node);
+
+    auto non_empty = [](const std::optional<std::string>& value)
+        -> std::optional<std::string> {
         if (value && !value->empty()) return value;
         return std::nullopt;
     };
 
-    out.text_placeholder = non_empty_attr("pulpPlaceholder");
-    if (auto value = non_empty_attr("pulpInitialValue"))
+    out.text_placeholder = non_empty(md.placeholder);
+    if (auto value = non_empty(md.initial_value))
         out.text_value = value;
-    else if (auto value = non_empty_attr("value"))
+    else if (auto value = attr(node, "value"); value && !value->empty())
         out.text_value = value;
     else if (!out.text.empty()) {
         // Only treat display text as the editor's value for a <textarea>, whose
         // element body IS the value. For other controls the node's text_content
         // is typically an adjacent label/heading, not editable contents —
         // injecting it would prefill the editor with a label.
-        const auto family = attr(node, "pulpSourceFamily");
+        const auto& family = md.source_family;
         const auto tag = attr(node, "jsxTag");
         const bool is_textarea =
             (family && lower_copy(*family) == "textarea") ||
@@ -1011,14 +1018,14 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
 
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");
-    out.toggle_on_background_color = non_empty_attr("pulpOnBackgroundColor");
-    out.toggle_off_background_color = non_empty_attr("pulpOffBackgroundColor");
-    out.toggle_on_text_color = non_empty_attr("pulpOnTextColor");
-    out.toggle_off_text_color = non_empty_attr("pulpOffTextColor");
-    out.toggle_on_border_color = non_empty_attr("pulpOnBorderColor");
-    out.toggle_off_border_color = non_empty_attr("pulpOffBorderColor");
-    out.toggle_corner_radius = attr_float(node, "pulpCornerRadius");
-    out.toggle_font_size = attr_float(node, "pulpFontSize");
+    out.toggle_on_background_color = non_empty(md.on_background_color);
+    out.toggle_off_background_color = non_empty(md.off_background_color);
+    out.toggle_on_text_color = non_empty(md.on_text_color);
+    out.toggle_off_text_color = non_empty(md.off_text_color);
+    out.toggle_on_border_color = non_empty(md.on_border_color);
+    out.toggle_off_border_color = non_empty(md.off_border_color);
+    out.toggle_corner_radius = md.corner_radius_value();
+    out.toggle_font_size = md.font_size_value();
 
     out.normalized_value = normalized_audio_value(node);
     out.normalized_default = normalized_audio_default(node);
@@ -1040,28 +1047,25 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
         }
     }
 
-    out.widget_schema = non_empty_attr("pulpWidgetSchema");
-    if (auto show_label = attr(node, "pulpShowInternalLabel");
-        show_label && lower_copy(*show_label) == "false") {
-        out.show_internal_label = false;
-    }
+    out.widget_schema = non_empty(md.widget_schema);
+    out.show_internal_label = md.show_internal_label_value();
 
-    if (auto shape = attr(node, "pulpThumbShape")) {
-        const auto lower = lower_copy(*shape);
+    if (md.thumb_shape) {
+        const auto lower = lower_copy(*md.thumb_shape);
         if (lower == "rectangle" || lower == "rect" || lower == "rounded_rect")
             out.fader_thumb_shape = ImportedFaderThumbShape::rectangle;
         else if (lower == "circle" || lower == "round" || lower == "dot")
             out.fader_thumb_shape = ImportedFaderThumbShape::circle;
     }
-    out.fader_thumb_width = attr_float(node, "pulpThumbWidth");
-    out.fader_thumb_height = attr_float(node, "pulpThumbHeight");
-    out.fader_thumb_corner_radius = attr_float(node, "pulpThumbCornerRadius");
+    out.fader_thumb_width = md.thumb_width_value();
+    out.fader_thumb_height = md.thumb_height_value();
+    out.fader_thumb_corner_radius = md.thumb_corner_radius_value();
 
     out.x_value = attr_float(node, "x").value_or(0.5f);
     out.y_value = attr_float(node, "y").value_or(0.5f);
-    out.x_label = non_empty_attr("xLabel");
-    out.y_label = non_empty_attr("yLabel");
-    out.waveform_shape = non_empty_attr("pulpWaveformShape");
+    out.x_label = non_empty(attr(node, "xLabel"));
+    out.y_label = non_empty(attr(node, "yLabel"));
+    out.waveform_shape = non_empty(md.waveform_shape);
 
     return out;
 }
