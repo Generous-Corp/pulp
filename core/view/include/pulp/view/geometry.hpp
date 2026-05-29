@@ -417,8 +417,9 @@ struct GridStyle {
     /// reference; use the explicit start/end fields above."
     std::string grid_area_name;
 
-    /// Parse "1fr 2fr auto 100px" into track list
-    static std::vector<GridTrack> parse_template(const std::string& tmpl);
+    /// Parse "1fr 2fr auto 100px" into track list. `depth` bounds recursion
+    /// into nested `repeat(...)` bodies from untrusted design-tool input.
+    static std::vector<GridTrack> parse_template(const std::string& tmpl, int depth = 0);
 
     /// pulp #1434 Phase A2-2 — parse the CSS named-area grid string
     /// (e.g. `"'h h h' 'm c c' 'f f f'"`) into the NamedArea list.

@@ -995,8 +995,19 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
         out.text_value = value;
     else if (auto value = non_empty_attr("value"))
         out.text_value = value;
-    else if (!out.text.empty())
-        out.text_value = out.text;
+    else if (!out.text.empty()) {
+        // Only treat display text as the editor's value for a <textarea>, whose
+        // element body IS the value. For other controls the node's text_content
+        // is typically an adjacent label/heading, not editable contents —
+        // injecting it would prefill the editor with a label.
+        const auto family = attr(node, "pulpSourceFamily");
+        const auto tag = attr(node, "jsxTag");
+        const bool is_textarea =
+            (family && lower_copy(*family) == "textarea") ||
+            (tag && lower_copy(*tag) == "textarea");
+        if (is_textarea)
+            out.text_value = out.text;
+    }
 
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");

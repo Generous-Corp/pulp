@@ -1204,8 +1204,14 @@ void View::simulate_hover(Point root_pos) {
 
 // ── Grid template parsing ────────────────────────────────────────────────────
 
-std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl) {
+std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl, int depth) {
     std::vector<GridTrack> tracks;
+    // A grid-template string is semi-trusted (design-tool exports). Each
+    // nested repeat() body recurses one level; cap the depth so a
+    // pathologically nested "repeat(2, repeat(2, repeat(2, …)))" cannot
+    // overflow the stack. Real templates nest at most a level or two.
+    static constexpr int kMaxTemplateDepth = 8;
+    if (depth > kMaxTemplateDepth) return tracks;
     std::vector<std::string> tokens;
     std::string token;
     int paren_depth = 0;
@@ -1254,7 +1260,7 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl) {
                 const auto count_token = trim(inner.substr(0, comma));
                 const auto repeated_template = trim(inner.substr(comma + 1));
                 if (try_parse(count_token, count_value) && count_value > 0.0f) {
-                    const auto repeated_tracks = parse_template(repeated_template);
+                    const auto repeated_tracks = parse_template(repeated_template, depth + 1);
                     const int count = std::min(64, static_cast<int>(std::floor(count_value)));
                     for (int i = 0; i < count; ++i)
                         tracks.insert(tracks.end(), repeated_tracks.begin(), repeated_tracks.end());

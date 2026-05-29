@@ -1172,6 +1172,41 @@ TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ m
     REQUIRE(result.binding_manifest.find("\"event_contract\": \"range:onChange:setState\"") != std::string::npos);
 }
 
+TEST_CASE("parse_v0_tsx resolves indexed useState value bindings (PR #3128 review)",
+          "[view][import][cpp-codegen]") {
+    // Regression: value={params[0]} validated its base identifier but returned
+    // the full "params[0]" expression as the lookup key, so the initial value
+    // (keyed by the base "params") was silently dropped.
+    auto ir = parse_v0_tsx(R"tsx(
+        import { useState } from "react";
+
+        export default function Bank() {
+            const [params, setParams] = useState([0.5, 0.25]);
+            return (
+                <section>
+                    <input
+                        type="range"
+                        value={params[0]}
+                        onChange={(event) => setParams(Number(event.currentTarget.value))} />
+                </section>
+            );
+        }
+    )tsx");
+
+    REQUIRE_FALSE(has_import_diagnostic(ir.diagnostics, "fallback-used"));
+    const auto* range = find_descendant(ir.root, [](const IRNode& node) {
+        auto type = node.attributes.find("type");
+        return node.type == "input" && type != node.attributes.end() && type->second == "range";
+    });
+    REQUIRE(range != nullptr);
+    // The index is preserved in the value key (the binding layer can target the
+    // specific element)...
+    REQUIRE(range->attributes.at("pulpValueKey") == "params[0]");
+    // ...and the initial value is resolved via the base identifier, not dropped.
+    REQUIRE(range->attributes.count("pulpInitialValue") == 1);
+    REQUIRE(range->attributes.at("pulpDefaultValueSource") == "useState");
+}
+
 TEST_CASE("parse_v0_tsx preserves grid template source contracts",
           "[view][import][cpp-codegen]") {
     auto ir = parse_v0_tsx(R"tsx(
