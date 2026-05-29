@@ -44,7 +44,6 @@
 #include "include/core/SkSurface.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/effects/SkGradient.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/core/SkColorFilter.h"

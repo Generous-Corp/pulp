@@ -8,12 +8,9 @@
 // BEFORE pulp/canvas/skia_canvas.hpp. See skia_canvas.cpp head-of-file
 // comment for the C++ name-lookup rule that forces this ordering.
 //
-// Skia m149 (2026-05): SkGradientShader was retired in favor of a
-// data-class (SkGradient) + namespace SkShaders factories. Pulp now
-// builds SkColor4f + SkSpan inputs into a SkGradient::Colors stop
-// block (with explicit SkColorSpace::MakeSRGB() so byte-sRGB inputs
-// stay sRGB) and a default SkGradient::Interpolation (matches m144
-// behavior: unpremul colors, destination color space, shorter hue).
+// Skia's gradient API moved during the m149 window. This TU routes through
+// skia_gradient_compat.hpp so Pulp uses the public packaged header surface
+// available in the current Skia build instead of depending on one layout.
 
 #include <algorithm>
 #include <cstring>
@@ -30,8 +27,7 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkShader.h"
-#include "include/core/SkSpan.h"
-#include "include/effects/SkGradient.h"
+#include "skia_gradient_compat.hpp"
 
 #endif  // PULP_HAS_SKIA
 
@@ -54,23 +50,13 @@ static void colors_to_skia4f(const Color* colors, const float* positions, int co
     }
 }
 
-static SkGradient make_gradient(const std::vector<SkColor4f>& c,
-                                const std::vector<float>& p) {
-    SkGradient::Colors stops(SkSpan<const SkColor4f>(c.data(), c.size()),
-                             SkSpan<const float>(p.data(), p.size()),
-                             SkTileMode::kClamp,
-                             SkColorSpace::MakeSRGB());
-    return SkGradient(stops, SkGradient::Interpolation{});
-}
-
 void SkiaCanvas::set_fill_gradient_linear(float x0, float y0, float x1, float y1,
                                            const Color* colors, const float* positions, int count) {
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
     SkPoint pts[2] = {{x0, y0}, {x1, y1}};
-    gradient_shader_ = SkShaders::LinearGradient(pts, grad);
+    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count);
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -79,8 +65,8 @@ void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
-    gradient_shader_ = SkShaders::RadialGradient({cx, cy}, radius, grad);
+    gradient_shader_ = skia_gradient::make_radial({cx, cy}, radius,
+                                                  sk_colors.data(), sk_pos.data(), count);
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -89,9 +75,9 @@ void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
     float start_deg = start_angle * 180.0f / 3.14159265f;
-    gradient_shader_ = SkShaders::SweepGradient({cx, cy}, start_deg, start_deg + 360.0f, grad);
+    gradient_shader_ = skia_gradient::make_sweep({cx, cy}, start_deg, start_deg + 360.0f,
+                                                 sk_colors.data(), sk_pos.data(), count);
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -106,8 +92,8 @@ void SkiaCanvas::set_fill_gradient_radial_two_circles(
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
-    gradient_shader_ = SkShaders::TwoPointConicalGradient({x0, y0}, r0, {x1, y1}, r1, grad);
+    gradient_shader_ = skia_gradient::make_two_point_conical({x0, y0}, r0, {x1, y1}, r1,
+                                                             sk_colors.data(), sk_pos.data(), count);
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -132,9 +118,8 @@ void SkiaCanvas::set_stroke_gradient_linear(float x0, float y0, float x1, float 
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
     SkPoint pts[2] = {{x0, y0}, {x1, y1}};
-    stroke_shader_ = SkShaders::LinearGradient(pts, grad);
+    stroke_shader_ = skia_gradient::make_linear(pts, sk_colors.data(), sk_pos.data(), count);
 }
 
 void SkiaCanvas::set_stroke_gradient_radial(float cx, float cy, float radius,
@@ -142,8 +127,8 @@ void SkiaCanvas::set_stroke_gradient_radial(float cx, float cy, float radius,
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
-    stroke_shader_ = SkShaders::RadialGradient({cx, cy}, radius, grad);
+    stroke_shader_ = skia_gradient::make_radial({cx, cy}, radius,
+                                                sk_colors.data(), sk_pos.data(), count);
 }
 
 void SkiaCanvas::set_stroke_gradient_radial_two_circles(
@@ -153,8 +138,8 @@ void SkiaCanvas::set_stroke_gradient_radial_two_circles(
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
-    stroke_shader_ = SkShaders::TwoPointConicalGradient({x0, y0}, r0, {x1, y1}, r1, grad);
+    stroke_shader_ = skia_gradient::make_two_point_conical({x0, y0}, r0, {x1, y1}, r1,
+                                                           sk_colors.data(), sk_pos.data(), count);
 }
 
 void SkiaCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle,
@@ -162,9 +147,9 @@ void SkiaCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    auto grad = make_gradient(sk_colors, sk_pos);
     float start_deg = start_angle * 180.0f / 3.14159265f;
-    stroke_shader_ = SkShaders::SweepGradient({cx, cy}, start_deg, start_deg + 360.0f, grad);
+    stroke_shader_ = skia_gradient::make_sweep({cx, cy}, start_deg, start_deg + 360.0f,
+                                               sk_colors.data(), sk_pos.data(), count);
 }
 
 void SkiaCanvas::clear_stroke_gradient() {

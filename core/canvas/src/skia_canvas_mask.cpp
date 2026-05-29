@@ -41,8 +41,7 @@
 #include "include/core/SkShader.h"
 #include "include/core/SkSurface.h"
 #include "include/core/SkBlendMode.h"
-#include "include/core/SkSpan.h"
-#include "include/effects/SkGradient.h"
+#include "skia_gradient_compat.hpp"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
 
@@ -224,10 +223,9 @@ sk_sp<SkShader> parse_linear_gradient_mask(const std::string& value,
         if (k < inner.size() && inner[k] == ',') { ++k; mask_skip_ws(inner, k); }
     }
 
-    // Parse color stops. Skia m149 gradient API uses SkColor4f stops in
-    // an explicit sRGB SkColorSpace; convert from CSS-parsed byte-sRGB
-    // SkColor here so the byte→float path is the only color transform
-    // (no double-gamma).
+    // Parse color stops. The Skia compatibility helper consumes SkColor4f
+    // stops in an explicit sRGB SkColorSpace, so byte-sRGB CSS values take
+    // exactly one byte-to-float conversion here.
     std::vector<SkColor4f> colors;
     while (k < inner.size()) {
         auto col = parse_color_token(inner, k);
@@ -252,14 +250,9 @@ sk_sp<SkShader> parse_linear_gradient_mask(const std::string& value,
     const float dx = std::cos(angle_rad) * half_diag;
     const float dy = std::sin(angle_rad) * half_diag;
     SkPoint pts[2] = { {cx - dx, cy - dy}, {cx + dx, cy + dy} };
-    // Empty position span = even distribution (matches m144 behavior of
-    // passing nullptr positions).
-    SkGradient::Colors stops(SkSpan<const SkColor4f>(colors.data(), colors.size()),
-                             SkSpan<const float>(),
-                             SkTileMode::kClamp,
-                             SkColorSpace::MakeSRGB());
-    SkGradient grad(stops, SkGradient::Interpolation{});
-    return SkShaders::LinearGradient(pts, grad);
+    // Null positions = even distribution.
+    return skia_gradient::make_linear(pts, colors.data(), nullptr,
+                                      static_cast<int>(colors.size()));
 }
 
 // Parse a CSS `mask-size` value into a (width_factor, height_factor)

@@ -100,11 +100,11 @@ sk_sp<SkImage> rasterize_texture_image(SkImage* image,
 // via the Graphite Context threaded through fImageCtx. If a texture
 // image arrives with no Context, the proc fails loudly (logged) instead
 // of silently dropping it from the artifact.
-// Skia m149: `SkSerialImageProc` return type tightened from
-// `sk_sp<SkData>` to `sk_sp<const SkData>` (PNG/JPEG output buffers
-// are immutable once encoded). Match the new signature exactly so
-// the function-pointer assignment in `pulp_serial_procs` typechecks.
-sk_sp<const SkData> encode_embedded_image(SkImage* image, void* ctx) {
+// Skia exposes the serial-proc return type through SkSerialReturnType; builds
+// may choose either const or non-const SkData while the proc contract is the
+// same. Match the configured typedef so fImageProc typechecks with the
+// packaged Skia headers.
+SkSerialReturnType encode_embedded_image(SkImage* image, void* ctx) {
     if (!image) return nullptr;
 
     if (image->isTextureBacked()) {

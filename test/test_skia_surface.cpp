@@ -344,9 +344,9 @@ TEST_CASE("SkPicture with embedded image needs fImageProc to round-trip pixels",
     //     embedded image round-trips through serialize + MakeFromData.
     {
         SkSerialProcs sprocs;
-        // Skia m149: SkSerialImageProc returns sk_sp<const SkData>
-        // (encoded image data is immutable). Match the new signature.
-        sprocs.fImageProc = [](SkImage* img, void*) -> sk_sp<const SkData> {
+        // Match the SkSerialImageProc return type selected by the packaged
+        // Skia headers.
+        sprocs.fImageProc = [](SkImage* img, void*) -> SkSerialReturnType {
             return SkPngEncoder::Encode(nullptr, img, SkPngEncoder::Options{});
         };
         sk_sp<SkData> blob = picture->serialize(&sprocs);
