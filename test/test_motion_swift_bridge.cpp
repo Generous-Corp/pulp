@@ -355,6 +355,34 @@ TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids",
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Start, "frame") == 0);
 }
 
+TEST_CASE("pulp_motion geometry bridge detaches one trace without silencing others",
+          "[motion][swift-bridge][coverage][requested]") {
+    BridgeFixture fx;
+
+    const int first = pulp_motion_register_geometry_trace("First", 60);
+    const int second = pulp_motion_register_geometry_trace("Second", 60);
+    REQUIRE(first > 0);
+    REQUIRE(second > 0);
+    REQUIRE(first != second);
+
+    pulp_motion_update_geometry(first, "frame", 0.0, 0.0, 10.0, 10.0);
+    pulp_motion_update_geometry(second, "frame", 20.0, 30.0, 40.0, 50.0);
+    fx.clock.tick(1.0f / 60.0f);
+
+    pulp_motion_detach_trace(first);
+    const auto before = fx.buffer.size();
+    pulp_motion_update_geometry(first, "bounds", 99.0, 99.0, 99.0, 99.0);
+    pulp_motion_update_geometry(second, "bounds", 1.0, 2.0, 3.0, 4.0);
+
+    REQUIRE(fx.buffer.size() == before + 1);
+    const auto& event = fx.buffer.back();
+    REQUIRE(event.view_name == "Second");
+    REQUIRE(event.metric_name == "bounds");
+    REQUIRE(event.components.size() == 4);
+
+    pulp_motion_detach_trace(second);
+}
+
 TEST_CASE("PulpBridge state ABI rejects invalid buffers without touching callers",
           "[motion][swift-bridge][coverage][requested]") {
     int untouched_size = 1234;

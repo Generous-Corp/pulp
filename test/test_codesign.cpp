@@ -238,6 +238,44 @@ TEST_CASE("combined pkg rejects empty and missing component inputs",
     REQUIRE(components[1].install_location.find("VST3") != std::string::npos);
 }
 
+#ifdef __APPLE__
+TEST_CASE("codesign parsers tolerate noisy command output",
+          "[ship][codesign][coverage][requested]") {
+    auto info = detail::parse_codesign_details(
+        "Executable=/tmp/Pulp.app\n"
+        "Authority=Developer ID Application: Pulp Labs (TEAM123456)\n"
+        "Authority=Apple Root CA\n"
+        "TeamIdentifier=TEAM123456\n");
+    REQUIRE(info.identity == "Developer ID Application: Pulp Labs (TEAM123456)");
+    REQUIRE(info.team_id == "TEAM123456");
+
+    auto submit_id = detail::parse_notarytool_submit_id(
+        "Conducting pre-submission checks\n"
+        "  id: 12345678-90ab-CDEF-1234-567890abcdef\n"
+        "status: In Progress\n");
+    REQUIRE(submit_id.has_value());
+    REQUIRE(*submit_id == "12345678-90ab-CDEF-1234-567890abcdef");
+
+    REQUIRE_FALSE(detail::parse_notarytool_submit_id("id: not-a-uuid").has_value());
+
+    auto accepted = detail::parse_notarytool_status("status: Accepted\n");
+    REQUIRE(accepted.complete);
+    REQUIRE(accepted.success);
+
+    auto rejected = detail::parse_notarytool_status("status: Rejected\n");
+    REQUIRE(rejected.complete);
+    REQUIRE_FALSE(rejected.success);
+
+    auto identities = detail::parse_signing_identities(
+        "  1) ABCDEF \"Developer ID Application: Pulp Labs (TEAM123456)\"\n"
+        "  2) 012345 \"Apple Development: CI Bot (TEAM123456)\"\n"
+        "     2 valid identities found\n");
+    REQUIRE(identities.size() == 2);
+    REQUIRE(identities[0] == "Developer ID Application: Pulp Labs (TEAM123456)");
+    REQUIRE(identities[1] == "Apple Development: CI Bot (TEAM123456)");
+}
+#endif
+
 TEST_CASE("default audio entitlements keep hardened runtime permissions narrow",
           "[ship][codesign][coverage][phase3]") {
     const auto plist = default_audio_entitlements();

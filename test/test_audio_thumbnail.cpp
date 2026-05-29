@@ -25,6 +25,7 @@
 #include <memory>
 #include <numbers>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::audio;
@@ -300,6 +301,15 @@ std::filesystem::path unique_cache_dir() {
     return p;
 }
 
+template <typename T>
+void write_le(std::vector<uint8_t>& blob, std::size_t offset, T value) {
+    static_assert(std::is_integral_v<T>);
+    REQUIRE(offset + sizeof(T) <= blob.size());
+    for (std::size_t i = 0; i < sizeof(T); ++i) {
+        blob[offset + i] = static_cast<uint8_t>((value >> (8 * i)) & 0xFFu);
+    }
+}
+
 }  // namespace
 
 TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
@@ -356,6 +366,115 @@ TEST_CASE("deserialize_thumbnail rejects bad magic / truncated blobs",
                                        0xFF, 0xFF};
     REQUIRE_FALSE(deserialize_thumbnail(wrong_version.data(),
                                         wrong_version.size()).has_value());
+}
+
+TEST_CASE("AudioPeak clamps serialized display ranges", "[audio][thumbnail][coverage]") {
+    const auto clipped = AudioPeak::from_range(-2.0f, 2.0f);
+    REQUIRE(clipped.min_q7 == -127);
+    REQUIRE(clipped.max_q7 == 127);
+    REQUIRE_THAT(clipped.min(), WithinAbs(-1.0f, 0.0001f));
+    REQUIRE_THAT(clipped.max(), WithinAbs(1.0f, 0.0001f));
+
+    const auto inside = AudioPeak::from_range(-0.25f, 0.75f);
+    REQUIRE(inside.min_q7 == static_cast<int8_t>(-31));
+    REQUIRE(inside.max_q7 == static_cast<int8_t>(95));
+    REQUIRE(inside.min() < 0.0f);
+    REQUIRE(inside.max() > 0.0f);
+}
+
+TEST_CASE("AudioThumbnail sanitizes empty resolution and non-finite sample windows",
+          "[audio][thumbnail][coverage]") {
+    auto data = make_sine(48000, 8, 1, 100.0);
+    REQUIRE(AudioThumbnail::build_from_buffer(data, 0).empty());
+
+    data.channels[0] = {
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+        0.5f,
+    };
+    auto t = AudioThumbnail::build_from_buffer(data, 4);
+    REQUIRE_FALSE(t.empty());
+    REQUIRE(t.num_levels() == 1);
+    REQUIRE(t.level(0).peaks_per_channel == 1);
+    REQUIRE(t.level(0).peaks[0][0].min_q7 == 0);
+    REQUIRE(t.level(0).peaks[0][0].max_q7 == 0);
+}
+
+TEST_CASE("AudioThumbnail::render_min_max guards empty and folded requests",
+          "[audio][thumbnail][coverage]") {
+    AudioThumbnail empty;
+    float scratch[4] = {};
+    REQUIRE(empty.best_level_for(128) == 0);
+    REQUIRE(empty.render_min_max(AudioThumbnail::kAllChannels, 2, scratch) == 0);
+
+    const auto data = make_sine(44100, 64, 2, 440.0, 0.5f);
+    auto t = AudioThumbnail::build_from_buffer(data, 8);
+    REQUIRE_FALSE(t.empty());
+    REQUIRE(t.render_min_max(0, 0, scratch) == 0);
+    REQUIRE(t.render_min_max(0, 2, nullptr) == 0);
+
+    std::vector<float> folded(6);
+    REQUIRE(t.render_min_max(99, 3, folded.data()) == 3);
+    for (std::size_t i = 0; i < folded.size(); i += 2) {
+        REQUIRE(folded[i] <= folded[i + 1]);
+        REQUIRE(folded[i] >= -1.0f);
+        REQUIRE(folded[i + 1] <= 1.0f);
+    }
+
+    std::vector<float> oversampled(40);
+    REQUIRE(t.render_min_max(0, 20, oversampled.data()) == 20);
+    REQUIRE(oversampled.front() <= oversampled[1]);
+    REQUIRE(oversampled[38] <= oversampled[39]);
+}
+
+TEST_CASE("deserialize_thumbnail rejects malformed structural headers",
+          "[audio][thumbnail][persist][coverage]") {
+    const auto data = make_sine(44100, 1024, 1, 110.0);
+    auto thumbnail = AudioThumbnail::build_from_buffer(data, 64);
+    const auto valid = serialize_thumbnail(thumbnail);
+    REQUIRE(deserialize_thumbnail(valid.data(), valid.size()).has_value());
+
+    auto too_many_channels = valid;
+    write_le<uint32_t>(too_many_channels, 6, 65);
+    REQUIRE_FALSE(deserialize_thumbnail(too_many_channels.data(),
+                                        too_many_channels.size()).has_value());
+
+    auto too_many_levels = valid;
+    write_le<uint32_t>(too_many_levels, 22, 33);
+    REQUIRE_FALSE(deserialize_thumbnail(too_many_levels.data(),
+                                        too_many_levels.size()).has_value());
+
+    auto truncated_payload = valid;
+    truncated_payload.pop_back();
+    REQUIRE_FALSE(deserialize_thumbnail(truncated_payload.data(),
+                                        truncated_payload.size()).has_value());
+
+    auto missing_level_header = valid;
+    missing_level_header.resize(29);
+    REQUIRE_FALSE(deserialize_thumbnail(missing_level_header.data(),
+                                        missing_level_header.size()).has_value());
+}
+
+TEST_CASE("AudioThumbnailCache handles zero capacity, null inserts, and replacement",
+          "[audio][thumbnail][cache][coverage]") {
+    AudioThumbnailCache cache(0);
+    REQUIRE(cache.capacity() == 1);
+    REQUIRE(cache.size() == 0);
+    cache.put("null", nullptr);
+    REQUIRE(cache.size() == 0);
+    REQUIRE(cache.stats().entries == 0);
+
+    auto first = std::make_shared<AudioThumbnail>(
+        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
+    auto second = std::make_shared<AudioThumbnail>(
+        AudioThumbnail::build_from_buffer(make_sine(44100, 8820, 1, 200.0), 128));
+    cache.put("same", first);
+    REQUIRE(cache.size() == 1);
+    cache.put("same", second);
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.get("same").get() == second.get());
+    REQUIRE(cache.stats().hits == 1);
 }
 
 TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",

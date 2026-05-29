@@ -435,3 +435,31 @@ TEST_CASE("PulpBridge plugin info updates static string storage per descriptor",
         REQUIRE(info.produces_midi);
     }
 }
+
+TEST_CASE("PulpBridge state serialization owns returned buffers independently",
+          "[apple][bridge][state][coverage][requested]") {
+    reset_bridge_store();
+
+    pulp_param_set(kBridgeParamId, -30.0f);
+    int first_size = 0;
+    uint8_t* first = pulp_state_serialize(&first_size);
+    REQUIRE(first != nullptr);
+    REQUIRE(first_size > 0);
+    std::vector<uint8_t> first_copy(first, first + first_size);
+
+    pulp_param_set(kBridgeParamId, 12.0f);
+    int second_size = 0;
+    uint8_t* second = pulp_state_serialize(&second_size);
+    REQUIRE(second != nullptr);
+    REQUIRE(second_size == first_size);
+    REQUIRE(std::memcmp(first, first_copy.data(), first_copy.size()) == 0);
+    REQUIRE(std::memcmp(first, second, static_cast<std::size_t>(first_size)) != 0);
+
+    REQUIRE(pulp_state_deserialize(first, first_size));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(-30.0f, 0.0001f));
+    REQUIRE(pulp_state_deserialize(second, second_size));
+    REQUIRE_THAT(pulp_param_get(kBridgeParamId), WithinAbs(12.0f, 0.0001f));
+
+    pulp_free(first);
+    pulp_free(second);
+}

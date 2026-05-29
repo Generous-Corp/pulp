@@ -272,6 +272,65 @@ TEST_CASE("find_compat_json walks parents and reports absence",
     fs::remove_all(dir);
 }
 
+TEST_CASE("snapshot_input scrapes script attributes and frontmatter edge cases",
+          "[cli][import-detect][coverage][requested]") {
+    ScratchDir scratch("snapshot-edges");
+
+    write_text(scratch.path / "case.html", R"HTML(
+<!doctype html>
+<SCRIPT SRC='/assets/app.js' TYPE='module'></SCRIPT>
+<script data-src="/ignored.js" src=/assets/inline.js></script>
+<script src = "/spaced-equals-ignored.js"></script>
+<scriptish src="/not-a-script.js"></scriptish>
+<script type=text/babel></script>
+<script>
+  window.tailwind = { theme: { extend: { colors: {
+    "surface-container": "#fff",
+    "accent": "#000"
+  }}}}
+</script>
+)HTML");
+
+    auto html = det::snapshot_input(scratch.path / "case.html");
+    REQUIRE_FALSE(html.is_directory);
+    REQUIRE(html.filename == "case.html");
+    REQUIRE(html.script_srcs.size() == 2);
+    REQUIRE(html.script_srcs[0] == "/assets/app.js");
+    REQUIRE(html.script_srcs[1] == "/assets/inline.js");
+    REQUIRE(html.script_types.size() == 2);
+    REQUIRE(html.script_types[0] == "module");
+    REQUIRE(html.script_types[1] == "text/babel");
+    REQUIRE(std::find(html.tailwind_tokens.begin(),
+                      html.tailwind_tokens.end(),
+                      "surface-container") != html.tailwind_tokens.end());
+    REQUIRE(std::find(html.tailwind_tokens.begin(),
+                      html.tailwind_tokens.end(),
+                      "accent") != html.tailwind_tokens.end());
+
+    write_text(scratch.path / "DESIGN.md",
+               "---\r\n"
+               "name: Demo\r\n"
+               "colors:\r\n"
+               "  primary: '#fff'\r\n"
+               "# comment: ignored\r\n"
+               "---\r\n"
+               "# Body\r\n");
+
+    auto design = det::snapshot_input(scratch.path / "DESIGN.md");
+    REQUIRE(design.has_frontmatter_fence);
+    REQUIRE(design.frontmatter_keys == std::vector<std::string>{"name", "colors"});
+
+    det::FingerprintClause type_clause;
+    type_clause.kind = det::FingerprintClause::Kind::html_script_type;
+    type_clause.value = " MODULE ";
+    REQUIRE(det::match_clause(type_clause, html));
+
+    det::FingerprintClause key_clause;
+    key_clause.kind = det::FingerprintClause::Kind::frontmatter_key;
+    key_clause.required = "colors";
+    REQUIRE(det::match_clause(key_clause, design));
+}
+
 TEST_CASE("clause matcher honors the fingerprint vocabulary", "[cli][import-detect][issue-1031]") {
     det::InputSnapshot snap;
     snap.is_directory = true;

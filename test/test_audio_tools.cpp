@@ -258,6 +258,16 @@ TEST_CASE("audio model registry rejects malformed checkpoint refs",
     REQUIRE(resolve_checkpoint_url("http:/example.test/model.pt").empty());
 }
 
+TEST_CASE("audio model registry rejects unsafe Hugging Face file paths",
+          "[audio][tools][model-registry][coverage][requested]") {
+    REQUIRE(resolve_checkpoint_url(std::string("hf://org/repo/path/")
+                                   + static_cast<char>(0x1f) + "model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/\rmodel.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo//model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/../model.pt")
+            == "https://huggingface.co/org/repo/resolve/main/../model.pt");
+}
+
 TEST_CASE("audio model registry preserves direct HTTP URLs byte-for-byte",
           "[audio][tools][model-registry][coverage]") {
     REQUIRE(resolve_checkpoint_url("https://example.test/model.pt")

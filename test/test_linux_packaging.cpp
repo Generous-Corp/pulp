@@ -220,6 +220,27 @@ TEST_CASE("Linux packaging tarballs preserve format directory boundaries",
     REQUIRE(listing.stdout_output.find("LV2-disabled") == std::string::npos);
 }
 
+TEST_CASE("Linux packaging tarballs preserve empty declared format directories",
+          "[ship][linux-package][coverage][requested]") {
+    TempDir temp("empty-format-directories");
+    auto build = temp.path / "build";
+    fs::create_directories(build / "VST3");
+    fs::create_directories(build / "CLAP");
+    write_file(build / "Docs" / "ignored.txt", "ignored");
+
+    auto output = temp.path / "empty-formats.tar.gz";
+    REQUIRE(pulp::ship::create_tar_gz("EmptyFormats", build.string(), output.string()));
+    REQUIRE(fs::is_regular_file(output));
+    REQUIRE(fs::file_size(output) > 0);
+
+    auto listing = run_sh("tar tzf " + quote(output));
+    REQUIRE(listing.exit_code == 0);
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("VST3/"));
+    REQUIRE_THAT(listing.stdout_output, ContainsSubstring("CLAP/"));
+    REQUIRE(listing.stdout_output.find("LV2/") == std::string::npos);
+    REQUIRE(listing.stdout_output.find("Docs/ignored.txt") == std::string::npos);
+}
+
 TEST_CASE("Linux packaging tarball command quotes paths with spaces",
           "[ship][linux-package][coverage]") {
     TempDir temp("space-tarball");

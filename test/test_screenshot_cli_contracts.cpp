@@ -338,6 +338,30 @@ TEST_CASE("pulp-screenshot option parser ignores incomplete trailing switches",
     REQUIRE(normalize_backend(options));
 }
 
+TEST_CASE("pulp-screenshot option parser keeps numeric boundary contracts explicit",
+          "[tools][screenshot][coverage][requested]") {
+    auto zero_size = parse_args({
+        "--demo",
+        "--width", "0",
+        "--height", "0",
+        "--scale", "0"
+    });
+    REQUIRE(zero_size.demo);
+    REQUIRE(zero_size.width == 0);
+    REQUIRE(zero_size.height == 0);
+    REQUIRE(zero_size.scale == 0.0f);
+
+    auto padded_numeric = parse_args({
+        "--width", "00064",
+        "--height", "00032",
+        "--scale", "0.5"
+    });
+    REQUIRE(padded_numeric.width == 64);
+    REQUIRE(padded_numeric.height == 32);
+    REQUIRE(padded_numeric.scale == 0.5f);
+    REQUIRE(padded_numeric.output_path == "screenshot.png");
+}
+
 TEST_CASE("pulp-screenshot main rejects unknown backend before rendering",
           "[tools][screenshot][coverage]") {
     auto exit_code = run_screenshot_cli({"--demo", "--backend", "metal"});
