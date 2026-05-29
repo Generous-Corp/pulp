@@ -7,6 +7,8 @@ import json
 import pathlib
 from typing import Any
 
+from frontend_ir_validation import SCHEMAS
+
 
 VALID_INVALIDATIONS = {"source", "style", "resource", "route", "validation"}
 
@@ -81,7 +83,7 @@ def tweaks_from_sidecar(path: pathlib.Path, valid_node_ids: set[str] | None = No
         raw_tweaks = data
     else:
         schema = data.get("schema")
-        if schema is not None and schema not in {"pulp-tweaks-v0", "pulp-frontend-ir-tweaks-v0"}:
+        if schema is not None and schema not in {SCHEMAS["tweaks"], SCHEMAS["tweaks_namespaced"]}:
             raise ValueError(f"{path} has unsupported tweak sidecar schema: {schema}")
         raw_tweaks = data.get("tweaks", [])
     if not isinstance(raw_tweaks, list):

@@ -8,6 +8,7 @@ import json
 import pathlib
 from typing import Any
 from frontend_ir_common import as_dict, as_list, load_json, write_json
+from frontend_ir_validation import SCHEMAS
 
 
 PRIMITIVE_CATALOG: dict[str, dict[str, Any]] = {
@@ -219,7 +220,7 @@ def build_primitive_report(
     summary["nodes_with_binding"] = sum(row["nodes_with_binding"] for row in primitives)
     summary["nodes_requiring_js"] = sum(row["nodes_requiring_js"] for row in primitives)
     return {
-        "schema": "pulp-frontend-ir-primitive-coverage-v0",
+        "schema": SCHEMAS["primitive_coverage"],
         "fixture_id": str(report.get("fixture_id", "")),
         "frontend_ir": {
             "path": repo_relative(source_path, root) if source_path else "",

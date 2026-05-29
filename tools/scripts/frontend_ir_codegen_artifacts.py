@@ -9,10 +9,11 @@ import json
 import pathlib
 from typing import Any
 from frontend_ir_common import as_list, load_json, write_json
+from frontend_ir_validation import SCHEMAS
 
 
-SCHEMA = "pulp-frontend-ir-codegen-artifacts-v0"
-BINDING_SCHEMA = "pulp-native-cpp-binding-manifest-v1"
+SCHEMA = SCHEMAS["codegen_artifacts"]
+BINDING_SCHEMA = SCHEMAS["native_cpp_binding_manifest"]
 NATIVE_CPP_ROUTE = "native_cpp"
 
 
@@ -120,7 +121,7 @@ def build_codegen_artifact_report(
     return {
         "schema": SCHEMA,
         "fixture_id": str(frontend_ir.get("fixture_id", "")),
-        "frontend_ir": artifact_ref(frontend_ir_path, repo_root, "frontend_ir", "pulp-frontend-ir-v0"),
+        "frontend_ir": artifact_ref(frontend_ir_path, repo_root, "frontend_ir", SCHEMAS["frontend_ir"]),
         "artifacts": {
             "source_cpp": artifact_ref(source_cpp, repo_root, "generated_cpp_source"),
             "header": artifact_ref(header, repo_root, "generated_cpp_header"),

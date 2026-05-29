@@ -8,6 +8,7 @@ import json
 import pathlib
 from typing import Any
 from frontend_ir_common import as_dict, as_list, load_json, non_negative_int, write_json
+from frontend_ir_validation import SCHEMAS
 
 
 PASS_STATUS = "pass"
@@ -15,8 +16,8 @@ WARN_STATUS = "warn"
 FAIL_STATUS = "fail"
 READY_VERDICT = "ready"
 NOT_READY_VERDICT = "not_ready"
-CODEGEN_ARTIFACT_SCHEMA = "pulp-frontend-ir-codegen-artifacts-v0"
-GATE_SCHEMA = "pulp-frontend-ir-codegen-artifact-gate-v0"
+CODEGEN_ARTIFACT_SCHEMA = SCHEMAS["codegen_artifacts"]
+GATE_SCHEMA = SCHEMAS["codegen_artifact_gate"]
 NATIVE_CPP_ROUTE = "native_cpp"
 
 

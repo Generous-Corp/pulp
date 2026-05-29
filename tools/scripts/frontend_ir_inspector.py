@@ -8,6 +8,7 @@ import json
 import pathlib
 from typing import Any
 from frontend_ir_common import as_dict, as_list, load_json, write_json
+from frontend_ir_validation import SCHEMAS
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -306,7 +307,7 @@ def build_inspector_report(report: dict[str, Any], gates: list[dict[str, Any]] |
     tokens = token_summary(report)
     tweaks = tweak_summary(report)
     return {
-        "schema": "pulp-frontend-ir-inspector-v0",
+        "schema": SCHEMAS["inspector"],
         "fixture_id": str(report.get("fixture_id", "")),
         "source": {
             "kind": source.get("kind", ""),
