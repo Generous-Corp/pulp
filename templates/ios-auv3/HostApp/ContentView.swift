@@ -151,6 +151,7 @@ struct PulpAUv3EditorView: UIViewControllerRepresentable {
         _ uiViewController: EditorContainerViewController,
         coordinator: Coordinator
     ) {
+        uiViewController.setEditor(nil)
         if let token = coordinator.observerToken {
             coordinator.host?.removeEditorObserver(token)
         }
