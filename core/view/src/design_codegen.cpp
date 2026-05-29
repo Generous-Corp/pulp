@@ -434,6 +434,18 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             }
         }
 
+        // Silver-knob synthesis: in the sprite-strip path the "VALUE" label
+        // typically lives baked into the captured PNG (Figma knob components
+        // include it as a flattened sub-text). When --knob-style=silver
+        // swaps the PNG for native vector rendering there's nothing carrying
+        // that label, so the knob reads as bare metal with no caption.
+        // Synthesize a generic "VALUE" label so the silver path stays
+        // visually parity with sprite. Only fires when both label slots
+        // are empty (we'd never overwrite a real Figma label).
+        if (opts.use_silver_knobs && label_text.empty() && value_text.empty()) {
+            label_text = "VALUE";
+        }
+
         if (opts.include_comments && !label_text.empty())
             ss << ind << "// " << label_text << "\n";
 
@@ -664,8 +676,18 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";  // pulp #81
         emit_position_if_absolute(id);
 
+        // Honour the IR-declared height when present. Pre-fix this branch
+        // unconditionally recomputed from font_size, which clobbered Figma's
+        // own label box height — and any absolute-positioned label that
+        // expected to be CENTRED in a slot relied on its own height matching
+        // the slot. Visible bug: the SEARCH input's text+icon sit at design
+        // y=5 / y=6 with IR heights 17 / 15; clobbering the text height to
+        // 14 shifted its glyph baseline up so it no longer aligned with the
+        // icon centre.
         float font_h = node.style.font_size.value_or(14.0f);
-        float label_h = std::max(font_h * 1.4f, kMinLabelHeight);
+        float label_h = node.style.height
+            ? std::max(*node.style.height, font_h * 1.0f)
+            : std::max(font_h * 1.4f, kMinLabelHeight);
         ss << ind << "setFlex('" << id << "', 'height', " << label_h << ");\n";
 
         if (node.style.font_size)
