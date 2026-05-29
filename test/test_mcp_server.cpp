@@ -246,12 +246,16 @@ std::filesystem::path make_fake_command(const std::filesystem::path& dir,
 } // namespace
 
 TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
-    const auto escaped = json_string("quote \" slash \\ newline\nreturn\rtab\t");
+    const auto escaped = json_string(std::string("quote \" slash \\ newline\nreturn\rtab\tunit")
+                                     + static_cast<char>(0x01)
+                                     + static_cast<char>(0x1f));
     require_contains(escaped, "\\\"");
     require_contains(escaped, "\\\\");
     require_contains(escaped, "\\n");
     require_contains(escaped, "\\r");
     require_contains(escaped, "\\t");
+    require_contains(escaped, "\\u0001");
+    require_contains(escaped, "\\u001f");
 
     const std::string payload =
         "{"
