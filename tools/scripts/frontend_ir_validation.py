@@ -35,6 +35,38 @@ SOURCE_TRUTHS = {"archived_fixture", "local_file", "mcp_payload", "generated", "
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
+# Canonical registry of frontend-IR schema name strings.
+#
+# Single source of truth for the schema identifiers emitted and checked by the
+# frontend_ir producer/consumer scripts. Logical key -> exact wire string. The
+# string VALUES are the contract: they are matched byte-for-byte by producers,
+# consumers, and external tooling, so they must never change here without a
+# coordinated schema-version bump. Add a new key rather than editing a value.
+SCHEMAS = {
+    # Core frontend-IR report and its acceptance gate.
+    "frontend_ir": "pulp-frontend-ir-v0",
+    "gate": "pulp-frontend-ir-gate-v0",
+    # Primitive-coverage report and its gate.
+    "primitive_coverage": "pulp-frontend-ir-primitive-coverage-v0",
+    "primitive_gate": "pulp-frontend-ir-primitive-gate-v0",
+    # Codegen artifacts manifest and its gate.
+    "codegen_artifacts": "pulp-frontend-ir-codegen-artifacts-v0",
+    "codegen_artifact_gate": "pulp-frontend-ir-codegen-artifact-gate-v0",
+    # Aggregate native-validation gate verdict.
+    "native_validation_gate": "pulp-frontend-ir-native-validation-gate-v0",
+    # Inspector snapshot.
+    "inspector": "pulp-frontend-ir-inspector-v0",
+    # Session manifest and session diff.
+    "session": "pulp-frontend-ir-session-v0",
+    "session_diff": "pulp-frontend-ir-session-diff-v0",
+    # Tweaks payloads (legacy + namespaced aliases, both accepted on read).
+    "tweaks": "pulp-tweaks-v0",
+    "tweaks_namespaced": "pulp-frontend-ir-tweaks-v0",
+    # Native C++ binding manifest consumed by the codegen-artifacts producer.
+    "native_cpp_binding_manifest": "pulp-native-cpp-binding-manifest-v1",
+}
+
+
 def expect(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
@@ -121,7 +153,7 @@ def validate_tweak(value: Any, field: str) -> None:
 
 
 def validate_frontend_ir(report: dict[str, Any]) -> None:
-    expect(report.get("schema") == "pulp-frontend-ir-v0", "schema must be pulp-frontend-ir-v0")
+    expect(report.get("schema") == SCHEMAS["frontend_ir"], "schema must be pulp-frontend-ir-v0")
     for key in ("source", "design_ir", "nodes", "routes", "validation"):
         expect(key in report, f"missing required field: {key}")
 

@@ -13,6 +13,7 @@ from frontend_ir_validation import (
     ROUTE_HYBRID,
     ROUTE_LIVE_JS,
     ROUTE_UNSUPPORTED,
+    SCHEMAS,
     validate_frontend_ir,
 )
 from frontend_ir_common import load_json, write_json
@@ -274,7 +275,7 @@ def gate_frontend_ir(report: dict[str, Any], mode: str) -> dict[str, Any]:
     warnings = sum(1 for item in checks if item["status"] == WARN_STATUS)
     verdict = READY_VERDICT if failures == 0 else NOT_READY_VERDICT
     return {
-        "schema": "pulp-frontend-ir-gate-v0",
+        "schema": SCHEMAS["gate"],
         "fixture_id": str(report.get("fixture_id", "")),
         "mode": mode,
         "verdict": verdict,

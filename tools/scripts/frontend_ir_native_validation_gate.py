@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Evaluate native end-to-end readiness from existing FrontendIR proof artifacts."""
+"""Evaluate native end-to-end readiness from existing FrontendIR proof artifacts.
+
+This gate is an *evidence aggregator* over child verdicts: it does not re-run any
+upstream validation. It trusts each child artifact's own pass/fail determination
+and re-derives only the cross-cutting invariants needed to keep a child from
+contributing a silent or self-certified PASS to the aggregate verdict. The
+per-function docstrings below spell out the trust boundary each check enforces.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,7 @@ import json
 import pathlib
 from typing import Any
 from frontend_ir_common import as_dict, as_list, load_json, non_negative_int, write_json
+from frontend_ir_validation import SCHEMAS
 
 
 PASS_STATUS = "pass"
@@ -15,11 +23,11 @@ WARN_STATUS = "warn"
 FAIL_STATUS = "fail"
 READY_VERDICT = "ready"
 NOT_READY_VERDICT = "not_ready"
-GATE_SCHEMA = "pulp-frontend-ir-native-validation-gate-v0"
+GATE_SCHEMA = SCHEMAS["native_validation_gate"]
 
-FRONTEND_IR_GATE_SCHEMA = "pulp-frontend-ir-gate-v0"
-PRIMITIVE_GATE_SCHEMA = "pulp-frontend-ir-primitive-gate-v0"
-CODEGEN_GATE_SCHEMA = "pulp-frontend-ir-codegen-artifact-gate-v0"
+FRONTEND_IR_GATE_SCHEMA = SCHEMAS["gate"]
+PRIMITIVE_GATE_SCHEMA = SCHEMAS["primitive_gate"]
+CODEGEN_GATE_SCHEMA = SCHEMAS["codegen_artifact_gate"]
 CPP_ONLY_SCHEMA = "pulp-native-ui-phase-g-cpp-only-audit-v1"
 BEHAVIOR_VISUAL_SCHEMA = "pulp-native-ui-phase-g-cpp-only-behavior-visual-v1"
 COST_SCHEMA = "pulp-native-ui-phase-g-cpp-only-cost-audit-v1"
@@ -54,6 +62,16 @@ def child_gate_check(report: dict[str, Any],
                      expected_schema: str,
                      check_id: str,
                      label: str) -> list[dict[str, Any]]:
+    """Aggregate a child gate's verdict (FrontendIR / primitive / codegen).
+
+    TRUST BOUNDARY: trusts the child gate's own ``verdict`` and ``summary``
+    counts as the authoritative result of the validation it ran — this gate does
+    not re-run that validation. It independently re-derives only the structural
+    guards that prevent a vacuous PASS: the report must carry the expected
+    ``schema``, must contain at least one ``checks`` entry (a "ready" verdict
+    with no checks has verified nothing), and must report ``verdict == ready``
+    with zero failures. Child warnings are surfaced but not treated as failing.
+    """
     checks: list[dict[str, Any]] = []
     if report.get("schema") != expected_schema:
         return [check(check_id, FAIL_STATUS, f"{label} schema must be {expected_schema}")]
@@ -104,6 +122,16 @@ def child_gate_check(report: dict[str, Any],
 
 
 def cpp_only_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Confirm the phase-G cpp-only audit proves a no-runtime-JS native binary.
+
+    TRUST BOUNDARY: trusts the audit's reported ``criteria`` booleans, its
+    ``binary`` descriptor (existence, byte count, sha256), and its
+    ``phase_g_cpp_only_proven`` claim as produced facts — it does not re-run the
+    build or re-hash the binary. It independently re-derives the *completeness*
+    conjunction: the schema must match, every required criterion must be exactly
+    ``True``, the binary must exist with non-zero bytes and a 64-char sha256, and
+    the proven flag must be set. A missing field reads as not-proven, never PASS.
+    """
     if report.get("schema") != CPP_ONLY_SCHEMA:
         return [check("cpp_only_audit", FAIL_STATUS, f"cpp-only audit schema must be {CPP_ONLY_SCHEMA}")]
 
@@ -137,6 +165,19 @@ def cpp_only_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def behavior_visual_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Confirm the phase-G behavior/visual parity proof is complete and passing.
+
+    TRUST BOUNDARY: trusts the report's measured numbers (``threshold``,
+    ``full_similarity``, ``routed_region_similarity``, interaction/parameter
+    counts, ``bound_counts``) and its boolean claims as produced evidence — it
+    does not re-capture screenshots or replay interactions. It independently
+    re-derives the guards that stop a report from self-certifying: the schema
+    must match, it must compile cpp-only and not link the script runtime, a
+    *positive* similarity threshold must be present (a zero threshold makes the
+    ``<`` comparison toothless), measured similarity must clear that threshold,
+    behavior must have passed, and interaction / parameter / bound counts must
+    all be non-zero so the proof actually exercised the UI.
+    """
     if report.get("schema") != BEHAVIOR_VISUAL_SCHEMA:
         return [check(
             "behavior_visual_parity",
@@ -198,6 +239,16 @@ def behavior_visual_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def cost_checks(report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Confirm the optional phase-G cost proof is complete when supplied.
+
+    TRUST BOUNDARY: the cost proof is optional — a missing report is a WARN, not
+    a failure, so its absence cannot block readiness. When present, this trusts
+    the report's ``status``, ``binary_size_delta`` and ``cost_metrics`` as
+    produced measurements (no re-measurement here) and independently re-derives
+    completeness: the schema must match, status and ``criteria.complete`` must
+    both signal complete, and the cpp-only byte delta plus startup metrics must
+    be present and non-empty.
+    """
     if report is None:
         return [check("cost_proof", WARN_STATUS, "cost proof was not supplied")]
     if report.get("schema") != COST_SCHEMA:
@@ -220,6 +271,15 @@ def cost_checks(report: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def gpu_preview_checks(report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Confirm the optional phase-F GPU preview proof loaded GPU but not JS.
+
+    TRUST BOUNDARY: the GPU preview proof is optional — a missing report is a
+    WARN, not a failure. When present, this trusts the report's boolean claims
+    and ``runtime`` observations as produced facts and independently re-derives
+    completeness: the schema must match, ``gpu_preview_proven`` / ``gpu_linked``
+    / ``no_js_engine_symbols`` must each be ``True``, the GPU runtime must have
+    loaded, and the JS runtime must explicitly *not* have loaded.
+    """
     if report is None:
         return [check("gpu_preview_proof", WARN_STATUS, "GPU preview proof was not supplied")]
     if report.get("schema") != GPU_PREVIEW_SCHEMA:
@@ -262,6 +322,16 @@ def build_native_validation_gate(
     gpu_preview_report: dict[str, Any] | None = None,
     artifact_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    """Compose all child verdicts into the aggregate native-validation gate.
+
+    TRUST BOUNDARY: this is the top-level aggregator. It owns no validation of
+    its own — it trusts each child check function (above) to enforce its
+    respective trust boundary and simply unions their emitted checks. The
+    aggregate ``verdict`` is mechanically derived: ``ready`` iff zero FAIL checks
+    across all children (WARN does not block). The required FrontendIR /
+    primitive / codegen child gates are mandatory inputs; the cost and GPU
+    preview proofs are optional and contribute WARN-only when absent.
+    """
     checks: list[dict[str, Any]] = []
     checks.extend(child_gate_check(
         frontend_ir_gate,

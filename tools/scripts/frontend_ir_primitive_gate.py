@@ -10,7 +10,7 @@ from typing import Any
 from frontend_ir_common import as_dict, as_list, load_json, non_negative_int, write_json
 # Import the canonical native-route set rather than re-typing the string
 # literals — a local copy silently drifts when a route is added to the set.
-from frontend_ir_validation import NATIVE_ROUTES
+from frontend_ir_validation import NATIVE_ROUTES, SCHEMAS
 
 
 PASS_STATUS = "pass"
@@ -47,7 +47,7 @@ def check(check_id: str, status: str, message: str, **details: Any) -> dict[str,
 
 
 def validate_primitive_coverage(report: dict[str, Any]) -> None:
-    if report.get("schema") != "pulp-frontend-ir-primitive-coverage-v0":
+    if report.get("schema") != SCHEMAS["primitive_coverage"]:
         raise ValueError("schema must be pulp-frontend-ir-primitive-coverage-v0")
     if not isinstance(report.get("fixture_id"), str):
         raise ValueError("fixture_id must be a string")
@@ -296,7 +296,7 @@ def gate_primitive_coverage(report: dict[str, Any], mode: str) -> dict[str, Any]
     failures = sum(1 for item in checks if item["status"] == FAIL_STATUS)
     warnings = sum(1 for item in checks if item["status"] == WARN_STATUS)
     return {
-        "schema": "pulp-frontend-ir-primitive-gate-v0",
+        "schema": SCHEMAS["primitive_gate"],
         "fixture_id": str(report.get("fixture_id", "")),
         "mode": mode,
         "verdict": READY_VERDICT if failures == 0 else NOT_READY_VERDICT,

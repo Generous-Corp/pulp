@@ -8,6 +8,7 @@ import json
 import pathlib
 from typing import Any
 from frontend_ir_common import load_json, write_json
+from frontend_ir_validation import SCHEMAS
 
 
 CHANGE_SCOPES = (
@@ -263,7 +264,7 @@ def compare_reports(before: dict[str, Any], after: dict[str, Any],
 
     root = repo_root or pathlib.Path.cwd()
     report: dict[str, Any] = {
-        "schema": "pulp-frontend-ir-session-diff-v0",
+        "schema": SCHEMAS["session_diff"],
         "fixture_id": str(after.get("fixture_id") or before.get("fixture_id") or ""),
         "before": {
             "fixture_id": str(before.get("fixture_id", "")),

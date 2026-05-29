@@ -10,6 +10,7 @@ import mimetypes
 import pathlib
 from typing import Any
 from frontend_ir_common import as_dict, as_list, load_json, write_json
+from frontend_ir_validation import SCHEMAS
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -353,7 +354,7 @@ def build_session_manifest(
     session_diff_summary = as_dict(as_dict(session_diff[1]).get("summary")) if session_diff else {}
     inspector_summary = as_dict(as_dict(inspector[1]).get("summary")) if inspector else {}
     return {
-        "schema": "pulp-frontend-ir-session-v0",
+        "schema": SCHEMAS["session"],
         "fixture_id": str(report.get("fixture_id", "")),
         "summary": {
             "artifacts": len(artifacts),

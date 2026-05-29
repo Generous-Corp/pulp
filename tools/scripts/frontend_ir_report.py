@@ -23,6 +23,7 @@ from frontend_ir_validation import (
     ROUTE_NATIVE_HTML,
     ROUTE_RECORDED_PAINT,
     ROUTE_UNSUPPORTED,
+    SCHEMAS,
     SOURCE_TRUTHS,
     is_finite_number,
     is_non_negative_int,
@@ -767,7 +768,7 @@ def build_frontend_ir(
         notes.append(f"attached {len(tweaks)} tweak sidecar edits without mutating imported source.")
 
     report: dict[str, Any] = {
-        "schema": "pulp-frontend-ir-v0",
+        "schema": SCHEMAS["frontend_ir"],
         "fixture_id": str(route_manifest.get("fixture") or overlay.get("fixture_id") or ""),
         "source": {
             "kind": source_kind(source_path),
