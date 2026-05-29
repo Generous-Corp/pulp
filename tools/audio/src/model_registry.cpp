@@ -47,6 +47,7 @@ std::string resolve_checkpoint_url(const std::string& checkpoint_ref) {
         auto user_repo = path.substr(0, second_slash);   // "user/repo"
         auto file_path = path.substr(second_slash + 1);  // "path/to/file"
         if (file_path.empty()) return {};
+        if (has_control_byte(user_repo)) return {};
         if (file_path.starts_with('/') || has_control_byte(file_path)) return {};
         return "https://huggingface.co/" + user_repo + "/resolve/main/" + file_path;
     }
