@@ -240,6 +240,20 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   `set_resize_callback(...)` on both the CPU and Metal hosts, driven from
   `layoutSubviews`. For native child embeds, size from the host's reported
   content bounds instead of hard-coding `UIScreen.mainScreen.bounds`.
+- **`UIViewControllerRepresentable` observer registrations must be paired
+  with `dismantleUIViewController` removal** — the HostApp template's
+  `PulpAUv3EditorView` mounts the AUv3 editor by registering a closure on
+  the `@StateObject` `PulpAUv3Host` that captures the container
+  `UIViewController`. SwiftUI rebuilds the representable on orientation
+  change, scene reset, and iPad split-view shuffles, calling
+  `makeUIViewController` each time. If the observer list is append-only,
+  every rebuild leaks one container VC for the lifetime of the host
+  (which is the lifetime of the SwiftUI app). Use the
+  install-token / remove-by-token pattern in
+  `templates/ios-auv3/HostApp/ContentView.swift`: store the token in a
+  `Coordinator`, call `removeEditorObserver(token)` from the static
+  `dismantleUIViewController(_:coordinator:)` hook, and capture the
+  container VC weakly inside the closure as a second layer of safety.
 
 ### Accessibility
 
