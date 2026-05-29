@@ -601,23 +601,36 @@ expands the host window by the exact view delta, and resizes the root
 view to the design. Keep this limited to initial attach; manual host
 resize must continue through `viewDidLayout` without being forced back.
 
-`PulpAudioUnit::supportedViewConfigurations:` accepts configurations
-within ~5% aspect tolerance of the design only when they are also large
-enough to contain that design (a JUCE forum thread documents that Logic
-10.6.1 probes 1024x768 / 1366x1024 — accepting at least one fixes a
-known Logic reopen-size bug). If any aspect-correct, large-enough
-configuration exists, return only those; wrong-aspect "large enough"
-configs are fallbacks, otherwise Logic/REAPER can choose one first and
-open fixed-design editors with avoidable top/bottom padding. If every
-candidate is undersized for a fixed-design editor, return an empty set
-so CoreAudioKit falls back to the largest available view configuration
-instead of treating the tiny default as supported.
+**Do NOT implement `supportedViewConfigurations:` / `selectViewConfiguration:`
+for fixed-design editors.** (Verified in Logic 2026-05-29; replaced the earlier
+"accept a large-enough config" policy, which *caused* the bug.) Logic Pro sizes
+AU v3 editors through the view-configuration path and offers ONLY oversized ~4:3
+configs (measured: 1024x768 / 1366x1024). The moment the AU returns *any*
+supported config, **Logic locks the editor window to that config's aspect ratio
+at every size** — so a wide fixed design (e.g. 900x520 ≈ 16:9.4) letterboxes with
+top/bottom bars that *cannot be resized away* (confirmed by AX resize probing:
+grow/shrink all snap back to 4:3). Apple's CoreAudioKit header states an empty
+index set means "use the largest available view configuration," so returning
+empty makes Logic pick its *largest* 4:3 config — strictly worse.
 
-Padding at the top/bottom (or left/right) of the editor in a host
-window is the **expected letterbox** when the host gives us a window
-whose aspect ratio doesn't match the design's. Tighten by either
-adjusting the plugin's `view_size()` hint or implementing a tighter
-view-configuration policy.
+Base `AUAudioUnit` already implements these selectors. By NOT overriding them,
+Logic falls back to the plain view at `preferredContentSize` and lets the window
+**free-resize to the design's own aspect** — tight and proportional, matching
+REAPER (in-process, honors design size), CLAP (`gui_get_size`), VST3 (`getSize`),
+and standalone. REAPER never used these selectors, so removing them is a no-op
+there. Regression-guarded by `test_au_plugin_state.mm` → "AU v3 does not opt into
+host view configurations" (asserts PulpAudioUnit's IMP for both selectors equals
+the inherited base IMP — i.e. not overridden).
+
+If a future *fluid/multi-config* editor genuinely wants host view configurations,
+reintroduce the selectors gated on that editor kind, but keep them OFF for any
+`set_design_viewport` / `set_fixed_aspect_ratio` (fixed-design) editor.
+
+Known minor follow-up: in Logic the editor can open a touch too short on first
+paint (top of the design clipped) until a quick manual resize reflows it; the
+letterbox bars are gone. Likely a stale-window-geometry / initial-layout settle
+nit (`runInitialSizeSync` only corrects *undersized*); verify on a fresh Logic
+project before investing in an initial-size fix.
 
 ### The `PULP_AUV3_PLUGIN()` macro replaces hardcoded force_link
 
