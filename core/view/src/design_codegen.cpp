@@ -528,13 +528,46 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             // crisper vector path. Convention rationale: same `@` style
             // Figma uses for variants (`Knob/State=hover`) and that
             // Mitosis / Penpot adopted for code-target hints.
+            // Parse the figma-plugin per-node knob-style suffix.
+            // Tolerates:
+            //   - case variation (`@Sprite`, `@SILVER`)
+            //   - trailing whitespace (Figma's rename UI keeps it)
+            //   - Figma variant separator (`Knob@sprite/State=hover`)
+            //   - Figma's `Knob/Hero@sprite` component-instance pattern
+            // Strictly matches "@sprite" or "@silver" as a complete tag
+            // at the end of the name OR before a variant separator. We
+            // do NOT match inside the middle of the name to avoid
+            // catching layer comments like "Knob@sprite-old-style".
             bool node_wants_sprite = false;
             bool node_wants_silver = false;
             {
-                const std::string& name = node.name;
+                std::string n = node.name;
+                // Trim trailing whitespace.
+                while (!n.empty() &&
+                       std::isspace(static_cast<unsigned char>(n.back())))
+                    n.pop_back();
+                // Cut at Figma variant separator (`@sprite/State=hover`
+                // → `@sprite`). Only the segment containing the @-tag
+                // matters for the suffix.
+                if (auto slash = n.find_last_of('/'); slash != std::string::npos) {
+                    // Only consider the slash a "variant cut" if there's
+                    // an @-tag before it AND no @-tag after it. Otherwise
+                    // it's part of a component path (`Knob/Hero@sprite`),
+                    // which we want to keep intact for the lowercase
+                    // ends-with check below.
+                    auto post = n.substr(slash + 1);
+                    auto pre = n.substr(0, slash);
+                    if (pre.find('@') != std::string::npos &&
+                        post.find('@') == std::string::npos) {
+                        n = pre;
+                    }
+                }
+                // Lowercase the whole string for case-insensitive matching.
+                for (auto& c : n) c = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(c)));
                 auto ends_with = [&](std::string_view suf) {
-                    if (name.size() < suf.size()) return false;
-                    return name.compare(name.size() - suf.size(), suf.size(), suf) == 0;
+                    if (n.size() < suf.size()) return false;
+                    return n.compare(n.size() - suf.size(), suf.size(), suf) == 0;
                 };
                 if (ends_with("@sprite")) node_wants_sprite = true;
                 else if (ends_with("@silver")) node_wants_silver = true;

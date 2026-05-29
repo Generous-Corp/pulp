@@ -1154,9 +1154,9 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
         auto& first = node.children.front();
         float fw = first.style.width.value_or(0.0f);
         float fh = first.style.height.value_or(0.0f);
-        bool is_horizontal_hairline = (fh > 0.0f && fh <= 2.0f && fw > 4.0f);
         size_t non_line_followers = 0;
         std::vector<float> follower_widths;
+        float max_follower_h = 0.0f;
         for (size_t i = 1; i < node.children.size(); ++i) {
             const auto& c = node.children[i];
             float cw = c.style.width.value_or(0.0f);
@@ -1164,11 +1164,30 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
             if (cw >= 8.0f && ch >= 8.0f) {
                 ++non_line_followers;
                 follower_widths.push_back(cw);
+                max_follower_h = std::max(max_follower_h, ch);
             }
         }
         float row_w = node.style.width.value_or(0.0f);
         float row_h = node.style.height.value_or(0.0f);
-        if (is_horizontal_hairline && non_line_followers >= 2 && row_w > 0.0f && row_h > 0.0f) {
+        // Trigger conditions for the connector promotion. Each gate exists
+        // to NOT misfire on legitimate "thin first child" patterns:
+        //   - is_horizontal_hairline: 0 < height ≤ 2px, width > 4px
+        //   - fits_below_half_row: a real CONNECTOR has the line drawn
+        //     much shorter than the row width (Figma stores the
+        //     SEGMENT length, not the spanning extent). A flex row
+        //     whose first child has width >= 50% of the row is almost
+        //     certainly a content element (progress bar, slider track,
+        //     divider) that should participate in flex sizing.
+        //   - row_much_taller: a 2px first child inside a 4-6px tall
+        //     row is geometry; a 2px first child inside a ≥ 6× tall
+        //     row is a connector because there's vertical headroom
+        //     for the dropdowns/buttons to sit ON TOP of it.
+        bool is_horizontal_hairline = (fh > 0.0f && fh <= 2.0f && fw > 4.0f);
+        bool fits_below_half_row = (row_w > 0.0f && fw <= row_w * 0.5f);
+        bool row_much_taller = (max_follower_h > 0.0f && row_h >= max_follower_h * 1.5f)
+                             || (row_h >= fh * 6.0f);
+        if (is_horizontal_hairline && fits_below_half_row && row_much_taller &&
+            non_line_followers >= 2 && row_w > 0.0f && row_h > 0.0f) {
             // Compute the span. Default: full row width. Refinement: if the
             // LAST follower is significantly smaller than the others (≤ 60%
             // of the median width), it's most likely a trailing "add" /
