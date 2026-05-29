@@ -234,6 +234,10 @@ class FrontendIrReportTests(unittest.TestCase):
                     },
                 },
             },
+            "route_metrics": {
+                "js_engine_initialized": False,
+                "requires_runtime_js": False,
+            },
             "source_contract_overlay": {
                 "source": {
                     "source_of_truth": "archived_corpus_fixture",
@@ -306,6 +310,7 @@ class FrontendIrReportTests(unittest.TestCase):
         self.assertEqual(report["validation"]["resource_counts"]["route_usage_native_html"], 1)
         self.assertEqual(report["validation"]["token_counts"]["total"], 0)
         self.assertEqual(report["validation"]["tweak_counts"]["total"], 0)
+        self.assertNotIn("js_engine_present", report["validation"]["binary_dependencies"])
         self.assertIn("did not provide a DesignIR", " ".join(report["validation"]["notes"]))
         fir.validate_frontend_ir(report)
 

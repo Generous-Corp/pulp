@@ -96,11 +96,12 @@ class StaticHtmlFrontendIrTests(unittest.TestCase):
             self.assertEqual(report["resources"][1]["mime"], "text/css")
             self.assertTrue(report["resources"][0]["watch"])
             self.assertTrue(report["resources"][1]["watch"])
+            self.assertNotIn("js_engine_present", report["validation"]["binary_dependencies"])
             self.assertEqual(evidence_gate["verdict"], "ready")
             self.assertEqual(native_gate["verdict"], "not_ready")
             self.assertEqual(
                 [item["id"] for item in native_gate["checks"] if item["status"] == "fail"],
-                ["native_compile_pass"],
+                ["binary_no_js_engine", "native_compile_pass"],
             )
             fir.validate_frontend_ir(report)
 

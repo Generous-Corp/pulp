@@ -182,15 +182,23 @@ def native_readiness_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
     else:
         checks.append(check("native_routes_no_js", PASS_STATUS, "all routes are no-runtime-JS routes"))
 
-    js_present = validation.get("binary_dependencies", {}).get("js_engine_present")
-    if js_present is False:
-        checks.append(check("binary_no_js_engine", PASS_STATUS, "binary dependency evidence reports no JS engine"))
+    binary_dependencies = validation.get("binary_dependencies", {})
+    if not isinstance(binary_dependencies, dict):
+        binary_dependencies = {}
+    js_present = binary_dependencies.get("js_engine_present")
+    has_binary_proof = (
+        isinstance(binary_dependencies.get("proof_artifact"), dict) or
+        isinstance(binary_dependencies.get("audit_artifact"), dict)
+    )
+    if js_present is False and has_binary_proof:
+        checks.append(check("binary_no_js_engine", PASS_STATUS, "binary dependency proof reports no JS engine"))
     else:
         checks.append(check(
             "binary_no_js_engine",
             FAIL_STATUS,
-            "native readiness requires binary evidence that no JS engine is present",
+            "native readiness requires proof-backed binary evidence that no JS engine is present",
             js_engine_present=js_present,
+            proof_artifact_present=has_binary_proof,
         ))
 
     compile_status = str(validation.get("compile", {}).get("status", "")).lower()

@@ -108,6 +108,10 @@ def ready_report() -> dict:
             },
             "binary_dependencies": {
                 "js_engine_present": False,
+                "proof_artifact": {
+                    "kind": "native_proof",
+                    "path": "reports/native-proof.json",
+                },
             },
         },
     }
@@ -163,6 +167,16 @@ class FrontendIrGateTests(unittest.TestCase):
         self.assertIn("binary_no_js_engine", failures)
         self.assertIn("native_compile_pass", failures)
         self.assertIn("token_resolution", failures)
+
+    def test_native_readiness_requires_proof_backed_no_js_evidence(self) -> None:
+        report = ready_report()
+        report["validation"]["binary_dependencies"].pop("proof_artifact")
+
+        result = gate.gate_frontend_ir(report, "native-readiness")
+
+        self.assertEqual(result["verdict"], "not_ready")
+        failures = {item["id"] for item in result["checks"] if item["status"] == "fail"}
+        self.assertIn("binary_no_js_engine", failures)
 
     def test_native_readiness_fails_route_invalidating_tweak(self) -> None:
         report = ready_report()

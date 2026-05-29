@@ -722,6 +722,19 @@ def artifact_ref_from_manifest(route_manifest: dict[str, Any], key: str, kind: s
     return ref
 
 
+def binary_dependency_evidence(route_manifest: dict[str, Any]) -> dict[str, Any]:
+    metrics = route_manifest.get("route_metrics", {})
+    if not isinstance(metrics, dict):
+        return {}
+    js_initialized = metrics.get("js_engine_initialized")
+    if js_initialized is True:
+        return {
+            "js_engine_present": True,
+            "source": "route_manifest_runtime_metrics",
+        }
+    return {}
+
+
 def build_frontend_ir(
     route_manifest: dict[str, Any],
     source_audit: dict[str, Any],
@@ -807,9 +820,7 @@ def build_frontend_ir(
             "compile": {
                 "status": "not_run",
             },
-            "binary_dependencies": {
-                "js_engine_present": bool(route_manifest.get("route_metrics", {}).get("js_engine_initialized", False)),
-            },
+            "binary_dependencies": binary_dependency_evidence(route_manifest),
             "screenshots": [],
             "notes": notes,
         },
