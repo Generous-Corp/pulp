@@ -282,3 +282,13 @@ looks audio-only.
 - Tests:
     - `test/test_au_v2_effect.cpp` — decode / sysex smoke
     - `test/cmake/test_au_v2_type_selection.cmake` — aumf/aufx/aumu/aumi mapping
+
+### AU v2 Cocoa view hands GpuSurface to ScriptedUiSession (Phase iOS-D.3b Slice 1)
+
+`au_v2_cocoa_view.mm` now calls
+`bridge->scripted_ui()->attach_gpu_surface(host->gpu_surface())` right
+after `PluginViewHost::create()` succeeds. Skip this and an AU v2
+plugin whose UI uses Three.js or raw WebGPU JS renders black — the JS
+shim silently falls back to mocks. See the `view-bridge` skill's
+"GpuSurface plumbing into WidgetBridge" section for the cross-platform
+contract.

@@ -756,6 +756,56 @@ window-sized layout would briefly flash before the next paint reset.
 
 See `test_plugin_view_host_design_viewport.mm` for the wiring proof.
 
+## GpuSurface plumbing into WidgetBridge — late-attach contract (Phase iOS-D.3b Slice 1)
+
+Adapter editor-attach paths that wire a scripted UI (`ScriptedUiSession`)
+MUST hand the host's live `render::GpuSurface*` to the bridge so the
+JS-side `navigator.gpu` / `canvas.getContext('webgpu')` shim routes
+through Pulp's real Dawn instance. Without it, those shims fall through
+to mocks and any JS-rendered WebGPU output (Three.js, raw WebGPU) is
+black.
+
+The order is fixed by the adapter editor lifecycle: `ViewBridge::open()`
+constructs the `ScriptedUiSession` (and its `WidgetBridge`) BEFORE
+`PluginViewHost::create()` allocates the `GpuSurface`. Two new API
+points close that gap:
+
+- `pulp::view::WidgetBridge::attach_gpu_surface(GpuSurface*)` — idempotent
+  late-attach; nullable. Stores the pointer + lazily allocates the
+  native GPU bridge state. Pair with `gpu_surface()` /
+  `has_native_gpu_bridge()` for introspection / tests.
+- `pulp::view::ScriptedUiSession::attach_gpu_surface(GpuSurface*)` —
+  forwards to the active bridge AND stashes the pointer so any later
+  hot-reload rebuild constructs the next bridge with the same surface.
+
+Adapters call this after the host is built. Reference wiring in:
+
+- `core/format/src/au_view_controller_ios.mm` (iOS AUv3)
+- `core/format/src/au_view_controller_mac.mm` (macOS AUv3)
+- `core/format/src/vst3_plug_view.cpp` (VST3)
+- `core/format/src/au_v2_cocoa_view.mm` (AU v2)
+- `core/format/include/pulp/format/clap_entry.hpp` (CLAP)
+
+The expected log line on success:
+
+```
+[plugin-gpu-host] GpuSurface attached to WidgetBridge via ScriptedUiSession (<format>)
+```
+
+`PluginViewHost::gpu_surface()` is a new virtual mirroring
+`WindowHost::gpu_surface()` (CPU hosts inherit the nullptr default; GPU
+hosts on iOS/macOS override). Future Windows/Linux factory hosts that
+want WebGPU JS plumbing must override the virtual too.
+
+Coverage: `pulp-test-widget-bridge "[gpu-surface-plumbing]"` (ctor +
+late-attach + idempotence + detach) and `pulp-test-scripted-ui
+"[gpu-surface-plumbing]"` (session-level forwarding). A live-Dawn
+counterpart belongs in Phase iOS-D.3b Slice 3
+(`[jsc][navigator-gpu][live]`).
+
+See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § Slice 1
+for the full rationale.
+
 ## References
 
 - `core/format/include/pulp/format/view_bridge.hpp` — public API

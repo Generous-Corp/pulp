@@ -986,6 +986,28 @@ Don't try to install an AU v3 `.appex` there.
   `MpeVoiceTracker` as CLAP / VST3).
 - `.agents/skills/clap/SKILL.md` and `.agents/skills/vst3/SKILL.md` —
   cross-format parity sanity-check for host-specific regressions.
+
+### iOS AUv3 controller hands GpuSurface to ScriptedUiSession (Phase iOS-D.3b Slice 1)
+
+`au_view_controller_ios.mm` and `au_view_controller_mac.mm` both now
+call, immediately after `PluginViewHost::create()`:
+
+```cpp
+if (auto* scripted = _bridge->scripted_ui()) {
+    scripted->attach_gpu_surface(_viewHost->gpu_surface());
+}
+```
+
+This routes the JS-side `navigator.gpu` / `canvas.getContext('webgpu')`
+shim through the host's live Dawn surface. Skip it and any embedded
+WebGPU JS content (Three.js, raw WebGPU) renders black with no error —
+the shim silently falls through to mocks. Verify with the log line
+`[plugin-gpu-host] GpuSurface attached to WidgetBridge via
+ScriptedUiSession (iOS AUv3)`.
+
+Full cross-platform contract lives in the `view-bridge` skill's
+"GpuSurface plumbing into WidgetBridge" section.
+
 - `docs/guides/ios-auv3-guidance.md` — the human-facing iOS AUv3 guide.
 - `docs/guides/formats.md` — user-facing format overview + auval
   recipes.

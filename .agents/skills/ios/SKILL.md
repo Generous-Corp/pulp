@@ -665,6 +665,25 @@ cases (REQUIRE+ENABLE+missing-Skia fail; REQUIRE off succeeds;
 REQUIRE on + ENABLE off fails). Add a case here whenever a new flag
 contradicts an existing one.
 
+### `IOSGpuPluginViewHost::gpu_surface()` exposes the host's wgpu::Surface (Phase iOS-D.3b Slice 1)
+
+`PluginViewHost` now has a `virtual render::GpuSurface* gpu_surface()`
+mirroring `WindowHost::gpu_surface()`. `IOSGpuPluginViewHost` overrides
+it to return `gpu_surface_.get()`; the CPU `IOSPluginViewHost` inherits
+the nullptr default.
+
+The AUv3 iOS view controller calls
+`bridge->scripted_ui()->attach_gpu_surface(_viewHost->gpu_surface())`
+right after `PluginViewHost::create()` succeeds, so the JS-side
+`navigator.gpu` / `canvas.getContext('webgpu')` shim talks to Pulp's
+real Dawn instance. Without it the JS GPU bridge falls through to mocks
+and any embedded WebGPU content (Three.js, raw WebGPU) renders black.
+
+See the `view-bridge` skill's "GpuSurface plumbing into WidgetBridge"
+section for the cross-platform contract and
+`planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § Slice 1 for
+the full rationale.
+
 ## See Also
 
 - `android` skill — parallel structure for Android NDK.

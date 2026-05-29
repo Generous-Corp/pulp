@@ -36,6 +36,19 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
 
 ScriptedUiSession::~ScriptedUiSession() = default;
 
+// Phase iOS-D.3b Slice 1 — late-attach of the host's GpuSurface. Hosts
+// (e.g. au_view_controller_ios.mm) call this AFTER PluginViewHost::create
+// returns, so the JS-side navigator.gpu / canvas.getContext('webgpu')
+// shim routes through Pulp's live Dawn instance instead of a mock.
+void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
+    gpu_surface_ = gpu_surface;
+    if (bridge_) {
+        bridge_->attach_gpu_surface(gpu_surface);
+    }
+    // Stashed in gpu_surface_ so that the next hot-reload rebuild_from_code
+    // passes the same surface into the freshly-constructed WidgetBridge.
+}
+
 bool ScriptedUiSession::load(std::string* error) {
     auto code = read_text_file(script_path_);
     if (code.empty()) {
@@ -122,7 +135,8 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
 
         root_.set_theme(theme_for_reload);
         auto next_engine = make_engine();
-        auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_);
+        auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_,
+                                                          gpu_surface_);
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }

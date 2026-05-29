@@ -325,6 +325,17 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
         warn_if_unexpected_cpu_fallback(gpu, p->editor_host.get());
         // Pump the scripted UI session (async results, timers, rAF) per vsync.
         p->editor_host->set_idle_callback(make_scripted_idle_pump(*p->bridge));
+        // Phase iOS-D.3b Slice 1 — route navigator.gpu / canvas.getContext
+        // ('webgpu') through the host's live GpuSurface. See
+        // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+        if (auto* scripted = p->bridge->scripted_ui()) {
+            scripted->attach_gpu_surface(p->editor_host->gpu_surface());
+            if (p->editor_host->gpu_surface()) {
+                runtime::log_info(
+                    "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
+                    "via ScriptedUiSession (CLAP)");
+            }
+        }
         // Design viewport: pin root at the editor's preferred size so that
         // host-driven resizes scale content proportionally instead of
         // re-laying out. Paired with the can_resize/get_resize_hints/

@@ -161,6 +161,18 @@ static const char kOwnershipKey = 0;
     // below); the wrapper destroys host (stops the display link) before bridge.
     host->set_idle_callback(format::make_scripted_idle_pump(*bridge));
 
+    // Phase iOS-D.3b Slice 1 — route navigator.gpu / canvas.getContext
+    // ('webgpu') through the host's live GpuSurface. See
+    // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+    if (auto* scripted = bridge->scripted_ui()) {
+        scripted->attach_gpu_surface(host->gpu_surface());
+        if (host->gpu_surface()) {
+            runtime::log_info(
+                "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
+                "via ScriptedUiSession (AU v2)");
+        }
+    }
+
     // AU v2 has no host size callback — the DAW resizes the returned NSView
     // directly. Forward native frame changes to the bridge so the surfaces
     // resize and Processor::on_view_resized fires.

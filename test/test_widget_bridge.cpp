@@ -11,11 +11,18 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#if __has_include(<pulp/render/gpu_surface.hpp>)
+#include <pulp/render/gpu_surface.hpp>
+#define PULP_TEST_HAS_GPU_SURFACE 1
+#else
+#define PULP_TEST_HAS_GPU_SURFACE 0
+#endif
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
 #include <thread>
+#include <utility>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -55,6 +62,57 @@ static bool wait_for_async_result(WidgetBridge& bridge, const std::function<bool
     }
     return done();
 }
+
+#if PULP_TEST_HAS_GPU_SURFACE
+class TestGpuSurface final : public pulp::render::GpuSurface {
+public:
+    explicit TestGpuSurface(AdapterInfo info) : info_(std::move(info)) {}
+
+    bool initialize(const Config& config) override {
+        initialized_ = true;
+        width_ = config.width;
+        height_ = config.height;
+        has_surface_ = config.native_surface_handle != nullptr;
+        return true;
+    }
+    void resize(uint32_t width, uint32_t height) override {
+        width_ = width;
+        height_ = height;
+    }
+    bool begin_frame() override { return false; }
+    void end_frame() override {}
+    bool is_initialized() const override { return initialized_; }
+    bool has_surface() const override { return has_surface_; }
+    uint32_t width() const override { return width_; }
+    uint32_t height() const override { return height_; }
+    void* dawn_device_handle() const override { return nullptr; }
+    void* dawn_queue_handle() const override { return nullptr; }
+    void* dawn_instance_handle() const override { return nullptr; }
+    void* current_texture_handle() const override { return nullptr; }
+    AdapterInfo adapter_info() const override { return info_; }
+
+private:
+    AdapterInfo info_;
+    bool initialized_ = false;
+    bool has_surface_ = false;
+    uint32_t width_ = 1;
+    uint32_t height_ = 1;
+};
+
+static pulp::render::GpuSurface::AdapterInfo test_gpu_info(bool native_bridge) {
+    pulp::render::GpuSurface::AdapterInfo info;
+    info.available = true;
+    info.native_bridge = native_bridge;
+    info.backend = native_bridge ? "Dawn/Metal" : "Dawn/WebGPU";
+    info.backend_type = native_bridge ? "Metal" : "Mock";
+    info.name = native_bridge ? "Pulp Test Native Adapter" : "Pulp Test Mock Adapter";
+    info.vendor = "Pulp";
+    info.architecture = native_bridge ? "arm64" : "unavailable";
+    info.description = info.name;
+    info.preferred_canvas_format = native_bridge ? "rgba8unorm" : "bgra8unorm";
+    return info;
+}
+#endif
 
 TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     ScriptEngine engine;
@@ -2813,3 +2871,107 @@ TEST_CASE("filter chain triggers save_layer_with_filters at paint",
     REQUIRE(save_count > 0);
 }
 
+
+// ── Phase iOS-D.3b Slice 1: GpuSurface late-attach into WidgetBridge ────────
+// planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1
+//
+// These tests pin the new attach_gpu_surface() / has_native_gpu_bridge()
+// API and the ScriptedUiSession-side plumbing. They DO NOT need a real
+// Dawn surface — passing nullptr exercises the detach/idempotent paths,
+// and passing the same pointer twice exercises the idempotence guard.
+// A live-surface companion test belongs in slice 3 ([jsc][navigator-gpu][live])
+// where Dawn is available.
+
+TEST_CASE("WidgetBridge gpu_surface late-attach is idempotent and nullable",
+          "[widget_bridge][gpu-surface-plumbing][issue-ios-d3b-slice1]") {
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    pulp::state::StateStore store;
+
+    // 1. Constructed without a surface → no native bridge.
+    auto bridge = std::make_unique<pulp::view::WidgetBridge>(engine, root, store);
+    REQUIRE(bridge->gpu_surface() == nullptr);
+    REQUIRE(bridge->has_native_gpu_bridge() == false);
+
+    // 2. attach_gpu_surface(nullptr) on a bridge that already has no
+    //    surface is a no-op. has_native_gpu_bridge stays false.
+    bridge->attach_gpu_surface(nullptr);
+    REQUIRE(bridge->gpu_surface() == nullptr);
+    REQUIRE(bridge->has_native_gpu_bridge() == false);
+
+#if PULP_TEST_HAS_GPU_SURFACE
+    // 3. Attaching a non-null surface stores the pointer. This test double
+    //    reports no native bridge, so has_native_gpu_bridge stays false.
+    //    The accessor itself is the contract being pinned: it returns
+    //    whatever was last attached.
+    TestGpuSurface mock_surface(test_gpu_info(false));
+    bridge->attach_gpu_surface(&mock_surface);
+    REQUIRE(bridge->gpu_surface() == &mock_surface);
+    // has_native_gpu_bridge depends on the surface actually exposing a Dawn
+    // native bridge; this mock surface does not.
+    REQUIRE(bridge->has_native_gpu_bridge() == false);
+
+    // 4. Late-attach a native-capable surface after JS registration. The
+    // descriptor path must be live, not a stale constructor-time snapshot,
+    // or navigator.gpu.requestAdapter() remains on the mock adapter path.
+    TestGpuSurface native_surface(test_gpu_info(true));
+    REQUIRE_FALSE(engine.evaluate("__describeNativeAdapterImpl().nativeBridge")
+                      .getWithDefault<bool>(true));
+    bridge->attach_gpu_surface(&native_surface);
+    REQUIRE(bridge->gpu_surface() == &native_surface);
+    REQUIRE(bridge->has_native_gpu_bridge() == true);
+    REQUIRE(engine.evaluate("__describeNativeAdapterImpl().nativeBridge")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("getGPUInfo().nativeBridge").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("__describeNativeDeviceImpl().nativeBridge")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("navigatorGPU.nativeBridge").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("navigatorGPU.getPreferredCanvasFormat()").toString() ==
+            "rgba8unorm");
+    engine.evaluate(R"(
+        globalThis.__lateAttachAdapterNative = false;
+        navigator.gpu.requestAdapter().then(function(adapter) {
+            globalThis.__lateAttachAdapterNative = !!(adapter && adapter._nativeBridge);
+        });
+        void 0;
+    )");
+    engine.pump_message_loop();
+    REQUIRE(engine.evaluate("globalThis.__lateAttachAdapterNative")
+                .getWithDefault<bool>(false));
+    // The live counterpart test in slice 3 will run the same path with real
+    // Dawn handles, not only descriptor-level test data.
+
+    // 5. attach_gpu_surface(same-ptr) is idempotent (no-op fast-path).
+    bridge->attach_gpu_surface(&native_surface);
+    REQUIRE(bridge->gpu_surface() == &native_surface);
+#else
+    SUCCEED("render::GpuSurface test double unavailable in GPU-off builds");
+#endif
+
+    // 6. attach_gpu_surface(nullptr) detaches cleanly.
+    bridge->attach_gpu_surface(nullptr);
+    REQUIRE(bridge->gpu_surface() == nullptr);
+    REQUIRE(bridge->has_native_gpu_bridge() == false);
+}
+
+TEST_CASE("WidgetBridge ctor with non-null gpu_surface stores it",
+          "[widget_bridge][gpu-surface-plumbing][issue-ios-d3b-slice1]") {
+#if PULP_TEST_HAS_GPU_SURFACE
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    pulp::state::StateStore store;
+
+    TestGpuSurface mock_surface(test_gpu_info(false));
+    pulp::view::WidgetBridge bridge(engine, root, store, &mock_surface);
+    REQUIRE(bridge.gpu_surface() == &mock_surface);
+#else
+    SUCCEED("render::GpuSurface test double unavailable in GPU-off builds");
+#endif
+}
+
+// ScriptedUiSession::attach_gpu_surface coverage lives in test_scripted_ui.cpp
+// — that file already brings in <pulp/view/scripted_ui.hpp> which transitively
+// pulls in choc's <FileWatcher.h> → CoreServices → MacTypes.h, defining a
+// global `Size` that clashes with `pulp::view::Size` once this file does
+// `using namespace pulp::view`. Keep the ScriptedUiSession test where the
+// transitive include is already managed.
