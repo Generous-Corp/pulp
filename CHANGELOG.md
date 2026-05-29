@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02740"></a>
+## [0.274.0] - 2026-05-29
+
+- feat(frontend-ir): Phase 0/1 contract surface + native-readiness gate composition ([#3128](https://github.com/danielraffel/pulp/pull/3128))
+- fix(scan-worker): preserve symlink-alias identity in bundle filtering ([#3132](https://github.com/danielraffel/pulp/pull/3132))
+
 <a id="v02730"></a>
 ## [0.273.0] - 2026-05-29
 
@@ -3140,6 +3146,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.274.0]: https://github.com/danielraffel/pulp/releases/tag/v0.274.0
 [0.273.0]: https://github.com/danielraffel/pulp/releases/tag/v0.273.0
 [0.272.1]: https://github.com/danielraffel/pulp/releases/tag/v0.272.1
 [0.272.0]: https://github.com/danielraffel/pulp/releases/tag/v0.272.0
