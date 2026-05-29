@@ -1372,6 +1372,22 @@ Each entry: *symptom → diagnostic step → root cause → fix*. Use this list 
 - **Fix**: in `parse_ir_node` post-pass, when the row matches the pattern, mutate the line to `position: absolute`, `left: 0`, `width: row_width`, `top: (row_h - line_h) / 2`, centred vertically. Stays first in flex source order so the renderer still draws it behind subsequent siblings.
 - **Lesson**: Figma's "I/O connection" / "pipeline" / "signal flow" visuals all use the same shape — a hairline as the FIRST flex child, boxes after. The importer needs to recognise it as a CONNECTOR, not as a sibling that should participate in flex sizing.
 
+#### 14. Connector line extends past trailing "add" affordance
+
+- **Symptom**: pattern #13 fixed the line threading, but the line continues past a trailing `+` / "add more" / settings-cog button, reading as "the + is part of the connection too".
+- **Diagnostic**: row has ≥3 widget siblings AND the trailing sibling is significantly smaller than the others — a single-icon affordance vs medium-width dropdown boxes.
+- **Root cause**: pattern #13 spans the line full-row-width by default. Designer intent is "pipeline ends at the LAST connected item", with the trailing affordance being a separate "add another" control.
+- **Fix**: when `last_width / median_width < 0.6`, pull the line's right edge back by `trailing_width + gap` so the connection visual ends at the last real pipeline widget. ELYSIUM's FX RACK: line 226px → 190px so it stops at REVERB's right edge.
+- **Lesson**: a trailing visually-smaller widget in a pipeline row is an affordance, not a stage. Same heuristic catches `[mode1][mode2][mode3][⚙]`, `[item1][item2][+]`, etc.
+
+#### 15. Single-child `space_between` degenerates to left-align
+
+- **Symptom**: a single piece of text/content in a flex container appears left-aligned even though the design clearly shows it centered (numbered tab buttons "1" "2" "3" "4" all sitting at the left edge of their boxes).
+- **Diagnostic**: container has `justify_content: space_between` AND `children.size() == 1`. CSS / Yoga semantics: space-between with one child means "distribute remaining space between start and the only item" → item ends up at start.
+- **Root cause**: common Figma designer pattern — they set the container to space-between meaning "spread items out when there are multiple", then drop a single item in. The intent is "center this solo item", but Figma serialises space-between literally regardless.
+- **Fix**: in design_codegen, when emitting `justify_content`, if value is space_between AND there's exactly one child, emit `center` instead. Preserves designer intent uniformly.
+- **Lesson**: Figma's auto-layout doesn't always reflect rendered intent on degenerate cases (single child, zero gap, infinite-size content). When the IR is the literal Figma value but renders wrong, look for these "single-N degenerates to default" cases.
+
 ### Subtleties you should catch BEFORE the user does
 
 When importing a new Figma file, run these checks proactively:
