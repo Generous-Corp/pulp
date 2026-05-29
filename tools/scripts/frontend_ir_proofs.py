@@ -112,10 +112,32 @@ def apply_phase_g_cpp_only(
         ),
     )
     if binary_ok:
+        # Build the per-claim provenance object first. The `claims[]` array
+        # is the authoritative shape going forward: each entry names the
+        # dependency, its status (`present`/`absent`/`unknown`), and the
+        # artifact reference that backs the claim — so a reader does not
+        # have to read the gate code to know what each flat boolean means.
+        proof_ref = artifact_ref(path, repo_root)
+        claim: dict[str, Any] = {
+            "dependency": "js_engine",
+            "status": "absent",
+            "source": "phase_g_cpp_only",
+            "proof_artifact": proof_ref,
+        }
+        if target:
+            claim["target"] = target
+        if isinstance(binary.get("path"), str) and binary["path"]:
+            claim["binary_path"] = binary["path"]
+        if isinstance(binary.get("sha256"), str) and binary["sha256"]:
+            claim["binary_sha256"] = binary["sha256"]
+
+        # Legacy flat fields preserved for backward compatibility with
+        # existing artifact readers; new gates SHOULD prefer `claims[]`.
         dependency_status: dict[str, Any] = {
+            "claims": [claim],
             "js_engine_present": False,
             "source": "phase_g_cpp_only",
-            "proof_artifact": artifact_ref(path, repo_root),
+            "proof_artifact": proof_ref,
         }
         if target:
             dependency_status["target"] = target
