@@ -187,6 +187,22 @@ TEST_CASE("design-import benchmark argument parser uses last explicit option",
     REQUIRE(config->output_path == std::filesystem::path("second.json"));
 }
 
+TEST_CASE("design-import benchmark argument parser rejects orphaned values",
+          "[design-import][benchmark][coverage][requested]") {
+    REQUIRE_FALSE(parse_args_vec({"bench", "stray"}).has_value());
+    REQUIRE_FALSE(parse_args_vec({"bench", "--lane", "live", "extra"}).has_value());
+    REQUIRE_FALSE(parse_args_vec({"bench", "--idle-ms", "1", "--", "--target-fps", "60"}).has_value());
+
+    auto valid = parse_args_vec({"bench", "--lane", "live",
+                                 "--idle-ms", "+0",
+                                 "--interactive-ms", "+2",
+                                 "--target-fps", "+30"});
+    REQUIRE(valid.has_value());
+    REQUIRE(valid->idle_ms == 0);
+    REQUIRE(valid->interactive_ms == 2);
+    REQUIRE(valid->target_fps == 30);
+}
+
 TEST_CASE("design-import benchmark fixture and phase helpers fail closed",
           "[design-import][benchmark][coverage][requested]") {
     REQUIRE(make_fixture("not-a-lane") == nullptr);

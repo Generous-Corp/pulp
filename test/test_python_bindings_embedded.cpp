@@ -124,6 +124,15 @@ assert pulp.ParamInfo.__name__ == "ParamInfo"
 assert pulp.MidiEvent.__name__ == "MidiEvent"
 assert pulp.MidiBuffer.__name__ == "MidiBuffer"
 assert pulp.HeadlessHost.__name__ == "HeadlessHost"
+assert sorted(name for name in dir(pulp) if not name.startswith("_")) == [
+    "HeadlessHost",
+    "MidiBuffer",
+    "MidiEvent",
+    "ParamInfo",
+    "ParamRange",
+    "PluginDescriptor",
+    "StateStore",
+]
 
 def raises(exc_type, fn):
     try:
@@ -211,6 +220,7 @@ assert midi.size() == 1
 midi.clear()
 midi.clear()
 assert midi.empty()
+assert raises(TypeError, lambda: midi.add(object()))
 try:
     pulp.MidiEvent.note_on(1, 60)
 except TypeError:
@@ -240,6 +250,11 @@ store.set_value(8201, -12.0)
 store.set_normalized(8202, 0.75)
 assert math.isclose(store.get_value(8201), -12.0)
 assert math.isclose(store.get_normalized(8202), 0.75)
+store.set_normalized(8201, -1.0)
+assert math.isclose(store.get_value(8201), -60.0)
+store.set_normalized(8201, 2.0)
+assert math.isclose(store.get_value(8201), 24.0)
+store.set_value(8201, -12.0)
 state_blob = bytes(store.serialize())
 assert isinstance(state_blob, bytes)
 assert len(state_blob) > 0
@@ -301,6 +316,9 @@ processed = host.process_numpy(audio)
 assert processed.shape == audio.shape
 assert processed.dtype == np.float32
 assert np.allclose(processed, audio)
+processed_again = host.process_numpy(np.ascontiguousarray(audio[:, :2]))
+assert processed_again.shape == (2, 2)
+assert np.allclose(processed_again, audio[:, :2])
 assert raises(RuntimeError, lambda: host.process_numpy(np.array([1.0, 2.0], dtype=np.float32)))
 assert raises(RuntimeError, lambda: host.process_numpy(
     np.zeros((1, 2, 3), dtype=np.float32)))

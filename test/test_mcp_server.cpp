@@ -341,6 +341,19 @@ TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated",
     require_contains(wrapped, R"("text":"{\"ok\":true,\"value\":\"x\"}")");
 }
 
+TEST_CASE("MCP JSON helpers keep numeric-looking keys distinct",
+          "[mcp][json][coverage][requested]") {
+    const std::string payload =
+        R"({"id":5,"id2":99,"id_text":"5","method":"tools/call","methodExtra":"wrong"})";
+
+    REQUIRE(extract_int(payload, "id", -1) == 5);
+    REQUIRE(extract_int(payload, "id2", -1) == 99);
+    REQUIRE(extract_int(payload, "id_text", -1) == -1);
+    REQUIRE(extract_string(payload, "method") == "tools/call");
+    REQUIRE(extract_string(payload, "methodExtra") == "wrong");
+    REQUIRE(extract_raw(payload, "missing").empty());
+}
+
 TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
           "[mcp][json][coverage]") {
     const auto error = json_error("null", -32602, "bad \"arg\"\nline");

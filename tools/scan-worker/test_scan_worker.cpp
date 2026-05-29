@@ -182,6 +182,23 @@ TEST_CASE("pulp-scan-worker rejects missing extension targets before scanning",
     REQUIRE(hidden_result.stdout_output.empty());
 }
 
+TEST_CASE("pulp-scan-worker reports empty success for absent supported bundle paths",
+          "[host][scan-worker][coverage][requested]") {
+    ScratchDir scratch("absent-supported-bundles");
+    auto missing_vst3 = scratch.path / "Missing.vst3";
+    auto missing_clap = scratch.path / "Missing.clap";
+
+    auto vst3_result = run_worker({missing_vst3.string()});
+    REQUIRE(vst3_result.exit_code == 0);
+    REQUIRE(vst3_result.stdout_output.empty());
+    REQUIRE(vst3_result.stderr_output.find("unsupported bundle extension") == std::string::npos);
+
+    auto clap_result = run_worker({missing_clap.string()});
+    REQUIRE(clap_result.exit_code == 0);
+    REQUIRE(clap_result.stdout_output.empty());
+    REQUIRE(clap_result.stderr_output.find("unsupported bundle extension") == std::string::npos);
+}
+
 TEST_CASE("pulp-scan-worker emits JSON for a manifest-free VST3 bundle",
           "[host][scan-worker][issue-493]") {
     ScratchDir scratch("vst3");

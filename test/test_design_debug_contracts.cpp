@@ -368,6 +368,18 @@ TEST_CASE("design-debug option validation fails before expensive render setup",
                               "--script", script.string(),
                               "--capture-backend", "live-gpu",
                               "--design-tool-bin", (temp / "missing-bin").string()}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", script.string(),
+                              "--capture-backend"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", script.string(),
+                              "--provider"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", script.string(),
+                              "--model"}) == 1);
+    REQUIRE(run_design_debug({"pulp-design-debug", "--prompt", "change color",
+                              "--script", script.string(),
+                              "--ai-cli"}) == 1);
 
     REQUIRE(write_text_file(response, "ok"));
     REQUIRE(read_file(response) == "ok");
