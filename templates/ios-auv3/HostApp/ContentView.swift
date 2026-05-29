@@ -28,6 +28,10 @@ import SwiftUI
 import AVFoundation
 import AudioToolbox
 import CoreAudioTypes
+#if os(iOS)
+import UIKit
+import CoreAudioKit
+#endif
 
 #if os(iOS) || os(macOS)
 
@@ -36,7 +40,7 @@ struct ContentView: View {
     @StateObject private var host = PulpAUv3Host()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(host.componentName ?? "(no Pulp AUv3 found — check Info.plist)")
                 .font(.headline)
 
@@ -69,7 +73,24 @@ struct ContentView: View {
                 }
             }
 
-            Spacer()
+            // Phase iOS-D.2 — mount the AUv3 extension's own view inside
+            // the HostApp so the Skia/Dawn-rendered plug-in editor
+            // (PulpAUViewController on iOS) is actually visible in the
+            // SwiftUI shell, not just instantiated for audio render.
+            //
+            // Without this block the iOS-D.1 GPU smoke proves the AU loaded
+            // and rendered to its own UIView, but the HostApp window stayed
+            // a SwiftUI-only screen with no visible editor — the "I can see
+            // the rotating quad in the Simulator" deliverable lives here.
+            #if os(iOS)
+            PulpAUv3EditorView(host: host)
+                .frame(minHeight: 280)
+                .background(Color.black.opacity(0.04))
+                .cornerRadius(8)
+                .padding(.top, 4)
+            #endif
+
+            Spacer(minLength: 0)
         }
         .padding()
         .onAppear {
@@ -83,6 +104,86 @@ struct ContentView: View {
     }
 }
 
+#if os(iOS)
+
+// Phase iOS-D.2 — SwiftUI bridge that hosts the AUv3 extension's editor
+// (PulpAUViewController) inside the HostApp via
+// UIViewControllerRepresentable. The extension is loaded out-of-process
+// (PulpAUv3Host.discover()), so AVAudioUnit.requestViewController fetches
+// the view controller across the XPC connection. We park the returned
+// VC inside a container UIViewController so SwiftUI's layout pass can
+// drive its preferredContentSize without rebuilding the AU.
+//
+// When the AU hasn't been instantiated yet (or the request returns nil),
+// the placeholder UI surfaces an obvious "(loading…)" / "(no AUv3 editor)"
+// label so a failed mount doesn't look like a black-screen render bug.
+@available(iOS 15.0, *)
+struct PulpAUv3EditorView: UIViewControllerRepresentable {
+    @ObservedObject var host: PulpAUv3Host
+
+    func makeUIViewController(context: Context) -> EditorContainerViewController {
+        let vc = EditorContainerViewController()
+        host.installEditorObserver { editorVC in
+            vc.setEditor(editorVC)
+        }
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: EditorContainerViewController, context: Context) {
+        // No-op — the container observes host.editorViewController updates
+        // through installEditorObserver.
+    }
+
+    final class EditorContainerViewController: UIViewController {
+        private weak var editor: UIViewController?
+        private let placeholder = UILabel()
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .clear
+            placeholder.text = "(AUv3 editor loading…)"
+            placeholder.textAlignment = .center
+            placeholder.textColor = .secondaryLabel
+            placeholder.font = .preferredFont(forTextStyle: .body)
+            placeholder.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(placeholder)
+            NSLayoutConstraint.activate([
+                placeholder.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                placeholder.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            ])
+        }
+
+        func setEditor(_ vc: UIViewController?) {
+            // Detach prior editor cleanly (UIKit child-VC contract).
+            if let prior = editor {
+                prior.willMove(toParent: nil)
+                prior.view.removeFromSuperview()
+                prior.removeFromParent()
+            }
+            editor = vc
+            guard let vc = vc else {
+                placeholder.text = "(no AUv3 editor — extension may have failed to load)"
+                placeholder.isHidden = false
+                return
+            }
+            placeholder.isHidden = true
+            addChild(vc)
+            vc.view.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(vc.view)
+            NSLayoutConstraint.activate([
+                vc.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                vc.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                vc.view.topAnchor.constraint(equalTo: view.topAnchor),
+                vc.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+            vc.didMove(toParent: self)
+            print("PULP_EDITOR_MOUNTED: AUv3 view controller attached to HostApp container")
+        }
+    }
+}
+
+#endif
+
 @available(iOS 15.0, macOS 12.0, *)
 @MainActor
 final class PulpAUv3Host: ObservableObject {
@@ -90,6 +191,25 @@ final class PulpAUv3Host: ObservableObject {
     @Published var parameters: [AUParameter] = []
     @Published var isPlaying = false
     var audioUnit: AUAudioUnit?
+
+#if os(iOS)
+    // Phase iOS-D.2 — editor view controller fetched via
+    // AUAudioUnit.requestViewController. We hold the most recent VC and
+    // notify subscribers so the SwiftUI container can re-mount when the
+    // extension finishes loading after the HostApp view tree exists.
+    @Published private(set) var editorViewController: UIViewController?
+    private var editorObservers: [(UIViewController?) -> Void] = []
+
+    func installEditorObserver(_ block: @escaping (UIViewController?) -> Void) {
+        editorObservers.append(block)
+        block(editorViewController)
+    }
+
+    fileprivate func setEditorVC(_ vc: UIViewController?) {
+        editorViewController = vc
+        for obs in editorObservers { obs(vc) }
+    }
+#endif
 
     // Pulp manufacturer code: 'Pulp' = 0x50756C70. Used as a
     // last-resort fallback when the HostApp Info.plist doesn't carry
@@ -245,6 +365,22 @@ final class PulpAUv3Host: ObservableObject {
                     self.midiBlock = node.auAudioUnit.scheduleMIDIEventBlock
                     print("PULP_MIDI_BLOCK: \(self.midiBlock != nil ? "ready" : "unavailable")")
                 }
+
+                // Phase iOS-D.2 — fetch the extension's view controller.
+                // AUv3 on iOS surfaces UI as a UIViewController via
+                // requestViewControllerWithCompletionHandler:; SwiftUI's
+                // UIViewControllerRepresentable hosts the result so the
+                // Skia/Dawn-rendered plug-in editor (PulpAUViewController)
+                // is visible in the HostApp window, not just running
+                // headlessly behind the audio render block.
+                #if os(iOS)
+                node.auAudioUnit.requestViewController { vc in
+                    DispatchQueue.main.async {
+                        print("PULP_EDITOR_REQUESTED: requestViewController -> \(vc == nil ? "nil" : "present")")
+                        self.setEditorVC(vc)
+                    }
+                }
+                #endif
             }
         }
     }
