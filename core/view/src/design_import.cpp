@@ -981,14 +981,18 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 1.
     {
         constexpr float kDegenerateAxis = 0.5f;
+        constexpr float kMinStrokeWeight = 0.5f;  // Figma "1px" strokes
+                                                   // often come through at
+                                                   // 0.97 due to fractional
+                                                   // raster alignment.
         float bw = node.style.border_width.value_or(0.0f);
         float w = node.style.width.value_or(0.0f);
         float h = node.style.height.value_or(0.0f);
-        bool degenerate_w = w > 0.0f && w < kDegenerateAxis;
-        bool degenerate_h = h > 0.0f && h < kDegenerateAxis;
-        if (bw >= 1.0f && (degenerate_w || degenerate_h)) {
-            if (degenerate_w) node.style.width  = bw;
-            if (degenerate_h) node.style.height = bw;
+        bool degenerate_w = w < kDegenerateAxis;
+        bool degenerate_h = h < kDegenerateAxis;
+        if (bw >= kMinStrokeWeight && (degenerate_w || degenerate_h)) {
+            if (degenerate_w) node.style.width  = std::max(bw, 1.0f);
+            if (degenerate_h) node.style.height = std::max(bw, 1.0f);
             // Use the stroke color as the rect fill; the captured PNG is
             // a zero-area image and would render nothing anyway.
             if (!node.style.background_color && node.style.border_color)
