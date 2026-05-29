@@ -198,6 +198,15 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
             YGNodeStyleSetMarginPercent(node, edge, dim.value);
             return;
         }
+        // When the bridge explicitly set a px dimension, route the typed
+        // value through — preserves the sign so CSS-spec negative margins
+        // (used by figma-import for cap-height icon nudges and elsewhere)
+        // actually reach Yoga. The legacy float path below only handled
+        // positives and silently dropped negatives.
+        if (dim.unit == DimensionUnit::px && dim.value != 0) {
+            YGNodeStyleSetMargin(node, edge, dim.value);
+            return;
+        }
         float v = legacy_per_edge >= 0 ? legacy_per_edge : uniform;
         if (v > 0) YGNodeStyleSetMargin(node, edge, v);
     };

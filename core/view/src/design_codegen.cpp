@@ -853,15 +853,69 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 if (child.type == "text" || child.type == "label") ++text_child_count;
             }
         }
+        // Cap-height nudge for [small icon, UPPERCASE label] header rows.
+        // Figma vertically centers icons on the label's cap-height optical
+        // centre. CSS / Yoga `align-items: center` uses the line-box math
+        // centre, which sits ~font_size * 0.15 BELOW the cap-glyph optical
+        // centre because the line box reserves descender slack the
+        // uppercase glyphs don't occupy. Pulp's Label::resolved_state()
+        // produces the same math-centre baseline, so the dot ends up
+        // visually below the label glyphs. Generalisable rule: when a row
+        // has align_items: center, at least one uppercase text child, and
+        // any image child whose min-dim ≤ that label's font_size, emit a
+        // negative margin_top on the icon so its centre lifts to the
+        // cap-glyph centre. No hardcoded constants — the nudge is derived
+        // from the label's own font_size.
+        float upper_font_size = 0.0f;
+        if (is_row && node.layout.align == LayoutAlign::center && !baseline_override) {
+            for (const auto& c : node.children) {
+                bool is_txt = (c.type == "text" || c.type == "label");
+                if (!is_txt) continue;
+                if (!c.style.text_transform || *c.style.text_transform != "uppercase")
+                    continue;
+                upper_font_size = std::max(upper_font_size,
+                                           c.style.font_size.value_or(0.0f));
+            }
+        }
+        // In flex with align-items: center, a margin_top of -M shifts the
+        // child's position UP by M/2 (Yoga centers around the margin-
+        // adjusted box). So to lift the icon's centre by font_size * 0.15
+        // (the cap-vs-math centre delta for an uppercase line-box) we
+        // need a -2 × that margin.
+        float cap_nudge = (upper_font_size > 0.0f)
+                              ? std::round(upper_font_size * 0.30f)
+                              : 0.0f;
+
         std::string last_text_child_id;
         for (auto& child : node.children) {
+            std::string child_var_id_pre;
             if (is_space_between && text_child_count >= 2 &&
                 (child.type == "text" || child.type == "label")) {
                 std::string child_id = sanitize_var(child.name.empty() ? child.type : child.name);
                 child_id += std::to_string(var_counter);  // counter value before this child runs
                 last_text_child_id = child_id;
             }
+            // Compute the image child's about-to-be-emitted var id so we
+            // can pin a setFlex margin_top onto it after generation.
+            bool is_img_child = (child.type == "image" ||
+                                  child.attributes.count("asset_path") > 0);
+            bool nudge_this_child = false;
+            if (cap_nudge > 0.0f && is_img_child) {
+                float cw = child.style.width.value_or(0.0f);
+                float ch = child.style.height.value_or(0.0f);
+                float small = (cw > 0.0f && ch > 0.0f) ? std::min(cw, ch) : 0.0f;
+                if (small > 0.0f && small <= upper_font_size) {
+                    child_var_id_pre = sanitize_var(child.name.empty() ? child.type : child.name);
+                    child_var_id_pre += std::to_string(var_counter);
+                    nudge_this_child = true;
+                }
+            }
             generate_native_node(ss, child, opts, depth + 1, var_counter, id);
+            if (nudge_this_child) {
+                std::string child_ind = indent(depth + 1, opts.indent_spaces);
+                ss << child_ind << "setFlex('" << child_var_id_pre
+                   << "', 'margin_top', " << -cap_nudge << ");\n";
+            }
         }
         if (!last_text_child_id.empty()) {
             std::string child_ind = indent(depth + 1, opts.indent_spaces);
