@@ -24,6 +24,7 @@ namespace pulp_mcp {
 // Escape + quote a string as a JSON string literal.
 inline std::string json_string(const std::string& s) {
     std::string out = "\"";
+    constexpr char hex[] = "0123456789abcdef";
     for (char c : s) {
         switch (c) {
             case '"':  out += "\\\""; break;
@@ -31,7 +32,16 @@ inline std::string json_string(const std::string& s) {
             case '\n': out += "\\n"; break;
             case '\r': out += "\\r"; break;
             case '\t': out += "\\t"; break;
-            default:   out += c;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    const auto byte = static_cast<unsigned char>(c);
+                    out += "\\u00";
+                    out += hex[(byte >> 4) & 0x0f];
+                    out += hex[byte & 0x0f];
+                } else {
+                    out += c;
+                }
+                break;
         }
     }
     out += "\"";
