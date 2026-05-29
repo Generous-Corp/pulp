@@ -3535,12 +3535,16 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setWidgetStyle(id, "standard"|"minimal") — switch rendering mode
+    // setWidgetStyle(id, "standard"|"minimal"|"silver") — switch rendering mode
     // "minimal" draws simple shapes matching design tools (circles, thin tracks)
+    // "silver" draws a skeuomorphic chrome-body knob (figma-import alt path)
     engine_.register_function("setWidgetStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto style_str = args.get<std::string>(1, "standard");
-        auto style = (style_str == "minimal") ? WidgetRenderStyle::minimal : WidgetRenderStyle::standard;
+        WidgetRenderStyle style;
+        if (style_str == "minimal") style = WidgetRenderStyle::minimal;
+        else if (style_str == "silver") style = WidgetRenderStyle::silver;
+        else                          style = WidgetRenderStyle::standard;
         auto* v = widget(id);
         if (auto* k = dynamic_cast<Knob*>(v)) k->set_render_style(style);
         else if (auto* f = dynamic_cast<Fader*>(v)) f->set_render_style(style);

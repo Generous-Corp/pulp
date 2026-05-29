@@ -681,6 +681,7 @@ int main(int argc, char* argv[]) {
     bool validate = false;           // --validate: render + compare after import
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
+    bool use_silver_knobs = false;   // --knob-style=silver: native vector chrome knobs instead of sprite PNGs
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
@@ -765,6 +766,13 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
             preview_mode = true;
+        } else if (std::strcmp(argv[i], "--knob-style") == 0 && i + 1 < argc) {
+            std::string ks = argv[++i];
+            if (ks == "silver") use_silver_knobs = true;
+            // Other values (sprite, standard, etc.) fall through to default.
+        } else if (std::strncmp(argv[i], "--knob-style=", 13) == 0) {
+            std::string ks = argv[i] + 13;
+            if (ks == "silver") use_silver_knobs = true;
         } else if (std::strcmp(argv[i], "--debug") == 0) {
             debug_json = true;
         } else if (std::strcmp(argv[i], "--debug-output") == 0 && i + 1 < argc) {
@@ -1334,6 +1342,7 @@ int main(int argc, char* argv[]) {
     opts.include_tokens = include_tokens;
     opts.include_comments = include_comments;
     opts.preview_mode = preview_mode;
+    opts.use_silver_knobs = use_silver_knobs;
 
     // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
     // Default-on. Source-agnostic helper: the extractor takes a raw

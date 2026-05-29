@@ -884,6 +884,14 @@ struct CodeGenOptions {
     /// state — we just intercept the OS chord and re-fire the synthetic
     /// keydown into the engine. Empty vector = no shortcut emission.
     std::vector<DetectedShortcut> shortcuts;
+
+    /// When true, figma-import knob nodes emit setWidgetStyle('silver')
+    /// instead of setKnobSpriteStrip — replaces the PNG sprite with the
+    /// native vector chrome knob (WidgetRenderStyle::silver). Loses
+    /// pixel-exact Figma fidelity in exchange for crisp rendering at
+    /// any size, no PNG bleed artefacts, and no Skia Graphite raster→
+    /// GPU upload step. Opt-in via `pulp import-design --knob-style=silver`.
+    bool use_silver_knobs = false;
 };
 
 /// Generate Pulp JS code from a DesignIR.

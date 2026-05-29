@@ -270,7 +270,11 @@ public:
 /// Rendering style for audio widgets.
 /// `standard` = interactive widget (arcs, thumbs, fills).
 /// `minimal` = design-preview mode (simple shapes matching design tools).
-enum class WidgetRenderStyle { standard, minimal };
+/// `silver` = skeuomorphic chrome body, radial-gradient highlight, indicator
+///           notch. Vector all the way — works on CPU raster + GPU Graphite.
+///           Used by the figma-import lane as a native-vector alternative to
+///           sprite-strip PNGs (no PNG bleed, crisp at any scale).
+enum class WidgetRenderStyle { standard, minimal, silver };
 
 class Knob : public View {
 public:

@@ -366,6 +366,80 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_stroke_color(stroke);
         canvas.set_line_width(2.5f);
         canvas.stroke_circle(cx, cy, full_r);
+    } else if (render_style_ == WidgetRenderStyle::silver) {
+        // ── Silver/chrome skeuomorphic knob (native vector) ────────────────
+        // Mimics the ELYSIUM-style brushed-metal knob from Figma without
+        // PNG sprites. All canvas primitives — works on the CPU raster
+        // path (pulp-screenshot) and the GPU Graphite path (live window).
+        //
+        // Layered top-to-bottom:
+        //   1. Soft drop shadow below the body
+        //   2. Outer dark rim (the knob's edge bezel)
+        //   3. Chrome body — two-circle radial gradient (off-centered light
+        //      source from top-left, fading to mid-grey at bottom-right)
+        //   4. Specular highlight arc at the top of the body
+        //   5. Indicator notch — short white line at the value's rotation
+        //
+        // Rotation: value 0..1 maps to angle range [-135°, +135°] which
+        // matches the classic analog-synth knob convention (Reaktor / U-He
+        // / Ableton stock knobs). Indicator notch sits at that angle from
+        // 35% inner radius to 95% outer radius — long enough to read,
+        // short enough not to dominate.
+        float full_r = std::min(cx, cy) - 2.0f;
+        float body_r = full_r - 1.5f;         // chrome body radius
+        float inner_r = body_r - 1.0f;
+
+        // 1. Drop shadow — soft offset disc below the body
+        for (int i = 4; i >= 1; --i) {
+            float a = 0.06f * static_cast<float>(i);
+            canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, a));
+            canvas.fill_circle(cx, cy + 1.5f + static_cast<float>(i),
+                               full_r + static_cast<float>(i));
+        }
+
+        // 2. Outer dark rim (the edge bezel) — slightly darker than body
+        canvas.set_fill_color(canvas::Color::rgba(0.22f, 0.23f, 0.26f, 1.0f));
+        canvas.fill_circle(cx, cy, full_r);
+
+        // 3. Chrome body — two-circle radial gradient from light source
+        //    at the upper-left to mid-tone toward lower-right.
+        canvas::Color light = canvas::Color::rgba(0.97f, 0.98f, 0.99f, 1.0f);
+        canvas::Color mid   = canvas::Color::rgba(0.82f, 0.84f, 0.87f, 1.0f);
+        canvas::Color dim   = canvas::Color::rgba(0.55f, 0.58f, 0.63f, 1.0f);
+        canvas::Color grads[3] = { light, mid, dim };
+        float stops[3] = { 0.0f, 0.55f, 1.0f };
+        canvas.set_fill_gradient_radial_two_circles(
+            cx - body_r * 0.35f, cy - body_r * 0.40f, body_r * 0.05f, // bright pinprick top-left
+            cx + body_r * 0.20f, cy + body_r * 0.30f, body_r * 1.25f, // dim envelope bottom-right
+            grads, stops, 3);
+        canvas.fill_circle(cx, cy, body_r);
+        canvas.clear_fill_gradient();
+
+        // 4. Specular highlight arc near the top — subtle white rim
+        //    that suggests reflected light.
+        canvas.set_stroke_color(canvas::Color::rgba(1.0f, 1.0f, 1.0f, 0.45f));
+        canvas.set_line_width(std::max(1.0f, body_r * 0.07f));
+        canvas.set_line_cap(canvas::LineCap::round);
+        // Top half of the body (~210° → 330° in canvas radians, where 0 is
+        // east; the top is at -90° = 270°). Half-width arc gives a soft cap.
+        canvas.stroke_arc(cx, cy, inner_r * 0.92f,
+                          3.926990f /* 225° */, 5.497787f /* 315° */);
+
+        // 5. Indicator notch
+        float angle = -1.5707963f /* -90° */
+                      + (value_ - 0.5f) * 4.7123890f /* 270° total range */;
+        float ind_outer_x = cx + inner_r * 0.95f * std::cos(angle);
+        float ind_outer_y = cy + inner_r * 0.95f * std::sin(angle);
+        float ind_inner_x = cx + inner_r * 0.35f * std::cos(angle);
+        float ind_inner_y = cy + inner_r * 0.35f * std::sin(angle);
+        // Subtle dark backing line for contrast on the bright top arc
+        canvas.set_stroke_color(canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.85f));
+        canvas.set_line_width(std::max(2.5f, body_r * 0.10f));
+        canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
+        // Bright top line — the actual indicator
+        canvas.set_stroke_color(canvas::Color::rgba(0.97f, 0.97f, 0.97f, 1.0f));
+        canvas.set_line_width(std::max(1.5f, body_r * 0.07f));
+        canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
     } else {
         // ── Default C++ paint path ──────────────────────────────────────
 

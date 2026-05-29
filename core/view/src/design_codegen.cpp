@@ -500,8 +500,17 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             // figma-plugin CLI lane (or anyone else) pre-resolved an asset_path
             // onto this knob node. Frame count defaults to 1 (static body);
             // a multi-frame strip lets the indicator rotate by value.
+            //
+            // Track D (alt-button): when opts.use_silver_knobs is true,
+            // emit the native-vector silver render style instead. The
+            // sprite-strip PNG path is skipped — the chrome look comes
+            // from canvas primitives + radial gradient + indicator notch
+            // (WidgetRenderStyle::silver). Crisp at any size, no PNG
+            // bleed, no GPU texture upload.
             auto skin_it = node.attributes.find("asset_path");
-            if (skin_it != node.attributes.end() && !skin_it->second.empty()) {
+            if (opts.use_silver_knobs) {
+                ss << ind << "setWidgetStyle('" << id << "', 'silver');\n";
+            } else if (skin_it != node.attributes.end() && !skin_it->second.empty()) {
                 int frames = 1;
                 auto fc_it = node.attributes.find("sprite_strip_frame_count");
                 if (fc_it != node.attributes.end()) {
