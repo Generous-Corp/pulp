@@ -7,6 +7,7 @@ import argparse
 import json
 import pathlib
 from typing import Any
+from frontend_ir_common import load_json, write_json
 
 
 CHANGE_SCOPES = (
@@ -18,19 +19,6 @@ CHANGE_SCOPES = (
     "tweaks",
     "validation",
 )
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -221,6 +209,12 @@ def recommended_reload(scope: list[str], classification_preserved: bool) -> str:
         return "full_reimport"
     if scope == ["resources"]:
         return "resource_reload"
+    # A validation-only delta (proofs/screenshots refreshed, no source/style/
+    # resource/token/tweak change) only needs a validation refresh. This must
+    # be checked before the token/tweak branch below, which would otherwise
+    # swallow {"validation"} and make validation_refresh unreachable.
+    if set(scope) == {"validation"}:
+        return "validation_refresh"
     if all(item in {"tokens", "tweaks", "validation"} for item in scope):
         return "token_tweak_reload"
     if any(item in {"style_contract", "resources", "tokens", "tweaks"} for item in scope):

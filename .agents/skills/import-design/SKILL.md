@@ -1254,3 +1254,34 @@ CLI surface:
 - `<name>.defaults.json` diagnostic written alongside `shortcuts.json` showing accepted candidates + collisions
 
 What's NOT in Phase A: Pulp-framework defaults for the built-in `SettingsPanel` Audio/MIDI sub-tabs (`Cmd+Opt+A` / `Cmd+Opt+M`). Phase B follow-up — needs `TabPanel` select-tab JS API + standalone-only emission gate. Spec: `planning/2026-05-16-default-keyboard-shortcuts.md`.
+
+## Native-import gotchas
+
+Non-obvious rules in the import + native-codegen path. Each cost a real
+correctness bug before it was made explicit; treat them as invariants.
+
+- **Text-editor value is `<textarea>`-only.** In `imported_widget_semantics`
+  (design_import_native_common.cpp), a node's incidental display text
+  (`text_content` — often a folded label/heading) must NOT become a text
+  editor's contents. Only a `<textarea>` body is the value. Gate the display-
+  text fallback on `pulpSourceFamily`/`jsxTag == "textarea"`; an `<input>` with
+  no explicit value renders empty.
+- **Indexed state bindings keep the index but resolve via the base.**
+  `value={params[0]}` (design_import_v0_tsx.cpp) must keep `pulpValueKey =
+  "params[0]"` (so the binding layer targets the element) while looking up
+  `pulpInitialValue` under the **base** identifier `params` —
+  `state_initial_values` is keyed by base. Returning the full indexed
+  expression as the lookup key silently drops the initial value.
+- **JSX computed-member keys come from the AST node, not a source slice.**
+  In `jsx-contract-audit.mjs`, derive `obj[key]` member paths from the
+  property node's type (StringLiteral/NumericLiteral/Identifier), never from
+  `expressionText('', node)` — an empty source string collapses every
+  computed access to `[]`.
+- **frontend-IR gates are fail-closed; manifest classification ≠ proof.** The
+  `tools/scripts/frontend_ir_*.py` gates must never let missing/`null`/`false`
+  evidence pass: a `route_manifest` calling a node `native_cpp` is not binary
+  proof; a child gate with zero checks verified nothing; a bare `{}` proof
+  artifact is not proof. Generic helpers (`as_dict`/`as_list`/
+  `non_negative_int`/`load_json`/`write_json`) live in `frontend_ir_common.py`
+  and the canonical route set in `frontend_ir_validation.NATIVE_ROUTES` —
+  import them, don't re-type them.

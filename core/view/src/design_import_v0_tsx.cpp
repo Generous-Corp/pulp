@@ -654,7 +654,15 @@ void attach_v0_value_contract(IRNode& node,
                               const std::string& state_key,
                               const V0SourceContracts& contracts) {
     set_contract_attr(node, "pulpValueKey", state_key);
-    if (auto it = contracts.state_initial_values.find(state_key);
+    // state_initial_values is keyed by the base identifier (e.g. "params"),
+    // but an indexed binding key is "params[0]". Look up the initial value by
+    // the base identifier so indexed-state inputs (value={params[0]}) keep a
+    // canonical, index-preserving pulpValueKey *and* still resolve
+    // pulpInitialValue instead of silently dropping it.
+    std::string lookup_key = state_key;
+    if (auto bracket = lookup_key.find('['); bracket != std::string::npos)
+        lookup_key = std::string(trim_ascii_ws(std::string_view(lookup_key).substr(0, bracket)));
+    if (auto it = contracts.state_initial_values.find(lookup_key);
         it != contracts.state_initial_values.end()) {
         set_contract_attr(node, "pulpInitialValue", it->second);
         set_contract_attr(node, "pulpDefaultValueSource", "useState");

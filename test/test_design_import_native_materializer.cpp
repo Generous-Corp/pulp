@@ -627,3 +627,39 @@ TEST_CASE("baked native materializer preserves audio widget attributes",
     REQUIRE(editor->placeholder == "Preset");
     REQUIRE(editor->text() == "Init");
 }
+
+TEST_CASE("baked native materializer only treats display text as editor value for textarea (PR #3128 review)",
+          "[view][import][native-materializer]") {
+    // Regression: the text_value fallback used incidental node text for any
+    // editor, so a label/heading captured as text_content was injected as the
+    // editor's contents. Only a <textarea> body is genuinely the value.
+    DesignIR ir;
+    ir.root = frame("root", 200.0f, 120.0f, LayoutDirection::column);
+
+    // <input type=text> with incidental label text, no explicit value.
+    auto input_node = frame("name-input", 96.0f, 24.0f, LayoutDirection::column);
+    input_node.type = "input";
+    input_node.attributes["type"] = "text";
+    input_node.text_content = "Preset Name";
+
+    // <textarea> whose body IS the value.
+    auto area_node = frame("notes", 120.0f, 60.0f, LayoutDirection::column);
+    area_node.type = "textarea";
+    area_node.attributes["pulpSourceFamily"] = "textarea";
+    area_node.text_content = "hello world";
+
+    ir.root.children.push_back(std::move(input_node));
+    ir.root.children.push_back(std::move(area_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    auto* input_editor = dynamic_cast<TextEditor*>(root->child_at(0));
+    REQUIRE(input_editor != nullptr);
+    REQUIRE(input_editor->text().empty());
+
+    auto* area_editor = dynamic_cast<TextEditor*>(root->child_at(1));
+    REQUIRE(area_editor != nullptr);
+    REQUIRE(area_editor->text() == "hello world");
+}

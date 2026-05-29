@@ -7,19 +7,7 @@ import argparse
 import json
 import pathlib
 from typing import Any
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+from frontend_ir_common import as_dict, as_list, load_json, write_json
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -27,14 +15,6 @@ def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
         return path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def count_routes(routes: list[Any]) -> dict[str, int]:
@@ -208,9 +188,20 @@ def tweak_cards_for_node(tweaks: list[Any], node_id: str) -> list[dict[str, Any]
             "property": tweak.get("property", ""),
             "value": tweak.get("value"),
             "invalidates": as_list(tweak.get("invalidates")),
-            "classification_preserved": tweak.get("classification_preserved"),
+            "classification_preserved": tweak_preserves_classification(tweak),
         })
     return sorted(cards, key=lambda item: str(item.get("property", "")))
+
+
+def tweak_preserves_classification(tweak: dict[str, Any]) -> bool:
+    # Derive preservation the same way frontend_ir_session does: a tweak that
+    # invalidates source or route cannot preserve component classification, no
+    # matter what the producer's flag claims. The producer flag can only make a
+    # non-invalidating tweak NON-preserving, never the reverse.
+    invalidates = as_list(tweak.get("invalidates"))
+    if any(scope in {"source", "route"} for scope in invalidates):
+        return False
+    return tweak.get("classification_preserved") is not False
 
 
 def tweak_summary(report: dict[str, Any]) -> dict[str, Any]:
@@ -225,7 +216,7 @@ def tweak_summary(report: dict[str, Any]) -> dict[str, Any]:
         node_id = tweak.get("node_id")
         if isinstance(node_id, str) and node_id:
             node_ids.add(node_id)
-        if tweak.get("classification_preserved") is True:
+        if tweak_preserves_classification(tweak):
             preserved += 1
         invalidates = as_list(tweak.get("invalidates"))
         if any(scope in {"source", "route"} for scope in invalidates):

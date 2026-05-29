@@ -11,6 +11,7 @@ import re
 from collections import Counter
 from html.parser import HTMLParser
 from typing import Any
+from frontend_ir_common import write_json
 
 
 CSS_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}", re.DOTALL)
@@ -27,11 +28,6 @@ def read_text(path: pathlib.Path) -> str:
 
 def read_bytes(path: pathlib.Path) -> bytes:
     return path.read_bytes()
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def sha256_bytes(data: bytes) -> str:

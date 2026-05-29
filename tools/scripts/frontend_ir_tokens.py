@@ -18,6 +18,7 @@ PROPERTY_RE = re.compile(
 )
 TOKEN_REF_RE = re.compile(r"^([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)$")
 HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+COLOR_FUNC_RE = re.compile(r"^(?:rgb|rgba|hsl|hsla)\(", re.IGNORECASE)
 
 
 def local_source_path(source_path: str, repo_root: pathlib.Path) -> pathlib.Path | None:
@@ -39,7 +40,8 @@ def line_for_offset(text: str, offset: int) -> int:
 
 
 def infer_resolved_type(value: str) -> str:
-    if HEX_COLOR_RE.fullmatch(value.strip()):
+    stripped = value.strip()
+    if HEX_COLOR_RE.fullmatch(stripped) or COLOR_FUNC_RE.match(stripped):
         return "color"
     return "string"
 

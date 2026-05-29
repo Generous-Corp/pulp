@@ -142,7 +142,11 @@ def apply_phase_g_cpp_only(
 def row_matches_report(row: dict[str, Any], report: dict[str, Any]) -> bool:
     fixture_id = str(report.get("fixture_id", ""))
     source_path = report.get("source", {}).get("path")
-    if row.get("fixture_id") == fixture_id:
+    # Only match on fixture_id when the report actually carries one. Two
+    # fixture-less artifacts both reporting "" must not be treated as the same
+    # fixture, which would attach an unrelated compile row as this report's
+    # proof.
+    if fixture_id and row.get("fixture_id") == fixture_id:
         return True
     if isinstance(source_path, str) and source_path:
         return row.get("path") == source_path

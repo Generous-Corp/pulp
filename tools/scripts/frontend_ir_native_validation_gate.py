@@ -7,6 +7,7 @@ import argparse
 import json
 import pathlib
 from typing import Any
+from frontend_ir_common import as_dict, as_list, load_json, non_negative_int, write_json
 
 
 PASS_STATUS = "pass"
@@ -37,31 +38,6 @@ CPP_ONLY_CRITERIA = (
 )
 
 
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def non_negative_int(value: Any) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
-
-
 def check(check_id: str, status: str, message: str, **details: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": check_id,
@@ -86,6 +62,15 @@ def child_gate_check(report: dict[str, Any],
     warnings = non_negative_int(summary.get("warnings"))
     failures = non_negative_int(summary.get("failures"))
     child_checks = as_list(report.get("checks"))
+    if not child_checks:
+        # A child gate that reports "ready" with no checks has verified nothing;
+        # it must not contribute a silent PASS to the aggregate gate.
+        return [check(
+            check_id,
+            FAIL_STATUS,
+            f"{label} reported no checks to verify",
+            verdict=verdict,
+        )]
     warning_ids = [
         str(item.get("id", ""))
         for item in child_checks
@@ -175,6 +160,11 @@ def behavior_visual_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
         failures.append("target_links_script_runtime")
     if report.get("within_threshold") is not True or report.get("full_within_threshold") is not True:
         failures.append("within_threshold")
+    if threshold <= 0.0:
+        # Without a positive threshold the similarity comparison below has no
+        # teeth (`x < 0.0` is never true), so a report could self-certify
+        # parity with zero measured similarity. Require a real threshold.
+        failures.append("missing_similarity_threshold")
     if full_similarity < threshold or routed_similarity < threshold:
         failures.append("similarity_threshold")
     if behavior.get("passed") is not True:

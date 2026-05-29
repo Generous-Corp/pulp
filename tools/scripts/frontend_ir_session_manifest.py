@@ -9,27 +9,7 @@ import json
 import mimetypes
 import pathlib
 from typing import Any
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+from frontend_ir_common import as_dict, as_list, load_json, write_json
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -159,7 +139,10 @@ def resource_entries(report: dict[str, Any], repo_root: pathlib.Path) -> list[di
             entry["path"] = metadata["path"]
             entry["exists"] = metadata["exists"]
             for key in ("sha256", "byte_size", "mime"):
-                if metadata.get(key):
+                # Use "is not None" so an on-disk byte_size of 0 (a real empty
+                # file) overwrites the stale IR value instead of being skipped
+                # as falsy.
+                if metadata.get(key) is not None:
                     entry[key] = metadata[key]
         entries.append(entry)
     return sorted(entries, key=lambda item: str(item.get("id", "")))

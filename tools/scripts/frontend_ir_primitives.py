@@ -7,6 +7,7 @@ import argparse
 import json
 import pathlib
 from typing import Any
+from frontend_ir_common import as_dict, as_list, load_json, write_json
 
 
 PRIMITIVE_CATALOG: dict[str, dict[str, Any]] = {
@@ -69,27 +70,6 @@ ROLE_ALIASES = {
     "text_editor": "text_input",
     "textarea": "text_area",
 }
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def repo_relative(path: pathlib.Path, repo_root: pathlib.Path) -> str:
@@ -189,7 +169,11 @@ def primitive_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
             "nodes_with_source_span": sum(1 for node in nodes if node.get("source_span_present") is True),
             "nodes_with_style": sum(1 for node in nodes if node.get("style_values", 0) > 0),
             "nodes_with_binding": sum(1 for node in nodes if node.get("has_binding") is True),
-            "nodes_requiring_js": sum(1 for node in nodes if node.get("requires_js_engine") is True),
+            # Fail-closed: a node is "no JS" only if its route explicitly proves
+            # requires_js_engine == False. A missing/non-bool value (e.g. an
+            # unrouted node) counts as JS-requiring so it cannot slip through
+            # native-readiness.
+            "nodes_requiring_js": sum(1 for node in nodes if node.get("requires_js_engine") is not False),
             "node_samples": nodes[:10],
         })
     return rows
@@ -223,6 +207,13 @@ def build_primitive_report(
     validation = as_dict(report.get("validation"))
     summary["nodes"] = len(as_list(report.get("nodes")))
     summary["routes"] = len(as_list(report.get("routes")))
+    # Per-node route membership, not just equal counts: a node missing a route
+    # balanced by a duplicate/orphan route must still surface as uncovered.
+    routed_ids = set(route_by_node(report).keys())
+    summary["nodes_without_route"] = sum(
+        1 for node in as_list(report.get("nodes"))
+        if not (isinstance(node, dict) and isinstance(node.get("id"), str) and node.get("id") in routed_ids)
+    )
     summary["nodes_with_source_span"] = sum(row["nodes_with_source_span"] for row in primitives)
     summary["nodes_with_style"] = sum(row["nodes_with_style"] for row in primitives)
     summary["nodes_with_binding"] = sum(row["nodes_with_binding"] for row in primitives)

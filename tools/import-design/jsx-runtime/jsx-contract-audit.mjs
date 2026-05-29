@@ -176,6 +176,18 @@ function staticLiteral(node) {
     return { kind: 'dynamic' };
 }
 
+function computedMemberKey(prop) {
+    // Derive the key from the AST node directly. The previous code called
+    // expressionText('', prop) with an empty source string, so every computed
+    // access (params[0], obj[idx], obj[a.b]) collapsed to an empty `[]`.
+    if (!prop) return '';
+    if (prop.type === 'StringLiteral') return prop.value;
+    if (prop.type === 'NumericLiteral') return String(prop.value);
+    if (prop.type === 'Identifier') return prop.name;
+    if (prop.type === 'MemberExpression') return memberPath(prop);
+    return '';
+}
+
 function memberPath(node) {
     if (!node) return '';
     if (node.type === 'Identifier') return node.name;
@@ -183,7 +195,7 @@ function memberPath(node) {
     if (node.type === 'MemberExpression') {
         const object = memberPath(node.object);
         const property = node.computed
-            ? `[${node.property?.type === 'StringLiteral' ? node.property.value : expressionText('', node.property)}]`
+            ? `[${computedMemberKey(node.property)}]`
             : keyName(node.property);
         return object ? `${object}.${property}` : property;
     }

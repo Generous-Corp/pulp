@@ -515,6 +515,26 @@ TEST_CASE("Grid: parse_template expands simple repeat tracks",
     }
 }
 
+TEST_CASE("Grid: parse_template caps recursion on pathologically nested repeat",
+          "[layout][grid]") {
+    // Semi-trusted design-tool input must not be able to overflow the stack via
+    // deeply nested repeat(...) bodies. Build a 4000-deep nest and require the
+    // parser to return (depth-capped) rather than recurse without bound.
+    std::string nested = "1fr";
+    for (int i = 0; i < 4000; ++i)
+        nested = "repeat(2, " + nested + ")";
+    auto tracks = GridStyle::parse_template(nested);
+    // Past the depth cap the inner body yields no tracks, so the doubling
+    // collapses to empty — the contract under test is "returns without
+    // crashing", not a specific track count.
+    SUCCEED("parse_template returned without unbounded recursion");
+    (void)tracks;
+
+    // A shallow nest still expands normally (2 * 3 = 6 fractional tracks).
+    auto shallow = GridStyle::parse_template("repeat(2, repeat(3, 1fr))");
+    REQUIRE(shallow.size() == 6);
+}
+
 TEST_CASE("Layout: width 0% lays out at zero, not intrinsic (issue-2704)",
           "[layout][w3c][issue-2704]") {
     View root;

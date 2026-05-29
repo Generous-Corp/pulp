@@ -15,6 +15,7 @@ from frontend_ir_validation import (
     ROUTE_UNSUPPORTED,
     validate_frontend_ir,
 )
+from frontend_ir_common import load_json, write_json
 
 
 PASS_STATUS = "pass"
@@ -32,19 +33,6 @@ SOURCE_STYLE_KEYS = (
     "source_style_values_normalized",
     "source_css_lexer_matches",
 )
-
-
-def load_json(path: pathlib.Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def check(check_id: str, status: str, message: str, **details: Any) -> dict[str, Any]:
@@ -155,6 +143,13 @@ def evidence_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
     return checks
 
 
+def refs_real_artifact(value: Any) -> bool:
+    """A proof/audit artifact must reference an actual file, not just be an
+    empty dict. Otherwise `js_engine_present: false` plus a bare `{}` would
+    satisfy native-readiness with no evidence behind it."""
+    return isinstance(value, dict) and isinstance(value.get("path"), str) and bool(value.get("path"))
+
+
 def native_readiness_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
     checks = evidence_checks(report)
     if any(item["status"] == FAIL_STATUS for item in checks):
@@ -187,8 +182,8 @@ def native_readiness_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
         binary_dependencies = {}
     js_present = binary_dependencies.get("js_engine_present")
     has_binary_proof = (
-        isinstance(binary_dependencies.get("proof_artifact"), dict) or
-        isinstance(binary_dependencies.get("audit_artifact"), dict)
+        refs_real_artifact(binary_dependencies.get("proof_artifact")) or
+        refs_real_artifact(binary_dependencies.get("audit_artifact"))
     )
     if js_present is False and has_binary_proof:
         checks.append(check("binary_no_js_engine", PASS_STATUS, "binary dependency proof reports no JS engine"))
