@@ -646,24 +646,43 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
 
     // Padding — support uniform or per-side
     if (obj.hasObjectMember("padding")) {
-        float p = get_float(obj, "padding");
-        l.padding_top = l.padding_right = l.padding_bottom = l.padding_left = p;
+        auto pad = obj["padding"];
+        if (pad.isObject()) {
+            // figma-plugin lane: { top, right, bottom, left }
+            if (pad.hasObjectMember("top"))    l.padding_top    = static_cast<float>(pad["top"].getWithDefault<double>(0));
+            if (pad.hasObjectMember("right"))  l.padding_right  = static_cast<float>(pad["right"].getWithDefault<double>(0));
+            if (pad.hasObjectMember("bottom")) l.padding_bottom = static_cast<float>(pad["bottom"].getWithDefault<double>(0));
+            if (pad.hasObjectMember("left"))   l.padding_left   = static_cast<float>(pad["left"].getWithDefault<double>(0));
+        } else {
+            // Legacy uniform-float form (Pencil / older sources).
+            float p = get_float(obj, "padding");
+            l.padding_top = l.padding_right = l.padding_bottom = l.padding_left = p;
+        }
     }
     if (obj.hasObjectMember("paddingTop"))    l.padding_top = get_float(obj, "paddingTop");
     if (obj.hasObjectMember("paddingRight"))  l.padding_right = get_float(obj, "paddingRight");
     if (obj.hasObjectMember("paddingBottom")) l.padding_bottom = get_float(obj, "paddingBottom");
     if (obj.hasObjectMember("paddingLeft"))   l.padding_left = get_float(obj, "paddingLeft");
+    if (obj.hasObjectMember("padding_top"))    l.padding_top = get_float(obj, "padding_top");
+    if (obj.hasObjectMember("padding_right"))  l.padding_right = get_float(obj, "padding_right");
+    if (obj.hasObjectMember("padding_bottom")) l.padding_bottom = get_float(obj, "padding_bottom");
+    if (obj.hasObjectMember("padding_left"))   l.padding_left = get_float(obj, "padding_left");
     if (obj.hasObjectMember("marginTop"))     l.margin_top = get_float(obj, "marginTop");
     if (obj.hasObjectMember("marginRight"))   l.margin_right = get_float(obj, "marginRight");
     if (obj.hasObjectMember("marginBottom"))  l.margin_bottom = get_float(obj, "marginBottom");
     if (obj.hasObjectMember("marginLeft"))    l.margin_left = get_float(obj, "marginLeft");
+    if (obj.hasObjectMember("margin_top"))     l.margin_top = get_float(obj, "margin_top");
+    if (obj.hasObjectMember("margin_right"))   l.margin_right = get_float(obj, "margin_right");
+    if (obj.hasObjectMember("margin_bottom"))  l.margin_bottom = get_float(obj, "margin_bottom");
+    if (obj.hasObjectMember("margin_left"))    l.margin_left = get_float(obj, "margin_left");
 
     auto parse_align = [](const std::string& s) -> LayoutAlign {
         if (s == "center")        return LayoutAlign::center;
-        if (s == "flex-end" || s == "end") return LayoutAlign::flex_end;
+        if (s == "flex-end" || s == "flex_end" || s == "end")   return LayoutAlign::flex_end;
+        if (s == "flex-start" || s == "flex_start" || s == "start") return LayoutAlign::flex_start;
         if (s == "stretch")       return LayoutAlign::stretch;
-        if (s == "space-between") return LayoutAlign::space_between;
-        if (s == "space-around")  return LayoutAlign::space_around;
+        if (s == "space-between" || s == "space_between") return LayoutAlign::space_between;
+        if (s == "space-around" || s == "space_around")  return LayoutAlign::space_around;
         return LayoutAlign::flex_start;
     };
 
