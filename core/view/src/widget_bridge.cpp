@@ -4121,14 +4121,20 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setCornerRadius(id, corner, radius) — per-corner border-radius
+    // setCornerRadius(id, corner, radius) — per-corner border-radius.
+    // "All" (uniform shorthand) is the codegen default for Figma frames
+    // that carry a single border-radius value; per-corner identifiers
+    // are emitted only when a frame has asymmetric radii. Without the
+    // "All" branch, the figma-plugin lane's setCornerRadius calls fell
+    // through silently and panel corners stayed sharp.
     engine_.register_function("setCornerRadius", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto corner = args.get<std::string>(1, "");
         auto r = static_cast<float>(args.get<double>(2, 0));
         auto* v = id.empty() ? &root_ : widget(id);
         if (v) {
-            if (corner == "TopLeft") v->set_corner_radius_tl(r);
+            if (corner == "All") v->set_border_radius(r);
+            else if (corner == "TopLeft") v->set_corner_radius_tl(r);
             else if (corner == "TopRight") v->set_corner_radius_tr(r);
             else if (corner == "BottomLeft") v->set_corner_radius_bl(r);
             else if (corner == "BottomRight") v->set_corner_radius_br(r);
