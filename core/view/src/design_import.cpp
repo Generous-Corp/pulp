@@ -521,6 +521,21 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
         if (obj.hasObjectMember(key)) field = static_cast<int>(obj[key].getWithDefault<int64_t>(0));
     };
 
+    // Snake_case aliases (lib emitted by the Figma plugin lane). Camel-case
+    // reads above win when both are present; these only fire when the field
+    // is still empty.
+    auto alias_str = [&](const char* snake, std::optional<std::string>& field) {
+        if (!field && obj.hasObjectMember(snake)) field = std::string(obj[snake].toString());
+    };
+    auto alias_float = [&](const char* snake, std::optional<float>& field) {
+        if (!field && obj.hasObjectMember(snake))
+            field = static_cast<float>(obj[snake].getWithDefault<double>(0));
+    };
+    auto alias_int = [&](const char* snake, std::optional<int>& field) {
+        if (!field && obj.hasObjectMember(snake))
+            field = static_cast<int>(obj[snake].getWithDefault<int64_t>(0));
+    };
+
     set_opt_str("backgroundColor", s.background_color);
     set_opt_str("backgroundGradient", s.background_gradient);
     set_opt_str("backgroundImage", s.background_image);
@@ -573,6 +588,46 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("minHeight", s.min_height);
     set_opt_float("maxWidth", s.max_width);
     set_opt_float("maxHeight", s.max_height);
+
+    // Snake_case aliases (figma-plugin lane).
+    alias_str("background_color", s.background_color);
+    alias_str("background_gradient", s.background_gradient);
+    alias_str("background_image", s.background_image);
+    alias_str("background_repeat", s.background_repeat);
+    alias_float("border_radius", s.border_radius);
+    alias_str("border_color", s.border_color);
+    alias_float("border_width", s.border_width);
+    alias_str("border_style", s.border_style);
+    alias_str("border_top_color", s.border_top_color);
+    alias_str("border_right_color", s.border_right_color);
+    alias_str("border_bottom_color", s.border_bottom_color);
+    alias_str("border_left_color", s.border_left_color);
+    alias_float("border_top_width", s.border_top_width);
+    alias_float("border_right_width", s.border_right_width);
+    alias_float("border_bottom_width", s.border_bottom_width);
+    alias_float("border_left_width", s.border_left_width);
+    alias_float("border_top_left_radius", s.border_top_left_radius);
+    alias_float("border_top_right_radius", s.border_top_right_radius);
+    alias_float("border_bottom_right_radius", s.border_bottom_right_radius);
+    alias_float("border_bottom_left_radius", s.border_bottom_left_radius);
+    alias_str("box_shadow", s.box_shadow);
+    alias_str("backdrop_filter", s.backdrop_filter);
+    alias_str("font_family", s.font_family);
+    alias_float("font_size", s.font_size);
+    alias_int("font_weight", s.font_weight);
+    alias_str("font_style", s.font_style);
+    alias_str("text_align", s.text_align);
+    alias_float("letter_spacing", s.letter_spacing);
+    alias_float("line_height", s.line_height);
+    alias_str("text_transform", s.text_transform);
+    alias_str("text_decoration", s.text_decoration);
+    alias_str("white_space", s.white_space);
+    alias_str("text_overflow", s.text_overflow);
+    alias_int("z_index", s.z_index);
+    alias_float("min_width", s.min_width);
+    alias_float("min_height", s.min_height);
+    alias_float("max_width", s.max_width);
+    alias_float("max_height", s.max_height);
 
     return s;
 }

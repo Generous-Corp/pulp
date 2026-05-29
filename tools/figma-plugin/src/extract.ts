@@ -526,6 +526,9 @@ function rgbaToCss(c: RGBA): string {
   const r = Math.round(c.r * 255);
   const g = Math.round(c.g * 255);
   const b = Math.round(c.b * 255);
+  if (c.a === undefined || c.a >= 1) {
+    return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
+  }
   return `rgba(${r}, ${g}, ${b}, ${c.a.toFixed(3)})`;
 }
 

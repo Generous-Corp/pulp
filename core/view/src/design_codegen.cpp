@@ -611,6 +611,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFontWeight('" << id << "', '" << *node.style.font_weight << "');\n";
         if (node.style.color)
             ss << ind << "setTextColor('" << id << "', '" << *node.style.color << "');\n";
+        if (node.style.font_family)
+            ss << ind << "setFontFamily('" << id << "', '" << js_single_quote_escape(*node.style.font_family) << "');\n";
+        if (node.style.text_transform)
+            ss << ind << "setTextTransform('" << id << "', '" << *node.style.text_transform << "');\n";
+        if (node.style.text_align)
+            ss << ind << "setTextAlign('" << id << "', '" << *node.style.text_align << "');\n";
+        if (node.style.letter_spacing)
+            ss << ind << "setLetterSpacing('" << id << "', " << *node.style.letter_spacing << ");\n";
+        if (node.style.width)
+            ss << ind << "setFlex('" << id << "', 'min_width', " << *node.style.width << ");\n";
 
         ss << "\n";
         return;
@@ -675,8 +685,14 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // Visual styles
         if (node.style.background_color)
             ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+        if (node.style.background_gradient)
+            ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
+        if (node.style.box_shadow)
+            ss << ind << "setBoxShadow('" << id << "', '" << js_single_quote_escape(*node.style.box_shadow) << "');\n";
+        if (node.style.opacity)
+            ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
 
         ss << "\n";
 
