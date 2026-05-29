@@ -44,6 +44,7 @@ Thumbs.db
 # ignoring them here keeps `git status` quiet too.
 /screenshot.png
 /.mcp.json.disabled-*
+/artifacts/
 
 
 # Dependencies (fetched at build time)
