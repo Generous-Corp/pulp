@@ -120,6 +120,39 @@ TEST_CASE("pulp-scan-worker command line reports usage and unsupported bundles",
     REQUIRE(rejected.stdout_output.empty());
 }
 
+// Regression for the Codex P2 finding on PR #3110: when a directory contains
+// multiple `.vst3` symlinks pointing at the same real bundle, the worker must
+// preserve the requested-alias identity (lexical absolute path) instead of
+// canonicalizing through symlinks. Otherwise a request for `alias.vst3` could
+// emit a descriptor for `real.vst3` and `IsolatedPluginScanner::scan` (which
+// consumes only the first JSON line) would return or blacklist a sibling.
+TEST_CASE("pulp-scan-worker preserves requested-alias identity for symlinks",
+          "[tools][scan-worker][coverage][issue-3110]") {
+    ScratchDir scratch("symlink-alias");
+    auto real_bundle = scratch.path / "Real.vst3";
+    fs::create_directories(real_bundle / "Contents" / "Resources");
+    auto alias_bundle = scratch.path / "Alias.vst3";
+
+    std::error_code ec;
+    fs::create_symlink(real_bundle, alias_bundle, ec);
+    if (ec) {
+        WARN("create_symlink not supported on this platform: " + ec.message());
+        return;
+    }
+
+    IsolatedPluginScanner scanner{PULP_ISOLATED_SCANNER_REAL_WORKER};
+
+    auto real_result = scanner.scan(real_bundle.string(), /*timeout_ms=*/5000);
+    REQUIRE(real_result.status == ScanStatus::Ok);
+    REQUIRE(real_result.descriptor.has_value());
+    REQUIRE(real_result.descriptor->path == real_bundle.string());
+
+    auto alias_result = scanner.scan(alias_bundle.string(), /*timeout_ms=*/5000);
+    REQUIRE(alias_result.status == ScanStatus::Ok);
+    REQUIRE(alias_result.descriptor.has_value());
+    REQUIRE(alias_result.descriptor->path == alias_bundle.string());
+}
+
 // ── Crash path: deliberate-crash helper ────────────────────────────────
 
 TEST_CASE("IsolatedPluginScanner classifies a worker SIGSEGV as Crash",

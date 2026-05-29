@@ -82,11 +82,19 @@ void write_json_descriptor(const pulp::host::PluginInfo& info) {
     std::printf("\"format\":\"%s\"}\n", fmt);
 }
 
+// Lex-only normalization: collapse `.`/`..` segments and resolve to an
+// absolute path WITHOUT following symlinks. `weakly_canonical` resolves
+// symlinks, so two `.clap`/`.vst3` aliases pointing at the same real
+// bundle would compare equal and the worker would lose the ability to
+// filter to the exact directory entry it was asked to scan. The parent
+// scanner only consumes the first JSON line of our output, so a request
+// for one symlink could otherwise return or blacklist a sibling alias
+// depending on sort order.
 fs::path normalized_bundle_path(const std::string& path) {
     std::error_code ec;
-    auto canonical = fs::weakly_canonical(fs::path(path), ec);
-    if (!ec) return canonical;
-    return fs::absolute(fs::path(path), ec).lexically_normal();
+    auto absolute = fs::absolute(fs::path(path), ec);
+    if (ec) return fs::path(path).lexically_normal();
+    return absolute.lexically_normal();
 }
 
 bool same_bundle_path(const std::string& lhs, const std::string& rhs) {
