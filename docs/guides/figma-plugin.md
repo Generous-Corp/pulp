@@ -21,13 +21,15 @@ first. For the full CLI reference, see
 
 This is the path for designers. **No build step, ever.**
 
-> **Status: once published.** At the time of writing, the plugin's publish to
-> the Figma Community is in progress. The **component library** below is already
-> published and usable today. Until the plugin is live in the Community, use the
-> [local development install](#b-local-development-install).
+> **Status: in review.** The plugin has been submitted to the Figma Community
+> and is **awaiting Figma's review** (typically 1–3 business days). Until it is
+> approved, its Community URL resolves **only for the author** — everyone else
+> gets a 404 — so use the [local development install](#b-local-development-install)
+> for now. The **component library** below is already published and usable today.
 
-1. **Install the plugin.** In Figma, install the **"Design for Pulp"** plugin
-   from the Figma Community.
+1. **Install the plugin.** Once approved, install the **"Design for Pulp"** plugin
+   from the Figma Community:
+   <https://www.figma.com/community/plugin/1642456870947996392>
 
 2. **Add the Pulp component library.** Add the published example library so you
    can drop "Pulp / Knob", "Pulp / Fader", and "Pulp / Meter" instances into
@@ -39,13 +41,16 @@ This is the path for designers. **No build step, ever.**
    — the [semantic link survives restyling](../reference/design-import-model.md#restyle-freely).
 
 4. **Export.** Select the frame(s) you want, run the plugin, and choose
-   **Export to Pulp**. The plugin downloads a `*.pulp.json` file (or a
-   `*.pulp.zip` when your design includes image assets — see
+   **Export to Pulp**. The plugin downloads a `*.pulp.zip` when your design
+   includes image assets, or a bare `*.pulp.json` when it doesn't (see
    [Exports with assets](#exports-with-assets)).
 
-5. **Import into Pulp:**
+5. **Import into Pulp** — point the importer straight at whatever the plugin
+   gave you; the CLI reads a `.pulp.zip` directly (it unpacks it for you):
 
    ```bash
+   pulp import-design --from figma-plugin my-design.pulp.zip
+   # …or a bare .pulp.json export:
    pulp import-design --from figma-plugin my-design.pulp.json
    ```
 
@@ -119,12 +124,15 @@ there.
 
 The exporter downloads one of two things:
 
-- **`*.pulp.json`** — when your design has no image assets. This is the file you
-  pass directly to `pulp import-design --from figma-plugin`.
+- **`*.pulp.json`** — when your design has no image assets.
 - **`*.pulp.zip`** — when your design includes image assets. The zip contains a
-  `scene.pulp.json` plus the asset files. Unzip it and point the importer at the
-  extracted `scene.pulp.json`; the importer resolves the bundled assets from the
-  accompanying asset manifest.
+  `scene.pulp.json` plus the asset files.
+
+**Pass either one straight to the importer** — `pulp import-design --from
+figma-plugin <file>` reads a `.pulp.zip` directly (it unpacks the archive and
+resolves the bundled assets from the manifest for you). You only need to unzip
+by hand for a hand-authored archive whose internal layout differs from the
+plugin's; in that case, point the importer at the extracted `scene.pulp.json`.
 
 The plugin runs **entirely on your machine** — its manifest declares
 `networkAccess: { allowedDomains: ["none"] }`, so no design data leaves your
@@ -152,11 +160,17 @@ Publishing is a **manual action in Figma desktop**. There is no CI step for it.
 3. **Submit for review.** Approval typically takes a few days. Once approved,
    the plugin is public.
 
-Two things live in the Figma Community and should be cross-linked for users:
+### The three Figma URLs (don't mix them up)
 
-- the **component library** (already published):
-  <https://www.figma.com/community/file/1642409275200893924>
-- the **plugin** (this publish flow).
+| URL | What it is | Who uses it |
+|-----|-----------|-------------|
+| <https://www.figma.com/community/plugin/1642456870947996392> | The **plugin** in the Community (post-approval) | Designers — install it |
+| <https://www.figma.com/community/file/1642409275200893924> | The **component library** in the Community (published) | Designers — add it, then drop in "Pulp / Knob" etc. |
+| <https://www.figma.com/design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library> | The **editable library source** file | Maintainers — open via the Figma MCP to add new Pulp library widgets (Fader, Meter, future XYPad/Waveform/Spectrum) and republish |
+
+The first two are what a designer installs; the third is the source of truth
+maintainers edit. The plugin's canonical published ID
+(`1642456870947996392`) is pinned in `tools/figma-plugin/manifest.json`.
 
 ---
 
