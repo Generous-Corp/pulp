@@ -473,12 +473,20 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     # runtime so plugins that try to load Three.js get a clean failure.
     if(PULP_HAS_THREEJS AND DEFINED threejs_SOURCE_DIR)
         find_program(_PULP_NODE_EXE NAMES node nodejs)
-        if(_PULP_NODE_EXE)
+        # Resolve sources relative to this .cmake file so the rule works
+        # both in Pulp's own source build and in a hypothetical installed
+        # consumer build, and so the installed config file does not
+        # contain ${CMAKE_SOURCE_DIR} (which would resolve to the
+        # consumer's source tree, not Pulp's — see install consumer
+        # smoke #2087). PulpAuv3.cmake lives at tools/cmake/, so the
+        # shim is two levels up under core/view/js/ and the bundler is
+        # one level up under tools/scripts/.
+        set(_three_shim_src "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../../core/view/js/web-compat-three-shim.js")
+        set(_bundler_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../scripts/bundle_threejs_for_jsc.mjs")
+        if(_PULP_NODE_EXE AND EXISTS "${_three_shim_src}" AND EXISTS "${_bundler_script}")
             set(_three_in  "${threejs_SOURCE_DIR}/build/three.webgpu.js")
             set(_three_iife "$<TARGET_BUNDLE_DIR:${target}_AUv3>/threejs/three.iife.js")
-            set(_three_shim_src "${CMAKE_SOURCE_DIR}/core/view/js/web-compat-three-shim.js")
             set(_three_shim_out "$<TARGET_BUNDLE_DIR:${target}_AUv3>/threejs/web-compat-three-shim.js")
-            set(_bundler_script "${CMAKE_SOURCE_DIR}/tools/scripts/bundle_threejs_for_jsc.mjs")
             add_custom_command(TARGET ${target}_AUv3 POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E make_directory
                         "$<TARGET_BUNDLE_DIR:${target}_AUv3>/threejs"
@@ -490,10 +498,11 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
             )
         else()
             message(STATUS
-                "Pulp iOS-D.3b: node executable not found — skipping "
-                "Three.js IIFE bundling for ${target}.appex. Plugins that "
-                "load Three.js via pulp::view::threejs_iife_source() will "
-                "see std::nullopt at runtime. Install Node.js to enable.")
+                "Pulp iOS-D.3b: node executable or bundler/shim source not "
+                "found — skipping Three.js IIFE bundling for ${target}.appex. "
+                "Plugins that load Three.js via "
+                "pulp::view::threejs_iife_source() will see std::nullopt at "
+                "runtime. Install Node.js and build from Pulp source to enable.")
         endif()
     endif()
 endfunction()
