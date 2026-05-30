@@ -35,8 +35,8 @@
       }
     },
     "library_manifest": {
-      "type": "object",
-      "description": "Pulp Figma Library version metadata at time of export. Plugin reads tools/figma-plugin/library-manifest.json and copies the active section here.",
+      "type": ["object", "null"],
+      "description": "Pulp Figma Library version metadata at time of export. Plugin reads tools/figma-plugin/library-manifest.json and copies the active section here. Emitted as null when no library snapshot is available (serialize.ts: ctx.libraryManifest ?? null).",
       "properties": {
         "library_version": { "type": "string" },
         "required_plugin_version": { "type": "string" },
@@ -81,6 +81,7 @@
   "$defs": {
     "node": {
       "type": "object",
+      "description": "An IR node as emitted by serialize.ts::toEnvelopeNode. Semantic audio-widget data lives at the NODE ROOT (audio_widget/label/min/max/default + attributes.binding), NOT in nested audio/binding sub-objects. The C++ parser (core/view/src/design_ir_json.cpp::parse_ir_node) reads these root-level fields directly.",
       "required": ["type", "name", "figma_node_id"],
       "properties": {
         "type": {
@@ -102,10 +103,30 @@
           "type": "string",
           "description": "Text content (when type=text). Maps to IRNode.text_content."
         },
+        "audio_widget": {
+          "type": "string",
+          "description": "Recognised Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.",
+          "enum": ["knob", "fader", "meter", "xy_pad", "waveform", "spectrum"]
+        },
+        "label": {
+          "type": "string",
+          "description": "Audio-widget label. Root-level; maps to IRNode.audio_label."
+        },
+        "min": {
+          "type": "number",
+          "description": "Audio-widget minimum value. Root-level; maps to IRNode.audio_min."
+        },
+        "max": {
+          "type": "number",
+          "description": "Audio-widget maximum value. Root-level; maps to IRNode.audio_max."
+        },
+        "default": {
+          "type": "number",
+          "description": "Audio-widget default value. Root-level; maps to IRNode.audio_default."
+        },
+        "attributes": { "$ref": "#/$defs/attributes" },
         "style": { "$ref": "#/$defs/style" },
         "layout": { "$ref": "#/$defs/layout" },
-        "audio": { "$ref": "#/$defs/audio" },
-        "binding": { "$ref": "#/$defs/binding" },
         "figma": { "$ref": "#/$defs/figma_metadata" },
         "asset_ref": {
           "type": "string",
@@ -116,6 +137,21 @@
           "items": { "$ref": "#/$defs/node" }
         }
       }
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Free-form string passthrough map emitted at the node root by serialize.ts. Each entry becomes an IRNode.attributes[*] entry in the C++ parser. Emitted only when at least one attribute is present.",
+      "properties": {
+        "binding": {
+          "type": "string",
+          "description": "Audio param / event / theme binding identifier (from node.audio_binding). Consumed by the binding resolver (bindParam JS helper + `pulp bindings check`)."
+        },
+        "units": {
+          "type": "string",
+          "description": "Display units for the audio-widget value (from node.audio_units)."
+        }
+      },
+      "additionalProperties": { "type": "string" }
     },
     "style": {
       "type": "object",
@@ -203,58 +239,33 @@
       },
       "additionalProperties": false
     },
-    "audio": {
-      "type": "object",
-      "description": "Present when node.type is one of the audio-widget kinds (knob/fader/meter/xy_pad/waveform/spectrum). Parser maps to IRNode.audio_label/audio_min/audio_max/audio_default and audio_widget enum (derived from node.type).",
-      "properties": {
-        "label": { "type": "string" },
-        "min": { "type": "number" },
-        "max": { "type": "number" },
-        "default": { "type": "number" },
-        "value_domain": {
-          "type": "string",
-          "enum": ["normalized", "raw"],
-          "default": "normalized",
-          "description": "normalized = 0..1 (param-range mapping applied at runtime); raw = values are in real units (passed through to setParam)."
-        },
-        "step": { "type": "number" }
-      },
-      "additionalProperties": false
-    },
-    "binding": {
-      "type": "object",
-      "description": "Audio param / event / theme binding metadata. Carries forward into IRNode.attributes['binding'] as a JSON-encoded string and is consumed by the binding resolver (bindParam JS helper + `pulp bindings check`).",
-      "required": ["kind", "key", "source", "resolved"],
-      "properties": {
-        "kind": { "type": "string", "enum": ["param", "event", "theme", "none"] },
-        "key": { "type": "string", "description": "Designer-supplied identifier. Matches against ParamInfo.name for kind=param. Blank means TODO_BIND." },
-        "source": { "type": "string", "enum": ["figma-component-property", "figma-name-suffix", "none"] },
-        "resolved": { "type": "boolean", "description": "False initially; flipped to true by `pulp bindings` after StateStore registration check." }
-      },
-      "additionalProperties": false
-    },
     "figma_metadata": {
       "type": "object",
-      "description": "Figma-specific metadata captured at extraction. Parser flattens to IRNode.attributes['figma:*'] keys as JSON-encoded strings.",
+      "description": "Figma-specific identity / provenance, packed into the node's `figma` sub-object by serialize.ts. The C++ parser reads figma.library_widget_kind / figma.component_key as needed. The six positional fields below are always present; the component/library fields are emitted only when the node is an instance / recognised library widget.",
+      "required": ["parent_id", "z_order", "absolute_transform", "visible", "locked", "blend_mode"],
       "properties": {
-        "component_key": { "type": "string" },
-        "component_set_name": { "type": "string" },
-        "main_component_id": { "type": "string" },
-        "main_component_name": { "type": "string" },
-        "library_widget_kind": { "type": "string" },
-        "library_version": { "type": "string" },
-        "component_properties": { "type": "object", "additionalProperties": true },
-        "variant_properties": { "type": "object", "additionalProperties": { "type": "string" } },
         "parent_id": { "type": ["string", "null"] },
         "z_order": { "type": "integer" },
         "absolute_transform": {
           "type": "array",
-          "items": { "type": "array", "items": { "type": "number" } }
+          "items": { "type": "array", "items": { "type": "number" } },
+          "description": "Node.relative_transform copied through as a 2x3 affine matrix."
         },
         "visible": { "type": "boolean", "default": true },
         "locked": { "type": "boolean", "default": false },
         "blend_mode": { "type": "string" },
-        "mask": { "type": "boolean", "description": "True if this node is a mask layer. Pulp does not support masks; importer emits opaque + diagnostic." }
+        "component_key": { "type": "string" },
+        "component_set_name": { "type": "string" },
+        "main_component_id": { "type": "string" },
+        "main_component_name": { "type": "string" },
+        "library_widget_kind": {
+          "type": "string",
+          "description": "Recognised Pulp widget kind, mirrors the node-root audio_widget field.",
+          "enum": ["knob", "fader", "meter", "xy_pad", "waveform", "spectrum"]
+        },
+        "library_version": { "type": "string" },
+        "component_properties": { "type": "object", "additionalProperties": true },
+        "variant_properties": { "type": "object", "additionalProperties": { "type": "string" } }
       },
       "additionalProperties": true
     },

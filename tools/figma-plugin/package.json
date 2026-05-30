@@ -10,7 +10,8 @@
     "gen-types": "node scripts/gen-types.mjs",
     "typecheck:code": "tsc -p src/code.tsconfig.json",
     "typecheck:ui": "tsc -p src/ui.tsconfig.json",
-    "typecheck": "npm run typecheck:code && npm run typecheck:ui"
+    "typecheck": "npm run typecheck:code && npm run typecheck:ui",
+    "test": "node scripts/test.mjs"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.115.0",

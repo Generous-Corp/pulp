@@ -32,7 +32,7 @@ export interface PulpFigmaPluginExport {
     exported_at?: string;
   };
   /**
-   * Pulp Figma Library version metadata at time of export. Plugin reads tools/figma-plugin/library-manifest.json and copies the active section here.
+   * Pulp Figma Library version metadata at time of export. Plugin reads tools/figma-plugin/library-manifest.json and copies the active section here. Emitted as null when no library snapshot is available (serialize.ts: ctx.libraryManifest ?? null).
    */
   library_manifest?: {
     library_version?: string;
@@ -43,7 +43,7 @@ export interface PulpFigmaPluginExport {
        */
       [k: string]: string;
     };
-  };
+  } | null;
   /**
    * Design tokens extracted from Figma variables. Maps to IRTokens in Pulp.
    */
@@ -122,6 +122,9 @@ export interface Diagnostic {
   anchor_id?: string;
   property?: string;
 }
+/**
+ * An IR node as emitted by serialize.ts::toEnvelopeNode. Semantic audio-widget data lives at the NODE ROOT (audio_widget/label/min/max/default + attributes.binding), NOT in nested audio/binding sub-objects. The C++ parser (core/view/src/design_ir_json.cpp::parse_ir_node) reads these root-level fields directly.
+ */
 export interface Node {
   /**
    * Node kind. Pulp library widgets get specific kinds (knob, fader, meter, ...). Everything else is one of the generic types.
@@ -152,16 +155,49 @@ export interface Node {
    * Text content (when type=text). Maps to IRNode.text_content.
    */
   content?: string;
+  /**
+   * Recognised Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
+   */
+  audio_widget?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
+  /**
+   * Audio-widget label. Root-level; maps to IRNode.audio_label.
+   */
+  label?: string;
+  /**
+   * Audio-widget minimum value. Root-level; maps to IRNode.audio_min.
+   */
+  min?: number;
+  /**
+   * Audio-widget maximum value. Root-level; maps to IRNode.audio_max.
+   */
+  max?: number;
+  /**
+   * Audio-widget default value. Root-level; maps to IRNode.audio_default.
+   */
+  default?: number;
+  attributes?: Attributes;
   style?: Style;
   layout?: Layout;
-  audio?: Audio;
-  binding?: Binding;
   figma?: FigmaMetadata;
   /**
    * When type=image, references asset_manifest.assets[*].asset_id
    */
   asset_ref?: string;
   children?: Node[];
+}
+/**
+ * Free-form string passthrough map emitted at the node root by serialize.ts. Each entry becomes an IRNode.attributes[*] entry in the C++ parser. Emitted only when at least one attribute is present.
+ */
+export interface Attributes {
+  /**
+   * Audio param / event / theme binding identifier (from node.audio_binding). Consumed by the binding resolver (bindParam JS helper + `pulp bindings check`).
+   */
+  binding?: string;
+  /**
+   * Display units for the audio-widget value (from node.audio_units).
+   */
+  units?: string;
+  [k: string]: string;
 }
 /**
  * Snake_case keys. Parser maps to IRStyle (which uses the same snake_case in C++).
@@ -238,43 +274,26 @@ export interface Layout {
   height_mode?: "fixed" | "hug" | "fill";
 }
 /**
- * Present when node.type is one of the audio-widget kinds (knob/fader/meter/xy_pad/waveform/spectrum). Parser maps to IRNode.audio_label/audio_min/audio_max/audio_default and audio_widget enum (derived from node.type).
- */
-export interface Audio {
-  label?: string;
-  min?: number;
-  max?: number;
-  default?: number;
-  /**
-   * normalized = 0..1 (param-range mapping applied at runtime); raw = values are in real units (passed through to setParam).
-   */
-  value_domain?: "normalized" | "raw";
-  step?: number;
-}
-/**
- * Audio param / event / theme binding metadata. Carries forward into IRNode.attributes['binding'] as a JSON-encoded string and is consumed by the binding resolver (bindParam JS helper + `pulp bindings check`).
- */
-export interface Binding {
-  kind: "param" | "event" | "theme" | "none";
-  /**
-   * Designer-supplied identifier. Matches against ParamInfo.name for kind=param. Blank means TODO_BIND.
-   */
-  key: string;
-  source: "figma-component-property" | "figma-name-suffix" | "none";
-  /**
-   * False initially; flipped to true by `pulp bindings` after StateStore registration check.
-   */
-  resolved: boolean;
-}
-/**
- * Figma-specific metadata captured at extraction. Parser flattens to IRNode.attributes['figma:*'] keys as JSON-encoded strings.
+ * Figma-specific identity / provenance, packed into the node's `figma` sub-object by serialize.ts. The C++ parser reads figma.library_widget_kind / figma.component_key as needed. The six positional fields below are always present; the component/library fields are emitted only when the node is an instance / recognised library widget.
  */
 export interface FigmaMetadata {
+  parent_id: string | null;
+  z_order: number;
+  /**
+   * Node.relative_transform copied through as a 2x3 affine matrix.
+   */
+  absolute_transform: number[][];
+  visible: boolean;
+  locked: boolean;
+  blend_mode: string;
   component_key?: string;
   component_set_name?: string;
   main_component_id?: string;
   main_component_name?: string;
-  library_widget_kind?: string;
+  /**
+   * Recognised Pulp widget kind, mirrors the node-root audio_widget field.
+   */
+  library_widget_kind?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
   library_version?: string;
   component_properties?: {
     [k: string]: unknown;
@@ -282,15 +301,5 @@ export interface FigmaMetadata {
   variant_properties?: {
     [k: string]: string;
   };
-  parent_id?: string | null;
-  z_order?: number;
-  absolute_transform?: number[][];
-  visible?: boolean;
-  locked?: boolean;
-  blend_mode?: string;
-  /**
-   * True if this node is a mask layer. Pulp does not support masks; importer emits opaque + diagnostic.
-   */
-  mask?: boolean;
   [k: string]: unknown;
 }
