@@ -141,6 +141,20 @@ if(Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
                 $<TARGET_FILE:pulp-mcp>)
     set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+
+    # Visual-fidelity diff harness unit + integration tests (PIL-based). The
+    # tool (tools/import-design/fidelity_diff.py) measures how close an
+    # imported + rendered design is to its captured Figma references. The
+    # suite skips itself (exit 77) when Pillow is not installed, so it stays
+    # green on PIL-less interpreters. Tagged `slow` (#1589): the integration
+    # tests do pixel-scan image IO over the checked-in fixtures.
+    add_test(NAME import-fidelity-diff
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_import_fidelity_diff.py)
+    set_tests_properties(import-fidelity-diff PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "import;fidelity;slow"
+        TIMEOUT 120)
 endif()
 
 # Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh

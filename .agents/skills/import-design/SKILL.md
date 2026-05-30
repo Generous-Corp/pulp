@@ -330,6 +330,20 @@ Detection uses ZIP magic (`PK\x03\x04`), not the file extension — `.zip` renam
 
 The extractor refuses hostile archives at parse time: entries whose filename is so long it would truncate inside the stack buffer, entries containing `..` substrings, entries that resolve to an absolute path (`fs::path::is_absolute()`), entries with Windows drive-relative or UNC prefixes (`C:foo`, `C:\\foo`, `\\\\server\\share\\…`), entries beginning with `/` or `\\`, archives with more than 10000 entries, and archives whose total or per-file uncompressed size exceeds 256 MB / 64 MB respectively. Each rejection logs a labelled `Error: refusing unsafe zip entry (<reason>): <name>` (or `oversized filename`, `total uncompressed size > …`) on stderr and bails with a non-zero exit. If a legitimate plugin export ever trips one of these caps, the right move is to lift the cap deliberately in `extract_pulp_zip_if_present` rather than disable the guard.
 
+**Measuring import fidelity — `tools/import-design/fidelity_diff.py`**:
+Don't eyeball whether an imported+rendered design matches the Figma source — measure it. The fidelity diff harness (stdlib + PIL only) takes the rendered PNG, the `scene.pulp.json`, the captured `asset_ref` PNGs, and an optional whole-frame reference, and emits a per-widget pass/fail report against a configurable tolerance (default 15%).
+
+```bash
+python3 tools/import-design/fidelity_diff.py \
+  --render <render.png> --scene scene.pulp.json --assets-dir assets/ \
+  [--frame-reference frame.png] [--out-dir cmp/] [--json report.json] \
+  [--tolerance 0.15]
+```
+
+Heuristics live in a registry (`HEURISTICS`) so new ones are cheap to add; each is a small, unit-tested function. Current set: `art_bounds` (scale-invariant art aspect, render vs captured reference), `declared_geometry` (render aspect vs scene `style` box, reference-normalized so a fader's thin track doesn't false-fail), `colors` (knob/fader palette nearest-match + meter green→red gradient stops), `frame_overlay` (whole-frame similarity + side-by-side + diff heatmap), `side_by_side` (per-widget comparison PNGs). Exit 0 = within tolerance, 1 = regression.
+
+Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *different* canvas scales, so absolute pixels are info-only — pass/fail is on aspect ratio. (2) Widget detection uses a per-kind signature *mask* + largest-connected-component bbox; the meter signature deliberately includes the yellow mid-band so the red→green ramp stays one blob instead of splitting. (3) Large renders are down-scaled to `MAX_SCAN_DIM` before the pure-Python pixel scans (aspect + color are scale-invariant) — without this a 1520² render takes minutes. Regression coverage: `test/test_import_fidelity_diff.py` (CTest `import-fidelity-diff`, skips 77 without PIL) with tiny checked-in fixtures under `test/fixtures/import-fidelity/`.
+
 **Figma (MCP available)**:
 - Use `com.figma.mcp` to read the current file or selection
 - Extract frames, auto-layout, fills, strokes, effects, text, components
