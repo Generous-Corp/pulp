@@ -500,8 +500,43 @@ public:
     void set_sprite_strip(std::shared_ptr<SpriteStrip> strip) { sprite_strip_ = std::move(strip); }
     const std::shared_ptr<SpriteStrip>& sprite_strip() const { return sprite_strip_; }
 
+    // ── Skin overrides ────────────────────────────────────────────────────
+    // Per-widget appearance, generalising the knob sprite-strip path to the
+    // fader: instead of baking the captured Figma art (which would freeze the
+    // thumb at its captured value), the importer derives the track / fill /
+    // thumb colours from the design and the widget redraws them procedurally
+    // so the thumb still MOVES with set_value(). Unset → today's theme-token
+    // behaviour (back-compat). Mirrors RangeSlider's accent override.
+    void set_skin_track_color(canvas::Color c) { track_color_ = c; has_skin_track_ = true; request_repaint(); }
+    void set_skin_fill_color(canvas::Color c)  { fill_color_  = c; has_skin_fill_  = true; request_repaint(); }
+    void set_skin_thumb_color(canvas::Color c) { thumb_color_ = c; has_skin_thumb_ = true; request_repaint(); }
+    void set_skin_thumb_border_color(canvas::Color c) { thumb_border_color_ = c; has_skin_thumb_border_ = true; request_repaint(); }
+    void clear_skin() {
+        has_skin_track_ = has_skin_fill_ = has_skin_thumb_ = has_skin_thumb_border_ = false;
+        request_repaint();
+    }
+    bool has_skin() const {
+        return has_skin_track_ || has_skin_fill_ || has_skin_thumb_ || has_skin_thumb_border_;
+    }
+    bool has_skin_track_color() const { return has_skin_track_; }
+    bool has_skin_fill_color() const { return has_skin_fill_; }
+    bool has_skin_thumb_color() const { return has_skin_thumb_; }
+    bool has_skin_thumb_border_color() const { return has_skin_thumb_border_; }
+    canvas::Color skin_track_color() const { return track_color_; }
+    canvas::Color skin_fill_color() const { return fill_color_; }
+    canvas::Color skin_thumb_color() const { return thumb_color_; }
+    canvas::Color skin_thumb_border_color() const { return thumb_border_color_; }
+
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
+    canvas::Color track_color_{};
+    canvas::Color fill_color_{};
+    canvas::Color thumb_color_{};
+    canvas::Color thumb_border_color_{};
+    bool has_skin_track_ = false;
+    bool has_skin_fill_ = false;
+    bool has_skin_thumb_ = false;
+    bool has_skin_thumb_border_ = false;
 };
 
 // ── RangeSlider ──────────────────────────────────────────────────────────────
@@ -836,12 +871,46 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
+    // ── Skin overrides ────────────────────────────────────────────────────
+    // Per-widget gradient + background, generalising the knob sprite-strip
+    // path to the meter. The importer samples the captured Figma PNG's
+    // gradient (green→orange→red) and hands the stops here; the meter redraws
+    // that gradient procedurally, CLIPPED to the current level, so the fill
+    // still animates with set_level()/update() instead of freezing the
+    // captured image. Stops are ordered low→high (bottom→top for vertical).
+    // Unset → today's theme-token threshold behaviour (back-compat).
+    void set_skin_gradient(std::vector<canvas::Color> stops) {
+        gradient_stops_ = std::move(stops);
+        request_repaint();
+    }
+    void set_skin_background_color(canvas::Color c) {
+        background_color_ = c;
+        has_skin_background_ = true;
+        request_repaint();
+    }
+    void clear_skin() {
+        gradient_stops_.clear();
+        has_skin_background_ = false;
+        request_repaint();
+    }
+    bool has_skin_gradient() const { return gradient_stops_.size() >= 2; }
+    bool has_skin_background_color() const { return has_skin_background_; }
+    const std::vector<canvas::Color>& skin_gradient() const { return gradient_stops_; }
+    canvas::Color skin_background_color() const { return background_color_; }
+
+    // Sample the skin gradient at normalized position t (0=low/bottom,
+    // 1=high/top). Linear interpolation across the supplied stops.
+    canvas::Color gradient_color_at(float t) const;
+
 private:
     Orientation orientation_ = Orientation::vertical;
     MeterBallistics ballistics_;
     float current_rms_ = 0;
     float current_peak_ = 0;
     WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
+    std::vector<canvas::Color> gradient_stops_;
+    canvas::Color background_color_{};
+    bool has_skin_background_ = false;
 };
 
 // ── XYPad ────────────────────────────────────────────────────────────────────

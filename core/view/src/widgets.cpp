@@ -630,53 +630,91 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
     } else {
 
+        // ── Per-widget skin overrides (figma-plugin import) ────────────────
+        // When the importer derived track / fill / thumb colours from the
+        // captured design, honour them here and force a rounded-rect thumb so
+        // the look matches the captured art — but keep the position
+        // value-driven (the thumb still moves with value_), unlike a baked
+        // full-image sprite. Falls back to theme tokens when unset.
+        const bool skinned = has_skin();
+        const bool skin_rect_thumb = skinned;  // captured faders use a slab thumb
+
         // Track
-        auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
+        auto track_color = has_skin_track_
+            ? track_color_
+            : resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         canvas.set_fill_color({track_color.r, track_color.g, track_color.b, track_color.a});
 
-        float track_thick = 4.0f;
+        // Skinned faders draw a thicker, more visible track to match the
+        // captured slab look; the default chrome keeps the thin 4px line.
+        float track_thick = skinned ? std::max(6.0f, std::min(track_width * 0.18f, 12.0f)) : 4.0f;
+        float track_radius = track_thick * 0.5f;
         if (vert) {
             float tx = (b.width - track_thick) * 0.5f;
-            canvas.fill_rounded_rect(tx, 0, track_thick, track_length, 2.0f);
+            canvas.fill_rounded_rect(tx, 0, track_thick, track_length, track_radius);
         } else {
             float ty = (b.height - track_thick) * 0.5f;
-            canvas.fill_rounded_rect(0, ty, track_length, track_thick, 2.0f);
+            canvas.fill_rounded_rect(0, ty, track_length, track_thick, track_radius);
         }
 
         // Fill (value portion)
-        auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+        auto fill_color = has_skin_fill_
+            ? fill_color_
+            : resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_fill_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
 
         if (vert) {
             float fill_height = value_ * track_length;
             float tx = (b.width - track_thick) * 0.5f;
-            canvas.fill_rounded_rect(tx, track_length - fill_height, track_thick, fill_height, 2.0f);
+            canvas.fill_rounded_rect(tx, track_length - fill_height, track_thick, fill_height, track_radius);
         } else {
             float fill_width = value_ * track_length;
             float ty = (b.height - track_thick) * 0.5f;
-            canvas.fill_rounded_rect(0, ty, fill_width, track_thick, 2.0f);
+            canvas.fill_rounded_rect(0, ty, fill_width, track_thick, track_radius);
         }
 
         // Thumb (with hover scale animation)
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+        auto thumb_color = has_skin_thumb_
+            ? thumb_color_
+            : resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
-        if (thumb_shape_ == ThumbShape::rectangle) {
+        if (thumb_shape_ == ThumbShape::rectangle || skin_rect_thumb) {
             const float scale = hover_thumb_scale_.value();
-            const float default_w = vert ? std::min(b.width, track_width) : 8.0f;
-            const float default_h = vert ? 5.0f : std::min(b.height, track_width);
+            // Skinned faders default to a wide rounded slab (matching the
+            // captured Figma thumb) when explicit dimensions weren't given.
+            const float skin_default_w = vert ? std::min(b.width, track_width) * 0.62f
+                                              : std::max(10.0f, track_length * 0.10f);
+            const float skin_default_h = vert ? std::max(10.0f, track_length * 0.10f)
+                                              : std::min(b.height, track_width) * 0.62f;
+            const float default_w = skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 8.0f);
+            const float default_h = skinned ? skin_default_h : (vert ? 5.0f : std::min(b.height, track_width));
             const float thumb_w = std::max(1.0f, (thumb_width_ > 0.0f ? thumb_width_ : default_w) * scale);
             const float thumb_h = std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
             const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
             const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
             const float axis_center = axis_half + (vert ? (1.0f - value_) : value_) * usable;
-            const float radius = std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f);
+            // Skinned slab defaults to a generously rounded corner when none
+            // was provided (the captured thumb is a pill).
+            const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
+            const float radius = thumb_corner_radius_ > 0.0f
+                ? std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f)
+                : (skinned ? skin_radius : 0.0f);
+            float thumb_x, thumb_y;
             if (vert) {
-                const float x = (b.width - thumb_w) * 0.5f;
-                canvas.fill_rounded_rect(x, axis_center - thumb_h * 0.5f, thumb_w, thumb_h, radius);
+                thumb_x = (b.width - thumb_w) * 0.5f;
+                thumb_y = axis_center - thumb_h * 0.5f;
             } else {
-                const float y = (b.height - thumb_h) * 0.5f;
-                canvas.fill_rounded_rect(axis_center - thumb_w * 0.5f, y, thumb_w, thumb_h, radius);
+                thumb_x = axis_center - thumb_w * 0.5f;
+                thumb_y = (b.height - thumb_h) * 0.5f;
+            }
+            canvas.fill_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
+            // Optional thumb border (the captured silver thumb has a darker
+            // bevel edge). Drawn as a stroke around the slab.
+            if (has_skin_thumb_border_) {
+                canvas.set_stroke_color(thumb_border_color_);
+                canvas.set_line_width(1.5f);
+                canvas.stroke_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
             }
         } else {
             float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();

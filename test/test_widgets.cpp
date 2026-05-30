@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/canvas.hpp>
 
@@ -135,6 +136,193 @@ TEST_CASE("Fader renders track and thumb", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
     REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
+}
+
+// ── pulp #3191: hybrid skinned fader/meter ──────────────────────────────────
+
+TEST_CASE("Skinned Fader draws a value-positioned rounded-rect thumb",
+          "[view][widget][issue-3191]") {
+    Fader fader;
+    fader.set_bounds({0, 0, 96, 200});
+    fader.set_skin_track_color(Color::rgba8(0x1f, 0x21, 0x29));
+    fader.set_skin_fill_color(Color::rgba8(0x36, 0x77, 0xcf));
+    fader.set_skin_thumb_color(Color::rgba8(0xea, 0xea, 0xf0));
+    REQUIRE(fader.has_skin());
+
+    // A skinned fader draws procedurally (track + fill + slab thumb), NOT a
+    // baked sprite image — so the thumb still moves with value.
+    auto thumb_y = [&](float v) {
+        fader.set_value(v);
+        RecordingCanvas c;
+        fader.paint(c);
+        // No sprite image baked in.
+        REQUIRE(c.count(DrawCommand::Type::draw_image) == 0);
+        // track + fill + thumb slab = 3 rounded rects (no circle thumb).
+        REQUIRE(c.count(DrawCommand::Type::fill_rounded_rect) == 3);
+        REQUIRE(c.count(DrawCommand::Type::fill_circle) == 0);
+        // The thumb is the LAST rounded rect (drawn after track+fill).
+        auto rects = commands_of(c, DrawCommand::Type::fill_rounded_rect);
+        return rects.back().f[1];  // y of the thumb slab
+    };
+
+    // Vertical fader: value 0 → thumb at the BOTTOM (high y),
+    // value 1 → thumb at the TOP (low y). The thumb must MOVE.
+    float y_low = thumb_y(0.0f);
+    float y_mid = thumb_y(0.5f);
+    float y_high = thumb_y(1.0f);
+    REQUIRE(y_low > y_mid);
+    REQUIRE(y_mid > y_high);
+}
+
+TEST_CASE("Skinned Fader thumb border emits a stroked rect",
+          "[view][widget][issue-3191]") {
+    Fader fader;
+    fader.set_bounds({0, 0, 96, 200});
+    fader.set_skin_thumb_color(Color::rgba8(0xea, 0xea, 0xf0));
+    fader.set_skin_thumb_border_color(Color::rgba8(0x69, 0x69, 0x6f));
+    fader.set_value(0.5f);
+
+    RecordingCanvas c;
+    fader.paint(c);
+    REQUIRE(c.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+}
+
+TEST_CASE("Skinned Meter clips its gradient fill to the level",
+          "[view][widget][issue-3191]") {
+    Meter meter;
+    meter.set_bounds({0, 0, 40, 200});
+    meter.set_skin_background_color(Color::rgba8(0x0f, 0x12, 0x17));
+    meter.set_skin_gradient({
+        Color::rgba8(0x33, 0xa7, 0x4d),  // low  (green)
+        Color::rgba8(0xff, 0xab, 0x33),  // mid  (orange)
+        Color::rgba8(0xff, 0x6b, 0x66),  // high (red)
+    });
+    REQUIRE(meter.has_skin_gradient());
+
+    auto fill_rows = [&](float level) {
+        meter.set_level(level, level);
+        RecordingCanvas c;
+        meter.paint(c);
+        // Each gradient row is a fill_rect; the count grows with the level.
+        return c.count(DrawCommand::Type::fill_rect);
+    };
+
+    size_t low = fill_rows(0.1f);
+    size_t mid = fill_rows(0.5f);
+    size_t high = fill_rows(0.9f);
+
+    // Value-driven: more level → more painted rows. Not a static image.
+    REQUIRE(low < mid);
+    REQUIRE(mid < high);
+    // Roughly proportional to the meter height (200px), within ballpark.
+    REQUIRE(high >= 150);
+}
+
+TEST_CASE("Skinned Meter gradient samples low→high across stops",
+          "[view][widget][issue-3191]") {
+    Meter meter;
+    meter.set_skin_gradient({
+        Color::rgba8(0, 255, 0),    // low
+        Color::rgba8(255, 0, 0),    // high
+    });
+    // Bottom of the bar is the low (green) stop; top is the high (red) stop.
+    auto lo = meter.gradient_color_at(0.0f);
+    auto hi = meter.gradient_color_at(1.0f);
+    auto mid = meter.gradient_color_at(0.5f);
+    REQUIRE_THAT(lo.g, WithinAbs(1.0, 0.01));
+    REQUIRE_THAT(hi.r, WithinAbs(1.0, 0.01));
+    // Midpoint is an even blend.
+    REQUIRE_THAT(mid.r, WithinAbs(0.5, 0.02));
+    REQUIRE_THAT(mid.g, WithinAbs(0.5, 0.02));
+}
+
+TEST_CASE("derive_meter_skin samples a synthetic gradient bottom→top",
+          "[view][widget][issue-3191]") {
+    // Build a 20-wide x 100-tall RGBA image: transparent margins top/bottom,
+    // a dark "empty channel" near the top of the art, then a green→red fill
+    // from the bottom. Mirrors the captured meter PNG's structure.
+    const int W = 20, H = 100;
+    std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4, 0);  // all transparent
+    auto set = [&](int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+        uint8_t* p = px.data() + (static_cast<size_t>(y) * W + x) * 4;
+        p[0] = r; p[1] = g; p[2] = b; p[3] = 255;
+    };
+    // Art region rows 10..80 (opaque). 10..30 dark channel, 30..80 gradient.
+    for (int y = 10; y < 80; ++y)
+        for (int x = 0; x < W; ++x) {
+            if (y < 30) set(x, y, 15, 18, 23);  // dark empty
+            else {
+                // bottom (y=79) green → top of fill (y=30) red
+                float t = static_cast<float>(y - 30) / (79 - 30);  // 0 at top fill, 1 at bottom
+                uint8_t r = static_cast<uint8_t>((1.0f - t) * 255);
+                uint8_t g = static_cast<uint8_t>(t * 255);
+                set(x, y, r, g, 30);
+            }
+        }
+
+    SkinImage img{px.data(), W, H};
+    auto skin = derive_meter_skin(img, 5);
+    REQUIRE(skin.valid());
+    REQUIRE(skin.gradient.size() == 5);
+    // Low stop (bottom) is green-dominant; high stop (top) is red-dominant.
+    REQUIRE(skin.gradient.front().g > skin.gradient.front().r);
+    REQUIRE(skin.gradient.back().r > skin.gradient.back().g);
+    // Background recovered as the dark channel.
+    REQUIRE(skin.has_background);
+    REQUIRE(skin.background.r < 0.2f);
+}
+
+TEST_CASE("derive_fader_skin recovers track / fill / thumb colours",
+          "[view][widget][issue-3191]") {
+    const int W = 30, H = 100;
+    std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4, 0);
+    auto set = [&](int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+        uint8_t* p = px.data() + (static_cast<size_t>(y) * W + x) * 4;
+        p[0] = r; p[1] = g; p[2] = b; p[3] = 255;
+    };
+    // Art rows 10..80. Dark track everywhere, a bright thumb slab at 40..48,
+    // and a saturated blue fill in the lower half.
+    for (int y = 10; y < 80; ++y)
+        for (int x = 0; x < W; ++x) {
+            if (y >= 40 && y < 48) set(x, y, 234, 234, 240);   // silver thumb
+            else if (y >= 55) set(x, y, 54, 119, 207);          // blue fill
+            else set(x, y, 31, 33, 41);                          // dark track
+        }
+
+    SkinImage img{px.data(), W, H};
+    auto skin = derive_fader_skin(img);
+    REQUIRE(skin.has_track);
+    REQUIRE(skin.has_thumb);
+    REQUIRE(skin.has_fill);
+    // Track is dark.
+    REQUIRE(skin.track_color.r < 0.2f);
+    // Thumb is bright.
+    REQUIRE(skin.thumb_color.r > 0.8f);
+    // Fill is blue-dominant.
+    REQUIRE(skin.fill_color.b > skin.fill_color.r);
+    REQUIRE(skin.fill_color.b > skin.fill_color.g);
+}
+
+TEST_CASE("Unskinned Fader/Meter keep their default look (back-compat)",
+          "[view][widget][issue-3191]") {
+    // Fader: no skin → circular thumb + 2 rounded rects (unchanged).
+    Fader fader;
+    fader.set_bounds({0, 0, 24, 200});
+    fader.set_value(0.6f);
+    REQUIRE_FALSE(fader.has_skin());
+    RecordingCanvas fc;
+    fader.paint(fc);
+    REQUIRE(fc.count(DrawCommand::Type::fill_circle) == 1);
+    REQUIRE(fc.count(DrawCommand::Type::fill_rounded_rect) == 2);
+
+    // Meter: no gradient → default threshold path (rounded-rect bg + rect fill).
+    Meter meter;
+    meter.set_bounds({0, 0, 40, 200});
+    meter.set_level(0.5f, 0.5f);
+    REQUIRE_FALSE(meter.has_skin_gradient());
+    RecordingCanvas mc;
+    meter.paint(mc);
+    REQUIRE(mc.count(DrawCommand::Type::fill_rounded_rect) == 1);  // bg
 }
 
 TEST_CASE("Fader horizontal orientation", "[view][widget]") {

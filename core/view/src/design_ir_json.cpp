@@ -380,6 +380,17 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             node.attributes[key] = std::move(value);
     }
 
+    // Top-level `asset_ref` (figma-plugin lane stamps it directly on the node,
+    // not under `attributes`). Promote it into node.attributes so the import
+    // CLI's asset-resolution pass can resolve it to a file path — this feeds
+    // both the knob sprite-strip skin and the #3191 fader/meter skin sampling.
+    // Don't overwrite an attributes-nested asset_ref if one was already set.
+    if (obj.hasObjectMember("asset_ref") && obj["asset_ref"].isString() &&
+        node.attributes.find("asset_ref") == node.attributes.end()) {
+        auto ar = std::string(obj["asset_ref"].toString());
+        if (!ar.empty()) node.attributes["asset_ref"] = std::move(ar);
+    }
+
     // Exact layout dimensions from snapshot_layout (injected by import skill)
     if (obj.hasObjectMember("_layoutHeight"))
         node.attributes["_layoutHeight"] = std::to_string(static_cast<int>(get_float(obj, "_layoutHeight", 0)));

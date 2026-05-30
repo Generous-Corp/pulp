@@ -3,6 +3,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
@@ -3046,4 +3047,85 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Meter envelope onto IR wi
     REQUIRE(ir.root.audio_default == Catch::Approx(-12.0f));
     REQUIRE(ir.root.attributes.at("units") == "dB");
     REQUIRE(ir.root.attributes.at("binding") == "meter.out_l");
+}
+
+// ── pulp #3191: codegen emits derived skin setters for fader/meter ──────────
+
+TEST_CASE("Codegen emits setFaderSkin from derived skin attributes",
+          "[view][import][issue-3191]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "root";
+    ir.root.style.width = 200;
+    ir.root.style.height = 300;
+
+    IRNode fader;
+    fader.type = "frame";
+    fader.name = "Fader — Master";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.audio_min = -60.0f;
+    fader.audio_max = 6.0f;
+    fader.audio_default = 0.0f;  // 0 dB → normalized ≈ 0.909
+    fader.style.width = 96;
+    fader.style.height = 230;
+    // Stamped by the importer's PNG sampler (here supplied directly).
+    fader.attributes["skin_track_color"] = "#1f2129";
+    fader.attributes["skin_fill_color"] = "#3677cf";
+    fader.attributes["skin_thumb_color"] = "#eaeaf0";
+    fader.attributes["skin_thumb_border_color"] = "#69696f";
+    ir.root.children.push_back(fader);
+
+    CodeGenOptions opts;
+    opts.skin_faders = true;
+    std::string js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setFaderSkin(") != std::string::npos);
+    REQUIRE(js.find("'#1f2129'") != std::string::npos);
+    REQUIRE(js.find("'#3677cf'") != std::string::npos);
+    // The captured value is normalised into [0,1] (≈0.909), not emitted raw.
+    REQUIRE(js.find("setValue(") != std::string::npos);
+    REQUIRE(js.find("setValue('Fader__Master2', 0)") == std::string::npos);
+
+    // Opt-out: --fader-style=default suppresses the skin call.
+    CodeGenOptions plain;
+    plain.skin_faders = false;
+    std::string plain_js = generate_pulp_js(ir, plain);
+    REQUIRE(plain_js.find("setFaderSkin(") == std::string::npos);
+}
+
+TEST_CASE("Codegen emits setMeterColors + normalized level from derived skin",
+          "[view][import][issue-3191]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "root";
+    ir.root.style.width = 200;
+    ir.root.style.height = 300;
+
+    IRNode meter;
+    meter.type = "frame";
+    meter.name = "Meter — Out L";
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.audio_min = -60.0f;
+    meter.audio_max = 0.0f;
+    meter.audio_default = -6.0f;  // → normalized 0.9
+    meter.style.width = 69;
+    meter.style.height = 228;
+    meter.attributes["skin_meter_gradient"] = "#33a74d,#ffab33,#ff6b66";
+    meter.attributes["skin_meter_background"] = "#0f1217";
+    ir.root.children.push_back(meter);
+
+    CodeGenOptions opts;
+    opts.skin_meters = true;
+    std::string js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setMeterColors(") != std::string::npos);
+    REQUIRE(js.find("#33a74d,#ffab33,#ff6b66") != std::string::npos);
+    // Level normalised to 0.9, not emitted as a raw dB value.
+    REQUIRE(js.find("setMeterLevel(") != std::string::npos);
+    REQUIRE(js.find("0.9") != std::string::npos);
+
+    CodeGenOptions plain;
+    plain.skin_meters = false;
+    std::string plain_js = generate_pulp_js(ir, plain);
+    REQUIRE(plain_js.find("setMeterColors(") == std::string::npos);
 }

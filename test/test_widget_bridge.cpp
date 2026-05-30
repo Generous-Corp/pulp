@@ -190,6 +190,58 @@ TEST_CASE("WidgetBridge creates fader from JS", "[view][bridge]") {
     REQUIRE(dynamic_cast<Fader*>(w) != nullptr);
 }
 
+TEST_CASE("WidgetBridge setFaderSkin applies derived colours to the fader",
+          "[view][bridge][issue-3191]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(
+        "createFader('vol', 'vertical', '');"
+        "setFaderSkin('vol', '#1f2129', '#3677cf', '#eaeaf0', '#69696f');");
+
+    auto* f = dynamic_cast<Fader*>(bridge.widget("vol"));
+    REQUIRE(f != nullptr);
+    REQUIRE(f->has_skin());
+    REQUIRE(f->has_skin_track_color());
+    REQUIRE(f->has_skin_fill_color());
+    REQUIRE(f->has_skin_thumb_color());
+    REQUIRE(f->has_skin_thumb_border_color());
+    // Spot-check a couple of channels round-tripped through the hex parser.
+    REQUIRE_THAT(f->skin_fill_color().b, Catch::Matchers::WithinAbs(0xcf / 255.0, 0.01));
+    REQUIRE_THAT(f->skin_thumb_color().r, Catch::Matchers::WithinAbs(0xea / 255.0, 0.01));
+    // setFaderSkin forces a rectangle thumb so the captured slab look applies.
+    REQUIRE(f->thumb_shape() == Fader::ThumbShape::rectangle);
+}
+
+TEST_CASE("WidgetBridge setMeterColors applies a value-driven gradient",
+          "[view][bridge][issue-3191]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(
+        "createMeter('out', 'vertical', '');"
+        "setMeterColors('out', '#0f1217', '#33a74d,#ffab33,#ff6b66');");
+
+    auto* m = dynamic_cast<Meter*>(bridge.widget("out"));
+    REQUIRE(m != nullptr);
+    REQUIRE(m->has_skin_gradient());
+    REQUIRE(m->skin_gradient().size() == 3);
+    REQUIRE(m->has_skin_background_color());
+    // Low stop green-dominant, high stop red-dominant.
+    REQUIRE(m->skin_gradient().front().g > m->skin_gradient().front().r);
+    REQUIRE(m->skin_gradient().back().r > m->skin_gradient().back().g);
+
+    // An empty stop list clears the skin (back to default).
+    bridge.load_script("setMeterColors('out', '', '');");
+    REQUIRE_FALSE(m->has_skin_gradient());
+}
+
 TEST_CASE("WidgetBridge creates toggle from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;

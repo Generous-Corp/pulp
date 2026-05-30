@@ -1,5 +1,6 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
+#include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -11,6 +12,7 @@
 #include <unistd.h>     // getpid()
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -38,6 +40,117 @@ using namespace pulp::view;
 using namespace pulp::state;
 
 namespace {
+
+// ── Minimal PNG → RGBA8 decoder (pulp #3191) ────────────────────────────────
+// AssetManager::decode_png only stores raw bytes + IHDR dims (the real decode
+// happens in the Skia renderer, which isn't linked in the GPU-off importer
+// build). For the fader/meter skin sampler we need actual pixels, so decode
+// here using miniz (already linked) for the common 8-bit, non-interlaced case.
+// Returns RGBA8 row-major; empty on any unsupported/failed path (caller then
+// skips skin derivation). Supports colour types 2 (RGB), 6 (RGBA), and 0/4
+// (grey / grey+alpha) — covers design-tool PNG exports.
+struct DecodedPng {
+    std::vector<uint8_t> rgba;
+    int width = 0;
+    int height = 0;
+    bool valid() const { return !rgba.empty() && width > 0 && height > 0; }
+};
+
+static uint32_t png_be32(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+}
+
+static DecodedPng decode_png_rgba(const uint8_t* data, size_t size) {
+    DecodedPng out;
+    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    if (size < 33 || std::memcmp(data, sig, 8) != 0) return out;
+
+    int width = static_cast<int>(png_be32(data + 16));
+    int height = static_cast<int>(png_be32(data + 20));
+    int bit_depth = data[24];
+    int color_type = data[25];
+    int interlace = data[28];
+    if (width <= 0 || height <= 0 || bit_depth != 8 || interlace != 0) return out;
+
+    int channels;
+    switch (color_type) {
+        case 0: channels = 1; break;  // grey
+        case 2: channels = 3; break;  // RGB
+        case 4: channels = 2; break;  // grey + alpha
+        case 6: channels = 4; break;  // RGBA
+        default: return out;
+    }
+
+    // Concatenate IDAT chunk payloads.
+    std::vector<uint8_t> idat;
+    size_t pos = 8;
+    while (pos + 8 <= size) {
+        uint32_t clen = png_be32(data + pos);
+        const uint8_t* ctype = data + pos + 4;
+        size_t body = pos + 8;
+        if (body + clen + 4 > size) break;
+        if (std::memcmp(ctype, "IDAT", 4) == 0)
+            idat.insert(idat.end(), data + body, data + body + clen);
+        else if (std::memcmp(ctype, "IEND", 4) == 0)
+            break;
+        pos = body + clen + 4;  // skip CRC
+    }
+    if (idat.empty()) return out;
+
+    // Inflate. Raw filtered size = height * (1 + width*channels).
+    size_t stride = static_cast<size_t>(width) * channels;
+    mz_ulong raw_len = static_cast<mz_ulong>(height) * (stride + 1);
+    std::vector<uint8_t> raw(raw_len);
+    if (mz_uncompress(raw.data(), &raw_len, idat.data(),
+                      static_cast<mz_ulong>(idat.size())) != MZ_OK)
+        return out;
+    if (raw_len < static_cast<mz_ulong>(height) * (stride + 1)) return out;
+
+    // Un-filter (PNG filter types 0-4) into a contiguous channel buffer.
+    std::vector<uint8_t> img(static_cast<size_t>(height) * stride);
+    auto paeth = [](int a, int b, int c) {
+        int p = a + b - c;
+        int pa = std::abs(p - a), pb = std::abs(p - b), pc = std::abs(p - c);
+        if (pa <= pb && pa <= pc) return a;
+        return pb <= pc ? b : c;
+    };
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* src = raw.data() + static_cast<size_t>(y) * (stride + 1);
+        uint8_t filter = src[0];
+        uint8_t* row = img.data() + static_cast<size_t>(y) * stride;
+        const uint8_t* prev = (y > 0) ? img.data() + static_cast<size_t>(y - 1) * stride : nullptr;
+        for (size_t x = 0; x < stride; ++x) {
+            int a = (x >= static_cast<size_t>(channels)) ? row[x - channels] : 0;
+            int b = prev ? prev[x] : 0;
+            int c = (prev && x >= static_cast<size_t>(channels)) ? prev[x - channels] : 0;
+            int v = src[1 + x];
+            switch (filter) {
+                case 0: break;
+                case 1: v += a; break;
+                case 2: v += b; break;
+                case 3: v += (a + b) / 2; break;
+                case 4: v += paeth(a, b, c); break;
+                default: return out;
+            }
+            row[x] = static_cast<uint8_t>(v & 0xFF);
+        }
+    }
+
+    // Expand to RGBA8.
+    out.rgba.resize(static_cast<size_t>(width) * height * 4);
+    for (int i = 0; i < width * height; ++i) {
+        const uint8_t* s = img.data() + static_cast<size_t>(i) * channels;
+        uint8_t* d = out.rgba.data() + static_cast<size_t>(i) * 4;
+        if (channels == 4) { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3]; }
+        else if (channels == 3) { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255; }
+        else if (channels == 2) { d[0] = d[1] = d[2] = s[0]; d[3] = s[1]; }
+        else { d[0] = d[1] = d[2] = s[0]; d[3] = 255; }
+    }
+    out.width = width;
+    out.height = height;
+    return out;
+}
 
 enum class ArtifactEmit {
     js,
@@ -900,6 +1013,8 @@ int main(int argc, char* argv[]) {
     // Per-node override: a Figma node name ending in `@sprite` or
     // `@silver` overrides the global default for THAT knob only.
     bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
+    bool skin_faders = true;         // pulp #3191; plain via --fader-style=default
+    bool skin_meters = true;         // pulp #3191; plain via --meter-style=default
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
@@ -994,6 +1109,18 @@ int main(int argc, char* argv[]) {
             std::string ks = argv[i] + 13;
             if (ks == "silver")      use_silver_knobs = true;
             else if (ks == "sprite") use_silver_knobs = false;
+        } else if ((std::strcmp(argv[i], "--fader-style") == 0 && i + 1 < argc)) {
+            std::string fs = argv[++i];
+            skin_faders = (fs != "default" && fs != "plain");
+        } else if (std::strncmp(argv[i], "--fader-style=", 14) == 0) {
+            std::string fs = argv[i] + 14;
+            skin_faders = (fs != "default" && fs != "plain");
+        } else if ((std::strcmp(argv[i], "--meter-style") == 0 && i + 1 < argc)) {
+            std::string ms = argv[++i];
+            skin_meters = (ms != "default" && ms != "plain");
+        } else if (std::strncmp(argv[i], "--meter-style=", 14) == 0) {
+            std::string ms = argv[i] + 14;
+            skin_meters = (ms != "default" && ms != "plain");
         } else if (std::strcmp(argv[i], "--debug") == 0) {
             debug_json = true;
         } else if (std::strcmp(argv[i], "--debug-output") == 0 && i + 1 < argc) {
@@ -1597,6 +1724,8 @@ int main(int argc, char* argv[]) {
     opts.include_comments = include_comments;
     opts.preview_mode = preview_mode;
     opts.use_silver_knobs = use_silver_knobs;
+    opts.skin_faders = skin_faders;
+    opts.skin_meters = skin_meters;
 
     // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
     // Default-on. Source-agnostic helper: the extractor takes a raw
@@ -1669,7 +1798,61 @@ int main(int argc, char* argv[]) {
                     if (ref->local_path && !ref->local_path->empty()) {
                         fs::path p(*ref->local_path);
                         if (p.is_relative()) p = base_dir / p;
-                        n.attributes["asset_path"] = p.lexically_normal().string();
+                        std::string abs = p.lexically_normal().string();
+                        n.attributes["asset_path"] = abs;
+
+                        // pulp #3191 — derive a value-driven skin for recognised
+                        // faders/meters by SAMPLING the captured PNG (not baking
+                        // it). The widget then redraws the recovered colours /
+                        // gradient procedurally so the thumb/level still move
+                        // with their bound value. Generalizable importer rule:
+                        // reads the exported pixels, hardcodes nothing.
+                        const bool want_fader =
+                            (n.audio_widget == pulp::view::AudioWidgetType::fader) && skin_faders;
+                        const bool want_meter =
+                            (n.audio_widget == pulp::view::AudioWidgetType::meter) && skin_meters;
+                        if (want_fader || want_meter) {
+                            std::ifstream af(abs, std::ios::binary);
+                            if (af.good()) {
+                                std::vector<uint8_t> bytes(
+                                    (std::istreambuf_iterator<char>(af)),
+                                    std::istreambuf_iterator<char>());
+                                auto img = decode_png_rgba(bytes.data(), bytes.size());
+                                if (img.valid()) {
+                                    auto hex = [](pulp::canvas::Color c) {
+                                        auto b = [](float v) {
+                                            int i = static_cast<int>(v * 255.0f + 0.5f);
+                                            return i < 0 ? 0 : (i > 255 ? 255 : i);
+                                        };
+                                        char buf[8];
+                                        std::snprintf(buf, sizeof(buf), "#%02x%02x%02x",
+                                                      b(c.r), b(c.g), b(c.b));
+                                        return std::string(buf);
+                                    };
+                                    pulp::view::SkinImage si{img.rgba.data(),
+                                                             img.width, img.height};
+                                    if (want_fader) {
+                                        auto fs_skin = pulp::view::derive_fader_skin(si);
+                                        if (fs_skin.has_track)        n.attributes["skin_track_color"]        = hex(fs_skin.track_color);
+                                        if (fs_skin.has_fill)         n.attributes["skin_fill_color"]         = hex(fs_skin.fill_color);
+                                        if (fs_skin.has_thumb)        n.attributes["skin_thumb_color"]        = hex(fs_skin.thumb_color);
+                                        if (fs_skin.has_thumb_border) n.attributes["skin_thumb_border_color"] = hex(fs_skin.thumb_border_color);
+                                    } else {
+                                        auto ms = pulp::view::derive_meter_skin(si);
+                                        if (ms.valid()) {
+                                            std::string stops;
+                                            for (size_t k = 0; k < ms.gradient.size(); ++k) {
+                                                if (k) stops += ',';
+                                                stops += hex(ms.gradient[k]);
+                                            }
+                                            n.attributes["skin_meter_gradient"] = stops;
+                                            if (ms.has_background)
+                                                n.attributes["skin_meter_background"] = hex(ms.background);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     // Asset-bleed detection (generalization of the Knob
                     // sprite-strip natural-size fix). The Figma plugin

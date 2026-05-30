@@ -38,6 +38,16 @@ struct CodeGenOptions {
     /// override via `@sprite` or `@silver` suffix on the Figma layer name.
     bool use_silver_knobs = true;
 
+    /// pulp #3191 — when true (default), recognised faders/meters are emitted
+    /// with a value-driven skin DERIVED from the captured asset (track / fill /
+    /// thumb colours for a fader; gradient stops for a meter) so they render
+    /// like the captured Figma art while the thumb/level still move with their
+    /// bound value. When false (`--fader-style=default` / `--meter-style=default`)
+    /// they fall back to the plain native look. The derived style attributes
+    /// are stamped onto the node by the import CLI's asset-resolution pass.
+    bool skin_faders = true;
+    bool skin_meters = true;
+
     /// pulp #2116 V2 — shortcuts pulled from the source by
     /// `extract_keyboard_shortcuts(...)` (Strategy A: synthetic keydown
     /// re-dispatch). The generator emits one `registerShortcut(...)` plus

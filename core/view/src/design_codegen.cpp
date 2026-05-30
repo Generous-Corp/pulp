@@ -631,7 +631,35 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Fader label overlaps track when rendered inside bounds — use separate label
             ss << ind << "setLabel('" << id << "', ' ');\n";  // Clear built-in label
-            ss << ind << "setValue('" << id << "', " << node.audio_default << ");\n";
+            // Normalise the captured value (audio_default, in [audio_min,
+            // audio_max]) to 0..1 so the imported fader's thumb sits where the
+            // capture shows it. setValue clamps to [0,1]; a raw value like a dB
+            // figure would clamp and mis-position the thumb.
+            float fader_norm = node.audio_default;
+            {
+                float lo = node.audio_min, hi = node.audio_max;
+                if (hi > lo) fader_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
+            }
+            ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
+            // pulp #3191 — value-driven skin derived from the captured asset.
+            // The importer sampled the PNG's track/fill/thumb colours; emit
+            // setFaderSkin so the native fader renders the captured look while
+            // the thumb still moves with setValue(). No per-instance hardcoding
+            // — every value comes from node.attributes stamped by the sampler.
+            if (opts.skin_faders) {
+                auto attr = [&](const char* k) -> std::string {
+                    auto it = node.attributes.find(k);
+                    return it != node.attributes.end() ? it->second : std::string();
+                };
+                std::string tc = attr("skin_track_color");
+                std::string fc = attr("skin_fill_color");
+                std::string thc = attr("skin_thumb_color");
+                std::string tbc = attr("skin_thumb_border_color");
+                if (!tc.empty() || !fc.empty() || !thc.empty() || !tbc.empty()) {
+                    ss << ind << "setFaderSkin('" << id << "', '"
+                       << tc << "', '" << fc << "', '" << thc << "', '" << tbc << "');\n";
+                }
+            }
             emit_style(id);
             if (!label_text.empty()) {
                 std::string lbl_id = id + "_lbl";
@@ -657,7 +685,31 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "createMeter('" << id << "', 'vertical', '" << col_id << "');\n";
             ss << ind << "setFlex('" << id << "', 'width', " << widget_w << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
-            ss << ind << "setMeterLevel('" << id << "', -6);\n";
+            // Initial level: normalise the captured value (audio_default, in
+            // [audio_min, audio_max]) to 0..1 so the imported meter shows the
+            // captured fill. setMeterLevel clamps to [0,1]; a raw dB value
+            // (e.g. -6) would clamp to 0 and read empty.
+            float meter_norm = 0.0f;
+            {
+                float lo = node.audio_min, hi = node.audio_max;
+                if (hi > lo) meter_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
+            }
+            ss << ind << "setMeterLevel('" << id << "', " << meter_norm << ", " << meter_norm << ");\n";
+            // pulp #3191 — value-driven gradient skin sampled from the captured
+            // meter PNG. setMeterColors hands the meter the recovered gradient
+            // stops (low→high); the meter redraws them CLIPPED to the level so
+            // the fill still animates with setMeterLevel(). No hardcoding.
+            if (opts.skin_meters) {
+                auto grad_it = node.attributes.find("skin_meter_gradient");
+                if (grad_it != node.attributes.end() && !grad_it->second.empty()) {
+                    std::string bg;
+                    if (auto bg_it = node.attributes.find("skin_meter_background");
+                        bg_it != node.attributes.end())
+                        bg = bg_it->second;
+                    ss << ind << "setMeterColors('" << id << "', '" << bg << "', '"
+                       << grad_it->second << "');\n";
+                }
+            }
             emit_style(id);
             // Meter has no setLabel — always add a separate label
             if (!label_text.empty()) {
