@@ -1,31 +1,46 @@
 #!/usr/bin/env node
-// bundle_threejs_for_jsc.mjs — iOS-D.3b Slice 2.
+// bundle_threejs_for_jsc.mjs — Three.js → IIFE bundler for the iOS
+// AUv3 lane (iOS-D.3b → iOS-D.3c).
 //
-// Reads `three.webgpu.js` (ESM, as shipped by the upstream Three.js
-// repo pinned in tools/deps/manifest.json) and emits `three.iife.js`,
-// a self-contained IIFE that registers `THREE` as a `globalThis.THREE`
-// namespace.
+// Reads `three.webgpu.js` (the ESM entry point shipped by the upstream
+// Three.js repo pinned in tools/deps/manifest.json) and emits
+// `three.iife.js`, a self-contained IIFE that registers `THREE` as a
+// `globalThis.THREE` namespace.
 //
 // Why: iOS public JSC API has NO public ESM module loader
 // (`JSScript.h` is private; `setModuleLoaderDelegate:` ships only
 // inside the framework, not in iPhoneOS.sdk public headers). Shipping
 // the ESM resolver path in a `.appex` risks App Store rejection.
-// Rollup-style IIFE bundling + plain JSC `evaluate()` is the
-// supported path. This script is the build-time transformation.
+// Build-time IIFE bundling + plain JSC `evaluate()` is the supported
+// path. This script is the build-time transformation.
+//
+// Implementation: delegates to esbuild (pinned in tools/scripts/
+// package.json) for proper ESM-import resolution, http: import
+// stripping, and IIFE wrapping. The earlier regex-only pass (slice 2)
+// could not resolve sibling `import { ... } from "./three.core.js"`
+// statements that Three.js's webgpu entry depends on, which caused
+// JSC parse errors at runtime ("expecting '('") on every iPad
+// install. esbuild handles all of those edge cases correctly out of
+// the box.
 //
 // Usage:
 //   node bundle_threejs_for_jsc.mjs --input <three.webgpu.js> \
 //                                   --output <three.iife.js>
 //
-// The transformation is intentionally simple: we wrap the source in
-// an IIFE and replace top-level `export {...}` / `export class X` /
-// `export const Y` / `export function Z` statements with assignments
-// to a local `__THREE__` object that's hoisted to `globalThis.THREE`
-// at the bottom of the bundle.
+// On first invocation in a fresh checkout, the script auto-installs
+// its esbuild dependency via `npm install --prefix <script_dir>`
+// using the pinned version in package.json. Subsequent invocations
+// skip the install when node_modules/esbuild is already present.
 
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REQUIRE = createRequire(import.meta.url);
 
 function parseArgs(argv) {
     const args = { input: null, output: null };
@@ -40,95 +55,123 @@ function parseArgs(argv) {
     return args;
 }
 
-function transformExports(source) {
-    // The three.webgpu.js bundle ships top-level export statements at
-    // the end of the file. Strip them and emit a single
-    // `globalThis.THREE = {...}` assignment that surfaces every named
-    // symbol the file referenced.
-    //
-    // The strategy: regex out the `export { A, B as C, ... }` blocks,
-    // collect the exported identifiers, then emit a trailing
-    // `Object.assign(globalThis.THREE = globalThis.THREE || {}, { ... })`.
-    //
-    // We deliberately keep the transformation small/dumb so the build
-    // step is auditable and doesn't pull in a Rollup dependency
-    // graph. If the ESM file shape changes in upstream Three.js, this
-    // script should fail loudly rather than silently miss symbols.
-
-    const exportBlockRe = /^export\s*\{\s*([\s\S]*?)\s*\}\s*;?\s*$/gm;
-    const exportDefaultRe = /^export\s+default\s+/gm;
-    const exportInlineRe = /^export\s+(class|const|let|var|function|async\s+function)\s+([A-Za-z_$][\w$]*)/gm;
-
-    const exported = new Set();
-    let stripped = source;
-
-    // export { A, B as C, ... }
-    stripped = stripped.replace(exportBlockRe, (_match, body) => {
-        for (const piece of body.split(",")) {
-            const trimmed = piece.trim();
-            if (!trimmed) continue;
-            const asMatch = trimmed.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-            if (asMatch) exported.add(asMatch[2]);
-            else exported.add(trimmed);
+// Load esbuild from this script's local node_modules. If it's missing,
+// run `npm install` once to populate it, then retry. Keeps the build
+// reproducible against the pinned version in package.json without
+// relying on a globally installed copy.
+async function loadEsbuild() {
+    const localEsbuildEntry = path.join(SCRIPT_DIR, "node_modules", "esbuild", "lib", "main.js");
+    if (!fs.existsSync(localEsbuildEntry)) {
+        process.stderr.write("[bundle_threejs] esbuild not present in tools/scripts/node_modules — running `npm install` (one-time)...\n");
+        const result = spawnSync("npm", ["install", "--no-audit", "--no-fund", "--prefix", SCRIPT_DIR], {
+            stdio: "inherit",
+            shell: false,
+        });
+        if (result.status !== 0) {
+            throw new Error(`npm install --prefix ${SCRIPT_DIR} exited ${result.status}`);
         }
-        return ""; // strip the export block
-    });
-
-    // export class X { ... }   /  export const X = ...   /  etc.
-    stripped = stripped.replace(exportInlineRe, (_match, keyword, name) => {
-        exported.add(name);
-        return `${keyword} ${name}`;
-    });
-
-    // export default expr;
-    stripped = stripped.replace(exportDefaultRe, "var __pulp_three_default__ = ");
-    if (stripped.includes("__pulp_three_default__")) {
-        exported.add("default");
     }
-
-    if (exported.size === 0) {
-        throw new Error("No exports detected — the upstream three.webgpu.js shape changed; update this script.");
-    }
-
-    const exportEntries = [...exported]
-        .map((sym) => (sym === "default" ? `"default": __pulp_three_default__` : `${sym}: ${sym}`))
-        .join(",\n        ");
-
-    return `// Auto-generated by tools/scripts/bundle_threejs_for_jsc.mjs.
-// Do not edit by hand. Source: three.webgpu.js (pinned in tools/deps/manifest.json).
-(function () {
-    "use strict";
-    var globalScope = (typeof globalThis !== "undefined") ? globalThis :
-                      (typeof window !== "undefined") ? window :
-                      (typeof self !== "undefined") ? self : this;
-    if (!globalScope.console) {
-        globalScope.console = { log: function () {}, warn: function () {}, error: function () {} };
-    }
-
-${stripped}
-
-    var __pulp_three_namespace__ = {
-        ${exportEntries}
-    };
-    globalScope.THREE = Object.assign(globalScope.THREE || {}, __pulp_three_namespace__);
-    if (typeof globalScope.print === "function") {
-        var count = Object.keys(__pulp_three_namespace__).length;
-        globalScope.print("PULP_THREEJS: globalThis.THREE available (" + count + " exports)");
-    }
-})();
-`;
+    return REQUIRE(path.join(SCRIPT_DIR, "node_modules", "esbuild"));
 }
 
-function main() {
+async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const inputPath = path.resolve(args.input);
-    const outputPath = path.resolve(args.output);
-    const source = fs.readFileSync(inputPath, "utf8");
-    const transformed = transformExports(source);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, transformed, "utf8");
-    const bytes = Buffer.byteLength(transformed, "utf8");
-    console.log(`PULP_THREEJS: bundle written ${outputPath} (${bytes} bytes)`);
+    if (!fs.existsSync(args.input)) {
+        console.error(`bundle_threejs_for_jsc: input not found: ${args.input}`);
+        process.exit(1);
+    }
+
+    const esbuild = await loadEsbuild();
+
+    // esbuild plugin: strip http: imports before esbuild sees them as
+    // resolves. Three.js HEAD imports a dev-only debugging helper from
+    // greggman.github.io; JSC has no network resolver so leaving the
+    // import in produces a parse error at runtime. Intercept the
+    // resolve and load an empty stub instead.
+    const stripHttpImports = {
+        name: "pulp-strip-http-imports",
+        setup(build) {
+            build.onResolve({ filter: /^https?:\/\// }, (a) => ({
+                path: a.path,
+                namespace: "pulp-stripped",
+            }));
+            build.onLoad({ filter: /.*/, namespace: "pulp-stripped" }, () => ({
+                contents: "/* stripped dev-only http: import */",
+                loader: "js",
+            }));
+        },
+    };
+
+    const inputAbs = path.resolve(args.input);
+
+    let result;
+    try {
+        result = await esbuild.build({
+            entryPoints: [inputAbs],
+            bundle: true,
+            format: "iife",
+            globalName: "__pulp_three_iife_namespace__",
+            platform: "neutral",
+            target: ["es2020"],
+            write: false,
+            logLevel: "warning",
+            plugins: [stripHttpImports],
+            supported: {
+                // JSC supports top-level-await but our wrapper IIFE
+                // doesn't, and Three.js's webgpu entry doesn't need it.
+                "top-level-await": false,
+            },
+            // Keep names so iPad-device stack traces map to upstream
+            // Three.js symbols. Whitespace minification is fine.
+            minifyWhitespace: false,
+            minifyIdentifiers: false,
+            minifySyntax: false,
+        });
+    } catch (err) {
+        console.error("bundle_threejs_for_jsc: esbuild build failed");
+        console.error(err.message || err);
+        process.exit(1);
+    }
+
+    if (!result.outputFiles || result.outputFiles.length === 0) {
+        console.error("bundle_threejs_for_jsc: esbuild produced no output files");
+        process.exit(1);
+    }
+
+    const esbuildIife = result.outputFiles[0].text;
+
+    // esbuild's iife output assigns the namespace to a top-level `var
+    // __pulp_three_iife_namespace__ = ...`. We re-emit it inside a
+    // Pulp wrapper that exposes the namespace at `globalThis.THREE`
+    // (what iOS-D.3c's scene.js and any Pulp plugin author looks up)
+    // and prints a console marker so the iPad walkthrough has one
+    // line to grep for to confirm Three.js loaded.
+    const wrapped =
+        "// Auto-generated by tools/scripts/bundle_threejs_for_jsc.mjs (esbuild path).\n" +
+        "// Do not edit by hand. Source: three.webgpu.js (pinned in tools/deps/manifest.json).\n" +
+        "// IIFE wrapper resolves ESM imports across three.webgpu.js + three.core.js +\n" +
+        "// sibling modules.\n" +
+        esbuildIife +
+        "\n" +
+        "(function () {\n" +
+        "    var globalScope = (typeof globalThis !== \"undefined\") ? globalThis :\n" +
+        "        (typeof self !== \"undefined\") ? self :\n" +
+        "        (typeof window !== \"undefined\") ? window : this;\n" +
+        "    if (typeof __pulp_three_iife_namespace__ === \"undefined\") return;\n" +
+        "    globalScope.THREE = Object.assign(globalScope.THREE || {}, __pulp_three_iife_namespace__);\n" +
+        "    if (typeof globalScope.print === \"function\") {\n" +
+        "        var count = Object.keys(__pulp_three_iife_namespace__).length;\n" +
+        "        globalScope.print(\"PULP_THREEJS: globalThis.THREE available (\" + count + \" exports)\");\n" +
+        "    }\n" +
+        "})();\n";
+
+    fs.writeFileSync(args.output, wrapped, "utf8");
+    process.stdout.write(
+        `bundle_threejs_for_jsc: wrote ${args.output} (${wrapped.length} bytes)\n`,
+    );
 }
 
-main();
+main().catch((err) => {
+    console.error(err.stack || err);
+    process.exit(1);
+});

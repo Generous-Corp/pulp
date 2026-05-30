@@ -624,6 +624,20 @@ globalThis.localStorage = localStorage;
 window.sessionStorage = localStorage;
 globalThis.sessionStorage = localStorage;
 
+// pulp #3206 — `self` alias for the window object.
+//
+// Browser/WebGPU spec: `self`, `window`, and `globalThis` all reference the
+// same object in a page context. Three.js's `Animation` class (and many
+// other libraries) keys its `requestAnimationFrame` lookup on `self`:
+//   `this._context = typeof self !== "undefined" ? self : null;`
+// If `self` is undefined here, libraries set their context to `null` and
+// then crash with TypeError when they try to call rAF/cAF on null. Aliasing
+// `self` to our window shim (which already provides `requestAnimationFrame`
+// + `cancelAnimationFrame`) is the spec-conforming fix and unblocks
+// Three.js, vanilla `setInterval`-via-self code, and any other library that
+// follows the standard browser globals convention.
+globalThis.self = window;
+
 function Image() {
     var self = this;
     self.width = 0;

@@ -1,4 +1,5 @@
 #include <pulp/render/gpu_surface.hpp>
+#include <vector>
 
 #ifdef PULP_HAS_SKIA
 // When Skia is available, we use Dawn's C++ API (which Skia requires).
@@ -110,19 +111,36 @@ public:
         wgpu::DeviceDescriptor device_desc{};
         device_desc.label = "Pulp GPU Device";
 
-        // Phase 6.5 — opt the device into `timestamp-query` when the adapter
-        // offers it, so Skia Graphite can report per-recording GPU render time
-        // via its GpuStats(kElapsedTime) path (see SkiaSurface). Strictly
-        // gated: requesting a feature the adapter lacks fails RequestDevice, so
-        // only add it when advertised. Absent the feature, GPU render time is
-        // reported unavailable and CPU timing stands alone. `ts_feature` must
-        // outlive the synchronous RequestDevice call below — it does (same
-        // scope).
-        wgpu::FeatureName ts_feature = wgpu::FeatureName::TimestampQuery;
+        // Opt the device into useful features when the adapter advertises
+        // them. Strictly gated: requesting a feature the adapter lacks
+        // fails RequestDevice, so only add it when advertised. Feature
+        // array must outlive the synchronous RequestDevice call below —
+        // it does (same scope).
+        //
+        // - TimestampQuery: lets Skia Graphite report per-recording GPU
+        //   render time via GpuStats(kElapsedTime). Phase 6.5.
+        // - IndirectFirstInstance: lets WebGPU consumers (notably
+        //   Three.js's WebGPURenderer) issue drawIndexed / draw calls
+        //   with non-zero firstInstance. Without this the Three.js
+        //   render path validates as "First instance must be zero" and
+        //   every command buffer is dropped — every frame paints
+        //   nothing. iOS-D.3c proved this empirically by surfacing the
+        //   exact validation message via the JS-side
+        //   unhandledrejection tracker (issue #3206). Apple Metal
+        //   supports the feature; iOS Sim with the Metal backend
+        //   typically advertises it.
+        std::vector<wgpu::FeatureName> required_device_features;
         if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
-            device_desc.requiredFeatureCount = 1;
-            device_desc.requiredFeatures = &ts_feature;
+            required_device_features.push_back(wgpu::FeatureName::TimestampQuery);
             runtime::log_info("GpuSurface: enabling timestamp-query (GPU render time gated on Graphite supportedGpuStats)");
+        }
+        if (adapter_.HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+            required_device_features.push_back(wgpu::FeatureName::IndirectFirstInstance);
+            runtime::log_info("GpuSurface: enabling indirect-first-instance (Three.js / non-zero firstInstance draws)");
+        }
+        if (!required_device_features.empty()) {
+            device_desc.requiredFeatureCount = required_device_features.size();
+            device_desc.requiredFeatures = required_device_features.data();
         }
 
         device_desc.SetUncapturedErrorCallback(

@@ -100,6 +100,51 @@ struct ContentView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 if !host.isPlaying && host.audioUnit != nil { host.toggle() }
             }
+
+            // First-install registration race: iOS may not have scanned a
+            // newly-installed .appex yet when the host's .onAppear fires.
+            // Discover() returns 0 matches in that window, and without a
+            // retry the host stays stuck on "(no Pulp AUv3 found)" until
+            // the user kills + relaunches the app — which is the exact UX
+            // failure the iOS-D.3c walkthrough hit on every fresh
+            // devicectl install. Wire two recovery paths:
+            //
+            // 1. Observe `AVAudioUnitComponentManager`'s
+            //    `RegistrationsChangedNotification` (Apple's documented
+            //    signal that the AU component registry changed) and
+            //    re-discover when it fires. Covers the happy path where
+            //    iOS finishes its scan within the app's foreground
+            //    session.
+            //
+            // 2. Polling fallback every 1s for the first 60s after launch
+            //    — guards against quirks where iOS fires the notification
+            //    on a different observer, or doesn't fire at all on the
+            //    first foreground after install. Stops as soon as
+            //    discovery finds the embedded extension.
+            let nc = NotificationCenter.default
+            let regChanged = NSNotification.Name(
+                "AVAudioUnitComponentManagerRegistrationsChangedNotification")
+            nc.addObserver(forName: regChanged, object: nil, queue: nil) { _ in
+                Task { @MainActor in
+                    if host.audioUnit == nil { host.discover() }
+                }
+            }
+            // Polling fallback for the first 60s, in case the
+            // notification doesn't fire or fires before our observer
+            // is set up. iPad PluginKit registration after a fresh
+            // `devicectl install` can take 30-60s on first launch
+            // even though the .appex is on disk; without an
+            // aggressive poll the host stays stuck on "(no Pulp AUv3
+            // found)" past the user's patience threshold. Each tick
+            // is a separate Task hop to the main actor so Swift 6
+            // strict-concurrency is happy.
+            Task { @MainActor in
+                for _ in 0..<60 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if host.audioUnit != nil { return }
+                    host.discover()
+                }
+            }
         }
     }
 }
@@ -221,6 +266,11 @@ final class PulpAUv3Host: ObservableObject {
     @Published var parameters: [AUParameter] = []
     @Published var isPlaying = false
     var audioUnit: AUAudioUnit?
+    // Set true between calling AVAudioUnit.instantiate and its callback
+    // landing. Polling retries in ContentView.onAppear consult this so
+    // they don't fire concurrent instantiations that would each create
+    // a fresh AU + tear down the editor view between cycles.
+    private var instantiationInFlight: Bool = false
 
 #if os(iOS)
     // Phase iOS-D.2 — editor view controller fetched via
@@ -320,6 +370,19 @@ final class PulpAUv3Host: ObservableObject {
     }
 
     func discover() {
+        // Idempotency: if the AU is already instantiated, or
+        // instantiation is in flight, skip. Without this the polling
+        // fallback in ContentView.onAppear (added 2026-05-30 to fix
+        // the first-install registration race) would re-call
+        // `AVAudioUnit.instantiate(...)` every 1s — each call creates
+        // a fresh AudioUnit, which tears down the AUv3's editor view
+        // and stops Three.js from completing a render pass. See
+        // .agents/skills/auv3 SKILL.md "First-install discovery race"
+        // section for context.
+        if audioUnit != nil { return }
+        if instantiationInFlight { return }
+        instantiationInFlight = true
+
         // Prefer the exact descriptor mirrored from the embedded AUv3
         // (HostApp Info.plist → AudioComponents[0]) so the picker is
         // deterministic across installed Pulp plug-ins. Fall back to
@@ -362,6 +425,7 @@ final class PulpAUv3Host: ObservableObject {
 
         guard let first = pulpUnits.first else {
             print("PULP_DISCOVER: no matching Pulp AUv3 found — extension may have failed to register, or HostApp Info.plist AudioComponents[0] does not match the embedded .appex")
+            instantiationInFlight = false
             return
         }
         let firstName = first.name
@@ -383,9 +447,13 @@ final class PulpAUv3Host: ObservableObject {
             if let err = error { print("PULP_INSTANTIATE_ERROR: \(err)") }
             guard let self = self, let node = node, error == nil else {
                 print("PULP_INSTANTIATE: bailed (node=\(String(describing: node)) error=\(String(describing: error)))")
+                if let self = self {
+                    Task { @MainActor in self.instantiationInFlight = false }
+                }
                 return
             }
             Task { @MainActor in
+                self.instantiationInFlight = false
                 self.node = node
                 self.audioUnit = node.auAudioUnit
                 self.componentName = node.auAudioUnit.componentName

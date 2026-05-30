@@ -768,10 +768,13 @@ static void eval_or_throw(ScriptEngine& engine, const char* name, const std::str
     try {
         engine.evaluate(js);
     } catch (const choc::javascript::Error& e) {
+        runtime::log_error("PULP_EVAL_THROW: name={} js_len={} choc_error={}", name, js.size(), e.what());
         throw std::runtime_error(std::string("failed to evaluate ") + name + ": " + e.what());
     } catch (const std::exception& e) {
+        runtime::log_error("PULP_EVAL_THROW: name={} js_len={} std_error={}", name, js.size(), e.what());
         throw std::runtime_error(std::string("failed to evaluate ") + name + ": " + e.what());
     } catch (...) {
+        runtime::log_error("PULP_EVAL_THROW: name={} js_len={} unknown_exception", name, js.size());
         throw std::runtime_error(std::string("failed to evaluate ") + name + ": unknown exception");
     }
 }

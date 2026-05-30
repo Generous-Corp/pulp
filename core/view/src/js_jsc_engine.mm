@@ -3,6 +3,7 @@
 // system framework usage is fine). Zero additional dependency on Apple.
 
 #include <pulp/view/js_engine.hpp>
+#include <pulp/runtime/log.hpp>
 
 #if __APPLE__
 
@@ -297,7 +298,20 @@ public:
     choc::value::Value evaluate(const std::string& code) override {
         @autoreleasepool {
             NSString* script = [NSString stringWithUTF8String:code.c_str()];
-            JSValue* result = [context_ evaluateScript:script];
+            JSValue* result = nil;
+            @try {
+                result = [context_ evaluateScript:script];
+            } @catch (NSException* ex) {
+                NSString* reason = [ex reason] ?: @"<no reason>";
+                NSString* name = [ex name] ?: @"NSException";
+                std::string msg([[NSString stringWithFormat:@"%@: %@", name, reason] UTF8String]);
+                pulp::runtime::log_error("PULP_JSC_EVAL_NSEXCEPTION: code_len={} msg={}", code.size(), msg);
+                throw std::runtime_error(msg);
+            } @catch (id ex) {
+                std::string msg([[NSString stringWithFormat:@"non-NSException ObjC throw: %@", ex] UTF8String]);
+                pulp::runtime::log_error("PULP_JSC_EVAL_OBJC: code_len={} msg={}", code.size(), msg);
+                throw std::runtime_error(msg);
+            }
             check_exception();
             return jsc_to_choc(context_, result);
         }

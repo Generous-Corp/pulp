@@ -66,6 +66,62 @@ namespace {
 constexpr int kQuickJsPumpJobCap = 1'000'000;
 }
 
+// Pulp #3206 — Promise-rejection tracker.
+//
+// QuickJS does not call JS-side `addEventListener("unhandledrejection", ...)`
+// handlers; if a Promise rejects with no `.catch`, the rejection is silently
+// dropped. The most damaging case is the `new Promise(async (resolve, reject) => { ... })`
+// anti-pattern: a sync throw inside the executor rejects the *inner* async
+// function's promise (not the outer Promise), and the outer Promise sits in
+// pending forever. Three.js's WebGPURenderer.init() uses this exact pattern,
+// which is why iOS-D.3c's cube never rendered — the silent throw blocked the
+// init promise indefinitely. See issue #3206 for the full reproducer.
+//
+// JS_SetHostPromiseRejectionTracker is QuickJS's hook for this: it fires
+// whenever a Promise rejection is created (is_handled=0) or later attached
+// to a handler (is_handled=1). We log the unhandled case to runtime::log_error
+// so the symptom becomes a visible error line instead of an invisible hang.
+// The handled-later case is benign (callers caught the rejection in time) so
+// we drop it.
+static void pulp_quickjs_promise_rejection_tracker(
+        choc::javascript::quickjs::JSContext* ctx,
+        choc::javascript::quickjs::JSValueConst /*promise*/,
+        choc::javascript::quickjs::JSValueConst reason,
+        int is_handled,
+        void* /*opaque*/) {
+    if (is_handled) return;  // someone attached .catch — not unhandled anymore
+    const char* msg = choc::javascript::quickjs::JS_ToCString(ctx, reason);
+    pulp::runtime::log_error(
+        "PULP_QJS_UNHANDLED_REJECTION: {}",
+        msg ? msg : "<no string representation>");
+    if (msg) choc::javascript::quickjs::JS_FreeCString(ctx, msg);
+    // Try to also surface the .stack so the actual call site is logged when
+    // the reason is an Error. JS_GetPropertyStr returns an exception JSValue
+    // on missing prop, which is fine — we just check and free.
+    choc::javascript::quickjs::JSValue stack =
+        choc::javascript::quickjs::JS_GetPropertyStr(ctx, reason, "stack");
+    if (!choc::javascript::quickjs::JS_IsUndefined(stack)
+        && !choc::javascript::quickjs::JS_IsException(stack)) {
+        const char* stack_msg = choc::javascript::quickjs::JS_ToCString(ctx, stack);
+        if (stack_msg) {
+            pulp::runtime::log_error("PULP_QJS_UNHANDLED_REJECTION_STACK: {}", stack_msg);
+            choc::javascript::quickjs::JS_FreeCString(ctx, stack_msg);
+        }
+    }
+    choc::javascript::quickjs::JS_FreeValue(ctx, stack);
+}
+
+static void install_quickjs_rejection_tracker(choc::javascript::Context& ctx) {
+    struct ContextLayout {
+        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
+    };
+    auto& layout = reinterpret_cast<ContextLayout&>(ctx);
+    auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
+    if (!qjctx || !qjctx->runtime) return;
+    choc::javascript::quickjs::JS_SetHostPromiseRejectionTracker(
+        qjctx->runtime, &pulp_quickjs_promise_rejection_tracker, nullptr);
+}
+
 static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
     struct ContextLayout {
         std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
@@ -102,6 +158,7 @@ public:
         : context_(choc::javascript::createQuickJSContext())
     {
         set_quickjs_stack_size(context_, 1024 * 1024);  // 1MB (up from 256KB)
+        install_quickjs_rejection_tracker(context_);    // pulp #3206
         setup_console();
     }
 

@@ -1,0 +1,10 @@
+{
+  "name": "pulp-scripts",
+  "private": true,
+  "description": "Node tooling for Pulp build-time JS bundling (Three.js IIFE bundle for iOS JSC, etc.). Installed once at build time when needed; not shipped with the SDK.",
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "esbuild": "0.25.10"
+  }
+}
