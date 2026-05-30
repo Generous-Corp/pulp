@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02810"></a>
+## [0.281.0] - 2026-05-29
+
+- feat(view): iOS-D.3b Slice 5 — queue.submit log marker + engine-agnostic input contract pin ([#3159](https://github.com/danielraffel/pulp/pull/3159))
+- fix(ci): provision prebuilt Skia in CI macOS setup (unblock shipyard mac lane) ([#3160](https://github.com/danielraffel/pulp/pull/3160))
+
 <a id="v02800"></a>
 ## [0.280.0] - 2026-05-29
 
@@ -3187,6 +3193,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.281.0]: https://github.com/danielraffel/pulp/releases/tag/v0.281.0
 [0.280.0]: https://github.com/danielraffel/pulp/releases/tag/v0.280.0
 [0.279.0]: https://github.com/danielraffel/pulp/releases/tag/v0.279.0
 [0.278.0]: https://github.com/danielraffel/pulp/releases/tag/v0.278.0
