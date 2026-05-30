@@ -11,11 +11,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v02820"></a>
 ## [0.282.0] - 2026-05-29
 
-- feat(ios): iOS-D.3b Slice 6 — program closeout (skills + plan tracker, all 6 slices ✅) ([#3163](https://github.com/danielraffel/pulp/pull/3163))
-- fix(view+ios): write Three.js IIFE bundle to .appex/threejs/ not /Resources/threejs/ (iOS flat-bundle layout)
-- fix(view): gate gpu_surface_ method calls behind PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE (slice 4 follow-up — unbreaks iOS Simulator AUv3 builds)
-- fix(cmake): resolve Three.js bundler/shim via CMAKE_CURRENT_FUNCTION_LIST_DIR (slice 3 follow-up — fixes installed-consumer-smoke lint)
-- test(view): add static scan asserting gpu_surface_-> dereferences sit inside the PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE gate
+- feat(ios): iOS-D.3b Slice 6 — program closeout + iOS bundle path fix ([#3163](https://github.com/danielraffel/pulp/pull/3163))
 
 <a id="v02810"></a>
 ## [0.281.0] - 2026-05-29
@@ -3202,6 +3198,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.282.0]: https://github.com/danielraffel/pulp/releases/tag/v0.282.0
 [0.281.0]: https://github.com/danielraffel/pulp/releases/tag/v0.281.0
 [0.280.0]: https://github.com/danielraffel/pulp/releases/tag/v0.280.0
 [0.279.0]: https://github.com/danielraffel/pulp/releases/tag/v0.279.0
