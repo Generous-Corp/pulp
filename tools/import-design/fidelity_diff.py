@@ -1430,8 +1430,20 @@ def heuristic_colors(ctx: Context) -> list[HeuristicResult]:
                 )
             )
             continue
+        # Drop trace colors (< MIN_PALETTE_FRAC of the crop) before scoring. A
+        # thin anti-aliased rim — e.g. the 1px transition row where the silver
+        # thumb cap meets the dark track — quantizes to a mid-grey that is not
+        # part of the widget's identity palette, yet a single such pixel run
+        # would otherwise dominate the worst-nearest-distance and flip the gate.
+        # The reference palette is already trace-free (dominant_colors caps at
+        # the top buckets), so this makes the comparison symmetric. Keep at least
+        # the single most-dominant rendered color so the check never empties out.
+        MIN_PALETTE_FRAC = 0.08
+        scored = [(c, f) for c, f in ren_palette if f >= MIN_PALETTE_FRAC]
+        if not scored:
+            scored = ren_palette[:1]
         worst = 0.0
-        for color, _frac in ren_palette:
+        for color, _frac in scored:
             nearest = min(color_distance(color, rc) for rc in ref_palette)
             worst = max(worst, nearest)
         status = "pass" if worst <= 90 else "fail"
@@ -1810,7 +1822,16 @@ def _has_track_stroke_above_thumb(crop: "Image.Image", bg: RGB) -> bool:
     """A vertical fader/meter has a dark recessed housing stroke that extends
     ABOVE the colored fill/thumb. Detect it: in the top quarter of the crop,
     is there a vertical run of non-background pixels that is NOT the saturated
-    fill color (i.e. the dark housing track)?"""
+    fill color (i.e. the dark housing track)?
+
+    The recessed housing channel is intentionally subtle — it can read either as
+    a slightly LIGHTER edge (a drawn stroke) OR as a near-bg DARK slot (a recess
+    a hair darker/equal to the panel interior, with a faint low-sat edge). Both
+    are "the dark housing track above the thumb" and both should count, so the
+    test accepts a low-saturation pixel that is meaningfully distinct from the
+    panel bg in EITHER luma direction (not just lighter). pulp #3191 follow-up:
+    keying only on "lighter than bg + 12" missed the dark recessed slot that the
+    captured Pulp fader/meter draws (track ≈ panel interior luma)."""
     crop = crop.convert("RGBA")
     w, h = crop.size
     if w == 0 or h == 0:
@@ -1818,6 +1839,7 @@ def _has_track_stroke_above_thumb(crop: "Image.Image", bg: RGB) -> bool:
     px = crop.load()
     top_band = max(1, h // 4)
     cx = w // 2
+    bg_luma = sum(bg) / 3.0
     housing = 0
     for y in range(top_band):
         # Scan a few central columns for a dark-but-distinct housing pixel.
@@ -1827,9 +1849,11 @@ def _has_track_stroke_above_thumb(crop: "Image.Image", bg: RGB) -> bool:
                 continue
             luma = (r + g + b) / 3.0
             sat = max(r, g, b) - min(r, g, b)
-            # Housing: distinct from panel bg, low saturation, not the bright
-            # thumb cap and not the saturated blue/green fill.
-            if luma > (sum(bg) / 3.0) + 12 and sat < 50 and luma < 180:
+            # Housing: low saturation, not the bright thumb cap, and not the
+            # saturated blue/green fill. Distinct from the panel bg in either
+            # direction — a lighter drawn edge (luma > bg+12) OR a darker
+            # recessed slot / its subtle low-sat rim (|luma-bg| >= 6).
+            if sat < 50 and luma < 180 and abs(luma - bg_luma) >= 6:
                 housing += 1
                 break
     return housing >= top_band // 3
@@ -1860,7 +1884,23 @@ def heuristic_widget_detail(ctx: Context) -> list[HeuristicResult]:
         crop = ctx.render.crop(region.as_tuple())
 
         if w.kind == "fader":
-            ren_track = _has_track_stroke_above_thumb(crop, ctx.render_bg)
+            # The full-widget region anchors on the colored fill + thumb and
+            # stops where the recessed dark track (≈ panel bg) starts — so the
+            # track ABOVE the thumb is not in `crop`. Extend the crop UPWARD to
+            # the widget's declared-box top (mapped into the render panel) so the
+            # housing-above-thumb is in frame for the stroke test. Bounded by the
+            # declared height so it can't run into a neighbour / the title row.
+            track_crop = crop
+            panel = ctx.render_panel()
+            if (w.declared_height and panel is not None and ctx.root_width):
+                sx = panel.width / ctx.root_width
+                hh = int(w.declared_height * sx)
+                ext_top = max(0, region.bottom - hh)
+                if ext_top < region.top:
+                    track_crop = ctx.render.crop(
+                        (region.left, ext_top, region.right, region.bottom)
+                    )
+            ren_track = _has_track_stroke_above_thumb(track_crop, ctx.render_bg)
             ref_track = None
             if w.asset_path:
                 ref_img = load_rgba(w.asset_path)

@@ -298,6 +298,64 @@ class TestFullWidgetDetection(unittest.TestCase):
         self.assertLessEqual(full.right, 55, "must not bleed into the right widget")
 
 
+class TestHousingStrokeDetection(unittest.TestCase):
+    def test_track_stroke_detects_near_bg_recessed_channel(self):
+        # The captured Pulp fader draws a dark recessed track channel above the
+        # thumb that is intentionally close to the panel bg (a subtle slot). The
+        # detector must count it as housing even though it is NOT lighter than
+        # the bg — keying only on "lighter than bg" missed the dark slot.
+        im = solid_bg(20, 80)
+        d = ImageDraw.Draw(im)
+        # Recessed channel in the TOP band: a hair darker than the bg, low-sat.
+        d.rectangle([8, 0, 11, 30], fill=(12, 14, 18, 255))
+        self.assertTrue(
+            fd._has_track_stroke_above_thumb(im, BG[:3]),
+            "near-bg recessed dark channel should read as housing",
+        )
+
+    def test_track_stroke_detects_lighter_edge(self):
+        # A lighter drawn track edge (the other valid housing style) still counts.
+        im = solid_bg(20, 80)
+        d = ImageDraw.Draw(im)
+        d.rectangle([8, 0, 11, 30], fill=(61, 63, 71, 255))
+        self.assertTrue(fd._has_track_stroke_above_thumb(im, BG[:3]))
+
+    def test_track_stroke_absent_on_plain_background(self):
+        # A crop that is ALL panel background (no recessed channel, no edge) must
+        # NOT be mistaken for a housing stroke — keeps the calibration honest.
+        im = solid_bg(20, 80)
+        self.assertFalse(fd._has_track_stroke_above_thumb(im, BG[:3]))
+
+
+class TestPaletteTraceFilter(unittest.TestCase):
+    def test_palette_match_ignores_thin_aa_rim(self):
+        # A thin anti-aliased rim (a single mid-grey pixel run << 8% of the crop)
+        # is not part of a widget's identity palette and must not dominate the
+        # worst-nearest-distance. Model the dominant_colors output directly: a
+        # dominant blue fill plus a trace mid-grey. Mirrors the palette_match
+        # trace-filter logic so a 1px thumb/track AA edge can't flip the gate.
+        # Dominant fill (blue) ~92%, trace AA grey ~5%, near-bg ~3%.
+        ren_palette = [
+            ((64, 128, 224), 0.92),
+            ((128, 128, 128), 0.05),  # trace AA rim — must be ignored
+            ((32, 32, 64), 0.03),
+        ]
+        ref_palette = [(64, 128, 224), (192, 192, 192), (32, 32, 64)]
+        MIN = 0.08
+        scored = [(c, f) for c, f in ren_palette if f >= MIN] or ren_palette[:1]
+        worst = max(
+            min(fd.color_distance(c, rc) for rc in ref_palette) for c, _f in scored
+        )
+        # The trace grey (128,128,128) — distance ~110 to the nearest ref — is
+        # excluded, so the worst is the well-matched blue (≈0).
+        self.assertLess(worst, 30.0)
+        # Sanity: without the filter the trace grey WOULD dominate.
+        worst_unfiltered = max(
+            min(fd.color_distance(c, rc) for rc in ref_palette) for c, _f in ren_palette
+        )
+        self.assertGreater(worst_unfiltered, 90.0)
+
+
 class TestTextDetection(unittest.TestCase):
     def test_text_run_found_in_band(self):
         im = solid_bg(200, 60)
