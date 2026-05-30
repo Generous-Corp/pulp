@@ -8,7 +8,16 @@
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
 #include <miniz.h>
-#include <unistd.h>     // getpid()
+// getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
+// `_getpid` declaration in <process.h>. Wrap both to keep the
+// `pid_kind` lookup portable.
+#if defined(_WIN32)
+#  include <process.h>
+#  define pulp_getpid _getpid
+#else
+#  include <unistd.h>
+#  define pulp_getpid getpid
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -764,7 +773,7 @@ static fs::path make_temp_dir() {
     if (ec) return {};
     // Names like pulp-import-design-<pid>-<rng>.
     std::random_device rd;
-    auto suffix = std::to_string(static_cast<unsigned long>(::getpid()))
+    auto suffix = std::to_string(static_cast<unsigned long>(::pulp_getpid()))
                 + "-"
                 + std::to_string(static_cast<uint32_t>(rd()));
     auto dir = tmp_root / ("pulp-import-design-" + suffix);
@@ -797,10 +806,42 @@ extract_pulp_zip_if_present(const std::string& input_file) {
         return out;
     }
 
+    // Bomb / over-quota caps. Realistic Pulp exports are a few MB of JSON
+    // + a few hundred KB of PNG/SVG assets; cap well above that but well
+    // below "fills /tmp on a CI runner". Numbers chosen to be ~10× any
+    // realistic plugin export.
+    constexpr std::uint64_t kMaxTotalUncompressed   = 256ull * 1024 * 1024;  // 256 MB
+    constexpr std::uint64_t kMaxPerFileUncompressed =  64ull * 1024 * 1024;  //  64 MB
+    constexpr mz_uint       kMaxFileCount           = 10000;
+
     const mz_uint n = mz_zip_reader_get_num_files(&zip);
+    if (n > kMaxFileCount) {
+        std::cerr << "Error: ZIP " << input_file << " has " << n
+                  << " entries (>" << kMaxFileCount
+                  << "); refusing to extract\n";
+        mz_zip_reader_end(&zip);
+        return out;
+    }
+    std::uint64_t total_uncompressed = 0;
     std::string scene_candidate;
     for (mz_uint i = 0; i < n; ++i) {
+        // mz_zip_reader_get_filename truncates silently when name_buf is
+        // too small. A malicious archive can stuff a 2-KB entry name like
+        // "<1020 safe chars>/../../../etc/passwd": the truncated string
+        // sails past our `..` substring check, but the central directory
+        // still holds the FULL name and mz_zip_reader_extract_to_file
+        // happily writes outside temp_dir. Probe required size first and
+        // reject anything that wouldn't fit (or exceeds a sane POSIX-y
+        // path limit) BEFORE we ever read the name.
+        const mz_uint name_size = mz_zip_reader_get_filename(&zip, i, nullptr, 0);
         char name_buf[1024]{};
+        if (name_size == 0 || name_size > sizeof(name_buf)) {
+            std::cerr << "Error: ZIP " << input_file << " entry " << i
+                      << " has oversized filename (" << name_size
+                      << " bytes); refusing\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
         mz_zip_reader_get_filename(&zip, i, name_buf, sizeof(name_buf));
         const std::string entry_name(name_buf);
         if (entry_name.empty()) continue;
@@ -808,12 +849,62 @@ extract_pulp_zip_if_present(const std::string& input_file) {
         // Skip directory entries (trailing slash).
         if (entry_name.back() == '/') continue;
 
-        // Defence-in-depth path-safety: refuse absolute / `..` entries so
-        // a malicious archive can't escape temp_dir.
-        if (entry_name.find("..") != std::string::npos ||
-            (!entry_name.empty() && (entry_name[0] == '/' || entry_name[0] == '\\'))) {
-            std::cerr << "Error: refusing unsafe zip entry: " << entry_name
-                      << "\n";
+        // Per-file + running total uncompressed-size caps (zip-bomb guard).
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) {
+            std::cerr << "Error: ZIP " << input_file << " entry "
+                      << entry_name << " has unreadable stat; refusing\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+        if (stat.m_uncomp_size > kMaxPerFileUncompressed) {
+            std::cerr << "Error: ZIP " << input_file << " entry "
+                      << entry_name << " uncompressed size "
+                      << stat.m_uncomp_size << " > " << kMaxPerFileUncompressed
+                      << " bytes; refusing\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+        total_uncompressed += stat.m_uncomp_size;
+        if (total_uncompressed > kMaxTotalUncompressed) {
+            std::cerr << "Error: ZIP " << input_file
+                      << " total uncompressed size > "
+                      << kMaxTotalUncompressed << " bytes; refusing\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+
+        // Path-safety: refuse anything that could escape temp_dir.
+        // (a) `..` anywhere — catches `a/../../etc/x` and trailing `..`.
+        // (b) entry that resolves absolute under std::filesystem rules —
+        //     catches POSIX `/foo`, Windows `C:\foo`, UNC `\\srv\sh\x`,
+        //     and any platform-specific oddity we'd otherwise miss.
+        // (c) Windows drive-relative `C:foo` — `is_absolute()` does NOT
+        //     consider this absolute on Linux (where this CLI parses
+        //     archives Windows authors may have produced), so guard
+        //     explicitly: any entry whose second character is `:` after
+        //     a single alphabetic drive letter.
+        bool unsafe = false;
+        const char* unsafe_reason = "";
+        if (entry_name.find("..") != std::string::npos) {
+            unsafe = true; unsafe_reason = "contains '..'";
+        } else if (fs::path(entry_name).is_absolute()) {
+            unsafe = true; unsafe_reason = "absolute path";
+        } else if (entry_name.size() >= 2 &&
+                   ((entry_name[0] >= 'A' && entry_name[0] <= 'Z') ||
+                    (entry_name[0] >= 'a' && entry_name[0] <= 'z')) &&
+                   entry_name[1] == ':') {
+            unsafe = true; unsafe_reason = "drive-relative Windows path";
+        } else if (!entry_name.empty() &&
+                   (entry_name[0] == '/' || entry_name[0] == '\\')) {
+            // Belt + braces — `is_absolute()` on macOS / Linux already
+            // catches `/`, but this also covers `\foo` on a Unix host
+            // where fs::path treats `\` as a regular character.
+            unsafe = true; unsafe_reason = "leading slash";
+        }
+        if (unsafe) {
+            std::cerr << "Error: refusing unsafe zip entry (" << unsafe_reason
+                      << "): " << entry_name << "\n";
             mz_zip_reader_end(&zip);
             return out;
         }

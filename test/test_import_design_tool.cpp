@@ -1101,3 +1101,152 @@ TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
     REQUIRE(r.stderr_output.find("scene.pulp.json") != std::string::npos);
     REQUIRE_FALSE(fs::exists(output));
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Issue #50 — adversarial-review hardening of the .pulp.zip extractor.
+//
+// Self-review on #3189 found three zip-slip/zip-bomb gaps the original
+// guards missed:
+//   (1) mz_zip_reader_get_filename truncates to the supplied buffer
+//       size; a 2-KB entry name like
+//         "<1020 safe chars>/../../../etc/passwd"
+//       becomes "<1020 safe chars>/..." after truncation — sneaks past
+//       the `..` substring check — and then extract_to_file is called
+//       with the FULL untruncated name from the central directory.
+//   (2) The path-prefix check only rejected entries starting with `/`
+//       or `\`. Windows drive-letter (C:\...) and UNC (\\srv\share\...)
+//       paths slipped through and would escape temp_dir on Windows.
+//   (3) No cap on total / per-file uncompressed size or entry count, so
+//       a zip-bomb could fill the temp filesystem.
+//
+// The fixtures below pin each guard with a hostile zip the CLI must
+// refuse.
+
+namespace {
+
+// Convenience: build a zip with one (name, contents) entry. Used to
+// construct hostile fixtures from inside the test.
+bool make_zip_with_entry(const fs::path& zip_path,
+                         const std::string& entry_name,
+                         const std::string& contents) {
+    mz_zip_archive zip{};
+    if (!mz_zip_writer_init_file(&zip, zip_path.string().c_str(), 0)) return false;
+    const bool ok = mz_zip_writer_add_mem(
+        &zip,
+        entry_name.c_str(),
+        contents.data(),
+        contents.size(),
+        MZ_DEFAULT_COMPRESSION);
+    if (!ok) { mz_zip_writer_end(&zip); return false; }
+    if (!mz_zip_writer_finalize_archive(&zip)) {
+        mz_zip_writer_end(&zip);
+        return false;
+    }
+    mz_zip_writer_end(&zip);
+    return true;
+}
+
+}  // namespace
+
+TEST_CASE("pulp-import-design refuses .pulp.zip with oversized filename (issue-50 truncation bypass)",
+          "[cli][import-design][tool][figma-plugin][issue-50]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-truncation");
+    const auto zip = tmp.path / "evil.pulp.zip";
+    const auto output = tmp.path / "ui.js";
+
+    // Craft a name long enough to truncate inside the original 1024-byte
+    // stack buffer (>= 1024 chars). The trailing `..` is what the
+    // truncation would have lost. With the new probe-first check the
+    // CLI must reject before ever calling extract_to_file.
+    const std::string oversized_name(1100, 'a');
+    REQUIRE(make_zip_with_entry(zip, oversized_name + "/../../../etc/passwd", "x"));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.stderr_output.find("oversized filename") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(output));
+}
+
+TEST_CASE("pulp-import-design refuses .pulp.zip with `..` in entry path",
+          "[cli][import-design][tool][figma-plugin][issue-50]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-dotdot");
+    const auto zip = tmp.path / "evil.pulp.zip";
+
+    REQUIRE(make_zip_with_entry(zip, "subdir/../../../etc/passwd", "x"));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", (tmp.path / "ui.js").string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.stderr_output.find("'..'") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(tmp.path / "ui.js"));
+}
+
+TEST_CASE("pulp-import-design refuses .pulp.zip with Windows drive-relative path",
+          "[cli][import-design][tool][figma-plugin][issue-50]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-driveletter");
+    const auto zip = tmp.path / "evil.pulp.zip";
+
+    // C:foo is drive-relative — fs::path::is_absolute() on Linux says
+    // false, so the explicit drive-letter guard is what catches it.
+    REQUIRE(make_zip_with_entry(zip, "C:Windows/system32/evil.dll", "x"));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", (tmp.path / "ui.js").string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.stderr_output.find("drive-relative") != std::string::npos);
+}
+
+// NOTE: a "leading slash absolute path" fixture is intentionally omitted —
+// miniz's writer (mz_zip_writer_add_mem) refuses entries beginning with
+// `/`, so a hand-crafted ZIP would be required to exercise that specific
+// path. The path-safety branch is already covered by the `..` test
+// (substring guard) and the Windows drive-relative test (explicit
+// drive-letter guard); the leading-slash fallback is defence-in-depth
+// for non-portable archives we'd never produce ourselves.
+
+TEST_CASE("pulp-import-design refuses .pulp.zip exceeding the file-count cap",
+          "[cli][import-design][tool][figma-plugin][issue-50]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-count-cap");
+    const auto zip = tmp.path / "many.pulp.zip";
+
+    // Pack 10001 minimal entries — one over the kMaxFileCount cap.
+    {
+        mz_zip_archive z{};
+        REQUIRE(mz_zip_writer_init_file(&z, zip.string().c_str(), 0));
+        for (int i = 0; i < 10001; ++i) {
+            const auto name = "f" + std::to_string(i) + ".bin";
+            const char body = 'x';
+            REQUIRE(mz_zip_writer_add_mem(&z, name.c_str(), &body, 1,
+                                          MZ_DEFAULT_COMPRESSION));
+        }
+        REQUIRE(mz_zip_writer_finalize_archive(&z));
+        mz_zip_writer_end(&z);
+    }
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", (tmp.path / "ui.js").string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.stderr_output.find("entries (>") != std::string::npos);
+}
