@@ -507,7 +507,38 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Clear built-in label — use separate Yoga-positioned labels for exact placement
             ss << ind << "setLabel('" << id << "', ' ');\n";
-            ss << ind << "setValue('" << id << "', " << node.audio_default << ");\n";
+            // Normalise the captured value to 0..1 — Knob::set_value clamps to
+            // [0,1], so a raw audio value (e.g. 880 Hz) would clamp to 1 and
+            // park the indicator at the far end. The native silver knob maps
+            // 0..1 linearly to its [-135°,+135°] sweep, so the NORMALISED value
+            // must already encode the parameter taper. For a frequency-unit
+            // knob (Hz / kHz) use a LOG taper — that's how audio cutoff/freq
+            // controls are laid out (and how Figma's library knob is drawn), so
+            // 880 Hz in [20, 20000] lands near the centre (≈0.55), indicator
+            // ~straight up, matching the design. Linear units fall back to the
+            // plain (value-min)/(max-min) map. Generalizable rule keyed on the
+            // IR's own units attribute — no per-instance angle hardcoding.
+            float knob_norm = node.audio_default;
+            {
+                float lo = node.audio_min, hi = node.audio_max;
+                auto uit = node.attributes.find("units");
+                std::string units;
+                if (uit != node.attributes.end()) {
+                    units = uit->second;
+                    for (auto& c : units)
+                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                const bool freq_unit = (units == "hz" || units == "khz");
+                if (freq_unit && lo > 0.0f && hi > lo && node.audio_default > 0.0f) {
+                    float ln_lo = std::log(lo), ln_hi = std::log(hi);
+                    knob_norm = std::clamp(
+                        (std::log(node.audio_default) - ln_lo) / (ln_hi - ln_lo),
+                        0.0f, 1.0f);
+                } else if (hi > lo) {
+                    knob_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
+                }
+            }
+            ss << ind << "setValue('" << id << "', " << knob_norm << ");\n";
             // Track A3 — attach a designer-supplied sprite-strip skin when the
             // figma-plugin CLI lane (or anyone else) pre-resolved an asset_path
             // onto this knob node. Frame count defaults to 1 (static body);
@@ -675,6 +706,13 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 if (node.attributes.count("skin_track_width")) {
                     ss << ind << "setFaderTrackWidth('" << id << "', "
                        << node.attributes.at("skin_track_width") << ");\n";
+                }
+                // pulp #3192 — derived empty-track outline colour. Strokes the
+                // track rect so the empty channel above the thumb shows the
+                // captured edge instead of a flat dark slab.
+                std::string tbo = attr("skin_track_border_color");
+                if (!tbo.empty()) {
+                    ss << ind << "setFaderTrackBorder('" << id << "', '" << tbo << "');\n";
                 }
             }
             emit_style(id);
@@ -863,6 +901,25 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             float w = *node.style.width;
             if (uppercase) w *= 1.20f;  // empirical: caps run ~15-20% wider
             ss << ind << "setFlex('" << id << "', 'min_width', " << w << ");\n";
+
+            // Multi-line text box: when the design's own box is taller than a
+            // single line of this font, the designer intended the string to
+            // WRAP within its declared width (a paragraph / subtitle), so emit
+            // the box WIDTH (a hard bound, not just a min) and put the label in
+            // multi-line mode. Without this a long string runs off the parent
+            // (visible bug: the smoke-test subtitle at width 720 overflowed the
+            // panel). The decision keys on the IR's own height vs. font size —
+            // generalizable, no per-node hardcoding. A single-line label
+            // (height ≈ one line, e.g. a title) is intentionally NOT bounded
+            // here: forcing its narrow hug-width as a hard wrap box would make
+            // it wrap when Pulp's font metrics run a hair wider than Figma's,
+            // breaking a title that the design drew on one line.
+            bool multiline_box =
+                node.style.height && *node.style.height > font_h * 1.6f;
+            if (multiline_box) {
+                ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+                ss << ind << "setMultiLine('" << id << "', true);\n";
+            }
         }
 
         ss << "\n";

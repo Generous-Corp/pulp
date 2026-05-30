@@ -156,10 +156,21 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("columnGap")) l.column_gap = get_float(obj, "columnGap");
     l.wrap = get_bool(obj, "wrap");
 
-    // Padding — support uniform or per-side
+    // Padding — support a uniform float, a nested {top,right,bottom,left}
+    // object (the figma-plugin export shape), or camelCase per-side keys.
+    // All three forms are accepted and may be combined (later forms override).
     if (obj.hasObjectMember("padding")) {
-        float p = get_float(obj, "padding");
-        l.padding_top = l.padding_right = l.padding_bottom = l.padding_left = p;
+        const auto& pad = obj["padding"];
+        if (pad.isObject()) {
+            // Nested object: {top,right,bottom,left}. Missing edges stay 0.
+            if (pad.hasObjectMember("top"))    l.padding_top    = static_cast<float>(pad["top"].getWithDefault<double>(0));
+            if (pad.hasObjectMember("right"))  l.padding_right  = static_cast<float>(pad["right"].getWithDefault<double>(0));
+            if (pad.hasObjectMember("bottom")) l.padding_bottom = static_cast<float>(pad["bottom"].getWithDefault<double>(0));
+            if (pad.hasObjectMember("left"))   l.padding_left   = static_cast<float>(pad["left"].getWithDefault<double>(0));
+        } else {
+            float p = get_float(obj, "padding");
+            l.padding_top = l.padding_right = l.padding_bottom = l.padding_left = p;
+        }
     }
     if (obj.hasObjectMember("paddingTop"))    l.padding_top = get_float(obj, "paddingTop");
     if (obj.hasObjectMember("paddingRight"))  l.padding_right = get_float(obj, "paddingRight");
