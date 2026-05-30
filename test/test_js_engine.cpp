@@ -3,11 +3,51 @@
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/js_engine_recommend.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 using namespace pulp::view;
+
+// Helper: capture stderr produced inside `body` so a test can assert that a
+// runtime::log_error marker actually fires. The dup2 + freopen dance is the
+// standard POSIX trick for redirecting an in-process stderr write to a file,
+// then restoring the original FD afterwards. Used to verify diagnostic-only
+// code paths (rejection tracker, JSC NSException bridge, eval_or_throw
+// pre-rethrow log) without depending on an external log sink we don't have.
+template <typename Body>
+static std::string capture_stderr(Body&& body) {
+    fflush(stderr);
+    int saved_fd = dup(fileno(stderr));
+    REQUIRE(saved_fd >= 0);
+    char path_buf[] = "/tmp/pulp-test-stderr-XXXXXX";
+    int tmp_fd = mkstemp(path_buf);
+    REQUIRE(tmp_fd >= 0);
+    REQUIRE(dup2(tmp_fd, fileno(stderr)) >= 0);
+    close(tmp_fd);
+    try {
+        body();
+    } catch (...) {
+        fflush(stderr);
+        dup2(saved_fd, fileno(stderr));
+        close(saved_fd);
+        std::ifstream in(path_buf);
+        std::stringstream ss; ss << in.rdbuf();
+        std::remove(path_buf);
+        throw;
+    }
+    fflush(stderr);
+    dup2(saved_fd, fileno(stderr));
+    close(saved_fd);
+    std::ifstream in(path_buf);
+    std::stringstream ss; ss << in.rdbuf();
+    std::remove(path_buf);
+    return ss.str();
+}
 
 // Helper: create engines for all available backends
 static std::vector<JsEngineType> available_engines() {
@@ -576,3 +616,143 @@ TEST_CASE("JsEngine multiple native functions", "[js_engine]") {
         REQUIRE(result.getWithDefault<int>(0) == 42);
     END_FOR_EACH_ENGINE
 }
+
+// pulp #3206 — QuickJS unhandled-promise-rejection tracker.
+//
+// QuickJS doesn't call JS-side `addEventListener("unhandledrejection", ...)`
+// handlers, so without a host hook a rejected promise with no `.catch` is
+// silently dropped. The fix installs `JS_SetHostPromiseRejectionTracker` in
+// QuickJsEngine()'s ctor and routes the rejection to runtime::log_error with
+// the `PULP_QJS_UNHANDLED_REJECTION:` prefix. These tests verify the marker
+// reaches stderr and that the engine survives the unhandled rejection +
+// continues to evaluate.
+
+TEST_CASE("QuickJS unhandled-rejection tracker logs PULP_QJS marker (#3206)",
+          "[js_engine][quickjs][issue-3206]") {
+    if (!is_engine_available(JsEngineType::quickjs)) return;
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    REQUIRE(engine->is_valid());
+
+    std::string captured = capture_stderr([&]() {
+        // Reject a promise with no .catch — the rejection becomes unhandled
+        // exactly after the microtask queue drains (Promise.reject is sync
+        // but the tracker fires when the queued reject task runs).
+        engine->evaluate("Promise.reject(new Error('pulp-test-rejection'))");
+        engine->pump_message_loop();
+    });
+
+    REQUIRE(captured.find("PULP_QJS_UNHANDLED_REJECTION") != std::string::npos);
+    REQUIRE(captured.find("pulp-test-rejection") != std::string::npos);
+    // Stack should also be logged when the reason is an Error.
+    REQUIRE(captured.find("PULP_QJS_UNHANDLED_REJECTION_STACK") != std::string::npos);
+}
+
+TEST_CASE("QuickJS unhandled-rejection tracker does not crash on non-Error reasons (#3206)",
+          "[js_engine][quickjs][issue-3206]") {
+    if (!is_engine_available(JsEngineType::quickjs)) return;
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    REQUIRE(engine->is_valid());
+
+    // Reject with a primitive — no `.stack` property exists on the reason.
+    // The tracker must handle JS_GetPropertyStr returning undefined/exception
+    // gracefully without aborting the host.
+    std::string captured = capture_stderr([&]() {
+        engine->evaluate("Promise.reject('plain-string-reason')");
+        engine->pump_message_loop();
+    });
+    REQUIRE(captured.find("PULP_QJS_UNHANDLED_REJECTION") != std::string::npos);
+    REQUIRE(captured.find("plain-string-reason") != std::string::npos);
+
+    // Engine survives and remains usable.
+    REQUIRE(engine->is_valid());
+    auto result = engine->evaluate("1 + 1");
+    REQUIRE(result.getWithDefault<int>(0) == 2);
+}
+
+TEST_CASE("QuickJS unhandled-rejection tracker logs exactly once per rejection (#3206)",
+          "[js_engine][quickjs][issue-3206]") {
+    if (!is_engine_available(JsEngineType::quickjs)) return;
+    auto engine = create_js_engine(JsEngineType::quickjs);
+
+    // QuickJS fires the host tracker TWICE for a rejection that gets a
+    // handler later: first with is_handled=0 (rejection created without a
+    // handler) and then with is_handled=1 (handler attached). Our hook
+    // logs ONLY the is_handled=0 case — verify the marker appears exactly
+    // once for a single bare `Promise.reject(...)`, not twice. Without the
+    // `if (is_handled) return;` guard at the top of the tracker, a noisy
+    // duplicate would ship for every rejection.
+    std::string captured = capture_stderr([&]() {
+        engine->evaluate("Promise.reject(new Error('dedup-once'))");
+        engine->pump_message_loop();
+        engine->pump_message_loop();  // second pump in case the tracker is deferred
+    });
+    auto first = captured.find("PULP_QJS_UNHANDLED_REJECTION:");
+    REQUIRE(first != std::string::npos);
+    auto second = captured.find("PULP_QJS_UNHANDLED_REJECTION:", first + 1);
+    REQUIRE(second == std::string::npos);
+}
+
+TEST_CASE("QuickJS rejection tracker surfaces 'new Promise(async ...)' anti-pattern (#3206)",
+          "[js_engine][quickjs][issue-3206]") {
+    if (!is_engine_available(JsEngineType::quickjs)) return;
+    auto engine = create_js_engine(JsEngineType::quickjs);
+
+    // The specific anti-pattern that hung Three.js's WebGPURenderer.init():
+    // a sync throw inside an `async` executor rejects the INNER async
+    // function's promise — not the outer `new Promise(...)`. Without the
+    // tracker the inner rejection is invisible. With it, we see the throw
+    // immediately.
+    std::string captured = capture_stderr([&]() {
+        engine->evaluate(
+            "new Promise(async function(resolve, reject) {"
+            "  throw new Error('inner-async-throw');"
+            "});");
+        engine->pump_message_loop();
+    });
+    REQUIRE(captured.find("PULP_QJS_UNHANDLED_REJECTION") != std::string::npos);
+    REQUIRE(captured.find("inner-async-throw") != std::string::npos);
+}
+
+// pulp #3206 — JSC NSException bridge in js_jsc_engine.mm.
+//
+// `[JSContext evaluateScript:]` can throw an NSException for malformed
+// scripts. Without `@try`/`@catch(NSException*)`, the exception unwinds
+// through the ObjC runtime and surfaces in C++ as the useless string
+// "unknown exception" (or worse, a hard crash on `terminate`). The fix
+// catches both NSException and any other ObjC throw, formats `name +
+// reason` from the NSException, logs PULP_JSC_EVAL_NSEXCEPTION /
+// PULP_JSC_EVAL_OBJC, and re-throws as std::runtime_error with the
+// actual JSC error message. Verifying via stderr-grep is the cleanest
+// route since the engine wrapper itself swallows the rethrown error
+// into its check_exception() helper.
+
+#if __APPLE__
+TEST_CASE("JSC evaluate surfaces NSException via std::runtime_error (#3206)",
+          "[js_engine][jsc][issue-3206]") {
+    if (!is_engine_available(JsEngineType::jsc)) return;
+    auto engine = create_js_engine(JsEngineType::jsc);
+    REQUIRE(engine->is_valid());
+
+    // A bare top-level ES module `import` statement causes JSC's parser
+    // to reject the script — depending on JSC's parse path this either
+    // throws a JS-level SyntaxError (caught by check_exception()) or
+    // raises an ObjC NSException (caught by our new @catch block).
+    // Either way, an exception MUST reach the C++ caller — that's the
+    // contract this test pins down. Without the @catch block the
+    // NSException case would propagate uncaught and crash the host.
+    bool threw = false;
+    try {
+        engine->evaluate("import { Color } from './nope.js';\nColor;");
+    } catch (const std::exception&) {
+        threw = true;
+    } catch (...) {
+        threw = true;
+    }
+    REQUIRE(threw);
+    REQUIRE(engine->is_valid());
+
+    // Engine survives the failed eval and continues to work.
+    auto result = engine->evaluate("1 + 2");
+    REQUIRE(result.getWithDefault<int>(0) == 3);
+}
+#endif

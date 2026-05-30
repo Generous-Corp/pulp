@@ -21,8 +21,13 @@
 #include <filesystem>
 #include <fstream>
 #include <numbers>
+#include <sstream>
 #include <thread>
 #include <utility>
+#include <cstdio>
+#if defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -3153,3 +3158,60 @@ TEST_CASE("WidgetBridge ctor with non-null gpu_surface stores it",
 // global `Size` that clashes with `pulp::view::Size` once this file does
 // `using namespace pulp::view`. Keep the ScriptedUiSession test where the
 // transitive include is already managed.
+
+// pulp #3206 — eval_or_throw must log PULP_EVAL_THROW BEFORE re-throwing.
+//
+// load_script wraps each evaluate() in `eval_or_throw` which catches three
+// classes (choc::javascript::Error, std::exception, ...) and re-throws as
+// std::runtime_error("failed to evaluate <name>: <err>"). A
+// cross-translation-unit std::exception typeinfo mismatch can cause the
+// caller's `catch(const std::exception&)` to miss the throw and fall through
+// to `catch(...)`, losing the original message. The fix: log the JS error
+// via runtime::log_error("PULP_EVAL_THROW: ...") BEFORE re-throwing so the
+// JS error reaches stderr regardless of whether the downstream catch matches.
+
+template <typename Body>
+static std::string capture_widget_bridge_stderr(Body&& body) {
+    fflush(stderr);
+    int saved_fd = dup(fileno(stderr));
+    REQUIRE(saved_fd >= 0);
+    char path_buf[] = "/tmp/pulp-wb-stderr-XXXXXX";
+    int tmp_fd = mkstemp(path_buf);
+    REQUIRE(tmp_fd >= 0);
+    REQUIRE(dup2(tmp_fd, fileno(stderr)) >= 0);
+    close(tmp_fd);
+    try { body(); } catch (...) { /* swallow — body asserts on throw */ }
+    fflush(stderr);
+    dup2(saved_fd, fileno(stderr));
+    close(saved_fd);
+    std::ifstream in(path_buf);
+    std::stringstream ss; ss << in.rdbuf();
+    std::remove(path_buf);
+    return ss.str();
+}
+
+TEST_CASE("WidgetBridge eval_or_throw logs PULP_EVAL_THROW before rethrowing (#3206)",
+          "[view][bridge][issue-3206]") {
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    root.set_bounds({0, 0, 400, 300});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+
+    // load_script wraps user code in `;void 0` and routes through
+    // eval_or_throw with name="user_script". A reference to an undeclared
+    // identifier triggers a runtime ReferenceError that bubbles up through
+    // one of the three catch branches and the log line should fire before
+    // the rethrow.
+    std::string captured = capture_widget_bridge_stderr([&]() {
+        try {
+            bridge.load_script("__definitely_not_defined_3206__.crash_here()");
+        } catch (...) {
+            // expected — the rethrow is fine, we only care about the log
+            // line that fires before it.
+        }
+    });
+
+    REQUIRE(captured.find("PULP_EVAL_THROW:") != std::string::npos);
+    REQUIRE(captured.find("name=user_script") != std::string::npos);
+}
