@@ -34,7 +34,8 @@ Then in Figma desktop (**first time only**):
 4. **Plugins → Development → Design for Pulp** to launch.
 
 Select a frame, then **Export to Pulp** to download the `*.pulp.json` (or
-`*.pulp.zip` when the design has assets).
+`*.pulp.zip` when the design has assets). Feed either straight to the importer —
+`pulp import-design --from figma-plugin <file>` reads a `.pulp.zip` directly.
 
 **Rebuild, don't re-import.** After the first manifest import, code changes are
 picked up by **`npm run build` + re-running the plugin** — Figma re-reads

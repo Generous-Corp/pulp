@@ -98,8 +98,18 @@ radius. Those overrides are exactly what instance overrides are *for*. So:
   appearance never severs meaning.
 
 This is what makes the model usable for real design work: you are not boxed
-into the library's default look. You inherit the library's *semantics* and keep
-*total* control over the visuals.
+into the library's default look. You inherit the library's *semantics*, and your
+restyling drives the imported control's appearance — the importer samples your
+captured component and skins the native widget to match it (the knob's silver
+finish, the fader's track/thumb, the meter's gradient).
+
+> **Fidelity note.** Recognition and binding from a restyled instance are solid.
+> Reproducing your *exact* per-instance visuals on the native control is an
+> actively improving path — the knob is faithful today; fader and meter
+> appearance fidelity (precise track/thumb width, meter width) is being tightened
+> in [#3191](https://github.com/danielraffel/pulp/issues/3191). Where exact
+> pixels matter more than live interaction, the captured visual is preserved in
+> the export and can back a recorded-paint route.
 
 ---
 
