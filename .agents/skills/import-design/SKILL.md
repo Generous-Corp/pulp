@@ -237,6 +237,14 @@ Ask the user or detect from context:
 
 ### Step 2: Read the design data
 
+**Figma plugin export — `.pulp.zip` is the default ship shape**:
+The "Export to Pulp" button in `tools/figma-plugin` emits a `.pulp.zip` containing `scene.pulp.json` + `assets/*.png` whenever the design has images. The CLI auto-unpacks ZIPs transparently (look for `Unpacked …` on stdout); point `--file` directly at either form:
+```bash
+pulp import-design --from figma-plugin --file design.pulp.zip --output ui.js  # canonical
+pulp import-design --from figma-plugin --file scene.pulp.json --output ui.js  # also fine
+```
+Detection uses ZIP magic (`PK\x03\x04`), not the file extension — `.zip` renames still get unpacked. The temp dir is auto-cleaned at process exit. Older CLI builds read input via `std::ifstream` text mode and silently truncated at the first NUL byte in the ZIP header; the symptom was `parser threw an unknown exception` on any `.pulp.zip`. If you see that error, the CLI predates the auto-unpack support — rebuild from current `main`.
+
 **Figma (MCP available)**:
 - Use `com.figma.mcp` to read the current file or selection
 - Extract frames, auto-layout, fills, strokes, effects, text, components
