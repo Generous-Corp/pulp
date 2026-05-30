@@ -368,6 +368,36 @@ TEST_CASE("derive_*_skin recovers horizontal art widths (pulp #3191 width fix)",
         REQUIRE(skin.thumb_width_px == Catch::Approx(24.0f).margin(1.0f));
         // Track is the thin 4-px column, NOT the 24-px thumb or 60-px box.
         REQUIRE(skin.track_width_px == Catch::Approx(4.0f).margin(1.0f));
+        // Thumb slab centred at y≈44 within art rows [10,80) → ~0.51 up the
+        // bar (1 = top, 0 = bottom). pulp #3191 position fix.
+        REQUIRE(skin.has_thumb_position);
+        REQUIRE(skin.thumb_position == Catch::Approx(0.51f).margin(0.1f));
+    }
+
+    SECTION("meter fill level from a partially-filled bar") {
+        // 40-wide box; gradient bar fills the BOTTOM ~70% of the art (rows
+        // 31..80 of art [10,80)) with dark/empty above — so fill_level ≈ 0.7,
+        // not the linear dB seed. pulp #3191 position fix.
+        const int W = 40, H = 100;
+        std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4, 0);
+        auto set = [&](int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+            uint8_t* p = px.data() + (static_cast<size_t>(y) * W + x) * 4;
+            p[0] = r; p[1] = g; p[2] = b; p[3] = 255;
+        };
+        // Empty dark channel: art rows 10..30, the bar's inset column.
+        for (int y = 10; y < 31; ++y)
+            for (int x = 14; x <= 25; ++x) set(x, y, 18, 20, 24);
+        // Coloured fill: rows 31..80 (the bottom ~70%), green→red bottom→top.
+        for (int y = 31; y < 80; ++y)
+            for (int x = 14; x <= 25; ++x) {
+                float t = static_cast<float>(y - 31) / (79 - 31);
+                set(x, y, static_cast<uint8_t>((1.0f - t) * 255),
+                          static_cast<uint8_t>(t * 255), 30);
+            }
+        SkinImage img{px.data(), W, H};
+        auto skin = derive_meter_skin(img, 5);
+        REQUIRE(skin.has_fill_level);
+        REQUIRE(skin.fill_level == Catch::Approx(0.70f).margin(0.12f));
     }
 }
 

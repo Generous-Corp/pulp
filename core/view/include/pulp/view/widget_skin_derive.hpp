@@ -50,6 +50,13 @@ struct FaderSkin {
     float thumb_width_px = 0.0f;
     bool has_track_width = false;
     bool has_thumb_width = false;
+    // Normalised thumb position recovered from the capture (0 = bottom, 1 =
+    // top), i.e. where the design actually drew the thumb. An audio fader's
+    // value→position map is non-linear (a taper), so a linear (value-min)/(max-
+    // min) seed lands the thumb in the wrong place; seeding from the captured
+    // position reproduces the design. pulp #3191.
+    float thumb_position = 0.0f;
+    bool has_thumb_position = false;
     bool any() const { return has_track || has_fill || has_thumb || has_thumb_border; }
 };
 
@@ -66,6 +73,12 @@ struct MeterSkin {
     // pulp #3191 width fix.
     float bar_width_px = 0.0f;
     bool has_bar_width = false;
+    // Normalised fill level recovered from the capture (0 = empty, 1 = full):
+    // the height of the contiguous saturated fill from the bottom of the bar.
+    // Like the fader, a meter's dB→position map is non-linear, so seed the
+    // initial level from where the capture actually filled to. pulp #3191.
+    float fill_level = 0.0f;
+    bool has_fill_level = false;
     bool valid() const { return gradient.size() >= 2; }
 };
 

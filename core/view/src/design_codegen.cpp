@@ -643,6 +643,13 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 float lo = node.audio_min, hi = node.audio_max;
                 if (hi > lo) fader_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
             }
+            // Prefer the captured thumb position when the sampler recovered it
+            // (#3191): an audio fader's value→position map is non-linear, so the
+            // linear seed above lands the thumb wrong; the captured position
+            // reproduces where the design drew it.
+            if (auto pit = node.attributes.find("skin_thumb_position");
+                pit != node.attributes.end() && !pit->second.empty())
+                fader_norm = std::clamp(std::stof(pit->second), 0.0f, 1.0f);
             ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
             // pulp #3191 — value-driven skin derived from the captured asset.
             // The importer sampled the PNG's track/fill/thumb colours; emit
@@ -705,6 +712,11 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 float lo = node.audio_min, hi = node.audio_max;
                 if (hi > lo) meter_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
             }
+            // Prefer the captured fill level when recovered (#3191) — matches
+            // where the design filled the meter rather than a linear dB map.
+            if (auto lit = node.attributes.find("skin_fill_level");
+                lit != node.attributes.end() && !lit->second.empty())
+                meter_norm = std::clamp(std::stof(lit->second), 0.0f, 1.0f);
             ss << ind << "setMeterLevel('" << id << "', " << meter_norm << ", " << meter_norm << ");\n";
             // pulp #3191 — value-driven gradient skin sampled from the captured
             // meter PNG. setMeterColors hands the meter the recovered gradient

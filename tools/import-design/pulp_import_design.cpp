@@ -1862,6 +1862,11 @@ int main(int argc, char* argv[]) {
                                             n.attributes["shape_width"] = fmt_px(fs_skin.thumb_width_px / asset_scale);
                                         if (fs_skin.has_track_width)
                                             n.attributes["skin_track_width"] = fmt_px(fs_skin.track_width_px / asset_scale);
+                                        // Captured thumb position (0..1) → initial
+                                        // value-position, so the imported fader
+                                        // matches where the design drew the thumb.
+                                        if (fs_skin.has_thumb_position)
+                                            n.attributes["skin_thumb_position"] = fmt_px(fs_skin.thumb_position);
                                     } else {
                                         auto ms = pulp::view::derive_meter_skin(si);
                                         if (ms.valid()) {
@@ -1879,6 +1884,10 @@ int main(int argc, char* argv[]) {
                                         // the box spacing so the narrow bar centres.
                                         if (ms.has_bar_width)
                                             n.attributes["shape_width"] = fmt_px(ms.bar_width_px / asset_scale);
+                                        // Captured fill level (0..1) → initial
+                                        // meter level matching the design.
+                                        if (ms.has_fill_level)
+                                            n.attributes["skin_fill_level"] = fmt_px(ms.fill_level);
                                     }
                                 }
                             }

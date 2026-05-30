@@ -104,6 +104,16 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         out.thumb_color = to_color(thumb_it->second);
         out.has_thumb = true;
 
+        // Where the design drew the thumb within the bar (1 = top, 0 = bottom)
+        // — seed the imported fader's initial value-position from this so it
+        // matches the capture regardless of the (non-linear) value→position map.
+        if (bottom > top + 1) {
+            out.thumb_position = std::clamp(
+                1.0f - static_cast<float>(thumb_y - top) / static_cast<float>(bottom - top),
+                0.0f, 1.0f);
+            out.has_thumb_position = true;
+        }
+
         // Thumb border / bevel: nearest-to-mid-grey low-sat row within a small
         // window around the thumb centre (the darker edge of the slab).
         RGB border{};
@@ -203,6 +213,15 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
     }
     int fill_h = fill_bottom - fill_top;
     if (fill_h < 8) return out;
+
+    // How far the captured gradient filled the bar (0 = empty, 1 = full) — seed
+    // the imported meter's initial level from this rather than a linear dB→
+    // position map. pulp #3191.
+    if (bottom > top + 1) {
+        out.fill_level = std::clamp(
+            static_cast<float>(fill_h) / static_cast<float>(bottom - top), 0.0f, 1.0f);
+        out.has_fill_level = true;
+    }
 
     // Sample stop_count stops across the fill, low(bottom)→high(top).
     for (int i = 0; i < stop_count; ++i) {
