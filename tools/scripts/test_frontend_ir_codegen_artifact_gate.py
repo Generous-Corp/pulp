@@ -54,9 +54,29 @@ def sample_report() -> dict:
             {
                 "route_id": "panel.meter.out",
                 "binding_entry_ids": ["panel.meter.out.left", "panel.meter.out.right"],
+                "provenance": "id_prefix",
             }
         ],
     }
+
+
+def explicit_report() -> dict:
+    """A report where the meter split is modeled explicitly via source_route_id."""
+    report = sample_report()
+    report["summary"]["explicit_split_bindings"] = 1
+    report["summary"]["prefix_split_bindings"] = 0
+    report["split_binding_candidates"] = [
+        {
+            "route_id": "panel.meter.out",
+            "binding_entry_ids": ["panel.meter.out.left", "panel.meter.out.right"],
+            "provenance": "explicit_source_route_id",
+            "parts": [
+                {"binding_entry_id": "panel.meter.out.left", "channel": "left"},
+                {"binding_entry_id": "panel.meter.out.right", "channel": "right"},
+            ],
+        }
+    ]
+    return report
 
 
 class FrontendIrCodegenArtifactGateTests(unittest.TestCase):
@@ -69,6 +89,70 @@ class FrontendIrCodegenArtifactGateTests(unittest.TestCase):
         warnings = {item["id"] for item in gate["checks"] if item["status"] == "warn"}
         self.assertIn("direct_binding_coverage", warnings)
         self.assertIn("extra_binding_entries", warnings)
+        # Prefix-accounted split surfaces the migration warning but stays ready.
+        self.assertIn("prefix_only_split_bindings", warnings)
+        by_id = {item["id"]: item for item in gate["checks"]}
+        self.assertEqual(by_id["explicit_one_to_many_bindings"]["status"], "pass")
+        self.assertIn("no explicit", by_id["explicit_one_to_many_bindings"]["message"])
+
+    def test_explicit_one_to_many_meter_is_ready_without_prefix_warn(self) -> None:
+        gate = codegen_gate.gate_codegen_artifacts(explicit_report())
+
+        self.assertEqual(gate["verdict"], "ready")
+        self.assertEqual(gate["summary"]["failures"], 0)
+        by_id = {item["id"]: item for item in gate["checks"]}
+        self.assertEqual(by_id["explicit_one_to_many_bindings"]["status"], "pass")
+        self.assertEqual(by_id["prefix_only_split_bindings"]["status"], "pass")
+
+    def test_explicit_xy_axis_split_is_ready(self) -> None:
+        report = sample_report()
+        report["missing_native_route_bindings"] = ["panel.xy.pan"]
+        report["extra_binding_entries"] = ["panel.xy.pan.x", "panel.xy.pan.y"]
+        report["summary"]["explicit_split_bindings"] = 1
+        report["summary"]["prefix_split_bindings"] = 0
+        report["split_binding_candidates"] = [
+            {
+                "route_id": "panel.xy.pan",
+                "binding_entry_ids": ["panel.xy.pan.x", "panel.xy.pan.y"],
+                "provenance": "explicit_source_route_id",
+                "parts": [
+                    {"binding_entry_id": "panel.xy.pan.x", "axis": "x"},
+                    {"binding_entry_id": "panel.xy.pan.y", "axis": "y"},
+                ],
+            }
+        ]
+
+        gate = codegen_gate.gate_codegen_artifacts(report)
+
+        self.assertEqual(gate["verdict"], "ready")
+        by_id = {item["id"]: item for item in gate["checks"]}
+        self.assertEqual(by_id["explicit_one_to_many_bindings"]["status"], "pass")
+        self.assertEqual(by_id["prefix_only_split_bindings"]["status"], "pass")
+
+    def test_broken_explicit_link_fails(self) -> None:
+        report = explicit_report()
+        # The explicit candidate references a binding id that does not exist in
+        # the generated sub-bindings.
+        report["extra_binding_entries"] = ["panel.meter.out.left"]
+        report["summary"]["extra_binding_entries"] = 1
+
+        gate = codegen_gate.gate_codegen_artifacts(report)
+
+        self.assertEqual(gate["verdict"], "not_ready")
+        failures = {item["id"] for item in gate["checks"] if item["status"] == "fail"}
+        self.assertIn("explicit_one_to_many_bindings", failures)
+
+    def test_provenance_count_mismatch_fails_schema_validation(self) -> None:
+        report = explicit_report()
+        report["summary"]["explicit_split_bindings"] = 0
+        report["summary"]["prefix_split_bindings"] = 0
+
+        gate = codegen_gate.gate_codegen_artifacts(report)
+
+        self.assertEqual(gate["verdict"], "not_ready")
+        failures = [item for item in gate["checks"] if item["status"] == "fail"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["id"], "schema_valid")
 
     def test_unaccounted_missing_route_fails(self) -> None:
         report = sample_report()

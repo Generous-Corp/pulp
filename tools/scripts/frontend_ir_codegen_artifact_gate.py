@@ -19,6 +19,9 @@ NOT_READY_VERDICT = "not_ready"
 CODEGEN_ARTIFACT_SCHEMA = SCHEMAS["codegen_artifacts"]
 GATE_SCHEMA = SCHEMAS["codegen_artifact_gate"]
 NATIVE_CPP_ROUTE = "native_cpp"
+PROVENANCE_EXPLICIT = "explicit_source_route_id"
+PROVENANCE_PREFIX = "id_prefix"
+SPLIT_PROVENANCE_VALUES = {PROVENANCE_EXPLICIT, PROVENANCE_PREFIX}
 
 
 def check(check_id: str, status: str, message: str, **details: Any) -> dict[str, Any]:
@@ -86,6 +89,61 @@ def validate_codegen_artifacts(report: dict[str, Any]) -> None:
     if summary["directly_bound_native_routes"] + summary["missing_native_route_bindings"] != summary["native_cpp_routes"]:
         raise ValueError("summary.directly_bound_native_routes plus summary.missing_native_route_bindings must equal summary.native_cpp_routes")
 
+    # Optional one-to-many provenance breakdown (explicit_source_route_id vs
+    # id_prefix). When present, validate the per-row shape and that the two
+    # provenance counts partition split_binding_candidates.
+    has_explicit_count = "explicit_split_bindings" in summary
+    has_prefix_count = "prefix_split_bindings" in summary
+    if has_explicit_count != has_prefix_count:
+        raise ValueError(
+            "summary.explicit_split_bindings and summary.prefix_split_bindings must both be present or both absent"
+        )
+    for key in ("explicit_split_bindings", "prefix_split_bindings"):
+        if key in summary and (
+            not isinstance(summary.get(key), int)
+            or isinstance(summary.get(key), bool)
+            or summary[key] < 0
+        ):
+            raise ValueError(f"summary.{key} must be a non-negative integer")
+
+    explicit_rows = 0
+    prefix_rows = 0
+    for row in report["split_binding_candidates"]:
+        if not isinstance(row, dict):
+            raise ValueError("split_binding_candidates entries must be objects")
+        provenance = row.get("provenance")
+        if provenance is not None:
+            if provenance not in SPLIT_PROVENANCE_VALUES:
+                raise ValueError(
+                    "split_binding_candidates.provenance must be one of "
+                    f"{sorted(SPLIT_PROVENANCE_VALUES)}"
+                )
+            if provenance == PROVENANCE_EXPLICIT:
+                explicit_rows += 1
+            else:
+                prefix_rows += 1
+        parts = row.get("parts")
+        if parts is not None:
+            if not isinstance(parts, list):
+                raise ValueError("split_binding_candidates.parts must be an array")
+            for part in parts:
+                if not isinstance(part, dict):
+                    raise ValueError("split_binding_candidates.parts entries must be objects")
+
+    if has_explicit_count:
+        if summary["explicit_split_bindings"] != explicit_rows:
+            raise ValueError(
+                "summary.explicit_split_bindings must match the count of explicit_source_route_id split candidates"
+            )
+        if summary["prefix_split_bindings"] != prefix_rows:
+            raise ValueError(
+                "summary.prefix_split_bindings must match the count of id_prefix split candidates"
+            )
+        if summary["explicit_split_bindings"] + summary["prefix_split_bindings"] != summary["split_binding_candidates"]:
+            raise ValueError(
+                "summary.explicit_split_bindings plus summary.prefix_split_bindings must equal summary.split_binding_candidates"
+            )
+
 
 def split_route_ids(report: dict[str, Any]) -> set[str]:
     ids: set[str] = set()
@@ -97,6 +155,18 @@ def split_route_ids(report: dict[str, Any]) -> set[str]:
         if isinstance(route_id, str) and route_id and isinstance(bindings, list) and bindings:
             ids.add(route_id)
     return ids
+
+
+def split_candidate_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in as_list(report.get("split_binding_candidates")):
+        if not isinstance(row, dict):
+            continue
+        route_id = row.get("route_id")
+        bindings = row.get("binding_entry_ids")
+        if isinstance(route_id, str) and route_id and isinstance(bindings, list) and bindings:
+            rows.append(row)
+    return rows
 
 
 def coverage_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -149,6 +219,67 @@ def coverage_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
             "unaccounted_native_route_bindings",
             PASS_STATUS,
             "all missing direct native route bindings are accounted for",
+        ))
+
+    split_rows = split_candidate_rows(report)
+    extra_entry_set = set(extra_entries)
+    explicit_rows = [row for row in split_rows if row.get("provenance") == PROVENANCE_EXPLICIT]
+    prefix_only_rows = [row for row in split_rows if row.get("provenance") == PROVENANCE_PREFIX]
+
+    # explicit_one_to_many_bindings: every binding id named by an explicit
+    # parent-child link must be a real generated sub-binding (present in
+    # extra_binding_entries). A phantom reference means a broken parent-child
+    # link and fails the gate.
+    broken_links: list[dict[str, Any]] = []
+    for row in explicit_rows:
+        missing_children = [
+            entry_id
+            for entry_id in as_list(row.get("binding_entry_ids"))
+            if isinstance(entry_id, str) and entry_id not in extra_entry_set
+        ]
+        if missing_children:
+            broken_links.append({
+                "route_id": row.get("route_id"),
+                "missing_binding_entry_ids": missing_children,
+            })
+    if broken_links:
+        checks.append(check(
+            "explicit_one_to_many_bindings",
+            FAIL_STATUS,
+            "explicit one-to-many bindings reference binding ids not present in generated sub-bindings",
+            broken_links=broken_links,
+        ))
+    elif explicit_rows:
+        checks.append(check(
+            "explicit_one_to_many_bindings",
+            PASS_STATUS,
+            "all explicit one-to-many bindings reference real generated sub-bindings",
+            explicit_split_bindings=len(explicit_rows),
+        ))
+    else:
+        checks.append(check(
+            "explicit_one_to_many_bindings",
+            PASS_STATUS,
+            "no explicit one-to-many bindings",
+        ))
+
+    # prefix_only_split_bindings: surface (but do not fail) missing routes that
+    # are accounted for ONLY by id-prefix convention, to encourage migration to
+    # explicit source_route_id modeling.
+    if prefix_only_rows:
+        checks.append(check(
+            "prefix_only_split_bindings",
+            WARN_STATUS,
+            "some native C++ routes are accounted for only by id-prefix convention; prefer explicit source_route_id",
+            route_ids=sorted(
+                str(row.get("route_id")) for row in prefix_only_rows if row.get("route_id")
+            ),
+        ))
+    else:
+        checks.append(check(
+            "prefix_only_split_bindings",
+            PASS_STATUS,
+            "no prefix-only split bindings",
         ))
 
     if direct_routes < native_routes:

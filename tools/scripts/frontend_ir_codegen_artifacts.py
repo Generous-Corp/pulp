@@ -82,15 +82,81 @@ def count_by(entries: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def split_candidates(missing_routes: set[str], entries: set[str]) -> list[dict[str, Any]]:
-    candidates = []
+PROVENANCE_EXPLICIT = "explicit_source_route_id"
+PROVENANCE_PREFIX = "id_prefix"
+SPLIT_PART_KEYS = ("channel", "axis", "part")
+
+
+def split_candidates(
+    missing_routes: set[str],
+    extra_entries: set[str],
+    entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Determine the split bindings for each missing native route.
+
+    A single source native route can map to multiple generated native
+    bindings (one-to-many). This is modeled two ways, explicit-preferred:
+
+    * Explicit: binding manifest entries that carry ``source_route_id ==
+      route_id``. When present, that is the authoritative parent-child link
+      and the candidate is tagged ``provenance=explicit_source_route_id``.
+      Split metadata (``channel`` / ``axis`` / ``part``) carried on those
+      entries is surfaced via a ``parts`` list so the split structure is
+      reviewable.
+    * Prefix fallback: otherwise, entries whose id starts with
+      ``route_id + "."`` (the historical string convention). Tagged
+      ``provenance=id_prefix`` so callers can encourage migration.
+
+    Only "extra" entries (sub-bindings not claimed by their own native
+    route) are eligible, so an entry that directly binds a *different* route
+    can never account for an unrelated unbound route via prefix collision.
+    """
+    entries = entries or []
+    # Index extra entries by id so explicit metadata can be looked up while
+    # still constraining candidates to the eligible (extra) id set.
+    extra_by_id = {
+        entry.get("id"): entry
+        for entry in entries
+        if isinstance(entry.get("id"), str) and entry.get("id") in extra_entries
+    }
+    # Group eligible extra entries by their explicit parent route, when set.
+    explicit_children: dict[str, list[str]] = {}
+    for entry_id, entry in extra_by_id.items():
+        source_route_id = entry.get("source_route_id")
+        if isinstance(source_route_id, str) and source_route_id:
+            explicit_children.setdefault(source_route_id, []).append(entry_id)
+
+    candidates: list[dict[str, Any]] = []
     for route_id in sorted(missing_routes):
+        explicit_ids = sorted(explicit_children.get(route_id, []))
+        if explicit_ids:
+            candidate: dict[str, Any] = {
+                "route_id": route_id,
+                "binding_entry_ids": explicit_ids,
+                "provenance": PROVENANCE_EXPLICIT,
+            }
+            parts = []
+            for entry_id in explicit_ids:
+                entry = extra_by_id.get(entry_id, {})
+                part: dict[str, Any] = {"binding_entry_id": entry_id}
+                for key in SPLIT_PART_KEYS:
+                    value = entry.get(key)
+                    if isinstance(value, str) and value:
+                        part[key] = value
+                parts.append(part)
+            # Only emit parts when at least one child carries split metadata.
+            if any(len(part) > 1 for part in parts):
+                candidate["parts"] = parts
+            candidates.append(candidate)
+            continue
+
         prefix = route_id + "."
-        split = sorted(entry_id for entry_id in entries if entry_id.startswith(prefix))
+        split = sorted(entry_id for entry_id in extra_entries if entry_id.startswith(prefix))
         if split:
             candidates.append({
                 "route_id": route_id,
                 "binding_entry_ids": split,
+                "provenance": PROVENANCE_PREFIX,
             })
     return candidates
 
@@ -116,7 +182,13 @@ def build_codegen_artifact_report(
     # that directly binds a *different* route (e.g. "foo.label") account for an
     # unrelated unbound route "foo" purely on a string-prefix collision,
     # downgrading a real binding hole from FAIL to WARN.
-    splits = split_candidates(missing, extra)
+    splits = split_candidates(missing, extra, entries)
+    explicit_split_count = sum(
+        1 for s in splits if s.get("provenance") == PROVENANCE_EXPLICIT
+    )
+    prefix_split_count = sum(
+        1 for s in splits if s.get("provenance") == PROVENANCE_PREFIX
+    )
 
     return {
         "schema": SCHEMA,
@@ -139,6 +211,8 @@ def build_codegen_artifact_report(
             "missing_native_route_bindings": len(missing),
             "extra_binding_entries": len(extra),
             "split_binding_candidates": len(splits),
+            "explicit_split_bindings": explicit_split_count,
+            "prefix_split_bindings": prefix_split_count,
             "binding_primitives": count_by(entries, "native_primitive"),
             "binding_route_types": count_by(entries, "route_type"),
         },
