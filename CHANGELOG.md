@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02820"></a>
+## [0.282.0] - 2026-05-29
+
+- feat(ios): iOS-D.3b Slice 6 — program closeout (skills + plan tracker, all 6 slices ✅) ([#3163](https://github.com/danielraffel/pulp/pull/3163))
+- fix(view+ios): write Three.js IIFE bundle to .appex/threejs/ not /Resources/threejs/ (iOS flat-bundle layout)
+
 <a id="v02810"></a>
 ## [0.281.0] - 2026-05-29
 
