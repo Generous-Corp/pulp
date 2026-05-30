@@ -123,6 +123,12 @@ if(IOS)
     # rendered through the same iPad GPU path, with the AUv3 editor
     # mounted inside the SwiftUI HostApp via UIViewControllerRepresentable.
     add_subdirectory(ios-auv3-chainer)
+    # Phase iOS-D.3c — Three.js rotating-cube AUv3 demo. Uses the
+    # iOS-D.3b plumbing (GpuSurface attach, three.iife.js bundler,
+    # presentable swapchain flag, queue.submit marker) to paint a
+    # real three.webgpu.js scene inside the editor pane.
+    # (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § 11).
+    add_subdirectory(ios-auv3-jsc-threejs)
 endif()
 
 # ARA pitch tracker example (workstream 06 slice A3)

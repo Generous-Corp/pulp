@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02830"></a>
+## [0.283.0] - 2026-05-30
+
+- feat(examples): iOS-D.3c — Three.js rotating-cube AUv3 demo (iPad-ready) ([#3171](https://github.com/danielraffel/pulp/pull/3171))
+
 <a id="v02822"></a>
 ## [0.282.2] - 2026-05-30
 
