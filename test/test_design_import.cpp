@@ -3161,3 +3161,186 @@ TEST_CASE("parse_figma_plugin_json maps Phase 5 part 2 Pulp / Spectrum envelope 
     // distinguishing this from a parameter route to consumers that care.
     REQUIRE(ir.root.attributes.at("binding") == "bus.fft.master_l");
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Phase B5 — Kitchen-sink smoke fixture.
+//
+// A single envelope that exercises every public Pulp Library widget at
+// once (Knob, Fader, Meter, XYPad, Waveform, Spectrum) plus all three
+// binding shapes (param route, audio-source path, XYPad's second-axis
+// binding_y). This is the canonical multi-widget smoke fixture for the
+// figma-plugin → import-design path — the per-widget Phase-3 / Phase-5
+// tests above pin one widget at a time; this test pins that the SAME
+// envelope shape carries them all simultaneously.
+//
+// Acceptance:
+//   1. Parser tolerates the full multi-widget envelope.
+//   2. Each child node is recognized with the correct audio_widget enum.
+//   3. Raw bindings are preserved on attributes for every widget.
+//   4. The binding-wireup pass produces canonical pulp* keys for the
+//      param-route widgets (knob/fader/meter) and leaves the audio-source
+//      widgets (waveform/spectrum) carrying only the raw `binding`.
+//   5. XYPad-specific binding_y rides on attributes.binding_y.
+//   6. Audio ranges round-trip on every widget.
+//
+// Once the library republish AND Agent A's fidelity harness both land in
+// main, we'll author a Figma file mirroring this layout via the MCP
+// connector and replace this hand-rolled envelope with one produced by
+// the real published plugin — closing the loop on Phase B5.
+TEST_CASE("kitchen-sink envelope parses all 6 Pulp Library widgets from one root frame",
+          "[view][import][figma-plugin][phase-b5][kitchen-sink]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": {
+            "adapter": "figma-plugin",
+            "version": "0.4.0",
+            "source_uri": "figma://design/kitchen-sink-smoke"
+        },
+        "root": {
+            "type": "frame",
+            "name": "PluginEditor",
+            "style": { "width": 720, "height": 360 },
+            "layout": { "direction": "row" },
+            "children": [
+                {
+                    "type": "frame",
+                    "name": "Cutoff",
+                    "audio_widget": "knob",
+                    "label": "Cutoff",
+                    "min": 20,
+                    "max": 20000,
+                    "default": 880,
+                    "attributes": { "units": "Hz", "binding": "filter.cutoff_hz" },
+                    "style": { "width": 56, "height": 56 },
+                    "children": []
+                },
+                {
+                    "type": "frame",
+                    "name": "Master",
+                    "audio_widget": "fader",
+                    "label": "Master",
+                    "min": -60,
+                    "max": 6,
+                    "default": 0,
+                    "attributes": { "units": "dB", "binding": "param.master_level" },
+                    "style": { "width": 28, "height": 120 },
+                    "children": []
+                },
+                {
+                    "type": "frame",
+                    "name": "OutL",
+                    "audio_widget": "meter",
+                    "label": "Out L",
+                    "min": -60,
+                    "max": 0,
+                    "default": -12,
+                    "attributes": { "units": "dB", "binding": "meter.out_l" },
+                    "style": { "width": 18, "height": 120 },
+                    "children": []
+                },
+                {
+                    "type": "frame",
+                    "name": "FilterPad",
+                    "audio_widget": "xy_pad",
+                    "label": "Filter",
+                    "min": 20,
+                    "max": 20000,
+                    "default": 880,
+                    "attributes": {
+                        "units": "Hz",
+                        "binding": "filter.cutoff_hz",
+                        "binding_y": "filter.resonance"
+                    },
+                    "style": { "width": 120, "height": 120 },
+                    "children": []
+                },
+                {
+                    "type": "frame",
+                    "name": "Master scope",
+                    "audio_widget": "waveform",
+                    "label": "Master",
+                    "min": -1,
+                    "max": 1,
+                    "attributes": { "binding": "bus.master_l" },
+                    "style": { "width": 200, "height": 64 },
+                    "children": []
+                },
+                {
+                    "type": "frame",
+                    "name": "MasterFFT",
+                    "audio_widget": "spectrum",
+                    "label": "Spectrum",
+                    "min": -60,
+                    "max": 0,
+                    "attributes": { "units": "dB", "binding": "bus.fft.master_l" },
+                    "style": { "width": 200, "height": 64 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+
+    // 1 — Envelope tolerated end-to-end.
+    REQUIRE(ir.source == DesignSource::figma_plugin);
+    REQUIRE(ir.root.name == "PluginEditor");
+    REQUIRE(ir.root.children.size() == 6);
+
+    const auto& knob = ir.root.children[0];
+    const auto& fader = ir.root.children[1];
+    const auto& meter = ir.root.children[2];
+    const auto& xy = ir.root.children[3];
+    const auto& wave = ir.root.children[4];
+    const auto& spec = ir.root.children[5];
+
+    // 2 — Every child recognized with the correct audio_widget enum.
+    REQUIRE(knob.audio_widget == AudioWidgetType::knob);
+    REQUIRE(fader.audio_widget == AudioWidgetType::fader);
+    REQUIRE(meter.audio_widget == AudioWidgetType::meter);
+    REQUIRE(xy.audio_widget == AudioWidgetType::xy_pad);
+    REQUIRE(wave.audio_widget == AudioWidgetType::waveform);
+    REQUIRE(spec.audio_widget == AudioWidgetType::spectrum);
+
+    // 3 — Raw bindings preserved on each widget.
+    REQUIRE(knob.attributes.at("binding") == "filter.cutoff_hz");
+    REQUIRE(fader.attributes.at("binding") == "param.master_level");
+    REQUIRE(meter.attributes.at("binding") == "meter.out_l");
+    REQUIRE(xy.attributes.at("binding") == "filter.cutoff_hz");
+    REQUIRE(wave.attributes.at("binding") == "bus.master_l");
+    REQUIRE(spec.attributes.at("binding") == "bus.fft.master_l");
+
+    // 4 — Binding-wireup smoke. The knob's `binding` synthesises the
+    //     canonical pulp* param-key contract (full pinning lives in the
+    //     `[binding-wireup]` per-widget tests); the meter's `binding`
+    //     lowers to a meter source/channel (NOT a pulpParamKey). This
+    //     test asserts only that both wire-up flavours coexist on one
+    //     envelope without interference — full coverage of each flavour
+    //     is in the dedicated binding-wireup tests above.
+    REQUIRE(knob.attributes.at("pulpParamKey") == "filter.cutoff_hz");
+    REQUIRE(meter.attributes.count("pulpParamKey") == 0);
+    REQUIRE(meter.attributes.at("pulpMeterSource") == "meter");
+    REQUIRE(meter.attributes.at("pulpMeterChannel") == "out_l");
+
+    // 5 — XYPad second-axis binding rides on binding_y; other widgets
+    //     do not carry it.
+    REQUIRE(xy.attributes.at("binding_y") == "filter.resonance");
+    REQUIRE(knob.attributes.count("binding_y") == 0);
+    REQUIRE(wave.attributes.count("binding_y") == 0);
+
+    // 6 — Audio ranges round-trip on every widget that carries them.
+    REQUIRE(knob.audio_min == Catch::Approx(20.0f));
+    REQUIRE(knob.audio_max == Catch::Approx(20000.0f));
+    REQUIRE(fader.audio_min == Catch::Approx(-60.0f));
+    REQUIRE(fader.audio_max == Catch::Approx(6.0f));
+    REQUIRE(meter.audio_min == Catch::Approx(-60.0f));
+    REQUIRE(meter.audio_max == Catch::Approx(0.0f));
+    REQUIRE(xy.audio_min == Catch::Approx(20.0f));
+    REQUIRE(xy.audio_max == Catch::Approx(20000.0f));
+    REQUIRE(wave.audio_min == Catch::Approx(-1.0f));
+    REQUIRE(wave.audio_max == Catch::Approx(1.0f));
+    REQUIRE(spec.audio_min == Catch::Approx(-60.0f));
+    REQUIRE(spec.audio_max == Catch::Approx(0.0f));
+}
