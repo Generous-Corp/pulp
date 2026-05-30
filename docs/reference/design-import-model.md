@@ -16,7 +16,8 @@ For the CLI and pipeline reference, see
 
 Most design-to-code tools treat a design as a picture: they try to reproduce
 pixels. Pulp's import is different. When you drop a **Pulp library component**
-— "Pulp / Knob", "Pulp / Fader", "Pulp / Meter" — into your design, you are not
+— "Pulp / Knob", "Pulp / Fader", "Pulp / Meter", "Pulp / XYPad", "Pulp / Waveform",
+"Pulp / Spectrum" — into your design, you are not
 just placing a graphic. You are declaring **what the control *means***.
 
 A Pulp library component carries semantic metadata alongside its appearance:
