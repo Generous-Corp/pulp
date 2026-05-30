@@ -2766,6 +2766,201 @@ TEST_CASE("parse_figma_plugin_json handles a Phase 3 knob without optional units
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// figma-plugin binding wire-up (feat/figma-plugin-binding-wireup).
+//
+// The figma-plugin extractor emits a recognized Pulp Library control as an
+// audio widget plus a single free-form `attributes["binding"]` string. Before
+// this slice that string reached the IR but was dropped — the native
+// materializer and the binding-manifest codegen only consume the
+// `pulp*`-prefixed binding contract. These tests pin that a recognized widget's
+// `binding` is now normalized into the SAME canonical pulp* binding
+// representation (so it produces a real native param hookup AND a
+// binding-manifest entry), while an unrecognized/generic node gets nothing.
+
+TEST_CASE("figma-plugin knob binding lowers to a real native param binding",
+          "[view][import][figma-plugin][binding-wireup]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "VolumeKnob",
+            "audio_widget": "knob",
+            "label": "Cutoff",
+            "min": 20,
+            "max": 20000,
+            "default": 880,
+            "attributes": {
+                "units": "Hz",
+                "binding": "filter.cutoff_hz"
+            },
+            "style": { "width": 56, "height": 56 },
+            "layout": { "direction": "column" },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::knob);
+
+    // The raw evidence is preserved.
+    REQUIRE(ir.root.attributes.at("binding") == "filter.cutoff_hz");
+
+    // The binding is materialized into the canonical pulp* binding contract —
+    // the SAME representation the JSX / Claude path feeds. This is the real
+    // native param binding (param_key drives the manifest + codegen helper),
+    // not merely a preserved string.
+    REQUIRE(ir.root.attributes.at("pulpParamKey") == "filter.cutoff_hz");
+    REQUIRE(ir.root.attributes.at("pulpBindingModule") == "filter");
+    REQUIRE(ir.root.attributes.at("pulpBindingParam") == "cutoff_hz");
+    REQUIRE(ir.root.attributes.at("pulpRouteType") == "native_cpp");
+    REQUIRE(ir.root.attributes.at("pulpRouteId") == "figma-plugin:filter.cutoff_hz");
+
+    // The binding-manifest codegen emits a binding entry carrying the param —
+    // proof the downstream consumer picks the binding up via its existing logic.
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.binding_manifest.find("\"param_key\": \"filter.cutoff_hz\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"binding_module\": \"filter\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"binding_param\": \"cutoff_hz\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"native_primitive\": \"knob\"") != std::string::npos);
+
+    // And the generated native helper emits a live bind_knob() hookup.
+    REQUIRE(result.source.find("ctx.bind_knob(") != std::string::npos);
+    REQUIRE(result.source.find("\"filter.cutoff_hz\"") != std::string::npos);
+}
+
+TEST_CASE("figma-plugin knob binding without a module dot binds the whole key",
+          "[view][import][figma-plugin][binding-wireup]") {
+    // "param.mix" splits module/param on the first dot; a binding with no dot
+    // (defensive) keeps the whole string as the param key.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "Mix",
+            "audio_widget": "knob",
+            "label": "Mix",
+            "min": 0,
+            "max": 1,
+            "default": 0.5,
+            "attributes": { "binding": "param.mix" },
+            "style": { "width": 32, "height": 32 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::knob);
+    REQUIRE(ir.root.attributes.at("pulpParamKey") == "param.mix");
+    REQUIRE(ir.root.attributes.at("pulpBindingModule") == "param");
+    REQUIRE(ir.root.attributes.at("pulpBindingParam") == "mix");
+    // Raw evidence preserved.
+    REQUIRE(ir.root.attributes.at("binding") == "param.mix");
+}
+
+TEST_CASE("figma-plugin meter binding lowers to a meter source/channel input",
+          "[view][import][figma-plugin][binding-wireup]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "OutputMeter",
+            "audio_widget": "meter",
+            "label": "Out L",
+            "attributes": { "binding": "meter.out_l" },
+            "style": { "width": 12, "height": 64 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::meter);
+    // A meter reads from a metering source/channel, not a writable param.
+    REQUIRE(ir.root.attributes.at("pulpMeterSource") == "meter");
+    REQUIRE(ir.root.attributes.at("pulpMeterChannel") == "out_l");
+    REQUIRE(ir.root.attributes.count("pulpParamKey") == 0);
+    REQUIRE(ir.root.attributes.at("binding") == "meter.out_l");
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.binding_manifest.find("\"meter_source\": \"meter\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"meter_channel\": \"out_l\"") != std::string::npos);
+}
+
+TEST_CASE("figma-plugin generic frame with a binding attribute gets no synthesized binding",
+          "[view][import][figma-plugin][binding-wireup]") {
+    // A node that is NOT a semantically-recognized audio widget must stay a
+    // generic/visual node — no pulp* binding is synthesized, and the codegen
+    // emits no binding-manifest entry for it. This pins the recognized-widget
+    // gate (audio_widget != none).
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "DecorativePanel",
+            "attributes": { "binding": "filter.cutoff_hz" },
+            "style": { "width": 200, "height": 120 },
+            "layout": { "direction": "column" },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::none);
+
+    // No binding contract synthesized.
+    REQUIRE(ir.root.attributes.count("pulpParamKey") == 0);
+    REQUIRE(ir.root.attributes.count("pulpBindingModule") == 0);
+    REQUIRE(ir.root.attributes.count("pulpBindingParam") == 0);
+    REQUIRE(ir.root.attributes.count("pulpRouteId") == 0);
+    REQUIRE(ir.root.attributes.count("pulpMeterSource") == 0);
+    // Raw attribute is still preserved untouched.
+    REQUIRE(ir.root.attributes.at("binding") == "filter.cutoff_hz");
+
+    // No binding-manifest entry for an unrecognized node — the manifest holds
+    // an empty entries array and never mentions the binding's param.
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.binding_manifest.find("\"entries\": []") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("filter.cutoff_hz") == std::string::npos);
+}
+
+TEST_CASE("figma-plugin knob with explicit pulp* binding is not overwritten",
+          "[view][import][figma-plugin][binding-wireup]") {
+    // No-regression: a node that already carries the canonical pulp* binding
+    // (e.g. authored or produced by another writer) keeps its values; the
+    // figma-plugin `binding` normalization is a no-op there.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "Knob",
+            "audio_widget": "knob",
+            "attributes": {
+                "binding": "filter.cutoff_hz",
+                "pulpParamKey": "osc.detune",
+                "pulpBindingModule": "osc",
+                "pulpBindingParam": "detune"
+            },
+            "style": { "width": 56, "height": 56 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.attributes.at("pulpParamKey") == "osc.detune");
+    REQUIRE(ir.root.attributes.at("pulpBindingModule") == "osc");
+    REQUIRE(ir.root.attributes.at("pulpBindingParam") == "detune");
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Phase 5 part 1 — Pulp / Fader + Pulp / Meter recognition.
 //
 // Mirrors the Phase 3 contract for the two new library widgets added in
