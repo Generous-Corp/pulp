@@ -220,3 +220,76 @@ test("serialized knob validates against figma-plugin-export-v1 schema", () => {
   validate(rootOf(out), (schema as any).$defs.node, schema as any, "root", nodeErrors);
   assert.deepEqual(nodeErrors, [], `node schema violations:\n${nodeErrors.join("\n")}`);
 });
+
+// ---------------------------------------------------------------------------
+// #43c — user-supplied font bundling. When a UserFontCache carries a TTF
+// for a (family, style) tuple matching a font_family_assets entry, the
+// serializer must:
+//   1. Stamp the entry with the cache's `asset_id`.
+//   2. Add a corresponding entry to `asset_manifest.assets` so the zip
+//      writer packages the bytes as `assets/<hash>.ttf`.
+//   3. Leave NON-matching entries untouched (metadata-only per #43a-rev).
+// ---------------------------------------------------------------------------
+
+import { UserFontCache } from "../src/user-fonts";
+
+test("serializeExport stamps user-supplied font asset_id (#43c)", async () => {
+  const cache = new UserFontCache();
+  const bytes = new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef]);
+  const entry = await cache.add("Clash Grotesk", "Medium", bytes, "ClashGrotesk-Medium.ttf");
+
+  const fontFamilyAssets = [
+    { family: "Inter", style: "Regular", weight: 400 },
+    { family: "Clash Grotesk", style: "Medium", weight: 500 },
+    { family: "Clash Grotesk", style: "Bold", weight: 700 }, // intentionally unmatched
+  ];
+
+  const out = serializeExport([knobNode()], [], ctx({
+    fontFamilyAssets,
+    userFonts: cache,
+  })) as Record<string, any>;
+
+  // 1 — asset_id stamped on the matching (family, style) tuple only.
+  const stamped = out.font_family_assets as Array<Record<string, any>>;
+  assert.equal(stamped[0].asset_id, undefined, "Inter Regular had no user-supplied font");
+  assert.equal(stamped[1].asset_id, entry.asset_id, "Clash Grotesk Medium matched");
+  assert.equal(stamped[2].asset_id, undefined, "Clash Grotesk Bold had no user-supplied font");
+
+  // 2 — bytes flow into asset_manifest with local_path ending in .ttf.
+  const fontAssets = out.asset_manifest.assets.filter(
+    (a: any) => a.asset_id === entry.asset_id,
+  );
+  assert.equal(fontAssets.length, 1, "exactly one asset_manifest entry for the font");
+  assert.equal(fontAssets[0].mime, "font/ttf");
+  assert.equal(fontAssets[0].content_hash, entry.content_hash);
+  assert.ok(
+    fontAssets[0].local_path.endsWith(".ttf"),
+    `local_path should end in .ttf, got ${fontAssets[0].local_path}`,
+  );
+
+  // 3 — the metadata-only path (#43a-rev) still works when no cache is given.
+  const noCacheOut = serializeExport([knobNode()], [], ctx({
+    fontFamilyAssets,
+  })) as Record<string, any>;
+  const noStamp = noCacheOut.font_family_assets as Array<Record<string, any>>;
+  for (const f of noStamp) {
+    assert.equal(f.asset_id, undefined, `no cache → no asset_id stamp (got ${f.asset_id})`);
+  }
+});
+
+test("UserFontCache sniffs SFNT magic for font/ttf vs font/otf (#43c)", async () => {
+  const cache = new UserFontCache();
+
+  // TrueType magic: 0x00 0x01 0x00 0x00
+  const ttf = await cache.add("F", "R", new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xff]), "any.ttf");
+  assert.equal(ttf.mime, "font/ttf");
+
+  // OpenType CFF: "OTTO" (0x4f 0x54 0x54 0x4f)
+  const otf = await cache.add("F", "B", new Uint8Array([0x4f, 0x54, 0x54, 0x4f, 0xff]), "any.otf");
+  assert.equal(otf.mime, "font/otf");
+
+  // Filename fallback when bytes are too short or unknown.
+  const fallback = await cache.add("F", "I", new Uint8Array([0xff]), "no-magic.otf");
+  assert.equal(fallback.mime, "font/otf");
+});
+

@@ -9,6 +9,7 @@ import type { ExtractedFigmaNode, ExtractedDiagnostic } from "./extract-model";
 import type { AssetCache } from "./assets";
 import type { ExtractedTokens } from "./tokens";
 import type { FontFamilyAsset } from "./extract";
+import type { UserFontCache } from "./user-fonts";
 
 export interface SerializeContext {
   fileKey: string;
@@ -21,6 +22,13 @@ export interface SerializeContext {
   /// Empty array → no text nodes in the selection (or no font names
   /// captured). Emitted at envelope root as `font_family_assets`.
   fontFamilyAssets?: FontFamilyAsset[];
+  /// #43c — user-supplied font bytes captured via the drag-drop UI.
+  /// When present, every `font_family_assets` entry whose (family, style)
+  /// matches a cache entry gets `asset_id` stamped, and the bytes flow
+  /// through the asset_manifest into the `.pulp.zip`. Optional — empty
+  /// or undefined cache is a no-op (the envelope still emits the
+  /// metadata-only catalogue per #43a-rev).
+  userFonts?: UserFontCache;
 }
 
 export interface LibraryManifestSnapshot {
@@ -65,16 +73,30 @@ export function serializeExport(
     },
     asset_manifest: {
       version: 1,
-      assets: ctx.assets.entries().map((a) => ({
-        asset_id: a.asset_id,
-        original_uri: a.original_uri,
-        original_uri_aliases: a.original_uri_aliases,
-        local_path: `assets/${a.content_hash}.${extOf(a.mime)}`,
-        content_hash: a.content_hash,
-        mime: a.mime,
-        width: a.width,
-        height: a.height,
-      })),
+      assets: [
+        ...ctx.assets.entries().map((a) => ({
+          asset_id: a.asset_id,
+          original_uri: a.original_uri,
+          original_uri_aliases: a.original_uri_aliases,
+          local_path: `assets/${a.content_hash}.${extOf(a.mime)}`,
+          content_hash: a.content_hash,
+          mime: a.mime,
+          width: a.width,
+          height: a.height,
+        })),
+        // #43c — user-supplied fonts ride alongside the image / vector
+        // assets in the same manifest. The local_path always ends in
+        // .ttf / .otf so the zip writer and downstream consumers can
+        // pick them out by extension without re-sniffing the mime.
+        ...(ctx.userFonts?.entries() ?? []).map((f) => ({
+          asset_id: f.asset_id,
+          original_uri: `userfont://${encodeURIComponent(f.original_filename)}`,
+          original_uri_aliases: [],
+          local_path: `assets/${f.content_hash}.${extOfFontMime(f.mime)}`,
+          content_hash: f.content_hash,
+          mime: f.mime,
+        })),
+      ],
     },
     // #43a-rev: top-level font catalogue. Each entry holds the family
     // name + style + (optional) weight + (optional) italic flag for every
@@ -83,7 +105,7 @@ export function serializeExport(
     // Figma plugin API does not expose font binaries directly. Runtime
     // (Agent A's #43b) consumes via Skia's SkFontMgr system-font matcher
     // with the bundled OFL set as fallback.
-    font_family_assets: ctx.fontFamilyAssets ?? [],
+    font_family_assets: stampUserFonts(ctx.fontFamilyAssets ?? [], ctx.userFonts),
     diagnostics: diagnostics.map(toEnvelopeDiagnostic),
     root,
   };
@@ -98,6 +120,33 @@ function extOf(mime: string): string {
     case "image/svg+xml": return "svg";
     default: return "bin";
   }
+}
+
+function extOfFontMime(mime: string): string {
+  switch (mime) {
+    case "font/ttf":   return "ttf";
+    case "font/otf":   return "otf";
+    case "font/woff":  return "woff";
+    case "font/woff2": return "woff2";
+    default: return "ttf";
+  }
+}
+
+/// #43c — for every font_family_assets entry, if the user has
+/// supplied a matching (family, style) cache entry, stamp it with
+/// the cached asset_id. Pure function; the original list is preserved
+/// otherwise so the metadata-only catalogue from #43a-rev is unchanged
+/// when no user fonts are present.
+function stampUserFonts(
+  fonts: FontFamilyAsset[],
+  cache: UserFontCache | undefined,
+): FontFamilyAsset[] {
+  if (!cache || cache.size() === 0) return fonts;
+  return fonts.map((f) => {
+    const match = cache.lookup(f.family, f.style);
+    if (!match) return f;
+    return { ...f, asset_id: match.asset_id };
+  });
 }
 
 function toEnvelopeNode(n: ExtractedFigmaNode): unknown {

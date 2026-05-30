@@ -2,9 +2,10 @@
 
 import { extractScene } from "./extract";
 import { serializeExport, type LibraryManifestSnapshot } from "./serialize";
-import type { PulpFigmaUIMessage, PulpSandboxMessage } from "./types";
+import type { FontFamilyAssetSummary, PulpFigmaUIMessage, PulpSandboxMessage } from "./types";
+import { UserFontCache } from "./user-fonts";
 
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.2.0";
 
 const LIBRARY_MANIFEST: LibraryManifestSnapshot = {
   library_version: "0.1.0",
@@ -15,6 +16,12 @@ const LIBRARY_MANIFEST: LibraryManifestSnapshot = {
 };
 
 let knownFileKey: string | null = null;
+
+/// #43c — sandbox-side store of user-dropped TTF/OTF bytes, keyed by
+/// (family, style). Survives across export attempts within a single
+/// plugin session so the user can drop, preview, export, drop more,
+/// re-export. Discarded when the plugin closes.
+const userFonts = new UserFontCache();
 
 figma.showUI(__html__, { width: 360, height: 540, themeColors: true });
 
@@ -45,6 +52,14 @@ figma.ui.onmessage = async (msg: PulpFigmaUIMessage) => {
 
       case "export":
         await handleExport();
+        break;
+
+      case "scan-fonts":
+        await handleScanFonts();
+        break;
+
+      case "user-font":
+        await handleUserFont(msg);
         break;
 
       case "close":
@@ -93,6 +108,7 @@ async function handleExport(): Promise<void> {
     assets: result.assets,
     tokens: result.tokens,
     fontFamilyAssets: result.font_family_assets,
+    userFonts,
   });
 
   const json = JSON.stringify(envelope, null, 2);
@@ -100,18 +116,29 @@ async function handleExport(): Promise<void> {
 
   // Hand the assets to the UI as { content_hash, mime, bytes } records.
   // Bytes are transferred as plain arrays to keep postMessage compatibility;
-  // the UI converts back to Uint8Array for the zip writer.
-  const assetBundles = result.assets.entries().map((a) => ({
-    content_hash: a.content_hash,
-    mime: a.mime,
-    bytes: Array.from(a.bytes), // postMessage-safe; ~1.5x size overhead vs raw buffer
-  }));
+  // the UI converts back to Uint8Array for the zip writer. The user-font
+  // entries (#43c) ride in the same bundle list — the UI doesn't need to
+  // distinguish them; the zip writer picks the file extension from mime.
+  const assetBundles = [
+    ...result.assets.entries().map((a) => ({
+      content_hash: a.content_hash,
+      mime: a.mime,
+      bytes: Array.from(a.bytes), // postMessage-safe; ~1.5x size overhead vs raw buffer
+    })),
+    ...userFonts.entries().map((f) => ({
+      content_hash: f.content_hash,
+      mime: f.mime,
+      bytes: Array.from(f.bytes),
+    })),
+  ];
+
+  const totalAssetCount = result.assets.size() + userFonts.size();
 
   reply({
     type: "export-result",
     nodeCount: result.nodeCount,
     diagnosticCount: result.diagnostics.length,
-    assetCount: result.assets.size(),
+    assetCount: totalAssetCount,
     tokenCount:
       Object.keys(result.tokens.colors).length +
       Object.keys(result.tokens.dimensions).length +
@@ -120,6 +147,48 @@ async function handleExport(): Promise<void> {
     suggestedName,
     json,
     assets: assetBundles,
+  });
+}
+
+/// #43c — walk the current selection, collect the unique (family, style,
+/// weight?, italic?) tuples referenced by text nodes, and reply with a
+/// `fonts-detected` message annotated with which entries already have
+/// user-supplied bytes in the cache. The same logic the export path
+/// uses (collectFontFamilyAssets) — invoked early so the UI can render
+/// drop zones before the user commits to a full export.
+async function handleScanFonts(): Promise<void> {
+  const sel = figma.currentPage.selection;
+  if (sel.length === 0) {
+    reply({ type: "fonts-detected", fonts: [] });
+    return;
+  }
+  const result = await extractScene(sel);
+  const fonts: FontFamilyAssetSummary[] = result.font_family_assets.map((f) => ({
+    family: f.family,
+    style: f.style,
+    weight: f.weight,
+    italic: f.italic,
+    has_user_font: !!userFonts.lookup(f.family, f.style),
+  }));
+  reply({ type: "fonts-detected", fonts });
+}
+
+/// #43c — user dropped a TTF/OTF onto the UI. Store in the cache and
+/// ack with the asset_id so the UI can flip the row state. The cache
+/// survives until plugin close.
+async function handleUserFont(msg: {
+  family: string;
+  style: string;
+  bytes: number[];
+  filename: string;
+}): Promise<void> {
+  const bytes = new Uint8Array(msg.bytes);
+  const entry = await userFonts.add(msg.family, msg.style, bytes, msg.filename);
+  reply({
+    type: "user-font-staged",
+    family: entry.family,
+    style: entry.style,
+    asset_id: entry.asset_id,
   });
 }
 
