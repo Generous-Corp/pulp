@@ -21,6 +21,55 @@ HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})
 COLOR_FUNC_RE = re.compile(r"^(?:rgb|rgba|hsl|hsla)\(", re.IGNORECASE)
 
 
+def token_key(value: str) -> str:
+    return value.strip()
+
+
+def tokens_from_rows(rows: list[Any]) -> dict[str, dict[str, Any]]:
+    tokens: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for token in row.get("style_token_references", []) or []:
+            if not isinstance(token, str):
+                continue
+            key = token_key(token)
+            if not key:
+                continue
+            tokens.setdefault(key, {
+                "type": "reference",
+                "value": key,
+                "source_identity": {
+                    "provenance": "style_token_references",
+                    "source": "route_manifest",
+                },
+            })
+    return dict(sorted(tokens.items()))
+
+
+def token_counts(tokens: dict[str, dict[str, Any]], rows: list[Any]) -> dict[str, int]:
+    counts = {
+        "total": len(tokens),
+        "unresolved": 0,
+        "referenced_by_rows": 0,
+    }
+    referenced_rows = set()
+    for token in tokens.values():
+        if "resolved_value" not in token:
+            counts["unresolved"] += 1
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        refs = [
+            token for token in row.get("style_token_references", []) or []
+            if isinstance(token, str) and token_key(token)
+        ]
+        if refs:
+            referenced_rows.add(index)
+    counts["referenced_by_rows"] = len(referenced_rows)
+    return counts
+
+
 def local_source_path(source_path: str, repo_root: pathlib.Path) -> pathlib.Path | None:
     if not source_path:
         return None

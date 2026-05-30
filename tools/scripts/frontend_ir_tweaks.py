@@ -7,6 +7,7 @@ import json
 import pathlib
 from typing import Any
 
+from frontend_ir_sources import metric_key
 from frontend_ir_validation import SCHEMAS
 
 
@@ -92,3 +93,21 @@ def tweaks_from_sidecar(path: pathlib.Path, valid_node_ids: set[str] | None = No
         normalize_tweak(item, index, valid_node_ids)
         for index, item in enumerate(raw_tweaks)
     ]
+
+
+def tweak_counts(tweaks: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {
+        "total": len(tweaks),
+        "classification_preserved": 0,
+    }
+    for tweak in tweaks:
+        if not isinstance(tweak, dict):
+            continue
+        if tweak.get("classification_preserved") is True:
+            counts["classification_preserved"] += 1
+        for invalidation in tweak.get("invalidates", []) or []:
+            if isinstance(invalidation, str):
+                counts[f"invalidates_{metric_key(invalidation)}"] = counts.get(
+                    f"invalidates_{metric_key(invalidation)}", 0
+                ) + 1
+    return counts

@@ -149,3 +149,33 @@ def resource_counts(resources: list[dict[str, Any]]) -> dict[str, int]:
             if isinstance(route, str):
                 counts[f"route_usage_{route}"] = counts.get(f"route_usage_{route}", 0) + 1
     return counts
+
+
+def artifact_ref_from_manifest(route_manifest: dict[str, Any], key: str, kind: str) -> dict[str, Any] | None:
+    value = route_manifest.get("inputs", {}).get(key)
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    ref = {
+        "path": path,
+        "kind": kind,
+    }
+    sha = value.get("sha256")
+    if isinstance(sha, str) and sha:
+        ref["sha256"] = sha
+    return ref
+
+
+def binary_dependency_evidence(route_manifest: dict[str, Any]) -> dict[str, Any]:
+    metrics = route_manifest.get("route_metrics", {})
+    if not isinstance(metrics, dict):
+        return {}
+    js_initialized = metrics.get("js_engine_initialized")
+    if js_initialized is True:
+        return {
+            "js_engine_present": True,
+            "source": "route_manifest_runtime_metrics",
+        }
+    return {}
