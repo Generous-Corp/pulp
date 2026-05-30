@@ -445,6 +445,18 @@ void Knob::paint(canvas::Canvas& canvas) {
         // / Ableton stock knobs). Indicator notch sits at that angle from
         // 35% inner radius to 95% outer radius — long enough to read,
         // short enough not to dominate.
+        //
+        // Named brushed-metal palette (pulp #41 — was inline magic rgba).
+        // Tuned to the ELYSIUM Figma reference: body highlight ~RGB 200, mid
+        // ~150, shadow side ~95; the rim/bevel/indicator tones frame it.
+        const canvas::Color kSilverRim              = canvas::Color::rgba(0.22f, 0.23f, 0.26f, 1.0f);
+        const canvas::Color kSilverBodyLight        = canvas::Color::rgba(0.82f, 0.84f, 0.88f, 1.0f);
+        const canvas::Color kSilverBodyMid          = canvas::Color::rgba(0.62f, 0.65f, 0.70f, 1.0f);
+        const canvas::Color kSilverBodyDim          = canvas::Color::rgba(0.40f, 0.43f, 0.49f, 1.0f);
+        const canvas::Color kSilverInnerBevel       = canvas::Color::rgba(0.18f, 0.20f, 0.23f, 0.55f);
+        const canvas::Color kSilverIndicatorBacking = canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.85f);
+        const canvas::Color kSilverIndicator        = canvas::Color::rgba(0.97f, 0.97f, 0.97f, 1.0f);
+
         float full_r = std::min(cx, cy) - 2.0f;
         float body_r = full_r - 1.5f;         // chrome body radius
         float inner_r = body_r - 1.0f;
@@ -458,7 +470,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         }
 
         // 2. Outer dark rim (the edge bezel) — slightly darker than body
-        canvas.set_fill_color(canvas::Color::rgba(0.22f, 0.23f, 0.26f, 1.0f));
+        canvas.set_fill_color(kSilverRim);
         canvas.fill_circle(cx, cy, full_r);
 
         // 3. Chrome body — two-circle radial gradient from light source
@@ -466,10 +478,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         //    tuned to match the Figma reference: highlight ~RGB 200, mid
         //    body ~150, shadow side ~95. Without the darker mid-body the
         //    knob looks washed-out and the indicator loses contrast.
-        canvas::Color light = canvas::Color::rgba(0.82f, 0.84f, 0.88f, 1.0f);
-        canvas::Color mid   = canvas::Color::rgba(0.62f, 0.65f, 0.70f, 1.0f);
-        canvas::Color dim   = canvas::Color::rgba(0.40f, 0.43f, 0.49f, 1.0f);
-        canvas::Color grads[3] = { light, mid, dim };
+        canvas::Color grads[3] = { kSilverBodyLight, kSilverBodyMid, kSilverBodyDim };
         float stops[3] = { 0.0f, 0.50f, 1.0f };
         canvas.set_fill_gradient_radial_two_circles(
             cx - body_r * 0.30f, cy - body_r * 0.40f, body_r * 0.05f,
@@ -482,7 +491,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         //     body edge creates a "bezel-inside-bezel" effect that reads
         //     as a precision-machined control. Subtle (alpha 0.35) so it
         //     doesn't compete with the highlight.
-        canvas.set_stroke_color(canvas::Color::rgba(0.18f, 0.20f, 0.23f, 0.55f));
+        canvas.set_stroke_color(kSilverInnerBevel);
         canvas.set_line_width(std::max(1.0f, body_r * 0.04f));
         canvas.stroke_circle(cx, cy, body_r - body_r * 0.05f);
 
@@ -510,11 +519,11 @@ void Knob::paint(canvas::Canvas& canvas) {
         float ind_inner_x = cx + inner_r * 0.35f * std::cos(angle);
         float ind_inner_y = cy + inner_r * 0.35f * std::sin(angle);
         // Subtle dark backing line for contrast on the bright top arc
-        canvas.set_stroke_color(canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.85f));
+        canvas.set_stroke_color(kSilverIndicatorBacking);
         canvas.set_line_width(std::max(2.5f, body_r * 0.10f));
         canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
         // Bright top line — the actual indicator
-        canvas.set_stroke_color(canvas::Color::rgba(0.97f, 0.97f, 0.97f, 1.0f));
+        canvas.set_stroke_color(kSilverIndicator);
         canvas.set_line_width(std::max(1.5f, body_r * 0.07f));
         canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
     } else {
