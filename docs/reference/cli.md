@@ -278,7 +278,30 @@ pulp doctor --caches                 # FetchContent shared-source cache health
 pulp doctor --caches --fix           # heal user-owned dangling/stale-commit entries
 pulp doctor --caches --fix --dry-run # preview heal without removing anything
 pulp doctor --caches --json          # emit the cache report as stable JSON
+pulp doctor --host-quirks            # show the runtime DAW host-quirks policy + enforced accommodations
+pulp doctor quirks                   # synonym for --host-quirks
 ```
+
+`pulp doctor --host-quirks` reports whether Pulp is enforcing DAW
+host-quirk accommodations and under which policy. It prints the effective
+tier policy (`off` / `validated-only` / `all`) and where it came from
+(compile-time default, the `PULP_HOST_QUIRKS` env var, or a programmatic
+`set_host_quirk_policy()` call), the detected host + version, and the list
+of currently-enforced accommodations with their validation tier. The same
+section is appended to the default `pulp doctor` output.
+
+Override the policy at runtime without recompiling:
+
+```bash
+PULP_HOST_QUIRKS=off            pulp doctor --host-quirks  # disable all accommodations
+PULP_HOST_QUIRKS=validated-only pulp doctor --host-quirks  # only bench-validated fixes
+PULP_HOST_QUIRKS=all            pulp doctor --host-quirks  # every detected quirk (default)
+```
+
+Per-quirk provenance — `source_type`, `evidence`, and `last_verified`
+dates — lives in `core/format/host-quirks.json`. See
+[host-quirks policy](host-quirks-policy.md) for the full opt-in / opt-out
+story and the precedence rules.
 
 Checks are platform-gated — only relevant checks run on each OS:
 - **macOS**: git, compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, optional AAX SDK/validator, build state

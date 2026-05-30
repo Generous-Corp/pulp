@@ -7,9 +7,14 @@
 #include "validator_discovery.hpp"
 #include "version_diag.hpp"
 
+#include <pulp/format/host_quirks.hpp>
+#include <pulp/format/host_type.hpp>
+#include <pulp/format/host_version.hpp>
+
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <ostream>
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <sys/wait.h>
@@ -51,6 +56,76 @@ pulp::cli::version_diag::ProjectEntry make_project_entry(
     return e;
 }
 
+// ── Host-quirks reporting (host-quirks integration plan, P2) ──────────
+//
+// Surfaces the runtime host-quirks state so a user can see whether Pulp
+// is enforcing DAW accommodations, under which policy, and from where
+// (env / API / compile default). Rendered in the default `pulp doctor`
+// output and as the focused `pulp doctor --host-quirks` view.
+const char* quirk_policy_label(const pulp::format::QuirkFilter& f) {
+    if (!f.allow_validated && !f.allow_speculative && !f.allow_lesson_only)
+        return "off";
+    if (f.allow_validated && !f.allow_speculative && !f.allow_lesson_only)
+        return "validated-only";
+    if (f.allow_validated && f.allow_speculative && f.allow_lesson_only)
+        return "all";
+    return "custom";
+}
+
+const char* quirk_policy_source_label(pulp::format::QuirkPolicySource s) {
+    switch (s) {
+        case pulp::format::QuirkPolicySource::CompileDefault: return "compile default";
+        case pulp::format::QuirkPolicySource::Environment:    return "PULP_HOST_QUIRKS env";
+        case pulp::format::QuirkPolicySource::Api:            return "set_host_quirk_policy()";
+    }
+    return "?";
+}
+
+const char* quirk_tier_label(pulp::format::QuirkStatus t) {
+    switch (t) {
+        case pulp::format::QuirkStatus::Validated:   return "Validated";
+        case pulp::format::QuirkStatus::Speculative: return "Speculative";
+        case pulp::format::QuirkStatus::LessonOnly:  return "LessonOnly";
+    }
+    return "?";
+}
+
+void render_host_quirks_section(std::ostream& os, bool color) {
+    namespace fmt = pulp::format;
+    const auto policy = fmt::resolve_quirk_policy();
+    const auto info = fmt::detect_host_info();
+    const auto quirks = fmt::resolved_quirks(info.type, info.version);
+    const auto fields = fmt::enumerate_quirk_fields(quirks);
+
+    int enforced = 0;
+    for (const auto& f : fields)
+        if (f.enforced) ++enforced;
+
+    os << (color ? color::bold() : "") << "Host quirks"
+       << (color ? color::reset() : "") << "\n";
+    os << "  policy:        " << quirk_policy_label(policy.filter)
+       << "  (" << quirk_policy_source_label(policy.source) << ")\n";
+    os << "  detected host: " << fmt::host_type_name(info.type);
+    if (!info.version.is_unknown())
+        os << " " << info.version.major << "." << info.version.minor;
+    os << "\n";
+    os << "  enforced:      " << enforced << " / " << fields.size()
+       << " accommodations active\n";
+    for (const auto& f : fields) {
+        if (!f.enforced) continue;
+        os << "    \xe2\x80\xa2 " << f.name
+           << "  [" << quirk_tier_label(f.tier) << "]\n";
+    }
+    if (enforced == 0)
+        os << "    (none active for this host)\n";
+    os << "  override with " << (color ? color::cyan() : "")
+       << "PULP_HOST_QUIRKS=off|validated-only|all" << (color ? color::reset() : "")
+       << "\n";
+    os << "  " << (color ? color::dim() : "")
+       << "provenance + last-verified dates: core/format/host-quirks.json"
+       << (color ? color::reset() : "") << "\n";
+}
+
 }  // namespace
 
 int cmd_doctor(const std::vector<std::string>& args) {
@@ -73,10 +148,12 @@ int cmd_doctor(const std::vector<std::string>& args) {
     bool au_cache_mode = false;   // --au-cache (Slice 11): refresh macOS AU registrar
     bool json_mode = false;       // --json (works with --versions and --caches)
     bool list_mode = false;       // --list / `pulp doctor list` (R2-8)
+    bool host_quirks_mode = false; // --host-quirks / `pulp doctor quirks` (host-quirks P2)
     std::string only_filter;      // --only <name> (R2-8)
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& arg = args[i];
         if (arg == "--fix") fix_mode = true;
+        else if (arg == "--host-quirks") host_quirks_mode = true;
         else if (arg == "--ci") ci_mode = true;
         else if (arg == "--dry-run") dry_run = true;
         else if (arg == "--versions") versions_mode = true;
@@ -89,7 +166,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         else if (arg == "--only") {
             if (i + 1 >= args.size() || args[i + 1].rfind("-", 0) == 0) {
                 std::cerr << "pulp doctor: --only requires a value\n";
-                std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
+                std::cerr << "Usage: pulp doctor [android|ios|list|quirks] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--host-quirks] [--only <name>]\n";
                 return 2;
             }
             only_filter = args[++i];
@@ -97,13 +174,13 @@ int cmd_doctor(const std::vector<std::string>& args) {
             only_filter = arg.substr(7);
         } else if (arg.rfind("--", 0) == 0) {
             std::cerr << "pulp doctor: unknown flag: " << arg << "\n";
-            std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--au-cache] [--json] [--list] [--only <name>]\n";
+            std::cerr << "Usage: pulp doctor [android|ios|list|quirks] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--au-cache] [--json] [--list] [--host-quirks] [--only <name>]\n";
             return 2;
         } else if (mode.empty()) {
             mode = arg;
         } else {
             std::cerr << "pulp doctor: unexpected argument '" << arg << "'\n";
-            std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
+            std::cerr << "Usage: pulp doctor [android|ios|list|quirks] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--host-quirks] [--only <name>]\n";
             return 2;
         }
     }
@@ -115,9 +192,23 @@ int cmd_doctor(const std::vector<std::string>& args) {
         mode.clear();
     }
 
+    // `pulp doctor quirks` is a synonym for `--host-quirks`.
+    if (mode == "quirks") {
+        host_quirks_mode = true;
+        mode.clear();
+    }
+
+    // Focused host-quirks view: print only the section and exit 0. Lets
+    // users (and the CLI test) inspect the runtime policy without running
+    // the full check battery. PULP_HOST_QUIRKS still applies.
+    if (host_quirks_mode) {
+        render_host_quirks_section(std::cout, !ci_mode && g_color_enabled);
+        return 0;
+    }
+
     if (!mode.empty() && mode != "android" && mode != "ios") {
         std::cerr << "pulp doctor: unknown subcommand '" << mode << "'\n";
-        std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--au-cache] [--json] [--list] [--only <name>]\n";
+        std::cerr << "Usage: pulp doctor [android|ios|list|quirks] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--au-cache] [--json] [--list] [--host-quirks] [--only <name>]\n";
         return 2;
     }
 
@@ -575,6 +666,14 @@ int cmd_doctor(const std::vector<std::string>& args) {
                 }
             }
         }
+    }
+
+    // Host-quirks summary — only in the default (non-mobile) doctor view,
+    // and only for humans (CI output stays machine-parseable). The focused
+    // `pulp doctor --host-quirks` path above is the scriptable surface.
+    if (mode.empty() && !ci_mode) {
+        std::cout << "\n";
+        render_host_quirks_section(std::cout, g_color_enabled);
     }
 
     if (!ci_mode) {

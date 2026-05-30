@@ -424,6 +424,9 @@ commands:
       - name: --json
         kind: flag
         description: With --versions or --caches, emit the diagnostic as a single JSON object (stable schema — see reference/cli.md#doctor)
+      - name: --host-quirks
+        kind: flag
+        description: Print only the host-quirks section — the effective runtime policy (off/validated-only/all) and its source (compile default / PULP_HOST_QUIRKS env / API), the detected DAW + version, and which accommodations are enforced. Also rendered at the bottom of the default doctor view. `pulp doctor quirks` is a synonym. Exits 0. Override the policy with the PULP_HOST_QUIRKS env var.
     docs: reference/cli.md#doctor
 
   - name: clean

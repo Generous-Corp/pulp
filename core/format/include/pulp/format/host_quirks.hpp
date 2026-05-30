@@ -44,6 +44,10 @@
 #include <pulp/format/host_type.hpp>
 #include <pulp/format/host_version.hpp>
 
+#include <optional>
+#include <string_view>
+#include <vector>
+
 namespace pulp::format {
 
 /// Validation tier for an individual host-quirk flag. See file header.
@@ -387,6 +391,80 @@ HostQuirks make_quirks_for_validated_only(HostType type, HostVersion version);
 /// Plugin authors can still override at runtime by ignoring this
 /// helper and constructing their own `HostQuirks` via
 /// `make_quirks_for(...)` + `apply_filter(...)`.
+///
+/// Since P2 this routes through `resolved_quirks(...)`, so the runtime
+/// policy (env / API / per-quirk override) applies here too. With no
+/// runtime override set, the effective filter is the compile-time
+/// default, so behavior is unchanged from before P2.
 HostQuirks detect_quirks();
+
+// ── Runtime policy (P2) ───────────────────────────────────────────────
+//
+// The compile-time `PULP_HOST_QUIRKS_DEFAULT_POLICY` option sets the
+// baseline tier filter. P2 layers a runtime override on top so a user
+// who doesn't trust a quirk can dial it back without recompiling, while
+// the default stays ON (validated quirks enforced). Precedence, highest
+// first:
+//
+//   per-quirk override  >  set_host_quirk_policy() (API)
+//                       >  PULP_HOST_QUIRKS env  >  compile-time default
+//
+// All of this is init-time configuration — resolve once when the adapter
+// is constructed. None of it is real-time safe; never call the setters
+// from the audio thread.
+
+/// Where the effective base tier-filter came from (for diagnostics —
+/// `pulp doctor` reports this).
+enum class QuirkPolicySource : unsigned char {
+    CompileDefault,  ///< PULP_HOST_QUIRKS_DEFAULT_POLICY build option.
+    Environment,     ///< PULP_HOST_QUIRKS environment variable.
+    Api,             ///< set_host_quirk_policy().
+};
+
+/// The runtime-resolved base filter together with its source.
+struct ResolvedQuirkPolicy {
+    QuirkFilter filter;
+    QuirkPolicySource source = QuirkPolicySource::CompileDefault;
+};
+
+/// Resolve the effective base tier-filter at runtime (does NOT apply
+/// per-quirk overrides — those layer on inside `resolved_quirks`). The
+/// `PULP_HOST_QUIRKS` env var is parsed once and cached; recognized
+/// values (case-insensitive) are `off`, `validated-only`, and `all`. An
+/// unrecognized value is ignored with a one-time warning and resolution
+/// falls through to the next layer.
+ResolvedQuirkPolicy resolve_quirk_policy();
+
+/// Programmatically set the base tier-filter (highest base-layer
+/// precedence, above the env var). Pass `std::nullopt` to clear it and
+/// fall back to env / compile default. Init-time only.
+void set_host_quirk_policy(std::optional<QuirkFilter> filter);
+
+/// Force a single quirk flag on or off by its `HostQuirks` field name,
+/// overriding the tier filter for just that flag. `enabled = true` keeps
+/// the host-populated value even when its tier is filtered out;
+/// `enabled = false` forces it back to the default (off). Unknown names
+/// are ignored. Init-time only.
+void set_quirk_override(std::string_view flag, bool enabled);
+
+/// Clear all per-quirk overrides set via `set_quirk_override`.
+void clear_quirk_overrides();
+
+/// One row of resolved quirk state, for diagnostics (`pulp doctor`).
+struct QuirkFieldStatus {
+    std::string_view name;  ///< `HostQuirks` field name (static storage).
+    QuirkStatus tier;       ///< Validation tier from `kHostQuirksMeta`.
+    bool enforced;          ///< Accommodation active (bool true; int != default).
+};
+
+/// Enumerate every quirk field of `q` with its tier and whether it is
+/// currently enforced, in `HostQuirks` declaration order. Used by
+/// `pulp doctor` to render the host-quirks table.
+std::vector<QuirkFieldStatus> enumerate_quirk_fields(const HostQuirks& q);
+
+/// The single entry adapters consume (P3): build the host's quirks, apply
+/// the runtime base filter (`resolve_quirk_policy`), then layer per-quirk
+/// overrides. Equivalent to `make_quirks_for` + the runtime policy.
+HostQuirks resolved_quirks(HostType type, HostVersion version);
 
 }  // namespace pulp::format
