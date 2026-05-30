@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02840"></a>
+## [0.284.0] - 2026-05-30
+
+- feat(design-import): wire figma-plugin parameter bindings into native widgets ([#3184](https://github.com/danielraffel/pulp/pull/3184))
+- docs: add Figma → Pulp design-import model + plugin guide; refresh stale plugin README ([#3186](https://github.com/danielraffel/pulp/pull/3186))
+
 <a id="v02831"></a>
 ## [0.283.1] - 2026-05-30
 
@@ -3222,6 +3228,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.284.0]: https://github.com/danielraffel/pulp/releases/tag/v0.284.0
 [0.283.1]: https://github.com/danielraffel/pulp/releases/tag/v0.283.1
 [0.283.0]: https://github.com/danielraffel/pulp/releases/tag/v0.283.0
 [0.282.2]: https://github.com/danielraffel/pulp/releases/tag/v0.282.2
