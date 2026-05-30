@@ -241,3 +241,23 @@ Both landed NO-GO; Slice 0.5 supersedes Slice 0's verdict. See
 new `PerfCounters` fields (`base64_decode_total_us`,
 `gpu_buffer_upload_count`, `gpu_buffer_bytes_resident_peak`) stay
 merged for future workload-specific re-evaluations.
+
+## JSC iOS lane (iOS-D.3b program, 2026-05-29)
+
+Pulp ships Three.js inside an AUv3 `.appex` on iOS via JSC (system framework, no V8 build). The full bring-up is in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` (6 slices, all merged to main).
+
+**Path summary:**
+- JSC runs `three.webgpu.js` as a Rollup-bundled IIFE (NOT ESM — JSC's ESM module-loader API is private on iOS, App Store rejection risk).
+- The bundle script `tools/scripts/bundle_threejs_for_jsc.mjs` is a pure-Node ESM-to-IIFE transform; no Rollup runtime dep.
+- `tools/cmake/PulpAuv3.cmake` runs the bundler at .appex build time (POST_BUILD step gated on `find_program(node)`).
+- `core/view/src/threejs_resources_apple.mm` loads the embedded bundle from `Resources/threejs/three.iife.js` at runtime via `NSBundle`.
+- WidgetBridge's `__gpu*Impl` family is engine-agnostic by construction — all 11 functions register through `engine_.register_function(...)` which works for V8 or JSC.
+
+**Perf delta vs V8 macOS:**
+- iOS-D.3a measured JSC interpreter at 230 FPS @ 2000 cubes on iPad Pro 11" 3rd-gen (scene-graph math only, no GPU). That's 80× the user's 30-FPS threshold with 14ms GPU budget remaining.
+- JSC interpreter is 3-10× slower than JIT V8 on hot loops, but the iPad GPU runs Metal at full speed regardless of jitless JS.
+- Three.js's tight `Object3D.updateMatrixWorld` traversal is actually MORE JIT-friendly than naive hand-rolled JS — Three.js r149 outperformed the iOS-D.3a hand-rolled cube bench at every scene size.
+
+**Don't reach for V8 on iOS unless a measurable feature gap surfaces** — the build is 3-5h, needs Chromium depot_tools + 50GB workspace, and JSC's jitless interpreter already clears the bar.
+
+**The `presentable` flag** (slice 4) is the load-bearing signal that distinguishes a real swapchain-backed canvas from a silent offscreen texture. Both `__gpuCanvasConfigureImpl` and `__gpuCanvasDescribeCurrentTextureImpl` surface it. If a JSC-backed Three.js demo shows a black editor pane, grep the log for `presentable=false` before debugging anything else.

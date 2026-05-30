@@ -341,3 +341,17 @@ table inside an individual backend; that path drifts.
 re-registrations across `WidgetBridge` (function, host-object, and
 promise-function names) and is the cheapest tripwire if a split-up
 registration module forgets the contract.
+
+## ESM support per engine (iOS-D.3b 2026-05-29)
+
+| Engine | Public ESM API | Status |
+|---|---|---|
+| **V8** (`libnode.141.dylib` on macOS) | `import.meta`, dynamic `import()`, `setModuleLoaderDelegate`-equivalent | ✅ Full ESM. Used by `examples/threejs-native-demo/main.cpp:221` for macOS Three.js. |
+| **JSC** (system framework on iOS) | NO public ESM module loader on iOS | ❌ `JSScript.h` + `JSModuleLoaderDelegate` are private. Shipping them in an `.appex` risks App Store rejection. |
+| **JSC** (system framework on macOS) | `JSScript` exposed via framework headers | 🟡 Available, but typically unused since macOS uses V8. |
+| **QuickJS** (vendored under `external/quickjs/`) | Full ESM via `JS_NewModule*` | ✅ Used as a fallback when V8 is unavailable + jitless V8 isn't an option. |
+| **Hermes** | Limited (no full ES module support) | ❌ Not viable for Three.js. |
+
+**iOS Three.js workaround**: Bundle the ESM source into a self-contained IIFE that registers exports on `globalThis.THREE`, then JSC `evaluate()` it. The bundler is at `tools/scripts/bundle_threejs_for_jsc.mjs`; the iOS NSBundle loader at `core/view/src/threejs_resources_apple.mm`; the .appex build-time wiring at `tools/cmake/PulpAuv3.cmake`. Pattern is general — any ESM library can be bundled this way for the JSC iOS lane.
+
+See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` for the full 6-slice bring-up and `.agents/skills/{ios,threejs-bridge}/SKILL.md` for the runtime contract.

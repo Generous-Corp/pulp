@@ -2704,6 +2704,19 @@ pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test
 pulp_add_test_suite(pulp-test-widget-bridge-api-contracts
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 
+# Widget bridge — no-GPU gate enforcement (issue #3157 regression).
+# Pure static scan: walks widget_bridge.cpp line-by-line and asserts every
+# `gpu_surface_->` dereference is inside a PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
+# gate (or the #else of an #ifndef PULP_HAS_SKIA block, which implies the
+# render module's include path is present). Catches the iOS Simulator
+# regression class where GpuSurface is forward-declared but its members are
+# called from configures that did not link the render module. Runs in the
+# default macOS PR lane in milliseconds — no Xcode / iOS SDK required, so it
+# closes the gap the slow `cmake-ios-auv3-configure` test left behind for PR
+# validation.
+pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 # Widget bridge — runtime-import handlers (pulp #468 follow-up).
 # Split out of test_widget_bridge.cpp in the Phase 5 P5-1 first cut so
 # the 14k-line god-test file shrinks toward per-surface modules.

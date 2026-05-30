@@ -823,3 +823,19 @@ for the full rationale.
 - `test/test_remote_view.cpp` — loopback tests for the remote protocol
 - `test/test_editor_bridge.cpp` — EditorBridge unit tests (#709)
 - `planning/next-features-plan.md` § Feature 1 — phase tracking
+
+## GpuSurface plumbing into WidgetBridge (iOS-D.3b Slice 1, 2026-05-29)
+
+Slice 1 of the iOS-D.3b program (PR #3146 @ `3e15f61cb`) added the cross-platform contract for plugin hosts to pass their live `GpuSurface*` to the bridge. All format adapters (AUv3 iOS/macOS, VST3, CLAP, AU v2) now route the surface through `ScriptedUiSession::attach_gpu_surface()` → `WidgetBridge::attach_gpu_surface()`.
+
+**Public APIs added:**
+- `PluginViewHost::gpu_surface() const` — virtual, returns the host's live surface (nullable). Overridden by each platform's plugin view host.
+- `WidgetBridge::attach_gpu_surface(render::GpuSurface*)` — idempotent + nullable. Late-attach is supported (slice-1 contract case 4): JS-side `__describeNativeAdapterImpl()` flips from mock to native after a non-null attach.
+- `WidgetBridge::has_native_gpu_bridge() const` — reflects whether the attached surface exposes a real Dawn-native bridge (not just any non-null pointer).
+- `ScriptedUiSession::attach_gpu_surface(...)` — the call format adapters use; routes to the underlying bridge.
+
+**Why this matters:** Before slice 1, only `examples/threejs-native-demo/main.cpp:230` ever passed the surface. Format adapters had no path to do so, which silently routed Three.js + WebGPU canvas calls to mock adapters in production plug-ins. Don't bypass this plumbing — if you're writing a new format adapter or plugin host, route your live `GpuSurface*` through `ScriptedUiSession::attach_gpu_surface()` (or `WidgetBridge::attach_gpu_surface()` if you don't have a session yet).
+
+**`presentable` flag** (iOS-D.3b Slice 4): `WidgetBridge`'s `__gpuCanvasConfigureImpl` and `__gpuCanvasDescribeCurrentTextureImpl` both expose a `presentable` boolean to JS. `true` iff `gpu_surface_->has_surface()` is true (i.e., the surface has a real swapchain, not just an offscreen texture). Three.js draws to a `presentable=false` canvas land in a silent offscreen render that's not composited to the visible AUv3 editor. Always check this flag in any new GPU bridge code path.
+
+See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` for the full 6-slice program.

@@ -8291,7 +8291,19 @@ void WidgetBridge::register_api() {
         // configure() returning `presentable: true` is the program's
         // contract that JS draws WILL hit the visible swapchain rather
         // than a silent offscreen texture (Codex pass-1 finding #3).
+        //
+        // `has_surface()` is a member of render::GpuSurface; the full type
+        // is only visible when pulp/render/gpu_surface.hpp is on the
+        // include path. On no-GPU configures (e.g. iOS Simulator with
+        // PULP_ENABLE_GPU=OFF) the render module isn't built, the header
+        // isn't reachable, and GpuSurface stays forward-declared — so we
+        // must gate the call under PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE and
+        // report presentable=false when GPU is unavailable.
+#if PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
         const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
+#else
+        const bool presentable = false;
+#endif
 
         auto result = choc::value::createObject("");
         result.addMember("nativeBridge", choc::value::createBool(false));
@@ -8370,8 +8382,14 @@ void WidgetBridge::register_api() {
         // JS can verify per-frame that the texture it's about to draw
         // into IS the visible swapchain (slice 5 wires
         // gpu_surface_->current_texture_handle() through this path;
-        // slice 4 just plumbs the boolean).
+        // slice 4 just plumbs the boolean). Same PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
+        // gate as the configure path above — no-GPU configures keep
+        // presentable=false because there is no swapchain to address.
+#if PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
         const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
+#else
+        const bool presentable = false;
+#endif
 
         auto descriptor = choc::value::createObject("");
         auto canvas_id = args.get<std::string>(0, "");

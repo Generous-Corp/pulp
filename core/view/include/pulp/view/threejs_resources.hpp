@@ -6,8 +6,9 @@
 // embedded inside the AUv3 `.appex` (currently iOS). The IIFE bundle
 // is produced at build time by
 // `tools/scripts/bundle_threejs_for_jsc.mjs` and copied into
-// `<appex>/Resources/threejs/three.iife.js` by the iOS AUv3 CMake
-// rules.
+// `<appex>/threejs/three.iife.js` by the iOS AUv3 CMake rules. (iOS
+// bundles are flat — `<appex>/Resources/` is a macOS-only path that
+// NSBundle does not search on iOS.)
 //
 // On non-Apple-mobile platforms this returns `std::nullopt` — the
 // macOS / desktop lanes resolve Three.js source files via the
@@ -24,10 +25,12 @@ namespace pulp::view {
 
 // Returns the embedded `three.iife.js` source if available on this
 // platform. On iOS the source lives at
-// `Resources/threejs/three.iife.js` inside the AUv3 `.appex`, located
-// at runtime via `[NSBundle bundleForClass:[PulpAUViewController
-// class]]`. On non-iOS platforms (and on Apple-mobile builds where
-// the resource is missing), returns `std::nullopt`.
+// `threejs/three.iife.js` inside the AUv3 `.appex` (iOS bundles are
+// flat — `<appex>/Resources/` is macOS-only). It is located at
+// runtime via `[NSBundle bundleForClass:[PulpAUViewController class]]`
+// and `pathForResource:ofType:inDirectory:@"threejs"`. On non-iOS
+// platforms (and on Apple-mobile builds where the resource is
+// missing), returns `std::nullopt`.
 //
 // The returned string is the full IIFE wrapper that, when run through
 // JSC `evaluate()`, registers `THREE` on `globalThis`. Callers should

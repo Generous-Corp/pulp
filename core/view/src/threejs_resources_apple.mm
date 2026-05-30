@@ -3,12 +3,16 @@
 // threejs_resources_apple.mm — iOS-D.3b Slice 2.
 //
 // Apple-platform implementation of `pulp::view::threejs_iife_source()`.
-// On iOS we load `Resources/threejs/three.iife.js` from inside the
-// AUv3 `.appex` via `NSBundle`. The bundle is located by walking up
-// from the `PulpAUViewController` class (the principal class of the
-// `.appex`). On macOS we deliberately return `std::nullopt` — the
-// macOS lane resolves Three.js source files via V8's public ESM API,
-// not via the embedded IIFE bundle.
+// On iOS we load `threejs/three.iife.js` from inside the AUv3 `.appex`
+// via `NSBundle`. iOS bundles are flat — `[NSBundle resourcePath]` IS
+// the bundle root, so the loader resolves
+// `<resourcePath>/threejs/three.iife.js` = `<appex>/threejs/...`
+// (NOT `<appex>/Resources/threejs/...`, which is the macOS-only
+// layout that NSBundle does not search on iOS). The bundle is located
+// by walking up from the `PulpAUViewController` class (the principal
+// class of the `.appex`). On macOS we deliberately return
+// `std::nullopt` — the macOS lane resolves Three.js source files via
+// V8's public ESM API, not via the embedded IIFE bundle.
 
 #include "pulp/view/threejs_resources.hpp"
 

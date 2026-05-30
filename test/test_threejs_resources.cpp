@@ -13,12 +13,12 @@
 //   use the IIFE bundle).
 //
 // The "loads correctly when staged" assertion runs on iOS only via a
-// staged fixture under
-// `test/fixtures/threejs/Resources/threejs/three.iife.js` so the unit
-// test can exercise the load path without needing a real `.appex`.
-// That fixture is created on demand by the test below; we do NOT
-// ship a pre-staged copy because slice 2's bundle output may differ
-// per upstream Three.js pin.
+// staged fixture under `test/fixtures/threejs/threejs/three.iife.js`
+// (iOS bundles are flat — the subdirectory mirrors the runtime
+// `[bundle pathForResource:ofType:inDirectory:@"threejs"]` lookup,
+// NOT a macOS `Contents/Resources/` layout). That fixture is created
+// on demand; we do NOT ship a pre-staged copy because slice 2's
+// bundle output may differ per upstream Three.js pin.
 
 #include <catch2/catch_test_macros.hpp>
 
