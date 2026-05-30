@@ -654,6 +654,25 @@ fi
 
 step "Checking git-lfs files"
 
+# In CI on Apple Silicon, provision the pinned prebuilt Skia so GPU/examples
+# builds (the PULP_HAS_SKIA configure gate, e.g. examples/design-tool) succeed.
+# The LFS-declared Skia binaries are NOT committed, so a fresh shipyard/local-CI
+# worktree has only headers/pointers and `-DPULP_BUILD_EXAMPLES=ON` configure
+# hard-fails (examples/design-tool/CMakeLists.txt). GitHub Actions provisions
+# Skia the same way (build.yml's "Fetch prebuilt Skia (macOS)" step). The fetch
+# script is idempotent (sha-stamps the unpacked asset and skips when the
+# manifest pin matches), so it is safe to run on every CI setup.
+if $CI_MODE && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+    step "Provisioning prebuilt Skia (CI macOS arm64)"
+    if dry "python3 tools/scripts/fetch_skia_for_release.py darwin-arm64"; then
+        :
+    elif python3 "$REPO_ROOT/tools/scripts/fetch_skia_for_release.py" darwin-arm64; then
+        info "Skia provisioned (pinned asset from tools/deps/manifest.json)"
+    else
+        warn "Skia fetch failed; GPU/examples build may fail the PULP_HAS_SKIA gate"
+    fi
+fi
+
 # Check if Skia files are actual binaries or just LFS pointers
 SKIA_CHECK="$REPO_ROOT/external/skia-build"
 if [ -d "$SKIA_CHECK" ]; then
