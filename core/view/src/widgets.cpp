@@ -655,12 +655,26 @@ void Fader::paint(canvas::Canvas& canvas) {
             : skinned             ? std::max(6.0f, std::min(track_width * 0.18f, 12.0f))
                                   : 4.0f;
         float track_radius = track_thick * 0.5f;
+        float track_x = 0, track_y = 0, track_w = 0, track_h = 0;
         if (vert) {
-            float tx = (b.width - track_thick) * 0.5f;
-            canvas.fill_rounded_rect(tx, 0, track_thick, track_length, track_radius);
+            track_x = (b.width - track_thick) * 0.5f;
+            track_y = 0; track_w = track_thick; track_h = track_length;
         } else {
-            float ty = (b.height - track_thick) * 0.5f;
-            canvas.fill_rounded_rect(0, ty, track_length, track_thick, track_radius);
+            track_y = (b.height - track_thick) * 0.5f;
+            track_x = 0; track_w = track_length; track_h = track_thick;
+        }
+        canvas.fill_rounded_rect(track_x, track_y, track_w, track_h, track_radius);
+
+        // Track outline (pulp #3192): the captured empty track has a visible
+        // lighter edge around the dark channel. When the importer derived that
+        // edge colour from the art, stroke the track rect so the empty portion
+        // above the thumb doesn't read as a flat dark slab. Drawn before the
+        // fill/thumb so they sit on top, matching the captured layering.
+        if (has_skin_track_border_) {
+            canvas.set_stroke_color({track_border_color_.r, track_border_color_.g,
+                                     track_border_color_.b, track_border_color_.a});
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(track_x, track_y, track_w, track_h, track_radius);
         }
 
         // Fill (value portion)

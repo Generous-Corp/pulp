@@ -1745,6 +1745,23 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // setFaderTrackBorder(id, "#rrggbb")
+    //
+    // pulp #3192 — the importer derived the lighter edge the captured art draws
+    // around the empty track channel. The skinned fader strokes the track rect
+    // with this colour so the empty portion above the thumb doesn't read as a
+    // flat dark slab. No-op for an empty / unparseable colour.
+    engine_.register_function("setFaderTrackBorder",
+        [this, parse_skin_hex](choc::javascript::ArgumentList args) {
+            auto* f = dynamic_cast<Fader*>(widget(args.get<std::string>(0, "")));
+            if (!f) return choc::value::Value();
+            if (auto [c, ok] = parse_skin_hex(args.get<std::string>(1, "")); ok) {
+                f->set_skin_track_border_color(c);
+                f->request_repaint();
+            }
+            return choc::value::Value();
+        });
+
     // setMeterColors(id, backgroundColor, "#stop0,#stop1,#stop2,...")
     //
     // Generalises the knob sprite-strip skin to the meter: the importer

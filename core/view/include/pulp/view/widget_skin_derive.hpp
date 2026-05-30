@@ -38,10 +38,17 @@ struct FaderSkin {
     canvas::Color fill_color{};
     canvas::Color thumb_color{};
     canvas::Color thumb_border_color{};
+    // Outline of the empty track (the lighter edge the captured art draws
+    // around the dark channel above the thumb). Recovered as the brightest
+    // low-saturation column pixel found on a track row, when it is meaningfully
+    // lighter than the track fill itself. Lets the skinned fader stroke the
+    // track so it doesn't read as a flat dark slab. pulp #3192.
+    canvas::Color track_border_color{};
     bool has_track = false;
     bool has_fill = false;
     bool has_thumb = false;
     bool has_thumb_border = false;
+    bool has_track_border = false;
     // Horizontal extents recovered from the captured art, in ASSET PIXELS
     // (the importer divides by the asset scale to get logical px). The track
     // is the thin low-saturation central column at a non-thumb row; the thumb

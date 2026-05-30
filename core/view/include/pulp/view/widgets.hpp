@@ -511,6 +511,10 @@ public:
     void set_skin_fill_color(canvas::Color c)  { fill_color_  = c; has_skin_fill_  = true; request_repaint(); }
     void set_skin_thumb_color(canvas::Color c) { thumb_color_ = c; has_skin_thumb_ = true; request_repaint(); }
     void set_skin_thumb_border_color(canvas::Color c) { thumb_border_color_ = c; has_skin_thumb_border_ = true; request_repaint(); }
+    // pulp #3192 — outline of the empty track (the lighter edge the captured
+    // art draws around the dark channel). When set, the skinned fader strokes
+    // the track rect so it doesn't read as a flat dark slab.
+    void set_skin_track_border_color(canvas::Color c) { track_border_color_ = c; has_skin_track_border_ = true; request_repaint(); }
     // pulp #3191 — derived thin track width (logical px). When set, the skinned
     // fader draws its track / fill at exactly this width (centred) instead of a
     // fraction of the widget box, matching the captured art's narrow track.
@@ -521,20 +525,24 @@ public:
     bool has_skin_track_width() const { return has_skin_track_width_; }
     void clear_skin() {
         has_skin_track_ = has_skin_fill_ = has_skin_thumb_ = has_skin_thumb_border_ = false;
+        has_skin_track_border_ = false;
         has_skin_track_width_ = false;
         request_repaint();
     }
     bool has_skin() const {
-        return has_skin_track_ || has_skin_fill_ || has_skin_thumb_ || has_skin_thumb_border_;
+        return has_skin_track_ || has_skin_fill_ || has_skin_thumb_ ||
+               has_skin_thumb_border_ || has_skin_track_border_;
     }
     bool has_skin_track_color() const { return has_skin_track_; }
     bool has_skin_fill_color() const { return has_skin_fill_; }
     bool has_skin_thumb_color() const { return has_skin_thumb_; }
     bool has_skin_thumb_border_color() const { return has_skin_thumb_border_; }
+    bool has_skin_track_border_color() const { return has_skin_track_border_; }
     canvas::Color skin_track_color() const { return track_color_; }
     canvas::Color skin_fill_color() const { return fill_color_; }
     canvas::Color skin_thumb_color() const { return thumb_color_; }
     canvas::Color skin_thumb_border_color() const { return thumb_border_color_; }
+    canvas::Color skin_track_border_color() const { return track_border_color_; }
 
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
@@ -542,10 +550,12 @@ private:
     canvas::Color fill_color_{};
     canvas::Color thumb_color_{};
     canvas::Color thumb_border_color_{};
+    canvas::Color track_border_color_{};
     bool has_skin_track_ = false;
     bool has_skin_fill_ = false;
     bool has_skin_thumb_ = false;
     bool has_skin_thumb_border_ = false;
+    bool has_skin_track_border_ = false;
     float skin_track_width_ = 0.0f;
     bool has_skin_track_width_ = false;
 };

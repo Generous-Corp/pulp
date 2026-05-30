@@ -97,6 +97,52 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         out.track_color = to_color(low_sat[low_sat.size() / 6].second);
         out.has_track = true;
 
+        // Track outline (pulp #3192): the captured empty track is a dark
+        // channel that the design draws with a slightly lighter edge so it
+        // doesn't read as a flat slab. We first try to RECOVER that edge by
+        // scanning across a representative dark track row for the brightest
+        // low-saturation pixel and comparing it to the fill at the row centre —
+        // a real outline shows a clear luminance delta. When the captured edge
+        // is a sub-pixel anti-aliased rim that the flat-PNG sample can't
+        // resolve (it reads as uniform fill), we SYNTHESISE the rim by
+        // lightening the sampled track colour — but only for a DARK track,
+        // where an outline is the design convention. Both paths are derived
+        // from the captured pixels (the actual track colour / edge); no
+        // per-instance colour is hardcoded. A light/flat track gets no rim.
+        {
+            const RGB track_rgb = low_sat[low_sat.size() / 6].second;
+            const int track_lum = lum(track_rgb);
+            int track_row = low_sat[low_sat.size() / 2].first;  // a mid dark row
+            int centre_lum = lum(pixel(img, cx, track_row));      // the fill here
+            int l = 0, r = 0;
+            bool recovered = false;
+            if (row_art_bounds(img, track_row, cx, l, r)) {
+                RGB brightest{};
+                int best_lum = -1;
+                for (int x = l; x <= r; ++x) {
+                    RGB c = pixel(img, track_row, x);
+                    if (c.a <= 200 || sat(c) >= 25) continue;
+                    if (lum(c) > best_lum) { best_lum = lum(c); brightest = c; }
+                }
+                if (best_lum - centre_lum > 12) {
+                    out.track_border_color = to_color(brightest);
+                    out.has_track_border = true;
+                    recovered = true;
+                }
+            }
+            // Synthesised rim for a dark track when none could be resolved.
+            // Lighten the sampled track colour by a fixed step (kept modest so
+            // the stroke reads as a subtle edge, not a second fill).
+            if (!recovered && track_lum < 90) {
+                auto lift = [](int v) { return std::min(255, v + 30); };
+                out.track_border_color =
+                    canvas::Color::rgba8(static_cast<uint8_t>(lift(track_rgb.r)),
+                                         static_cast<uint8_t>(lift(track_rgb.g)),
+                                         static_cast<uint8_t>(lift(track_rgb.b)));
+                out.has_track_border = true;
+            }
+        }
+
         // Thumb body: brightest low-saturation row (the silver slab).
         auto thumb_it = std::max_element(low_sat.begin(), low_sat.end(),
                                          [](auto& a, auto& b) { return lum(a.second) < lum(b.second); });

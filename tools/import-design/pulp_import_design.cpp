@@ -1854,6 +1854,7 @@ int main(int argc, char* argv[]) {
                                         if (fs_skin.has_fill)         n.attributes["skin_fill_color"]         = hex(fs_skin.fill_color);
                                         if (fs_skin.has_thumb)        n.attributes["skin_thumb_color"]        = hex(fs_skin.thumb_color);
                                         if (fs_skin.has_thumb_border) n.attributes["skin_thumb_border_color"] = hex(fs_skin.thumb_border_color);
+                                        if (fs_skin.has_track_border) n.attributes["skin_track_border_color"] = hex(fs_skin.track_border_color);
                                         // Widths: the widget/thumb box uses the
                                         // derived thumb-slab width; the track is
                                         // the narrow central column. Both in
