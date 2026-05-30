@@ -307,7 +307,7 @@ Accepts IR-format JSON. In Claude Code flows, the Figma MCP (`get_design_context
 ### Figma plugin (`parse_figma_plugin_json`)
 
 The **"Design for Pulp"** Figma plugin export envelope. Recognized Pulp library
-components (Knob / Fader / Meter) carry semantic `audio_widget` metadata +
+components (Knob / Fader / Meter / XYPad / Waveform / Spectrum) carry semantic `audio_widget` metadata +
 parameter bindings, so they materialize as native, bound widgets rather than
 generic frames; everything else imports as layout/visual. Accepts a `.pulp.zip`
 (assets bundled) directly — the importer unpacks it and resolves assets from the

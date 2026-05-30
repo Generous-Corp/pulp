@@ -32,8 +32,8 @@ This is the path for designers. **No build step, ever.**
    <https://www.figma.com/community/plugin/1642456870947996392>
 
 2. **Add the Pulp component library.** Add the published example library so you
-   can drop "Pulp / Knob", "Pulp / Fader", and "Pulp / Meter" instances into
-   your design:
+   can drop "Pulp / Knob", "Pulp / Fader", "Pulp / Meter", "Pulp / XYPad",
+   "Pulp / Waveform", and "Pulp / Spectrum" instances into your design:
    <https://www.figma.com/community/file/1642409275200893924>
 
 3. **Design.** Lay out your plugin UI. Drop in Pulp library components wherever
