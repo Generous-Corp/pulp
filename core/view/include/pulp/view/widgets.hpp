@@ -912,8 +912,20 @@ public:
     void clear_skin() {
         gradient_stops_.clear();
         has_skin_background_ = false;
+        bar_fill_ratio_ = 1.0f;
         request_repaint();
     }
+    // Fraction of the widget's cross-axis width occupied by the coloured bar
+    // (0..1). The captured meter draws a narrow coloured fill recessed inside a
+    // wider dark housing slot; this ratio reproduces that inset so the rendered
+    // bar isn't edge-to-edge paint. Derived from the captured asset
+    // (colored-bar width / housing width); defaults to 1.0 (full width) when the
+    // importer didn't supply it. pulp #3191 follow-up.
+    void set_bar_fill_ratio(float r) {
+        bar_fill_ratio_ = std::clamp(r, 0.05f, 1.0f);
+        request_repaint();
+    }
+    float bar_fill_ratio() const { return bar_fill_ratio_; }
     bool has_skin_gradient() const { return gradient_stops_.size() >= 2; }
     bool has_skin_background_color() const { return has_skin_background_; }
     const std::vector<canvas::Color>& skin_gradient() const { return gradient_stops_; }
@@ -932,6 +944,7 @@ private:
     std::vector<canvas::Color> gradient_stops_;
     canvas::Color background_color_{};
     bool has_skin_background_ = false;
+    float bar_fill_ratio_ = 1.0f;
 };
 
 // ── XYPad ────────────────────────────────────────────────────────────────────

@@ -1894,6 +1894,90 @@ TEST_CASE("generate_pulp_js produces valid web-compat JS", "[view][import]") {
     REQUIRE(js.find("theme.colors[\"bg.primary\"]") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_js reconstructs the value/range/unit/binding stack from metadata",
+          "[view][import][issue-3192]") {
+    // The figma-plugin export carries each widget's value / range / unit /
+    // binding as NODE METADATA (audio_min/max/default + attributes
+    // units/binding), NOT as child text nodes. The native codegen must
+    // reconstruct the Pulp Library display stack from that metadata: the widget
+    // label, the formatted value, then a small grey sub-stack (min / max / units
+    // / binding). This is generalizable from metadata — no per-instance
+    // hardcoding.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.layout.direction = LayoutDirection::row;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Knob — Cutoff";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Cutoff";
+    knob.audio_min = 20.0f;
+    knob.audio_max = 20000.0f;
+    knob.audio_default = 880.0f;
+    knob.has_audio_range = true;
+    knob.attributes["units"] = "Hz";
+    knob.attributes["binding"] = "filter.cutoff_hz";
+    ir.root.children.push_back(knob);
+
+    CodeGenOptions opts;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Widget label.
+    REQUIRE(js.find("'Cutoff'") != std::string::npos);
+    // Formatted value: 880 is whole → no decimals.
+    REQUIRE(js.find("'880'") != std::string::npos);
+    // Grey sub-stack: min / max / units / binding, each its own label.
+    REQUIRE(js.find("'20'") != std::string::npos);
+    REQUIRE(js.find("'20000'") != std::string::npos);
+    REQUIRE(js.find("'Hz'") != std::string::npos);
+    REQUIRE(js.find("'filter.cutoff_hz'") != std::string::npos);
+    // Sub-stack uses the small grey colour.
+    REQUIRE(js.find("'#6c7086'") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js formats fractional audio values with one decimal",
+          "[view][import][issue-3192]") {
+    // The value formatter is generalizable: a whole value prints with no
+    // decimals (matching the reference's 880 / 0 / -60), a fractional value
+    // prints with one decimal (e.g. -6.5). NB: the reference shows the meter's
+    // whole -6 as "-6.0" because the Pulp Library meter component uses a fixed
+    // 1-decimal level format; that per-component decimal convention is not
+    // recoverable from the value alone (it's whole), so the generalizable rule
+    // formats whole -6 as "-6" — the exact "-6.0" trailing zero is a deferred
+    // cosmetic, not a fidelity-gated metric.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+
+    IRNode meter;
+    meter.type = "frame";
+    meter.name = "Meter — Out L";
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.audio_label = "Out L";
+    meter.audio_min = -60.0f;
+    meter.audio_max = 0.0f;
+    meter.audio_default = -6.5f;   // genuinely fractional → 1 decimal
+    meter.has_audio_range = true;
+    meter.attributes["units"] = "dB";
+    meter.attributes["binding"] = "meter.out_l";
+    ir.root.children.push_back(meter);
+
+    CodeGenOptions opts;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Fractional value formatted with one decimal: -6.5.
+    REQUIRE(js.find("'-6.5'") != std::string::npos);
+    // Whole-number range bounds print without decimals.
+    REQUIRE(js.find("'-60'") != std::string::npos);
+    REQUIRE(js.find("'0'") != std::string::npos);
+    REQUIRE(js.find("'meter.out_l'") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js escapes text containing newlines / quotes / backslashes (pulp #81)",
           "[view][import][issue-81]") {
     // pulp #81: a Claude Design HTML file with multi-line <style>/<script>

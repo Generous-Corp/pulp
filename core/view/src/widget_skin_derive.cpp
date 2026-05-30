@@ -182,12 +182,23 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         }
     }
 
-    // Fill: the most-saturated row in the art (the coloured track fill).
-    auto fill_it = std::max_element(rows.begin(), rows.end(),
-                                    [](auto& a, auto& b) { return sat(a.second) < sat(b.second); });
-    if (fill_it != rows.end() && sat(fill_it->second) > 40) {
-        out.fill_color = to_color(fill_it->second);
-        out.has_fill = true;
+    // Fill: a REPRESENTATIVE coloured row, not the single most-saturated one.
+    // The captured fill is a vertical gradient (lighter near the thumb, darker
+    // toward the bottom); the single max-saturation pixel is the darkest /
+    // deepest stop and over-saturates the derived colour vs the fill's dominant
+    // mid tone. Collect the saturated rows (sat > 40) and take the MEDIAN by
+    // saturation so the derived colour is the dominant mid blue — matching the
+    // reference palette the harness compares against. pulp #3191 colour fix.
+    {
+        std::vector<RGB> colored;
+        for (auto& r : rows)
+            if (sat(r.second) > 40) colored.push_back(r.second);
+        if (!colored.empty()) {
+            std::sort(colored.begin(), colored.end(),
+                      [](const RGB& a, const RGB& b) { return sat(a) < sat(b); });
+            out.fill_color = to_color(colored[colored.size() / 2]);
+            out.has_fill = true;
+        }
     }
 
     // ── Horizontal widths (pulp #3191) ───────────────────────────────────────
@@ -224,6 +235,13 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         }
     }
 
+    // Housing height = the control art region (track + thumb), excluding the
+    // value-stack text the design tool bakes below it. pulp #3191 follow-up.
+    if (bottom > top) {
+        out.housing_height_px = static_cast<float>(bottom - top);
+        out.has_housing_height = true;
+    }
+
     return out;
 }
 
@@ -247,7 +265,10 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
 
     // Walk the contiguous coloured fill from the bottom up. Stop at the dark
     // empty channel or the low-saturation white peak line — that bounds the
-    // captured gradient.
+    // captured gradient's TOP (the warm/red stop sits just under the peak
+    // line / dark channel). This `fill_top` is the top of the bar's full
+    // COLOURED extent, which is what the gradient must span so its top stop is
+    // the warm/red the capture shows — not only the lower green→yellow band.
     int fill_bottom = bottom - 2;
     if (fill_bottom <= top) return out;
     int fill_top = fill_bottom;
@@ -269,7 +290,10 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
         out.has_fill_level = true;
     }
 
-    // Sample stop_count stops across the fill, low(bottom)→high(top).
+    // Sample stop_count stops across the bar's full COLOURED extent, low/green
+    // (fill_bottom) → high/warm (fill_top). The renderer maps these stops across
+    // the displayed fill region, so the top stop (warm/red) lands at the top of
+    // the rendered fill, matching the capture.
     for (int i = 0; i < stop_count; ++i) {
         float frac = static_cast<float>(i) / static_cast<float>(stop_count - 1);
         int y = static_cast<int>(std::lround(fill_bottom - frac * fill_h));
@@ -277,22 +301,59 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
         out.gradient.push_back(to_color(pixel(img, cx, y)));
     }
 
-    // ── Bar width (pulp #3191) ───────────────────────────────────────────────
-    // The visible coloured bar is a narrow inset region; its opaque width is
-    // constant down the bar's own vertical region [top, bottom). Take the
-    // median row width (outward from cx) so AA at the rounded top/bottom and
-    // any faint glyphs below don't skew it. Reported in asset pixels.
-    {
+    // ── Bar / housing widths (pulp #3191) ─────────────────────────────────────
+    // The captured art has TWO widths: the dark HOUSING slot (the full opaque
+    // run in [top, bottom)) and the narrower COLOURED bar recessed inside it
+    // (the saturated fill in [fill_top, fill_bottom]). The widget box should be
+    // the housing width; the coloured bar insets within it by bar_fill_ratio so
+    // the rendered meter reads as a recessed bar, not edge-to-edge paint.
+    // Housing width = the full opaque extent (outward from cx) — the dark slot.
+    // Coloured-bar width = the run of SATURATED pixels around cx — the recessed
+    // coloured fill, which can be narrower than the opaque housing it sits in.
+    // Measuring the opaque extent for the bar would just re-measure the housing
+    // (the dark slot stays opaque around the colour), so the bar must be the
+    // saturated run, not the opaque run.
+    auto median_opaque_width = [&](int y0, int y1) -> float {
         std::vector<int> widths;
-        widths.reserve(static_cast<size_t>(bottom - top));
+        widths.reserve(static_cast<size_t>(std::max(1, y1 - y0)));
         int l = 0, r = 0;
-        for (int y = top; y < bottom; ++y)
+        for (int y = y0; y < y1; ++y)
             if (row_art_bounds(img, y, cx, l, r)) widths.push_back(r - l + 1);
-        if (!widths.empty()) {
-            std::sort(widths.begin(), widths.end());
-            out.bar_width_px = static_cast<float>(widths[widths.size() / 2]);
-            out.has_bar_width = true;
+        if (widths.empty()) return 0.0f;
+        std::sort(widths.begin(), widths.end());
+        return static_cast<float>(widths[widths.size() / 2]);
+    };
+    auto median_colored_width = [&](int y0, int y1) -> float {
+        std::vector<int> widths;
+        widths.reserve(static_cast<size_t>(std::max(1, y1 - y0)));
+        for (int y = y0; y < y1; ++y) {
+            // Walk outward from cx counting contiguous saturated pixels.
+            if (sat(pixel(img, cx, y)) < 30) continue;
+            int l = cx, r = cx;
+            while (l - 1 >= 0 && pixel(img, l - 1, y).a > 200 && sat(pixel(img, l - 1, y)) >= 30) --l;
+            while (r + 1 < img.width && pixel(img, r + 1, y).a > 200 && sat(pixel(img, r + 1, y)) >= 30) ++r;
+            widths.push_back(r - l + 1);
         }
+        if (widths.empty()) return 0.0f;
+        std::sort(widths.begin(), widths.end());
+        return static_cast<float>(widths[widths.size() / 2]);
+    };
+    float housing_w = median_opaque_width(top, bottom);
+    float colored_w = median_colored_width(fill_top, fill_bottom);
+    if (housing_w > 0.0f) {
+        out.bar_width_px = housing_w;
+        out.has_bar_width = true;
+        if (colored_w > 0.0f && colored_w <= housing_w) {
+            out.bar_fill_ratio = std::clamp(colored_w / housing_w, 0.05f, 1.0f);
+            out.has_bar_fill_ratio = true;
+        }
+    }
+    // Housing height = the control art region (dark channel + coloured fill),
+    // excluding the value-stack text the design tool bakes below it. pulp #3191
+    // follow-up.
+    if (bottom > top) {
+        out.housing_height_px = static_cast<float>(bottom - top);
+        out.has_housing_height = true;
     }
     return out;
 }

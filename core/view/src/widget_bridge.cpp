@@ -1799,6 +1799,23 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // setMeterBarRatio(id, ratio)
+    //
+    // pulp #3191 follow-up — the captured meter draws a narrow coloured fill
+    // recessed inside a wider dark housing slot. The importer derives the
+    // colored-bar-width / housing-width ratio from the asset and hands it here
+    // so the skinned meter insets its gradient bar by (1-ratio)/2 on each side
+    // instead of painting edge-to-edge. No-op (full width) for a non-positive
+    // or unset ratio.
+    engine_.register_function("setMeterBarRatio",
+        [this](choc::javascript::ArgumentList args) {
+            auto* m = dynamic_cast<Meter*>(widget(args.get<std::string>(0, "")));
+            if (!m) return choc::value::Value();
+            float r = static_cast<float>(args.get<double>(1, 0));
+            if (r > 0.0f) { m->set_bar_fill_ratio(r); m->request_repaint(); }
+            return choc::value::Value();
+        });
+
     // createCheckbox(id, parentId)
     engine_.register_function("createCheckbox", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

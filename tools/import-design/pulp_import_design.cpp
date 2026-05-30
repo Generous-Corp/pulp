@@ -1863,6 +1863,14 @@ int main(int argc, char* argv[]) {
                                             n.attributes["shape_width"] = fmt_px(fs_skin.thumb_width_px / asset_scale);
                                         if (fs_skin.has_track_width)
                                             n.attributes["skin_track_width"] = fmt_px(fs_skin.track_width_px / asset_scale);
+                                        // Control housing height (logical px) —
+                                        // the captured PNG bakes the value-stack
+                                        // text below the control, so the node's
+                                        // declared height spans control+labels;
+                                        // use the real control extent so the
+                                        // fader isn't stretched ~2× tall.
+                                        if (fs_skin.has_housing_height)
+                                            n.attributes["shape_height"] = fmt_px(fs_skin.housing_height_px / asset_scale);
                                         // Captured thumb position (0..1) → initial
                                         // value-position, so the imported fader
                                         // matches where the design drew the thumb.
@@ -1885,6 +1893,19 @@ int main(int argc, char* argv[]) {
                                         // the box spacing so the narrow bar centres.
                                         if (ms.has_bar_width)
                                             n.attributes["shape_width"] = fmt_px(ms.bar_width_px / asset_scale);
+                                        // Control housing height (logical px) —
+                                        // exclude the baked value-stack text so
+                                        // the meter isn't stretched ~2× tall
+                                        // (which also doubles the absolute fill).
+                                        if (ms.has_housing_height)
+                                            n.attributes["shape_height"] = fmt_px(ms.housing_height_px / asset_scale);
+                                        // Colored-bar / housing width ratio →
+                                        // the meter insets its gradient bar so a
+                                        // narrow coloured fill reads recessed in
+                                        // the wider dark housing (the capture's
+                                        // structure). Scale-invariant ratio.
+                                        if (ms.has_bar_fill_ratio)
+                                            n.attributes["skin_meter_bar_ratio"] = fmt_px(ms.bar_fill_ratio);
                                         // Captured fill level (0..1) → initial
                                         // meter level matching the design.
                                         if (ms.has_fill_level)

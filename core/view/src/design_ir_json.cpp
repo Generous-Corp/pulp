@@ -448,6 +448,8 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         node.audio_max = get_float(obj, "max", 1.0f);
     if (obj.hasObjectMember("default"))
         node.audio_default = get_float(obj, "default", 0.5f);
+    if (obj.hasObjectMember("min") && obj.hasObjectMember("max"))
+        node.has_audio_range = true;
 
     // Top-level properties (Pencil/Figma format puts these at node level, not in "style")
     // Override style values if they weren't set from the "style" sub-object

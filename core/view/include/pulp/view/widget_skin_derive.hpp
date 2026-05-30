@@ -57,6 +57,13 @@ struct FaderSkin {
     float thumb_width_px = 0.0f;
     bool has_track_width = false;
     bool has_thumb_width = false;
+    // Height of the control housing (the tallest opaque run — the track + thumb),
+    // in ASSET PIXELS. The captured PNG bakes the value-stack text below the
+    // control, so the node's declared height spans control+labels; using it
+    // verbatim stretches the fader to ~2× its real height. This is the real
+    // control extent. pulp #3191 follow-up.
+    float housing_height_px = 0.0f;
+    bool has_housing_height = false;
     // Normalised thumb position recovered from the capture (0 = bottom, 1 =
     // top), i.e. where the design actually drew the thumb. An audio fader's
     // value→position map is non-linear (a taper), so a linear (value-min)/(max-
@@ -80,6 +87,21 @@ struct MeterSkin {
     // pulp #3191 width fix.
     float bar_width_px = 0.0f;
     bool has_bar_width = false;
+    // Height of the meter housing (the tallest opaque run — the dark channel +
+    // coloured fill), in ASSET PIXELS. Like the fader, the captured PNG bakes
+    // the value-stack text below the control, so the declared height spans
+    // control+labels; using it verbatim stretches the meter to ~2× its real
+    // height (and doubles the absolute fill). This is the real control extent.
+    // pulp #3191 follow-up.
+    float housing_height_px = 0.0f;
+    bool has_housing_height = false;
+    // Fraction of the housing's cross-axis width occupied by the coloured fill
+    // (colored-bar width / full housing width, 0..1). The captured meter recesses
+    // a narrow coloured bar inside a wider dark housing slot; this ratio lets the
+    // skinned meter reproduce that inset instead of painting edge-to-edge. 1.0
+    // when the fill spans the full housing. pulp #3191 follow-up.
+    float bar_fill_ratio = 1.0f;
+    bool has_bar_fill_ratio = false;
     // Normalised fill level recovered from the capture (0 = empty, 1 = full):
     // the height of the contiguous saturated fill from the bottom of the bar.
     // Like the fader, a meter's dB→position map is non-linear, so seed the

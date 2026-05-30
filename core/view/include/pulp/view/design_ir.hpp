@@ -207,6 +207,10 @@ struct IRNode {
     float audio_min = 0.0f;
     float audio_max = 1.0f;
     float audio_default = 0.5f;
+    // True when the source explicitly carried a min/max range (vs the 0..1
+    // defaults). Lets the codegen reconstruct the value/range display stack only
+    // for widgets that actually declared a range. pulp #3192 follow-up.
+    bool has_audio_range = false;
     std::vector<IRNode> children;
     std::unordered_map<std::string, std::string> attributes;  // Extra metadata
 

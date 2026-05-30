@@ -320,25 +320,43 @@ void Meter::paint(canvas::Canvas& canvas) {
         float level = std::clamp(ballistics_.display_rms, 0.0f, 1.0f);
         float fill = std::clamp(std::round(level * meter_length), 0.0f, meter_length);
 
-        // Draw the gradient row-by-row, but only up to the fill height. Each
-        // row's colour samples the gradient at that absolute position along
-        // the meter (so the visible colours don't shift as the level moves —
-        // the fill reveals more of the SAME gradient).
-        const float inset = 1.0f;
+        // Draw the gradient row-by-row, but only up to the fill height. The
+        // captured gradient stops span the bar's FULL colored range (low/green
+        // at stop 0 → warm/red at the top stop). The captured asset draws that
+        // entire ramp inside the FILLED region — the empty channel above the
+        // fill is the dark housing, and the warm/red top stop sits at the TOP
+        // of the fill (just under the peak line), not at the absolute meter top.
+        // So sample the gradient across the FILL region (0 at the fill bottom,
+        // 1 at the fill top) rather than against absolute meter height. That
+        // makes the fill top read warm/red — matching the capture — while the
+        // fill still reveals more of the SAME ramp as the level moves. pulp
+        // #3191 follow-up: previously `pos` was keyed off absolute meter height,
+        // so a partial fill only ever exposed the lower (green→yellow) stops and
+        // the warm top was clipped away above the fill.
+        //
+        // Horizontal inset is derived from the captured bar-vs-housing ratio so
+        // the colored bar reads as a narrower fill recessed inside the darker
+        // housing slot (the capture's structure), not edge-to-edge paint.
+        float h_inset = vert ? std::max(1.0f, b.width * (1.0f - bar_fill_ratio_) * 0.5f) : 1.0f;
+        float v_inset = vert ? 1.0f : std::max(1.0f, b.height * (1.0f - bar_fill_ratio_) * 0.5f);
         if (fill > 0.0f) {
             if (vert) {
                 int start = static_cast<int>(b.height - fill);
+                float fill_top = static_cast<float>(start);
+                float fill_span = std::max(1.0f, static_cast<float>(b.height) - fill_top);
                 for (int y = start; y < static_cast<int>(b.height) - 1; ++y) {
-                    // position along meter: 1.0 at top, 0.0 at bottom
-                    float pos = 1.0f - (static_cast<float>(y) + 0.5f) / b.height;
+                    // position within the FILL: 1.0 at the fill top, 0.0 at the
+                    // fill bottom (the meter base).
+                    float pos = 1.0f - (static_cast<float>(y) + 0.5f - fill_top) / fill_span;
                     canvas.set_fill_color(gradient_color_at(pos));
-                    canvas.fill_rect(inset, static_cast<float>(y), b.width - 2 * inset, 1);
+                    canvas.fill_rect(h_inset, static_cast<float>(y), b.width - 2 * h_inset, 1);
                 }
             } else {
+                float fill_span = std::max(1.0f, fill);
                 for (int x = 0; x < static_cast<int>(fill); ++x) {
-                    float pos = (static_cast<float>(x) + 0.5f) / b.width;
+                    float pos = (static_cast<float>(x) + 0.5f) / fill_span;
                     canvas.set_fill_color(gradient_color_at(pos));
-                    canvas.fill_rect(static_cast<float>(x), inset, 1, b.height - 2 * inset);
+                    canvas.fill_rect(static_cast<float>(x), v_inset, 1, b.height - 2 * v_inset);
                 }
             }
         }
@@ -351,9 +369,9 @@ void Meter::paint(canvas::Canvas& canvas) {
             canvas.set_line_width(2.0f);
             if (vert) {
                 float y = b.height - peak_pos;
-                canvas.stroke_line(inset, y, b.width - inset, y);
+                canvas.stroke_line(h_inset, y, b.width - h_inset, y);
             } else {
-                canvas.stroke_line(peak_pos, inset, peak_pos, b.height - inset);
+                canvas.stroke_line(peak_pos, v_inset, peak_pos, b.height - v_inset);
             }
         }
         return;
