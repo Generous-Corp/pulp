@@ -10,7 +10,8 @@
     "lib": ["es2019", "webworker"],
     "types": ["@figma/plugin-typings"],
     "noEmit": true,
-    "rootDir": "."
+    "resolveJsonModule": true,
+    "rootDir": ".."
   },
-  "include": ["code.ts", "types.ts", "extract.ts", "extract-model.ts", "serialize.ts", "assets.ts", "tokens.ts"]
+  "include": ["code.ts", "types.ts", "extract.ts", "extract-model.ts", "serialize.ts", "assets.ts", "tokens.ts", "library-registry.ts", "../library-manifest.json"]
 }

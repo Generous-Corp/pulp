@@ -19,6 +19,11 @@ import type {
 } from "./extract-model";
 import { AssetCache } from "./assets";
 import { extractTokens, type ExtractedTokens } from "./tokens";
+import {
+  widgetKindByLibraryKey,
+  widgetKindByNamePrefix,
+  LIBRARY_VERSION,
+} from "./library-registry";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Public entry point
@@ -190,17 +195,46 @@ async function walk(
   if (node.type === "INSTANCE") {
     await captureInstanceMetadata(node as InstanceNode, ex, ctx);
 
-    // Track A2 — audio-widget instances export as a single PNG so the
-    // import lane can attach them as a sprite-strip skin via the A1
-    // setKnobSpriteStrip bridge. The native widget keeps full
-    // interactivity; the PNG provides Figma-quality visual fidelity.
-    // Detection is conservative (name-based) and ONLY fires for INSTANCE
-    // nodes whose main-component name maps to a known audio-widget kind.
-    // Non-audio instances continue to walk their child structure as
-    // normal.
-    const widgetKind = audioWidgetKindFromName(
-      ex.main_component_name ?? node.name,
-    );
+    // Phase 3 — Pulp Library component recognition.
+    //
+    // Recognition order:
+    //   1. Authoritative key-based match: ex.component_key matches a
+    //      Pulp-library component_set_key from library-manifest.json.
+    //      This is the canonical Phase 3 path — designs that pulled in
+    //      the published Pulp library hit this regardless of layer name.
+    //   2. Name-prefix fallback: name starts with a manifest-registered
+    //      prefix (e.g. "Pulp / Knob"). Lets designs use the convention
+    //      without depending on the published library file.
+    //   3. Permissive name match: the broader audioWidgetKindFromName()
+    //      heuristic ("knob" / "fader" / "meter" appearing anywhere in
+    //      the name) — preserves pre-Phase-3 behaviour for sprite-strip
+    //      detection on ad-hoc designs.
+    //
+    // The first match wins. When a library or prefix match fires we
+    // also stamp ex.library_version so the importer can tell apart
+    // "real published library" instances from heuristic detections.
+    let widgetKind = widgetKindByLibraryKey(ex.component_key);
+    if (widgetKind) {
+      ex.library_version = LIBRARY_VERSION;
+    } else {
+      widgetKind = widgetKindByNamePrefix(ex.main_component_name ?? node.name);
+      if (widgetKind) {
+        ex.library_version = LIBRARY_VERSION;
+      } else {
+        widgetKind = audioWidgetKindFromName(
+          ex.main_component_name ?? node.name,
+        );
+      }
+    }
+
+    // When recognised, extract the structured property values (label /
+    // min / max / value / units / binding) from componentProperties so
+    // the downstream serializer can emit them at the IR node root for
+    // design_import.cpp::parse_ir_node to pick up.
+    if (widgetKind) {
+      extractAudioPropsFromComponentProperties(ex);
+    }
+
     if (widgetKind) {
       const res = await ctx.assets.captureExportedNode(node, "PNG");
       if ("assetId" in res) {
@@ -675,6 +709,51 @@ function pushDiag(
 
 function pathOf(ctx: WalkCtx): string {
   return ctx.pathStack.join("");
+}
+
+/// Phase 3 — read the structured audio-widget properties (label, min,
+/// max, value, units, binding) off `ex.component_properties` and stamp
+/// them onto `ex.audio_*` fields so the serializer can emit them at the
+/// IR node root for design_import.cpp::parse_ir_node to consume.
+///
+/// componentProperties keys carry a "#<unique-id>" suffix (e.g.
+/// "binding#01:02"); we match on the prefix before the "#".
+function extractAudioPropsFromComponentProperties(
+  ex: ExtractedFigmaNode,
+): void {
+  if (!ex.component_properties) return;
+  const cp = ex.component_properties;
+
+  function getRawString(propName: string): string | undefined {
+    for (const key of Object.keys(cp)) {
+      const base = key.split("#")[0];
+      if (base !== propName) continue;
+      const entry = cp[key];
+      if (!entry || entry.type !== "TEXT") continue;
+      const v = entry.value;
+      return typeof v === "string" ? v : String(v);
+    }
+    return undefined;
+  }
+  function getNumeric(propName: string): number | undefined {
+    const s = getRawString(propName);
+    if (s === undefined || s.length === 0) return undefined;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  const label = getRawString("label");
+  if (label !== undefined) ex.audio_label = label;
+  const min = getNumeric("min");
+  if (min !== undefined) ex.audio_min = min;
+  const max = getNumeric("max");
+  if (max !== undefined) ex.audio_max = max;
+  const value = getNumeric("value");
+  if (value !== undefined) ex.audio_default = value;
+  const units = getRawString("units");
+  if (units !== undefined && units.length > 0) ex.audio_units = units;
+  const binding = getRawString("binding");
+  if (binding !== undefined && binding.length > 0) ex.audio_binding = binding;
 }
 
 /// Detect audio widget kind from an instance's main-component name. Used

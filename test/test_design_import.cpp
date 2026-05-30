@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/design_import.hpp>
@@ -2673,4 +2674,93 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers fill-height and leaf fa
     REQUIRE(js.find("setFlex('root', 'flex_grow', 1)") != std::string::npos);
     REQUIRE(js.find("createRow('empty_divider0', 'root')") != std::string::npos);
     REQUIRE(js.find("setFlex('empty_divider0', 'height', 1)") != std::string::npos);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Phase 3 — Pulp Library component recognition (figma-plugin lane).
+//
+// The TypeScript extractor (tools/figma-plugin/src/extract.ts) matches an
+// INSTANCE node's `component_set_key` against `library-manifest.json`. When
+// matched, it stamps `library_widget_kind` and lifts the instance's structured
+// component properties to the JSON envelope's node root:
+//   audio_widget=<kind>, label, min, max, default, attributes.{units,binding}
+// design_ir_json.cpp::parse_ir_node maps these to IRNode.audio_widget /
+// audio_label / audio_min / audio_max / audio_default and the attributes map.
+//
+// This test pins that contract — without it the figma-plugin extractor and
+// design_import.cpp parser can drift apart silently.
+TEST_CASE("parse_figma_plugin_json maps Phase 3 Pulp / Knob envelope onto IR widget",
+          "[view][import][figma-plugin][phase-3]") {
+    // Envelope shape mirrors what tools/figma-plugin/src/serialize.ts emits
+    // for an instance of the Pulp / Knob component-set (the file authored
+    // in Phase 0 at https://www.figma.com/design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library).
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": {
+            "adapter": "figma-plugin",
+            "version": "0.1.0",
+            "source_uri": "figma://design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library"
+        },
+        "root": {
+            "type": "frame",
+            "name": "VolumeKnob",
+            "audio_widget": "knob",
+            "label": "Cutoff",
+            "min": 20,
+            "max": 20000,
+            "default": 880,
+            "attributes": {
+                "units": "Hz",
+                "binding": "filter.cutoff_hz"
+            },
+            "style": { "width": 56, "height": 56 },
+            "layout": { "direction": "column" },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.source == DesignSource::figma_plugin);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::knob);
+    REQUIRE(ir.root.audio_label == "Cutoff");
+    REQUIRE(ir.root.audio_min == Catch::Approx(20.0f));
+    REQUIRE(ir.root.audio_max == Catch::Approx(20000.0f));
+    REQUIRE(ir.root.audio_default == Catch::Approx(880.0f));
+    REQUIRE(ir.root.attributes.at("units") == "Hz");
+    REQUIRE(ir.root.attributes.at("binding") == "filter.cutoff_hz");
+}
+
+TEST_CASE("parse_figma_plugin_json handles a Phase 3 knob without optional units",
+          "[view][import][figma-plugin][phase-3]") {
+    // An instance can leave `units` empty (the Pulp / Knob default is an
+    // empty string). The extractor SHOULD omit empty units; check that the
+    // parser still maps the rest of the envelope correctly without it.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "Mix",
+            "audio_widget": "knob",
+            "label": "Mix",
+            "min": 0,
+            "max": 1,
+            "default": 0.5,
+            "attributes": { "binding": "param.mix" },
+            "style": { "width": 32, "height": 32 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::knob);
+    REQUIRE(ir.root.audio_label == "Mix");
+    REQUIRE(ir.root.audio_min == Catch::Approx(0.0f));
+    REQUIRE(ir.root.audio_max == Catch::Approx(1.0f));
+    REQUIRE(ir.root.audio_default == Catch::Approx(0.5f));
+    REQUIRE(ir.root.attributes.at("binding") == "param.mix");
+    REQUIRE(ir.root.attributes.count("units") == 0);
 }

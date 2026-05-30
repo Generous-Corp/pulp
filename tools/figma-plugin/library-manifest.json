@@ -1,11 +1,12 @@
 {
   "library_version": "0.1.0",
-  "library_file_url": "https://www.figma.com/community/file/PENDING-Pulp-library-publish",
+  "library_file_key": "vxW6btjzQtc4t9ITLNjev0",
+  "library_file_url": "https://www.figma.com/design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library",
   "required_plugin_version": ">=0.1.0",
   "widgets": {
     "knob": {
-      "_note": "component_set_key gets filled in by hand AFTER the Pulp Figma library file is built and we read the key via the plugin or the REST API. Until then, the plugin treats Pulp / Knob name-prefix matches as a fallback recognition path.",
-      "component_set_key": "TBD-paste-after-library-publish",
+      "component_set_key": "f74264ffa9108521fb0d3398dc8f5ea88e23a84e",
+      "component_set_node_id": "3:74",
       "name_prefix": "Pulp / Knob",
       "supported_property_definitions": ["label", "value", "min", "max", "units", "binding"],
       "supported_variant_axes": ["size", "state"],

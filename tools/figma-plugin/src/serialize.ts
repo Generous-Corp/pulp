@@ -96,6 +96,24 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   if (n.content !== undefined) out.content = n.content;
   if (n.asset_ref) out.asset_ref = n.asset_ref;
 
+  // Phase 3 — emit audio-widget metadata at the IR node root. The C++
+  // parser (design_ir_json.cpp::parse_ir_node) reads:
+  //   audio_widget  → IRNode.audio_widget enum
+  //   label         → IRNode.audio_label
+  //   min/max/default → IRNode.audio_min/max/default (float)
+  //   attributes.* → IRNode.attributes (free-form passthrough)
+  if (n.library_widget_kind) out.audio_widget = n.library_widget_kind;
+  if (n.audio_label !== undefined) out.label = n.audio_label;
+  if (n.audio_min !== undefined) out.min = n.audio_min;
+  if (n.audio_max !== undefined) out.max = n.audio_max;
+  if (n.audio_default !== undefined) out.default = n.audio_default;
+  if (n.audio_units !== undefined || n.audio_binding !== undefined) {
+    const attrs: Record<string, string> = {};
+    if (n.audio_units !== undefined) attrs.units = n.audio_units;
+    if (n.audio_binding !== undefined) attrs.binding = n.audio_binding;
+    out.attributes = attrs;
+  }
+
   // Style: pass through truthy fields only (envelope schema says additionalProperties:false)
   const styleEntries = Object.entries(n.style).filter(([, v]) => v !== undefined && v !== null && v !== "");
   if (styleEntries.length > 0) out.style = Object.fromEntries(styleEntries);
