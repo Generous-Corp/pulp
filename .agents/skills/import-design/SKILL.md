@@ -180,6 +180,42 @@ attribute, while `set_default_value(...)` must come from normalized
 and emit non-hex semantic color tokens as strings rather than trying to parse
 them as colors.
 
+#### figma-plugin `binding` → canonical `pulp*` binding contract
+
+The figma-plugin extractor (`tools/figma-plugin/`) exports a recognized Pulp
+Library control as an audio widget (`audio_widget`) plus a single free-form
+`attributes["binding"]` string (e.g. `"filter.cutoff_hz"`). The whole native
+binding pipeline — the materializer (`design_import_native_common.cpp`,
+`NativeBindingMetadata::parse`) and the binding-manifest codegen
+(`design_cpp_codegen.cpp`) — only consumes the `pulp*`-prefixed contract, so a
+raw `binding` string is invisible to them on its own.
+
+`parse_ir_node` (`design_ir_json.cpp`, `normalize_figma_plugin_binding`)
+normalizes that string into the canonical `pulp*` contract at the IR-ingest
+boundary, so there is exactly ONE downstream binding consumer. Rules to keep in
+mind when touching this:
+
+- **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
+  A generic/visual frame that happens to carry a `binding` attribute gets NO
+  synthesized binding — it stays a generic node. Don't loosen this gate.
+- **Module/param split.** Split on the FIRST `.`: `"filter.cutoff_hz"` →
+  `pulpBindingModule="filter"`, `pulpBindingParam="cutoff_hz"`,
+  `pulpParamKey="filter.cutoff_hz"`. No dot → empty module, whole string is the
+  param. `param_key` (non-empty) is what drives both the manifest entry and the
+  codegen `bind_knob`/`bind_fader` helper gate.
+- **Meters differ.** `knob`/`fader`/`waveform` map to a writable param
+  (`pulpParamKey`); `meter`/`spectrum` map to `pulpMeterSource` +
+  `pulpMeterChannel` (no `pulpParamKey`), since a meter reads a metering input.
+- **`pulpRouteId` is required** for the codegen helper to emit a live bind call;
+  it's synthesized deterministically as `"figma-plugin:<binding>"`.
+- **No-overwrite / no-regression.** Synthesis routes through
+  `NativeBindingMetadata::serialize()` (skip-empty, no-overwrite) and bails if
+  any canonical binding attr is already present, so a JSX/Claude node that
+  already carries `pulp*` is untouched. The raw `attributes["binding"]` is
+  always preserved — never delete the source evidence.
+- **This is a generalizable importer rule**, not a per-fixture patch: it reads
+  the figma-plugin data and produces the contract for ANY recognized widget.
+
 The Phase 5/7/9 benchmark harness lives at `pulp-design-import-bench` and is driven
 by `tools/scripts/design_import_benchmark.py`. Run it under no-launch env
 (`PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1

@@ -13,6 +13,7 @@
 
 #include <pulp/view/design_import.hpp>
 
+#include "design_binding_metadata.hpp"
 #include "design_import_internal.hpp"
 
 #include <choc/text/choc_JSON.h>
@@ -198,6 +199,97 @@ bool is_asset_reference_key(std::string_view key) {
     }
     if (key.rfind("htmlAsset", 0) == 0) return true;
     return false;
+}
+
+// ── figma-plugin binding normalization ──────────────────────────────────────
+//
+// The figma-plugin extractor (tools/figma-plugin/src/extract.ts) emits a Pulp
+// Library control as a recognized audio widget plus a single free-form
+// `attributes["binding"]` string (e.g. "filter.cutoff_hz"). Historically that
+// string reached the IR but was dropped: the native materializer
+// (design_import_native_common.cpp) and the binding-manifest codegen
+// (design_cpp_codegen.cpp) only consume the `pulp*`-prefixed binding contract,
+// never the raw `binding` attribute.
+//
+// This normalizes the figma-plugin `binding` into the SAME internal binding
+// representation that the JSX / Claude path already feeds —
+// NativeBindingMetadata — so the native materializer and the codegen manifest
+// both pick it up via their existing logic, with no duplicated downstream
+// consumer. It runs at the IR-ingest boundary (end of parse_ir_node), gated on
+// the node being a semantically-recognized audio widget. An unrecognized /
+// generic node (audio_widget == none) never gets a synthesized binding.
+//
+// The raw `attributes["binding"]` is preserved (the evidence is not deleted),
+// and NativeBindingMetadata::serialize() uses no-overwrite / skip-empty
+// semantics so a node that already carries `pulp*` binding attributes (e.g. a
+// JSX/Claude import that happens to also carry a `binding` key) is left exactly
+// as-is — no regression to the existing pulp* path.
+void normalize_figma_plugin_binding(IRNode& node) {
+    // Gate 1: only semantically-recognized widgets get a synthesized binding.
+    if (node.audio_widget == AudioWidgetType::none)
+        return;
+
+    // Gate 2: must carry a non-empty figma-plugin `binding` string.
+    auto binding_it = node.attributes.find("binding");
+    if (binding_it == node.attributes.end() || binding_it->second.empty())
+        return;
+
+    // Gate 3: if the node already carries any of the canonical single-param /
+    // meter binding-contract attributes, leave it untouched. This keeps the
+    // existing pulp* path byte-identical and avoids double-synthesis on a node
+    // that was already lowered by the JSX/Claude writer.
+    for (const char* existing : {"pulpParamKey", "pulpBindingModule",
+                                 "pulpBindingParam", "pulpMeterSource",
+                                 "pulpMeterChannel"}) {
+        auto it = node.attributes.find(existing);
+        if (it != node.attributes.end() && !it->second.empty())
+            return;
+    }
+
+    const std::string& binding = binding_it->second;
+
+    // Split on the first '.': "<module>.<param>". A binding with no '.' has an
+    // empty module and the whole string as the param/channel.
+    std::string module_part;
+    std::string param_part = binding;
+    if (auto dot = binding.find('.'); dot != std::string::npos) {
+        module_part = binding.substr(0, dot);
+        param_part = binding.substr(dot + 1);
+    }
+
+    NativeBindingMetadata md;
+    // route_id is required for the codegen helper gate to emit a live bind_*()
+    // call; make it deterministic from the binding so re-imports are stable.
+    md.route_id = "figma-plugin:" + binding;
+    md.route_type = "native_cpp";
+
+    switch (node.audio_widget) {
+        case AudioWidgetType::meter:
+        case AudioWidgetType::spectrum:
+            // Meters read from a metering source/channel, not a writable param.
+            md.source_family = "meter";
+            md.meter_source = module_part.empty() ? binding : module_part;
+            md.meter_channel = param_part;
+            break;
+        case AudioWidgetType::knob:
+        case AudioWidgetType::fader:
+        case AudioWidgetType::xy_pad:
+        case AudioWidgetType::waveform:
+        default:
+            // Scalar parameter controls. param_key drives both the manifest
+            // entry and the codegen helper gate (has_single_param).
+            md.source_family = "param";
+            md.param_key = binding;
+            if (!module_part.empty())
+                md.binding_module = module_part;
+            md.binding_param = param_part;
+            break;
+    }
+
+    // serialize() writes only present, non-empty values and never overwrites an
+    // existing non-empty attribute — so `attributes["binding"]` and any other
+    // pre-existing data survive untouched.
+    md.serialize(node);
 }
 
 IRNode parse_ir_node(const choc::value::ValueView& obj) {
@@ -735,6 +827,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             }
         }
     }
+
+    // Normalize a recognized figma-plugin widget's free-form `binding` string
+    // into the canonical pulp* binding contract. Runs after audio_widget is
+    // finalized (covers both explicit `audio_widget` and name-detected widgets).
+    normalize_figma_plugin_binding(node);
 
     return node;
 }
