@@ -690,3 +690,45 @@ the full rationale.
 - `view-bridge` skill — `au_v2_cocoa_view.mm` + `au_view_controller_ios.mm` linkage.
 - `ci` skill — how iOS builds integrate into PR validation (when added).
 - Issue #218 — AUv3 mobile validation workstream.
+
+## Three.js inside AUv3 on iOS (iOS-D.3b program, 2026-05-29)
+
+Pulp ships a Three.js-on-iPad path inside AUv3 extensions via JSC + a Rollup-bundled IIFE wrapper for `three.webgpu.js`. The full bring-up was 6 slices (#3146 #3154 #3156 #3157 #3159 + the final demo) detailed in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md`. The non-obvious bits worth remembering:
+
+### JSC's ESM module-loader API is NOT public on iOS
+
+`iPhoneOS.sdk/JavaScriptCore.framework/Headers/` ships **no** `JSScript.h`, **no** `JSModuleLoaderDelegate`, **no** `setModuleLoaderDelegate:`. Shipping any code path that uses those in an `.appex` risks App Store rejection at submission time. The supported path is:
+
+1. Bundle `three.webgpu.js` (ESM) at build time into a self-contained IIFE wrapper via `tools/scripts/bundle_threejs_for_jsc.mjs` — the script reads the pinned Three.js source, strips `export {...}` blocks + inline `export class/const/function`, registers all exported identifiers on `globalThis.THREE`.
+2. Load the resulting `three.iife.js` at runtime via `pulp::view::threejs_iife_source()` (`core/view/include/pulp/view/threejs_resources.hpp` + `core/view/src/threejs_resources_apple.mm`). The NSBundle loader walks up from `PulpAUViewController` to the `.appex` and reads `Resources/threejs/three.iife.js`.
+3. JSC `evaluate()` the source — `THREE` lands on `globalThis`. No resolver needed.
+
+If you reach for `setModuleLoaderDelegate:` because it's mentioned in WebKit internal docs, stop. Use the IIFE path. Future contributors who don't see this note will spend a day discovering this on their own.
+
+### Bundle invocation in CMake
+
+`tools/cmake/PulpAuv3.cmake` `_pulp_add_auv3_ios()` adds a `POST_BUILD` step that runs `node tools/scripts/bundle_threejs_for_jsc.mjs --input <threejs.webgpu.js> --output <appex>/Resources/threejs/three.iife.js`. The step is gated on `find_program(node)` — if Node.js is missing on the build host, the embed is skipped with a STATUS message and `pulp::view::threejs_iife_source()` returns `std::nullopt` at runtime (clean failure, not a build break).
+
+### Log marker chain (grep these on iPad device walks)
+
+```
+[plugin-gpu-host] adapter mode=custom use_gpu=true ... requires_gpu_host=true
+GpuSurface: backend_type=Metal
+PULP_WEBGPU_BRIDGE: canvas.getContext('webgpu') ok (presentable=true)
+PULP_WEBGPU_BRIDGE: context.configure ok (format=bgra8unorm, size=WxH)
+PULP_WEBGPU_BRIDGE: queue.submit ok (canvas=X, commands=N)
+PULP_THREEJS: bundle loaded (N bytes)
+PULP_THREEJS: globalThis.THREE available
+PULP_THREE_SHIM: ready
+PULP_THREE_SHIM: webgpu-renderer-present
+```
+
+The `presentable=true|false` boolean is the program's most load-bearing signal — `false` means JS draws went to an offscreen texture, not the visible swapchain. If the iPad demo shows a black editor pane, grep for `presentable=false` first.
+
+### Buffered-draw probe
+
+`globalThis.__phase13BufferedSkips` is the canonical "bridge gave up" probe. After a Three.js render call, the array should be empty. If it's non-empty, each entry is a `JSON.stringify(...)` of the skipped draw — that's where a missing native-bridge function call surfaces. The macOS V8 lane uses the same probe; the JSC lane behaves identically by design (`widget_bridge.cpp` registers each `__gpu*Impl` engine-agnostically via `engine_.register_function(...)`).
+
+### Memory probe
+
+The .appex peak resident-set after `first frame painted` is the program's memory exit gate. Phase iOS-D.3b deliberately defers adding Increased Memory Limit (`com.apple.developer.kernel.increased-memory-limit`) and Extended Virtual Addressing (`com.apple.developer.kernel.extended-virtual-addressing`) entitlements — instrument the number first, escalate only if real-device testing shows pressure.
