@@ -3455,7 +3455,16 @@ catch_discover_tests(pulp-test-cli-import-design
 # Direct shell-out coverage for the standalone import-design tool
 # executable. These tests hit tools/import-design/pulp_import_design.cpp
 # without going through the top-level pulp CLI delegate.
-add_executable(pulp-test-import-design-tool test_import_design_tool.cpp)
+add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
+    # Same miniz subset the CLI links — issue #47's `.pulp.zip` auto-unpack
+    # test needs to assemble a tiny ZIP fixture from C++ rather than
+    # shelling out to `zip(1)` (which is not portable).
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz.c
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tdef.c
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tinfl.c
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c)
+target_include_directories(pulp-test-import-design-tool PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/miniz)
 target_link_libraries(pulp-test-import-design-tool
     PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-import-design-tool PRIVATE

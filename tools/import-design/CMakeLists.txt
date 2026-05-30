@@ -5,8 +5,18 @@
 # the test target without dragging the full pulp::view pipeline along.
 add_executable(pulp-import-design
     pulp_import_design.cpp
-    import_detect.cpp)
-target_include_directories(pulp-import-design PRIVATE ${CMAKE_SOURCE_DIR})
+    import_detect.cpp
+    # miniz lets the CLI auto-unpack .pulp.zip exports from the Figma
+    # plugin (issue #47). Compiled here rather than pulled from
+    # pulp::runtime because that target's miniz include dirs are PRIVATE
+    # and pulp::view doesn't re-export them.
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz.c
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tdef.c
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tinfl.c
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c)
+target_include_directories(pulp-import-design PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/external/miniz)
 target_link_libraries(pulp-import-design PRIVATE pulp::view pulp::state pulp::platform)
 
 add_executable(pulp-design-import-bench

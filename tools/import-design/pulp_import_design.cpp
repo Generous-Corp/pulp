@@ -7,6 +7,8 @@
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
+#include <miniz.h>
+#include <unistd.h>     // getpid()
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -693,7 +695,12 @@ static void print_usage() {
 // uncovered. The CLI only calls into the library function below.
 
 static std::string read_file(const std::string& path) {
-    std::ifstream f(path);
+    // Binary mode — the input may be a .pulp.zip (handled upstream by
+    // extract_pulp_zip_if_present) or a JSON file with multi-byte UTF-8
+    // sequences. std::ifstream default text mode is fine on POSIX but the
+    // explicit ios::binary documents intent and survives any future
+    // Windows port.
+    std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) {
         std::cerr << "Error: cannot open file: " << path << "\n";
         return {};
@@ -701,6 +708,153 @@ static std::string read_file(const std::string& path) {
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+// ── .pulp.zip auto-unpack (issue #47) ──────────────────────────────────
+//
+// The Pulp Figma plugin's "Export to Pulp" button emits a `.pulp.zip` that
+// contains scene.pulp.json + assets/*.png. Asking users to manually unzip
+// before running `pulp import-design --from figma-plugin` is a UX wart;
+// detect a ZIP magic header (PK\x03\x04) or `.zip` extension on the input
+// file, unpack it to a temp directory, and swap input_file for the path
+// to scene.pulp.json inside.
+//
+// Asset paths in the envelope are relative (`assets/...`), and the rest
+// of the import pipeline resolves them against
+// `fs::path(input_file).parent_path()`. Unpacking the whole archive
+// preserves that layout: the temp dir becomes the new asset base
+// directory automatically.
+
+struct PulpZipExtraction {
+    fs::path temp_dir;          // root of the extracted archive
+    fs::path scene_json_path;   // resolved location of scene.pulp.json
+
+    PulpZipExtraction() = default;
+    PulpZipExtraction(const PulpZipExtraction&) = delete;
+    PulpZipExtraction& operator=(const PulpZipExtraction&) = delete;
+    PulpZipExtraction(PulpZipExtraction&&) = default;
+    PulpZipExtraction& operator=(PulpZipExtraction&&) = default;
+
+    ~PulpZipExtraction() {
+        if (!temp_dir.empty()) {
+            std::error_code ec;
+            fs::remove_all(temp_dir, ec);   // best-effort
+        }
+    }
+};
+
+static bool looks_like_pulp_zip(const std::string& path) {
+    // ZIP magic bytes (RFC: local file header signature 0x04034b50,
+    // stored little-endian → "PK\x03\x04"). Cheap and authoritative —
+    // catches the `.pulp.zip` case and also any `.zip` someone renamed.
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    char magic[4]{};
+    f.read(magic, sizeof(magic));
+    if (!f) return false;
+    return magic[0] == 'P' && magic[1] == 'K' &&
+           magic[2] == '\x03' && magic[3] == '\x04';
+}
+
+/// Make a unique temp directory under /tmp (or %TEMP%). Returns an empty
+/// path on failure.
+static fs::path make_temp_dir() {
+    std::error_code ec;
+    auto tmp_root = fs::temp_directory_path(ec);
+    if (ec) return {};
+    // Names like pulp-import-design-<pid>-<rng>.
+    std::random_device rd;
+    auto suffix = std::to_string(static_cast<unsigned long>(::getpid()))
+                + "-"
+                + std::to_string(static_cast<uint32_t>(rd()));
+    auto dir = tmp_root / ("pulp-import-design-" + suffix);
+    fs::create_directories(dir, ec);
+    if (ec) return {};
+    return dir;
+}
+
+/// If `input_file` points at a Pulp-flavoured ZIP, extract it to a fresh
+/// temp dir and return the path information. Otherwise return std::nullopt.
+/// On extraction failure the returned PulpZipExtraction.temp_dir is empty
+/// and the caller should fall back to treating input_file as raw JSON
+/// (with a useful error already printed to stderr).
+static std::optional<PulpZipExtraction>
+extract_pulp_zip_if_present(const std::string& input_file) {
+    if (!looks_like_pulp_zip(input_file)) return std::nullopt;
+
+    PulpZipExtraction out;
+    out.temp_dir = make_temp_dir();
+    if (out.temp_dir.empty()) {
+        std::cerr << "Error: could not create temp directory for "
+                  << input_file << "\n";
+        return out;  // empty temp_dir signals "tried but failed"
+    }
+
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_file(&zip, input_file.c_str(), 0)) {
+        std::cerr << "Error: not a valid ZIP archive: " << input_file
+                  << "\n";
+        return out;
+    }
+
+    const mz_uint n = mz_zip_reader_get_num_files(&zip);
+    std::string scene_candidate;
+    for (mz_uint i = 0; i < n; ++i) {
+        char name_buf[1024]{};
+        mz_zip_reader_get_filename(&zip, i, name_buf, sizeof(name_buf));
+        const std::string entry_name(name_buf);
+        if (entry_name.empty()) continue;
+
+        // Skip directory entries (trailing slash).
+        if (entry_name.back() == '/') continue;
+
+        // Defence-in-depth path-safety: refuse absolute / `..` entries so
+        // a malicious archive can't escape temp_dir.
+        if (entry_name.find("..") != std::string::npos ||
+            (!entry_name.empty() && (entry_name[0] == '/' || entry_name[0] == '\\'))) {
+            std::cerr << "Error: refusing unsafe zip entry: " << entry_name
+                      << "\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+
+        const fs::path dest = out.temp_dir / entry_name;
+        std::error_code ec;
+        fs::create_directories(dest.parent_path(), ec);
+        if (ec) {
+            std::cerr << "Error: could not mkdir for " << dest << ": "
+                      << ec.message() << "\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+        if (!mz_zip_reader_extract_to_file(&zip, i, dest.string().c_str(), 0)) {
+            std::cerr << "Error: failed to extract " << entry_name
+                      << " from " << input_file << "\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+
+        // Identify the IR envelope. The plugin uses scene.pulp.json by
+        // convention; accept `scene.json` and `design.json` as fallbacks
+        // so older or hand-authored archives still work.
+        const auto fname = fs::path(entry_name).filename().string();
+        if (scene_candidate.empty()) {
+            if (fname == "scene.pulp.json" ||
+                fname == "scene.json"      ||
+                fname == "design.json") {
+                scene_candidate = dest.string();
+            }
+        }
+    }
+    mz_zip_reader_end(&zip);
+
+    if (scene_candidate.empty()) {
+        std::cerr << "Error: ZIP " << input_file
+                  << " contains no scene.pulp.json / scene.json / design.json\n";
+        return out;
+    }
+    out.scene_json_path = scene_candidate;
+    return out;
 }
 
 static bool write_file(const std::string& path, const std::string& content) {
@@ -1170,6 +1324,26 @@ int main(int argc, char* argv[]) {
     }
 
     auto t_start = std::chrono::steady_clock::now();
+
+    // If the user passed a .pulp.zip (or any ZIP with a Pulp envelope
+    // inside), unpack it transparently so `--file` always behaves the
+    // same regardless of whether the plugin shipped a JSON or a bundle.
+    // The PulpZipExtraction RAII guard cleans up the temp dir at scope
+    // exit; we keep it alive for the rest of `main` so asset paths
+    // continue to resolve.
+    std::optional<PulpZipExtraction> pulp_zip_keepalive;
+    if (auto extracted = extract_pulp_zip_if_present(input_file)) {
+        if (extracted->scene_json_path.empty()) {
+            // Tried to extract but failed; the helper already wrote a
+            // useful stderr line and we should not silently fall back to
+            // the truncated text-read path.
+            return 1;
+        }
+        std::cout << "Unpacked " << input_file << " → "
+                  << extracted->temp_dir << "\n";
+        input_file = extracted->scene_json_path.string();
+        pulp_zip_keepalive = std::move(*extracted);
+    }
 
     // Read input
     auto content = read_file(input_file);

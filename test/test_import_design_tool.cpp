@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
+#include <miniz.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -950,4 +951,153 @@ TEST_CASE("pulp-import-design debug report names the default bridge-native mode"
     const auto report = read_text(debug);
     REQUIRE(report.find("\"mode\": \"bridge_native_js\"") != std::string::npos);
     REQUIRE(report.find("\"mode\": \"native\"") == std::string::npos);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Issue #47 — .pulp.zip auto-unpack
+//
+// The Pulp Figma plugin ships its "Export to Pulp" as a `.pulp.zip` that
+// contains scene.pulp.json + assets/*.png. Before this fix the CLI read
+// the input file via std::ifstream and silently truncated at the first
+// NUL byte in the ZIP header — the user had to manually `unzip` before
+// running the import. This test pins the auto-unpack contract by
+// assembling a minimal .pulp.zip from C++ (one entry, scene.pulp.json,
+// holding a valid figma-plugin envelope with a recognised Pulp / Knob
+// instance) and asserting the CLI parses it without an intermediate
+// unzip step.
+
+namespace {
+
+bool make_pulp_zip(const fs::path& zip_path, const std::string& scene_json) {
+    mz_zip_archive zip{};
+    if (!mz_zip_writer_init_file(&zip, zip_path.string().c_str(), 0)) return false;
+    const auto ok = mz_zip_writer_add_mem(
+        &zip,
+        "scene.pulp.json",
+        scene_json.data(),
+        scene_json.size(),
+        MZ_DEFAULT_COMPRESSION);
+    if (!ok) {
+        mz_zip_writer_end(&zip);
+        return false;
+    }
+    if (!mz_zip_writer_finalize_archive(&zip)) {
+        mz_zip_writer_end(&zip);
+        return false;
+    }
+    mz_zip_writer_end(&zip);
+    return true;
+}
+
+}  // namespace
+
+TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
+          "[cli][import-design][tool][figma-plugin][issue-47]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip");
+    const auto zip = tmp.path / "smoke.pulp.zip";
+    const auto output = tmp.path / "ui.js";
+
+    // Minimal figma-plugin envelope with a Pulp / Knob recognised by
+    // Phase 3's audio_widget="knob" path. The full envelope shape is
+    // documented in tools/figma-plugin/schema/figma-plugin-export-v1.json
+    // and exercised end-to-end by test/test_design_import.cpp's
+    // "[figma-plugin][phase-3]" cases. Here we only care that the CLI
+    // unpacks the zip and round-trips the IR through to the codegen.
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": {
+            "adapter": "figma-plugin",
+            "version": "0.1.0",
+            "source_uri": "test://issue-47-fixture"
+        },
+        "asset_manifest": { "version": 1, "assets": [] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 200, "height": 200 },
+            "layout": { "direction": "column", "gap": 8,
+                        "paddingTop": 16, "paddingRight": 16,
+                        "paddingBottom": 16, "paddingLeft": 16 },
+            "children": [
+                {
+                    "type": "frame",
+                    "name": "Cutoff Knob",
+                    "figma_node_id": "1:2",
+                    "audio_widget": "knob",
+                    "label": "Cutoff",
+                    "min": 20,
+                    "max": 20000,
+                    "default": 880,
+                    "attributes": { "units": "Hz", "binding": "filter.cutoff_hz" },
+                    "style": { "width": 56, "height": 56 },
+                    "layout": { "direction": "column" },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope));
+    REQUIRE(fs::exists(zip));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(output));
+
+    // Visibility of the auto-unpack on stdout — both confirms the path
+    // ran and gives the user a breadcrumb if they later want to inspect
+    // the extracted contents.
+    REQUIRE(r.stdout_output.find("Unpacked ") != std::string::npos);
+    REQUIRE(r.stdout_output.find(".pulp.zip") != std::string::npos);
+
+    // The CLI should have emitted a native createKnob call with the
+    // designer-set range / value. If this assertion fails after a
+    // future codegen refactor, update the expected pattern rather than
+    // weakening the contract — the whole point of #47 is that the IR
+    // survives the round-trip.
+    const auto js = read_text(output);
+    REQUIRE(js.find("createKnob('Cutoff_Knob") != std::string::npos);
+    REQUIRE(js.find("setValue('Cutoff_Knob") != std::string::npos);
+    REQUIRE(js.find("880") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
+          "[cli][import-design][tool][figma-plugin][issue-47]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-empty");
+    const auto zip = tmp.path / "empty.pulp.zip";
+    const auto output = tmp.path / "ui.js";
+
+    // Build a zip whose only entry is `note.txt` — i.e. no scene
+    // envelope. The CLI must surface a clear error rather than silently
+    // succeed with empty content.
+    {
+        mz_zip_archive z{};
+        REQUIRE(mz_zip_writer_init_file(&z, zip.string().c_str(), 0));
+        REQUIRE(mz_zip_writer_add_mem(&z, "note.txt", "hi", 2, MZ_DEFAULT_COMPRESSION));
+        REQUIRE(mz_zip_writer_finalize_archive(&z));
+        mz_zip_writer_end(&z);
+    }
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("scene.pulp.json") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(output));
 }
