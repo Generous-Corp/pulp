@@ -14,7 +14,81 @@
 #include <pulp/format/host_quirks/wavelab.hpp>
 #include <pulp/format/host_version.hpp>
 
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <mutex>
+#include <string>
+#include <string_view>
+
 namespace pulp::format {
+
+// ── Single source of truth for the HostQuirks field list ──────────────
+//
+// Every data member of `HostQuirks` is listed here exactly once. The
+// list drives three generated passes (apply_filter, per-quirk override
+// application, and field enumeration for `pulp doctor`) so they can
+// never drift from one another. When you add a field to `HostQuirks`
+// (and its tier to `HostQuirksMeta` + a row to host-quirks.json), add it
+// here too — the static_assert below and the catalog parity test guard
+// against forgetting. Keep declaration order in sync with the struct.
+#define PULP_HOST_QUIRK_FIELDS(X)                       \
+    X(synthesize_bypass_parameter)                      \
+    X(clamp_latency_to_nonneg)                          \
+    X(silence_unsupported_bus_arrangements)             \
+    X(cubase10_async_view_resize_queue)                 \
+    X(cubase10_param_gesture_ordering)                  \
+    X(cubase10_fractional_scale_correction)             \
+    X(cubase9_state_blob_size_validation)               \
+    X(live_vst3_canresize_ignore)                       \
+    X(live_vst3_windows_dpi_defer)                      \
+    X(double_string_buffer_for_live_10_1_13)            \
+    X(bitwig_vst3_linux_repaint_after_resize)           \
+    X(bitwig_vst3_setbusarrangements_while_active)      \
+    X(skip_bus_arrangement_call)                        \
+    X(wavelab_vst3_defer_activation)                    \
+    X(wavelab_state_blob_fallback)                      \
+    X(tolerate_state_read_nontrue_status)               \
+    X(fl_studio_setactive_process_mutex)                \
+    X(fl_studio_state_reader_skip)                      \
+    X(reaper_vst3_gesture_ordering)                     \
+    X(reaper_process_while_bypassed)                    \
+    X(reaper_keyboard_passthrough)                      \
+    X(reaper_permissive_bus_arrangements)               \
+    X(reaper_anticipative_fx_buffer_variability)        \
+    X(reaper_midsession_setstate)                       \
+    X(reaper_keyboard_only_space)                       \
+    X(pro_tools_aax_sidechain_negotiation)              \
+    X(pro_tools_aax_latency_callback_push)              \
+    X(pro_tools_aax_mono_second_bus)                    \
+    X(aax_vendor_version_unknown)                       \
+    X(logic_au_channel_probe_cap)                       \
+    X(logic_au_tail_time_conversion)                    \
+    X(au_v3_bypass_dual_tracking)                        \
+    X(au_v3_host_id_from_wrapper)                        \
+    X(reaper_auv3_in_process_preferred_size_sync)       \
+    X(studio_one_restart_component_ui_thread)           \
+    X(digital_performer_param_list_reload)              \
+    X(cubase13_midi_cc_param_id_stable)
+
+// Tripwire: the field count baked into the X-macro list above. If a new
+// HostQuirks field is added without extending PULP_HOST_QUIRK_FIELDS the
+// generated passes would silently skip it; bump this count in lock-step
+// (the catalog parity test independently asserts the struct/meta/JSON
+// flag sets all match, so a forgotten field surfaces there too).
+namespace {
+constexpr int count_quirk_fields() noexcept {
+    int n = 0;
+#define PULP_QUIRK_COUNT(name) ++n;
+    PULP_HOST_QUIRK_FIELDS(PULP_QUIRK_COUNT)
+#undef PULP_QUIRK_COUNT
+    return n;
+}
+}  // namespace
+static_assert(count_quirk_fields() == 37,
+              "PULP_HOST_QUIRK_FIELDS is out of sync with HostQuirks — "
+              "add the new field to the X-macro list and bump this count.");
 
 namespace {
 
@@ -103,76 +177,71 @@ constexpr QuirkFilter default_policy_filter() noexcept {
 #endif
 }
 
+// ── Runtime policy layer (P2) ─────────────────────────────────────────
+//
+// Layered on TOP of the compile-time default above. Precedence (highest
+// first): per-quirk override > set_host_quirk_policy() (API) >
+// PULP_HOST_QUIRKS env > compile-time default. All of this is init-time
+// state (adapters resolve once at construction); it is NOT touched on
+// the audio thread. A single mutex guards the API-set state.
+
+// Parse PULP_HOST_QUIRKS once. Recognized (case-insensitive):
+//   off | validated-only (or validated_only) | all.
+// An empty/unset var → nullopt (fall through). An unrecognized value →
+// nullopt + a one-time stderr warning (so a typo can't silently disable
+// accommodations).
+std::optional<QuirkFilter> parse_env_policy() {
+    const char* raw = std::getenv("PULP_HOST_QUIRKS");
+    if (raw == nullptr || raw[0] == '\0') return std::nullopt;
+    std::string v(raw);
+    for (char& c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (v == "off") return kQuirkFilterOff;
+    if (v == "all") return QuirkFilter{};
+    if (v == "validated-only" || v == "validated_only" || v == "validatedonly")
+        return kQuirkFilterValidatedOnly;
+    std::fprintf(stderr,
+                 "[pulp] warning: ignoring unrecognized PULP_HOST_QUIRKS=%s "
+                 "(expected off|validated-only|all)\n",
+                 raw);
+    return std::nullopt;
+}
+
+const std::optional<QuirkFilter>& env_policy() {
+    static const std::optional<QuirkFilter> cached = parse_env_policy();
+    return cached;
+}
+
+std::mutex& policy_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+// API-set whole-policy filter (highest base-layer precedence). nullopt
+// means "not set — fall through to env/compile".
+std::optional<QuirkFilter>& api_policy() {
+    static std::optional<QuirkFilter> p;
+    return p;
+}
+
+// Per-quirk forced state by field name. true → force the host-populated
+// value (exempt from the tier filter); false → force the default (off).
+std::map<std::string, bool, std::less<>>& quirk_overrides() {
+    static std::map<std::string, bool, std::less<>> m;
+    return m;
+}
+
 } // namespace
 
 void apply_filter(HostQuirks& q, QuirkFilter filter) {
     constexpr auto& m = kHostQuirksMeta;
     constexpr auto& d = kDefaultHostQuirks;
 
-#define PULP_QUIRK_FILTER_FIELD(name) \
-    reset_if_filtered(q.name, d.name, m.name, filter)
-
-    // Cheap defenses (Validated)
-    PULP_QUIRK_FILTER_FIELD(synthesize_bypass_parameter);
-    PULP_QUIRK_FILTER_FIELD(clamp_latency_to_nonneg);
-    PULP_QUIRK_FILTER_FIELD(silence_unsupported_bus_arrangements);
-
-    // Cubase
-    PULP_QUIRK_FILTER_FIELD(cubase10_async_view_resize_queue);
-    PULP_QUIRK_FILTER_FIELD(cubase10_param_gesture_ordering);
-    PULP_QUIRK_FILTER_FIELD(cubase10_fractional_scale_correction);
-    PULP_QUIRK_FILTER_FIELD(cubase9_state_blob_size_validation);
-
-    // Ableton Live
-    PULP_QUIRK_FILTER_FIELD(live_vst3_canresize_ignore);
-    PULP_QUIRK_FILTER_FIELD(live_vst3_windows_dpi_defer);
-    PULP_QUIRK_FILTER_FIELD(double_string_buffer_for_live_10_1_13);
-
-    // Bitwig
-    PULP_QUIRK_FILTER_FIELD(bitwig_vst3_linux_repaint_after_resize);
-    PULP_QUIRK_FILTER_FIELD(bitwig_vst3_setbusarrangements_while_active);
-
-    // Ardour family (Ardour + Mixbus 32C)
-    PULP_QUIRK_FILTER_FIELD(skip_bus_arrangement_call);
-
-    // Wavelab
-    PULP_QUIRK_FILTER_FIELD(wavelab_vst3_defer_activation);
-    PULP_QUIRK_FILTER_FIELD(wavelab_state_blob_fallback);
-    PULP_QUIRK_FILTER_FIELD(tolerate_state_read_nontrue_status);
-
-    // FL Studio
-    PULP_QUIRK_FILTER_FIELD(fl_studio_setactive_process_mutex);
-    PULP_QUIRK_FILTER_FIELD(fl_studio_state_reader_skip);
-
-    // Reaper
-    PULP_QUIRK_FILTER_FIELD(reaper_vst3_gesture_ordering);
-    PULP_QUIRK_FILTER_FIELD(reaper_process_while_bypassed);
-    PULP_QUIRK_FILTER_FIELD(reaper_keyboard_passthrough);
-    PULP_QUIRK_FILTER_FIELD(reaper_permissive_bus_arrangements);
-    PULP_QUIRK_FILTER_FIELD(reaper_anticipative_fx_buffer_variability);
-    PULP_QUIRK_FILTER_FIELD(reaper_midsession_setstate);
-    PULP_QUIRK_FILTER_FIELD(reaper_keyboard_only_space);
-
-    // Pro Tools
-    PULP_QUIRK_FILTER_FIELD(pro_tools_aax_sidechain_negotiation);
-    PULP_QUIRK_FILTER_FIELD(pro_tools_aax_latency_callback_push);
-    PULP_QUIRK_FILTER_FIELD(pro_tools_aax_mono_second_bus);
-    PULP_QUIRK_FILTER_FIELD(aax_vendor_version_unknown);
-
-    // Logic Pro AU (one int field — same machinery)
-    PULP_QUIRK_FILTER_FIELD(logic_au_channel_probe_cap);
-    PULP_QUIRK_FILTER_FIELD(logic_au_tail_time_conversion);
-
-    // AU v3 cross-host
-    PULP_QUIRK_FILTER_FIELD(au_v3_bypass_dual_tracking);
-    PULP_QUIRK_FILTER_FIELD(au_v3_host_id_from_wrapper);
-
-    // 2026-05-26 iPlug2-audit batch (Pulp #3044 / #3045 / #3046 / #3047).
-    PULP_QUIRK_FILTER_FIELD(reaper_auv3_in_process_preferred_size_sync);
-    PULP_QUIRK_FILTER_FIELD(studio_one_restart_component_ui_thread);
-    PULP_QUIRK_FILTER_FIELD(digital_performer_param_list_reload);
-    PULP_QUIRK_FILTER_FIELD(cubase13_midi_cc_param_id_stable);
-
+    // Reset every field whose meta tier is not allowed by `filter`. The
+    // field list lives in the single PULP_HOST_QUIRK_FIELDS X-macro so
+    // this pass, the per-quirk override pass, and the doctor enumeration
+    // all iterate identical sets (no manual list to drift).
+#define PULP_QUIRK_FILTER_FIELD(name) reset_if_filtered(q.name, d.name, m.name, filter);
+    PULP_HOST_QUIRK_FIELDS(PULP_QUIRK_FILTER_FIELD)
 #undef PULP_QUIRK_FILTER_FIELD
 }
 
@@ -214,11 +283,95 @@ HostQuirks make_quirks_for_validated_only(HostType type, HostVersion version) {
     return q;
 }
 
+ResolvedQuirkPolicy resolve_quirk_policy() {
+    std::lock_guard<std::mutex> lk(policy_mutex());
+    if (api_policy().has_value())
+        return {*api_policy(), QuirkPolicySource::Api};
+    if (env_policy().has_value())
+        return {*env_policy(), QuirkPolicySource::Environment};
+    return {default_policy_filter(), QuirkPolicySource::CompileDefault};
+}
+
+void set_host_quirk_policy(std::optional<QuirkFilter> filter) {
+    std::lock_guard<std::mutex> lk(policy_mutex());
+    api_policy() = filter;
+}
+
+void set_quirk_override(std::string_view flag, bool enabled) {
+    std::lock_guard<std::mutex> lk(policy_mutex());
+    quirk_overrides()[std::string(flag)] = enabled;
+}
+
+void clear_quirk_overrides() {
+    std::lock_guard<std::mutex> lk(policy_mutex());
+    quirk_overrides().clear();
+}
+
+namespace {
+// "Enforced" for the doctor view = the accommodation is actively in
+// effect. The meaning differs by field type, so these overloads pick
+// the right test per field (resolved at the X-macro expansion site):
+//   * bool flag  → enforced when true (the defense/workaround is on).
+//   * int field  → enforced when it differs from the cross-host default
+//     (e.g. Logic's channel-probe cap of 8 vs the default 64); the
+//     default value is "no host-specific accommodation".
+constexpr bool quirk_field_enforced(bool value, bool /*default_value*/) noexcept {
+    return value;
+}
+constexpr bool quirk_field_enforced(int value, int default_value) noexcept {
+    return value != default_value;
+}
+
+// The "off" value a force-off override sets — disabling an accommodation,
+// which is NOT the same as the struct default for cheap defenses (whose
+// default is true). Mirrors reset_if_filtered's behavior: bool → false,
+// int → its cross-host default (no host-specific cap).
+constexpr bool quirk_off_value(bool /*default_value*/) noexcept { return false; }
+constexpr int  quirk_off_value(int default_value) noexcept { return default_value; }
+
+// Apply per-quirk overrides on top of an already tier-filtered `q`.
+// `populated` is the unfiltered host result, so force-on restores the
+// real host value (handles the int field too); force-off resets to the
+// struct default. Field dispatch is generated from PULP_HOST_QUIRK_FIELDS.
+void apply_overrides(HostQuirks& q, const HostQuirks& populated) {
+    std::lock_guard<std::mutex> lk(policy_mutex());
+    auto& ov = quirk_overrides();
+    if (ov.empty()) return;
+    constexpr auto& d = kDefaultHostQuirks;
+#define PULP_QUIRK_OVERRIDE_FIELD(name)                       \
+    if (auto it = ov.find(#name); it != ov.end())             \
+        q.name = it->second ? populated.name : quirk_off_value(d.name);
+    PULP_HOST_QUIRK_FIELDS(PULP_QUIRK_OVERRIDE_FIELD)
+#undef PULP_QUIRK_OVERRIDE_FIELD
+}
+}  // namespace
+
+std::vector<QuirkFieldStatus> enumerate_quirk_fields(const HostQuirks& q) {
+    constexpr auto& m = kHostQuirksMeta;
+    constexpr auto& d = kDefaultHostQuirks;
+    std::vector<QuirkFieldStatus> out;
+    out.reserve(count_quirk_fields());
+    // `enforced` = the field differs from its default — true means the
+    // accommodation is active (covers both bool flags and the int
+    // logic_au_channel_probe_cap, whose default is 64).
+#define PULP_QUIRK_ENUM_FIELD(name) \
+    out.push_back(QuirkFieldStatus{#name, m.name, quirk_field_enforced(q.name, d.name)});
+    PULP_HOST_QUIRK_FIELDS(PULP_QUIRK_ENUM_FIELD)
+#undef PULP_QUIRK_ENUM_FIELD
+    return out;
+}
+
+HostQuirks resolved_quirks(HostType type, HostVersion version) {
+    const HostQuirks populated = make_quirks_for(type, version);
+    HostQuirks q = populated;
+    apply_filter(q, resolve_quirk_policy().filter);
+    apply_overrides(q, populated);
+    return q;
+}
+
 HostQuirks detect_quirks() {
     const auto info = detect_host_info();
-    auto q = make_quirks_for(info.type, info.version);
-    apply_filter(q, default_policy_filter());
-    return q;
+    return resolved_quirks(info.type, info.version);
 }
 
 }  // namespace pulp::format

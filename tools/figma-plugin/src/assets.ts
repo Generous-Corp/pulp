@@ -135,7 +135,7 @@ export class AssetCache {
 // for content-addressable dedupe. Collisions are theoretically possible but
 // vanishingly rare within a single export and acceptable here — we're hashing
 // for de-duplication, not cryptographic integrity.
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   try {
     if (typeof crypto !== "undefined" && crypto.subtle && typeof crypto.subtle.digest === "function") {
       const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;

@@ -565,6 +565,35 @@ When adding a new validator: extend the `kValidators` array in
 all four states (Healthy, user-owned Broken, root-owned Broken,
 Missing).
 
+### `pulp doctor --host-quirks` (host-quirks integration plan P2)
+
+Reports the runtime DAW host-quirks policy. `cmd_doctor.cpp` reads the
+`pulp::format` host-quirks API directly:
+
+- `resolve_quirk_policy()` → effective `QuirkFilter` + `QuirkPolicySource`
+  (compile default / `PULP_HOST_QUIRKS` env / `set_host_quirk_policy()` API)
+- `detect_host_info()` → detected DAW + version
+- `resolved_quirks(type, version)` + `enumerate_quirk_fields(...)` → the
+  per-flag table (name · tier · enforced)
+
+`--host-quirks` (and the `pulp doctor quirks` synonym) prints **only** the
+section and exits 0 — that's the scriptable surface the `cli-doctor-host-quirks*`
+ctest cases pin. The same section is also appended to the default
+`pulp doctor` human output (gated on `mode.empty() && !ci_mode`).
+
+Gotchas:
+- The override-hint line always literally contains `off|validated-only|all`,
+  so a ctest `PASS_REGULAR_EXPRESSION` for a specific policy must anchor on
+  the **source label** (`... (PULP_HOST_QUIRKS env)`), which appears only on
+  the policy line — not on the hint line. See the three `cli-doctor-host-quirks*`
+  tests in `tools/cli/CMakeLists.txt`.
+- `PULP_HOST_QUIRKS` is parsed **once per process** (cached), so each policy
+  variant needs its own `add_test` (fresh process), not a single invocation.
+- The policy is layered on the compile-time `PULP_HOST_QUIRKS_DEFAULT_POLICY`;
+  with nothing set the source reads "compile default" and behaviour is
+  unchanged. Full precedence + the override API live in
+  `docs/reference/host-quirks-policy.md`.
+
 ## `pulp upgrade` — self-update
 
 Lives in `tools/cli/cmd_upgrade.cpp` (moved out of `cmd_misc.cpp` in

@@ -66,6 +66,48 @@
         line-height: 1.4;
         margin-top: 16px;
       }
+      #fonts-list {
+        margin-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .font-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 4px;
+        font-size: 11px;
+      }
+      .font-row.bundled {
+        border-style: solid;
+        border-color: color-mix(in srgb, #2c8 40%, transparent);
+        background: color-mix(in srgb, #2c8 6%, transparent);
+      }
+      .font-row.dragover {
+        border-color: color-mix(in srgb, currentColor 60%, transparent);
+        background: color-mix(in srgb, currentColor 8%, transparent);
+      }
+      .font-row .meta {
+        color: #888;
+        font-size: 10px;
+        margin-left: 6px;
+      }
+      .font-row .badge {
+        flex-shrink: 0;
+        font-size: 10px;
+        color: #888;
+      }
+      .font-row.bundled .badge { color: #2c8; }
+      #fonts-empty {
+        color: #888;
+        font-size: 11px;
+        font-style: italic;
+        padding: 4px 0;
+      }
     </style>
   </head>
   <body>
@@ -80,6 +122,21 @@
         <button id="btn-refresh">Refresh</button>
         <button id="btn-export"><strong>Export to Pulp</strong></button>
         <button id="btn-close">Close</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Fonts</h2>
+      <p class="subtitle" style="margin: 0 0 8px;">
+        Drop a <code>.ttf</code>/<code>.otf</code> onto a row to bundle a non-system
+        font into the export. Otherwise Pulp falls back to a system match or its
+        bundled OFL set at import.
+      </p>
+      <div id="fonts-list">
+        <div id="fonts-empty">Click "Scan fonts" to detect fonts used in the current selection.</div>
+      </div>
+      <div class="row">
+        <button id="btn-scan-fonts">Scan fonts</button>
       </div>
     </div>
 

@@ -227,6 +227,34 @@ if(PULP_BUILD_TESTS)
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Validators")
 
+    # host-quirks integration plan P2: `pulp doctor --host-quirks` renders
+    # the runtime host-quirks policy section and exits 0. These tests pin
+    # the effective-policy line per PULP_HOST_QUIRKS value — a fresh
+    # process each time, so the env-var parse cache starts cold. The
+    # source label ("PULP_HOST_QUIRKS env") only appears on the policy
+    # line, so the regex can't collide with the override-hint line that
+    # always lists off|validated-only|all.
+    add_test(NAME cli-doctor-host-quirks
+        COMMAND pulp-cli doctor --host-quirks
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-doctor-host-quirks PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
+        PASS_REGULAR_EXPRESSION "Host quirks")
+
+    add_test(NAME cli-doctor-host-quirks-off
+        COMMAND pulp-cli doctor --host-quirks
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-doctor-host-quirks-off PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env};PULP_HOST_QUIRKS=off"
+        PASS_REGULAR_EXPRESSION "off  \\(PULP_HOST_QUIRKS env\\)")
+
+    add_test(NAME cli-doctor-host-quirks-validated
+        COMMAND pulp-cli doctor --host-quirks
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-doctor-host-quirks-validated PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env};PULP_HOST_QUIRKS=validated-only"
+        PASS_REGULAR_EXPRESSION "validated-only  \\(PULP_HOST_QUIRKS env\\)")
+
     add_test(NAME cli-status
         COMMAND pulp-cli status
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

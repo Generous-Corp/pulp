@@ -76,6 +76,11 @@
       "description": "Maps to ImportDiagnostic[]. Plugin records unsupported features here so the importer can surface them without re-running detection.",
       "items": { "$ref": "#/$defs/diagnostic" }
     },
+    "font_family_assets": {
+      "type": "array",
+      "description": "Deduplicated catalogue of every font (family + style + weight + italic) referenced by text nodes in the export. Drives Pulp's runtime font resolution: the consumer (Skia SkFontMgr) looks up each entry against system fonts, falls back to Pulp's bundled OFL set (Inter / Roboto / etc.), and emits a `recognition_unavailable` diagnostic when neither resolves. Note: the Figma plugin API intentionally does NOT expose font binaries, so `asset_id` stays unset for plain captures; it's populated only when the plugin's drag-drop escape hatch (issue follow-up) has carried a user-supplied TTF/OTF in `asset_manifest.assets`.",
+      "items": { "$ref": "#/$defs/font_family_asset" }
+    },
     "root": { "$ref": "#/$defs/node" }
   },
   "$defs": {
@@ -236,6 +241,34 @@
         "aspect_ratio": { "type": "number" },
         "width_mode": { "type": "string", "enum": ["fixed", "hug", "fill"] },
         "height_mode": { "type": "string", "enum": ["fixed", "hug", "fill"] }
+      },
+      "additionalProperties": false
+    },
+    "font_family_asset": {
+      "type": "object",
+      "description": "One row in the deduplicated font catalogue carried on `font_family_assets`. Populated by extractScene().collectFontFamilyAssets — every (family, style, weight, italic) tuple referenced by a text node appears exactly once, in first-encounter order.",
+      "required": ["family", "style"],
+      "properties": {
+        "family": {
+          "type": "string",
+          "description": "Figma font family — e.g. \"Inter\", \"Clash Grotesk\"."
+        },
+        "style": {
+          "type": "string",
+          "description": "Figma style string — verbatim from TextNode.fontName.style (\"Regular\", \"Semi Bold\", \"Italic\", \"Bold Italic\", etc.)."
+        },
+        "weight": {
+          "type": "number",
+          "description": "Numeric font-weight when figma exposes it on the text node (TextNode.fontWeight). Omitted when not numeric (mixed weight)."
+        },
+        "italic": {
+          "type": "boolean",
+          "description": "True when the style string indicates italic (case-insensitive substring match on \"italic\"). Lets the runtime resolve italic variants without re-parsing the style string."
+        },
+        "asset_id": {
+          "type": "string",
+          "description": "Reference into asset_manifest.assets. Set only when the user has supplied a TTF/OTF via the plugin's drag-drop escape hatch (follow-up). For plain captures this is absent; the runtime falls back to system-font lookup."
+        }
       },
       "additionalProperties": false
     },

@@ -47,6 +47,33 @@ export interface ExtractResult {
   assets: AssetCache;
   /// Captured design tokens from Figma variables.
   tokens: ExtractedTokens;
+  /// Deduplicated list of every font family/style/weight tuple referenced
+  /// by text nodes in the extracted tree. Drives Pulp's runtime font
+  /// resolution (#43a-rev / #43b). Note: Figma's plugin API does NOT
+  /// expose font binaries — `asset_id` stays empty for plain captures;
+  /// it's populated only when the user supplies a TTF via the drag-drop
+  /// escape hatch (#43c, follow-up).
+  font_family_assets: FontFamilyAsset[];
+}
+
+/// One row in the deduplicated font catalogue carried on the envelope's
+/// top-level `font_family_assets` field. See ExtractResult for context.
+export interface FontFamilyAsset {
+  /// Figma font family — e.g. "Inter", "Clash Grotesk".
+  family: string;
+  /// Figma style string — "Regular", "Semi Bold", "Italic", etc. Verbatim from `fontName.style`.
+  style: string;
+  /// Numeric font-weight when figma exposes it on the text node
+  /// (`TextNode.fontWeight`). Omitted when not numeric (e.g. mixed weight).
+  weight?: number;
+  /// True when the style string indicates italic (case-insensitive
+  /// substring match on "italic"). Lets the runtime resolve italic
+  /// variants without re-parsing the style string.
+  italic?: boolean;
+  /// Set only when the user supplied a TTF/OTF via the drag-drop escape
+  /// hatch (#43c, follow-up). Points into the envelope's
+  /// `asset_manifest` so the runtime can locate the bundled font file.
+  asset_id?: string;
 }
 
 /// Walk the given Figma scene nodes into a Pulp-shaped tree.
@@ -82,6 +109,11 @@ export async function extractScene(
     if (extracted) roots.push(extracted);
   }
 
+  // Collect the unique font-family/style/weight tuples used by text
+  // nodes in the extracted tree. Runs after the walk because every text
+  // node has already had its style normalised via extractTextStyle.
+  const fontFamilyAssets = collectFontFamilyAssets(roots);
+
   return {
     roots,
     diagnostics: ctx.diagnostics,
@@ -89,7 +121,39 @@ export async function extractScene(
     truncated: ctx.truncated,
     assets,
     tokens,
+    font_family_assets: fontFamilyAssets,
   };
+}
+
+/// Walk the extracted IR once and produce a deduplicated catalogue of
+/// every (family, style, weight, italic) tuple referenced by text nodes.
+/// Order is stable: families appear in first-encounter order, styles
+/// within a family in first-encounter order. That stability matters for
+/// snapshot tests that compare envelope output.
+function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamilyAsset[] {
+  const seen = new Map<string, FontFamilyAsset>();
+  function visit(n: ExtractedFigmaNode): void {
+    const family = n.style.font_family;
+    if (family) {
+      // Figma's `fontName.style` (already captured by extractTextStyle)
+      // lives on `style.font_style` as either "normal" or "italic" today;
+      // the verbose style string ("Semi Bold", "Bold Italic") is not yet
+      // surfaced. Emit what we have and let the runtime resolve.
+      const styleField = (n.style.font_style as string | undefined) ?? "Regular";
+      const weight = n.style.font_weight;
+      const italic = styleField === "italic" || /italic/i.test(styleField);
+      const key = `${family}|${styleField}|${weight ?? ""}|${italic ? "i" : ""}`;
+      if (!seen.has(key)) {
+        const row: FontFamilyAsset = { family, style: styleField };
+        if (typeof weight === "number") row.weight = weight;
+        if (italic) row.italic = true;
+        seen.set(key, row);
+      }
+    }
+    for (const c of n.children) visit(c);
+  }
+  for (const r of roots) visit(r);
+  return Array.from(seen.values());
 }
 
 // ──────────────────────────────────────────────────────────────────────────

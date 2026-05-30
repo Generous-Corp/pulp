@@ -4,7 +4,7 @@ Exports Figma designs to a Pulp-native JSON schema that the Pulp importer (`pulp
 
 **Status: working exporter with Pulp library recognition.** The plugin walks the
 selected frame(s), extracts geometry / layout / typography / style / tokens /
-assets, recognizes Pulp library components (Knob / Fader / Meter) and emits them
+assets, recognizes Pulp library components (Knob / Fader / Meter / XYPad / Waveform / Spectrum) and emits them
 as semantic audio-widget nodes, and exports a `*.pulp.json` (or `*.pulp.zip`
 when assets are present) that `pulp import-design --from figma-plugin` consumes.
 The exporter lives in `src/extract.ts`, `src/serialize.ts`, and
@@ -97,7 +97,7 @@ The plugin embeds its `library_manifest` snapshot into every export so the Pulp 
   tree: geometry, auto-layout, typography, fills/strokes/radius/opacity, images,
   and recursive children.
 - **Recognize** (`src/library-registry.ts`) — map Pulp library component
-  instances to audio-widget kinds (Knob / Fader / Meter), authoritatively by
+  instances to audio-widget kinds (Knob / Fader / Meter / XYPad / Waveform / Spectrum), authoritatively by
   component key and as a fallback by name prefix.
 - **Serialize** (`src/serialize.ts`) — emit the v1 JSON envelope declared in
   `schema/figma-plugin-export-v1.json`, with provenance, the library-manifest

@@ -1253,3 +1253,142 @@ TEST_CASE("kHostQuirksMeta tags the 4 new iPlug2-audit rows correctly",
 // bottom rather than mixed with the original includes so the diff
 // stays localized to the batch.
 
+
+// ─────────────────────────────────────────────────────────────────────
+// P2: runtime policy gate + per-quirk override + field enumeration.
+// (host-quirks integration plan → 2026-05-30-host-quirks-enforcement-goal)
+// ─────────────────────────────────────────────────────────────────────
+
+#include <algorithm>
+#include <optional>
+#include <string_view>
+
+namespace {
+// Find one enumerated field by name; returns nullptr if absent.
+const pulp::format::QuirkFieldStatus* find_field(
+    const std::vector<pulp::format::QuirkFieldStatus>& fields,
+    std::string_view name) {
+    auto it = std::find_if(fields.begin(), fields.end(),
+                           [&](const auto& f) { return f.name == name; });
+    return it == fields.end() ? nullptr : &*it;
+}
+
+// RAII reset so a test never leaks runtime-policy state into the next.
+struct QuirkPolicyGuard {
+    QuirkPolicyGuard() { reset(); }
+    ~QuirkPolicyGuard() { reset(); }
+    static void reset() {
+        pulp::format::set_host_quirk_policy(std::nullopt);
+        pulp::format::clear_quirk_overrides();
+    }
+};
+}  // namespace
+
+TEST_CASE("resolve_quirk_policy: API policy wins and reports source=Api",
+          "[format][host-quirks][runtime-policy][p2]") {
+    QuirkPolicyGuard guard;
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterValidatedOnly);
+    auto resolved = pulp::format::resolve_quirk_policy();
+    REQUIRE(resolved.source == pulp::format::QuirkPolicySource::Api);
+    REQUIRE(resolved.filter.allow_validated == true);
+    REQUIRE(resolved.filter.allow_speculative == false);
+    REQUIRE(resolved.filter.allow_lesson_only == false);
+}
+
+TEST_CASE("resolved_quirks validated-only keeps cheap defenses, drops speculative",
+          "[format][host-quirks][runtime-policy][p2]") {
+    QuirkPolicyGuard guard;
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterValidatedOnly);
+    auto q = pulp::format::resolved_quirks(HostType::Reaper, HostVersion{7, 20});
+    // Cheap defenses are Validated → survive.
+    REQUIRE(q.synthesize_bypass_parameter == true);
+    REQUIRE(q.clamp_latency_to_nonneg == true);
+    REQUIRE(q.silence_unsupported_bus_arrangements == true);
+    // REAPER rows are Speculative/LessonOnly → filtered out, even though
+    // make_quirks_for(Reaper) would have set them.
+    REQUIRE(make_quirks_for(HostType::Reaper, HostVersion{7, 20})
+                .reaper_vst3_gesture_ordering == true);
+    REQUIRE(q.reaper_vst3_gesture_ordering == false);
+}
+
+TEST_CASE("resolved_quirks off-policy zeroes everything including cheap defenses",
+          "[format][host-quirks][runtime-policy][p2]") {
+    QuirkPolicyGuard guard;
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+    auto q = pulp::format::resolved_quirks(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(q.synthesize_bypass_parameter == false);
+    REQUIRE(q.clamp_latency_to_nonneg == false);
+    REQUIRE(q.silence_unsupported_bus_arrangements == false);
+    REQUIRE(q.reaper_vst3_gesture_ordering == false);
+    // The int field reverts to its cross-host default.
+    auto logic = pulp::format::resolved_quirks(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(logic.logic_au_channel_probe_cap == 64);
+}
+
+TEST_CASE("per-quirk override force-on exempts a tier-filtered flag",
+          "[format][host-quirks][runtime-policy][override][p2]") {
+    QuirkPolicyGuard guard;
+    // Base policy drops every speculative REAPER row...
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterValidatedOnly);
+    // ...but the author trusts this one specifically.
+    pulp::format::set_quirk_override("reaper_keyboard_passthrough", true);
+    auto q = pulp::format::resolved_quirks(HostType::Reaper, HostVersion{7, 20});
+    REQUIRE(q.reaper_keyboard_passthrough == true);   // forced on
+    REQUIRE(q.reaper_vst3_gesture_ordering == false);  // still filtered
+}
+
+TEST_CASE("per-quirk override force-off beats an allowed flag (incl. int field)",
+          "[format][host-quirks][runtime-policy][override][p2]") {
+    QuirkPolicyGuard guard;
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // all tiers
+    pulp::format::set_quirk_override("synthesize_bypass_parameter", false);
+    pulp::format::set_quirk_override("logic_au_channel_probe_cap", false);
+    auto q = pulp::format::resolved_quirks(HostType::LogicPro, HostVersion{11, 0});
+    REQUIRE(q.synthesize_bypass_parameter == false);     // forced off
+    REQUIRE(q.clamp_latency_to_nonneg == true);          // untouched
+    REQUIRE(q.logic_au_channel_probe_cap == 64);         // forced to default
+}
+
+TEST_CASE("set_quirk_override ignores unknown flag names",
+          "[format][host-quirks][runtime-policy][override][p2]") {
+    QuirkPolicyGuard guard;
+    pulp::format::set_quirk_override("not_a_real_quirk_flag", true);
+    // Resolution proceeds normally; the bogus name is a no-op.
+    auto q = pulp::format::resolved_quirks(HostType::Unknown, HostVersion{});
+    REQUIRE(q.synthesize_bypass_parameter == true);
+}
+
+TEST_CASE("enumerate_quirk_fields covers every field with tier + enforced",
+          "[format][host-quirks][runtime-policy][doctor][p2]") {
+    auto q = make_quirks_for(HostType::Reaper, HostVersion{7, 20});
+    auto fields = pulp::format::enumerate_quirk_fields(q);
+    // One row per HostQuirks field (kept in lock-step with the X-macro
+    // count static_assert in host_quirks.cpp).
+    REQUIRE(fields.size() == 37);
+
+    const auto* bypass = find_field(fields, "synthesize_bypass_parameter");
+    REQUIRE(bypass != nullptr);
+    REQUIRE(bypass->tier == QuirkStatus::Validated);
+    REQUIRE(bypass->enforced == true);  // cheap defense on by default
+
+    const auto* reaper = find_field(fields, "reaper_vst3_gesture_ordering");
+    REQUIRE(reaper != nullptr);
+    REQUIRE(reaper->enforced == true);  // set for REAPER
+
+    const auto* cubase = find_field(fields, "cubase10_async_view_resize_queue");
+    REQUIRE(cubase != nullptr);
+    REQUIRE(cubase->enforced == false);  // not a REAPER flag
+}
+
+TEST_CASE("enumerate_quirk_fields enforced reflects the int channel-probe cap",
+          "[format][host-quirks][runtime-policy][doctor][p2]") {
+    auto logic = enumerate_quirk_fields(make_quirks_for(HostType::LogicPro, HostVersion{11, 0}));
+    const auto* cap = find_field(logic, "logic_au_channel_probe_cap");
+    REQUIRE(cap != nullptr);
+    REQUIRE(cap->enforced == true);  // Logic caps at 8 (!= default 64)
+
+    auto unknown = enumerate_quirk_fields(make_quirks_for(HostType::Unknown, HostVersion{}));
+    const auto* cap2 = find_field(unknown, "logic_au_channel_probe_cap");
+    REQUIRE(cap2 != nullptr);
+    REQUIRE(cap2->enforced == false);  // default 64 → not enforced
+}

@@ -85,6 +85,63 @@ cheap defenses, pass `kQuirkFilterOff`.
 `apply_filter()` is idempotent — applying the same filter twice is a
 no-op on the second call.
 
+## Runtime policy: env var + API override (no recompile)
+
+The `make_quirks_for(...)` / `apply_filter(...)` route above is the
+fully manual surface. Since the host-quirks **enforcement layer** (P2),
+adapters resolve quirks through a single entry that also honours a
+*runtime* policy layered on top of the build-time default — so a user
+who doesn't trust a particular accommodation can dial it back without
+recompiling, while the trusted set stays enforced.
+
+```cpp
+// The single entry adapters consume. Equivalent to make_quirks_for(...)
+// plus the runtime base filter and any per-quirk overrides.
+HostQuirks q = resolved_quirks(host_type, host_version);
+```
+
+**Precedence (highest first):**
+
+1. **Per-quirk override** — `set_quirk_override("<field>", true|false)`.
+   `true` keeps the host-populated value even if its tier is filtered
+   out; `false` forces it back to the default (off). `clear_quirk_overrides()`
+   resets them.
+2. **API policy** — `set_host_quirk_policy(QuirkFilter{...})` sets the
+   whole-policy filter programmatically; pass `std::nullopt` to clear.
+3. **Environment** — `PULP_HOST_QUIRKS` (case-insensitive):
+   `off` | `validated-only` | `all`. Parsed once per process; an
+   unrecognized value is ignored with a one-time warning.
+4. **Build-time default** — the `PULP_HOST_QUIRKS_DEFAULT_POLICY` CMake
+   option (see above). When nothing else is set, behaviour is exactly
+   the build-time default — i.e. P2 changes nothing by default.
+
+All of these are **init-time** configuration: resolve once when the
+adapter is constructed. None of the setters are real-time safe — never
+call them from the audio thread.
+
+`resolve_quirk_policy()` returns the effective base filter together with
+its `QuirkPolicySource` (compile default / env / API) for diagnostics.
+
+### Inspecting the live policy: `pulp doctor`
+
+```text
+$ pulp doctor --host-quirks
+Host quirks
+  policy:        all  (compile default)
+  detected host: REAPER 7.20
+  enforced:      9 / 37 accommodations active
+    • reaper_vst3_gesture_ordering  [Speculative]
+    • ...
+  override with PULP_HOST_QUIRKS=off|validated-only|all
+  provenance + last-verified dates: core/format/host-quirks.json
+```
+
+The same section appears at the bottom of the default `pulp doctor`
+output. `PULP_HOST_QUIRKS=off pulp doctor --host-quirks` shows the
+policy switching to `off` with source `PULP_HOST_QUIRKS env`. Per-quirk
+provenance — `source_type`, `evidence`, and `last_verified` dates — lives
+in the machine-readable catalog `core/format/host-quirks.json`.
+
 ## Filing a new quirk
 
 When a Pulp plugin breaks in a DAW you should follow the discovery
