@@ -2954,6 +2954,45 @@ TEST_CASE("WidgetBridge gpu_surface late-attach is idempotent and nullable",
     REQUIRE(bridge->has_native_gpu_bridge() == false);
 }
 
+TEST_CASE("WidgetBridge __gpuQueueSubmitImpl returns boolean for all engine inputs",
+          "[widget_bridge][gpu-queue][ios-d3b-slice5]") {
+    // iOS-D.3b Slice 5: pin the engine-agnostic contract of
+    // __gpuQueueSubmitImpl — must return a JS-side boolean for every
+    // input shape, never throw / return undefined / return a type that
+    // JSC would coerce surprisingly. This is the canonical "bridge
+    // survived the call" check that the buffered-skips probe in
+    // web-compat-gpu-buffered.js relies on. The wgpu device-side
+    // success path is exercised by the live tests; this case pins the
+    // input-validation surface so a regression returning undefined
+    // (falsy-coerced) doesn't silently break the bridge.
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    pulp::state::StateStore store;
+    auto bridge = std::make_unique<pulp::view::WidgetBridge>(engine, root, store);
+
+    // 1. Empty canvas_id → false (early return, no surface required).
+    {
+        auto result = engine.evaluate(
+            "(function() { var r = __gpuQueueSubmitImpl('', 0, 0, 0, 1); return typeof r === 'boolean' && r === false; })()");
+        REQUIRE(result.getWithDefault<bool>(false));
+    }
+
+    // 2. Non-empty canvas_id but no gpu_surface attached → false.
+    {
+        auto result = engine.evaluate(
+            "(function() { var r = __gpuQueueSubmitImpl('cv-no-surface', 0.5, 0.5, 0.5, 1.0); return typeof r === 'boolean' && r === false; })()");
+        REQUIRE(result.getWithDefault<bool>(false));
+    }
+
+    // 3. Bad numeric inputs (NaN) → bridge must still return boolean,
+    //    not propagate NaN through the wgpu clearValue path.
+    {
+        auto result = engine.evaluate(
+            "(function() { var r = __gpuQueueSubmitImpl('cv-nan', NaN, NaN, NaN, 1.0); return typeof r === 'boolean'; })()");
+        REQUIRE(result.getWithDefault<bool>(false));
+    }
+}
+
 TEST_CASE("WidgetBridge __gpuCanvasConfigureImpl surfaces presentable flag",
           "[widget_bridge][gpu-canvas][ios-d3b-slice4]") {
     // iOS-D.3b Slice 4: the configure result must carry a `presentable`

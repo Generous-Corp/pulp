@@ -8582,6 +8582,16 @@ void WidgetBridge::register_api() {
 
         auto command_buffer = encoder.Finish();
         queue_ptr->Submit(1, &command_buffer);
+
+        // iOS-D.3b Slice 5: surface the queue.submit success in the
+        // runtime log so iPad device walks can grep `PULP_WEBGPU_BRIDGE:
+        // queue.submit ok` without instrumenting JS. `commands=1` is
+        // accurate for this single-command-buffer code path; the buffered
+        // shim (`__gpuQueueDrawBufferedImpl` etc.) handles multi-command
+        // submissions and would emit a different count.
+        runtime::log_info(
+            "PULP_WEBGPU_BRIDGE: queue.submit ok (canvas={}, commands=1)",
+            canvas_id);
         return choc::value::createBool(true);
 #endif
     });
