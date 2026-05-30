@@ -8,6 +8,7 @@
 import type { ExtractedFigmaNode, ExtractedDiagnostic } from "./extract-model";
 import type { AssetCache } from "./assets";
 import type { ExtractedTokens } from "./tokens";
+import type { FontFamilyAsset } from "./extract";
 
 export interface SerializeContext {
   fileKey: string;
@@ -16,6 +17,10 @@ export interface SerializeContext {
   libraryManifest?: LibraryManifestSnapshot;
   assets: AssetCache;
   tokens: ExtractedTokens;
+  /// Deduplicated font catalogue produced by extractScene (#43a-rev).
+  /// Empty array → no text nodes in the selection (or no font names
+  /// captured). Emitted at envelope root as `font_family_assets`.
+  fontFamilyAssets?: FontFamilyAsset[];
 }
 
 export interface LibraryManifestSnapshot {
@@ -71,6 +76,14 @@ export function serializeExport(
         height: a.height,
       })),
     },
+    // #43a-rev: top-level font catalogue. Each entry holds the family
+    // name + style + (optional) weight + (optional) italic flag for every
+    // font referenced by text nodes. `asset_id` is populated only by the
+    // drag-drop escape hatch (#43c) for user-supplied TTF bundling — the
+    // Figma plugin API does not expose font binaries directly. Runtime
+    // (Agent A's #43b) consumes via Skia's SkFontMgr system-font matcher
+    // with the bundled OFL set as fallback.
+    font_family_assets: ctx.fontFamilyAssets ?? [],
     diagnostics: diagnostics.map(toEnvelopeDiagnostic),
     root,
   };

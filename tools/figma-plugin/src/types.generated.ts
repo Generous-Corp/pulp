@@ -69,6 +69,10 @@ export interface PulpFigmaPluginExport {
    * Maps to ImportDiagnostic[]. Plugin records unsupported features here so the importer can surface them without re-running detection.
    */
   diagnostics?: Diagnostic[];
+  /**
+   * Deduplicated catalogue of every font (family + style + weight + italic) referenced by text nodes in the export. Drives Pulp's runtime font resolution: the consumer (Skia SkFontMgr) looks up each entry against system fonts, falls back to Pulp's bundled OFL set (Inter / Roboto / etc.), and emits a `recognition_unavailable` diagnostic when neither resolves. Note: the Figma plugin API intentionally does NOT expose font binaries, so `asset_id` stays unset for plain captures; it's populated only when the plugin's drag-drop escape hatch (issue follow-up) has carried a user-supplied TTF/OTF in `asset_manifest.assets`.
+   */
+  font_family_assets?: FontFamilyAsset[];
   root: Node;
 }
 /**
@@ -121,6 +125,31 @@ export interface Diagnostic {
     | "recognition_unavailable";
   anchor_id?: string;
   property?: string;
+}
+/**
+ * One row in the deduplicated font catalogue carried on `font_family_assets`. Populated by extractScene().collectFontFamilyAssets — every (family, style, weight, italic) tuple referenced by a text node appears exactly once, in first-encounter order.
+ */
+export interface FontFamilyAsset {
+  /**
+   * Figma font family — e.g. "Inter", "Clash Grotesk".
+   */
+  family: string;
+  /**
+   * Figma style string — verbatim from TextNode.fontName.style ("Regular", "Semi Bold", "Italic", "Bold Italic", etc.).
+   */
+  style: string;
+  /**
+   * Numeric font-weight when figma exposes it on the text node (TextNode.fontWeight). Omitted when not numeric (mixed weight).
+   */
+  weight?: number;
+  /**
+   * True when the style string indicates italic (case-insensitive substring match on "italic"). Lets the runtime resolve italic variants without re-parsing the style string.
+   */
+  italic?: boolean;
+  /**
+   * Reference into asset_manifest.assets. Set only when the user has supplied a TTF/OTF via the plugin's drag-drop escape hatch (follow-up). For plain captures this is absent; the runtime falls back to system-font lookup.
+   */
+  asset_id?: string;
 }
 /**
  * An IR node as emitted by serialize.ts::toEnvelopeNode. Semantic audio-widget data lives at the NODE ROOT (audio_widget/label/min/max/default + attributes.binding), NOT in nested audio/binding sub-objects. The C++ parser (core/view/src/design_ir_json.cpp::parse_ir_node) reads these root-level fields directly.

@@ -92,6 +92,7 @@ async function handleExport(): Promise<void> {
     libraryManifest: LIBRARY_MANIFEST,
     assets: result.assets,
     tokens: result.tokens,
+    fontFamilyAssets: result.font_family_assets,
   });
 
   const json = JSON.stringify(envelope, null, 2);

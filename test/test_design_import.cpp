@@ -3344,3 +3344,54 @@ TEST_CASE("kitchen-sink envelope parses all 6 Pulp Library widgets from one root
     REQUIRE(spec.audio_min == Catch::Approx(-60.0f));
     REQUIRE(spec.audio_max == Catch::Approx(0.0f));
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// #43a-rev — `font_family_assets` top-level envelope field.
+//
+// Plugin emits a deduplicated catalogue of (family, style, weight, italic)
+// tuples for every font referenced by text nodes. Runtime (Agent A's
+// #43b) consumes via Skia's SkFontMgr system-font matcher with the
+// bundled OFL set as fallback.
+//
+// This test pins the contract that the C++ parser TOLERATES the new
+// field without error. Today the parser doesn't yet bind it to IR
+// fields — that's #43b — but the unknown-field tolerance is the
+// invariant we need now so a v0.4.x plugin emitting the field can be
+// consumed by older parsers gracefully.
+
+TEST_CASE("parse_figma_plugin_json tolerates font_family_assets top-level field (issue-43a-rev)",
+          "[view][import][figma-plugin][issue-43a-rev]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "font_family_assets": [
+            { "family": "Inter", "style": "Regular", "weight": 400 },
+            { "family": "Inter", "style": "Semi Bold", "weight": 600 },
+            { "family": "Inter", "style": "Italic", "weight": 400, "italic": true },
+            { "family": "Clash Grotesk", "style": "Medium", "weight": 500,
+              "asset_id": "font-1a2b3c4d" }
+        ],
+        "root": {
+            "type": "frame",
+            "name": "Typed",
+            "style": { "width": 200, "height": 100, "font_family": "Inter" },
+            "children": [
+                {
+                    "type": "text",
+                    "name": "title",
+                    "content": "Hello",
+                    "style": { "font_family": "Inter", "font_weight": 600 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+    // The whole point of the test: the parser must NOT throw on the new
+    // top-level field. Behaviour beyond that is #43b territory.
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.source == DesignSource::figma_plugin);
+    REQUIRE(ir.root.name == "Typed");
+    REQUIRE(ir.root.children.size() == 1);
+    REQUIRE(ir.root.children.front().name == "title");
+}
