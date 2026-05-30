@@ -7,6 +7,7 @@
     "**/cg_canvas.mm",
     "**/window_host_mac.mm",
     "**/window_host_ios.mm",
+    "**/au_view_controller_mac.mm",
     "**/sdl_window_host.cpp",
     "**/scanner_clap.cpp",
     "**/cmd_projects.cpp",

@@ -119,6 +119,26 @@ Full recipe (macOS framework + stub .appex + container .app, signing,
 notarization, PlugInKit diagnostics) is in
 `.agents/skills/auv3/SKILL.md → "macOS AU v3 packaging"`.
 
+### macOS AU v3: editor attach is now DEFERRED until a settled host size
+
+`rebuildEditorIfReady` no longer creates the `PluginViewHost` (or calls
+`ViewBridge::notify_attached()`) inline. Logic hosts AU v3 out-of-process and
+does **not** deliver its restored window size to the extension's view on initial
+open, so a `PluginViewHost` built then would paint its first frame at the design
+size inside Logic's smaller window (clipped). Instead `rebuildEditorIfReady`
+opens the bridge, sets `preferredContentSize`, wires a `setFrameSize:` hook on a
+custom `PulpAUMacRootView` (which fills its superview the **frame-based** way —
+`autoresizingMask`, NOT Auto Layout: constraint pinning crashed Ableton Live, see
+the auv3 SKILL), and marks the host
+**pending**; `-createViewHostIfReady` then builds the host **at the view's real
+bounds** — and only there fires `notify_attached()`. **Consequence for adapter
+authors:** on macOS AU v3, `Processor::on_view_opened` (via `notify_attached`)
+fires slightly later — after the host's first real layout, not at controller
+build — and `_pendingRoot`/`_viewHostPending` gate the one-shot creation. Don't
+move `notify_attached()` back inline; it reintroduces the first-paint clip.
+Rationale + the view-config/first-paint root cause are in
+`.agents/skills/auv3/SKILL.md → "Logic OOP first-paint clip"`.
+
 ## AU v2 dual-Processor gotcha (fixed)
 
 Pre-ViewBridge, the AU v2 Cocoa view factory called

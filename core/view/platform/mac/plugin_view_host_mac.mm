@@ -958,6 +958,16 @@ private:
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
 
+    // FIRST-PAINT SIZE matters: the (width,height) this surface is created at
+    // becomes the first painted frame's size. In an out-of-process plugin host
+    // (notably Logic AU v3) the host may NOT have delivered the editor view's
+    // real window size yet at attach time, so creating the surface at the
+    // DESIGN size paints an oversized first frame that the host clips/composites
+    // into a smaller window until a resize/reopen. Callers embedding this host
+    // in such a DAW must defer creation until the view reports a real settled
+    // size and pass THAT as the initial size (see
+    // core/format/src/au_view_controller_mac.mm `-createViewHostIfReady` and
+    // `.agents/skills/auv3/SKILL.md → "Logic OOP first-paint clip"`).
     void init_gpu(float width, float height) {
         gpu_surface_ = render::GpuSurface::create_dawn();
         if (!gpu_surface_) {

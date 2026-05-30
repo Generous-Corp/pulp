@@ -28,6 +28,7 @@
 #import "au_audio_unit.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 
 namespace {
@@ -56,27 +57,55 @@ void pulp_auv3_apply_preferred_size(NSViewController *controller,
     [view setNeedsLayout:YES];
 }
 
-bool pulp_auv3_is_undersized(NSSize current, NSSize design) {
-    return current.width > 0.0 && current.height > 0.0 &&
-           design.width > 0.0 && design.height > 0.0 &&
-           (current.width < design.width || current.height < design.height);
-}
-
-void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
-    if (!view || !view.window) return;
-    NSSize current = view.bounds.size;
-    if (!pulp_auv3_is_undersized(current, design)) return;
-
-    NSRect frame = view.window.frame;
-    const CGFloat delta_w = std::max<CGFloat>(0.0, design.width - current.width);
-    const CGFloat delta_h = std::max<CGFloat>(0.0, design.height - current.height);
-    frame.size.width += delta_w;
-    frame.size.height += delta_h;
-    frame.origin.y -= delta_h;
-    [view.window setFrame:frame display:YES animate:NO];
-}
+// Initial-attach size-sync ticks. Logic hosts AU v3 out-of-process and the
+// extension's `viewDidLayout` does not reliably fire when the host resizes the
+// remote view, so the editor can paint its first frame at the design size
+// inside whatever (often remembered) window Logic restored — clipping the UI
+// until a manual resize. We poll the view's real bounds for a short window
+// after attach and re-fit each tick. 8 × 60ms ≈ 0.5s covers Logic's late
+// layout settle without lingering long enough to fight a deliberate resize.
+static constexpr unsigned long kInitialSizeSyncMaxAttempts = 8;
+static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
 
 } // namespace
+
+/// Root view that reports host-driven frame changes synchronously.
+///
+/// In Logic Pro's out-of-process AU v3 hosting the host sets the remote view's
+/// frame geometry to its (often restored) window size WITHOUT reliably driving
+/// the controller's `viewDidLayout`. Polling `self.view.bounds` after attach
+/// therefore misses the host's initial size and the editor's first frame stays
+/// painted at the design size inside a smaller window (clipped) until the user
+/// nudges it. Overriding `setFrameSize:` is the one hook guaranteed to fire on
+/// every host-driven (re)size, so we re-fit the design viewport from here.
+@interface PulpAUMacRootView : NSView
+@property (nonatomic, copy) void (^onResize)(void);
+@end
+
+@implementation PulpAUMacRootView
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    if (self.onResize) self.onResize();
+}
+- (void)viewDidMoveToSuperview {
+    [super viewDidMoveToSuperview];
+    NSView *sv = self.superview;
+    if (!sv) return;
+    // Fill the host's container view so we pick up its real size — but do it the
+    // FRAME-based way (springs & struts), NOT Auto Layout. Pinning with
+    // NSLayoutConstraints (translatesAutoresizingMaskIntoConstraints=NO) crashed
+    // Ableton Live: when the host places the AU window, our setFrameSize: →
+    // [super] → setNeedsLayout engages the constraint engine
+    // (-[NSWindow _postWindowNeedsLayout]) which throws in that context and the
+    // uncaught exception kills the host. Frame-based autoresizing fills the
+    // container identically for our purposes (the deferred GPU host then reads
+    // these real bounds) without touching the constraint engine, and is
+    // compatible with frame-driven AU hosts (Live, REAPER, Logic).
+    self.translatesAutoresizingMaskIntoConstraints = YES;
+    self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    self.frame = sv.bounds;
+}
+@end
 
 /// AUViewController subclass + AUAudioUnitFactory for macOS AU v3.
 /// Apple's current pattern: the view controller IS the factory. Info.plist
@@ -89,6 +118,14 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
 @implementation PulpAUMacViewController {
     NSSize _designSize;
     NSUInteger _initialSizeSyncAttempts;
+    // Deferred GPU-host creation (Logic OOP first-paint fix): we hold the
+    // resolved root View and wait to build the PluginViewHost (and its Dawn/
+    // Skia surface) until the root view reports a real, settled host size, so
+    // the surface is never born at the design size inside a smaller restored
+    // Logic window. _pendingRoot points into _bridge / _fallbackView and is
+    // only dereferenced before they are reset.
+    pulp::view::View *_pendingRoot;
+    BOOL _viewHostPending;
     // Ivar order is load-bearing — see -dealloc in
     // au_view_controller_ios.mm for the same contract. _viewHost holds
     // `View& root_` and MUST be destroyed before whichever object owns
@@ -106,7 +143,8 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
     // initial container from this frame before createAudioUnit has provided
     // the processor, so use compile-time design dimensions when available.
     const NSSize initial = pulp_auv3_initial_editor_size();
-    NSView *root = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, initial.width, initial.height)];
+    PulpAUMacRootView *root =
+        [[PulpAUMacRootView alloc] initWithFrame:NSMakeRect(0, 0, initial.width, initial.height)];
     root.wantsLayer = YES;
     root.layer.backgroundColor = NSColor.blackColor.CGColor;
     self.view = root;
@@ -238,42 +276,78 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
         root = _fallbackView.get();
     }
 
-    // If the host has not attached the controller yet, update the root frame
-    // too so preferredContentSize and the actual view bounds agree. REAPER's
-    // in-process AUv3 path can attach first and hand us its small default
-    // container; on that first build, expand the root to the design before
-    // attaching the GPU host. Later user/host resize still flows through
-    // viewDidLayout without being forced back to the design size.
+    // Publish the design size as the preferred size, but do NOT force the root
+    // view's frame to it here. Forcing the frame during rebuild poisons the
+    // first paint in Logic's OOP host: the editor paints at the design size
+    // before Logic delivers its restored (smaller) window size, leaving the
+    // first frame clipped. The PulpAUMacRootView `setFrameSize:` hook (wired
+    // below) re-fits the design viewport to whatever size the host hands us —
+    // including Logic's initial geometry push that `viewDidLayout` misses.
     const NSSize designSize = NSMakeSize(w, h);
     _designSize = designSize;
     _initialSizeSyncAttempts = 0;
-    NSSize currentSize = self.view.bounds.size;
-    const bool currentUndersized = pulp_auv3_is_undersized(currentSize, designSize);
-    const bool resizeInitialRoot = self.view.window == nil || currentUndersized;
-    if (currentUndersized) {
-        pulp::runtime::log_info("AU mac: expanding undersized initial root {}x{} to design {}x{}",
-                                static_cast<int>(currentSize.width),
-                                static_cast<int>(currentSize.height),
-                                w, h);
+    pulp_auv3_apply_preferred_size(self, designSize, /*resize_view_frame=*/false);
+
+    // Defer PluginViewHost creation until the root view reports a real, settled
+    // host size (see -createViewHostIfReady). Wire the frame-change hook first:
+    // when Logic's OOP host finally sizes our (superview-pinned) view to its
+    // restored window, this fires and builds the GPU host at THAT size — so the
+    // first painted frame is already correct, never the design-size frame Logic
+    // would otherwise composite (clipped) into a smaller window.
+    _pendingRoot = root;
+    _viewHostPending = YES;
+    if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
+        __unsafe_unretained PulpAUMacViewController *weakSelf = self;
+        ((PulpAUMacRootView *)self.view).onResize = ^{
+            [weakSelf createViewHostIfReady];
+            [weakSelf resizeEditorToViewBounds];
+        };
     }
-    pulp_auv3_apply_preferred_size(self, designSize, resizeInitialRoot);
+
+    // Try immediately (REAPER's in-process path hands us a real size up front)
+    // and start the settle driver as a fallback for hosts that size us late.
+    [self createViewHostIfReady];
+    [self scheduleInitialSizeSync];
+}
+
+// Build the GPU host lazily, at the view's REAL bounds, once the host has
+// settled them. While the bounds still equal the design size we wait (up to the
+// initial-size-sync window) for the host to deliver its possibly-smaller
+// restored size; after that we accept the current size. Creating at the real
+// size is what makes Logic's first paint correct instead of design-sized.
+- (void)createViewHostIfReady {
+    if (!_viewHostPending || !_pendingRoot) return;
+
+    const NSSize b = self.view.bounds.size;
+    if (b.width < 1.0 || b.height < 1.0) return;  // no real layout yet
+
+    const bool boundsMatchDesign =
+        std::abs(b.width - _designSize.width) < 1.0 &&
+        std::abs(b.height - _designSize.height) < 1.0;
+    if (boundsMatchDesign && _initialSizeSyncAttempts < kInitialSizeSyncMaxAttempts) {
+        return;  // keep waiting for the host's settled (likely different) size
+    }
+
+    _viewHostPending = NO;
+
+    const uint32_t w = static_cast<uint32_t>(_designSize.width);
+    const uint32_t h = static_cast<uint32_t>(_designSize.height);
 
     pulp::view::PluginViewHost::Options opts;
-    opts.size = {w, h};
+    opts.size = {std::max(1u, static_cast<uint32_t>(b.width)),
+                 std::max(1u, static_cast<uint32_t>(b.height))};  // REAL host size
     const char *mode = "fallback";
     if (_bridge) {
         const auto gpu = pulp::format::decide_gpu_host(*_bridge);
         opts.use_gpu = gpu.use_gpu;
         mode = gpu.mode;
-        _viewHost = pulp::view::PluginViewHost::create(*root, opts);
+        _viewHost = pulp::view::PluginViewHost::create(*_pendingRoot, opts);
         if (_viewHost) {
             pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
             _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
-            // Phase iOS-D.3b Slice 1 (cross-platform): hand the host's live
-            // GpuSurface to the scripted-UI session so JS navigator.gpu /
-            // canvas.getContext('webgpu') routes through Pulp's Dawn
-            // instance instead of mocks. See
-            // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+            // Phase iOS-D.3b Slice 1: hand the host's live GpuSurface to the
+            // scripted-UI session so JS navigator.gpu / canvas.getContext(
+            // 'webgpu') routes through Pulp's Dawn instance instead of mocks.
             if (auto* scripted = _bridge->scripted_ui()) {
                 scripted->attach_gpu_surface(_viewHost->gpu_surface());
                 if (_viewHost->gpu_surface()) {
@@ -284,18 +358,16 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
             }
         }
     } else {
-        _viewHost = pulp::view::PluginViewHost::create(*root, opts);
+        _viewHost = pulp::view::PluginViewHost::create(*_pendingRoot, opts);
     }
 
     if (!_viewHost) {
         pulp::runtime::log_error("AU mac: PluginViewHost::create returned null");
+        _viewHostPending = YES;  // allow a later attempt
         return;
     }
 
-    // Phase 3 viewport pin + aspect lock: paint at design size; let the
-    // host size the window. The host receives the *container* size in
-    // resize(), not the design size — PluginViewHost::set_design_viewport
-    // scales the paint/input transform.
+    // Phase 3 viewport pin + aspect lock: paint the design at the host size.
     if (w > 0 && h > 0) {
         _viewHost->set_design_viewport(w, h);
         _viewHost->set_fixed_aspect_ratio(static_cast<float>(w) /
@@ -305,39 +377,39 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
     _viewHost->attach_to_parent((__bridge void *)self.view);
     if (_bridge) _bridge->notify_attached();
 
-    pulp::runtime::log_info("AU mac: editor attached, design={}x{}, mode={}, gpu={}",
+    pulp::runtime::log_info("AU mac: editor attached at {}x{}, design={}x{}, mode={}, gpu={}",
+                            static_cast<int>(b.width), static_cast<int>(b.height),
                             w, h, mode, _viewHost->is_gpu_backed());
 
-    [self scheduleInitialSizeSync];
     [self resizeEditorToViewBounds];
 }
 
 - (void)scheduleInitialSizeSync {
-    if (_initialSizeSyncAttempts >= 3) return;
+    if (_initialSizeSyncAttempts >= kInitialSizeSyncMaxAttempts) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self runInitialSizeSync];
     });
 }
 
 - (void)runInitialSizeSync {
-    if (!_viewHost || _designSize.width <= 0.0 || _designSize.height <= 0.0) return;
-    if (_initialSizeSyncAttempts >= 3) return;
-    ++_initialSizeSyncAttempts;
+    if (_designSize.width <= 0.0 || _designSize.height <= 0.0) return;
+    if (_initialSizeSyncAttempts < kInitialSizeSyncMaxAttempts) {
+        ++_initialSizeSyncAttempts;
+    }
 
-    NSSize currentSize = self.view.bounds.size;
-    if (!pulp_auv3_is_undersized(currentSize, _designSize)) return;
+    // Settle driver / fallback for hosts that size us late: builds the deferred
+    // GPU host once the view's bounds settle (or, on the final attempt, at
+    // whatever size we have). We let the host own the window — no forced
+    // window resize here (Codex: forcing Logic's window fights its restore
+    // behavior). Once the host exists, just re-fit the design viewport.
+    [self createViewHostIfReady];
+    if (_viewHost) {
+        [self resizeEditorToViewBounds];
+    }
 
-    pulp::runtime::log_info("AU mac: correcting undersized initial layout {}x{} to design {}x{}",
-                            static_cast<int>(currentSize.width),
-                            static_cast<int>(currentSize.height),
-                            static_cast<int>(_designSize.width),
-                            static_cast<int>(_designSize.height));
-    pulp_auv3_expand_window_for_view(self.view, _designSize);
-    pulp_auv3_apply_preferred_size(self, _designSize, true);
-    [self resizeEditorToViewBounds];
-
-    if (_initialSizeSyncAttempts < 3) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+    if (_initialSizeSyncAttempts < kInitialSizeSyncMaxAttempts) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     kInitialSizeSyncIntervalMs * NSEC_PER_MSEC),
                        dispatch_get_main_queue(), ^{
             [self runInitialSizeSync];
         });
@@ -351,10 +423,21 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
     const uint32_t h = std::max(1u, static_cast<uint32_t>(size.height));
     _viewHost->set_size(w, h);
     if (_bridge) _bridge->resize(w, h);
+    // Force a repaint at the new size. On Logic's first open the GPU surface
+    // paints once at the design size before the superview-pin resolves the view
+    // to Logic's container size; set_size alone updates the logical size but the
+    // stale first frame can persist (clipped) until the host next requests a
+    // redraw (a window reopen or a manual resize). Requesting the repaint here
+    // makes the corrected size show on the first settle.
+    _viewHost->repaint();
 }
 
 - (void)viewDidLayout {
     [super viewDidLayout];
+    // Also a creation trigger: on hosts where viewDidLayout *does* fire with a
+    // real size, build the deferred GPU host here too (idempotent — no-op once
+    // created or while still waiting for a settled size).
+    [self createViewHostIfReady];
     [self resizeEditorToViewBounds];
 }
 
@@ -371,6 +454,12 @@ void pulp_auv3_expand_window_for_view(NSView *view, NSSize design) {
 
 #if !__has_feature(objc_arc)
 - (void)dealloc {
+    // Clear the root view's resize hook FIRST: it captures self unretained and
+    // touches _viewHost (destroyed below, after [super dealloc]), so a stray
+    // setFrameSize: during teardown must not call back into us.
+    if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
+        ((PulpAUMacRootView *)self.view).onResize = nil;
+    }
     // Same destruction-order contract as au_view_controller_ios.mm:
     // ivars destroy in reverse declaration order after [super dealloc].
     // 1. ~PluginViewHost runs first, clears back-pointer on root_ View.

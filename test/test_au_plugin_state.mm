@@ -1,6 +1,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -971,7 +972,23 @@ TEST_CASE("AU v3 per-method audit invariants",
     }
 }
 
-TEST_CASE("AU v3 view configurations prefer aspect-correct editor sizes",
+// Regression guard for the AUv3-in-Logic sizing fix.
+//
+// Pulp deliberately does NOT implement `supportedViewConfigurations:` /
+// `selectViewConfiguration:`. Logic Pro sizes AU v3 editors through the
+// view-configuration path and offers only oversized ~4:3 configs (measured
+// 1024x768 / 1366x1024). The moment an AU returns ANY supported config, Logic
+// locks the editor window to that config's aspect ratio at every size, so a
+// wide fixed-design editor (e.g. 900x520 ≈ 16:9.4) letterboxes with top/bottom
+// bars that can't be resized away. Apple's empty-set semantics ("use the
+// largest available view configuration") make returning empty strictly worse.
+//
+// By NOT overriding these selectors, `respondsToSelector:` returns NO, Logic
+// skips config negotiation entirely, and the editor free-resizes to the
+// design's own aspect — matching the tight, proportional fit Pulp gets in
+// REAPER / CLAP / VST3 / standalone (verified in Logic 2026-05-29). If anyone
+// reintroduces these overrides, this test fails to flag the regression.
+TEST_CASE("AU v3 does not opt into host view configurations (Logic 4:3-lock fix)",
           "[au][auv3][view-config][resize]") {
     @autoreleasepool {
         AudioComponentDescription desc{};
@@ -989,54 +1006,22 @@ TEST_CASE("AU v3 view configurations prefer aspect-correct editor sizes",
         REQUIRE(unit != nil);
         REQUIRE(err == nil);
 
-        NSArray<AUAudioUnitViewConfiguration*>* mixedConfigs = @[
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:486
-                                                          height:290
-                                               hostHasController:NO] autorelease],
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1024
-                                                          height:768
-                                               hostHasController:NO] autorelease],
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:900
-                                                          height:520
-                                               hostHasController:NO] autorelease],
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1366
-                                                          height:1024
-                                               hostHasController:NO] autorelease],
-        ];
+        // Base AUAudioUnit *does* implement these selectors, so respondsToSelector
+        // is always YES. The regression guard that matters is that PulpAudioUnit
+        // does NOT OVERRIDE them — i.e. its method implementation is the inherited
+        // base one. If someone re-adds an override (reintroducing the Logic
+        // 4:3-lock), the IMP diverges and this fails.
+        IMP pulpSupported = class_getMethodImplementation(
+            [PulpAudioUnit class], @selector(supportedViewConfigurations:));
+        IMP baseSupported = class_getMethodImplementation(
+            [AUAudioUnit class], @selector(supportedViewConfigurations:));
+        REQUIRE(pulpSupported == baseSupported);
 
-        NSIndexSet* supported = [unit supportedViewConfigurations:mixedConfigs];
-        REQUIRE(supported != nil);
-        REQUIRE([supported containsIndex:2]);
-        REQUIRE_FALSE([supported containsIndex:0]);
-        REQUIRE_FALSE([supported containsIndex:1]);
-        REQUIRE_FALSE([supported containsIndex:3]);
-
-        NSArray<AUAudioUnitViewConfiguration*>* noAspectMatchConfigs = @[
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1024
-                                                          height:768
-                                               hostHasController:NO] autorelease],
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:1366
-                                                          height:1024
-                                               hostHasController:NO] autorelease],
-        ];
-
-        NSIndexSet* fallback = [unit supportedViewConfigurations:noAspectMatchConfigs];
-        REQUIRE(fallback != nil);
-        REQUIRE([fallback containsIndex:0]);
-        REQUIRE([fallback containsIndex:1]);
-
-        NSArray<AUAudioUnitViewConfiguration*>* undersizedConfigs = @[
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:486
-                                                          height:290
-                                               hostHasController:NO] autorelease],
-            [[[AUAudioUnitViewConfiguration alloc] initWithWidth:640
-                                                          height:370
-                                               hostHasController:NO] autorelease],
-        ];
-
-        NSIndexSet* undersized = [unit supportedViewConfigurations:undersizedConfigs];
-        REQUIRE(undersized != nil);
-        REQUIRE(undersized.count == 0u);
+        IMP pulpSelect = class_getMethodImplementation(
+            [PulpAudioUnit class], @selector(selectViewConfiguration:));
+        IMP baseSelect = class_getMethodImplementation(
+            [AUAudioUnit class], @selector(selectViewConfiguration:));
+        REQUIRE(pulpSelect == baseSelect);
 
         [unit release];
     }

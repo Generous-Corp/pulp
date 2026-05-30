@@ -148,6 +148,19 @@ struct HostQuirks {
     // Logic Pro AU
     int logic_au_channel_probe_cap = 64;               ///< row 19 (Logic = 8)
     bool logic_au_tail_time_conversion = false;        ///< row 20
+    // NOTE (no runtime flag — handled in the AU v3 adapter, recorded here so the
+    // DAW-quirks ledger captures it): Logic Pro AU v3 editor SIZING has two
+    // confirmed behaviors a fixed-design GPU editor must accommodate:
+    //   1. Logic locks the editor window to its selected view-config aspect
+    //      (it offers only oversized ~4:3 configs), so a wide fixed design
+    //      letterboxes. Fix: do NOT implement supportedViewConfigurations: /
+    //      selectViewConfiguration: → Logic free-resizes to the design aspect.
+    //   2. Logic (out-of-process) does NOT deliver the editor view's restored
+    //      window size on first open, so a GPU surface created at the design
+    //      size clips its first paint. Fix: defer GPU-host creation until the
+    //      view reports a real settled size.
+    // Both live in core/format/src/{au_adapter,au_view_controller_mac}.mm and
+    // .agents/skills/auv3/SKILL.md. Verified live in Logic 2026-05-29.
 
     // AU v3 cross-host
     bool au_v3_bypass_dual_tracking = false;           ///< row 21

@@ -35,9 +35,14 @@
 //  │ fullState                                │ NSDict    │ main         │ YES (serdes) │
 //  │ setFullState:                            │ void      │ main         │ YES (serdes) │
 //  │ audioUnitARAFactory                      │ void*     │ KVO/main     │ NO (cached)  │
-//  │ supportedViewConfigurations:             │ NSIndexS… │ main         │ YES (NSSet)  │
-//  │ selectViewConfiguration:                 │ void      │ main         │ NO (log only)│
 //  └──────────────────────────────────────────┴───────────┴──────────────┴──────────────┘
+//
+// NOTE: supportedViewConfigurations: / selectViewConfiguration: are
+// intentionally NOT overridden (removed). See the "view configuration
+// negotiation: intentionally NOT implemented" comment near @end and the
+// regression test "AU v3 does not opt into host view configurations". Logic
+// locks the editor window to the selected config's aspect; not opting in lets
+// it free-resize to the design aspect (the AUv3-Logic sizing fix).
 //
 // Pulp-private accessors used by tests (NOT AUAudioUnit overrides):
 //   • pulpProcessor / pulpStore — main-thread, read-only.
@@ -981,91 +986,29 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         pulp::format::ara_companion_factory_for(nullptr));
 }
 
-// ── AU v3 view configuration negotiation ───────────────────────────────────
+// ── AU v3 view configuration negotiation: intentionally NOT implemented ─────
 //
-// Hosts (Logic, MainStage, GarageBand) probe `supportedViewConfigurations:`
-// with a set of candidate window sizes and pick one via
-// `selectViewConfiguration:`. For a fixed-design GPU editor (the common
-// Pulp shape), we accept configurations that are close to the processor's
-// design aspect *and* large enough to contain the design viewport. The view
-// controller's `set_design_viewport` + `set_fixed_aspect_ratio` then scales
-// the actual paint at the host-chosen size.
+// We deliberately do NOT override `supportedViewConfigurations:` /
+// `selectViewConfiguration:` for Pulp's fixed-design GPU editors.
 //
-// preferredContentSize remains authoritative for the initial editor size
-// when no host-selected configuration applies. Don't put an internal corner
-// resizer here — Logic's AU v3 path is host/container-driven.
-
-- (NSIndexSet *)supportedViewConfigurations:(NSArray<AUAudioUnitViewConfiguration *> *)availableViewConfigurations NS_AVAILABLE(10_13, 11_0) {
-    NSMutableIndexSet *result = [NSMutableIndexSet indexSet];
-    if (!_bridge.processor || availableViewConfigurations.count == 0) {
-        return result;
-    }
-
-    const auto hints = _bridge.processor->view_size();
-    const double design_w = static_cast<double>(hints.preferred_width);
-    const double design_h = static_cast<double>(hints.preferred_height);
-    if (design_w <= 0.0 || design_h <= 0.0) {
-        // No usable design size — accept everything and let the host decide.
-        [result addIndexesInRange:NSMakeRange(0, availableViewConfigurations.count)];
-        return result;
-    }
-
-    const double design_aspect = design_w / design_h;
-    // 5% aspect tolerance is tight enough to reject obvious wrong-aspect
-    // candidates and loose enough to land on Logic's common defaults.
-    constexpr double kAspectTolerance = 0.05;
-
-    NSMutableIndexSet *aspectMatches = [NSMutableIndexSet indexSet];
-    NSMutableIndexSet *largeEnoughFallbacks = [NSMutableIndexSet indexSet];
-
-    for (NSUInteger i = 0; i < availableViewConfigurations.count; ++i) {
-        AUAudioUnitViewConfiguration *cfg = availableViewConfigurations[i];
-        const double w = static_cast<double>(cfg.width);
-        const double h = static_cast<double>(cfg.height);
-        if (w <= 0.0 || h <= 0.0) continue;
-
-        const double cfg_aspect = w / h;
-        const double aspect_delta = std::abs(cfg_aspect - design_aspect) / design_aspect;
-        if (aspect_delta <= kAspectTolerance && w >= design_w && h >= design_h) {
-            [aspectMatches addIndex:i];
-            continue;
-        }
-
-        // Even on an aspect mismatch, accept configurations large enough to
-        // contain the design viewport, but only as a fallback when no
-        // aspect-correct option exists. Returning both lets hosts choose a
-        // wrong-aspect "large enough" config first, which opens fixed-design
-        // editors with avoidable top/bottom padding in Logic/REAPER AUv3.
-        if (w >= design_w && h >= design_h) {
-            [largeEnoughFallbacks addIndex:i];
-        }
-    }
-
-    if (aspectMatches.count > 0) {
-        [result addIndexes:aspectMatches];
-    } else if (largeEnoughFallbacks.count > 0) {
-        [result addIndexes:largeEnoughFallbacks];
-    } else {
-        // If every candidate is too small or wrong for a fixed-design editor,
-        // return an empty set. CoreAudioKit defines that as "use the largest
-        // available view configuration"; accepting undersized configs lets
-        // hosts open a truncated/padded editor and never revisit the design
-        // size.
-    }
-    return result;
-}
-
-- (void)selectViewConfiguration:(AUAudioUnitViewConfiguration *)viewConfiguration NS_AVAILABLE(10_13, 11_0) {
-    // The view controller is the authority on actual sizing — it already
-    // observes its own bounds in viewDidLayout and forwards to
-    // PluginViewHost::set_size + ViewBridge::resize. This selector is the
-    // host telling us its preferred config; we log it for diagnostics and
-    // bump the preferredContentSize so any pending unload/reload of the
-    // controller picks up the new size.
-    pulp::runtime::log_info("AU v3 host selected view config: {}x{} (hostHasController={})",
-                            static_cast<int>(viewConfiguration.width),
-                            static_cast<int>(viewConfiguration.height),
-                            viewConfiguration.hostHasController ? "YES" : "NO");
-}
+// Why: Logic Pro drives AU v3 editor sizing through the view-configuration
+// path and offers ONLY oversized ~4:3 configs (measured: 1024x768 / 1366x1024).
+// When an AU opts in by returning any supported config, Logic LOCKS the editor
+// window to that config's aspect ratio at every size (confirmed: a 900x520 /
+// ~16:9.4 design forced into Logic's 4:3 window letterboxes with top/bottom
+// bars that cannot be resized away). Apple's CoreAudioKit header states an
+// empty index set means "use the largest available view configuration", so
+// returning empty makes Logic pick its *largest* 4:3 config — strictly worse,
+// not better.
+//
+// By NOT implementing these selectors at all, Logic falls back to the plain
+// view at the controller's `preferredContentSize` and lets the window
+// free-resize to the design's own aspect — matching the tight, proportional
+// fit Pulp already gets in REAPER, CLAP, VST3, and standalone. (REAPER/CLAP/
+// VST3 never used these selectors, so this is a no-op for them.)
+//
+// If a future non-fixed (truly fluid / multi-config) editor needs host view
+// configurations, reintroduce these selectors gated on that editor kind — but
+// keep them OFF for design-viewport / `set_fixed_aspect_ratio` editors.
 
 @end

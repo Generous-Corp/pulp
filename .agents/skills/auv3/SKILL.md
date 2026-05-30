@@ -601,23 +601,90 @@ expands the host window by the exact view delta, and resizes the root
 view to the design. Keep this limited to initial attach; manual host
 resize must continue through `viewDidLayout` without being forced back.
 
-`PulpAudioUnit::supportedViewConfigurations:` accepts configurations
-within ~5% aspect tolerance of the design only when they are also large
-enough to contain that design (a JUCE forum thread documents that Logic
-10.6.1 probes 1024x768 / 1366x1024 — accepting at least one fixes a
-known Logic reopen-size bug). If any aspect-correct, large-enough
-configuration exists, return only those; wrong-aspect "large enough"
-configs are fallbacks, otherwise Logic/REAPER can choose one first and
-open fixed-design editors with avoidable top/bottom padding. If every
-candidate is undersized for a fixed-design editor, return an empty set
-so CoreAudioKit falls back to the largest available view configuration
-instead of treating the tiny default as supported.
+**Do NOT implement `supportedViewConfigurations:` / `selectViewConfiguration:`
+for fixed-design editors.** (Verified in Logic 2026-05-29; replaced the earlier
+"accept a large-enough config" policy, which *caused* the bug.) Logic Pro sizes
+AU v3 editors through the view-configuration path and offers ONLY oversized ~4:3
+configs (measured: 1024x768 / 1366x1024). The moment the AU returns *any*
+supported config, **Logic locks the editor window to that config's aspect ratio
+at every size** — so a wide fixed design (e.g. 900x520 ≈ 16:9.4) letterboxes with
+top/bottom bars that *cannot be resized away* (confirmed by AX resize probing:
+grow/shrink all snap back to 4:3). Apple's CoreAudioKit header states an empty
+index set means "use the largest available view configuration," so returning
+empty makes Logic pick its *largest* 4:3 config — strictly worse.
 
-Padding at the top/bottom (or left/right) of the editor in a host
-window is the **expected letterbox** when the host gives us a window
-whose aspect ratio doesn't match the design's. Tighten by either
-adjusting the plugin's `view_size()` hint or implementing a tighter
-view-configuration policy.
+Base `AUAudioUnit` already implements these selectors. By NOT overriding them,
+Logic falls back to the plain view at `preferredContentSize` and lets the window
+**free-resize to the design's own aspect** — tight and proportional, matching
+REAPER (in-process, honors design size), CLAP (`gui_get_size`), VST3 (`getSize`),
+and standalone. REAPER never used these selectors, so removing them is a no-op
+there. Regression-guarded by `test_au_plugin_state.mm` → "AU v3 does not opt into
+host view configurations" (asserts PulpAudioUnit's IMP for both selectors equals
+the inherited base IMP — i.e. not overridden).
+
+If a future *fluid/multi-config* editor genuinely wants host view configurations,
+reintroduce the selectors gated on that editor kind, but keep them OFF for any
+`set_design_viewport` / `set_fixed_aspect_ratio` (fixed-design) editor.
+
+### Logic OOP first-paint clip — defer GPU-host creation until a real size
+
+After the view-config fix above, Logic stopped letterboxing but the editor's
+**first paint** still clipped: the UI rendered at the design size inside Logic's
+restored (smaller) window — top + right cut off — until a manual resize or a
+window close+reopen snapped it tight. Reopen worked (the container already
+existed at the right size); only the very first open raced.
+
+Root cause (verified in Logic 2026-05-29): Logic hosts AU v3 **out-of-process**
+and does **not** push its restored window size to the extension's view on
+initial open — not via `viewDidLayout`, not via `setFrameSize:`, not via a
+`self.view.bounds` change during a ~0.5s poll. It embeds our view, leaves it at
+the design-size frame from `loadView`, and composites that oversized layer into
+its smaller window. The GPU surface (created at attach with `opts.size = design`)
+therefore paints once at design size and the stale frame persists until the host
+next requests a redraw (a resize or reopen). Forcing a repaint, re-asserting
+`preferredContentSize`, or forcing the host window size did **not** fix it (and
+forcing Logic's window is host-hostile — it fights Logic's restore).
+
+Fix (the one that worked) — **defer creating the `PluginViewHost` / GPU surface
+until the root view reports a real, settled host size**, so the surface is never
+born at the design size for a smaller first window. Mechanics in
+`au_view_controller_mac.mm`:
+
+1. `loadView` makes the root view a `PulpAUMacRootView` (NSView subclass)
+   overriding `setFrameSize:` → an `onResize` block; in `viewDidMoveToSuperview`
+   it fills its superview the **frame-based** way (`autoresizingMask` =
+   width|height-sizable + `frame = superview.bounds`) so AppKit sizes it to the
+   host container on embed and every host resize.
+   **⚠️ Do NOT use Auto Layout (`translatesAutoresizingMaskIntoConstraints=NO` +
+   edge constraints) to pin it — that CRASHED Ableton Live** (2026-05-29):
+   when the host places the AU window, our `setFrameSize:` → `[super]` →
+   `setNeedsLayout` engages the constraint engine (`-[NSWindow
+   _postWindowNeedsLayout]`), which throws in that context and the uncaught
+   exception kills the host. Frame-based autoresizing fills the container
+   identically for our purposes (the deferred GPU host reads the real bounds)
+   without touching the constraint engine, and is compatible with frame-driven
+   AU hosts (Live, REAPER, Logic). Lesson: in an AU editor view embedded by an
+   arbitrary host, never engage Auto Layout against the host's window.
+2. `rebuildEditorIfReady` opens the `ViewBridge`, sets `preferredContentSize`,
+   wires `onResize`, sets `_viewHostPending` + `_pendingRoot`, and does **not**
+   create the host or force the view frame.
+3. `-createViewHostIfReady` builds the host **at the view's real bounds**
+   (`opts.size = bounds`, not design), then `set_design_viewport(design)`.
+   While bounds still equal the design size it **waits** (up to the
+   `kInitialSizeSyncMaxAttempts` × `kInitialSizeSyncIntervalMs` settle window)
+   for the host's likely-different restored size; after that it accepts the
+   current size. It is driven from `onResize`, `viewDidLayout`, and the
+   `runInitialSizeSync` fallback (all idempotent).
+4. Clear `onResize` first in `dealloc` (it captures `self` unretained + touches
+   `_viewHost`, which is destroyed after `[super dealloc]`).
+
+Trade-off: a brief (<0.5s) black frame on first open while we wait for the real
+size — acceptable, and far better than a clipped first paint. **Never create the
+AU v3 GPU surface at the design size before the host has sized the view.** When
+working on Dawn/Skia-backed editors in any out-of-process host, treat
+"first-paint size" as a first-class concern: confirm what size the host actually
+delivers and when, rather than assuming `viewDidLayout`/`preferredContentSize`
+will be honored on initial open.
 
 ### The `PULP_AUV3_PLUGIN()` macro replaces hardcoded force_link
 
