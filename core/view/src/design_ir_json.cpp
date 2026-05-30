@@ -51,6 +51,126 @@ static bool get_bool(const choc::value::ValueView& obj, const char* key, bool de
     return def;
 }
 
+// ── box-shadow parse / serialize (pulp #41) ─────────────────────────────
+//
+// CSS `box-shadow` is a comma-separated list of layers; each layer is
+// `[inset] <ox> <oy> [<blur> [<spread>]] <color>` with lengths in arbitrary
+// order relative to the color but always offsets-first. The IR used to keep
+// the whole declaration as one opaque string, so any layer past the first
+// (and the structured offset/blur/spread/color/inset of every layer) was
+// effectively lost. These parse/serialize helpers give every consumer the
+// structured layers while preserving the original text for lossless
+// round-trips.
+
+namespace {
+
+std::string bxsh_trim(std::string s) {
+    auto sp = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!s.empty() && sp((unsigned char)s.front())) s.erase(s.begin());
+    while (!s.empty() && sp((unsigned char)s.back())) s.pop_back();
+    return s;
+}
+
+// Split a CSS value on top-level commas only — commas inside parentheses
+// (rgb()/rgba()/hsl()/color-mix()) are part of a single token.
+std::vector<std::string> bxsh_split_top_level(const std::string& css) {
+    std::vector<std::string> parts;
+    int depth = 0;
+    std::string cur;
+    for (char c : css) {
+        if (c == '(') { ++depth; cur.push_back(c); }
+        else if (c == ')') { if (depth > 0) --depth; cur.push_back(c); }
+        else if (c == ',' && depth == 0) { parts.push_back(cur); cur.clear(); }
+        else cur.push_back(c);
+    }
+    if (!cur.empty()) parts.push_back(cur);
+    return parts;
+}
+
+// Tokenize one layer on top-level whitespace (parens kept intact).
+std::vector<std::string> bxsh_tokenize(const std::string& layer) {
+    std::vector<std::string> toks;
+    int depth = 0;
+    std::string t;
+    for (char c : layer) {
+        if (c == '(') { ++depth; t.push_back(c); }
+        else if (c == ')') { if (depth > 0) --depth; t.push_back(c); }
+        else if (std::isspace((unsigned char)c) && depth == 0) {
+            if (!t.empty()) { toks.push_back(t); t.clear(); }
+        } else t.push_back(c);
+    }
+    if (!t.empty()) toks.push_back(t);
+    return toks;
+}
+
+// Parse a CSS length token ("12", "12px", "-4px") fully; returns false if the
+// token is not a pure number (optionally px-suffixed).
+bool bxsh_parse_length(const std::string& tok, float& out) {
+    std::string n = tok;
+    if (n.size() > 2 && n.compare(n.size() - 2, 2, "px") == 0) n.resize(n.size() - 2);
+    if (n.empty()) return false;
+    try {
+        size_t pos = 0;
+        float v = std::stof(n, &pos);
+        if (pos != n.size()) return false;
+        out = v;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+} // namespace
+
+std::vector<IRBoxShadow> parse_css_box_shadow(const std::string& css) {
+    std::vector<IRBoxShadow> out;
+    std::string all = bxsh_trim(css);
+    if (all.empty()) return out;
+    {
+        std::string lower = all;
+        for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+        if (lower == "none") return out;
+    }
+    for (const auto& rawLayer : bxsh_split_top_level(all)) {
+        std::string layer = bxsh_trim(rawLayer);
+        if (layer.empty()) continue;
+        IRBoxShadow sh;
+        sh.raw = layer;
+        std::vector<float> lengths;
+        for (const auto& tok : bxsh_tokenize(layer)) {
+            std::string low = tok;
+            for (auto& c : low) c = (char)std::tolower((unsigned char)c);
+            if (low == "inset") { sh.inset = true; continue; }
+            float len = 0.0f;
+            if (bxsh_parse_length(tok, len)) { lengths.push_back(len); continue; }
+            // First non-length, non-inset token is the color (rgba()/hex/named).
+            if (sh.color.empty()) sh.color = tok;
+        }
+        if (lengths.size() >= 1) sh.offset_x = lengths[0];
+        if (lengths.size() >= 2) sh.offset_y = lengths[1];
+        if (lengths.size() >= 3) sh.blur = lengths[2];
+        if (lengths.size() >= 4) sh.spread = lengths[3];
+        out.push_back(std::move(sh));
+    }
+    return out;
+}
+
+std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows) {
+    std::string out;
+    for (size_t i = 0; i < shadows.size(); ++i) {
+        if (i) out += ", ";
+        const auto& s = shadows[i];
+        if (!s.raw.empty()) { out += s.raw; continue; }
+        std::ostringstream ss;
+        if (s.inset) ss << "inset ";
+        ss << s.offset_x << "px " << s.offset_y << "px " << s.blur << "px";
+        if (s.spread != 0.0f) ss << ' ' << s.spread << "px";
+        if (!s.color.empty()) ss << ' ' << s.color;
+        out += ss.str();
+    }
+    return out;
+}
+
 // ── IR from JSON ────────────────────────────────────────────────────────
 
 static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
@@ -111,7 +231,8 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("borderTopRightRadius", s.border_top_right_radius);
     set_opt_float("borderBottomRightRadius", s.border_bottom_right_radius);
     set_opt_float("borderBottomLeftRadius", s.border_bottom_left_radius);
-    set_opt_str("boxShadow", s.box_shadow);
+    if (auto k = resolve_key("boxShadow"))
+        s.box_shadow = parse_css_box_shadow(std::string(obj[k->c_str()].toString()));
     set_opt_str("filter", s.filter);
     set_opt_str("backdropFilter", s.backdrop_filter);
     set_opt_str("fontFamily", s.font_family);
@@ -322,6 +443,118 @@ void normalize_figma_plugin_binding(IRNode& node) {
     // existing non-empty attribute — so `attributes["binding"]` and any other
     // pre-existing data survive untouched.
     md.serialize(node);
+}
+
+// ── parse_ir_node post-passes (pulp #41 extraction) ─────────────────────
+// These ran as inline blocks at the tail of parse_ir_node; pulled out into
+// named functions so each rule reads as one testable unit. Behavior is
+// unchanged from the inline versions (the shadow snap now reads the parsed
+// IRBoxShadow layers instead of re-parsing the raw CSS string each time).
+
+// Shadow-driven sibling snap. When a frame has a downward drop shadow and an
+// absolutely-positioned sibling sits just below it with a small gap, the gap
+// exposes the grandparent's canvas color through the shadow zone — a thin
+// lighter band between the panel and whatever sits below. Figma's designer
+// places these tightly because Figma's shadow extends visually ONTO the
+// sibling below (shadow is drawn on top); the intent is visual continuity.
+// Pulp paints the lower sibling ABOVE the shadow (later in z-order) so closing
+// the geometric gap gives us the same continuity. Rule: for each absolute
+// child F with a downward drop shadow, look at the next absolute sibling S
+// beneath it; if 0 < gap < (oy + blur/2), snap S up — but leave the shadow's
+// y-offset worth of room so Pulp's same-z-layer shadow still has somewhere to
+// render (otherwise S overpaints it).
+static void snap_absolute_siblings_under_shadow(IRNode& node) {
+    // First non-inset downward drop-shadow layer of a node, if any.
+    auto down_shadow = [](const IRStyle& st) -> const IRBoxShadow* {
+        for (const auto& sh : st.box_shadow)
+            if (!sh.inset && sh.offset_y > 0.0f) return &sh;
+        return nullptr;
+    };
+    struct SibRect { size_t idx; float top, bottom; bool has_down_shadow; float shadow_reach; };
+    std::vector<SibRect> abs_siblings;
+    for (size_t i = 0; i < node.children.size(); ++i) {
+        auto& c = node.children[i];
+        bool is_abs = c.style.position && *c.style.position == "absolute";
+        if (!is_abs) continue;
+        float top = c.style.top.value_or(0.0f);
+        float h   = c.style.height.value_or(0.0f);
+        if (h <= 0.0f) continue;
+        const IRBoxShadow* sh = down_shadow(c.style);
+        float oy = sh ? sh->offset_y : 0.0f;
+        float blur = sh ? sh->blur : 0.0f;
+        abs_siblings.push_back({i, top, top + h, sh != nullptr, oy + blur * 0.5f});
+    }
+    std::sort(abs_siblings.begin(), abs_siblings.end(),
+              [](const SibRect& a, const SibRect& b){ return a.top < b.top; });
+    for (size_t k = 0; k + 1 < abs_siblings.size(); ++k) {
+        const auto& F = abs_siblings[k];
+        auto& S       = abs_siblings[k + 1];
+        if (!F.has_down_shadow) continue;
+        float gap = S.top - F.bottom;
+        if (gap <= 0.0f) continue;
+        if (gap >= F.shadow_reach) continue;
+        const IRBoxShadow* fsh = down_shadow(node.children[F.idx].style);
+        float preserve = std::max(0.0f, fsh ? fsh->offset_y : 0.0f);
+        float close = std::max(0.0f, gap - preserve);
+        if (close <= 0.0f) continue;
+        float new_top = S.top - close;
+        node.children[S.idx].style.top = new_top;
+        S.bottom -= (S.top - new_top);
+        S.top = new_top;
+    }
+}
+
+// Audio-widget detection (deferred until after children are parsed). A node is
+// an audio widget ONLY if its name/type matches an audio-widget pattern AND it
+// has no child frames/groups — a node with only shape children (ellipse /
+// rectangle) + text is a widget; a node with child frames (e.g. "KnobRow"
+// containing four knob frames) is a container. Skipped when the source already
+// set an explicit audio_widget.
+static void detect_node_audio_widget(IRNode& node, bool explicit_audio_widget) {
+    auto detected = explicit_audio_widget ? AudioWidgetType::none
+                                          : detect_audio_widget(node.name);
+    if (detected == AudioWidgetType::none && !node.type.empty() && !explicit_audio_widget)
+        detected = detect_audio_widget(node.type);
+    if (detected == AudioWidgetType::none) return;
+
+    bool has_child_containers = false;
+    for (auto& child : node.children) {
+        if (child.type == "frame" || child.type == "group" || !child.children.empty()) {
+            has_child_containers = true;
+            break;
+        }
+    }
+    if (!has_child_containers)
+        node.audio_widget = detected;
+}
+
+// Parse a shape's stroke color (Pencil puts stroke on ellipse/rectangle nodes)
+// into the `stroke_color` attribute.
+static void parse_shape_stroke_color(IRNode& node, const choc::value::ValueView& obj) {
+    if (!obj.hasObjectMember("stroke")) return;
+    auto stroke = obj["stroke"];
+    if (!stroke.isObject() || !stroke.hasObjectMember("fill")) return;
+    auto fill = stroke["fill"];
+    if (!fill.isString()) return;
+    auto fill_str = std::string(fill.toString());
+    if (!fill_str.empty() && fill_str[0] == '#')
+        node.attributes["stroke_color"] = fill_str;
+}
+
+// For audio widgets: copy the first child shape's dimensions into
+// shape_width/shape_height attributes. The frame's own width/height belong to
+// the column container; the child shape's belong to the widget itself.
+static void extract_widget_shape_dims(IRNode& node) {
+    if (node.audio_widget == AudioWidgetType::none || node.children.empty()) return;
+    for (auto& child : node.children) {
+        if (child.type == "ellipse" || child.type == "rectangle") {
+            if (child.style.width)
+                node.attributes["shape_width"] = std::to_string(static_cast<int>(*child.style.width));
+            if (child.style.height)
+                node.attributes["shape_height"] = std::to_string(static_cast<int>(*child.style.height));
+            break;
+        }
+    }
 }
 
 IRNode parse_ir_node(const choc::value::ValueView& obj) {
@@ -642,98 +875,8 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // ── Shadow-driven sibling snap ──────────────────────────────────────
-    // When a frame has a downward drop shadow and an absolutely-positioned
-    // sibling sits just below it with a small gap, the gap exposes the
-    // grandparent's canvas color through the shadow zone — visible as a
-    // thin lighter band between the panel and whatever sits below. Figma's
-    // designer places these tightly because Figma's shadow extends visually
-    // ONTO the sibling below (shadow is drawn on top); the design intent is
-    // visual continuity. Pulp's renderer happily paints the lower sibling
-    // ABOVE the shadow (later in z-order) so closing the geometric gap
-    // gives us the same continuity.
-    //
-    // Rule: for each absolute-positioned child F with style.box_shadow whose
-    // y-offset is > 0 (shadow falls down), look at the next absolute sibling
-    // S beneath it. If 0 < gap < (oy + blur/2), snap S.top up to F.bottom.
-    // The threshold ties the snap distance to the shadow's actual reach, so
-    // the rule fires precisely when the shadow would have overlapped S.
-    auto parse_shadow_offset_blur = [](const std::string& s,
-                                       float& oy, float& blur) {
-        oy = 0.0f; blur = 0.0f;
-        // Format: "<ox>px <oy>px <blur>px [<spread>px] <color>"
-        // Strip optional "inset" keyword.
-        std::string body = s;
-        for (auto& c : body) c = (char)std::tolower((unsigned char)c);
-        if (auto p = body.find("inset"); p != std::string::npos) body.erase(p, 5);
-        // Extract numeric tokens before any color value (rgb/rgba/hex).
-        auto cut = body.find_first_of("#r");  // # or r (rgba/rgb)
-        std::string nums = (cut == std::string::npos) ? body : body.substr(0, cut);
-        std::vector<float> v;
-        std::string tok;
-        auto flush = [&]() {
-            if (tok.empty()) return;
-            if (tok.size() > 2 && tok.compare(tok.size()-2, 2, "px") == 0)
-                tok.resize(tok.size()-2);
-            try { v.push_back(std::stof(tok)); } catch (...) {}
-            tok.clear();
-        };
-        for (char c : nums) {
-            if (std::isspace((unsigned char)c) || c == ',') flush();
-            else tok.push_back(c);
-        }
-        flush();
-        if (v.size() >= 2) oy = v[1];
-        if (v.size() >= 3) blur = v[2];
-    };
-
-    {
-        // Collect absolute-positioned children with their effective Y rects.
-        struct SibRect { size_t idx; float top, bottom; bool has_down_shadow; float shadow_reach; };
-        std::vector<SibRect> abs_siblings;
-        for (size_t i = 0; i < node.children.size(); ++i) {
-            auto& c = node.children[i];
-            bool is_abs = c.style.position && *c.style.position == "absolute";
-            if (!is_abs) continue;
-            float top = c.style.top.value_or(0.0f);
-            float h   = c.style.height.value_or(0.0f);
-            if (h <= 0.0f) continue;
-            float oy = 0.0f, blur = 0.0f;
-            if (c.style.box_shadow)
-                parse_shadow_offset_blur(*c.style.box_shadow, oy, blur);
-            abs_siblings.push_back({i, top, top + h, oy > 0.0f, oy + blur * 0.5f});
-        }
-        std::sort(abs_siblings.begin(), abs_siblings.end(),
-                  [](const SibRect& a, const SibRect& b){ return a.top < b.top; });
-        for (size_t k = 0; k + 1 < abs_siblings.size(); ++k) {
-            const auto& F = abs_siblings[k];
-            auto& S       = abs_siblings[k + 1];
-            if (!F.has_down_shadow) continue;
-            float gap = S.top - F.bottom;
-            if (gap <= 0.0f) continue;
-            if (gap >= F.shadow_reach) continue;
-            // Leave the shadow's y-offset (`oy`) worth of room above S so
-            // the panel's drop shadow has somewhere to render. Without
-            // this opening the sibling overpaints the shadow (Pulp draws
-            // shadows in the same z-layer as the View, so a later sibling
-            // covers it). Closing only `gap - oy` of the geometric gap
-            // gives us both: no exposed canvas band (the shadow's blur
-            // fills the remaining space softly) AND a visible shadow
-            // fade matching Figma's render where the shadow lays softly
-            // over the sibling's top edge.
-            float oy_only = 0.0f, blur_only = 0.0f;
-            if (node.children[F.idx].style.box_shadow)
-                parse_shadow_offset_blur(*node.children[F.idx].style.box_shadow,
-                                         oy_only, blur_only);
-            float preserve = std::max(0.0f, oy_only);
-            float close = std::max(0.0f, gap - preserve);
-            if (close <= 0.0f) continue;
-            float new_top = S.top - close;
-            node.children[S.idx].style.top = new_top;
-            S.bottom -= (S.top - new_top);
-            S.top = new_top;
-        }
-    }
+    // Shadow-driven sibling snap (extracted — pulp #41).
+    snap_absolute_siblings_under_shadow(node);
 
     // ── Connector-line spanning rule ────────────────────────────────────
     // Pattern: a flex row whose FIRST child is a horizontal hairline (height
@@ -818,60 +961,10 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Audio widget detection (deferred until after children are parsed)
-    // Rule: a node is an audio widget ONLY if:
-    //   1. Its name matches an audio widget pattern (knob, fader, meter, etc.)
-    //   2. AND it doesn't have child frames/groups (containers aren't widgets)
-    //   A node with only shape children (ellipse/rectangle) + text is a widget.
-    //   A node with child frames (like "KnobRow" containing 4 knob frames) is a container.
-    {
-        auto detected = explicit_audio_widget ? AudioWidgetType::none : detect_audio_widget(node.name);
-        if (detected == AudioWidgetType::none && !node.type.empty() && !explicit_audio_widget)
-            detected = detect_audio_widget(node.type);
-
-        if (detected != AudioWidgetType::none) {
-            // Check if this node has child frames — if so, it's a container, not a widget
-            bool has_child_containers = false;
-            for (auto& child : node.children) {
-                if (child.type == "frame" || child.type == "group" ||
-                    !child.children.empty()) {
-                    has_child_containers = true;
-                    break;
-                }
-            }
-            // Only assign widget type if it's a leaf or has only shapes+text
-            if (!has_child_containers)
-                node.audio_widget = detected;
-        }
-    }
-
-    // Parse stroke color from shapes (Pencil puts stroke on ellipse/rectangle nodes)
-    if (obj.hasObjectMember("stroke")) {
-        auto stroke = obj["stroke"];
-        if (stroke.isObject() && stroke.hasObjectMember("fill")) {
-            auto fill = stroke["fill"];
-            if (fill.isString()) {
-                auto fill_str = std::string(fill.toString());
-                if (!fill_str.empty() && fill_str[0] == '#')
-                    node.attributes["stroke_color"] = fill_str;
-            }
-        }
-    }
-
-    // For audio widgets: extract child shape dimensions into attributes
-    // The frame's own width/height is for the column container.
-    // The child shape's width/height is for the widget itself.
-    if (node.audio_widget != AudioWidgetType::none && !node.children.empty()) {
-        for (auto& child : node.children) {
-            if (child.type == "ellipse" || child.type == "rectangle") {
-                if (child.style.width)
-                    node.attributes["shape_width"] = std::to_string(static_cast<int>(*child.style.width));
-                if (child.style.height)
-                    node.attributes["shape_height"] = std::to_string(static_cast<int>(*child.style.height));
-                break;
-            }
-        }
-    }
+    // Tail post-passes, extracted into named functions (pulp #41).
+    detect_node_audio_widget(node, explicit_audio_widget);
+    parse_shape_stroke_color(node, obj);
+    extract_widget_shape_dims(node);
 
     // Normalize a recognized figma-plugin widget's free-form `binding` string
     // into the canonical pulp* binding contract. Runs after audio_widget is
@@ -1176,7 +1269,8 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_float_member(out, first, "borderTopRightRadius", s.border_top_right_radius);
     write_float_member(out, first, "borderBottomRightRadius", s.border_bottom_right_radius);
     write_float_member(out, first, "borderBottomLeftRadius", s.border_bottom_left_radius);
-    write_string_member(out, first, "boxShadow", s.box_shadow);
+    if (!s.box_shadow.empty())
+        write_string_member(out, first, "boxShadow", box_shadow_to_css(s.box_shadow));
     write_string_member(out, first, "filter", s.filter);
     write_string_member(out, first, "backdropFilter", s.backdrop_filter);
     write_string_member(out, first, "fontFamily", s.font_family);

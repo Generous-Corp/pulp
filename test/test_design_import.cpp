@@ -1776,7 +1776,7 @@ TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
     REQUIRE(ir.root.layout.padding_left == 8.0f);
     REQUIRE(ir.root.style.background_gradient == "linear-gradient(#111,#222)");
     REQUIRE(ir.root.style.opacity == 0.75f);
-    REQUIRE(ir.root.style.box_shadow == "0 4px 12px #00000040");
+    REQUIRE(box_shadow_to_css(ir.root.style.box_shadow) == "0 4px 12px #00000040");
     REQUIRE(ir.root.style.z_index == 9);
     REQUIRE(ir.tokens.strings["copy.title"] == "Drive");
 
@@ -2499,7 +2499,7 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
     ir.root.style.opacity = 0.5f;
     ir.root.style.border_radius = 3.5f;
     ir.root.style.border = "1px solid #444";
-    ir.root.style.box_shadow = "0 1px 2px #000";
+    ir.root.style.box_shadow = parse_css_box_shadow("0 1px 2px #000");
     ir.root.style.filter = "blur(1px)";
     ir.root.style.font_family = "Inter";
     ir.root.style.font_size = 15.0f;
@@ -3823,4 +3823,78 @@ TEST_CASE("parse_figma_plugin_json tolerates font_family_assets top-level field 
     REQUIRE(ir.root.name == "Typed");
     REQUIRE(ir.root.children.size() == 1);
     REQUIRE(ir.root.children.front().name == "title");
+}
+
+// ── box-shadow promotion (pulp #41) ─────────────────────────────────────
+// Before #41 IRStyle::box_shadow was a single opaque string; every layer past
+// the first was silently dropped. These cover the parse/serialize helpers and
+// the JSON round-trip that preserves a multi-layer stack.
+
+TEST_CASE("parse_css_box_shadow parses a single drop-shadow layer", "[design-import][issue-41]") {
+    auto layers = parse_css_box_shadow("0px 2px 4px rgba(0, 0, 0, 0.5)");
+    REQUIRE(layers.size() == 1);
+    CHECK(layers[0].offset_x == Catch::Approx(0.0f));
+    CHECK(layers[0].offset_y == Catch::Approx(2.0f));
+    CHECK(layers[0].blur == Catch::Approx(4.0f));
+    CHECK(layers[0].spread == Catch::Approx(0.0f));
+    CHECK(layers[0].inset == false);
+    // The comma INSIDE rgba(...) must NOT split the value into extra layers.
+    CHECK(layers[0].color == "rgba(0, 0, 0, 0.5)");
+}
+
+TEST_CASE("parse_css_box_shadow keeps every comma-separated layer", "[design-import][issue-41]") {
+    auto layers = parse_css_box_shadow(
+        "0px 2px 4px #000000, 0px 8px 16px rgba(10, 20, 30, 0.4)");
+    REQUIRE(layers.size() == 2);
+    CHECK(layers[0].color == "#000000");
+    CHECK(layers[0].offset_y == Catch::Approx(2.0f));
+    CHECK(layers[1].offset_y == Catch::Approx(8.0f));
+    CHECK(layers[1].blur == Catch::Approx(16.0f));
+    CHECK(layers[1].color == "rgba(10, 20, 30, 0.4)");
+}
+
+TEST_CASE("parse_css_box_shadow handles inset + spread + named color", "[design-import][issue-41]") {
+    auto layers = parse_css_box_shadow("inset 10px 20px 30px 5px black");
+    REQUIRE(layers.size() == 1);
+    CHECK(layers[0].inset == true);
+    CHECK(layers[0].offset_x == Catch::Approx(10.0f));
+    CHECK(layers[0].offset_y == Catch::Approx(20.0f));
+    CHECK(layers[0].blur == Catch::Approx(30.0f));
+    CHECK(layers[0].spread == Catch::Approx(5.0f));
+    CHECK(layers[0].color == "black");
+}
+
+TEST_CASE("parse_css_box_shadow treats empty / none as no shadow", "[design-import][issue-41]") {
+    CHECK(parse_css_box_shadow("").empty());
+    CHECK(parse_css_box_shadow("   ").empty());
+    CHECK(parse_css_box_shadow("none").empty());
+    CHECK(parse_css_box_shadow("NONE").empty());
+}
+
+TEST_CASE("box_shadow_to_css round-trips a multi-layer stack losslessly", "[design-import][issue-41]") {
+    const std::string css = "0px 2px 4px #000000, inset 0px 8px 16px rgba(10, 20, 30, 0.4)";
+    auto layers = parse_css_box_shadow(css);
+    REQUIRE(layers.size() == 2);
+    // raw preservation means the serialized form matches the trimmed input.
+    CHECK(box_shadow_to_css(layers) == css);
+}
+
+TEST_CASE("design IR JSON round-trip preserves a multi-shadow boxShadow", "[design-import][issue-41]") {
+    auto parsed = parse_design_ir_json(R"json({
+        "version": 2,
+        "root": {
+            "type": "frame",
+            "name": "Panel",
+            "style": { "boxShadow": "0px 2px 4px #000000, 0px 8px 16px rgba(10, 20, 30, 0.4)" }
+        }
+    })json");
+    REQUIRE(parsed.root.style.box_shadow.size() == 2);
+    CHECK(parsed.root.style.box_shadow[1].offset_y == Catch::Approx(8.0f));
+
+    // Serialize → re-parse: both layers survive (the bug #41 fixes).
+    const auto canonical = serialize_design_ir(parsed);
+    const auto reparsed = parse_design_ir_json(canonical);
+    REQUIRE(reparsed.root.style.box_shadow.size() == 2);
+    CHECK(reparsed.root.style.box_shadow[0].color == "#000000");
+    CHECK(reparsed.root.style.box_shadow[1].color == "rgba(10, 20, 30, 0.4)");
 }

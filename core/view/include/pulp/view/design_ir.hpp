@@ -52,6 +52,21 @@ enum class LayoutAlign {
 /// Sizing mode for an IR node dimension.
 enum class SizingMode { fixed, hug, fill };
 
+/// A single CSS `box-shadow` layer. CSS `box-shadow` is a comma-separated
+/// list of these layers (painted first-to-last, so the first sits on top);
+/// `IRStyle::box_shadow` keeps them in author order. Before pulp #41 the IR
+/// stored the whole declaration as one opaque string, which silently dropped
+/// every layer past the first — multi-shadow designs lost their stack.
+struct IRBoxShadow {
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+    float blur = 0.0f;
+    float spread = 0.0f;
+    std::string color;            ///< raw CSS color token ("#rrggbbaa" or "rgba(...)")
+    bool inset = false;
+    std::string raw;              ///< original layer text, for lossless round-trip
+};
+
 /// Style properties for an IR node.
 struct IRStyle {
     std::optional<std::string> background_color;
@@ -77,7 +92,7 @@ struct IRStyle {
     std::optional<float> border_top_right_radius;
     std::optional<float> border_bottom_right_radius;
     std::optional<float> border_bottom_left_radius;
-    std::optional<std::string> box_shadow;
+    std::vector<IRBoxShadow> box_shadow;               // ordered CSS shadow layers
     std::optional<std::string> filter;                 // e.g. "blur(4px)"
     std::optional<std::string> backdrop_filter;
     std::optional<std::string> font_family;
@@ -162,6 +177,18 @@ WidgetPromotionSignal classify_interactive_signal(const IRNode& node);
 /// `button`. Runs automatically from the parse APIs; exposed for tests and
 /// callers that construct IR manually.
 std::size_t promote_interactive_frames(IRNode& root);
+
+/// Parse a CSS `box-shadow` value into ordered layers. Splits on top-level
+/// commas only (commas inside `rgb()`/`rgba()` are preserved), then parses
+/// each layer's offsets/blur/spread/color/inset. Numeric lengths accept an
+/// optional `px` suffix. Empty / "none" input yields an empty vector. Each
+/// layer keeps its trimmed original text in `raw` for lossless round-trip.
+std::vector<IRBoxShadow> parse_css_box_shadow(const std::string& css);
+
+/// Serialize ordered box-shadow layers back to a CSS `box-shadow` string,
+/// preferring each layer's `raw` text when present (lossless) and otherwise
+/// reconstructing from the parsed fields. Empty input yields an empty string.
+std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows);
 
 // ── Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
 // additive identity fields on IRNode. The TS-side @pulp/import-ir package

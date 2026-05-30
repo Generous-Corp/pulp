@@ -225,7 +225,8 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_float("opacity", s.opacity);
     emit_px("borderRadius", s.border_radius);
     emit_str("border", s.border);
-    emit_str("boxShadow", s.box_shadow);
+    if (!s.box_shadow.empty())
+        ss << ind << var << ".style.boxShadow = '" << box_shadow_to_css(s.box_shadow) << "';\n";
     emit_str("filter", s.filter);
     emit_str("fontFamily", s.font_family);
     emit_px("fontSize", s.font_size);
@@ -1126,71 +1127,19 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                << js_single_quote_escape(*node.style.border_color) << "', "
                << *node.style.border_width << ", " << br << ");\n";
         }
-        if (node.style.box_shadow) {
-            // Parse CSS-style "<ox> <oy> <blur> [<spread>] <color>" into the
-            // bridge's setBoxShadow(id, ox, oy, blur, spread, color, inset?)
-            // signature — passing the raw string makes the bridge fall back
-            // to default (2,4,#00000050) numerics, which doesn't match the
-            // designer's intent.
-            const std::string& s = *node.style.box_shadow;
-            float ox = 0, oy = 0, blur = 0, spread = 0;
-            std::string color = "#00000050";
-            bool inset = false;
-            // Strip trailing/leading whitespace + detect inset.
-            std::string body = s;
-            auto find_lower = [](const std::string& h, const std::string& n) {
-                auto it = std::search(h.begin(), h.end(), n.begin(), n.end(),
-                    [](char a, char b){ return std::tolower(static_cast<unsigned char>(a))
-                                              == std::tolower(static_cast<unsigned char>(b)); });
-                return it == h.end() ? std::string::npos : (size_t)(it - h.begin());
-            };
-            if (auto p = find_lower(body, "inset"); p != std::string::npos) {
-                inset = true;
-                body.erase(p, 5);
-            }
-            // Tokenize: pull color first (hex or rgba(...)), then 3–4 lengths.
-            auto rgba_p = body.find("rgba(");
-            auto rgb_p  = body.find("rgb(");
-            auto hex_p  = body.find('#');
-            if (rgba_p != std::string::npos) {
-                auto end = body.find(')', rgba_p);
-                if (end != std::string::npos) {
-                    color = body.substr(rgba_p, end - rgba_p + 1);
-                    body.erase(rgba_p, end - rgba_p + 1);
-                }
-            } else if (rgb_p != std::string::npos) {
-                auto end = body.find(')', rgb_p);
-                if (end != std::string::npos) {
-                    color = body.substr(rgb_p, end - rgb_p + 1);
-                    body.erase(rgb_p, end - rgb_p + 1);
-                }
-            } else if (hex_p != std::string::npos) {
-                auto end = body.find_first_of(" \t,", hex_p);
-                color = body.substr(hex_p, end == std::string::npos ? std::string::npos : end - hex_p);
-                body.erase(hex_p, end == std::string::npos ? std::string::npos : end - hex_p);
-            }
-            // Collect numeric tokens (strip "px").
-            std::vector<float> nums;
-            std::string tok;
-            auto flush = [&]() {
-                if (tok.empty()) return;
-                // strip "px" suffix
-                if (tok.size() > 2 && tok.substr(tok.size()-2) == "px") tok.resize(tok.size()-2);
-                try { nums.push_back(std::stof(tok)); } catch (...) {}
-                tok.clear();
-            };
-            for (char c : body) {
-                if (std::isspace(static_cast<unsigned char>(c)) || c == ',') flush();
-                else tok.push_back(c);
-            }
-            flush();
-            if (nums.size() >= 2) { ox = nums[0]; oy = nums[1]; }
-            if (nums.size() >= 3) blur = nums[2];
-            if (nums.size() >= 4) spread = nums[3];
+        if (!node.style.box_shadow.empty()) {
+            // The IR carries parsed CSS box-shadow layers (pulp #41), so we no
+            // longer re-tokenize the raw string here. The bridge's
+            // setBoxShadow(id, ox, oy, blur, spread, color, inset?) takes a
+            // single drop shadow; emit the first layer (CSS paints the first
+            // layer on top). An omitted color falls back to the bridge's
+            // default tint rather than letting setBoxShadow guess numerics.
+            const auto& sh = node.style.box_shadow.front();
+            const std::string color = sh.color.empty() ? "#00000050" : sh.color;
             ss << ind << "setBoxShadow('" << id << "', "
-               << ox << ", " << oy << ", " << blur << ", " << spread
+               << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
                << ", '" << js_single_quote_escape(color) << "'"
-               << (inset ? ", true" : "") << ");\n";
+               << (sh.inset ? ", true" : "") << ");\n";
         }
         if (node.style.opacity)
             ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";

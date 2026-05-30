@@ -238,7 +238,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     };
 
     add("backgroundGradient", node.style.background_gradient);
-    add("boxShadow", node.style.box_shadow);
+    if (!node.style.box_shadow.empty())
+        add("boxShadow", box_shadow_to_css(node.style.box_shadow));
     add("filter", node.style.filter);
     add("backdropFilter", node.style.backdrop_filter);
     add("transform", node.style.transform);

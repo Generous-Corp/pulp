@@ -471,7 +471,8 @@ IRNode json_to_ir_node(const choc::value::ValueView& v) {
         node.style.background_color = style_str("backgroundColor");
         node.style.color = style_str("color");
         node.style.border = style_str("border");
-        node.style.box_shadow = style_str("boxShadow");
+        if (auto bs = style_str("boxShadow"))
+            node.style.box_shadow = parse_css_box_shadow(*bs);
         node.style.font_family = style_str("fontFamily");
         node.style.font_style = style_str("fontStyle");
         node.style.text_align = style_str("textAlign");

@@ -288,7 +288,7 @@ void apply_jsx_style_property(IRNode& node,
     } else if (key == "borderStyle") {
         set_string(node.style.border_style);
     } else if (key == "boxShadow") {
-        set_string(node.style.box_shadow);
+        node.style.box_shadow = parse_css_box_shadow(value);
     } else if (key == "filter") {
         set_string(node.style.filter);
     } else if (key == "backdropFilter") {
