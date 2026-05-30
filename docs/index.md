@@ -38,6 +38,7 @@ MIT-licensed. No royalties. No copyleft.
 - [Building](guides/build.md) — requirements, options, platform notes
 - [Testing](guides/testing.md) — running tests, validation, writing tests
 - [Web Plugins](guides/web-plugins.md) — WAMv2, WebCLAP, browser demos
+- [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code
 
 ## Policies

@@ -2,7 +2,16 @@
 
 Exports Figma designs to a Pulp-native JSON schema that the Pulp importer (`pulp import-design --from figma-plugin`) consumes. Plan: [`planning/2026-05-28-pulp-figma-plugin-strategy.md`](../../planning/2026-05-28-pulp-figma-plugin-strategy.md) (in the `pulp-planning` submodule).
 
-Phase 1 status: **scaffold only.** The plugin loads in Figma, shows its UI, reports your current selection back. No extraction or export yet — Phase 2a adds the walker.
+**Status: working exporter with Pulp library recognition.** The plugin walks the
+selected frame(s), extracts geometry / layout / typography / style / tokens /
+assets, recognizes Pulp library components (Knob / Fader / Meter) and emits them
+as semantic audio-widget nodes, and exports a `*.pulp.json` (or `*.pulp.zip`
+when assets are present) that `pulp import-design --from figma-plugin` consumes.
+The exporter lives in `src/extract.ts`, `src/serialize.ts`, and
+`src/library-registry.ts`, and builds to `dist/code.js`.
+
+For full setup — both the Figma Community install path and the local-dev path,
+plus publishing — see [`docs/guides/figma-plugin.md`](../../docs/guides/figma-plugin.md).
 
 ---
 
@@ -16,14 +25,21 @@ npm run build         # produces dist/code.js + dist/ui.html
 npm run typecheck     # both sides
 ```
 
-Then in Figma desktop:
+Then in Figma desktop (**first time only**):
 
-1. Open any file.
+1. Open any file (a **Figma Pro** workspace — local-dev plugins don't load in
+   Community/free files).
 2. **Plugins → Development → Import plugin from manifest…**
 3. Pick `tools/figma-plugin/manifest.json` from this checkout.
 4. **Plugins → Development → Design for Pulp** to launch.
 
-Select a frame in your Figma canvas and click "Refresh selection" — the plugin echoes its name and type back. That's the Phase 1 milestone.
+Select a frame, then **Export to Pulp** to download the `*.pulp.json` (or
+`*.pulp.zip` when the design has assets).
+
+**Rebuild, don't re-import.** After the first manifest import, code changes are
+picked up by **`npm run build` + re-running the plugin** — Figma re-reads
+`dist/` fresh on every run. You only **re-import the manifest** if
+`manifest.json` itself changes. Use `npm run build:watch` to rebuild on save.
 
 ---
 
@@ -74,11 +90,20 @@ The plugin embeds its `library_manifest` snapshot into every export so the Pulp 
 
 ---
 
-## Next phases
+## Pipeline (all landed)
 
-- **Phase 2a** — Figma extractor: walk selection, build the `ExtractedFigmaNode` model in memory.
-- **Phase 2b** — Serialize the model into the v1 JSON schema.
-- **Phase 3** — Recognize Pulp Library components and emit them as widget nodes (knob/fader/meter/…) instead of generic frames.
-- **Phase 4** — Pulp CLI lane: `parse_figma_plugin_json` parser in `core/view/src/`, `--from figma-plugin` dispatch in the CLI.
+- **Extract** (`src/extract.ts`) — walk the selection into an `ExtractedFigmaNode`
+  tree: geometry, auto-layout, typography, fills/strokes/radius/opacity, images,
+  and recursive children.
+- **Recognize** (`src/library-registry.ts`) — map Pulp library component
+  instances to audio-widget kinds (Knob / Fader / Meter), authoritatively by
+  component key and as a fallback by name prefix.
+- **Serialize** (`src/serialize.ts`) — emit the v1 JSON envelope declared in
+  `schema/figma-plugin-export-v1.json`, with provenance, the library-manifest
+  snapshot, tokens, an asset manifest, and diagnostics.
+- **Import** — the Pulp CLI lane: `parse_figma_plugin_json` in
+  `core/view/src/design_import.cpp`, reached via
+  `pulp import-design --from figma-plugin`.
 
-See the planning doc for details.
+See the planning doc and [`docs/guides/figma-plugin.md`](../../docs/guides/figma-plugin.md)
+for details.

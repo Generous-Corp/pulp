@@ -28,6 +28,8 @@ If you prefer writing DSP in a dedicated language, Pulp integrates with Faust (o
 
 Import from Figma, Pencil.dev, Google Stich and more. Define your visual identity as a design token system — colors, typography, widget geometry, knob styles, button shapes, shadows, gradients. Apply one design language across many plugins. Change a token, and changes appear live in the standalone host via hot-reload.
 
+The Figma import is **semantic, not visual**. A Pulp library component — "Pulp / Knob", "Pulp / Fader", "Pulp / Meter" — tells Pulp *what a control is* (its parameter binding, label, range, and units), not just what it looks like. Recognition keys off component identity, so you can restyle freely without breaking the binding. The library is **additive fidelity**: a design that uses none of it still imports, and every Pulp component you add upgrades exactly the control it sits on. Author once in Figma, then flow the same design into a **live JavaScript UI**, a **native app**, or a **fully compiled C++ plugin** — no rebuilding the UI by hand. (Details: [`docs/reference/design-import-model.md`](docs/reference/design-import-model.md).)
+
 Describe a look in natural language — "80s Macintosh", "neon cyberpunk", "minimal Dieter Rams" — and watch the entire interface transform. The design system is structured data, not compiled C++, so any AI tool that can read JSON can modify your theme.
 
 Tokens export to JSON, CSS variables, C++ headers, GPU shader uniforms, and OKLCH color systems.

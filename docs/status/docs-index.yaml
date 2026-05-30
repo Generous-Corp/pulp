@@ -159,6 +159,11 @@ docs:
     kind: guide
     summary: Importing UI structure and design tokens from Figma, Stitch, v0, and Pencil
 
+  - slug: figma-plugin
+    path: guides/figma-plugin.md
+    kind: guide
+    summary: The "Design for Pulp" Figma plugin — Community install, local-dev install (rebuild-not-reimport), export, and publishing
+
   - slug: design-debugging
     path: guides/design-debugging.md
     kind: guide
@@ -298,6 +303,11 @@ docs:
     path: reference/design-import.md
     kind: reference
     summary: CLI and pipeline reference for design import adapters, IR, validation, and token sync
+
+  - slug: design-import-model
+    path: reference/design-import-model.md
+    kind: reference
+    summary: Conceptual model for Figma → Pulp import — semantic-not-visual, the additive-fidelity guarantee, restyle freely, and one design → live-JS/native/compiled-C++
 
   - slug: design-ir-v1
     path: reference/design-ir-v1.md
