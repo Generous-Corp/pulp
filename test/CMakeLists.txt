@@ -2512,6 +2512,20 @@ pulp_add_test_suite(pulp-test-edit-history LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-host-version LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-host-quirks LIBRARIES pulp::format)
 
+# Host-quirks catalog parity (host-quirks integration plan, P1) — the
+# machine-readable core/format/host-quirks.json must list EXACTLY the
+# flags + tiers in the C++ HostQuirksMeta. Pure-Python parser, no C++
+# build needed, so it runs cheaply on every PR and guards against the
+# JSON and the struct drifting apart.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME host-quirks-catalog-parity
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/scripts/test_host_quirks_catalog_parity.py)
+    set_tests_properties(host-quirks-catalog-parity PROPERTIES
+        LABELS "format;host-quirks;catalog"
+        TIMEOUT 30)
+endif()
+
 # macOS plan Batch B (partial: mixers) — DryWetMixer + Panner pan laws
 pulp_add_test_suite(pulp-test-pan-mix-laws LIBRARIES pulp::signal)
 

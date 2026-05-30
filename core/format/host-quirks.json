@@ -1,0 +1,387 @@
+{
+  "$schema": "./host-quirks.schema.json",
+  "schema_version": 1,
+  "_comment": "Machine-readable index of the HostQuirks ledger. The C++ struct pulp::format::HostQuirksMeta (core/format/include/pulp/format/host_quirks.hpp) is the SINGLE SOURCE OF TRUTH for the set of flags and their validation tier; this JSON is a parallel, machine-readable catalog consumed by provenance/staleness tooling (host-quirks integration plan P2+). The parity test tools/scripts/test_host_quirks_catalog_parity.py fails CI if this file and HostQuirksMeta ever drift (different flag set or mismatched tier). Rich rationale lives in the C++ comments and planning/host-quirks-log.md; this JSON is the index. Provenance fields (source_type, evidence, last_verified) are best-effort from the log + per-host headers; 'unknown' where the record is not explicit. This file introduces NO behavior change (P1: documentation/catalog hardening only).",
+  "_field_docs": {
+    "flag": "Field name in HostQuirks / HostQuirksMeta (exact match).",
+    "tier": "Validated | Speculative | LessonOnly — MUST match kHostQuirksMeta.",
+    "host": "DAW / host the quirk accommodates (free text; matches the per-host header / log entry).",
+    "symptom_area": "Coarse area label for bug-context matching (e.g. sizing, bus-arrangement, state-io, params, keyboard, threading, latency, bypass, dpi, midi).",
+    "source_type": "spec | release-notes | repro | in-DAW-bench | unknown — how the quirk was established.",
+    "evidence": "Issue/PR/doc reference or short pointer; 'unknown' where the log is not explicit.",
+    "last_verified": "ISO date the tier was last affirmed, or 'unknown'.",
+    "note": "One-line human-readable summary."
+  },
+  "quirks": [
+    {
+      "flag": "synthesize_bypass_parameter",
+      "tier": "Validated",
+      "host": "cross-format",
+      "symptom_area": "bypass",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.12 (DAW-quirks rows 23-26); founding cheap-defense, on the test bench since item 5.1",
+      "last_verified": "2026-05-25",
+      "note": "Synthesize a bypass parameter when the plugin doesn't declare one."
+    },
+    {
+      "flag": "clamp_latency_to_nonneg",
+      "tier": "Validated",
+      "host": "cross-format",
+      "symptom_area": "latency",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.12; VST3 requires unsigned latency",
+      "last_verified": "2026-05-25",
+      "note": "Clamp Processor::latency_samples() to non-negative when reporting to the host."
+    },
+    {
+      "flag": "silence_unsupported_bus_arrangements",
+      "tier": "Validated",
+      "host": "cross-format",
+      "symptom_area": "bus-arrangement",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.12",
+      "last_verified": "2026-05-25",
+      "note": "Accept unsupported bus arrangements and emit silence on extra channels rather than failing."
+    },
+    {
+      "flag": "cubase10_async_view_resize_queue",
+      "tier": "Speculative",
+      "host": "Cubase 10+",
+      "symptom_area": "sizing",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.2 (DAW-quirks row 1); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Async window resize after IPlugView::onSize()."
+    },
+    {
+      "flag": "cubase10_param_gesture_ordering",
+      "tier": "Speculative",
+      "host": "Cubase 10+",
+      "symptom_area": "params",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.2 (DAW-quirks row 2); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Parameter automation gesture ordering."
+    },
+    {
+      "flag": "cubase10_fractional_scale_correction",
+      "tier": "Speculative",
+      "host": "Cubase 10+",
+      "symptom_area": "dpi",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.2 (DAW-quirks row 3); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Integer-rounded fractional DPI scale correction."
+    },
+    {
+      "flag": "cubase9_state_blob_size_validation",
+      "tier": "Speculative",
+      "host": "Cubase 9",
+      "symptom_area": "state-io",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.3 (DAW-quirks row 4); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "State-blob stream-size mismatch validation."
+    },
+    {
+      "flag": "live_vst3_canresize_ignore",
+      "tier": "Speculative",
+      "host": "Ableton Live",
+      "symptom_area": "sizing",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.4 (DAW-quirks row 5); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Live VST3 ignores canResize()."
+    },
+    {
+      "flag": "live_vst3_windows_dpi_defer",
+      "tier": "Speculative",
+      "host": "Ableton Live",
+      "symptom_area": "dpi",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.4 (DAW-quirks row 6, Windows-only); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Windows per-monitor DPI defers view attach (Windows-only)."
+    },
+    {
+      "flag": "double_string_buffer_for_live_10_1_13",
+      "tier": "LessonOnly",
+      "host": "Ableton Live 10.1.13",
+      "symptom_area": "state-io",
+      "source_type": "release-notes",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (clean-room lessons); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Live 10.1.13 IInfoListener::getString writes past spec buffer length; allocate buffers at twice spec size."
+    },
+    {
+      "flag": "bitwig_vst3_linux_repaint_after_resize",
+      "tier": "Speculative",
+      "host": "Bitwig Studio (Linux)",
+      "symptom_area": "sizing",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.5 (DAW-quirks row 8, Linux-only); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "VST3 editor repaint after resize (Linux-only)."
+    },
+    {
+      "flag": "bitwig_vst3_setbusarrangements_while_active",
+      "tier": "Speculative",
+      "host": "Bitwig Studio (< 6.0)",
+      "symptom_area": "bus-arrangement",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.5 (DAW-quirks row 9); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "VST3 setBusArrangements invoked while active."
+    },
+    {
+      "flag": "skip_bus_arrangement_call",
+      "tier": "LessonOnly",
+      "host": "Ardour + Harrison Mixbus 32C",
+      "symptom_area": "bus-arrangement",
+      "source_type": "spec",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (PR #2908); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "setBusArrangements returns success without applying; skip the call and accept the host default arrangement."
+    },
+    {
+      "flag": "wavelab_vst3_defer_activation",
+      "tier": "Speculative",
+      "host": "Wavelab 11+",
+      "symptom_area": "bus-arrangement",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.6 (DAW-quirks row 10); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Re-entrant setBusArrangements during prepareToPlay; defer activation."
+    },
+    {
+      "flag": "wavelab_state_blob_fallback",
+      "tier": "Speculative",
+      "host": "Wavelab",
+      "symptom_area": "state-io",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.6 (DAW-quirks row 11); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "State-blob graceful-restore fallback."
+    },
+    {
+      "flag": "tolerate_state_read_nontrue_status",
+      "tier": "LessonOnly",
+      "host": "Wavelab",
+      "symptom_area": "state-io",
+      "source_type": "spec",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (Steinberg spec + reproducer notes); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "IBStream::read may return non-kResultTrue at EOF with the buffer populated; accept when read count matches requested bytes."
+    },
+    {
+      "flag": "fl_studio_setactive_process_mutex",
+      "tier": "Speculative",
+      "host": "FL Studio",
+      "symptom_area": "threading",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.7 (DAW-quirks row 13); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "VST3 Patcher activation race; serialize setActive/process/setBusArrangements."
+    },
+    {
+      "flag": "fl_studio_state_reader_skip",
+      "tier": "Speculative",
+      "host": "FL Studio",
+      "symptom_area": "state-io",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.7 (DAW-quirks row 14); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "VST3 state-blob MemoryStream reader skip."
+    },
+    {
+      "flag": "reaper_vst3_gesture_ordering",
+      "tier": "Speculative",
+      "host": "REAPER",
+      "symptom_area": "params",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.8 (DAW-quirks row 15); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "VST3 parameter gesture ordering."
+    },
+    {
+      "flag": "reaper_process_while_bypassed",
+      "tier": "Speculative",
+      "host": "REAPER",
+      "symptom_area": "bypass",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.8 (DAW-quirks row R1); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "REAPER calls process() while bypassed."
+    },
+    {
+      "flag": "reaper_keyboard_passthrough",
+      "tier": "Speculative",
+      "host": "REAPER",
+      "symptom_area": "keyboard",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.8 (DAW-quirks row R2); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Keyboard passthrough handling."
+    },
+    {
+      "flag": "reaper_permissive_bus_arrangements",
+      "tier": "Speculative",
+      "host": "REAPER",
+      "symptom_area": "bus-arrangement",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.8 (DAW-quirks row R3); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Permissive bus arrangements."
+    },
+    {
+      "flag": "reaper_anticipative_fx_buffer_variability",
+      "tier": "Speculative",
+      "host": "REAPER",
+      "symptom_area": "process",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.8 (DAW-quirks row R4); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Anticipative FX buffer-size variability."
+    },
+    {
+      "flag": "reaper_midsession_setstate",
+      "tier": "Speculative",
+      "host": "REAPER",
+      "symptom_area": "state-io",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.8 (DAW-quirks row R6); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Mid-session setState."
+    },
+    {
+      "flag": "reaper_keyboard_only_space",
+      "tier": "LessonOnly",
+      "host": "REAPER",
+      "symptom_area": "keyboard",
+      "source_type": "release-notes",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (clean-room lessons, 5.x-7.x); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Only VKEY_SPACE delivers a well-formed keyMsg; reject non-Space keys."
+    },
+    {
+      "flag": "pro_tools_aax_sidechain_negotiation",
+      "tier": "Speculative",
+      "host": "Pro Tools (AAX)",
+      "symptom_area": "bus-arrangement",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.9 (DAW-quirks row 16); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "AAX sidechain negotiation."
+    },
+    {
+      "flag": "pro_tools_aax_latency_callback_push",
+      "tier": "Speculative",
+      "host": "Pro Tools (AAX)",
+      "symptom_area": "latency",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.9 (DAW-quirks row 17); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "AAX latency callback push."
+    },
+    {
+      "flag": "pro_tools_aax_mono_second_bus",
+      "tier": "Speculative",
+      "host": "Pro Tools (AAX)",
+      "symptom_area": "bus-arrangement",
+      "source_type": "spec",
+      "evidence": "macOS plan item 5.9 (DAW-quirks row 18); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "AAX mono second bus."
+    },
+    {
+      "flag": "aax_vendor_version_unknown",
+      "tier": "LessonOnly",
+      "host": "Pro Tools (AAX)",
+      "symptom_area": "version",
+      "source_type": "spec",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (Avid AAX docs); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "AAX wrapper reports vendor version unreliably; treat Pro Tools version as unknown and avoid version-gated branching."
+    },
+    {
+      "flag": "logic_au_channel_probe_cap",
+      "tier": "Speculative",
+      "host": "Logic Pro / GarageBand (AU)",
+      "symptom_area": "bus-arrangement",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.10 (DAW-quirks row 19); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "AU channel-probe cap (numeric; default 64, Logic = 8)."
+    },
+    {
+      "flag": "logic_au_tail_time_conversion",
+      "tier": "Speculative",
+      "host": "Logic Pro / GarageBand (AU)",
+      "symptom_area": "latency",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.10 (DAW-quirks row 20); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "AU tail-time wall-clock conversion."
+    },
+    {
+      "flag": "au_v3_bypass_dual_tracking",
+      "tier": "Speculative",
+      "host": "AU v3 cross-host",
+      "symptom_area": "bypass",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.11 (DAW-quirks row 21); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "AU v3 bypass dual-tracking."
+    },
+    {
+      "flag": "au_v3_host_id_from_wrapper",
+      "tier": "Speculative",
+      "host": "AU v3 cross-host",
+      "symptom_area": "host-detection",
+      "source_type": "repro",
+      "evidence": "macOS plan item 5.11 (DAW-quirks row 22); host-quirks-log.md 2026-05-25",
+      "last_verified": "2026-05-25",
+      "note": "Wrapper-reported host identifier."
+    },
+    {
+      "flag": "reaper_auv3_in_process_preferred_size_sync",
+      "tier": "LessonOnly",
+      "host": "REAPER (AU v3 in-process)",
+      "symptom_area": "sizing",
+      "source_type": "repro",
+      "evidence": "Pulp #3044 (iPlug2-audit batch 2026-05-26); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "In-process AU v3: set preferredContentSize synchronously in audioUnitInitialized, not only viewDidLoad."
+    },
+    {
+      "flag": "studio_one_restart_component_ui_thread",
+      "tier": "LessonOnly",
+      "host": "Studio One",
+      "symptom_area": "threading",
+      "source_type": "repro",
+      "evidence": "Pulp #3045 (iPlug2-audit batch 2026-05-26); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Marshal IComponentHandler::restartComponent (esp. kLatencyChanged) to the UI thread."
+    },
+    {
+      "flag": "digital_performer_param_list_reload",
+      "tier": "LessonOnly",
+      "host": "Digital Performer (MOTU)",
+      "symptom_area": "params",
+      "source_type": "repro",
+      "evidence": "Pulp #3046 (iPlug2-audit batch 2026-05-26); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Layer kReloadComponent onto restart bundle on preset-load/project-import so automation labels aren't stale."
+    },
+    {
+      "flag": "cubase13_midi_cc_param_id_stable",
+      "tier": "Speculative",
+      "host": "Cubase 13+ / Nuendo 13+",
+      "symptom_area": "midi",
+      "source_type": "repro",
+      "evidence": "Pulp #3047 (iPlug2-audit batch 2026-05-26); host-quirks-log.md 2026-05-26",
+      "last_verified": "2026-05-26",
+      "note": "Derive MIDI CC parameter IDs from a stable hash (not runtime index) so automation lanes survive reload on 13.x."
+    }
+  ]
+}

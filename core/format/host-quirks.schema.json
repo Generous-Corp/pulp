@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pulp.audio/schemas/host-quirks.schema.json",
+  "title": "Pulp host-quirks catalog",
+  "description": "Machine-readable index of the HostQuirks ledger. Parity with the C++ HostQuirksMeta is enforced by tools/scripts/test_host_quirks_catalog_parity.py.",
+  "type": "object",
+  "required": ["schema_version", "quirks"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "integer" },
+    "_comment": { "type": "string" },
+    "_field_docs": { "type": "object" },
+    "quirks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["flag", "tier", "host", "symptom_area", "note"],
+        "additionalProperties": false,
+        "properties": {
+          "flag": { "type": "string" },
+          "tier": { "enum": ["Validated", "Speculative", "LessonOnly"] },
+          "host": { "type": "string" },
+          "symptom_area": { "type": "string" },
+          "source_type": {
+            "enum": ["spec", "release-notes", "repro", "in-DAW-bench", "unknown"]
+          },
+          "evidence": { "type": "string" },
+          "last_verified": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}
