@@ -1,0 +1,64 @@
+{
+  "$schema": "https://pulp.dev/schemas/figma-plugin-export-v1.json",
+  "format_version": "2026.05-figma-plugin-v1",
+  "asset_manifest": {
+    "version": 1,
+    "assets": [
+      {
+        "asset_id": "knob-ref",
+        "local_path": "assets/knob_ref.png",
+        "mime": "image/png",
+        "width": 60,
+        "height": 100
+      },
+      {
+        "asset_id": "fader-ref",
+        "local_path": "assets/fader_ref.png",
+        "mime": "image/png",
+        "width": 40,
+        "height": 120
+      },
+      {
+        "asset_id": "meter-ref",
+        "local_path": "assets/meter_ref.png",
+        "mime": "image/png",
+        "width": 36,
+        "height": 120
+      }
+    ]
+  },
+  "root": {
+    "type": "frame",
+    "name": "fixture frame",
+    "style": { "width": 300, "height": 260, "background_color": "#14171c" },
+    "children": [
+      {
+        "type": "frame",
+        "name": "Knob — Cutoff",
+        "asset_ref": "knob-ref",
+        "audio_widget": "knob",
+        "label": "Cutoff",
+        "attributes": { "binding": "filter.cutoff_hz", "units": "Hz" },
+        "style": { "width": 80, "height": 80, "border_radius": 40 }
+      },
+      {
+        "type": "frame",
+        "name": "Fader — Master",
+        "asset_ref": "fader-ref",
+        "audio_widget": "fader",
+        "label": "Master",
+        "attributes": { "binding": "param.master_level", "units": "dB" },
+        "style": { "width": 40, "height": 120, "border_radius": 0 }
+      },
+      {
+        "type": "frame",
+        "name": "Meter — Out L",
+        "asset_ref": "meter-ref",
+        "audio_widget": "meter",
+        "label": "Out L",
+        "attributes": { "binding": "meter.out_l", "units": "dB" },
+        "style": { "width": 17, "height": 65, "border_radius": 0 }
+      }
+    ]
+  }
+}
