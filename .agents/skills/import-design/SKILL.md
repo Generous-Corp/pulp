@@ -245,6 +245,8 @@ pulp import-design --from figma-plugin --file scene.pulp.json --output ui.js  # 
 ```
 Detection uses ZIP magic (`PK\x03\x04`), not the file extension — `.zip` renames still get unpacked. The temp dir is auto-cleaned at process exit. Older CLI builds read input via `std::ifstream` text mode and silently truncated at the first NUL byte in the ZIP header; the symptom was `parser threw an unknown exception` on any `.pulp.zip`. If you see that error, the CLI predates the auto-unpack support — rebuild from current `main`.
 
+The extractor refuses hostile archives at parse time: entries whose filename is so long it would truncate inside the stack buffer, entries containing `..` substrings, entries that resolve to an absolute path (`fs::path::is_absolute()`), entries with Windows drive-relative or UNC prefixes (`C:foo`, `C:\\foo`, `\\\\server\\share\\…`), entries beginning with `/` or `\\`, archives with more than 10000 entries, and archives whose total or per-file uncompressed size exceeds 256 MB / 64 MB respectively. Each rejection logs a labelled `Error: refusing unsafe zip entry (<reason>): <name>` (or `oversized filename`, `total uncompressed size > …`) on stderr and bails with a non-zero exit. If a legitimate plugin export ever trips one of these caps, the right move is to lift the cap deliberately in `extract_pulp_zip_if_present` rather than disable the guard.
+
 **Figma (MCP available)**:
 - Use `com.figma.mcp` to read the current file or selection
 - Extract frames, auto-layout, fills, strokes, effects, text, components
