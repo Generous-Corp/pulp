@@ -2764,3 +2764,91 @@ TEST_CASE("parse_figma_plugin_json handles a Phase 3 knob without optional units
     REQUIRE(ir.root.attributes.at("binding") == "param.mix");
     REQUIRE(ir.root.attributes.count("units") == 0);
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Phase 5 part 1 — Pulp / Fader + Pulp / Meter recognition.
+//
+// Mirrors the Phase 3 contract for the two new library widgets added in
+// Pulp Library v0.2.0:
+//   - Pulp / Fader  (component_set_key 1c2b727f0c0e11026512725aeb546997f16042bd)
+//   - Pulp / Meter  (component_set_key 52e1636086b855cb2d20d341d4cfa15e94151eef)
+//
+// Same envelope shape as Pulp / Knob; only audio_widget enum changes.
+TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Fader envelope onto IR widget",
+          "[view][import][figma-plugin][phase-5]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": {
+            "adapter": "figma-plugin",
+            "version": "0.1.0",
+            "source_uri": "figma://design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library"
+        },
+        "root": {
+            "type": "frame",
+            "name": "LevelFader",
+            "audio_widget": "fader",
+            "label": "Master",
+            "min": -inf-replaced-below,
+            "max": 6,
+            "default": 0,
+            "attributes": {
+                "units": "dB",
+                "binding": "param.master_level"
+            },
+            "style": { "width": 28, "height": 120 },
+            "layout": { "direction": "column" },
+            "children": []
+        }
+    })JSON";
+    // The literal "-inf-replaced-below" above is a sentinel — replace it
+    // with a real number (-60) so the JSON parser doesn't choke. (Keeps
+    // the envelope structure inline-readable in this test source.)
+    auto json = envelope;
+    auto pos = json.find("-inf-replaced-below");
+    REQUIRE(pos != std::string::npos);
+    json.replace(pos, std::string("-inf-replaced-below").size(), "-60");
+
+    auto ir = parse_figma_plugin_json(json);
+    REQUIRE(ir.source == DesignSource::figma_plugin);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::fader);
+    REQUIRE(ir.root.audio_label == "Master");
+    REQUIRE(ir.root.audio_min == Catch::Approx(-60.0f));
+    REQUIRE(ir.root.audio_max == Catch::Approx(6.0f));
+    REQUIRE(ir.root.audio_default == Catch::Approx(0.0f));
+    REQUIRE(ir.root.attributes.at("units") == "dB");
+    REQUIRE(ir.root.attributes.at("binding") == "param.master_level");
+}
+
+TEST_CASE("parse_figma_plugin_json maps Phase 5 Pulp / Meter envelope onto IR widget",
+          "[view][import][figma-plugin][phase-5]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "OutputMeter",
+            "audio_widget": "meter",
+            "label": "Out L",
+            "min": -60,
+            "max": 0,
+            "default": -12,
+            "attributes": {
+                "units": "dB",
+                "binding": "meter.out_l"
+            },
+            "style": { "width": 18, "height": 120 },
+            "children": []
+        }
+    })JSON";
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::meter);
+    REQUIRE(ir.root.audio_label == "Out L");
+    REQUIRE(ir.root.audio_min == Catch::Approx(-60.0f));
+    REQUIRE(ir.root.audio_max == Catch::Approx(0.0f));
+    REQUIRE(ir.root.audio_default == Catch::Approx(-12.0f));
+    REQUIRE(ir.root.attributes.at("units") == "dB");
+    REQUIRE(ir.root.attributes.at("binding") == "meter.out_l");
+}

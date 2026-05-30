@@ -1,5 +1,5 @@
 {
-  "library_version": "0.1.0",
+  "library_version": "0.2.0",
   "library_file_key": "vxW6btjzQtc4t9ITLNjev0",
   "library_file_url": "https://www.figma.com/design/vxW6btjzQtc4t9ITLNjev0/Pulp-Library",
   "required_plugin_version": ">=0.1.0",
@@ -11,6 +11,22 @@
       "supported_property_definitions": ["label", "value", "min", "max", "units", "binding"],
       "supported_variant_axes": ["size", "state"],
       "since_library_version": "0.1.0"
+    },
+    "fader": {
+      "component_set_key": "1c2b727f0c0e11026512725aeb546997f16042bd",
+      "component_set_node_id": "10:87",
+      "name_prefix": "Pulp / Fader",
+      "supported_property_definitions": ["label", "value", "min", "max", "units", "binding"],
+      "supported_variant_axes": ["size", "state"],
+      "since_library_version": "0.2.0"
+    },
+    "meter": {
+      "component_set_key": "52e1636086b855cb2d20d341d4cfa15e94151eef",
+      "component_set_node_id": "10:234",
+      "name_prefix": "Pulp / Meter",
+      "supported_property_definitions": ["label", "value", "min", "max", "units", "binding"],
+      "supported_variant_axes": ["size", "state"],
+      "since_library_version": "0.2.0"
     }
   }
 }
