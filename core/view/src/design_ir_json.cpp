@@ -57,14 +57,35 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     IRStyle s;
     if (!obj.isObject()) return s;
 
+    // Style keys arrive in two spellings: figma/pencil/v0 emit camelCase
+    // (`borderRadius`, `backgroundColor`), the figma-plugin export emits
+    // snake_case (`border_radius`, `background_color`). Single-word keys
+    // (`width`, `color`) are identical, but every COMPOUND key would be
+    // silently dropped for one source or the other. Resolve both spellings so
+    // a frame's corner radius, borders, and background survive regardless of
+    // which adapter produced the JSON.
+    auto snake_of = [](const char* camel) {
+        std::string out;
+        for (const char* p = camel; *p; ++p) {
+            if (*p >= 'A' && *p <= 'Z') { out.push_back('_'); out.push_back(static_cast<char>(*p - 'A' + 'a')); }
+            else out.push_back(*p);
+        }
+        return out;
+    };
+    auto resolve_key = [&](const char* key) -> std::optional<std::string> {
+        if (obj.hasObjectMember(key)) return std::string(key);
+        std::string snake = snake_of(key);
+        if (snake != key && obj.hasObjectMember(snake.c_str())) return snake;
+        return std::nullopt;
+    };
     auto set_opt_str = [&](const char* key, std::optional<std::string>& field) {
-        if (obj.hasObjectMember(key)) field = std::string(obj[key].toString());
+        if (auto k = resolve_key(key)) field = std::string(obj[k->c_str()].toString());
     };
     auto set_opt_float = [&](const char* key, std::optional<float>& field) {
-        if (obj.hasObjectMember(key)) field = static_cast<float>(obj[key].getWithDefault<double>(0));
+        if (auto k = resolve_key(key)) field = static_cast<float>(obj[k->c_str()].getWithDefault<double>(0));
     };
     auto set_opt_int = [&](const char* key, std::optional<int>& field) {
-        if (obj.hasObjectMember(key)) field = static_cast<int>(obj[key].getWithDefault<int64_t>(0));
+        if (auto k = resolve_key(key)) field = static_cast<int>(obj[k->c_str()].getWithDefault<int64_t>(0));
     };
 
     set_opt_str("backgroundColor", s.background_color);
