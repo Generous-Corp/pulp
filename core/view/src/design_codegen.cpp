@@ -959,8 +959,14 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 if (node.style.top)
                     ss << ind << "setTop('" << id << "', " << (*node.style.top - core_y * s + pad_y) << ");\n";
             }
-        } else if (png_w > 0.0f && png_h > 0.0f && box_w > 0.0f && box_h > 0.0f) {
-            // No core data but real dims known → contain-fit preserving aspect.
+        } else if (node.style.render_bounds && png_w > 0.0f && png_h > 0.0f &&
+                   box_w > 0.0f && box_h > 0.0f) {
+            // A bleed sprite (render_bounds present) whose opaque core couldn't
+            // be recovered → contain-fit preserving aspect. Gated on
+            // render_bounds: an ORDINARY image/icon must keep the box the IR
+            // declared (a 100×100 node with a 200×100 bitmap fills its 100×100
+            // slot, as Figma's image-fill intends), so aspect-preservation is
+            // limited to bleed sprites and never reshapes normal images.
             const float png_aspect = png_w / png_h;
             float ew = box_w, eh = box_h;
             if (box_w / box_h > png_aspect) { eh = box_h; ew = box_h * png_aspect; }
@@ -968,7 +974,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'width', " << ew << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << eh << ");\n";
         } else {
-            // Aspect unknown → legacy box sizing.
+            // Ordinary image (no bleed) or unknown dims → keep the declared box.
             if (node.style.width)
                 ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
             if (node.style.height)

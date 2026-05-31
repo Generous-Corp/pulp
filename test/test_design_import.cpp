@@ -4148,3 +4148,36 @@ TEST_CASE("sprite image is sized preserving its source PNG aspect ratio (never s
     // And the core (115*s x 129*s, s = min(62/115,68/129)) fills the 62x68 box.
     CHECK(*w == Catch::Approx(420.0f * (68.0f / 129.0f)).epsilon(0.03));
 }
+
+TEST_CASE("ordinary image (no render_bounds) keeps its declared box, not its PNG aspect",
+          "[view][import][codegen][fidelity]") {
+    // Aspect-preservation is ONLY for bleed sprites (render_bounds present).
+    // A normal image/icon whose node is 100x100 but whose bitmap is 200x100
+    // must fill its declared 100x100 slot (Figma image-fill intent), NOT be
+    // contained to 100x50 — that would reshape ordinary images and shift flex
+    // layout. Guards the gating fix for the sprite-sizing path.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 300.0f;
+    ir.root.style.height = 300.0f;
+    IRNode img;
+    img.type = "image";
+    img.name = "Icon";
+    img.style.width = 100.0f;
+    img.style.height = 100.0f;
+    img.attributes["asset_path"] = "icon.png";
+    img.attributes["png_natural_w"] = "200";   // wide bitmap, no render_bounds
+    img.attributes["png_natural_h"] = "100";
+    ir.root.children.push_back(img);
+
+    const auto js = generate_pulp_js(ir);
+    const auto id = image_id_after_comment(js, "Icon");
+    REQUIRE(id.has_value());
+    const auto w = emitted_flex(js, *id, "width");
+    const auto h = emitted_flex(js, *id, "height");
+    REQUIRE(w.has_value());
+    REQUIRE(h.has_value());
+    CHECK(*w == Catch::Approx(100.0f));   // declared box preserved
+    CHECK(*h == Catch::Approx(100.0f));   // NOT 50 (contain to PNG aspect)
+}
