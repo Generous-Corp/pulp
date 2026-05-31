@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["es2020", "webworker"],
+    "types": ["@figma/plugin-typings"],
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "rootDir": ".."
+  },
+  "include": ["headless.ts", "types.ts", "extract.ts", "extract-model.ts", "serialize.ts", "assets.ts", "tokens.ts", "library-registry.ts", "user-fonts.ts", "../library-manifest.json"]
+}

@@ -21,9 +21,13 @@ plus publishing — see [`docs/guides/figma-plugin.md`](../../docs/guides/figma-
 cd tools/figma-plugin
 npm install
 npm run gen-types     # regenerates src/types.generated.ts from schema/figma-plugin-export-v1.json
-npm run build         # produces dist/code.js + dist/ui.html
-npm run typecheck     # both sides
+npm run build         # produces dist/code.js + dist/ui.html + dist/headless.js
+npm run typecheck     # all three entries (code + ui + headless)
 ```
+
+`npm run build` produces three artifacts: `dist/code.js` (UI plugin sandbox),
+`dist/ui.html` (iframe with inlined JS), and `dist/headless.js` (the
+**headless** extractor, see below).
 
 Then in Figma desktop (**first time only**):
 
@@ -41,6 +45,77 @@ Select a frame, then **Export to Pulp** to download the `*.pulp.json` (or
 picked up by **`npm run build` + re-running the plugin** — Figma re-reads
 `dist/` fresh on every run. You only **re-import the manifest** if
 `manifest.json` itself changes. Use `npm run build:watch` to rebuild on save.
+
+---
+
+## Headless extraction (`dist/headless.js`)
+
+`dist/headless.js` is a minified IIFE of the same `extractScene` +
+`serializeExport` core that powers the UI plugin, **without the UI iframe
+or message loop**. It's designed to be inlined into a Figma MCP `use_figma`
+call and run inside Figma's actual Plugin API sandbox by an agent.
+
+**Why this exists alongside the REST port:** Pulp also ships
+[`tools/import-design/figma_rest_export.py`](../import-design/figma_rest_export.py),
+which is the production headless path (no Figma Desktop needed; just a
+Figma PAT). The headless bundle here is a *conformance oracle*: because
+it runs the same Plugin API code path the user clicks through, its
+output is the gold standard the REST port is benchmarked against. If
+the two ever diverge, the conformance test (`P3-alt`) flags it.
+
+### Bundle size discipline
+
+`use_figma` caps its `code` parameter at 50 000 chars. The build asserts
+`dist/headless.js` stays under 49 KB so the agent's small prelude
+(`const TARGET_NODE_ID = "..."`) plus trailing
+`return await globalThis.__pulp_headless_result;` always fits. If the
+extractor grows past that, `npm run build` fails loudly — the fix is to
+split shared code into a tinier core (see P2 in
+`planning/figma-import-coordination-log.md`).
+
+### Driving from an agent
+
+```bash
+node scripts/run-headless.mjs 26:3 > /tmp/payload.js
+```
+
+The script prints a self-contained JS payload to stdout: the
+`TARGET_NODE_ID` prelude + the bundle + the trailing await/return. The
+agent passes the file contents verbatim as the `code` parameter to
+`mcp__figma__use_figma`:
+
+```js
+mcp__figma__use_figma({
+  fileKey: "vxW6btjzQtc4t9ITLNjev0",
+  description: "headless export of kitchen-sink frame",
+  code: <contents of /tmp/payload.js>,
+})
+```
+
+The tool result is a plain object:
+
+```ts
+{
+  envelope: <full v1 envelope>,
+  envelope_json: <pretty-printed string>,
+  assets: [{ content_hash, mime, bytes: number[] }, ...],
+  node_count: 59,
+  diagnostic_count: 0,
+  asset_count: 6,
+  truncated: false,
+  suggested_name: "PluginEditor",
+  target_node_id: "26:3"
+}
+```
+
+Pack `envelope_json` as `scene.pulp.json` + each `assets[i].bytes` as
+`assets/<content_hash>.<ext>` into a zip; the result is a valid
+`*.pulp.zip` for `pulp import-design --from figma-plugin`.
+
+Pass `--selection` to `run-headless.mjs` instead of a node id to fall
+back to whatever frame the user has selected in Figma (matches the UI
+plugin's behaviour). Selection mode is mostly useful for interactive
+debugging.
 
 ---
 
