@@ -83,7 +83,9 @@ def extract_style(n):
             elif t == "GRADIENT_LINEAR": s["background_gradient"] = gradient_to_css(f)
             elif t == "IMAGE":
                 ih = f.get("imageRef") or f.get("imageHash")
-                if ih: s["background_image"] = f"pending:{ih}"
+                if ih:
+                    s["background_image"] = f"pending:{ih}"
+                    IMAGE_FILL_REFS.add(ih)  # resolved → real path after the walk
             elif t in ("GRADIENT_RADIAL", "GRADIENT_ANGULAR", "GRADIENT_DIAMOND"):
                 s["background_color"] = gradient_flat(f)  # flat fallback (matches extract.ts)
     strokes = n.get("strokes")
@@ -178,6 +180,17 @@ def widget_kind_from_name(name):
     if "spectrum" in low: return "spectrum"
     return None
 
+def _has_child_containers(n):
+    """True if the node is a layout CONTAINER (has child frames/instances/
+    components) rather than a leaf widget. A container named like a widget
+    ("Knob Row" frame holding Knob instances) must NOT be promoted — that would
+    drop the real widgets inside. NOTE: GROUP/VECTOR/shape children are a leaf
+    widget's OWN visual content (e.g. an ELYSIUM 'Knob Small' instance wraps a
+    vector Group), so they do NOT count as containers — only structural nesting
+    (FRAME / INSTANCE / COMPONENT / COMPONENT_SET) does."""
+    return any(c.get("type") in ("FRAME", "INSTANCE", "COMPONENT", "COMPONENT_SET")
+               for c in n.get("children", []))
+
 def is_auto_layout(n):
     return n is not None and n.get("layoutMode") in ("HORIZONTAL", "VERTICAL")
 
@@ -206,6 +219,7 @@ def extract_layout(n):
 
 ASSET_IDS = []  # node ids to export as PNG via /images (filled during walk)
 FONT_ASSETS = {}  # (family, style, weight) -> {family, style, weight} (deduped, fill order)
+IMAGE_FILL_REFS = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
 
 def _record_font(n):
     """Collect a text node's font into FONT_ASSETS (deduped by family/style/weight).
@@ -255,7 +269,11 @@ def walk(n, parent, z):
     tiny = bb.get("width", 0) < 1 and bb.get("height", 0) < 1
     captured = False
     wkind = widget_kind_from_name(n.get("name", ""))
-    if wkind:
+    # Codex #3234 P2: only promote LEAF-ish nodes. A CONTAINER whose name merely
+    # contains a widget word (e.g. "Knob Row", "Fader Bank") must NOT be promoted
+    # to a leaf widget — that would drop its children (the real knobs inside).
+    # Mirrors the importer's detect_node_audio_widget has_child_containers rule.
+    if wkind and not _has_child_containers(n):
         out["audio_widget"] = wkind
         captured = True  # leaf widget: importer renders native; don't capture/recurse
     # Asset capture (extract.ts:268-322). Vector-like nodes → PNG asset_ref.
@@ -329,6 +347,10 @@ def resolve_token(explicit):
 
 def parse_url(url):
     # https://figma.com/design/<KEY>/<name>?node-id=<a-b>  (node-id uses '-'; API uses ':')
+    # Codex #3225 P2: copied URLs commonly percent-encode the separator
+    # (node-id=3%3A42, or %2D); unquote first so the regex still matches.
+    import urllib.parse
+    url = urllib.parse.unquote(url)
     m = re.search(r"/(?:design|file)/([A-Za-z0-9]+)", url)
     key = m.group(1) if m else None
     m2 = re.search(r"node-id=([0-9]+)[-:]([0-9]+)", url)
@@ -341,6 +363,53 @@ def fetch_nodes(file_key, node_id, token):
         headers={"X-Figma-Token": token})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.load(r)
+
+def resolve_image_fills(file_key, refs, token, out_dir):
+    """Codex #3225 P2: resolve IMAGE-fill imageRefs into real assets. The image
+    fill on a node references a file image by `imageRef`; the file-images
+    endpoint maps each ref to a (temporary) download URL. Download → assets/
+    (sha256-named, like node captures) → return (manifest_entries, {ref: rel_path})
+    so the caller can rewrite each node's `background_image: "pending:<ref>"` into
+    a real relative path instead of a dangling pending hash."""
+    import hashlib, os, urllib.request
+    os.makedirs(os.path.join(out_dir, "assets"), exist_ok=True)
+    req = urllib.request.Request(f"https://api.figma.com/v1/files/{file_key}/images",
+                                 headers={"X-Figma-Token": token})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        url_map = (json.load(r).get("meta") or {}).get("images", {}) or {}
+    manifest, ref_to_rel = [], {}
+    for ref in refs:
+        url = url_map.get(ref)
+        if not url:
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                blob = r.read()
+            digest = hashlib.sha256(blob).hexdigest()
+            rel = f"assets/{digest}.png"
+            open(os.path.join(out_dir, rel), "wb").write(blob)
+            ref_to_rel[ref] = rel
+            manifest.append({"asset_id": f"imgfill-{ref}",
+                             "original_uri": f"figma-image://{ref}", "original_uri_aliases": [],
+                             "local_path": rel, "content_hash": digest, "mime": "image/png"})
+        except Exception as e:
+            print(f"  image fill {ref} failed: {e}", file=sys.stderr)
+    return manifest, ref_to_rel
+
+def _rewrite_image_fills(node, ref_to_rel):
+    """Replace style.background_image 'pending:<ref>' with the resolved relative
+    path (or drop it if the fill couldn't be resolved — never leave a pending:)."""
+    st = node.get("style")
+    if st:
+        bg = st.get("background_image", "")
+        if isinstance(bg, str) and bg.startswith("pending:"):
+            ref = bg[len("pending:"):]
+            if ref in ref_to_rel:
+                st["background_image"] = ref_to_rel[ref]
+            else:
+                st.pop("background_image", None)  # unresolved → no dangling pending:
+    for c in node.get("children", []):
+        _rewrite_image_fills(c, ref_to_rel)
 
 def main():
     ap = argparse.ArgumentParser(description="Headless Figma REST → Pulp figma-plugin envelope")
@@ -374,6 +443,17 @@ def main():
         print(f"exporting {len(ASSET_IDS)} assets via /images ...")
         asset_manifest_entries = export_assets(file_key, ASSET_IDS, token, out_dir)
         print(f"  captured {len(asset_manifest_entries)} PNGs")
+    # Resolve IMAGE-fill imageRefs → real assets, rewrite the dangling pending:
+    # markers (Codex #3225 P2). Even with --no-assets/--node-json we strip the
+    # pending: placeholders so the envelope never carries a dead reference.
+    if IMAGE_FILL_REFS:
+        ref_to_rel = {}
+        if not args.no_assets and token:
+            print(f"resolving {len(IMAGE_FILL_REFS)} image fill(s) ...")
+            fill_entries, ref_to_rel = resolve_image_fills(file_key, IMAGE_FILL_REFS, token, out_dir)
+            asset_manifest_entries += fill_entries
+            print(f"  resolved {len(fill_entries)} image fill(s)")
+        _rewrite_image_fills(root_node, ref_to_rel)
 
     envelope = {
         "$schema": "https://pulp.dev/schemas/figma-plugin-export-v1.json",
