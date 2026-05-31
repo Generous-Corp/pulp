@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03000"></a>
+## [0.300.0] - 2026-05-31
+
+- feat(import-design): reference-free no-skew fidelity self-check ([#3267](https://github.com/danielraffel/pulp/pull/3267))
+- fix(view): center asset-bleed sprites after contain sizing ([#3264](https://github.com/danielraffel/pulp/pull/3264))
+- fix(view): include asset_bleed in the bleed sprite sizing gate ([#3262](https://github.com/danielraffel/pulp/pull/3262))
+- fix(view): limit aspect-preserving image sizing to bleed sprites only ([#3260](https://github.com/danielraffel/pulp/pull/3260))
+
 <a id="v02990"></a>
 ## [0.299.0] - 2026-05-31
 
@@ -3350,6 +3358,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.300.0]: https://github.com/danielraffel/pulp/releases/tag/v0.300.0
 [0.299.0]: https://github.com/danielraffel/pulp/releases/tag/v0.299.0
 [0.298.0]: https://github.com/danielraffel/pulp/releases/tag/v0.298.0
 [0.297.0]: https://github.com/danielraffel/pulp/releases/tag/v0.297.0
