@@ -4,10 +4,10 @@
   "_comment": "Machine-readable index of the HostQuirks ledger. The C++ struct pulp::format::HostQuirksMeta (core/format/include/pulp/format/host_quirks.hpp) is the SINGLE SOURCE OF TRUTH for the set of flags and their validation tier; this JSON is a parallel, machine-readable catalog consumed by provenance/staleness tooling (host-quirks integration plan P2+). The parity test tools/scripts/test_host_quirks_catalog_parity.py fails CI if this file and HostQuirksMeta ever drift (different flag set or mismatched tier). Rich rationale lives in the C++ comments and planning/host-quirks-log.md; this JSON is the index. Provenance fields (source_type, evidence, last_verified) are best-effort from the log + per-host headers; 'unknown' where the record is not explicit. This file introduces NO behavior change (P1: documentation/catalog hardening only).",
   "_field_docs": {
     "flag": "Field name in HostQuirks / HostQuirksMeta (exact match).",
-    "tier": "Validated | Speculative | LessonOnly — MUST match kHostQuirksMeta.",
+    "tier": "Validated | Speculative | LessonOnly \u2014 MUST match kHostQuirksMeta.",
     "host": "DAW / host the quirk accommodates (free text; matches the per-host header / log entry).",
     "symptom_area": "Coarse area label for bug-context matching (e.g. sizing, bus-arrangement, state-io, params, keyboard, threading, latency, bypass, dpi, midi).",
-    "source_type": "spec | release-notes | repro | in-DAW-bench | unknown — how the quirk was established.",
+    "source_type": "spec | release-notes | repro | in-DAW-bench | unknown \u2014 how the quirk was established.",
     "evidence": "Issue/PR/doc reference or short pointer; 'unknown' where the log is not explicit.",
     "last_verified": "ISO date the tier was last affirmed, or 'unknown'.",
     "note": "One-line human-readable summary."
@@ -40,8 +40,8 @@
       "symptom_area": "bus-arrangement",
       "source_type": "repro",
       "evidence": "macOS plan item 5.12",
-      "last_verified": "2026-05-25",
-      "note": "Accept unsupported bus arrangements and emit silence on extra channels rather than failing."
+      "last_verified": "2026-05-30",
+      "note": "Accept unsupported bus arrangements and emit silence on extra channels rather than failing. (VST3 adapter consumes this since host-quirks P3c; setBusArrangements accept + process() silence, validated)."
     },
     {
       "flag": "cubase10_async_view_resize_queue",

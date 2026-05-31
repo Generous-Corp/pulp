@@ -211,48 +211,71 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
         return kResultFalse;
     }
 
-    // Only mono + stereo are negotiable today — anything else is
-    // refused so the host falls back to the default arrangement.
-    auto supported = [](SpeakerArrangement a) {
+    // Only mono + stereo are translatable to a Processor::BusesLayout
+    // proposal today; any other arrangement is "unsupported" by
+    // definition. Item 3.7 — the Processor also gets a veto on the
+    // proposed mono/stereo layout via is_bus_layout_supported().
+    auto is_mono_stereo = [](SpeakerArrangement a) {
         return a == SpeakerArr::kMono || a == SpeakerArr::kStereo;
     };
-    for (int32 i = 0; i < numIns;  ++i) if (!supported(inputs[i]))  return kResultFalse;
-    for (int32 i = 0; i < numOuts; ++i) if (!supported(outputs[i])) return kResultFalse;
-
-    // Item 3.7 — let the Processor reject the layout before we mutate
-    // anything. Translate VST3 SpeakerArrangement masks to channel
-    // counts (1 = mono, 2 = stereo today; the mono/stereo guard above
-    // already filtered out other arrangements).
     auto channel_count = [](SpeakerArrangement a) -> int {
         if (a == SpeakerArr::kMono)   return 1;
         if (a == SpeakerArr::kStereo) return 2;
         return 0;
     };
-    Processor::BusesLayout proposal;
-    proposal.inputs.reserve(static_cast<std::size_t>(numIns));
-    proposal.outputs.reserve(static_cast<std::size_t>(numOuts));
-    for (int32 i = 0; i < numIns;  ++i) proposal.inputs.push_back(channel_count(inputs[i]));
-    for (int32 i = 0; i < numOuts; ++i) proposal.outputs.push_back(channel_count(outputs[i]));
-    if (!processor_->is_bus_layout_supported(proposal)) {
-        runtime::log_info(
-            "VST3 setBusArrangements: processor rejected proposed layout "
-            "({} in / {} out buses)", numIns, numOuts);
-        return kResultFalse;
+
+    bool all_mono_stereo = true;
+    for (int32 i = 0; i < numIns;  ++i) if (!is_mono_stereo(inputs[i]))  all_mono_stereo = false;
+    for (int32 i = 0; i < numOuts; ++i) if (!is_mono_stereo(outputs[i])) all_mono_stereo = false;
+
+    bool natively_supported = false;
+    if (all_mono_stereo) {
+        Processor::BusesLayout proposal;
+        proposal.inputs.reserve(static_cast<std::size_t>(numIns));
+        proposal.outputs.reserve(static_cast<std::size_t>(numOuts));
+        for (int32 i = 0; i < numIns;  ++i) proposal.inputs.push_back(channel_count(inputs[i]));
+        for (int32 i = 0; i < numOuts; ++i) proposal.outputs.push_back(channel_count(outputs[i]));
+        natively_supported = processor_->is_bus_layout_supported(proposal);
     }
 
     // Apply channel counts to the AudioBus objects the parent registered
     // from descriptor() during initialize(). setArrangement is the VST3
     // SDK's canonical in-place mutator for a bus's channel layout.
-    for (int32 i = 0; i < numIns; ++i) {
-        if (auto* bus = FCast<AudioBus>(audioInputs.at(i))) {
-            bus->setArrangement(inputs[i]);
+    auto apply_arrangements = [&] {
+        for (int32 i = 0; i < numIns; ++i)
+            if (auto* bus = FCast<AudioBus>(audioInputs.at(i))) bus->setArrangement(inputs[i]);
+        for (int32 i = 0; i < numOuts; ++i)
+            if (auto* bus = FCast<AudioBus>(audioOutputs.at(i))) bus->setArrangement(outputs[i]);
+    };
+
+    if (!natively_supported) {
+        // silence_unsupported_bus_arrangements (host-quirks P3c): rather
+        // than failing the whole proposal, accept the host's arrangement
+        // and emit silence on the channels the processor doesn't produce.
+        // process() enforces this by clamping the processor's views to its
+        // prepared (descriptor-default) channel counts and zero-filling
+        // the host's extra channels — so the processor never reads/writes
+        // past what prepare() allocated. When the quirk is filtered out
+        // (PULP_HOST_QUIRKS=off) the original reject-the-proposal behavior
+        // is preserved exactly.
+        if (!quirks_.silence_unsupported_bus_arrangements) {
+            runtime::log_info(
+                "VST3 setBusArrangements: rejected unsupported layout "
+                "({} in / {} out buses) — silence accommodation off",
+                numIns, numOuts);
+            return kResultFalse;
         }
+        apply_arrangements();
+        silence_unsupported_active_ = true;
+        runtime::log_info(
+            "VST3 setBusArrangements: accepted UNSUPPORTED layout via silence "
+            "accommodation ({} in / {} out buses); extra channels silenced",
+            numIns, numOuts);
+        return kResultTrue;
     }
-    for (int32 i = 0; i < numOuts; ++i) {
-        if (auto* bus = FCast<AudioBus>(audioOutputs.at(i))) {
-            bus->setArrangement(outputs[i]);
-        }
-    }
+
+    silence_unsupported_active_ = false;
+    apply_arrangements();
     runtime::log_info(
         "VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
     return kResultTrue;
@@ -273,6 +296,11 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     ctx.output_channels = out_ch;
 
     processor_->prepare(ctx);
+
+    // Cache what the processor's buffers are prepared for — the silence
+    // accommodation (P3c) clamps process() views to these counts.
+    native_in_ = in_ch;
+    native_out_ = out_ch;
 
     // Pre-allocate buffer pointer arrays for real-time safety
     input_ptrs_.resize(ctx.input_channels);
@@ -403,11 +431,31 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
+    // silence_unsupported_bus_arrangements (host-quirks P3c): the host
+    // accepted an arrangement the processor does NOT natively support, so
+    // the processor was prepare()'d for native_in_/native_out_ channels
+    // only (setupProcessing uses descriptor defaults). Hand the processor
+    // exactly those counts, and zero-fill ALL of the host's main-bus
+    // OUTPUT channels first so the ones the processor doesn't write emit
+    // silence instead of uninitialised memory. No-op when the arrangement
+    // is natively supported (the common path).
+    int proc_in = in_channels;
+    int proc_out = out_channels;
+    if (silence_unsupported_active_) {
+        for (int ch = 0; ch < out_channels; ++ch) {
+            if (output_ptrs_[ch] != nullptr) {
+                std::memset(output_ptrs_[ch], 0, sizeof(float) * num_samples);
+            }
+        }
+        proc_in  = (in_channels  < native_in_)  ? in_channels  : native_in_;
+        proc_out = (out_channels < native_out_) ? out_channels : native_out_;
+    }
+
     audio::BufferView<const float> input_view(
         const_cast<const float* const*>(input_ptrs_.data()),
-        in_channels, num_samples);
+        proc_in, num_samples);
     audio::BufferView<float> output_view(
-        output_ptrs_.data(), out_channels, num_samples);
+        output_ptrs_.data(), proc_out, num_samples);
     audio::BufferView<const float> sidechain_view(
         const_cast<const float* const*>(sidechain_ptrs_.data()),
         sc_channels, num_samples);

@@ -108,6 +108,19 @@ private:
     // instead of hardcoding DAW workarounds (host-quirks plan, P3).
     HostQuirks quirks_{};
 
+    // silence_unsupported_bus_arrangements (host-quirks P3c). The
+    // processor is always prepare()'d with the DESCRIPTOR-DEFAULT channel
+    // counts (see setupProcessing), so these cache what the processor's
+    // buffers are sized for. When setBusArrangements accepts an
+    // arrangement the processor does NOT natively support (only because
+    // the quirk is enforced), `silence_unsupported_active_` is set; then
+    // process() hands the processor only its prepared channel counts and
+    // zero-fills the host's extra channels rather than letting the
+    // processor read/write past what prepare() allocated.
+    int native_in_ = 0;
+    int native_out_ = 0;
+    bool silence_unsupported_active_ = false;
+
     // Item 1.3 — previous-block transport snapshot used to derive the
     // `tempo_changed` / `time_sig_changed` / `transport_changed` flags
     // on `ProcessContext`. Default-constructed (no previous block) so

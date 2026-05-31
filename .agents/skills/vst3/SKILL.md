@@ -511,3 +511,24 @@ through the pure helper `pulp::format::reported_latency_samples(raw, quirks)`
 (in `host_quirks.hpp`): a negative `latency_samples()` clamps to 0 when the
 quirk is enforced, and passes through raw (wrapping the unsigned host field)
 when `PULP_HOST_QUIRKS=off`. See `docs/reference/host-quirks-policy.md`.
+
+## silence_unsupported_bus_arrangements (host-quirks P3c, 2026-05-30)
+
+`setBusArrangements` now gates its rejection of unsupported layouts on the
+`silence_unsupported_bus_arrangements` quirk (cached in `quirks_` at init):
+
+- Bus-COUNT mismatch still hard-rejects (structural, not an arrangement issue).
+- An arrangement the processor can't natively support (non-mono/stereo, or
+  `is_bus_layout_supported()` says no): with the quirk enforced it is
+  **accepted** (`setArrangement` to the host request, `silence_unsupported_active_=true`);
+  with `PULP_HOST_QUIRKS=off` the original `kResultFalse` reject is preserved.
+
+**Key invariant:** `setupProcessing` always `prepare()`s the processor with
+*descriptor-default* channel counts (cached as `native_in_`/`native_out_`),
+NOT the negotiated arrangement. So when `silence_unsupported_active_`,
+`process()` hands the processor **clamped** views (`min(host, native)`) and
+**zero-fills all of the host's main-bus output channels first** — the
+processor never reads/writes past what `prepare()` allocated, and the host's
+extra channels emit silence instead of uninitialised memory. Empirical proof:
+`pulp-test-vst3-plugin-state` `[bus-arrangement]` drives a 5.1 output through
+a stereo processor and asserts channels 2–5 are silent + the processor saw 2.

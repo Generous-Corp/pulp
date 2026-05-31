@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/host_quirks.hpp>
 #include <public.sdk/source/vst/hosting/eventlist.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 
@@ -806,4 +807,121 @@ TEST_CASE("VST3 adapter without a Bypass parameter never short-circuits",
     // No "Bypass" parameter declared by the plugin — the adapter should
     // report the no-op sentinel ID 0 so process() never short-circuits.
     REQUIRE(processor.bypass_parameter_id() == 0u);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// host-quirks P3c — silence_unsupported_bus_arrangements, end-to-end.
+//
+// Empirical proof the VST3 adapter RESPECTS the quirk: with it enforced
+// (default), setBusArrangements accepts an arrangement the processor does
+// NOT natively support (6-ch 5.1) instead of failing, the processor still
+// runs at its prepared (stereo) channel count, and the host's extra output
+// channels are silenced. With PULP_HOST_QUIRKS=off the original
+// reject-the-proposal behavior is preserved exactly.
+// ─────────────────────────────────────────────────────────────────────
+
+TEST_CASE("VST3 accepts an unsupported arrangement and silences extras when the quirk is enforced",
+          "[vst3][host-quirks][p3][bus-arrangement]") {
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // all tiers → quirk on
+
+    TestVst3Config config;  // stereo in / stereo out
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    // Host requests a 5.1 (6-channel) output — not mono/stereo, so the
+    // processor cannot natively support it. With the quirk enforced the
+    // adapter accepts rather than returning kResultFalse.
+    Steinberg::Vst::SpeakerArrangement inputs[1]  = {SpeakerArr::kStereo};
+    Steinberg::Vst::SpeakerArrangement outputs[1] = {SpeakerArr::k51};
+    REQUIRE(processor.setBusArrangements(inputs, 1, outputs, 1) == Steinberg::kResultTrue);
+
+    // Drive a process block with a 6-channel output buffer; pre-fill with a
+    // sentinel so we can tell "silenced" (0) from "left untouched" (9).
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{{0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f}};
+    std::array<float, kFrames> in_r{{-0.1f, -0.2f, -0.3f, -0.4f, -0.5f, -0.6f, -0.7f, -0.8f}};
+    std::array<std::array<float, kFrames>, 6> outs{};
+    for (auto& o : outs) o.fill(9.0f);
+
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[6];
+    for (int ch = 0; ch < 6; ++ch) main_outputs[ch] = outs[ch].data();
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 6;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::ParameterChanges input_params;
+    Steinberg::Vst::ParameterChanges output_params;
+    Steinberg::Vst::EventList input_events(4);
+    Steinberg::Vst::EventList output_events(4);
+    Steinberg::Vst::ProcessContext process_context{};
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+    data.outputParameterChanges = &output_params;
+    data.inputEvents = &input_events;
+    data.outputEvents = &output_events;
+    data.processContext = &process_context;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    // The processor saw only its prepared (stereo) channel count — not 6.
+    REQUIRE(test_processor->last_output_channels == 2);
+
+    // Channels 0..1: the processor copied the input through.
+    REQUIRE_THAT(outs[0][0], WithinAbs(0.1, 1e-6));
+    REQUIRE_THAT(outs[1][0], WithinAbs(-0.1, 1e-6));
+    // Channels 2..5: silenced (0), NOT the 9.0 sentinel and NOT garbage.
+    for (int ch = 2; ch < 6; ++ch) {
+        for (int s = 0; s < kFrames; ++s) {
+            REQUIRE_THAT(outs[ch][s], WithinAbs(0.0, 1e-9));
+        }
+    }
+
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("VST3 rejects an unsupported arrangement when silence accommodation is off",
+          "[vst3][host-quirks][p3][bus-arrangement]") {
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+
+    TestVst3Config config;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    Steinberg::Vst::SpeakerArrangement inputs[1]  = {SpeakerArr::kStereo};
+    Steinberg::Vst::SpeakerArrangement outputs[1] = {SpeakerArr::k51};
+    // Quirk off → original behavior: reject the unsupported proposal.
+    REQUIRE(processor.setBusArrangements(inputs, 1, outputs, 1) == Steinberg::kResultFalse);
+
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }

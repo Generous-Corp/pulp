@@ -125,13 +125,22 @@ its `QuirkPolicySource` (compile default / env / API) for diagnostics.
 ### Adapter consumption (enforcement status)
 
 The format adapters cache `resolved_quirks(detect_host_info()...)` once at
-init and gate accommodations on the flags. As of P3a, the first wired flag
-is **`clamp_latency_to_nonneg`** — VST3 / CLAP / AU v2 / AU v3 route latency
-reporting through `reported_latency_samples()`, so a negative
-`latency_samples()` clamps to 0 by default and reports raw under
-`PULP_HOST_QUIRKS=off`. Remaining flags are wired incrementally, one PR per
-quirk, each with its own validation — a flag is only meaningfully
-`Validated` once an adapter consumes it under test.
+init and gate accommodations on the flags. Flags wired so far:
+
+- **`clamp_latency_to_nonneg`** (P3a) — VST3 / CLAP / AU v2 / AU v3 route
+  latency reporting through `reported_latency_samples()`; a negative
+  `latency_samples()` clamps to 0 by default and reports raw under
+  `PULP_HOST_QUIRKS=off`.
+- **`silence_unsupported_bus_arrangements`** (P3c) — VST3 `setBusArrangements`
+  accepts an arrangement the processor can't natively support (instead of
+  `kResultFalse`) and `process()` clamps the processor to its prepared
+  channel count + silences the host's extra channels. `PULP_HOST_QUIRKS=off`
+  preserves the original reject behavior. (VST3-scoped — the AU/CLAP adapters
+  are declarative and don't reject arrangements.)
+
+Remaining flags are wired incrementally, one PR per quirk, each with its own
+validation — a flag is only meaningfully `Validated` once an adapter consumes
+it under test.
 
 ### Inspecting the live policy: `pulp doctor`
 
