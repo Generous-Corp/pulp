@@ -1096,9 +1096,13 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    > exactly the path that produced the accurate ELYSIUM sprite-strip /
    > native-silver-knob comparison renders in #3138.
 
-3. **Compare** reference vs render:
+3. **Compare** reference vs render. For designs WITHOUT image assets (pure native widgets/text), the importer's built-in `--validate --reference` diff is fine:
    ```bash
    pulp import-design --from X --file input --validate --reference source.png --diff diff.png
+   ```
+   But for designs WITH image `asset_ref`s, do NOT diff through `--validate` — its render placeholders images (see the ⚠️ above), so the diff would flag every image as a mismatch. Instead diff the **`pulp-screenshot`** render (step 2) against the reference directly with `fidelity_diff.py` / `figma_import_diff.py`:
+   ```bash
+   python3 tools/import-design/fidelity_diff.py --render render.png --scene scene.pulp.json --frame-reference source.png
    ```
 
 4. **Review the diff image** — red highlights show differences

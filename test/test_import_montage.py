@@ -55,5 +55,20 @@ class MontageTest(unittest.TestCase):
             self.assertGreater(w, 200 * 2)  # two columns side by side
 
 
+
+
+class LabelColonTest(unittest.TestCase):
+    def test_label_with_colon_survives(self):
+        # Codex #3237: a label containing a colon must not be truncated.
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "ref.png"); Image.new("RGB", (10, 10)).save(p)
+            label, path = montage._parse_panel(f"{p}:1. Figma: source")
+            self.assertEqual(label, "1. Figma: source")
+            self.assertEqual(path, p)
+            # bare path (no label) → stem label
+            self.assertEqual(montage._parse_panel(p), ("ref", p))
+
+
 if __name__ == "__main__":
     unittest.main()
