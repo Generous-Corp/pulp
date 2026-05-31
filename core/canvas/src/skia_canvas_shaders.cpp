@@ -371,6 +371,20 @@ bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
         return false;
     }
 
+    // iOS-D.3c (#3217) DIAG — log Skia read pointer every 60 to
+    // correlate with bridge write-target log.
+    {
+        static std::atomic<int> rt_count{0};
+        int rt = rt_count.fetch_add(1) + 1;
+        if (rt % 60 == 0) {
+            pulp::runtime::log_info(
+                "PULP_GPU_BRIDGE read-target n={} tex=0x{:x} w={} h={} fmt={}",
+                rt,
+                reinterpret_cast<uintptr_t>(texture->Get()),
+                width, height, format);
+        }
+    }
+
     auto backend_tex = skgpu::graphite::BackendTextures::MakeDawn(texture->Get());
     if (!backend_tex.isValid()) {
         early_invalid_backend.fetch_add(1);

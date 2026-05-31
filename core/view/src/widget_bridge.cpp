@@ -9652,6 +9652,22 @@ void WidgetBridge::register_api() {
         auto pipeline = device_ptr->CreateRenderPipeline(&pipeline_desc);
         if (!pipeline) return choc::value::createBool(false);
 
+        // iOS-D.3c (#3217) DIAG — log canvas_id + texture pointer for
+        // every 60 calls so we can correlate with SkiaCanvas read.
+        {
+            static std::atomic<int> wt_count{0};
+            int wt = wt_count.fetch_add(1) + 1;
+            if (wt % 60 == 0) {
+                WGPUTexture raw = target_canvas_state != nullptr
+                    ? target_canvas_state->texture.Get()
+                    : (target_texture_state != nullptr ? target_texture_state->texture.Get() : nullptr);
+                pulp::runtime::log_info(
+                    "PULP_GPU_BRIDGE write-target n={} canvas='{}' texId='{}' tex=0x{:x}",
+                    wt, canvas_id, target_texture_id,
+                    reinterpret_cast<uintptr_t>(raw));
+            }
+        }
+
         auto texture_view = target_canvas_state != nullptr
             ? target_canvas_state->texture.CreateView()
             : target_texture_state->texture.CreateView();

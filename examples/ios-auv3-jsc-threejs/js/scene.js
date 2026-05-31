@@ -202,7 +202,7 @@
     // WebGPU full-screen triangle. If a bright red triangle appears,
     // our shim handles raw WebGPU correctly and Three.js is the issue.
     // If still blank, the bug is deeper in the bridge/Dawn pipeline.
-    var __PULP_RAW_WEBGPU_TEST = true;
+    var __PULP_RAW_WEBGPU_TEST = false;  // off — use Three.js path
     if (__PULP_RAW_WEBGPU_TEST) {
         console.info("PULP_RAW_WEBGPU: entering raw test path");
         function rawTriangleStart() {
@@ -217,20 +217,37 @@
                     format: "bgra8unorm",
                     alphaMode: "opaque"
                 });
+                // iOS-D.3c (#3217): use explicit vertex buffer (no @builtin(vertex_index))
+                // because our buffered draw path skips payload creation when
+                // currentVertexBuffers is empty (web-compat-gpu-buffered.js:259).
                 var shaderCode =
-                    "@vertex fn vmain(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {" +
-                    "  var p = array(vec2f(-0.8, -0.8), vec2f(0.8, -0.8), vec2f(0.0, 0.8));" +
-                    "  return vec4f(p[i], 0.0, 1.0);" +
+                    "@vertex fn vmain(@location(0) pos : vec2f) -> @builtin(position) vec4f {" +
+                    "  return vec4f(pos, 0.0, 1.0);" +
                     "}" +
                     "@fragment fn fmain() -> @location(0) vec4f {" +
                     "  return vec4f(1.0, 0.0, 0.0, 1.0);" +
                     "}";
                 console.info("PULP_RAW_WEBGPU: creating shader module");
                 var mod = device.createShaderModule({ code: shaderCode });
+                console.info("PULP_RAW_WEBGPU: creating vertex buffer");
+                var verts = new Float32Array([-0.8, -0.8, 0.8, -0.8, 0.0, 0.8]);
+                var vbuf = device.createBuffer({
+                    size: verts.byteLength,
+                    usage: 0x20 /* VERTEX */ | 0x4 /* COPY_DST */,
+                    mappedAtCreation: false
+                });
+                device.queue.writeBuffer(vbuf, 0, verts);
                 console.info("PULP_RAW_WEBGPU: creating render pipeline");
                 var pipeline = device.createRenderPipeline({
                     layout: "auto",
-                    vertex: { module: mod, entryPoint: "vmain" },
+                    vertex: {
+                        module: mod,
+                        entryPoint: "vmain",
+                        buffers: [{
+                            arrayStride: 8,
+                            attributes: [{ shaderLocation: 0, format: "float32x2", offset: 0 }]
+                        }]
+                    },
                     fragment: {
                         module: mod,
                         entryPoint: "fmain",
@@ -245,6 +262,15 @@
                     try {
                         var tex = context.getCurrentTexture();
                         var view = tex.createView();
+                        if (localFrame === 0) {
+                            console.info("PULP_RAW_WEBGPU: pipeline.nativeBridge=" + pipeline._nativeBridge
+                                + " tex.nativeBridge=" + tex._nativeBridge
+                                + " view.nativeBridge=" + view._nativeBridge
+                                + " tex.canvasId=" + tex._nativeCanvasId
+                                + " view.canvasId=" + view._nativeCanvasId
+                                + " view.textureId=" + view._nativeTextureId
+                                + " context.nativeBridge=" + context._nativeBridge);
+                        }
                         var encoder = device.createCommandEncoder();
                         var pass = encoder.beginRenderPass({
                             colorAttachments: [{
@@ -255,6 +281,7 @@
                             }]
                         });
                         pass.setPipeline(pipeline);
+                        pass.setVertexBuffer(0, vbuf);
                         pass.draw(3, 1, 0, 0);
                         pass.end();
                         device.queue.submit([encoder.finish()]);
