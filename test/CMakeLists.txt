@@ -166,6 +166,13 @@ if(Python3_Interpreter_FOUND)
         SKIP_RETURN_CODE 77
         LABELS "import;fidelity"
         TIMEOUT 60)
+
+    # Headless Figma REST exporter — font-capture + content-hash unit test.
+    add_test(NAME figma-rest-export
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_figma_rest_export.py)
+    set_tests_properties(figma-rest-export PROPERTIES
+        LABELS "import" TIMEOUT 30)
 endif()
 
 # Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh
