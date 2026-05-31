@@ -33,15 +33,24 @@ The CMake cache variable `PULP_HOST_QUIRKS_DEFAULT_POLICY` selects what
 `pulp::format::detect_quirks()` returns by default:
 
 ```bash
-# Apply every detected quirk, regardless of tier (current Pulp default).
-cmake -S . -B build -DPULP_HOST_QUIRKS_DEFAULT_POLICY=all
-
-# Only Validated accommodations fire — Speculative + LessonOnly stay default.
+# Only Validated accommodations fire — Speculative + LessonOnly stay at
+# their defaults. This is the SHIPPED Pulp default: enforce what's been
+# bench-validated, evidence-gate the rest.
 cmake -S . -B build -DPULP_HOST_QUIRKS_DEFAULT_POLICY=validated_only
+
+# Apply every detected quirk regardless of tier (pre-enforcement behavior).
+cmake -S . -B build -DPULP_HOST_QUIRKS_DEFAULT_POLICY=all
 
 # Diagnostic build: no accommodations at all (including cheap defenses).
 cmake -S . -B build -DPULP_HOST_QUIRKS_DEFAULT_POLICY=off
 ```
+
+The flip to `validated_only` is behavior-neutral today: every quirk an
+adapter currently consumes (`clamp_latency_to_nonneg`,
+`silence_unsupported_bus_arrangements`, `synthesize_bypass_parameter`) is
+`Validated`, so it survives the filter. It evidence-gates *future*
+host-specific quirks — a `Speculative` row won't fire by default until it
+earns `Validated` status.
 
 The policy is compiled into the `pulp::format` library. Plugins built
 against that library inherit whichever policy was chosen at configure
@@ -210,9 +219,12 @@ planning submodule):
 
 | Audience                                                                 | Suggested policy        |
 |--------------------------------------------------------------------------|-------------------------|
-| Plugin authors who trust Pulp's curated catalog (most users).            | `all` (default)         |
-| Plugin authors who want strict in-DAW evidence before applying a fix.    | `validated_only`        |
+| Most users — enforce bench-validated accommodations, evidence-gate the rest. | `validated_only` (default) |
+| Plugin authors who trust Pulp's full curated catalog (incl. Speculative). | `all`                  |
 | Compliance / diagnostic builds investigating whether a host or a Pulp accommodation is misbehaving. | `off` |
 
-The default stays `all` so existing builds keep their current behavior
-after upgrading to a tier-aware Pulp.
+The default is `validated_only`: only quirks that have been bench-validated
+(and the always-on cheap defenses, which are `Validated`) fire by default.
+Because every quirk an adapter currently consumes is `Validated`, flipping
+to this default changed no shipped behavior — it sets the contract that
+future `Speculative` host quirks stay dormant until they earn `Validated`.

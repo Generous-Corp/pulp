@@ -168,9 +168,12 @@ constexpr void reset_if_filtered(int& field, int default_value,
 // call) makes apply_filter() noexcept + cheap.
 constexpr HostQuirks kDefaultHostQuirks{};
 
-// Compile-time policy selection for `detect_quirks()`. The build-time
-// option `PULP_HOST_QUIRKS_DEFAULT_POLICY` toggles `_VALIDATED_ONLY`
-// or `_OFF`; default is "all quirks fire" (matches pre-tier behavior).
+// Compile-time policy selection (the baseline the runtime layer falls
+// through to). The CMake option `PULP_HOST_QUIRKS_DEFAULT_POLICY`
+// (core/format/CMakeLists.txt) defines `_VALIDATED_ONLY` (the shipped
+// default — only bench-validated accommodations fire), `_OFF`, or
+// neither (`all` — every detected quirk fires; the pre-enforcement
+// behavior, kept as an explicit opt-in).
 constexpr QuirkFilter default_policy_filter() noexcept {
 #if defined(PULP_HOST_QUIRKS_DEFAULT_POLICY_OFF)
     return kQuirkFilterOff;

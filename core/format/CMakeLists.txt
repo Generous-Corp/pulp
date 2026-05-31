@@ -62,6 +62,34 @@ else()
     target_compile_definitions(pulp-format PRIVATE PULP_ENABLE_INSPECTOR=0)
 endif()
 
+# Host-quirks default policy (host-quirks enforcement plan).
+#
+# Selects the baseline tier filter detect_quirks() / resolved_quirks() apply
+# when no runtime override (PULP_HOST_QUIRKS env / set_host_quirk_policy API /
+# per-quirk override) is set. Shipped default is `validated_only`: only
+# bench-validated accommodations fire by default; Speculative / LessonOnly
+# rows stay dormant until explicitly opted in. The currently-enforced quirks
+# (clamp_latency_to_nonneg, silence_unsupported_bus_arrangements,
+# synthesize_bypass_parameter — all Validated) survive this filter, so the
+# default flip is behavior-neutral today and evidence-gates future
+# host-specific quirks. Override at configure time:
+#   -DPULP_HOST_QUIRKS_DEFAULT_POLICY=all | validated_only | off
+# The define is PUBLIC so default_policy_filter() in host_quirks.cpp AND the
+# policy-aware unit tests both compile against the same baseline.
+set(PULP_HOST_QUIRKS_DEFAULT_POLICY "validated_only" CACHE STRING
+    "Baseline host-quirks tier filter: all | validated_only | off")
+set_property(CACHE PULP_HOST_QUIRKS_DEFAULT_POLICY PROPERTY STRINGS
+    all validated_only off)
+if(PULP_HOST_QUIRKS_DEFAULT_POLICY STREQUAL "validated_only")
+    target_compile_definitions(pulp-format PUBLIC PULP_HOST_QUIRKS_DEFAULT_POLICY_VALIDATED_ONLY=1)
+elseif(PULP_HOST_QUIRKS_DEFAULT_POLICY STREQUAL "off")
+    target_compile_definitions(pulp-format PUBLIC PULP_HOST_QUIRKS_DEFAULT_POLICY_OFF=1)
+elseif(NOT PULP_HOST_QUIRKS_DEFAULT_POLICY STREQUAL "all")
+    message(FATAL_ERROR
+        "PULP_HOST_QUIRKS_DEFAULT_POLICY must be all|validated_only|off, got "
+        "'${PULP_HOST_QUIRKS_DEFAULT_POLICY}'")
+endif()
+
 # VST3 adapter (when SDK is available)
 if(PULP_HAS_VST3)
     target_sources(pulp-format PRIVATE
