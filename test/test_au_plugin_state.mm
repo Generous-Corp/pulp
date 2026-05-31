@@ -7,8 +7,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>
+#include <pulp/format/host_quirks.hpp>
 #include <pulp/format/host_type.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
 
 #import "../core/format/src/au_audio_unit.h"
@@ -876,6 +878,10 @@ TEST_CASE("AU v3 render block short-circuits to pass-through when bypassed",
 
 TEST_CASE("AU v3 without a Bypass parameter still honours setShouldBypassEffect",
           "[au][auv3][bypass][item-3.1]") {
+    // The atomic-fallback path this test pins only exists when no Bypass
+    // param is present — since host-quirks P3b one is synthesized by
+    // default, so disable synthesis here.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
     @autoreleasepool {
         AudioComponentDescription desc{};
         desc.componentType = kAudioUnitType_Effect;
@@ -904,6 +910,40 @@ TEST_CASE("AU v3 without a Bypass parameter still honours setShouldBypassEffect"
 
         [unit release];
     }
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("AU v3 synthesizes a Bypass param when the plugin declares none (P3b)",
+          "[au][auv3][host-quirks][p3][bypass]") {
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);  // no Bypass param
+
+        NSError* err = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&err];
+        REQUIRE(unit != nil);
+        REQUIRE(err == nil);
+
+        // The adapter synthesized a Bypass param (reserved ID) and the
+        // detection pass adopted it onto the AU bypass surface; it now
+        // appears in the parameter tree and drives shouldBypassEffect.
+        REQUIRE([unit pulpBypassParameterId] ==
+                static_cast<uint32_t>(pulp::format::kSynthesizedBypassParamId));
+        AUParameterTree* tree = unit.parameterTree;
+        REQUIRE(tree != nil);
+        REQUIRE(tree.allParameters.count == 2u);  // processor's Gain + synthesized Bypass
+
+        [unit release];
+    }
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -917,6 +957,10 @@ TEST_CASE("AU v3 without a Bypass parameter still honours setShouldBypassEffect"
 
 TEST_CASE("AU v3 per-method audit invariants",
           "[au][auv3][audit][item-3.1]") {
+    // Pin the test processor's own 1-parameter tree — disable bypass
+    // synthesis (host-quirks P3b) so the count reflects only the plugin's
+    // declared params, not the synthesized Bypass.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
     @autoreleasepool {
         AudioComponentDescription desc{};
         desc.componentType = kAudioUnitType_Effect;
@@ -970,6 +1014,7 @@ TEST_CASE("AU v3 per-method audit invariants",
 
         [unit release];
     }
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
 // Regression guard for the AUv3-in-Logic sizing fix.

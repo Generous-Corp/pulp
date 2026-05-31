@@ -137,6 +137,13 @@ init and gate accommodations on the flags. Flags wired so far:
   channel count + silences the host's extra channels. `PULP_HOST_QUIRKS=off`
   preserves the original reject behavior. (VST3-scoped — the AU/CLAP adapters
   are declarative and don't reject arrangements.)
+- **`synthesize_bypass_parameter`** (P3b) — when the plugin declares no
+  Bypass param, VST3 + AU v3 inject an automatable one (`maybe_synthesize_bypass`
+  in `quirk_apply.hpp`, reserved ID `kSynthesizedBypassParamId`); the
+  adapters' existing bypass detection adopts it and `process()` honors the
+  pass-through. `PULP_HOST_QUIRKS=off` synthesizes nothing. (CLAP + AU v2
+  have no bypass process path yet — a synthesized param there would
+  appear-but-do-nothing, so they're a separate follow-up.)
 
 Remaining flags are wired incrementally, one PR per quirk, each with its own
 validation — a flag is only meaningfully `Validated` once an adapter consumes

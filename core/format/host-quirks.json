@@ -20,8 +20,8 @@
       "symptom_area": "bypass",
       "source_type": "repro",
       "evidence": "macOS plan item 5.12 (DAW-quirks rows 23-26); founding cheap-defense, on the test bench since item 5.1",
-      "last_verified": "2026-05-25",
-      "note": "Synthesize a bypass parameter when the plugin doesn't declare one."
+      "last_verified": "2026-05-30",
+      "note": "Synthesize a bypass parameter when the plugin doesn't declare one. (VST3 + AU v3 adapters synthesize + honor this since host-quirks P3b; CLAP/AU v2 pending)."
     },
     {
       "flag": "clamp_latency_to_nonneg",

@@ -1119,3 +1119,17 @@ lookup of namespace free functions fails to compile. Qualify them:
 cached `HostQuirks host_quirks` resolve fine — the struct is in-namespace.)
 The core lib doesn't compile this `.mm`, so only the AU target/test catches
 such errors — build `pulp-test-au-plugin-state`.
+
+## synthesize_bypass_parameter (host-quirks P3b, 2026-05-30)
+
+When the plugin declares no Bypass parameter and the quirk is enforced,
+the adapter calls `pulp::format::maybe_synthesize_bypass(store, quirks)`
+(in `quirk_apply.hpp`) right after `define_parameters` — injecting an
+automatable boolean `"Bypass"` param with the reserved ID
+`kSynthesizedBypassParamId` (0x70427970). The adapter's EXISTING bypass
+detection (name == "Bypass", boolean range) then adopts it, so the
+pass-through short-circuit honors it with no further wiring.
+`PULP_HOST_QUIRKS=off` synthesizes nothing. Existing "no-bypass" tests
+must set `kQuirkFilterOff` to keep that premise. (CLAP + AU v2 are NOT
+wired — they have no bypass process path; injecting a param there would
+appear-but-do-nothing, so they're a separate follow-up.)

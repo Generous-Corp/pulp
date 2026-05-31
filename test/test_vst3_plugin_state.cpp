@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <public.sdk/source/vst/hosting/eventlist.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 
@@ -699,8 +700,10 @@ TEST_CASE("VST3 getState/setState fail cleanly without a live processor",
 //   * When the host sets that parameter to >= 0.5 (denormalized) before
 //     process(), the adapter short-circuits to in→out copy and does NOT
 //     call Processor::process().
-//   * Plugins without a Bypass parameter never see the short-circuit
-//     (the adapter doesn't synthesize one — that's a per-plugin opt-in).
+//   * Plugins without a Bypass parameter see the short-circuit only when
+//     the synthesize_bypass_parameter host-quirk is enforced (P3b), which
+//     injects an automatable Bypass param the detection pass then adopts.
+//     With PULP_HOST_QUIRKS=off no param is synthesized.
 
 TEST_CASE("VST3 processBlockBypassed copies input to output without calling Processor::process",
           "[vst3][bypass][item-3.2]") {
@@ -797,6 +800,11 @@ TEST_CASE("VST3 processBlockBypassed copies input to output without calling Proc
 
 TEST_CASE("VST3 adapter without a Bypass parameter never short-circuits",
           "[vst3][bypass][item-3.2]") {
+    // Since host-quirks P3b the adapter SYNTHESIZES a Bypass param by
+    // default, so the "no bypass surface at all" scenario this test pins
+    // only exists when synthesize_bypass_parameter is disabled.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+
     TestVst3Config config; // add_bypass_param defaults to false
     reset_test_processor(config);
 
@@ -804,9 +812,109 @@ TEST_CASE("VST3 adapter without a Bypass parameter never short-circuits",
     pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
     REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
 
-    // No "Bypass" parameter declared by the plugin — the adapter should
-    // report the no-op sentinel ID 0 so process() never short-circuits.
+    // No "Bypass" parameter declared by the plugin AND none synthesized —
+    // the adapter reports the no-op sentinel ID 0 so process() never
+    // short-circuits.
     REQUIRE(processor.bypass_parameter_id() == 0u);
+
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// host-quirks P3b — synthesize_bypass_parameter, end-to-end (VST3).
+//
+// A plugin that declares NO Bypass parameter: with the quirk enforced the
+// adapter synthesizes an automatable "Bypass" param (reserved ID), the
+// existing detection tags it kIsBypass, and process() honors it with the
+// pass-through short-circuit. With PULP_HOST_QUIRKS=off nothing is
+// synthesized (original behavior).
+// ─────────────────────────────────────────────────────────────────────
+
+TEST_CASE("VST3 synthesizes an automatable Bypass param when the plugin declares none",
+          "[vst3][host-quirks][p3][bypass]") {
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
+
+    TestVst3Config config;
+    config.add_bypass_param = false;  // plugin declares ONLY Gain
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    // A synthesized Bypass now exists, carrying the reserved ID + kIsBypass.
+    REQUIRE(processor.getParameterCount() == 2);  // Gain + synthesized Bypass
+    REQUIRE(processor.bypass_parameter_id() ==
+            pulp::format::kSynthesizedBypassParamId);
+
+    Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 4;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 4;
+    std::array<float, kFrames> in_l{{0.1f, 0.2f, 0.3f, 0.4f}};
+    std::array<float, kFrames> in_r{{-0.1f, -0.2f, -0.3f, -0.4f}};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    out_l.fill(99.0f);
+    out_r.fill(99.0f);
+    float* ins[2]  = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2; ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2; ab_out[0].channelBuffers32 = outs;
+
+    // Engage the SYNTHESIZED bypass via its reserved ID → pass-through.
+    Steinberg::Vst::ParameterChanges params(1);
+    Steinberg::int32 q_index = 0;
+    auto* queue = params.addParameterData(
+        static_cast<Steinberg::Vst::ParamID>(pulp::format::kSynthesizedBypassParamId),
+        q_index);
+    REQUIRE(queue != nullptr);
+    Steinberg::int32 pt = 0;
+    REQUIRE(queue->addPoint(0, 1.0, pt) == Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1; data.numOutputs = 1;
+    data.inputs = ab_in; data.outputs = ab_out;
+    data.inputParameterChanges = &params;
+
+    const int before = test_processor->process_count;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    // Synthesized bypass engaged → input copied through, Processor skipped.
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+        REQUIRE_THAT(out_r[i], WithinAbs(in_r[i], 1e-6f));
+    }
+    REQUIRE(test_processor->process_count == before);
+
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("VST3 does NOT synthesize a Bypass param when the quirk is off",
+          "[vst3][host-quirks][p3][bypass]") {
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+
+    TestVst3Config config;
+    config.add_bypass_param = false;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    // No synthesis: only the plugin's own Gain param, no bypass surface.
+    REQUIRE(processor.getParameterCount() == 1);
+    REQUIRE(processor.bypass_parameter_id() == 0);
+
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
 // ─────────────────────────────────────────────────────────────────────
