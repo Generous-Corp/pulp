@@ -1,0 +1,50 @@
+name: Host-quirks staleness check
+
+# host-quirks enforcement plan, P4.
+#
+# Scheduled, PREVIEW-ONLY reminder that surfaces host-quirk catalog entries
+# due for re-review:
+#   * Speculative / LessonOnly rows not re-verified in N months (default 6)
+#   * Validated rows carrying affected_versions (re-check vs current major)
+#
+# Deliberately advisory: it prints the report to the run log and exits 0.
+# It does NOT open issues (no false-positive spam — acceptance criterion).
+# Promoting this to auto-open tracking issues is a future opt-in once the
+# cadence + signal-to-noise are trusted.
+
+on:
+  schedule:
+    - cron: '0 9 1 * *'  # 09:00 UTC on the 1st of each month
+  workflow_dispatch:
+    inputs:
+      months:
+        description: 'Staleness window in months'
+        required: false
+        default: '6'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-quirks-staleness
+  cancel-in-progress: false
+
+jobs:
+  staleness:
+    runs-on: ubuntu-latest
+    name: Report stale host-quirk catalog entries
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run staleness unit tests
+        run: python3 tools/scripts/test_host_quirks_staleness.py
+
+      - name: Catalog parity (struct/meta/JSON must agree)
+        run: python3 tools/scripts/test_host_quirks_catalog_parity.py
+
+      - name: Report (preview only — advisory, opens no issues)
+        shell: bash
+        run: |
+          set -euo pipefail
+          months="${{ github.event.inputs.months || '6' }}"
+          python3 tools/scripts/host_quirks_staleness.py --months "${months}"
