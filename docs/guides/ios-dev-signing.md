@@ -26,9 +26,19 @@ These steps run once per Apple Developer account, not once per project.
    <https://developer.apple.com/account/resources/identifiers/list>.
    - Description: `Pulp Dev Wildcard`
    - Bundle ID: `Wildcard`, e.g. `com.<your-handle>.pulpdev.*`
-   - All capabilities OFF. Wildcard App IDs cannot use App Groups,
+   - Most capabilities OFF. Wildcard App IDs cannot use App Groups,
      Push, Sign in with Apple, etc — and **none** of those are needed
      for a local test plug-in. Skip them.
+   - **Enable Inter-App Audio** (one of the few capabilities that IS
+     allowed on a wildcard). This is **required** if you'll build any
+     AUv3 host example: `AVAudioUnitComponentManager` on iOS 11+
+     device returns an empty match list when the host app lacks
+     `inter-app-audio`, so your AUv3 appears invisible. The iOS
+     Simulator does not enforce this, so the gap is silent until
+     you test on real hardware. Apple deprecated IAA in iOS 13 but
+     the entitlement still gates AUv3 host scanning. Enabling it
+     once on the wildcard covers every future Pulp example
+     automatically — no per-app App IDs required.
 
 2. **Generate an App Store Connect API key** at
    <https://appstoreconnect.apple.com/access/integrations/api>.
