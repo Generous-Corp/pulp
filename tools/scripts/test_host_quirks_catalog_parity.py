@@ -33,6 +33,7 @@ import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 HEADER = REPO_ROOT / "core" / "format" / "include" / "pulp" / "format" / "host_quirks.hpp"
+SOURCE = REPO_ROOT / "core" / "format" / "src" / "host_quirks.cpp"
 CATALOG = REPO_ROOT / "core" / "format" / "host-quirks.json"
 
 VALID_TIERS = {"Validated", "Speculative", "LessonOnly"}
@@ -89,6 +90,29 @@ def parse_struct_fields() -> set[str]:
         )
     body = re.sub(r"//[^\n]*", "", match.group(1))  # strip line comments
     return set(re.findall(r"(?:bool|int)\s+(\w+)\s*=", body))
+
+
+def parse_macro_fields() -> set[str]:
+    """Return the field names in the ``PULP_HOST_QUIRK_FIELDS`` X-macro.
+
+    This is the THIRD list (host_quirks.cpp) that drives apply_filter, the
+    per-quirk overrides, and `pulp doctor` enumeration. Codex review on
+    #3240: comparing only struct↔meta↔JSON misses the case where a field is
+    added everywhere EXCEPT this macro — then apply_filter / overrides /
+    enumerate silently skip it while every other parity check passes and the
+    self-counting `static_assert(count_quirk_fields() == N)` stays valid
+    (the macro counts its own entries). Parsing the macro here closes that
+    last drift axis.
+    """
+    text = SOURCE.read_text(encoding="utf-8")
+    match = re.search(r"#define\s+PULP_HOST_QUIRK_FIELDS\(X\)(.*?)\n\n", text, re.DOTALL)
+    if not match:
+        raise AssertionError(
+            "Could not locate the `#define PULP_HOST_QUIRK_FIELDS(X)` macro in "
+            f"{SOURCE} — did it get renamed?"
+        )
+    body = re.sub(r"//[^\n]*", "", match.group(1))
+    return set(re.findall(r"X\((\w+)\)", body))
 
 
 def load_catalog() -> dict:
@@ -161,6 +185,37 @@ class StructMetaParity(unittest.TestCase):
             only_in_meta,
             "Fields in HostQuirksMeta but NOT in `struct HostQuirks` "
             f"(stale meta entry): {sorted(only_in_meta)}",
+        )
+
+
+class MacroFieldParity(unittest.TestCase):
+    """The PULP_HOST_QUIRK_FIELDS X-macro lists EXACTLY the struct fields.
+
+    Closes the last drift axis (Codex review on #3240): a field added to the
+    struct + meta + JSON but omitted from the X-macro would otherwise be
+    silently inert in apply_filter / overrides / enumerate, with every other
+    parity check + the self-counting static_assert still green.
+    """
+
+    def test_macro_fields_match_struct(self) -> None:
+        macro = parse_macro_fields()
+        struct_fields = parse_struct_fields()
+        self.assertTrue(
+            macro, "parsed zero fields from PULP_HOST_QUIRK_FIELDS — parser broke"
+        )
+        only_in_struct = struct_fields - macro
+        only_in_macro = macro - struct_fields
+        self.assertFalse(
+            only_in_struct,
+            "Fields in `struct HostQuirks` but MISSING from the "
+            "PULP_HOST_QUIRK_FIELDS X-macro (host_quirks.cpp) — they would be "
+            "silently skipped by apply_filter / overrides / pulp doctor: "
+            f"{sorted(only_in_struct)}",
+        )
+        self.assertFalse(
+            only_in_macro,
+            "Fields in the PULP_HOST_QUIRK_FIELDS X-macro but NOT in "
+            f"`struct HostQuirks` (stale macro entry): {sorted(only_in_macro)}",
         )
 
 

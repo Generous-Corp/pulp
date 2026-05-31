@@ -363,6 +363,16 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
                 std::memset(dst, 0, sizeof(float) * inFramesToProcess);
             }
         }
+        // Drain + DISCARD any MIDI queued by HandleMIDIEvent/HandleSysEx
+        // while bypassed. Without this the queue grows for the whole bypass
+        // window and floods the processor with stale notes/CCs the instant
+        // bypass turns off (Codex review on #3246). A bypassed plugin is a
+        // wire — inbound MIDI is dropped with the block, matching the VST3
+        // path (which leaves MIDI buffers empty on the bypass short-circuit).
+        {
+            std::lock_guard lock(midi_mutex_);
+            pending_midi_ = midi::MidiBuffer{};
+        }
         return noErr;
     }
 

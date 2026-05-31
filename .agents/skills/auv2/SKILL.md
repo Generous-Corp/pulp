@@ -321,3 +321,16 @@ processBlockBypassed path. `PULP_HOST_QUIRKS=off` synthesizes nothing
 (bypass_param_id stays 0). The pass-through MUST null-check each destination
 channel pointer (a bus can report channels with null buffers — see #178 /
 the #3240 sweep).
+
+## Codex review fixes (#3226, #3246)
+
+- **Instrument latency (#3226):** `PulpAUInstrument::GetLatency()` now routes
+  the processor's latency through `reported_latency_samples()` (clamped,
+  policy-gated) instead of hardcoding 0.0 — instruments with lookahead get
+  host PDC. MusicDeviceBase has no `GetSampleRate()`; read it from
+  `GetOutput(0)->GetStreamFormat().mSampleRate` (guarded for pre-config).
+- **Bypass MIDI drain (#3246):** the `ProcessBufferLists` bypass
+  short-circuit now drains + DISCARDS `pending_midi_` under `midi_mutex_`
+  before returning. Without it, MIDI received while bypassed accumulated and
+  flooded the processor with stale notes/CCs the instant bypass turned off.
+  A bypassed plugin is a wire — inbound MIDI is dropped with the block.
