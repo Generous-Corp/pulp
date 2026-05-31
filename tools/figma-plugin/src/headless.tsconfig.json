@@ -13,5 +13,5 @@
     "resolveJsonModule": true,
     "rootDir": ".."
   },
-  "include": ["headless.ts", "types.ts", "extract.ts", "extract-model.ts", "serialize.ts", "assets.ts", "tokens.ts", "library-registry.ts", "user-fonts.ts", "../library-manifest.json"]
+  "include": ["headless.ts", "types.ts", "extract.ts", "extract-pure.ts", "extract-model.ts", "serialize.ts", "assets.ts", "tokens.ts", "library-registry.ts", "user-fonts.ts", "../library-manifest.json"]
 }

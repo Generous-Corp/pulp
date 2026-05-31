@@ -24,6 +24,21 @@ import {
   widgetKindByNamePrefix,
   LIBRARY_VERSION,
 } from "./library-registry";
+// P2 — pure, host-neutral helpers split for clarity + maintainability.
+// Behaviour-unchanged from when these lived inline here.
+import {
+  paintToColor,
+  rgbaToCss,
+  gradientToCss,
+  gradientFallbackFlat,
+  mapNodeType,
+  mapPrimaryAxisAlign,
+  mapCounterAxisAlign,
+  mapAxisSize,
+  audioWidgetKindFromName,
+  isPureVectorIllustration,
+  collectFontFamilyAssets,
+} from "./extract-pure";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Public entry point
@@ -130,31 +145,8 @@ export async function extractScene(
 /// Order is stable: families appear in first-encounter order, styles
 /// within a family in first-encounter order. That stability matters for
 /// snapshot tests that compare envelope output.
-function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamilyAsset[] {
-  const seen = new Map<string, FontFamilyAsset>();
-  function visit(n: ExtractedFigmaNode): void {
-    const family = n.style.font_family;
-    if (family) {
-      // Figma's `fontName.style` (already captured by extractTextStyle)
-      // lives on `style.font_style` as either "normal" or "italic" today;
-      // the verbose style string ("Semi Bold", "Bold Italic") is not yet
-      // surfaced. Emit what we have and let the runtime resolve.
-      const styleField = (n.style.font_style as string | undefined) ?? "Regular";
-      const weight = n.style.font_weight;
-      const italic = styleField === "italic" || /italic/i.test(styleField);
-      const key = `${family}|${styleField}|${weight ?? ""}|${italic ? "i" : ""}`;
-      if (!seen.has(key)) {
-        const row: FontFamilyAsset = { family, style: styleField };
-        if (typeof weight === "number") row.weight = weight;
-        if (italic) row.italic = true;
-        seen.set(key, row);
-      }
-    }
-    for (const c of n.children) visit(c);
-  }
-  for (const r of roots) visit(r);
-  return Array.from(seen.values());
-}
+// `collectFontFamilyAssets` moved to ./extract-pure.ts (P2). Behaviour-identical;
+// imported above. Kept the call site in `extractScene` unchanged.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Internal walker
@@ -396,34 +388,7 @@ async function walk(
 // ──────────────────────────────────────────────────────────────────────────
 // Type mapping
 
-function mapNodeType(n: SceneNode): string {
-  switch (n.type) {
-    case "FRAME":
-    case "GROUP":
-    case "SECTION":
-      return "frame";
-    case "COMPONENT":
-    case "COMPONENT_SET":
-      return "frame"; // Phase 3 will promote recognized instances to widget kinds
-    case "INSTANCE":
-      return "frame"; // ditto
-    case "TEXT":
-      return "text";
-    case "RECTANGLE":
-    case "ELLIPSE":
-    case "POLYGON":
-    case "STAR":
-    case "LINE":
-      return "frame";
-    case "VECTOR":
-    case "BOOLEAN_OPERATION":
-      return "vector";
-    case "SLICE":
-      return "frame";
-    default:
-      return "frame";
-  }
-}
+// `mapNodeType` moved to ./extract-pure.ts (P2). Behaviour-identical.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Geometry
@@ -687,76 +652,9 @@ function extractLayout(n: SceneNode, ctx: WalkCtx): ExtractedLayout {
   return l;
 }
 
-function mapPrimaryAxisAlign(v: FrameNode["primaryAxisAlignItems"]): ExtractedLayout["justify"] {
-  switch (v) {
-    case "MIN": return "flex_start";
-    case "MAX": return "flex_end";
-    case "CENTER": return "center";
-    case "SPACE_BETWEEN": return "space_between";
-    default: return "flex_start";
-  }
-}
-
-function mapCounterAxisAlign(v: FrameNode["counterAxisAlignItems"]): ExtractedLayout["align"] {
-  switch (v) {
-    case "MIN": return "flex_start";
-    case "MAX": return "flex_end";
-    case "CENTER": return "center";
-    case "BASELINE": return "flex_start"; // Pulp Yoga doesn't model baseline; closest fallback
-    default: return "stretch";
-  }
-}
-
-function mapAxisSize(v: FrameNode["layoutSizingHorizontal"]): ExtractedLayout["width_mode"] {
-  switch (v) {
-    case "HUG": return "hug";
-    case "FILL": return "fill";
-    case "FIXED":
-    default: return "fixed";
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Color helpers
-
-function paintToColor(p: SolidPaint): string {
-  const c = p.color;
-  const a = p.opacity !== undefined ? p.opacity : 1;
-  const r = Math.round(c.r * 255);
-  const g = Math.round(c.g * 255);
-  const b = Math.round(c.b * 255);
-  if (a >= 1) return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-  return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
-}
-
-function rgbaToCss(c: RGBA): string {
-  const r = Math.round(c.r * 255);
-  const g = Math.round(c.g * 255);
-  const b = Math.round(c.b * 255);
-  if (c.a === undefined || c.a >= 1) {
-    return `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-  }
-  return `rgba(${r}, ${g}, ${b}, ${c.a.toFixed(3)})`;
-}
-
-function hex2(n: number): string {
-  return n.toString(16).padStart(2, "0");
-}
-
-function gradientToCss(p: GradientPaint): string {
-  if (!p.gradientStops || p.gradientStops.length === 0) return "linear-gradient(transparent, transparent)";
-  // Pulp's setBackgroundGradient bridge takes color stop positions implicitly by
-  // index, and its parseColor doesn't strip trailing `Npc%` from a token.
-  // Emit colors only (no inline percentages).
-  const stops = p.gradientStops.map((s) => rgbaToCss(s.color)).join(", ");
-  return `linear-gradient(to bottom, ${stops})`;
-}
-
-function gradientFallbackFlat(p: GradientPaint): string {
-  const first = p.gradientStops?.[0]?.color;
-  if (!first) return "transparent";
-  return rgbaToCss(first);
-}
+// `mapPrimaryAxisAlign`, `mapCounterAxisAlign`, `mapAxisSize`, `paintToColor`,
+// `rgbaToCss`, `hex2`, `gradientToCss`, `gradientFallbackFlat` all moved to
+// ./extract-pure.ts (P2). Behaviour-identical.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Diagnostic helpers
@@ -827,46 +725,8 @@ function extractAudioPropsFromComponentProperties(
 /// Detect audio widget kind from an instance's main-component name. Used
 /// to flatten widget instances to a PNG skin (Track A2). Patterns match
 /// Pulp's IR-side detect_audio_widget() (core/view/src/design_import.cpp).
-function audioWidgetKindFromName(name: string): import("./extract-model").AudioWidgetKind | undefined {
-  const lower = name.toLowerCase();
-  if (lower.includes("knob") || lower.includes("dial")) return "knob";
-  if (lower.includes("fader") || lower.includes("slider")) return "fader";
-  if (lower.includes("meter") || lower.includes("level") || lower.includes("vu")) return "meter";
-  if (lower.includes("xypad") || lower.includes("xy_pad") || lower.includes("xy-pad")) return "xy_pad";
-  if (lower.includes("waveform")) return "waveform";
-  if (lower.includes("spectrum")) return "spectrum";
-  return undefined;
-}
-
-/// Heuristic: returns true if the node and all its recursive descendants are
-/// vector-like primitives (or empty frames wrapping them). Used to detect
-/// "shape illustration" frames that should export as a single SVG.
-function isPureVectorIllustration(node: SceneNode): boolean {
-  if (!("children" in node)) return false;
-  const children = (node as ChildrenMixin).children;
-  if (children.length === 0) return false;
-  for (const child of children) {
-    const t = child.type;
-    if (
-      t === "VECTOR" ||
-      t === "BOOLEAN_OPERATION" ||
-      t === "LINE" ||
-      t === "STAR" ||
-      t === "POLYGON" ||
-      t === "ELLIPSE" ||
-      t === "RECTANGLE"
-    ) {
-      continue;
-    }
-    if (t === "FRAME" || t === "GROUP") {
-      if (!isPureVectorIllustration(child)) return false;
-      continue;
-    }
-    // text, instance, image, anything else → not a pure illustration
-    return false;
-  }
-  return true;
-}
+// `audioWidgetKindFromName` and `isPureVectorIllustration` moved to
+// ./extract-pure.ts (P2). Behaviour-identical.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Instance metadata capture (Phase 2a slice 2)
