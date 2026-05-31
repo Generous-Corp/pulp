@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02970"></a>
+## [0.297.0] - 2026-05-30
+
+- feat(format): synthesize + honor a Bypass parameter in CLAP and AU v2 (P3d) ([#3246](https://github.com/danielraffel/pulp/pull/3246))
+- docs(import-design): codify pulp-screenshot (decodes images) vs --validate (layout-only) ([#3230](https://github.com/danielraffel/pulp/pull/3230))
+- feat(import-design): labeled comparison-montage helper (montage.py) ([#3237](https://github.com/danielraffel/pulp/pull/3237))
+- feat(format): host-quirks staleness check + affected_versions catalog field (P4) ([#3245](https://github.com/danielraffel/pulp/pull/3245))
+- feat(import-design): register bundled fonts from font_family_assets (#43b) ([#3241](https://github.com/danielraffel/pulp/pull/3241))
+
 <a id="v02960"></a>
 ## [0.296.0] - 2026-05-30
 
@@ -3328,6 +3337,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.297.0]: https://github.com/danielraffel/pulp/releases/tag/v0.297.0
 [0.296.0]: https://github.com/danielraffel/pulp/releases/tag/v0.296.0
 [0.295.1]: https://github.com/danielraffel/pulp/releases/tag/v0.295.1
 [0.295.0]: https://github.com/danielraffel/pulp/releases/tag/v0.295.0
