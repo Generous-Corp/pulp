@@ -938,6 +938,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         const bool have_core = png_w > 0.0f && png_h > 0.0f &&
                                core_w > 0.0f && core_h > 0.0f &&
                                box_w > 0.0f && box_h > 0.0f;
+        // A sprite "bleeds" past its box either because the export carried a
+        // render_bounds extent OR because the importer's pixel-vs-box heuristic
+        // stamped asset_bleed=1 (PNG dims ≫ layout box). Both mark art that
+        // must preserve its source aspect; an asset_bleed-only sprite has no
+        // render_bounds, and object-fit is storage-only, so without this it
+        // would size to its box and skew.
+        const bool is_bleed_sprite =
+            node.style.render_bounds.has_value() ||
+            (node.attributes.count("asset_bleed") &&
+             node.attributes.at("asset_bleed") == "1");
 
         if (have_core) {
             // Uniform scale that fits the solid core inside the layout box
@@ -959,14 +969,15 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 if (node.style.top)
                     ss << ind << "setTop('" << id << "', " << (*node.style.top - core_y * s + pad_y) << ");\n";
             }
-        } else if (node.style.render_bounds && png_w > 0.0f && png_h > 0.0f &&
+        } else if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f &&
                    box_w > 0.0f && box_h > 0.0f) {
-            // A bleed sprite (render_bounds present) whose opaque core couldn't
-            // be recovered → contain-fit preserving aspect. Gated on
-            // render_bounds: an ORDINARY image/icon must keep the box the IR
-            // declared (a 100×100 node with a 200×100 bitmap fills its 100×100
-            // slot, as Figma's image-fill intends), so aspect-preservation is
-            // limited to bleed sprites and never reshapes normal images.
+            // A bleed sprite (render_bounds or asset_bleed) whose opaque core
+            // couldn't be recovered → contain-fit preserving aspect. Gated on
+            // the bleed markers: an ORDINARY image/icon must keep the box the
+            // IR declared (a 100×100 node with a 200×100 bitmap fills its
+            // 100×100 slot, as Figma's image-fill intends), so aspect-
+            // preservation is limited to bleed sprites and never reshapes
+            // normal images.
             const float png_aspect = png_w / png_h;
             float ew = box_w, eh = box_h;
             if (box_w / box_h > png_aspect) { eh = box_h; ew = box_h * png_aspect; }

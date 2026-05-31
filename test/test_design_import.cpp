@@ -4181,3 +4181,37 @@ TEST_CASE("ordinary image (no render_bounds) keeps its declared box, not its PNG
     CHECK(*w == Catch::Approx(100.0f));   // declared box preserved
     CHECK(*h == Catch::Approx(100.0f));   // NOT 50 (contain to PNG aspect)
 }
+
+TEST_CASE("asset_bleed sprite (no render_bounds) preserves PNG aspect",
+          "[view][import][codegen][fidelity]") {
+    // The importer's pixel-vs-box heuristic stamps asset_bleed=1 on sprites
+    // that bleed past their box without a render_bounds extent. Those must
+    // still preserve their source aspect (object-fit is storage-only, so the
+    // element box has to carry the aspect) — otherwise they skew.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 300.0f;
+    ir.root.style.height = 300.0f;
+    IRNode img;
+    img.type = "image";
+    img.name = "Bleed";
+    img.style.width = 100.0f;
+    img.style.height = 100.0f;
+    img.attributes["asset_path"] = "bleed.png";
+    img.attributes["png_natural_w"] = "200";   // wide bitmap
+    img.attributes["png_natural_h"] = "100";
+    img.attributes["asset_bleed"] = "1";        // bleed marker, NO render_bounds
+    ir.root.children.push_back(img);
+
+    const auto js = generate_pulp_js(ir);
+    const auto id = image_id_after_comment(js, "Bleed");
+    REQUIRE(id.has_value());
+    const auto w = emitted_flex(js, *id, "width");
+    const auto h = emitted_flex(js, *id, "height");
+    REQUIRE(w.has_value());
+    REQUIRE(h.has_value());
+    // 100x100 box, aspect 2.0 → contain → 100x50 (aspect preserved, not skewed).
+    CHECK(*w == Catch::Approx(100.0f));
+    CHECK(*h == Catch::Approx(50.0f));
+}
