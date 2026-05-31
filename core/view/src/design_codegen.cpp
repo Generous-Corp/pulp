@@ -536,8 +536,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // auto-layout row that already arranges siblings) does the layout.
         // Wrapping in a col with +20 padding for absent labels makes the col
         // taller than the parent's hugged row height, breaking Yoga's flex
-        // layout (Track A regression on the ELYSIUM knob row: the wrapper
-        // was 28x61 / 62x111 / 28x61 inside a 158x91 parent).
+        // layout (Track A regression on a knob row: the wrapper was
+        // 28x61 / 62x111 / 28x61 inside a 158x91 parent).
         bool needs_label_wrapper = !label_text.empty() || !value_text.empty() || has_value_stack;
 
         // Create a wrapper column for the widget + value label (only when
@@ -910,19 +910,72 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setImageSource('" << id << "', '"
                << js_single_quote_escape(it->second) << "');\n";
         }
-        if (node.style.width)
-            ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
-        if (node.style.height)
-            ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
-        // When the importer flagged this asset as bleed (PNG pixel dims
-        // exceed twice the layout dims by 1.5× — typical drop-shadow case),
-        // tell ImageView to render at natural size centered instead of
-        // stretching the PNG into the smaller layout box. Same effect as
-        // the Knob::paint natural-size fix, generalised through CSS
-        // object-fit:none which ImageView already supports.
-        auto bleed_it = node.attributes.find("asset_bleed");
-        if (bleed_it != node.attributes.end() && bleed_it->second == "1") {
-            ss << ind << "setObjectFit('" << id << "', 'none');\n";
+        // Sprite sizing. A captured sprite (knob graphic, etc.) is exported as
+        // a PNG that bleeds well past its layout box: the solid art sits in
+        // part of the PNG with a soft drop-shadow/glow filling the rest. The
+        // renderer always stretches the PNG to its element box (setObjectFit
+        // is storage-only), so to avoid skew + get the size right we size the
+        // ELEMENT to the PNG's real aspect and place it so the art's SOLID
+        // CORE lands on the layout box. The solid-core bbox + true pixel dims
+        // are recovered from the PNG itself at asset resolution
+        // (art_core_*/png_natural_*); nothing is hardcoded and render_bounds —
+        // which is unreliable for scaled component instances (e.g. a knob
+        // whose render_bounds aspect is 1.81 while its PNG is 0.87) — is not
+        // trusted for
+        // sizing. Falls back to legacy box sizing when no core data exists.
+        const float box_w = node.style.width.value_or(0.0f);
+        const float box_h = node.style.height.value_or(0.0f);
+        auto attr_f = [&](const char* k) -> float {
+            auto it = node.attributes.find(k);
+            return it != node.attributes.end() ? std::strtof(it->second.c_str(), nullptr) : 0.0f;
+        };
+        const float png_w = attr_f("png_natural_w");
+        const float png_h = attr_f("png_natural_h");
+        const float core_w = attr_f("art_core_w");
+        const float core_h = attr_f("art_core_h");
+        const float core_x = attr_f("art_core_x");
+        const float core_y = attr_f("art_core_y");
+        const bool have_core = png_w > 0.0f && png_h > 0.0f &&
+                               core_w > 0.0f && core_h > 0.0f &&
+                               box_w > 0.0f && box_h > 0.0f;
+
+        if (have_core) {
+            // Uniform scale that fits the solid core inside the layout box
+            // (preserves aspect — never skews). The whole PNG scales by `s`,
+            // so the shadow extends naturally beyond the box.
+            const float s = std::min(box_w / core_w, box_h / core_h);
+            const float ew = png_w * s;
+            const float eh = png_h * s;
+            ss << ind << "setFlex('" << id << "', 'width', " << ew << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << eh << ");\n";
+            // Place so the core's top-left lands on the layout box, then nudge
+            // so the core is centered within the box on each axis.
+            const float core_box_w = core_w * s, core_box_h = core_h * s;
+            const float pad_x = (box_w - core_box_w) * 0.5f;
+            const float pad_y = (box_h - core_box_h) * 0.5f;
+            if (node.style.position && *node.style.position == "absolute") {
+                if (node.style.left)
+                    ss << ind << "setLeft('" << id << "', " << (*node.style.left - core_x * s + pad_x) << ");\n";
+                if (node.style.top)
+                    ss << ind << "setTop('" << id << "', " << (*node.style.top - core_y * s + pad_y) << ");\n";
+            }
+        } else if (png_w > 0.0f && png_h > 0.0f && box_w > 0.0f && box_h > 0.0f) {
+            // No core data but real dims known → contain-fit preserving aspect.
+            const float png_aspect = png_w / png_h;
+            float ew = box_w, eh = box_h;
+            if (box_w / box_h > png_aspect) { eh = box_h; ew = box_h * png_aspect; }
+            else                            { ew = box_w; eh = box_w / png_aspect; }
+            ss << ind << "setFlex('" << id << "', 'width', " << ew << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << eh << ");\n";
+        } else {
+            // Aspect unknown → legacy box sizing.
+            if (node.style.width)
+                ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+            if (node.style.height)
+                ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+            auto bleed_it = node.attributes.find("asset_bleed");
+            if (bleed_it != node.attributes.end() && bleed_it->second == "1")
+                ss << ind << "setObjectFit('" << id << "', 'none');\n";
         }
         ss << "\n";
         return;
@@ -1000,8 +1053,23 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             // here: forcing its narrow hug-width as a hard wrap box would make
             // it wrap when Pulp's font metrics run a hair wider than Figma's,
             // breaking a title that the design drew on one line.
+            // Multi-line only when the box clears ~TWO line boxes. Keying on
+            // font_h * 1.6 false-fired on single-line text whose Figma box
+            // carries normal line-box padding (e.g. an 8px "Search" in a 17px
+            // box: 17 > 8*1.6=12.8), which flipped it to multi-line and pushed
+            // the vertically-centered baseline down. Use the IR's own
+            // line_height (fallback font_h*1.4) × 1.8 so one line + padding
+            // doesn't trip it. Generalizable: reads Figma's declared metrics.
+            // Multi-line only when the box clears ~1.8 line boxes. Prefer the
+            // IR's declared line_height; when absent assume a tight font*1.2
+            // (a single rendered line), NOT font*1.4 — the looser fallback let
+            // a genuine two-line paragraph (e.g. 26px box at 11px font) read as
+            // one line. A single line of small text in a tall padded box (e.g.
+            // a 17px search field around 8px text, line_height 9.84) still
+            // stays single. Generalizable: reads Figma's declared metrics.
+            const float line_h = node.style.line_height.value_or(font_h * 1.2f);
             bool multiline_box =
-                node.style.height && *node.style.height > font_h * 1.6f;
+                node.style.height && *node.style.height > line_h * 1.8f;
             if (multiline_box) {
                 ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
                 ss << ind << "setMultiLine('" << id << "', true);\n";
@@ -1068,8 +1136,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // mean "spread items out", then drop a single child in. With one
         // child, CSS / Yoga space-between degenerates to flex-start, so
         // the lone item left-aligns instead of centering — visible bug
-        // on every numbered tab button in ELYSIUM ("1" "2" "3" "4" sat
-        // at the left edge of their 29×20 button boxes). When the IR
+        // on a numbered tab button (e.g. "1" "2" "3" "4" sitting at the
+        // left edge of their 29×20 button boxes). When the IR
         // says space_between AND there's exactly one child, the design
         // intent is centering — emit that.
         LayoutAlign effective_justify = node.layout.justify;
@@ -1114,10 +1182,10 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
         // Emit border (Figma frame stroke) as setBorder(id, color, width).
-        // The codegen was previously dropping these — visible effect: the
-        // 4 column frames inside the ELYSIUM gradient panel each have a
-        // 1px rgba(0,0,0,0.1) border that Figma renders as the thin
-        // vertical separators between GRAINS/CURSOR/RANGE/TUNING. The
+        // The codegen was previously dropping these — visible effect:
+        // column frames inside a gradient panel each carry a 1px
+        // rgba(0,0,0,0.1) border that Figma renders as the thin vertical
+        // separators between columns. The
         // bridge's parseColor accepts both hex and rgba(...) so we can
         // pass border_color verbatim from the IR.
         if (node.style.border_color && node.style.border_width &&
