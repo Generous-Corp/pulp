@@ -409,3 +409,42 @@ TEST_CASE("pulp import-design respects explicit sidecar paths over --output anch
 // `tools/import-design/pulp_import_design.cpp` is preserved; tests
 // tracked under #1180 (env-aware ProcessResult) for later restoration
 // once we can deterministically influence the child's getenv() lookups.
+
+// ── pulp #41 follow-up: --from figma auto-routes a figma-plugin envelope ──
+// A Figma-plugin export passed to `--from figma` used to be fed to
+// parse_figma_json (the old Figma format), which read none of its structure
+// and silently emitted an empty root-only import. The CLI now detects the
+// envelope (looks_like_figma_plugin_export) and routes to the plugin parser
+// with a stderr note. This guards against the silent-empty footgun.
+TEST_CASE("pulp import-design --from figma auto-routes a figma-plugin envelope",
+          "[cli][import-design][issue-41][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-import-source-routing");
+    auto scene = tmp / "scene.pulp.json";
+    {
+        std::ofstream f(scene);
+        f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+           "children": [{"type": "text", "name": "Hello", "figma_node_id": "1:2",
+                         "content": "Hello world"}]}
+})";
+    }
+    auto js_out = tmp / "ui.js";
+    // Deliberately the WRONG flag (--from figma) to exercise the guardrail.
+    auto r = run_pulp({"import-design", "--from", "figma",
+                       "--file", scene.string(), "--output", js_out.string(),
+                       "--no-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    // Guardrail fired: routed to the plugin parser with a notice.
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("figma-plugin export envelope") != std::string::npos);
+    // Children were actually parsed (NOT the empty root-only output): the
+    // text node's content reaches the generated JS.
+    REQUIRE(fs::exists(js_out));
+    REQUIRE(read_text(js_out).find("Hello world") != std::string::npos);
+}

@@ -210,6 +210,19 @@ bool looks_like_serialized_design_ir(const std::string& content) {
         && trimmed.find("\"root\"") != std::string::npos;
 }
 
+// Detect a Figma-plugin export envelope (the `.pulp.json` the Pulp Figma plugin
+// and the headless REST exporter emit), so `--from figma` doesn't silently feed
+// it to parse_figma_json — which reads none of its structure and produces an
+// empty root-only import. Keyed on the envelope's stable identity fields:
+// format_version `...-figma-plugin-v1` or provenance.adapter "figma-plugin".
+bool looks_like_figma_plugin_export(const std::string& content) {
+    const auto trimmed = trim_copy(content);
+    if (trimmed.empty() || trimmed.front() != '{') return false;
+    return trimmed.find("figma-plugin-v1") != std::string::npos
+        || trimmed.find("\"adapter\": \"figma-plugin\"") != std::string::npos
+        || trimmed.find("\"adapter\":\"figma-plugin\"") != std::string::npos;
+}
+
 std::string strip_quotes_copy(const std::string& s) {
     if (s.size() >= 2
         && ((s.front() == '"' && s.back() == '"')
@@ -1597,7 +1610,21 @@ int main(int argc, char* argv[]) {
             parsed_serialized_design_ir = true;
         } else {
             switch (*source) {
-                case DesignSource::figma:        ir = parse_figma_json(content); break;
+                case DesignSource::figma:
+                    // Guardrail (pulp #41 follow-up): a Figma-plugin export
+                    // envelope passed to `--from figma` would otherwise be fed
+                    // to parse_figma_json, which finds none of its structure and
+                    // silently yields an empty root-only import. Auto-route to
+                    // the plugin parser and tell the user once.
+                    if (looks_like_figma_plugin_export(content)) {
+                        std::cerr << "note: input is a Figma-plugin export envelope; "
+                                     "using the figma-plugin parser. Pass "
+                                     "--from figma-plugin to silence this notice.\n";
+                        ir = parse_figma_plugin_json(content);
+                    } else {
+                        ir = parse_figma_json(content);
+                    }
+                    break;
                 case DesignSource::figma_plugin: ir = parse_figma_plugin_json(content); break;
                 case DesignSource::stitch: ir = parse_stitch_html(content); break;
                 case DesignSource::v0:     ir = parse_v0_tsx(content); break;

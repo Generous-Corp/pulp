@@ -338,12 +338,26 @@ Ask the user or detect from context:
 
 ### Step 2: Read the design data
 
+**`--from figma-plugin`, NOT `--from figma`, for any `.pulp.json`/`.pulp.zip` envelope.**
+There are two distinct Figma sources: `--from figma` → `parse_figma_json` (the old Figma REST/file format) and `--from figma-plugin` → `parse_figma_plugin_json` (the plugin/headless **export envelope**, `format_version 2026.05-figma-plugin-v1`). Feeding a plugin envelope to `--from figma` historically produced a **silent empty import** — `parse_figma_json` found none of its structure and emitted only `createCol('root')` (`1 elements: 1 containers, 0 widgets, 0 labels`). The CLI now **auto-detects** the envelope and routes to the plugin parser with a `note:` on stderr (see `looks_like_figma_plugin_export` + `test_import_source_routing.cpp`), but always pass `--from figma-plugin` explicitly. Tell-tale of the old mistake: a ~13-line `ui.js` with only the root, or `0 widgets, 0 labels` on a design that clearly has widgets.
+
 **Figma plugin export — `.pulp.zip` is the default ship shape**:
 The "Export to Pulp" button in `tools/figma-plugin` emits a `.pulp.zip` containing `scene.pulp.json` + `assets/*.png` whenever the design has images. The CLI auto-unpacks ZIPs transparently (look for `Unpacked …` on stdout); point `--file` directly at either form:
 ```bash
 pulp import-design --from figma-plugin --file design.pulp.zip --output ui.js  # canonical
 pulp import-design --from figma-plugin --file scene.pulp.json --output ui.js  # also fine
 ```
+
+**Headless alternative — `tools/import-design/figma_rest_export.py` (no plugin click).**
+For iterative dev you don't have to open Figma desktop and click Export every time. This script pulls a frame via the Figma **REST API** and emits the same `figma-plugin-export-v1` envelope (it's a faithful PORT of `pulp-figma-plugin/src/extract.ts` — keep the two in sync). It captures vector/illustration nodes as PNG `asset_ref`s via the REST `/images` endpoint, exactly like the plugin's `exportAsync`.
+```bash
+# one-time: figma.com -> Settings -> Security -> Personal access tokens ->
+# Generate, check ONLY file_content:read, save to ~/.config/pulp/figma-token (chmod 600)
+python3 tools/import-design/figma_rest_export.py \
+  --url 'https://figma.com/design/<KEY>/...?node-id=3-42' --out scene.pulp.json
+pulp import-design --from figma-plugin --file scene.pulp.json --output ui.js
+```
+Token resolves from `--token`, then `$FIGMA_TOKEN`, then `~/.config/pulp/figma-token`; lifecycle (added/expiry) tracked in `~/.config/pulp/figma.json`. PATs expire (≤90 days) — regenerate same-scope; Figma OAuth2 is the permanent path (future). The plugin lane remains source-of-truth (audio-widget recognition, Pulp Library matching); the REST port covers generic frames/text/vectors/assets, which is what non-library designs (e.g. ELYSIUM) use. **Asset PNGs only raster-render in a GPU/Skia-enabled build** (`PULP_HAS_SKIA`); a GPU-off build draws filename placeholders for images while native widgets still paint.
 Detection uses ZIP magic (`PK\x03\x04`), not the file extension — `.zip` renames still get unpacked. The temp dir is auto-cleaned at process exit. Older CLI builds read input via `std::ifstream` text mode and silently truncated at the first NUL byte in the ZIP header; the symptom was `parser threw an unknown exception` on any `.pulp.zip`. If you see that error, the CLI predates the auto-unpack support — rebuild from current `main`.
 
 The extractor refuses hostile archives at parse time: entries whose filename is so long it would truncate inside the stack buffer, entries containing `..` substrings, entries that resolve to an absolute path (`fs::path::is_absolute()`), entries with Windows drive-relative or UNC prefixes (`C:foo`, `C:\\foo`, `\\\\server\\share\\…`), entries beginning with `/` or `\\`, archives with more than 10000 entries, and archives whose total or per-file uncompressed size exceeds 256 MB / 64 MB respectively. Each rejection logs a labelled `Error: refusing unsafe zip entry (<reason>): <name>` (or `oversized filename`, `total uncompressed size > …`) on stderr and bails with a non-zero exit. If a legitimate plugin export ever trips one of these caps, the right move is to lift the cap deliberately in `extract_pulp_zip_if_present` rather than disable the guard.
