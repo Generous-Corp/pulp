@@ -67,6 +67,30 @@ def parse_meta_tiers() -> dict[str, str]:
     return tiers
 
 
+def parse_struct_fields() -> set[str]:
+    """Return the set of data-member names in the ``HostQuirks`` struct.
+
+    Extracts every ``bool <name> =`` / ``int <name> =`` field from the
+    ``struct HostQuirks { ... };`` body (comments stripped). This closes the
+    struct↔meta/macro drift axis: a field added to the struct (+ meta + JSON)
+    but forgotten in the PULP_HOST_QUIRK_FIELDS X-macro in host_quirks.cpp
+    would otherwise compile + test green while being silently inert in
+    apply_filter / overrides / `pulp doctor`. Since the macro must list every
+    struct field, asserting struct == meta == JSON keeps the macro honest too
+    (any struct field missing from meta/JSON trips this; the X-macro mirrors
+    the struct 1:1 by construction + the in-file count static_assert).
+    """
+    text = HEADER.read_text(encoding="utf-8")
+    match = re.search(r"struct\s+HostQuirks\s*\{(.*?)\n\};", text, re.DOTALL)
+    if not match:
+        raise AssertionError(
+            "Could not locate `struct HostQuirks { ... };` in "
+            f"{HEADER} — did the struct get renamed?"
+        )
+    body = re.sub(r"//[^\n]*", "", match.group(1))  # strip line comments
+    return set(re.findall(r"(?:bool|int)\s+(\w+)\s*=", body))
+
+
 def load_catalog() -> dict:
     return json.loads(CATALOG.read_text(encoding="utf-8"))
 
@@ -108,6 +132,36 @@ class CatalogWellFormed(unittest.TestCase):
                 f"duplicate flag {entry['flag']!r} in host-quirks.json",
             )
             seen.add(entry["flag"])
+
+
+class StructMetaParity(unittest.TestCase):
+    """The HostQuirks struct fields EXACTLY match the HostQuirksMeta flags.
+
+    Closes the struct↔meta/macro drift axis flagged by the 2026-05-30
+    self-sweep: a field added to the struct but missed in meta/JSON (or the
+    X-macro) would otherwise be silently inert.
+    """
+
+    def test_struct_fields_match_meta(self) -> None:
+        struct_fields = parse_struct_fields()
+        meta = set(parse_meta_tiers())
+        self.assertTrue(
+            struct_fields,
+            "parsed zero fields from `struct HostQuirks` — parser likely broke",
+        )
+        only_in_struct = struct_fields - meta
+        only_in_meta = meta - struct_fields
+        self.assertFalse(
+            only_in_struct,
+            "Fields in `struct HostQuirks` but NOT in HostQuirksMeta "
+            "(add a QuirkStatus + a catalog entry + the PULP_HOST_QUIRK_FIELDS "
+            f"X-macro row): {sorted(only_in_struct)}",
+        )
+        self.assertFalse(
+            only_in_meta,
+            "Fields in HostQuirksMeta but NOT in `struct HostQuirks` "
+            f"(stale meta entry): {sorted(only_in_meta)}",
+        )
 
 
 class CatalogStructParity(unittest.TestCase):

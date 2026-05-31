@@ -546,3 +546,14 @@ pass-through short-circuit honors it with no further wiring.
 must set `kQuirkFilterOff` to keep that premise. (CLAP + AU v2 are NOT
 wired — they have no bypass process path; injecting a param there would
 appear-but-do-nothing, so they're a separate follow-up.)
+
+## Bypass pass-through null-guard (self-sweep, 2026-05-30)
+
+The `processBlockBypassed` short-circuit in `process()` MUST null-check
+`output_ptrs_[ch]` before the memcpy/memset — a VST3 bus can report
+`numChannels > 0` while an individual `channelBuffers32[ch]` is null (#178).
+This was a latent RT-thread null-deref that synthesize_bypass_parameter (P3b)
+widened, since the short-circuit is now reachable for plugins that never
+declared a Bypass. Regression: `pulp-test-vst3-plugin-state`
+`[vst3][bypass][regression]` runs the bypass path with a null channel-1
+output pointer and asserts no crash + the live channel still passes through.

@@ -480,6 +480,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (bypass_param_id_ != 0 &&
         store_.get_value(bypass_param_id_) >= 0.5f) {
         for (int ch = 0; ch < out_channels; ++ch) {
+            // A VST3 bus can report numChannels > 0 while individual
+            // channelBuffers32[ch] entries are null (see the #178 note
+            // above); the destination must be null-checked before we
+            // write to it. This guard mirrors the silence-accommodation
+            // path — important now that synthesize_bypass_parameter (P3b)
+            // makes this short-circuit reachable for plugins that never
+            // declared a Bypass param.
+            if (output_ptrs_[ch] == nullptr) continue;
             if (ch < in_channels && input_ptrs_[ch] != nullptr) {
                 std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
                             sizeof(float) * num_samples);

@@ -145,6 +145,16 @@ init and gate accommodations on the flags. Flags wired so far:
   have no bypass process path yet — a synthesized param there would
   appear-but-do-nothing, so they're a separate follow-up.)
 
+  > **State round-trip caveat:** the synthesized Bypass persists under its
+  > reserved ID like any param. If a project is saved with synthesis active
+  > (bypass engaged) and later loaded with `PULP_HOST_QUIRKS=off`, the param
+  > isn't re-synthesized, so the persisted value is silently dropped on load
+  > (the plugin reopens un-bypassed) — `StateStore` skips unknown IDs by
+  > design. The reverse (saved off → loaded on) is benign: the synthesized
+  > param keeps its safe default (not bypassed). Since the quirk is
+  > `Validated` it survives the `validated-only` policy, so this only bites
+  > when a user *explicitly* sets `PULP_HOST_QUIRKS=off` between save + load.
+
 Remaining flags are wired incrementally, one PR per quirk, each with its own
 validation — a flag is only meaningfully `Validated` once an adapter consumes
 it under test.

@@ -74,9 +74,13 @@ namespace pulp::format {
 
 // Tripwire: the field count baked into the X-macro list above. If a new
 // HostQuirks field is added without extending PULP_HOST_QUIRK_FIELDS the
-// generated passes would silently skip it; bump this count in lock-step
-// (the catalog parity test independently asserts the struct/meta/JSON
-// flag sets all match, so a forgotten field surfaces there too).
+// generated passes would silently skip it; bump this count in lock-step.
+// NOTE: this static_assert only pins the macro's OWN count (it is
+// self-counting) — it cannot by itself notice a field added to the
+// `HostQuirks` struct but missed in the macro. That struct↔macro/meta
+// drift axis is closed by tools/scripts/test_host_quirks_catalog_parity.py,
+// which parses the `HostQuirks` struct + `HostQuirksMeta` + host-quirks.json
+// and asserts all three flag sets match.
 namespace {
 constexpr int count_quirk_fields() noexcept {
     int n = 0;

@@ -1033,3 +1033,62 @@ TEST_CASE("VST3 rejects an unsupported arrangement when silence accommodation is
 
     pulp::format::set_host_quirk_policy(std::nullopt);
 }
+
+// Self-sweep hardening (2026-05-30): the bypass pass-through must null-check
+// the destination channel pointer. A VST3 bus can report numChannels > 0
+// while an individual channelBuffers32[ch] is null (#178); without the guard
+// the bypass short-circuit dereferenced null on the audio thread — a crash
+// P3b widened by making the short-circuit reachable for synthesized bypass.
+TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
+          "[vst3][bypass][regression]") {
+    TestVst3Config config;
+    config.add_bypass_param = true;  // declared bypass — policy-independent
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    REQUIRE(processor.bypass_parameter_id() == kBypassParamId);
+
+    Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 4;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 4;
+    std::array<float, kFrames> in_l{{0.1f, 0.2f, 0.3f, 0.4f}};
+    std::array<float, kFrames> in_r{{-0.1f, -0.2f, -0.3f, -0.4f}};
+    std::array<float, kFrames> out_l{};
+    out_l.fill(99.0f);
+    float* ins[2]  = {in_l.data(), in_r.data()};
+    // Channel 1's output buffer is NULL — the host reports 2 channels but
+    // only provides one live pointer.
+    float* outs[2] = {out_l.data(), nullptr};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2; ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2; ab_out[0].channelBuffers32 = outs;
+
+    Steinberg::Vst::ParameterChanges params(1);
+    Steinberg::int32 q_index = 0;
+    auto* queue = params.addParameterData(kBypassParamId, q_index);
+    REQUIRE(queue != nullptr);
+    Steinberg::int32 pt = 0;
+    REQUIRE(queue->addPoint(0, 1.0, pt) == Steinberg::kResultTrue);  // engage bypass
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1; data.numOutputs = 1;
+    data.inputs = ab_in; data.outputs = ab_out;
+    data.inputParameterChanges = &params;
+
+    // Must not dereference the null channel-1 pointer.
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    // The live channel 0 still got the pass-through copy.
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+    }
+}

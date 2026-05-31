@@ -35,7 +35,16 @@ inline constexpr state::ParamID kSynthesizedBypassParamId = 0x70427970;  // 'pBy
 inline bool maybe_synthesize_bypass(state::StateStore& store, const HostQuirks& q) {
     if (!q.synthesize_bypass_parameter) return false;
     for (const auto& p : store.all_params()) {
-        if (p.name == "Bypass") return false;            // plugin already declares one
+        // Suppress synthesis only when the plugin already declares a
+        // DETECTABLE bypass — a boolean param named "Bypass" matching the
+        // exact heuristic the VST3/AU adapters use to tag kIsBypass (name +
+        // boolean range: step>=1, 0..1). A non-boolean param merely *named*
+        // "Bypass" is not a bypass surface to those adapters, so we still
+        // synthesize one rather than leave the host without a bypass control.
+        const bool is_detectable_bypass =
+            p.name == "Bypass" && p.range.step >= 1.0f &&
+            p.range.min == 0.0f && p.range.max == 1.0f;
+        if (is_detectable_bypass) return false;
         if (p.id == kSynthesizedBypassParamId) return false;  // ID-collision guard
     }
     state::ParamInfo info;
