@@ -833,6 +833,8 @@ static void print_usage() {
     std::cout << "  --no-comments     Omit comments from generated code\n";
     std::cout << "  --web-compat      Use DOM API instead of native Pulp API\n";
     std::cout << "  --validate        Render generated JS and validate layout\n";
+    std::cout << "  --strict-fidelity Fail (exit 4) if the import-time fidelity self-check\n";
+    std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
     std::cout << "  --diff <png>      Save visual diff image\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
@@ -1159,6 +1161,8 @@ int main(int argc, char* argv[]) {
     bool include_comments = true;
     bool export_tokens_mode = false;
     bool validate = false;           // --validate: render + compare after import
+    bool strict_fidelity = false;    // --strict-fidelity: fail on a fidelity self-check finding
+    bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
     // figma-plugin lane only: knob render style.
@@ -1243,6 +1247,8 @@ int main(int argc, char* argv[]) {
             use_web_compat = true;
         } else if (std::strcmp(argv[i], "--validate") == 0) {
             validate = true;
+        } else if (std::strcmp(argv[i], "--strict-fidelity") == 0) {
+            strict_fidelity = true;
         } else if (std::strcmp(argv[i], "--reference") == 0 && i + 1 < argc) {
             reference_image = argv[++i];
             validate = true;
@@ -2192,7 +2198,22 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    std::vector<pulp::view::FidelityIssue> fidelity_issues;
+    opts.fidelity_report = &fidelity_issues;
     auto js = generate_pulp_js(ir, opts);
+
+    // Reference-free fidelity self-check: surface any sprite the importer could
+    // not prove it sized faithfully. Always reported as warnings; with
+    // --strict-fidelity a finding makes the import exit non-zero.
+    for (const auto& fi : fidelity_issues) {
+        std::cerr << "fidelity: [" << fi.kind << "] " << fi.node_name
+                  << " (" << fi.node_id << "): " << fi.detail << "\n";
+    }
+    if (strict_fidelity && !fidelity_issues.empty()) {
+        std::cerr << "fidelity: " << fidelity_issues.size()
+                  << " issue(s); failing due to --strict-fidelity\n";
+        fidelity_failed = true;
+    }
 
     if (dry_run) {
         std::cout << "=== Generated Pulp JS (" << design_source_name(*source) << " → " << output_file << ") ===\n\n";
@@ -2528,5 +2549,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // --strict-fidelity: a self-check finding fails the import (distinct exit
+    // code so callers/harness can tell it apart from a parse/IO error).
+    if (fidelity_failed) return 4;
     return 0;
 }

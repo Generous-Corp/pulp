@@ -4222,3 +4222,62 @@ TEST_CASE("asset_bleed sprite (no render_bounds) preserves PNG aspect",
     CHECK(js.find("setTop('" + *id + "', 35") != std::string::npos);
     CHECK(js.find("setLeft('" + *id + "', 10") != std::string::npos);
 }
+
+// ── Reference-free fidelity self-check (no-skew invariant) ──────────────────
+namespace {
+IRNode make_image_node(bool bleed_via_render_bounds, bool asset_bleed,
+                       float png_w, float png_h) {
+    IRNode n;
+    n.type = "image";
+    n.name = "Sprite";
+    n.style.width = 100.0f;
+    n.style.height = 100.0f;
+    if (bleed_via_render_bounds)
+        n.style.render_bounds = IRStyle::RenderBounds{200.0f, 200.0f, 0.0f, 0.0f};
+    if (asset_bleed) n.attributes["asset_bleed"] = "1";
+    if (png_w > 0.0f) n.attributes["png_natural_w"] = std::to_string((int)png_w);
+    if (png_h > 0.0f) n.attributes["png_natural_h"] = std::to_string((int)png_h);
+    return n;
+}
+}  // namespace
+
+TEST_CASE("fidelity self-check passes when a bleed sprite preserves its aspect",
+          "[view][import][fidelity][harness]") {
+    // png 200x100 (aspect 2.0); emitted 120x60 (aspect 2.0) → no finding.
+    const auto n = make_image_node(/*render_bounds*/true, /*asset_bleed*/false, 200, 100);
+    CHECK_FALSE(check_image_sizing_fidelity(n, "Sprite0", 120.0f, 60.0f).has_value());
+}
+
+TEST_CASE("fidelity self-check flags a skewed bleed sprite",
+          "[view][import][fidelity][harness]") {
+    // png 200x100 (aspect 2.0); emitted 100x100 (aspect 1.0) → skew.
+    const auto n = make_image_node(true, false, 200, 100);
+    const auto issue = check_image_sizing_fidelity(n, "Sprite0", 100.0f, 100.0f);
+    REQUIRE(issue.has_value());
+    CHECK(issue->kind == "skew");
+    CHECK(issue->node_id == "Sprite0");
+}
+
+TEST_CASE("fidelity self-check flags an asset_bleed sprite missing PNG dims",
+          "[view][import][fidelity][harness]") {
+    const auto n = make_image_node(/*render_bounds*/false, /*asset_bleed*/true, 0, 0);
+    const auto issue = check_image_sizing_fidelity(n, "Sprite0", 100.0f, 100.0f);
+    REQUIRE(issue.has_value());
+    CHECK(issue->kind == "aspect-unverified");
+}
+
+TEST_CASE("fidelity self-check ignores ordinary (non-bleed) images",
+          "[view][import][fidelity][harness]") {
+    // No render_bounds, no asset_bleed: filling the box is intentional, never
+    // a finding even when the emitted aspect differs from the PNG.
+    const auto n = make_image_node(false, false, 200, 100);
+    CHECK_FALSE(check_image_sizing_fidelity(n, "Sprite0", 100.0f, 100.0f).has_value());
+}
+
+TEST_CASE("fidelity self-check flags an asset_bleed sprite that skews",
+          "[view][import][fidelity][harness]") {
+    const auto n = make_image_node(false, true, 200, 100);  // aspect 2.0
+    const auto issue = check_image_sizing_fidelity(n, "Sprite0", 100.0f, 100.0f);  // aspect 1.0
+    REQUIRE(issue.has_value());
+    CHECK(issue->kind == "skew");
+}

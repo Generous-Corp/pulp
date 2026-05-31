@@ -7,6 +7,7 @@
 
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/design_shortcuts.hpp>  // DetectedShortcut (CodeGenOptions::shortcuts)
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -57,7 +58,34 @@ struct CodeGenOptions {
     /// state — we just intercept the OS chord and re-fire the synthetic
     /// keydown into the engine. Empty vector = no shortcut emission.
     std::vector<DetectedShortcut> shortcuts;
+
+    /// Optional fidelity-report sink. When non-null, codegen records a
+    /// FidelityIssue for any image it cannot prove it sized faithfully — a
+    /// bleed sprite whose emitted aspect diverges from its source PNG (skew),
+    /// or one missing the pixel dims needed to preserve aspect at all. This is
+    /// a reference-free self-consistency check (it compares the emitted
+    /// geometry against the asset's own pixels), so it generalizes to any
+    /// import without overfitting. Non-owning; the caller owns the vector.
+    std::vector<struct FidelityIssue>* fidelity_report = nullptr;
 };
+
+/// A single import-fidelity self-check finding.
+struct FidelityIssue {
+    std::string node_id;    ///< sanitized bridge id of the offending node
+    std::string node_name;  ///< source layer name (for human-readable reports)
+    std::string kind;       ///< "skew" | "aspect-unverified"
+    std::string detail;     ///< one-line explanation with the measured numbers
+};
+
+/// Reference-free check: did codegen size this image faithfully? Returns a
+/// finding when a BLEED sprite (render_bounds or asset_bleed) was emitted at an
+/// aspect that diverges from its source PNG (skew), or lacks the PNG dims
+/// needed to preserve aspect (aspect-unverified). Ordinary (non-bleed) images
+/// intentionally fill their declared box and are never flagged. Pure +
+/// testable in isolation; `emitted_w/h` are the dimensions codegen emitted.
+std::optional<FidelityIssue> check_image_sizing_fidelity(
+    const IRNode& node, const std::string& node_id,
+    float emitted_w, float emitted_h);
 
 /// Generate Pulp JS code from a DesignIR.
 /// Native mode (default) uses createCol/createRow/createKnob + setFlex.

@@ -1795,3 +1795,20 @@ rasterized shapes). Each cost a visible fidelity bug.
   replaces each with a single PNG rasterized via the Figma `/images` endpoint.
   It needs a Figma token + network, so it is a developer-time export helper,
   never run in CI.
+
+## Fidelity self-check (reference-free no-skew invariant)
+
+- **Codegen self-checks every sprite it sizes.** `check_image_sizing_fidelity`
+  (design_codegen.cpp) is a pure, testable function: for a BLEED sprite
+  (`render_bounds` or `asset_bleed`) it compares the dimensions codegen emitted
+  against the source PNG aspect and returns a `FidelityIssue` of kind `skew`
+  (>5% aspect divergence) or `aspect-unverified` (no PNG dims). Ordinary
+  non-bleed images intentionally fill their box and are never flagged. Pass a
+  `CodeGenOptions::fidelity_report` sink to collect findings.
+- **`pulp import-design --strict-fidelity`** prints any findings as
+  `fidelity: …` warnings and exits 4 when one is present (distinct from a
+  parse/IO error). This is the first reference-free invariant from the
+  fidelity-harness plan — it would have caught the original knob-skew bug at
+  import time, with no reference image, generalizing to any design. Keep new
+  sizing paths covered: assign the emitted w/h to `emitted_w/emitted_h` so the
+  check runs on every branch.

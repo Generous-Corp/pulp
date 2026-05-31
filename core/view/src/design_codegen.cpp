@@ -949,6 +949,10 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             (node.attributes.count("asset_bleed") &&
              node.attributes.at("asset_bleed") == "1");
 
+        // Capture the dimensions actually emitted so the fidelity self-check
+        // can verify them against the source PNG aspect (no-skew invariant).
+        float emitted_w = 0.0f, emitted_h = 0.0f;
+
         if (have_core) {
             // Uniform scale that fits the solid core inside the layout box
             // (preserves aspect — never skews). The whole PNG scales by `s`,
@@ -956,6 +960,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             const float s = std::min(box_w / core_w, box_h / core_h);
             const float ew = png_w * s;
             const float eh = png_h * s;
+            emitted_w = ew; emitted_h = eh;
             ss << ind << "setFlex('" << id << "', 'width', " << ew << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << eh << ");\n";
             // Place so the core's top-left lands on the layout box, then nudge
@@ -982,6 +987,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             float ew = box_w, eh = box_h;
             if (box_w / box_h > png_aspect) { eh = box_h; ew = box_h * png_aspect; }
             else                            { ew = box_w; eh = box_w / png_aspect; }
+            emitted_w = ew; emitted_h = eh;
             ss << ind << "setFlex('" << id << "', 'width', " << ew << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << eh << ");\n";
             // Center the contained element within the declared box — the bleed
@@ -1002,9 +1008,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
             if (node.style.height)
                 ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+            emitted_w = node.style.width.value_or(0.0f);
+            emitted_h = node.style.height.value_or(0.0f);
             auto bleed_it = node.attributes.find("asset_bleed");
             if (bleed_it != node.attributes.end() && bleed_it->second == "1")
                 ss << ind << "setObjectFit('" << id << "', 'none');\n";
+        }
+        // Fidelity self-check: confirm a bleed sprite was sized without skew.
+        if (opts.fidelity_report) {
+            if (auto issue = check_image_sizing_fidelity(node, id, emitted_w, emitted_h))
+                opts.fidelity_report->push_back(std::move(*issue));
         }
         ss << "\n";
         return;
@@ -1339,6 +1352,44 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     if (node.style.background_color)
         ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
     ss << "\n";
+}
+
+// ── Fidelity self-check (reference-free no-skew invariant) ───────────────
+
+std::optional<FidelityIssue> check_image_sizing_fidelity(
+    const IRNode& node, const std::string& node_id,
+    float emitted_w, float emitted_h) {
+    // Only bleed sprites are sized to preserve aspect; an ordinary image
+    // intentionally fills its declared box, so it is never a skew finding.
+    const bool is_bleed =
+        node.style.render_bounds.has_value() ||
+        (node.attributes.count("asset_bleed") &&
+         node.attributes.at("asset_bleed") == "1");
+    if (!is_bleed) return std::nullopt;
+
+    auto attr_f = [&](const char* k) -> float {
+        auto it = node.attributes.find(k);
+        return it != node.attributes.end() ? std::strtof(it->second.c_str(), nullptr) : 0.0f;
+    };
+    const float png_w = attr_f("png_natural_w");
+    const float png_h = attr_f("png_natural_h");
+    if (png_w <= 0.0f || png_h <= 0.0f) {
+        return FidelityIssue{node_id, node.name, "aspect-unverified",
+            "bleed sprite has no source PNG dimensions; aspect could not be verified"};
+    }
+    if (emitted_w <= 0.0f || emitted_h <= 0.0f) return std::nullopt;
+
+    const float png_aspect = png_w / png_h;
+    const float emitted_aspect = emitted_w / emitted_h;
+    const float rel = std::fabs(emitted_aspect - png_aspect) / png_aspect;
+    if (rel > 0.05f) {
+        std::ostringstream d;
+        d << "emitted aspect " << emitted_aspect << " diverges from source PNG aspect "
+          << png_aspect << " (" << static_cast<int>(rel * 100.0f + 0.5f)
+          << "% off) — sprite skewed";
+        return FidelityIssue{node_id, node.name, "skew", d.str()};
+    }
+    return std::nullopt;
 }
 
 // ── Public code generation ──────────────────────────────────────────────
