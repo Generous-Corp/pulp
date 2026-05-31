@@ -205,6 +205,28 @@ def extract_layout(n):
     return l
 
 ASSET_IDS = []  # node ids to export as PNG via /images (filled during walk)
+FONT_ASSETS = {}  # (family, style, weight) -> {family, style, weight} (deduped, fill order)
+
+def _record_font(n):
+    """Collect a text node's font into FONT_ASSETS (deduped by family/style/weight).
+    Mirrors the plugin's font_family_assets[] (#43a). REST exposes the family +
+    weight; the bundled .ttf binary is NOT available via REST, so asset_id is
+    omitted — the importer #43b path then keeps the family name (falls back to a
+    system face) rather than registering a bundled file. Capturing the metadata
+    still keeps the REST envelope conformant with the plugin's shape."""
+    st = n.get("style") or {}
+    family = st.get("fontFamily")
+    if not family:
+        return
+    weight = st.get("fontWeight", 400)
+    italic = bool(st.get("italic"))
+    style = "Italic" if italic else "Regular"
+    key = (family, style, weight)
+    if key not in FONT_ASSETS:
+        entry = {"family": family, "style": style, "weight": weight}
+        if italic:
+            entry["italic"] = True
+        FONT_ASSETS[key] = entry
 
 def walk(n, parent, z):
     ntype = n.get("type")
@@ -222,6 +244,7 @@ def walk(n, parent, z):
     if ntype == "TEXT":
         out["content"] = n.get("characters", "")
         extract_text_style(n, style)
+        _record_font(n)
 
     # Audio-widget recognition (mirrors importer detect_audio_widget). A
     # knob/fader/meter node is emitted as a recognized leaf widget so the
@@ -274,18 +297,23 @@ def export_assets(file_key, ids, token, out_dir):
         with urllib.request.urlopen(req, timeout=60) as r:
             data = json.load(r)
         url_map.update(data.get("images", {}) or {})
+    import hashlib
     for nid in ids:
         url = url_map.get(nid)
-        safe = nid.replace(":", "_")
-        rel = f"assets/{safe}.png"
         if url:
             try:
                 with urllib.request.urlopen(url, timeout=60) as r:
                     blob = r.read()
+                # Content-address by sha256 of the bytes (matches the plugin's
+                # AssetCache, which keys + names assets by content_hash). This
+                # dedupes identical captures and lets the importer verify bytes,
+                # vs the node-id placeholder we used before.
+                digest = hashlib.sha256(blob).hexdigest()
+                rel = f"assets/{digest}.png"
                 open(os.path.join(out_dir, rel), "wb").write(blob)
                 manifest.append({"asset_id": nid, "original_uri": f"figma://{file_key}/{nid}",
                                  "original_uri_aliases": [], "local_path": rel,
-                                 "content_hash": safe, "mime": "image/png"})
+                                 "content_hash": digest, "mime": "image/png"})
             except Exception as e:
                 print(f"  asset {nid} download failed: {e}", file=sys.stderr)
     return manifest
@@ -358,10 +386,14 @@ def main():
         "library_manifest": None,
         "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
         "asset_manifest": {"version": 1, "assets": asset_manifest_entries},
+        "font_family_assets": list(FONT_ASSETS.values()),
         "diagnostics": [],
         "root": root_node,
     }
     json.dump(envelope, open(args.out, "w"), indent=1)
+    if FONT_ASSETS:
+        print(f"  font_family_assets: {len(FONT_ASSETS)} families "
+              f"({', '.join(sorted({f['family'] for f in FONT_ASSETS.values()}))})")
     cnt = [0]
     def c(n):
         cnt[0] += 1
