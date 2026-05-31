@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v02980"></a>
+## [0.298.0] - 2026-05-31
+
+- fix(format): address Codex review findings on the host-quirks enforcement PRs ([#3253](https://github.com/danielraffel/pulp/pull/3253))
+- feat(format): default host-quirks policy to validated_only ([#3248](https://github.com/danielraffel/pulp/pull/3248))
+
 <a id="v02970"></a>
 ## [0.297.0] - 2026-05-30
 
@@ -3337,6 +3343,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.298.0]: https://github.com/danielraffel/pulp/releases/tag/v0.298.0
 [0.297.0]: https://github.com/danielraffel/pulp/releases/tag/v0.297.0
 [0.296.0]: https://github.com/danielraffel/pulp/releases/tag/v0.296.0
 [0.295.1]: https://github.com/danielraffel/pulp/releases/tag/v0.295.1
