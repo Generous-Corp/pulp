@@ -35,6 +35,13 @@ cmake --build build-ios-sim-three \
 
 ## Build (physical iPad, signed)
 
+> **One-time portal step**: enable **Inter-App Audio** on your wildcard
+> `com.<you>.pulpdev.*` App ID at <https://developer.apple.com/account/resources/identifiers/list>.
+> AUv3 host scanning on iOS 11+ device requires `inter-app-audio` on the
+> host (the iOS Simulator does not enforce it, so the AUv3 will appear
+> on Sim but be invisible on device without this). Full one-time setup
+> in [`docs/guides/ios-dev-signing.md`](../../docs/guides/ios-dev-signing.md).
+
 Source the user's signing creds (under `~/.config/pulp/secrets/notary.env`)
 to populate `DEVELOPMENT_TEAM`, then configure for the device SDK:
 
