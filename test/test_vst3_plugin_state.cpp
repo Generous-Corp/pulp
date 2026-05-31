@@ -82,6 +82,7 @@ struct TestVst3Config {
     bool add_bypass_param = false;
     bool mutate_gain_in_process = false;
     bool emit_midi_out = false;
+    bool veto_bus_layout = false;  // is_bus_layout_supported() always returns false
     int latency_samples = 0;
 };
 
@@ -91,6 +92,12 @@ public:
 
     pulp::format::PluginDescriptor descriptor() const override {
         return config_.descriptor;
+    }
+
+    bool is_bus_layout_supported(const BusesLayout&) const override {
+        // Simulate a processor that enforces a layout contract (e.g. linked
+        // main/sidechain counts). When set, EVERY proposal is vetoed.
+        return !config_.veto_bus_layout;
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
@@ -1091,4 +1098,28 @@ TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
     for (int i = 0; i < kFrames; ++i) {
         REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
     }
+}
+
+// Codex review on #3235: the silence accommodation must NOT override a
+// processor's veto of a mono/stereo layout (a real contract, e.g. linked
+// main/sidechain counts) — there are no extra channels to silence, so
+// running process() under it would be a correctness bug. The veto is
+// honored even with the quirk enforced (pre-P3c behavior for mono/stereo).
+TEST_CASE("VST3 honors a processor mono/stereo bus-layout veto even with the quirk on",
+          "[vst3][host-quirks][p3][bus-arrangement]") {
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
+    TestVst3Config config;
+    config.veto_bus_layout = true;  // processor rejects every proposed layout
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    // Stereo in/out is mono/stereo-expressible, so is_bus_layout_supported()
+    // is consulted — the processor vetoes it. With the quirk on this is now
+    // REJECTED (no silence accommodation for vetoed mono/stereo layouts).
+    Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultFalse);
+
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }

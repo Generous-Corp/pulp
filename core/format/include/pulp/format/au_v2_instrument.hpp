@@ -3,6 +3,7 @@
 #include <AudioUnitSDK/MusicDeviceBase.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 
 #include <memory>
@@ -58,6 +59,9 @@ public:
 private:
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
+
+    // Host accommodations, resolved once at init (host-quirks plan, P3).
+    HostQuirks host_quirks_{};
     std::vector<float*> output_ptrs_;
     std::mutex midi_mutex_;
     midi::MidiBuffer pending_midi_;

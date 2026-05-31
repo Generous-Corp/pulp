@@ -258,15 +258,31 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     };
 
     if (!natively_supported) {
-        // silence_unsupported_bus_arrangements (host-quirks P3c): rather
-        // than failing the whole proposal, accept the host's arrangement
-        // and emit silence on the channels the processor doesn't produce.
-        // process() enforces this by clamping the processor's views to its
-        // prepared (descriptor-default) channel counts and zero-filling
-        // the host's extra channels — so the processor never reads/writes
-        // past what prepare() allocated. When the quirk is filtered out
-        // (PULP_HOST_QUIRKS=off) the original reject-the-proposal behavior
-        // is preserved exactly.
+        // CRITICAL (Codex review on #3235): when the arrangement is a
+        // mono/stereo layout the processor EXPLICITLY vetoed via
+        // is_bus_layout_supported(), honor that veto — it encodes a real
+        // contract (e.g. linked main/sidechain channel counts, stereo-only
+        // output) and there are no "extra" channels the silence
+        // accommodation could neutralize. Running process() under a layout
+        // the processor rejected would be a correctness bug, not an
+        // accommodation. This is also the exact pre-P3c behavior, so
+        // mono/stereo proposals are unaffected by the quirk.
+        if (all_mono_stereo) {
+            runtime::log_info(
+                "VST3 setBusArrangements: rejected processor-vetoed mono/stereo "
+                "layout ({} in / {} out buses) — honoring is_bus_layout_supported",
+                numIns, numOuts);
+            return kResultFalse;
+        }
+
+        // silence_unsupported_bus_arrangements (host-quirks P3c): the
+        // arrangement is NOT expressible as mono/stereo (e.g. 5.1) — a
+        // genuinely-exotic layout with more channels than the processor
+        // produces. Rather than failing, accept it and emit silence on the
+        // extra channels: process() clamps the processor's views to its
+        // prepared (descriptor-default) counts and zero-fills the host's
+        // surplus channels, so the processor never reads/writes past what
+        // prepare() allocated. PULP_HOST_QUIRKS=off preserves the reject.
         if (!quirks_.silence_unsupported_bus_arrangements) {
             runtime::log_info(
                 "VST3 setBusArrangements: rejected unsupported layout "

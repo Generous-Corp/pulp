@@ -557,3 +557,14 @@ widened, since the short-circuit is now reachable for plugins that never
 declared a Bypass. Regression: `pulp-test-vst3-plugin-state`
 `[vst3][bypass][regression]` runs the bypass path with a null channel-1
 output pointer and asserts no crash + the live channel still passes through.
+
+## silence_unsupported_bus_arrangements — honor processor vetoes (Codex #3235)
+
+The silence accommodation applies ONLY to non-mono/stereo (exotic, e.g. 5.1)
+arrangements — there it accepts + silences the extra channels. A mono/stereo
+layout the processor vetoes via `is_bus_layout_supported()` is a real
+contract (linked main/sidechain counts, stereo-only) with no extra channels
+to silence, so `setBusArrangements` HONORS the veto (returns kResultFalse)
+even with the quirk on — matching pre-P3c behavior. Regression:
+`pulp-test-vst3-plugin-state` `veto_bus_layout` config + the
+"honors a processor mono/stereo bus-layout veto" case.
