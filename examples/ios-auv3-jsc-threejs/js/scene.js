@@ -218,9 +218,13 @@
         60, canvasWidth / canvasHeight, 0.1, 100);
     camera.position.z = 2.4;
 
+    // iOS-D.3c (#3217) DIAG: try MeshNormalMaterial — uses surface
+    // normals as RGB. No per-mesh color uniform required, simpler
+    // NodeBuilder pipeline. If THIS renders we know MeshBasicMaterial
+    // is the only broken material; if NOT, NodeBuilder itself is broken.
     var cube = new THREE.Mesh(
         new THREE.BoxGeometry(0.9, 0.9, 0.9),
-        new THREE.MeshBasicMaterial({ color: 0x76ff7a })
+        new THREE.MeshNormalMaterial()
     );
     scene.add(cube);
     globalThis.__pulpThreeDemoMesh = cube;
