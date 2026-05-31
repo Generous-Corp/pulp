@@ -1427,3 +1427,53 @@ TEST_CASE("latency clamp follows the runtime policy via resolved_quirks",
     REQUIRE(off.clamp_latency_to_nonneg == false);
     REQUIRE(pulp::format::reported_latency_samples(-7, off) == -7);  // raw reported
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// P3b: maybe_synthesize_bypass helper (synthesize_bypass_parameter).
+// ─────────────────────────────────────────────────────────────────────
+
+#include <pulp/format/quirk_apply.hpp>
+#include <pulp/state/store.hpp>
+
+TEST_CASE("maybe_synthesize_bypass injects a Bypass param only when warranted",
+          "[format][host-quirks][p3][bypass]") {
+    using pulp::format::maybe_synthesize_bypass;
+    using pulp::format::kSynthesizedBypassParamId;
+
+    SECTION("synthesizes when enforced and no Bypass exists") {
+        pulp::state::StateStore store;
+        store.add_parameter({.id = 1, .name = "Gain", .range = {-60, 24, 0, 0.1f}});
+        HostQuirks q;  // synthesize_bypass_parameter defaults true
+        REQUIRE(maybe_synthesize_bypass(store, q) == true);
+        REQUIRE(store.param_count() == 2);
+        // The synthesized one carries the reserved ID + boolean range.
+        bool found = false;
+        for (const auto& p : store.all_params()) {
+            if (p.id == kSynthesizedBypassParamId) {
+                found = true;
+                REQUIRE(p.name == "Bypass");
+                REQUIRE(p.range.step >= 1.0f);
+                REQUIRE(p.range.min == 0.0f);
+                REQUIRE(p.range.max == 1.0f);
+            }
+        }
+        REQUIRE(found);
+    }
+
+    SECTION("no-op when the quirk is filtered out") {
+        pulp::state::StateStore store;
+        store.add_parameter({.id = 1, .name = "Gain", .range = {-60, 24, 0, 0.1f}});
+        HostQuirks q;
+        q.synthesize_bypass_parameter = false;
+        REQUIRE(maybe_synthesize_bypass(store, q) == false);
+        REQUIRE(store.param_count() == 1);
+    }
+
+    SECTION("no-op when the plugin already declares a Bypass param") {
+        pulp::state::StateStore store;
+        store.add_parameter({.id = 5, .name = "Bypass", .range = {0, 1, 0, 1}});
+        HostQuirks q;
+        REQUIRE(maybe_synthesize_bypass(store, q) == false);
+        REQUIRE(store.param_count() == 1);
+    }
+}

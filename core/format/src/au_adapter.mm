@@ -58,6 +58,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -265,6 +266,12 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         _bridge.host_quirks =
             pulp::format::resolved_quirks(host_info.type, host_info.version);
     }
+
+    // synthesize_bypass_parameter (host-quirks P3b): inject an automatable
+    // "Bypass" param when the plugin declared none, BEFORE the detection
+    // pass below — which then mirrors it onto the AU bypass surface. No-op
+    // when the quirk is filtered out. Qualified (Obj-C method file scope).
+    pulp::format::maybe_synthesize_bypass(_bridge.store, _bridge.host_quirks);
 
     // Item 3.1 — auto-detect a plugin-declared Bypass parameter so the
     // host's `shouldBypassEffect` AUValue and the plugin's

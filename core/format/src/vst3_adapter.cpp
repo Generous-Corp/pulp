@@ -9,6 +9,7 @@
 #include <pulp/format/detail/vst3_frame_rate.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -74,6 +75,14 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     auto desc = processor_->descriptor();
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
+
+    // synthesize_bypass_parameter (host-quirks P3b): if the plugin
+    // declared no Bypass parameter, inject an automatable one BEFORE the
+    // parameter-registration loop below — that loop then detects the
+    // synthesized "Bypass" (boolean range), tags it kIsBypass, and caches
+    // bypass_param_id_, so process()'s pass-through path honors it with no
+    // further wiring. No-op when the quirk is filtered out.
+    maybe_synthesize_bypass(store_, quirks_);
 
     // Wire gesture callbacks to VST3 host
     store_.set_gesture_callbacks(
