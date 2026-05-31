@@ -3,6 +3,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_sources.hpp>
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -3954,4 +3955,196 @@ TEST_CASE("design IR JSON round-trip preserves font_family_assets", "[design-imp
     CHECK(reparsed.font_family_assets[0].family == "Inter");
     CHECK(reparsed.font_family_assets[0].weight == 400);
     CHECK(reparsed.font_family_assets[0].resolved_path == "/x/inter.ttf");
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Design-import sprite & widget-recognition fidelity invariants.
+// Each guards a general importer rule: widget recognition is not blocked by a
+// decorative leaf child, render_bounds parses, snake_case align keywords are
+// honored, a degenerate stroke is not double-drawn, single-line text is not
+// flipped to multi-line, and a sprite image is sized preserving its source
+// aspect ratio. Fixtures are synthetic; nothing here is tied to one design.
+// ───────────────────────────────────────────────────────────────────────────
+namespace {
+const IRNode* find_node_by_name(const IRNode& n, const std::string& name) {
+    if (n.name == name) return &n;
+    for (const auto& c : n.children)
+        if (const IRNode* r = find_node_by_name(c, name)) return r;
+    return nullptr;
+}
+
+// Pull the float arg of the first `setFlex('<id>', '<dim>', N)` for a given id.
+std::optional<float> emitted_flex(const std::string& js, const std::string& id,
+                                  const std::string& dim) {
+    const std::string needle = "setFlex('" + id + "', '" + dim + "', ";
+    auto pos = js.find(needle);
+    if (pos == std::string::npos) return std::nullopt;
+    pos += needle.size();
+    return std::strtof(js.c_str() + pos, nullptr);
+}
+
+// Find the sanitized bridge id of the createImage call for a comment-labelled
+// node (codegen prints `// <name>` immediately before the create call).
+std::optional<std::string> image_id_after_comment(const std::string& js,
+                                                   const std::string& name) {
+    auto cpos = js.find("// " + name + "\n");
+    if (cpos == std::string::npos) return std::nullopt;
+    auto cipos = js.find("createImage('", cpos);
+    if (cipos == std::string::npos) return std::nullopt;
+    cipos += std::string("createImage('").size();
+    auto end = js.find('\'', cipos);
+    if (end == std::string::npos) return std::nullopt;
+    return js.substr(cipos, end - cipos);
+}
+}  // namespace
+
+TEST_CASE("figma-plugin knob with a stroked indicator child is recognized as a native knob",
+          "[view][import][figma-plugin][fidelity]") {
+    // A knob frame whose children are the captured silver-graphic image, a
+    // ~0-width stroked pointer hairline, and value/label text. The hairline is
+    // demoted image->frame; before the fix that leaf frame tripped the
+    // has_child_containers gate and the whole knob fell through to a raw stack
+    // of images instead of a native createKnob.
+    const std::string json = R"json({
+      "provenance": {"adapter":"figma-plugin","version":"test"},
+      "root": {"type":"frame","name":"Root","style":{"width":200,"height":200},"children":[
+        {"type":"frame","name":"Knob","style":{"width":62,"height":91,"position":"absolute","left":20,"top":20},"children":[
+          {"type":"image","name":"Group 130","asset_ref":"a","style":{"width":62,"height":68,"position":"absolute","left":0,"top":0,"renderBounds":{"w":210,"h":116,"dx":-74,"dy":0}}},
+          {"type":"image","name":"Vector 7","asset_ref":"b","style":{"width":0.0001,"height":8,"border":"2px solid #ffffff","borderColor":"#ffffff","borderWidth":2,"position":"absolute","left":31,"top":17}},
+          {"type":"text","name":"VALUE","content":"VALUE","style":{"width":40,"height":12}},
+          {"type":"text","name":"80%","content":"80%","style":{"width":40,"height":12}}
+        ]}
+      ]}
+    })json";
+    const auto ir = parse_figma_plugin_json(json);
+    const IRNode* knob = find_node_by_name(ir.root, "Knob");
+    REQUIRE(knob != nullptr);
+    CHECK(knob->audio_widget == AudioWidgetType::knob);
+    const auto js = generate_pulp_js(ir);
+    CHECK(js.find("createKnob") != std::string::npos);
+}
+
+TEST_CASE("figma-plugin render_bounds parses into IRStyle (drop-shadow / bleed extent)",
+          "[view][import][figma-plugin][fidelity]") {
+    const std::string json = R"json({
+      "provenance": {"adapter":"figma-plugin","version":"test"},
+      "root": {"type":"frame","name":"Root","style":{"width":200,"height":200},"children":[
+        {"type":"image","name":"Art","asset_ref":"a","style":{"width":62,"height":68,"renderBounds":{"w":210,"h":116,"dx":-74,"dy":0}}}
+      ]}
+    })json";
+    const auto ir = parse_figma_plugin_json(json);
+    const IRNode* art = find_node_by_name(ir.root, "Art");
+    REQUIRE(art != nullptr);
+    REQUIRE(art->style.render_bounds.has_value());
+    CHECK(art->style.render_bounds->w == Catch::Approx(210.0f));
+    CHECK(art->style.render_bounds->h == Catch::Approx(116.0f));
+    CHECK(art->style.render_bounds->dx == Catch::Approx(-74.0f));
+    CHECK(art->style.render_bounds->dy == Catch::Approx(0.0f));
+}
+
+TEST_CASE("figma-plugin snake_case align keywords are honored (titles not pinned to top)",
+          "[view][import][figma-plugin][fidelity]") {
+    // The figma-plugin export emits snake_case (`space_between`), not the CSS
+    // kebab-case parse_align previously required; the keyword was silently
+    // dropped, collapsing column justification.
+    const std::string json = R"json({
+      "provenance": {"adapter":"figma-plugin","version":"test"},
+      "root": {"type":"frame","name":"Root","style":{"width":200,"height":400},
+        "layout":{"direction":"column","justify":"space_between","align":"center"},"children":[
+        {"type":"text","name":"Title","content":"SECTION","style":{"width":80,"height":20}}
+      ]}
+    })json";
+    const auto ir = parse_figma_plugin_json(json);
+    CHECK(ir.root.layout.justify == LayoutAlign::space_between);
+    CHECK(ir.root.layout.align == LayoutAlign::center);
+}
+
+TEST_CASE("figma-plugin degenerate stroke hairline renders as a thin fill, not a doubled border",
+          "[view][import][figma-plugin][fidelity]") {
+    // A ~0-width 2px-stroke pointer: the fill becomes the line. Keeping the
+    // border too drew it on both edges and rendered ~3x too wide.
+    const std::string json = R"json({
+      "provenance": {"adapter":"figma-plugin","version":"test"},
+      "root": {"type":"frame","name":"Root","style":{"width":200,"height":200},"children":[
+        {"type":"image","name":"Hairline","asset_ref":"a","style":{"width":0.0001,"height":8,"border":"2px solid #ababab","borderColor":"#ababab","borderWidth":2,"position":"absolute","left":31,"top":17}}
+      ]}
+    })json";
+    const auto ir = parse_figma_plugin_json(json);
+    const IRNode* h = find_node_by_name(ir.root, "Hairline");
+    REQUIRE(h != nullptr);
+    CHECK(h->style.background_color.has_value());        // the fill IS the line
+    CHECK_FALSE(h->style.border_width.has_value());      // no doubled stroke
+    CHECK_FALSE(h->style.border_color.has_value());
+}
+
+TEST_CASE("single-line text taller than its font is not flipped to multi-line (search box)",
+          "[view][import][codegen][fidelity]") {
+    // An 8-14px label in a ~30px Figma box (line-box padding) must stay
+    // single-line so its vertical centering survives; the old font_h*1.6
+    // heuristic false-fired and pushed the baseline down.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 200.0f;
+    IRNode label;
+    label.type = "text";
+    label.name = "Search";
+    label.text_content = "Search";
+    label.style.width = 120.0f;
+    label.style.height = 26.0f;       // > font*1.6 (old heuristic) but < ~1.8 line boxes (new)
+    label.style.font_size = 14.0f;
+    ir.root.children.push_back(label);
+    const auto js = generate_pulp_js(ir);
+    CHECK(js.find("setMultiLine") == std::string::npos);
+
+    // A genuinely tall box still flips to multi-line.
+    DesignIR ir2 = ir;
+    ir2.root.children[0].style.height = 90.0f;
+    const auto js2 = generate_pulp_js(ir2);
+    CHECK(js2.find("setMultiLine") != std::string::npos);
+}
+
+TEST_CASE("sprite image is sized preserving its source PNG aspect ratio (never skewed)",
+          "[view][import][codegen][fidelity]") {
+    // A captured component-instance sprite: layout box 62x68, render_bounds
+    // 210x116 (aspect 1.81), but the PNG is 420x484 (aspect 0.87) with its
+    // solid core in the top. Codegen must scale by the core->box fit and emit
+    // an element at the PNG's aspect — not stretch it into render_bounds.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 300.0f;
+    ir.root.style.height = 300.0f;
+    IRNode img;
+    img.type = "image";
+    img.name = "Art";
+    img.style.width = 62.0f;
+    img.style.height = 68.0f;
+    img.style.position = "absolute";
+    img.style.left = 0.0f;
+    img.style.top = 0.0f;
+    img.style.render_bounds = IRStyle::RenderBounds{210.0f, 116.0f, -74.0f, 0.0f};
+    img.attributes["asset_path"] = "knob.png";
+    img.attributes["png_natural_w"] = "420";
+    img.attributes["png_natural_h"] = "484";
+    img.attributes["art_core_x"] = "148";
+    img.attributes["art_core_y"] = "0";
+    img.attributes["art_core_w"] = "115";
+    img.attributes["art_core_h"] = "129";
+    ir.root.children.push_back(img);
+
+    const auto js = generate_pulp_js(ir);
+    const auto id = image_id_after_comment(js, "Art");
+    REQUIRE(id.has_value());
+    const auto w = emitted_flex(js, *id, "width");
+    const auto h = emitted_flex(js, *id, "height");
+    REQUIRE(w.has_value());
+    REQUIRE(h.has_value());
+    REQUIRE(*h > 0.0f);
+    // Emitted aspect must equal the source PNG aspect (420/484), NOT
+    // render_bounds (210/116) — that is the no-skew invariant.
+    CHECK((*w / *h) == Catch::Approx(420.0f / 484.0f).epsilon(0.02));
+    // And the core (115*s x 129*s, s = min(62/115,68/129)) fills the 62x68 box.
+    CHECK(*w == Catch::Approx(420.0f * (68.0f / 129.0f)).epsilon(0.03));
 }

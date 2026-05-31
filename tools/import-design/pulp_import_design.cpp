@@ -70,6 +70,24 @@ static uint32_t png_be32(const uint8_t* p) {
            (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
 }
 
+// Read a PNG's pixel dimensions from its IHDR header (width @ byte 16, height
+// @ byte 20) without decoding the pixel data. Returns {0,0} on any non-PNG or
+// unreadable file. Used to recover the true source aspect ratio so imported
+// images/sprites are never skewed.
+static std::pair<int, int> read_png_dimensions(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.good()) return {0, 0};
+    uint8_t hdr[24];
+    f.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
+    if (f.gcount() < static_cast<std::streamsize>(sizeof(hdr))) return {0, 0};
+    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    if (std::memcmp(hdr, sig, 8) != 0) return {0, 0};
+    int w = static_cast<int>(png_be32(hdr + 16));
+    int h = static_cast<int>(png_be32(hdr + 20));
+    if (w <= 0 || h <= 0) return {0, 0};
+    return {w, h};
+}
+
 static DecodedPng decode_png_rgba(const uint8_t* data, size_t size) {
     DecodedPng out;
     static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
@@ -159,6 +177,43 @@ static DecodedPng decode_png_rgba(const uint8_t* data, size_t size) {
     out.width = width;
     out.height = height;
     return out;
+}
+
+// The bbox of an image's *solid* content — pixels whose alpha is at least
+// `min_alpha` (default 0.5). For a captured sprite this isolates the drawn
+// geometry (a knob's disc, a shape's body) from the soft drop-shadow / glow
+// that bleeds far past it. Lets the importer scale a sprite so its solid core
+// fills the node's logical box while the shadow is free to extend beyond —
+// the generalizable answer to "size sprites correctly without skew", derived
+// from the pixels themselves. Returns false if no qualifying pixels.
+struct OpaqueCore { int x = 0, y = 0, w = 0, h = 0, png_w = 0, png_h = 0; };
+static bool compute_opaque_core(const std::string& path, OpaqueCore& out,
+                                float min_alpha = 0.5f) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.good()) return false;
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+    auto img = decode_png_rgba(bytes.data(), bytes.size());
+    if (!img.valid()) return false;
+    const uint8_t thresh = static_cast<uint8_t>(
+        std::clamp(min_alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+    int minx = img.width, miny = img.height, maxx = -1, maxy = -1;
+    for (int y = 0; y < img.height; ++y) {
+        const uint8_t* row = img.rgba.data() + static_cast<size_t>(y) * img.width * 4;
+        for (int x = 0; x < img.width; ++x) {
+            if (row[x * 4 + 3] >= thresh) {
+                if (x < minx) minx = x;
+                if (x > maxx) maxx = x;
+                if (y < miny) miny = y;
+                if (y > maxy) maxy = y;
+            }
+        }
+    }
+    if (maxx < minx || maxy < miny) return false;
+    out.x = minx; out.y = miny;
+    out.w = maxx - minx + 1; out.h = maxy - miny + 1;
+    out.png_w = img.width; out.png_h = img.height;
+    return true;
 }
 
 enum class ArtifactEmit {
@@ -1898,6 +1953,31 @@ int main(int argc, char* argv[]) {
         opts.shortcuts = detected_shortcuts;
     }
 
+    // Sprite knob style = pixel-exact Figma reproduction. When a knob frame
+    // ships a captured graphic child (an image with an asset_ref — e.g. a
+    // silver-knob body group), the most faithful sprite rendering is to draw
+    // that PNG directly at its full render_bounds extent — exactly what the
+    // image codegen path does — rather than collapse the frame into a native
+    // knob and skin it (which fits the art to the knob box and loses the
+    // bleed/3-D chrome). So in sprite mode we DEMOTE such recognized knobs
+    // back to plain containers; their art child then renders as a normal
+    // bleed-sized image. Silver mode keeps the native-vector widget. This is
+    // the swap the design-import contract promises: sprite = captured art,
+    // silver = native vector. Generalizable: keyed on widget kind + an
+    // asset-bearing image child, no layer-name match.
+    if (!use_silver_knobs) {
+        std::function<void(IRNode&)> demote = [&](IRNode& n) {
+            if (n.audio_widget == pulp::view::AudioWidgetType::knob) {
+                bool has_art = false;
+                for (auto& c : n.children)
+                    if (c.type == "image" && c.attributes.count("asset_ref")) { has_art = true; break; }
+                if (has_art) n.audio_widget = pulp::view::AudioWidgetType::none;
+            }
+            for (auto& c : n.children) demote(c);
+        };
+        demote(ir.root);
+    }
+
     // Resolve asset_ref → absolute file path. For envelopes that include an
     // asset_manifest with local_path entries (figma-plugin lane), walk the IR
     // tree and stamp each node's attributes["asset_path"] with the absolute
@@ -1918,6 +1998,39 @@ int main(int argc, char* argv[]) {
                         if (p.is_relative()) p = base_dir / p;
                         std::string abs = p.lexically_normal().string();
                         n.attributes["asset_path"] = abs;
+
+                        // Stamp the asset's TRUE pixel dimensions from the PNG
+                        // header (the manifest ships null dims). Codegen uses
+                        // this to preserve the source aspect ratio — sprites
+                        // must never be skewed (e.g. a knob graphic whose
+                        // render_bounds claim a 1.81 aspect while the PNG is
+                        // 0.87: naively sizing to render_bounds stretches it
+                        // ~2× wide). Generalizable: every imported image
+                        // carries its real aspect.
+                        if (auto d = read_png_dimensions(abs); d.first > 0 && d.second > 0) {
+                            n.attributes["png_natural_w"] = std::to_string(d.first);
+                            n.attributes["png_natural_h"] = std::to_string(d.second);
+                        }
+                        // For a sprite that bleeds past its layout box
+                        // (render_bounds present), also recover the solid-core
+                        // bbox so codegen can scale the art so its core fills
+                        // the box while the soft shadow extends beyond — the
+                        // correct, data-driven sprite size+placement (the knob
+                        // disc sits in the PNG's top with a long shadow below,
+                        // so render_bounds and naive centering both misplace
+                        // it). Decode is gated on render_bounds to keep the
+                        // common image path header-only cheap.
+                        if (n.style.render_bounds) {
+                            OpaqueCore core;
+                            if (compute_opaque_core(abs, core)) {
+                                n.attributes["art_core_x"] = std::to_string(core.x);
+                                n.attributes["art_core_y"] = std::to_string(core.y);
+                                n.attributes["art_core_w"] = std::to_string(core.w);
+                                n.attributes["art_core_h"] = std::to_string(core.h);
+                                n.attributes["png_natural_w"] = std::to_string(core.png_w);
+                                n.attributes["png_natural_h"] = std::to_string(core.png_h);
+                            }
+                        }
 
                         // pulp #3191 — derive a value-driven skin for recognised
                         // faders/meters by SAMPLING the captured PNG (not baking

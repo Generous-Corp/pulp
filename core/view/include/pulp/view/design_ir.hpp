@@ -115,6 +115,14 @@ struct IRStyle {
     std::optional<float> width, height;
     std::optional<float> min_width, min_height;
     std::optional<float> max_width, max_height;
+    // The asset's true visual extent in logical px when it bleeds past the
+    // layout box (figma-plugin `render_bounds`: drop shadows, glow, oversized
+    // chrome like the silver-knob graphic). w/h = rendered size, dx/dy = offset
+    // of the render origin relative to the layout box (negative = extends
+    // left/up). When present + larger than width/height, the importer sizes the
+    // image to render_bounds and offsets by dx/dy instead of squashing it.
+    struct RenderBounds { float w = 0, h = 0, dx = 0, dy = 0; };
+    std::optional<RenderBounds> render_bounds;
 };
 
 /// Layout properties for an IR container node.

@@ -262,6 +262,21 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("maxWidth", s.max_width);
     set_opt_float("maxHeight", s.max_height);
 
+    // render_bounds {w,h,dx,dy} — the asset's true visual extent when it bleeds
+    // past the layout box (figma-plugin). Without this the silver-knob graphic
+    // (210px wide) gets squashed into its 62px layout box.
+    if (auto k = resolve_key("renderBounds")) {
+        auto rb = obj[k->c_str()];
+        if (rb.isObject()) {
+            IRStyle::RenderBounds out{};
+            auto rbf = [&](const char* m, float& f) {
+                if (rb.hasObjectMember(m)) f = static_cast<float>(rb[m].getWithDefault<double>(0));
+            };
+            rbf("w", out.w); rbf("h", out.h); rbf("dx", out.dx); rbf("dy", out.dy);
+            if (out.w > 0 && out.h > 0) s.render_bounds = out;
+        }
+    }
+
     return s;
 }
 
@@ -302,9 +317,17 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("marginBottom"))  l.margin_bottom = get_float(obj, "marginBottom");
     if (obj.hasObjectMember("marginLeft"))    l.margin_left = get_float(obj, "marginLeft");
 
-    auto parse_align = [](const std::string& s) -> LayoutAlign {
+    auto parse_align = [](std::string s) -> LayoutAlign {
+        // The figma-plugin export uses snake_case (flex_end, space_between);
+        // earlier callers used kebab-case (flex-end). Normalize '_'→'-' so both
+        // spell the same — otherwise snake_case justify/align silently fell
+        // through to flex_start, leaving column `justify:flex_end` titles pinned
+        // to the top (overlapping their sublabels) and dropping every
+        // `space_between` row's distribution.
+        for (auto& c : s) if (c == '_') c = '-';
         if (s == "center")        return LayoutAlign::center;
         if (s == "flex-end" || s == "end") return LayoutAlign::flex_end;
+        if (s == "flex-start" || s == "start") return LayoutAlign::flex_start;
         if (s == "stretch")       return LayoutAlign::stretch;
         if (s == "space-between") return LayoutAlign::space_between;
         if (s == "space-around")  return LayoutAlign::space_around;
@@ -517,9 +540,23 @@ static void detect_node_audio_widget(IRNode& node, bool explicit_audio_widget) {
         detected = detect_audio_widget(node.type);
     if (detected == AudioWidgetType::none) return;
 
+    // A child that is itself a container — a populated frame/group, or any
+    // nested-frame/group structure — marks this node as a composite layout
+    // that must NOT be collapsed into a single audio widget (a widget-named
+    // row of sub-widgets stays a row). The ONE exception is a stroke-demoted
+    // decoration: a ~0-width stroked leaf (e.g. a knob's pointer hairline)
+    // that the pre-pass above retypes image→frame. Without this exception that
+    // lone decorative box blocked recognition, so a knob shipping a pointer
+    // line fell through to a raw container of images instead of a native knob.
+    // The decoration is tagged at demotion time (__stroke_demoted).
     bool has_child_containers = false;
     for (auto& child : node.children) {
-        if (child.type == "frame" || child.type == "group" || !child.children.empty()) {
+        const bool decorative_stroke =
+            child.attributes.count("__stroke_demoted") != 0;
+        const bool is_container =
+            !child.children.empty() ||
+            ((child.type == "frame" || child.type == "group") && !decorative_stroke);
+        if (is_container) {
             has_child_containers = true;
             break;
         }
@@ -555,6 +592,7 @@ static void extract_widget_shape_dims(IRNode& node) {
             break;
         }
     }
+
 }
 
 IRNode parse_ir_node(const choc::value::ValueView& obj) {
@@ -829,12 +867,25 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             // a zero-area image and would render nothing anyway.
             if (!node.style.background_color && node.style.border_color)
                 node.style.background_color = node.style.border_color;
+            // The fill now IS the hairline. Drop the stroke so codegen does
+            // not ALSO emit a border — a 1.5px line + a 1.5px border draws on
+            // both edges and renders ~3× too wide (e.g. a knob pointer line).
+            // The width was already set to the stroke weight above, so the
+            // filled rect alone reproduces the line at its true thickness.
+            node.style.border.reset();
+            node.style.border_color.reset();
+            node.style.border_width.reset();
+            node.style.border_style.reset();
             // Strip the asset_ref so codegen's image branch doesn't try to
             // emit setImageSource on a degenerate PNG.
             node.attributes.erase("asset_ref");
             // Demote from "image" to "frame" so codegen emits a styled
             // container instead of an <img>-style image element.
             if (node.type == "image") node.type = "frame";
+            // Tag it as a decorative stroke so a parent widget's recognition
+            // gate treats it as ornamentation, not as a disqualifying nested
+            // container (a knob keeps its pointer hairline AND its widget-ness).
+            node.attributes["__stroke_demoted"] = "1";
         }
     }
 
@@ -889,9 +940,9 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // breaking the connection visual. Convert the line to absolute,
     // span the full row width, and centre it vertically. Because it
     // stays first in z-order, subsequent children draw on top — the
-    // visible segments emerge as gaps. Generalises the FX RACK pattern
-    // in ELYSIUM (Vector 177 + 1/4 DELAY + REVERB + "+") to any flex
-    // row with a connector hairline + ≥ 2 sibling widgets.
+    // visible segments emerge as gaps. Generalises a connector-rail
+    // pattern (e.g. an FX-rack row: a hairline + chained dropdowns + "+")
+    // to any flex row with a connector hairline + ≥ 2 sibling widgets.
     if (node.layout.direction == LayoutDirection::row && node.children.size() >= 3) {
         auto& first = node.children.front();
         float fw = first.style.width.value_or(0.0f);

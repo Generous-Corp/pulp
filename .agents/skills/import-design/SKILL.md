@@ -1731,3 +1731,67 @@ correctness bug before it was made explicit; treat them as invariants.
   `non_negative_int`/`load_json`/`write_json`) live in `frontend_ir_common.py`
   and the canonical route set in `frontend_ir_validation.NATIVE_ROUTES` —
   import them, don't re-type them.
+
+## Sprite/asset sizing — never skew, size from the pixels
+
+Non-obvious rules for sizing captured image assets (knob graphics, icons,
+rasterized shapes). Each cost a visible fidelity bug.
+
+- **`render_bounds` is NOT a reliable size for scaled component instances.**
+  The figma-plugin export's `render_bounds {w,h,dx,dy}` (the on-canvas bleed
+  extent) can have a totally different aspect than the exported PNG — e.g. a
+  knob graphic with `render_bounds` aspect 1.81 but a PNG aspect 0.87, because
+  `render_bounds` reports the *component's* native box, not the scaled
+  *instance*. Sizing an element to `render_bounds` and letting the renderer
+  stretch the PNG into it skews the art ~2x. `setObjectFit` is **storage-only**
+  (the ImageView paint slice ignores it), so aspect can ONLY be preserved by
+  sizing the *element* itself.
+- **Recover real dims + the opaque-core bbox from the PNG; the manifest dims
+  are null.** The import CLI's asset-resolution pass stamps `png_natural_w/h`
+  (PNG header) and, for nodes carrying `render_bounds`, the `art_core_*` bbox
+  of pixels with alpha ≥ 0.5 (`compute_opaque_core`). Codegen scales the whole
+  PNG so the solid core fits the layout box (`min(box_w/core_w, box_h/core_h)`)
+  and positions it so the core lands on the box — the soft shadow then bleeds
+  beyond. This is the data-driven fix for "right size, not skewed", and it
+  generalizes to any sprite (knob disc, icon) — no layer-name matching.
+
+## Widget recognition vs decorative children
+
+- **A decorative stroke child must not block widget recognition.** A knob's
+  ~0-width stroked pointer hairline is demoted image→frame by the degenerate-
+  stroke pre-pass; before it was tagged, that lone leaf frame tripped the
+  `has_child_containers` gate in `detect_node_audio_widget` and the whole knob
+  fell through to a raw stack of images instead of a native `createKnob`. The
+  demotion now tags the node `__stroke_demoted`; the recognition gate treats a
+  tagged child as ornamentation, while a *populated* or genuinely structural
+  frame/group child still disqualifies (a widget-named row of sub-widgets stays
+  a row). When a degenerate stroke becomes a fill, also DROP its border — a
+  1.5px line plus a 1.5px border draws on both edges and renders ~3x too wide.
+
+## snake_case vs kebab-case + multi-line text
+
+- **`parse_align` must accept snake_case.** The figma-plugin export emits
+  `space_between`/`flex_end`; CSS sources emit `space-between`/`flex-end`.
+  `parse_align` normalizes `'_'→'-'` so both spell the same — otherwise
+  snake_case justify/align silently fall through to `flex_start`.
+- **Multi-line text heuristic is line_height-aware, with a TIGHT fallback.**
+  `multiline_box = height > line_h * 1.8`, where `line_h =
+  line_height.value_or(font_size * 1.2)`. The `*1.2` fallback (not `*1.4`)
+  matters: a genuine two-line paragraph (e.g. 26px box at 11px font, no
+  declared line_height) must read as multi-line, while a single small line in a
+  tall padded box (e.g. a search field: 17px box, 8px font, line_height 9.84)
+  must stay single so its vertical centering survives.
+
+## Rasterizing vector illustration frames
+
+- **A pure-vector illustration FRAME must be flattened to one PNG.** The
+  exporter rasterizes single vector *leaves* but walks a vector illustration
+  *group* (a frame whose whole subtree is vector/shape content — e.g. a 3-D
+  prism of rotated `REGULAR_POLYGON` faces) as a layout container; since Pulp
+  is flex/grid-only with no rotated-polygon primitive, those faces degrade to
+  axis-aligned bordered boxes. `tools/import-design/figma_rasterize_vector_frames.py`
+  is a post-export pass that detects such frames (subtree all vector/shape, no
+  text, no recognized widget — keyed on structure, NOT layer names) and
+  replaces each with a single PNG rasterized via the Figma `/images` endpoint.
+  It needs a Figma token + network, so it is a developer-time export helper,
+  never run in CI.
