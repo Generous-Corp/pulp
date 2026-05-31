@@ -984,6 +984,18 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             else                            { ew = box_w; eh = box_w / png_aspect; }
             ss << ind << "setFlex('" << id << "', 'width', " << ew << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << eh << ");\n";
+            // Center the contained element within the declared box — the bleed
+            // art is documented as centered, and leaving the original top/left
+            // (from emit_position_if_absolute) would pin the reduced element to
+            // the box's top-left, visibly shifting it.
+            if (node.style.position && *node.style.position == "absolute") {
+                const float pad_x = (box_w - ew) * 0.5f;
+                const float pad_y = (box_h - eh) * 0.5f;
+                if (node.style.left)
+                    ss << ind << "setLeft('" << id << "', " << (*node.style.left + pad_x) << ");\n";
+                if (node.style.top)
+                    ss << ind << "setTop('" << id << "', " << (*node.style.top + pad_y) << ");\n";
+            }
         } else {
             // Ordinary image (no bleed) or unknown dims → keep the declared box.
             if (node.style.width)

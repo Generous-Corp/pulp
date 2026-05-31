@@ -4198,6 +4198,9 @@ TEST_CASE("asset_bleed sprite (no render_bounds) preserves PNG aspect",
     img.name = "Bleed";
     img.style.width = 100.0f;
     img.style.height = 100.0f;
+    img.style.position = "absolute";
+    img.style.left = 10.0f;
+    img.style.top = 10.0f;
     img.attributes["asset_path"] = "bleed.png";
     img.attributes["png_natural_w"] = "200";   // wide bitmap
     img.attributes["png_natural_h"] = "100";
@@ -4214,4 +4217,8 @@ TEST_CASE("asset_bleed sprite (no render_bounds) preserves PNG aspect",
     // 100x100 box, aspect 2.0 → contain → 100x50 (aspect preserved, not skewed).
     CHECK(*w == Catch::Approx(100.0f));
     CHECK(*h == Catch::Approx(50.0f));
+    // …and centered in the box: 50px of vertical slack → top offset by +25
+    // (10 → 35); no horizontal slack (width fills) → left unchanged (10).
+    CHECK(js.find("setTop('" + *id + "', 35") != std::string::npos);
+    CHECK(js.find("setLeft('" + *id + "', 10") != std::string::npos);
 }
