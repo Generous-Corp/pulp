@@ -1290,6 +1290,23 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
 
     ss << "setTheme('dark');\n\n";
 
+    // Register bundled (non-system) fonts (#43b) BEFORE any setFontFamily, so a
+    // family like "Clash Grotesk" / "Inter" resolves to the shipped face
+    // instead of silently falling back to a same-named system font (or a
+    // generic). resolved_path is the absolute .ttf/.otf path stamped by the
+    // CLI's font asset-resolution pass; skip entries that didn't resolve.
+    if (!ir.font_family_assets.empty()) {
+        bool any = false;
+        for (const auto& fa : ir.font_family_assets) {
+            if (fa.family.empty() || fa.resolved_path.empty()) continue;
+            if (!any && opts.include_comments) ss << "// Bundled fonts\n";
+            any = true;
+            ss << "registerFont('" << js_single_quote_escape(fa.family) << "', '"
+               << js_single_quote_escape(fa.resolved_path) << "');\n";
+        }
+        if (any) ss << "\n";
+    }
+
     // Token assignments
     if (opts.include_tokens && (!ir.tokens.colors.empty() ||
                                  !ir.tokens.dimensions.empty() ||

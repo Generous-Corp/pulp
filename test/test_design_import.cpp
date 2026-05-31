@@ -3898,3 +3898,60 @@ TEST_CASE("design IR JSON round-trip preserves a multi-shadow boxShadow", "[desi
     CHECK(reparsed.root.style.box_shadow[0].color == "#000000");
     CHECK(reparsed.root.style.box_shadow[1].color == "rgba(10, 20, 30, 0.4)");
 }
+
+// ── #43b: bundled-font registration from font_family_assets ──────────────
+TEST_CASE("parse_figma_plugin_json reads font_family_assets", "[design-import][issue-43b]") {
+    auto ir = parse_figma_plugin_json(R"json({
+        "format_version": "2026.05-figma-plugin-v1",
+        "provenance": {"adapter": "figma-plugin"},
+        "asset_manifest": {"version": 1, "assets": [
+            {"asset_id": "userfont-1", "local_path": "assets/clash.ttf", "mime": "font/ttf"}]},
+        "font_family_assets": [
+            {"family": "Clash Grotesk", "style": "Regular", "weight": 500, "asset_id": "userfont-1"}],
+        "root": {"type": "frame", "name": "R", "figma_node_id": "1:1",
+                 "style": {"fontFamily": "Clash Grotesk"}}
+    })json");
+    REQUIRE(ir.font_family_assets.size() == 1);
+    CHECK(ir.font_family_assets[0].family == "Clash Grotesk");
+    CHECK(ir.font_family_assets[0].weight == 500);
+    CHECK(ir.font_family_assets[0].asset_id == "userfont-1");
+}
+
+TEST_CASE("codegen emits registerFont before setFontFamily for bundled fonts", "[design-import][issue-43b]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.root.name = "R";
+    ir.root.style.font_family = "Clash Grotesk";
+    IRFontAsset fa;
+    fa.family = "Clash Grotesk";
+    fa.weight = 500;
+    fa.asset_id = "userfont-1";
+    fa.resolved_path = "/tmp/assets/clash.ttf";  // CLI normally stamps this
+    ir.font_family_assets.push_back(fa);
+
+    const auto js = generate_pulp_js(ir);
+    const auto reg = js.find("registerFont('Clash Grotesk', '/tmp/assets/clash.ttf')");
+    REQUIRE(reg != std::string::npos);
+    // registerFont must precede any setFontFamily so the family resolves to the
+    // bundled face, not a system fallback.
+    const auto setf = js.find("setFontFamily");
+    if (setf != std::string::npos) CHECK(reg < setf);
+    // An unresolved font asset (no path) must NOT emit registerFont.
+    DesignIR ir2 = ir;
+    ir2.font_family_assets[0].resolved_path.clear();
+    CHECK(generate_pulp_js(ir2).find("registerFont(") == std::string::npos);
+}
+
+TEST_CASE("design IR JSON round-trip preserves font_family_assets", "[design-import][issue-43b]") {
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "R";
+    IRFontAsset fa; fa.family = "Inter"; fa.weight = 400; fa.asset_id = "uf-2";
+    fa.resolved_path = "/x/inter.ttf";
+    ir.font_family_assets.push_back(fa);
+    const auto reparsed = parse_design_ir_json(serialize_design_ir(ir));
+    REQUIRE(reparsed.font_family_assets.size() == 1);
+    CHECK(reparsed.font_family_assets[0].family == "Inter");
+    CHECK(reparsed.font_family_assets[0].weight == 400);
+    CHECK(reparsed.font_family_assets[0].resolved_path == "/x/inter.ttf");
+}

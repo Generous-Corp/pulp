@@ -8312,6 +8312,23 @@ void WidgetBridge::register_api() {
         return choc::value::createBool(exists);
     });
 
+    // registerFont(family, path) — register a bundled .ttf/.otf with the text
+    // renderer under `family`, so set_font() / Label font_family resolve to the
+    // shipped face instead of a same-named system font (or a generic fallback).
+    // figma-import #43b: codegen emits these from the envelope's
+    // font_family_assets before any setFontFamily.
+    engine_.register_function("registerFont", [](choc::javascript::ArgumentList args) {
+        auto family = args.get<std::string>(0, "");
+        auto path = args.get<std::string>(1, "");
+        if (family.empty() || path.empty()) return choc::value::createBool(false);
+        if (path.rfind("file://", 0) == 0) path = path.substr(7);
+        if (!std::filesystem::exists(path)) return choc::value::createBool(false);
+        // register_font_family decodes the file + registers the typeface with
+        // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
+        AssetManager::instance().register_font_family(family, path);
+        return choc::value::createBool(true);
+    });
+
     // WebGPU shader: applyShader(canvasId, skslCode) → applies custom shader to canvas
     // Uses the existing Skia/Dawn pipeline — SkSL shaders compiled at runtime
     engine_.register_function("applyShader", [this](choc::javascript::ArgumentList args) {

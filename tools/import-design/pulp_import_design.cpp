@@ -2063,6 +2063,20 @@ int main(int argc, char* argv[]) {
             for (auto& c : n.children) resolve_node(c);
         };
         resolve_node(ir.root);
+
+        // Resolve bundled-font asset_ids → absolute paths (#43b) so codegen can
+        // emit registerFont(family, path). Same base_dir + manifest resolution
+        // as the node asset-path pass above.
+        for (auto& fa : ir.font_family_assets) {
+            if (fa.asset_id.empty()) continue;
+            if (auto* ref = ir.asset_manifest.resolve(fa.asset_id)) {
+                if (ref->local_path && !ref->local_path->empty()) {
+                    fs::path p(*ref->local_path);
+                    if (p.is_relative()) p = base_dir / p;
+                    fa.resolved_path = p.lexically_normal().string();
+                }
+            }
+        }
     }
 
     auto js = generate_pulp_js(ir, opts);

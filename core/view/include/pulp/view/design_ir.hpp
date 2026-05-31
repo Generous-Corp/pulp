@@ -312,6 +312,18 @@ struct IRAssetManifest {
     const IRAssetRef* resolve(std::string_view asset_id) const;
 };
 
+/// A bundled (non-system) font shipped with the design (figma-plugin #43a:
+/// envelope `font_family_assets[]`). The importer registers each one with the
+/// text renderer (#43b) so `setFontFamily(family)` resolves to the bundled
+/// face instead of silently falling back to a system font of the same name.
+struct IRFontAsset {
+    std::string family;          // CSS family name nodes reference via font_family
+    std::string style;           // "Regular", "Italic", … (informational)
+    int weight = 400;            // 100–900
+    std::string asset_id;        // → asset_manifest entry holding the .ttf/.otf
+    std::string resolved_path;   // absolute fs path, stamped by the CLI asset-resolution pass
+};
+
 struct IRTokenIdentity {
     std::string source_id;
     std::string source_collection;
@@ -334,6 +346,7 @@ struct DesignIR {
     IRNode root;
     IRTokens tokens;
     IRAssetManifest asset_manifest;
+    std::vector<IRFontAsset> font_family_assets;   // bundled fonts (#43a/#43b)
     std::vector<ImportDiagnostic> diagnostics;
     DesignSource source = DesignSource::figma;
     std::string source_file;

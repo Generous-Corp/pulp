@@ -1437,6 +1437,33 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
     else if (parsed.hasObjectMember("assetManifest"))
         ir.asset_manifest = parse_asset_manifest(parsed["assetManifest"]);
 
+    // font_family_assets[] (#43a) — bundled fonts the importer registers (#43b)
+    // so setFontFamily resolves to the bundled face, not a system fallback.
+    {
+        auto read_str = [](const choc::value::ValueView& o, const char* k) -> std::string {
+            return (o.hasObjectMember(k) && o[k].isString()) ? std::string(o[k].toString())
+                                                             : std::string();
+        };
+        const char* fkey = parsed.hasObjectMember("font_family_assets") ? "font_family_assets"
+                          : parsed.hasObjectMember("fontFamilyAssets")  ? "fontFamilyAssets"
+                                                                        : nullptr;
+        if (fkey && parsed[fkey].isArray()) {
+            auto arr = parsed[fkey];
+            for (uint32_t i = 0; i < arr.size(); ++i) {
+                auto e = arr[static_cast<int>(i)];
+                if (!e.isObject()) continue;
+                IRFontAsset fa;
+                fa.family = read_str(e, "family");
+                fa.style = read_str(e, "style");
+                if (e.hasObjectMember("weight"))
+                    fa.weight = static_cast<int>(e["weight"].getWithDefault<int64_t>(400));
+                fa.asset_id = read_str(e, "asset_id");
+                if (fa.asset_id.empty()) fa.asset_id = read_str(e, "assetId");
+                if (!fa.family.empty()) ir.font_family_assets.push_back(std::move(fa));
+            }
+        }
+    }
+
     IRProvenance provenance{"figma-plugin", ir.source_version, {}};
     if (parsed.hasObjectMember("provenance") && parsed["provenance"].isObject()) {
         auto pr = parsed["provenance"];

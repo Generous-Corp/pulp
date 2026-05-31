@@ -1611,6 +1611,24 @@ std::string serialize_design_ir(const DesignIR& ir,
         write_key(out, first, "assetManifest");
         write_asset_manifest_json(out, ir.asset_manifest);
     }
+    if (!ir.font_family_assets.empty()) {
+        write_key(out, first, "fontFamilyAssets");
+        out << "[";
+        bool ffirst = true;
+        for (const auto& fa : ir.font_family_assets) {
+            if (!ffirst) out << ",";
+            ffirst = false;
+            out << "{";
+            bool mf = true;
+            write_string_member(out, mf, "family", fa.family);
+            if (!fa.style.empty()) write_string_member(out, mf, "style", fa.style);
+            write_key(out, mf, "weight"); out << fa.weight;
+            if (!fa.asset_id.empty()) write_string_member(out, mf, "asset_id", fa.asset_id);
+            if (!fa.resolved_path.empty()) write_string_member(out, mf, "resolvedPath", fa.resolved_path);
+            out << "}";
+        }
+        out << "]";
+    }
     if (!ir.diagnostics.empty()) {
         write_key(out, first, "diagnostics");
         write_diagnostics_array_json(out, ir.diagnostics);
@@ -1650,6 +1668,26 @@ DesignIR parse_design_ir_json(const std::string& json) {
             ir.tokens = parse_ir_tokens(parsed["tokens"]);
         if (parsed.hasObjectMember("assetManifest"))
             ir.asset_manifest = parse_asset_manifest(parsed["assetManifest"]);
+        for (const char* fk : {"fontFamilyAssets", "font_family_assets"}) {
+            if (parsed.hasObjectMember(fk) && parsed[fk].isArray()) {
+                auto arr = parsed[fk];
+                for (uint32_t i = 0; i < arr.size(); ++i) {
+                    auto e = arr[static_cast<int>(i)];
+                    if (!e.isObject()) continue;
+                    IRFontAsset fa;
+                    fa.family = get_string(e, "family");
+                    fa.style = get_string(e, "style");
+                    if (e.hasObjectMember("weight"))
+                        fa.weight = static_cast<int>(e["weight"].getWithDefault<int64_t>(400));
+                    fa.asset_id = get_string(e, "asset_id");
+                    if (fa.asset_id.empty()) fa.asset_id = get_string(e, "assetId");
+                    fa.resolved_path = get_string(e, "resolvedPath");
+                    if (fa.resolved_path.empty()) fa.resolved_path = get_string(e, "resolved_path");
+                    if (!fa.family.empty()) ir.font_family_assets.push_back(std::move(fa));
+                }
+                break;
+            }
+        }
         if (parsed.hasObjectMember("diagnostics"))
             ir.diagnostics = parse_import_diagnostics(parsed["diagnostics"]);
         promote_interactive_frames(ir.root);
