@@ -1133,24 +1133,44 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
         // Yoga: every container MUST have explicit height
         // Priority: _layoutHeight (from snapshot_layout) > style.height > fill > computed
+        float fidelity_emitted_h = 0.0f;  // captured for the gross-size self-check
         if (node.attributes.count("_layoutHeight")) {
             int lh = std::stoi(node.attributes.at("_layoutHeight"));
-            if (lh > 0) ss << ind << "setFlex('" << id << "', 'height', " << lh << ");\n";
+            if (lh > 0) {
+                ss << ind << "setFlex('" << id << "', 'height', " << lh << ");\n";
+                fidelity_emitted_h = static_cast<float>(lh);
+            }
         } else if (node.style.height) {
             ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+            fidelity_emitted_h = *node.style.height;
         } else if (node.layout.height_mode == SizingMode::fill) {
             ss << ind << "setFlex('" << id << "', 'flex_grow', 1);\n";
         } else {
             float est = compute_container_height(node);
             ss << ind << "setFlex('" << id << "', 'height', " << est << ");\n";
+            fidelity_emitted_h = est;
         }
 
         // Width: use _layoutWidth if available, then style.width
+        float fidelity_emitted_w = 0.0f;  // captured for the gross-size self-check
         if (node.attributes.count("_layoutWidth")) {
             int lw = std::stoi(node.attributes.at("_layoutWidth"));
-            if (lw > 0) ss << ind << "setFlex('" << id << "', 'width', " << lw << ");\n";
+            if (lw > 0) {
+                ss << ind << "setFlex('" << id << "', 'width', " << lw << ");\n";
+                fidelity_emitted_w = static_cast<float>(lw);
+            }
         } else if (node.style.width) {
             ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+            fidelity_emitted_w = *node.style.width;
+        }
+
+        // Reference-free fidelity self-check: did codegen keep an explicitly
+        // fixed-sized container within tolerance of its authored box? Self-skips
+        // on hug/fill/absolute/display:none and on any unmeasured axis.
+        if (opts.fidelity_report) {
+            if (auto issue = check_gross_size_divergence(
+                    node, id, fidelity_emitted_w, fidelity_emitted_h))
+                opts.fidelity_report->push_back(std::move(*issue));
         }
 
         if (node.layout.gap > 0)
@@ -1388,6 +1408,45 @@ std::optional<FidelityIssue> check_image_sizing_fidelity(
           << png_aspect << " (" << static_cast<int>(rel * 100.0f + 0.5f)
           << "% off) — sprite skewed";
         return FidelityIssue{node_id, node.name, "skew", d.str()};
+    }
+    return std::nullopt;
+}
+
+std::optional<FidelityIssue> check_gross_size_divergence(
+    const IRNode& node, const std::string& node_id,
+    float emitted_w, float emitted_h) {
+    // Only meaningful when the user explicitly pinned BOTH axes. hug/fill are
+    // flex-driven by design and must never be flagged — they legitimately grow
+    // or shrink away from the authored width/height.
+    if (node.layout.width_mode  != SizingMode::fixed) return std::nullopt;
+    if (node.layout.height_mode != SizingMode::fixed) return std::nullopt;
+
+    // False-positive gates (all IR-level, source-agnostic):
+    //  - absolute nodes size relative to their containing block, not sibling
+    //    flow, so a large emitted box vs. a small authored one is legitimate.
+    //  - display:none / hidden nodes are not rendered at all.
+    if (node.style.position.has_value() && *node.style.position == "absolute")
+        return std::nullopt;
+    if (node.layout.display.has_value() && *node.layout.display == "none")
+        return std::nullopt;
+
+    const float src_w = node.style.width.value_or(0.0f);
+    const float src_h = node.style.height.value_or(0.0f);
+    // Need a real source box on both axes to form a ratio, and an emitted box
+    // to compare it against. Missing either → cannot judge, so no finding.
+    if (src_w <= 0.0f || src_h <= 0.0f) return std::nullopt;
+    if (emitted_w <= 0.0f || emitted_h <= 0.0f) return std::nullopt;
+
+    auto ratio = [](float a, float b) { return std::max(a, b) / std::min(a, b); };
+    const float rw = ratio(emitted_w, src_w);
+    const float rh = ratio(emitted_h, src_h);
+    constexpr float kMaxRatio = 3.0f;
+    if (rw > kMaxRatio || rh > kMaxRatio) {
+        std::ostringstream d;
+        d << "fixed-sized node emitted box diverges from source: "
+          << "W " << rw << "x (source " << src_w << " emitted " << emitted_w << "px), "
+          << "H " << rh << "x (source " << src_h << " emitted " << emitted_h << "px)";
+        return FidelityIssue{node_id, node.name, "gross-size", d.str()};
     }
     return std::nullopt;
 }

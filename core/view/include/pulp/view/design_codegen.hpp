@@ -73,7 +73,7 @@ struct CodeGenOptions {
 struct FidelityIssue {
     std::string node_id;    ///< sanitized bridge id of the offending node
     std::string node_name;  ///< source layer name (for human-readable reports)
-    std::string kind;       ///< "skew" | "aspect-unverified"
+    std::string kind;       ///< "skew" | "aspect-unverified" | "gross-size"
     std::string detail;     ///< one-line explanation with the measured numbers
 };
 
@@ -84,6 +84,17 @@ struct FidelityIssue {
 /// intentionally fill their declared box and are never flagged. Pure +
 /// testable in isolation; `emitted_w/h` are the dimensions codegen emitted.
 std::optional<FidelityIssue> check_image_sizing_fidelity(
+    const IRNode& node, const std::string& node_id,
+    float emitted_w, float emitted_h);
+
+/// Reference-free check: did codegen keep an explicitly-sized node's emitted
+/// box within 3× of its IR source box on both axes? Fires ONLY when BOTH axes
+/// are SizingMode::fixed (the user pinned the size); hug/fill axes are
+/// flex-driven by design and skipped, as are absolutely-positioned and
+/// display:none nodes. Catches errant flex-grow/shrink and paint-size bugs for
+/// ANY source — it reads only normalized IR geometry, never a source quirk.
+/// `emitted_w/h` are the dimensions codegen emitted for the node's box.
+std::optional<FidelityIssue> check_gross_size_divergence(
     const IRNode& node, const std::string& node_id,
     float emitted_w, float emitted_h);
 

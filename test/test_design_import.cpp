@@ -4281,3 +4281,97 @@ TEST_CASE("fidelity self-check flags an asset_bleed sprite that skews",
     REQUIRE(issue.has_value());
     CHECK(issue->kind == "skew");
 }
+
+// ── Gross-size divergence self-check (any node, any source) ─────────────────
+namespace {
+IRNode make_sized_node(float src_w, float src_h,
+                       SizingMode wmode = SizingMode::fixed,
+                       SizingMode hmode = SizingMode::fixed) {
+    IRNode n;
+    n.type = "frame";
+    n.name = "Box";
+    n.style.width = src_w;
+    n.style.height = src_h;
+    n.layout.width_mode = wmode;
+    n.layout.height_mode = hmode;
+    return n;
+}
+}  // namespace
+
+TEST_CASE("gross-size check passes within tolerance",
+          "[view][import][fidelity][harness]") {
+    const auto n = make_sized_node(100.0f, 100.0f);
+    CHECK_FALSE(check_gross_size_divergence(n, "Box0", 120.0f, 120.0f).has_value());
+}
+
+TEST_CASE("gross-size check flags a width blow-out on a fixed node",
+          "[view][import][fidelity][harness]") {
+    const auto n = make_sized_node(100.0f, 100.0f);
+    const auto issue = check_gross_size_divergence(n, "Box0", 400.0f, 100.0f);
+    REQUIRE(issue.has_value());
+    CHECK(issue->kind == "gross-size");
+    CHECK(issue->node_id == "Box0");
+    CHECK(issue->detail.find("400") != std::string::npos);
+}
+
+TEST_CASE("gross-size check skips hug/fill axes (flex intent, never flagged)",
+          "[view][import][fidelity][harness]") {
+    const auto hug = make_sized_node(100.0f, 100.0f,
+                                     SizingMode::fixed, SizingMode::hug);
+    CHECK_FALSE(check_gross_size_divergence(hug, "Box0", 100.0f, 900.0f).has_value());
+    const auto fill = make_sized_node(100.0f, 100.0f,
+                                      SizingMode::fill, SizingMode::fixed);
+    CHECK_FALSE(check_gross_size_divergence(fill, "Box0", 900.0f, 100.0f).has_value());
+}
+
+TEST_CASE("gross-size check skips absolute and display:none nodes",
+          "[view][import][fidelity][harness]") {
+    auto abs_node = make_sized_node(100.0f, 100.0f);
+    abs_node.style.position = "absolute";
+    CHECK_FALSE(check_gross_size_divergence(abs_node, "Box0", 900.0f, 900.0f).has_value());
+
+    auto hidden = make_sized_node(100.0f, 100.0f);
+    hidden.layout.display = "none";
+    CHECK_FALSE(check_gross_size_divergence(hidden, "Box0", 900.0f, 900.0f).has_value());
+}
+
+TEST_CASE("gross-size check ignores the exact-3x boundary and is source-agnostic",
+          "[view][import][fidelity][harness]") {
+    const auto edge = make_sized_node(100.0f, 100.0f);
+    CHECK_FALSE(check_gross_size_divergence(edge, "Box0", 300.0f, 100.0f).has_value());
+    const auto bare = make_sized_node(100.0f, 100.0f);
+    CHECK(check_gross_size_divergence(bare, "Box0", 301.0f, 100.0f).has_value());
+}
+
+TEST_CASE("codegen routes a fixed container through the gross-size check",
+          "[view][import][codegen][fidelity]") {
+    // A fixed/fixed frame whose _layoutWidth snapshot quadruples its authored
+    // width must surface a "gross-size" finding through the fidelity_report
+    // sink wired into the container branch.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 100.0f;
+
+    IRNode box;
+    box.type = "frame";
+    box.name = "Box";
+    box.style.width = 100.0f;
+    box.style.height = 100.0f;
+    box.layout.width_mode = SizingMode::fixed;
+    box.layout.height_mode = SizingMode::fixed;
+    box.attributes["_layoutWidth"] = "400";   // snapshot computes 4x the authored box
+    box.attributes["_layoutHeight"] = "100";
+    ir.root.children.push_back(box);
+
+    std::vector<pulp::view::FidelityIssue> report;
+    CodeGenOptions opts;
+    opts.fidelity_report = &report;
+    (void)generate_pulp_js(ir, opts);
+
+    bool found = false;
+    for (const auto& iss : report)
+        if (iss.kind == "gross-size" && iss.node_name == "Box") found = true;
+    CHECK(found);
+}
