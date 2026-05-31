@@ -2426,3 +2426,16 @@ capacity, not a queue waiting on the Mac. Namespace is no longer a
 routing target (cut for cost, 2026-05-20). The matrix leg name's
 `[<provider>]` suffix reflects the real route (`local` / `github-hosted`
 / `operator`).
+
+## Host-quirks staleness check (host-quirks P4)
+
+`.github/workflows/host-quirks-staleness.yml` — scheduled (monthly) +
+`workflow_dispatch`, **preview-only**. Runs `tools/scripts/host_quirks_staleness.py`
+(+ the staleness unit test + the catalog parity test) to surface host-quirk
+catalog entries due for re-review: Speculative/LessonOnly rows not
+re-verified in N months (default 6), and Validated rows with
+`affected_versions` (re-check vs the host's current major). It prints a
+report and exits 0 — it does **not** open issues (no false-positive spam).
+Promoting it to auto-open tracking issues is a future opt-in. Detection
+lives in the pure `stale_entries()` fn (unit-tested in
+`tools/scripts/test_host_quirks_staleness.py`), so it needs no clock/network.

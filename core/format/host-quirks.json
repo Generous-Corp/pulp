@@ -10,7 +10,8 @@
     "source_type": "spec | release-notes | repro | in-DAW-bench | unknown \u2014 how the quirk was established.",
     "evidence": "Issue/PR/doc reference or short pointer; 'unknown' where the log is not explicit.",
     "last_verified": "ISO date the tier was last affirmed, or 'unknown'.",
-    "note": "One-line human-readable summary."
+    "note": "One-line human-readable summary.",
+    "affected_versions": "Free-text host-version expression the quirk applies to (e.g. =10.1.13, <6.0, 13+, fixed in 7.0). Optional; read by the staleness job to prompt re-verification against new host majors. Not a parsed DSL."
   },
   "quirks": [
     {
@@ -81,7 +82,8 @@
       "source_type": "spec",
       "evidence": "macOS plan item 5.3 (DAW-quirks row 4); host-quirks-log.md 2026-05-25",
       "last_verified": "2026-05-25",
-      "note": "State-blob stream-size mismatch validation."
+      "note": "State-blob stream-size mismatch validation.",
+      "affected_versions": "9"
     },
     {
       "flag": "live_vst3_canresize_ignore",
@@ -111,7 +113,8 @@
       "source_type": "release-notes",
       "evidence": "iPlug2 quirks audit 2026-05-25 (clean-room lessons); host-quirks-log.md 2026-05-25",
       "last_verified": "2026-05-25",
-      "note": "Live 10.1.13 IInfoListener::getString writes past spec buffer length; allocate buffers at twice spec size."
+      "note": "Live 10.1.13 IInfoListener::getString writes past spec buffer length; allocate buffers at twice spec size.",
+      "affected_versions": "=10.1.13"
     },
     {
       "flag": "bitwig_vst3_linux_repaint_after_resize",
@@ -131,7 +134,8 @@
       "source_type": "repro",
       "evidence": "macOS plan item 5.5 (DAW-quirks row 9); host-quirks-log.md 2026-05-25",
       "last_verified": "2026-05-25",
-      "note": "VST3 setBusArrangements invoked while active."
+      "note": "VST3 setBusArrangements invoked while active.",
+      "affected_versions": "<6.0"
     },
     {
       "flag": "skip_bus_arrangement_call",
@@ -381,7 +385,8 @@
       "source_type": "repro",
       "evidence": "Pulp #3047 (iPlug2-audit batch 2026-05-26); host-quirks-log.md 2026-05-26",
       "last_verified": "2026-05-26",
-      "note": "Derive MIDI CC parameter IDs from a stable hash (not runtime index) so automation lanes survive reload on 13.x."
+      "note": "Derive MIDI CC parameter IDs from a stable hash (not runtime index) so automation lanes survive reload on 13.x.",
+      "affected_versions": "13+"
     }
   ]
 }

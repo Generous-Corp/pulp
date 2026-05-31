@@ -26,6 +26,10 @@
           },
           "evidence": { "type": "string" },
           "last_verified": { "type": "string" },
+          "affected_versions": {
+            "type": "string",
+            "description": "Free-text host-version expression the quirk applies to (e.g. \"=10.1.13\", \"<6.0\", \"13+\", \"fixed in 7.0\"). Optional; consumed by the staleness job to prompt re-verification against new host majors. NOT a parsed version DSL — human-readable only."
+          },
           "note": { "type": "string" }
         }
       }
