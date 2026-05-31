@@ -9049,7 +9049,20 @@ void WidgetBridge::register_api() {
         for (size_t i = 0; i < bind_groups.size(); ++i) {
             pass.SetBindGroup(bind_group_indices[i], bind_groups[i], 0, nullptr);
         }
-        pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+        if (first_instance > 0 && device_ptr->HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+            runtime::log_info(
+                "PULP_WEBGPU_BRIDGE: DrawIndirect/immediate firstInstance={} vertexCount={} instanceCount={}",
+                first_instance, vertex_count, instance_count);
+            uint32_t indirect_args[4] = { vertex_count, instance_count, first_vertex, first_instance };
+            wgpu::BufferDescriptor ibd{};
+            ibd.size = sizeof(indirect_args);
+            ibd.usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::CopyDst;
+            auto ibuf = device_ptr->CreateBuffer(&ibd);
+            queue_ptr->WriteBuffer(ibuf, 0, indirect_args, sizeof(indirect_args));
+            pass.DrawIndirect(ibuf, 0);
+        } else {
+            pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+        }
         pass.End();
 
         auto command_buffer = encoder.Finish();
@@ -9555,8 +9568,32 @@ void WidgetBridge::register_api() {
             }
         }
 
+        // iOS-D.3c (#3217 Codex pass 1): the pipeline's color attachment
+        // format MUST match the actual target texture's format, NOT the
+        // JS-supplied payload `format` field. Three.js may request a
+        // bgra8unorm RenderPass but the intermediate texture is created
+        // as rgba8unorm — Metal SoftwareRenderer silently rejects the
+        // pipeline (the mismatch is suppressed by skip_validation). Use
+        // the target's actual format so the pipeline matches the
+        // attachment.
+        std::string actual_target_format = target_canvas_state != nullptr
+            ? target_canvas_state->format
+            : (target_texture_state != nullptr ? target_texture_state->format : format);
+        if (format != actual_target_format) {
+            static int s_warned = 0;
+            if (++s_warned <= 3) {
+                runtime::log_info("PULP_WEBGPU_BRIDGE: draw target-format mismatch payload={} actual={} canvas={} texId={}",
+                    format, actual_target_format, canvas_id, target_texture_id);
+            }
+        }
         wgpu::ColorTargetState color_target{};
-        color_target.format = texture_format_from_string(format);
+        color_target.format = texture_format_from_string(actual_target_format);
+        // iOS-D.3c (#3217): writeMask was unset → defaulted to None →
+        // pipeline executed but never wrote color. The immediate __gpuQueueDrawImpl
+        // path sets `writeMask = All` (line 8767); buffered path must too,
+        // otherwise the magenta-clear test paints but Three.js's actual
+        // shader output silently vanishes. (Codex root-cause for #3217.)
+        color_target.writeMask = wgpu::ColorWriteMask::All;
 
         wgpu::FragmentState fragment_state{};
         fragment_state.module = fragment_module;
@@ -9718,14 +9755,41 @@ void WidgetBridge::register_api() {
             auto base_vertex = static_cast<int32_t>(payload.hasObjectMember("baseVertex") ? payload["baseVertex"].getWithDefault<int32_t>(0) : 0);
             auto first_instance = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("firstInstance") ? payload["firstInstance"].getWithDefault<int32_t>(0) : 0));
             if (index_count == 0) return choc::value::createBool(false);
-            pass.DrawIndexed(index_count, instance_count, first_index, base_vertex, first_instance);
+            if (first_instance > 0 && device_ptr->HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+                runtime::log_info(
+                    "PULP_WEBGPU_BRIDGE: DrawIndexedIndirect/buffered firstInstance={} indexCount={} instanceCount={}",
+                    first_instance, index_count, instance_count);
+                uint32_t indirect_args[5] = { index_count, instance_count, first_index,
+                                              static_cast<uint32_t>(base_vertex), first_instance };
+                wgpu::BufferDescriptor ibd{};
+                ibd.size = sizeof(indirect_args);
+                ibd.usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::CopyDst;
+                auto ibuf = device_ptr->CreateBuffer(&ibd);
+                queue_ptr->WriteBuffer(ibuf, 0, indirect_args, sizeof(indirect_args));
+                pass.DrawIndexedIndirect(ibuf, 0);
+            } else {
+                pass.DrawIndexed(index_count, instance_count, first_index, base_vertex, first_instance);
+            }
         } else {
             auto vertex_count = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("vertexCount") ? payload["vertexCount"].getWithDefault<int32_t>(0) : 0));
             auto instance_count = static_cast<uint32_t>(std::max(1, payload.hasObjectMember("instanceCount") ? payload["instanceCount"].getWithDefault<int32_t>(1) : 1));
             auto first_vertex = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("firstVertex") ? payload["firstVertex"].getWithDefault<int32_t>(0) : 0));
             auto first_instance = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("firstInstance") ? payload["firstInstance"].getWithDefault<int32_t>(0) : 0));
             if (vertex_count == 0) return choc::value::createBool(false);
-            pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+            if (first_instance > 0 && device_ptr->HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+                runtime::log_info(
+                    "PULP_WEBGPU_BRIDGE: DrawIndirect/buffered firstInstance={} vertexCount={} instanceCount={}",
+                    first_instance, vertex_count, instance_count);
+                uint32_t indirect_args[4] = { vertex_count, instance_count, first_vertex, first_instance };
+                wgpu::BufferDescriptor ibd{};
+                ibd.size = sizeof(indirect_args);
+                ibd.usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::CopyDst;
+                auto ibuf = device_ptr->CreateBuffer(&ibd);
+                queue_ptr->WriteBuffer(ibuf, 0, indirect_args, sizeof(indirect_args));
+                pass.DrawIndirect(ibuf, 0);
+            } else {
+                pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+            }
         }
 
         pass.End();

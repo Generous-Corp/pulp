@@ -43,8 +43,10 @@
 #include "include/effects/SkRuntimeEffect.h"
 // pulp #2183 hot-fix: WebGPU/Graphite native-texture wrap path was
 // missing these heavy includes after the split.
+#include "include/gpu/GpuTypes.h"                  // skgpu::Origin
 #include "include/gpu/graphite/BackendTexture.h"
-#include "include/gpu/graphite/Image.h"
+#include "include/gpu/graphite/Image.h"            // SkImages::WrapTexture
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"  // BackendTextures::MakeDawn(WGPUTexture)
 #include "webgpu/webgpu_cpp.h"
 
 #endif  // PULP_HAS_SKIA
@@ -333,18 +335,45 @@ bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
                                           float y,
                                           float w,
                                           float h) {
-    // pulp #2183 hot-fix: the original body referenced
-    // `skgpu::graphite::BackendTextures::MakeDawn(wgpu::Texture::Handle)`,
-    // an API that does not exist in this Skia release. Stubbed to
-    // return false so the canvas widget (core/view/src/canvas_widget.cpp)
-    // falls back to its non-native rendering path until whoever owns
-    // the Dawn-native-texture wrap path lands the correct
-    // `BackendTexture` factory call for the bundled Skia.
-    (void) texture_handle;
-    (void) width; (void) height;
-    (void) format;
-    (void) x; (void) y; (void) w; (void) h;
-    return false;
+    // iOS-D.3c (#3217): implement the WebGPU canvas → Skia blit. The
+    // bridge gives canvas widgets a `wgpu::Texture*` provider (see
+    // widget_bridge.cpp:1027-1029 and :3265/:3666); CanvasWidget::paint()
+    // routes through here. Until this function returned `true` the
+    // Three.js cube rendered to an invisible offscreen texture; the
+    // CAMetalLayer surface stayed blank. Codex's plan in issue #3217:
+    // wrap the Dawn texture as a graphite::BackendTexture, materialize
+    // as an SkImage, draw into the current canvas.
+    if (!canvas_ || !recorder_ || !texture_handle || width == 0 || height == 0) {
+        return false;
+    }
+
+    auto* texture = static_cast<wgpu::Texture*>(texture_handle);
+    if (!texture || !(*texture)) {
+        return false;
+    }
+
+    auto backend_tex = skgpu::graphite::BackendTextures::MakeDawn(texture->Get());
+    if (!backend_tex.isValid()) {
+        return false;
+    }
+
+    auto image = SkImages::WrapTexture(recorder_,
+                                       backend_tex,
+                                       sk_color_type_from_webgpu_format(format),
+                                       kPremul_SkAlphaType,
+                                       sk_color_space_from_webgpu_format(format),
+                                       skgpu::Origin::kTopLeft,
+                                       nullptr,
+                                       nullptr,
+                                       "Pulp native GPU canvas");
+    if (!image) {
+        return false;
+    }
+
+    canvas_->drawImageRect(image,
+                           SkRect::MakeXYWH(x, y, w, h),
+                           sampling_options_for_image_smoothing());
+    return true;
 }
 
 // ── Blur backdrop ────────────────────────────────────────────────────────────
