@@ -32,6 +32,7 @@
 
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/clap_entry.hpp>
+#include <pulp/format/host_quirks.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
@@ -39,6 +40,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -202,6 +204,12 @@ PULP_CLAP_PLUGIN(make_host_validation)
 
 TEST_CASE("CLAP plugin id + parameter IDs are stable across instances",
           "[clap][host-validation][issue-3-4]") {
+    // Disable host-quirk synthesis so this test sees ONLY the plugin's
+    // declared parameters — since host-quirks P3d the CLAP adapter
+    // synthesizes a Bypass param by default, which would otherwise bump
+    // the count this test pins.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+
     // Force the entry to reinitialise its cached descriptor so we read
     // the canonical (factory-fresh) value rather than a leftover from
     // an earlier suite.
@@ -255,6 +263,7 @@ TEST_CASE("CLAP plugin id + parameter IDs are stable across instances",
     a->destroy(a);
     b->destroy(b);
     clap_entry.deinit();
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
 TEST_CASE("CLAP modulation does not bleed across blocks",

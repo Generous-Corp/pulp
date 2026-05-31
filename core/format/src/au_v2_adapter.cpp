@@ -9,6 +9,7 @@
 #include <mach/mach_time.h>
 
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
@@ -79,6 +80,19 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
             // the runtime policy (PULP_HOST_QUIRKS env / API).
             const auto host_info = detect_host_info();
             host_quirks_ = resolved_quirks(host_info.type, host_info.version);
+
+            // synthesize_bypass_parameter (host-quirks P3d): inject an
+            // automatable Bypass when the plugin declared none (before the
+            // AU param list is built from the store), then detect it so
+            // ProcessBufferLists can honor it with a pass-through.
+            maybe_synthesize_bypass(store_, host_quirks_);
+            for (const auto& p : store_.all_params()) {
+                if (p.name == "Bypass" && p.range.step >= 1.0f &&
+                    p.range.min == 0.0f && p.range.max == 1.0f) {
+                    bypass_param_id_ = p.id;
+                    break;
+                }
+            }
 
             // Wire gesture callbacks for undo grouping support.
             store_.set_gesture_callbacks(
@@ -332,6 +346,24 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     }
     for (UInt32 i = 0; i < out_channels; ++i) {
         output_ptrs_[i] = static_cast<float*>(outBuffer.mBuffers[i].mData);
+    }
+
+    // synthesize_bypass_parameter (host-quirks P3d): when the Bypass param
+    // (declared or synthesized) is engaged, copy main input → main output
+    // (null-guarded), zero any output channel without a matching input, and
+    // skip the Processor — mirrors the VST3/CLAP pass-through. The value was
+    // pulled into the store from GetParameter() above.
+    if (bypass_param_id_ != 0 && store_.get_value(bypass_param_id_) >= 0.5f) {
+        for (UInt32 ch = 0; ch < out_channels; ++ch) {
+            float* dst = output_ptrs_[ch];
+            if (dst == nullptr) continue;
+            if (ch < in_channels && input_ptrs_[ch] != nullptr) {
+                std::memcpy(dst, input_ptrs_[ch], sizeof(float) * inFramesToProcess);
+            } else {
+                std::memset(dst, 0, sizeof(float) * inFramesToProcess);
+            }
+        }
+        return noErr;
     }
 
     audio::BufferView<const float> input_view(

@@ -2,6 +2,7 @@
 // Implements the CLAP C API wrapping a Pulp Processor
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/ump_conversion.hpp>
@@ -50,6 +51,19 @@ bool clap_init(const clap_plugin_t* plugin) {
     {
         const auto host_info = detect_host_info();
         self->host_quirks = resolved_quirks(host_info.type, host_info.version);
+    }
+
+    // synthesize_bypass_parameter (host-quirks P3d): inject an automatable
+    // Bypass param when the plugin declared none, then detect it (the same
+    // boolean-range heuristic VST3/AU use) so clap_process() can honor it
+    // with a pass-through short-circuit. No-op when the quirk is off.
+    maybe_synthesize_bypass(self->store, self->host_quirks);
+    for (const auto& p : self->store.all_params()) {
+        if (p.name == "Bypass" && p.range.step >= 1.0f &&
+            p.range.min == 0.0f && p.range.max == 1.0f) {
+            self->bypass_param_id = p.id;
+            break;
+        }
     }
 
     // Item 6.4b — opt this plugin instance into the process-wide
@@ -563,7 +577,25 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // a plugin that allocates on the audio thread. The guard is a
     // thread-local counter — zero cost in NDEBUG, ~1 ns in debug.
     // See planning/2026-05-18-rt-safety-and-debug-dx.md Slice 4.
-    {
+    // synthesize_bypass_parameter (host-quirks P3d): when the Bypass param
+    // (declared or synthesized) is engaged, the adapter does the pass-through
+    // itself — copy main input → main output (null-guarded), zero any output
+    // channel without a matching input — and skips the Processor entirely.
+    // Mirrors the VST3 processBlockBypassed behavior.
+    const bool bypassed = self->bypass_param_id != 0 &&
+                          self->store.get_value(self->bypass_param_id) >= 0.5f;
+    if (bypassed) {
+        for (int ch = 0; ch < out_channels; ++ch) {
+            if (self->output_ptrs[ch] == nullptr) continue;
+            if (ch < in_channels && self->input_ptrs[ch] != nullptr) {
+                std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
+                            sizeof(float) * num_samples);
+            } else {
+                std::memset(self->output_ptrs[ch], 0, sizeof(float) * num_samples);
+            }
+        }
+        self->processor->set_sidechain(nullptr);
+    } else {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         self->processor->process(output_view, input_view, midi_in, midi_out, ctx);
     }

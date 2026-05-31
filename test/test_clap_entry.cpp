@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/clap_entry.hpp>
+#include <pulp/format/host_quirks.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -332,6 +333,10 @@ TEST_CASE("CLAP entry fallback metadata handles missing processors",
 
 TEST_CASE("CLAP params extension reports metadata and text conversions",
           "[clap][entry][params]") {
+    // Disable host-quirk synthesis so the count below reflects only the
+    // plugin's declared params — since host-quirks P3d the CLAP adapter
+    // synthesizes a Bypass param by default.
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
     REQUIRE(clap_entry.init("test"));
 
     auto* factory = static_cast<const clap_plugin_factory_t*>(
@@ -375,6 +380,7 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
 
     plugin->destroy(plugin);
     clap_entry.deinit();
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
 TEST_CASE("CLAP params extension formats fallbacks and flushes gestures",

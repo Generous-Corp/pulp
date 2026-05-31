@@ -558,3 +558,18 @@ through the pure helper `pulp::format::reported_latency_samples(raw, quirks)`
 (in `host_quirks.hpp`): a negative `latency_samples()` clamps to 0 when the
 quirk is enforced, and passes through raw (wrapping the unsigned host field)
 when `PULP_HOST_QUIRKS=off`. See `docs/reference/host-quirks-policy.md`.
+
+## synthesize_bypass_parameter pass-through (host-quirks P3d, 2026-05-30)
+
+This adapter had no bypass process path; P3d adds the full P3b behavior.
+At init (clap_init / PulpAUEffect ctor) it calls
+`pulp::format::maybe_synthesize_bypass(store, host_quirks)` then detects the
+"Bypass" param (shared boolean-range heuristic: name=="Bypass", step>=1,
+0..1) into a cached `bypass_param_id`. In the audio callback (clap_process /
+ProcessBufferLists) it short-circuits to a **null-guarded pass-through**
+(copy main input → output, zero any output channel without a matching input)
+and skips the Processor when the param value is >= 0.5 — mirroring the VST3
+processBlockBypassed path. `PULP_HOST_QUIRKS=off` synthesizes nothing
+(bypass_param_id stays 0). The pass-through MUST null-check each destination
+channel pointer (a bus can report channels with null buffers — see #178 /
+the #3240 sweep).

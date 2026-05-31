@@ -142,6 +142,11 @@ private:
     // Host accommodations, resolved once in the constructor via the
     // runtime policy (host-quirks plan, P3).
     HostQuirks host_quirks_{};
+
+    // Cached ParamID of the "Bypass" parameter (plugin-declared or
+    // synthesized via synthesize_bypass_parameter, host-quirks P3d). 0 when
+    // none — ProcessBufferLists then never short-circuits to pass-through.
+    state::ParamID bypass_param_id_ = 0;
     std::vector<const float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
     // Pre-process snapshot of parameter values; used to diff plugin-side

@@ -40,6 +40,11 @@ struct PulpClapPlugin {
     // (host-quirks plan, P3).
     HostQuirks host_quirks{};
 
+    // Cached ParamID of the "Bypass" parameter (plugin-declared or
+    // synthesized via synthesize_bypass_parameter, host-quirks P3d). 0 when
+    // none — clap_process() then never short-circuits to pass-through.
+    state::ParamID bypass_param_id = 0;
+
     // Stored at create_plugin() time so the adapter can publish
     // latency / tail change notifications (item 3.11) back to the
     // host. `clap_on_main_thread()` consumes the processor's pending

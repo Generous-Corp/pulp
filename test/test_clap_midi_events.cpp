@@ -29,6 +29,7 @@
 
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/clap_entry.hpp>
+#include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
@@ -39,6 +40,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <vector>
 
 using namespace pulp;
@@ -1740,4 +1742,42 @@ TEST_CASE("midi_out shorts + sysex interleave by sample_offset on out_events",
     REQUIRE(out.at(1)->type == CLAP_EVENT_MIDI);
     REQUIRE(out.at(2)->time == 10);
     REQUIRE(out.at(2)->type == CLAP_EVENT_MIDI);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// host-quirks P3d — synthesize_bypass_parameter honored by the CLAP
+// adapter end-to-end. CapturingProcessor declares no Bypass, so with the
+// quirk enforced clap_init synthesizes one; engaging it makes clap_process
+// pass main input → output verbatim and skip the Processor.
+// ─────────────────────────────────────────────────────────────────────
+TEST_CASE("CLAP synthesizes + honors a Bypass param when the plugin declares none",
+          "[clap][host-quirks][p3][bypass]") {
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
+    {
+        Harness h(make_capturing);
+        // clap_init synthesized the Bypass (reserved ID) and detected it.
+        REQUIRE(h.plugin.bypass_param_id == pulp::format::kSynthesizedBypassParamId);
+
+        for (uint32_t i = 0; i < Harness::kFrames; ++i) {
+            h.in_left[i]  = 0.1f + static_cast<float>(i);
+            h.in_right[i] = -(0.1f + static_cast<float>(i));
+        }
+        // Engage bypass + run with no events → pass-through, Processor skipped.
+        h.plugin.store.set_value(h.plugin.bypass_param_id, 1.0f);
+        InputEventList empty;
+        REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+        REQUIRE(h.out_left == h.in_left);
+        REQUIRE(h.out_right == h.in_right);
+    }
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("CLAP does NOT synthesize a Bypass param when the quirk is off",
+          "[clap][host-quirks][p3][bypass]") {
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+    {
+        Harness h(make_capturing);
+        REQUIRE(h.plugin.bypass_param_id == 0u);  // no synthesis
+    }
+    pulp::format::set_host_quirk_policy(std::nullopt);
 }
