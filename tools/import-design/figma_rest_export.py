@@ -139,21 +139,44 @@ def extract_text_style(n, s):
             s["color"] = paint_to_color(f)
             s.pop("background_color", None)
 
+# Figma REST vector/shape leaf types. NOTE: REST uses REGULAR_POLYGON (the plugin
+# SceneNode API reports "POLYGON"); the port must accept both or polygon-based
+# illustrations (e.g. ELYSIUM's Pentagon/RANGE shape) fail the pure-vector test
+# and recurse into partial captures instead of rasterizing as one whole sprite.
+VECTOR_LEAF_TYPES = ("VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON",
+                     "REGULAR_POLYGON", "LINE", "ELLIPSE", "RECTANGLE")
+
 def is_vector_like(t):
-    return t in ("VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "LINE")
+    return t in ("VECTOR", "BOOLEAN_OPERATION", "STAR", "POLYGON", "REGULAR_POLYGON", "LINE")
 
 def is_pure_vector_illustration(n):
     kids = n.get("children", [])
     if not kids: return False
     for c in kids:
         t = c.get("type")
-        if t in ("VECTOR", "BOOLEAN_OPERATION", "LINE", "STAR", "POLYGON", "ELLIPSE", "RECTANGLE"):
+        if t in VECTOR_LEAF_TYPES:
             continue
         if t in ("FRAME", "GROUP"):
             if not is_pure_vector_illustration(c): return False
             continue
         return False  # text/instance/image → not a pure illustration
     return True
+
+# Recognize audio-widget nodes by name (mirrors the importer's detect_audio_widget
+# + the plugin's widgetKindByNamePrefix). A recognized widget is emitted as a leaf
+# with audio_widget set so the importer renders it NATIVELY (silver knob / fader /
+# meter — the figma-plugin lane default) at the node's own size, instead of
+# capturing its internal vectors as images (which suppresses recognition and
+# renders a misplaced raw sprite). Mirror this in the TS extractor (P2/P3).
+def widget_kind_from_name(name):
+    low = (name or "").lower()
+    if "knob" in low or "dial" in low: return "knob"
+    if "fader" in low or "slider" in low: return "fader"
+    if "meter" in low or "vu" in low: return "meter"
+    if "xy" in low and "pad" in low: return "xy_pad"
+    if "waveform" in low: return "waveform"
+    if "spectrum" in low: return "spectrum"
+    return None
 
 def is_auto_layout(n):
     return n is not None and n.get("layoutMode") in ("HORIZONTAL", "VERTICAL")
@@ -200,12 +223,21 @@ def walk(n, parent, z):
         out["content"] = n.get("characters", "")
         extract_text_style(n, style)
 
-    # Asset capture (extract.ts:268-322). Vector-like nodes → PNG asset_ref.
-    # Pure-vector-illustration frames → whole-frame PNG, drop children.
+    # Audio-widget recognition (mirrors importer detect_audio_widget). A
+    # knob/fader/meter node is emitted as a recognized leaf widget so the
+    # importer renders it natively (silver knob etc.) at the node's own size —
+    # NOT captured as a raw image sprite from its internal vectors (which
+    # suppresses recognition and renders a misplaced fragment).
     bb = n.get("absoluteBoundingBox") or {}
     tiny = bb.get("width", 0) < 1 and bb.get("height", 0) < 1
     captured = False
-    if is_vector_like(ntype) and not tiny:
+    wkind = widget_kind_from_name(n.get("name", ""))
+    if wkind:
+        out["audio_widget"] = wkind
+        captured = True  # leaf widget: importer renders native; don't capture/recurse
+    # Asset capture (extract.ts:268-322). Vector-like nodes → PNG asset_ref.
+    # Pure-vector-illustration frames → whole-frame PNG, drop children.
+    elif is_vector_like(ntype) and not tiny:
         out["type"] = "image"; out["asset_ref"] = n["id"]; ASSET_IDS.append(n["id"]); captured = True
     elif (ntype in ("FRAME", "GROUP") and n.get("children")
           and is_pure_vector_illustration(n)):
