@@ -9595,6 +9595,20 @@ void WidgetBridge::register_api() {
         // shader output silently vanishes. (Codex root-cause for #3217.)
         color_target.writeMask = wgpu::ColorWriteMask::All;
 
+        // iOS-D.3c (#3217): for canvas-targeted draws specifically, drop
+        // the alpha channel from writeMask so the shader's alpha=0 output
+        // (Three.js's WebGPURenderer composite path) doesn't reset the
+        // destination alpha to 0. Combined with the loadOp=Clear/alpha=1
+        // override below at color_attachment, this keeps the canvas
+        // swapchain alpha at 1 (opaque) regardless of shader output —
+        // Skia then composites the RGB content the shader wrote instead
+        // of compositing src.alpha=0 against the canvasCard CSS bg.
+        if (target_canvas_state != nullptr) {
+            color_target.writeMask = wgpu::ColorWriteMask::Red
+                                   | wgpu::ColorWriteMask::Green
+                                   | wgpu::ColorWriteMask::Blue;
+        }
+
         wgpu::FragmentState fragment_state{};
         fragment_state.module = fragment_module;
         fragment_state.entryPoint = fragment_entry.c_str();
@@ -9663,6 +9677,18 @@ void WidgetBridge::register_api() {
                 static_cast<float>(clear_value.hasObjectMember("b") ? clear_value["b"].getWithDefault<double>(0.0) : 0.0),
                 static_cast<float>(clear_value.hasObjectMember("a") ? clear_value["a"].getWithDefault<double>(1.0) : 1.0)
             };
+        }
+        // iOS-D.3c (#3217): for canvas-targeted draws, force loadOp=Clear
+        // with alpha=1 so the destination alpha starts opaque. Combined
+        // with the canvas-specific writeMask (RGB only, set above on the
+        // pipeline's color_target), this keeps the canvas swapchain
+        // alpha at 1 across all draws regardless of what alpha the
+        // shader emits. Without this, Three.js's composite (which
+        // writes alpha=0 for the canvas pass) leaves the canvas
+        // transparent and the canvasCard CSS background shows through.
+        if (target_canvas_state != nullptr) {
+            color_attachment.loadOp = wgpu::LoadOp::Clear;
+            color_attachment.clearValue.a = 1.0f;
         }
 
         // Create depth texture if depth/stencil is requested
