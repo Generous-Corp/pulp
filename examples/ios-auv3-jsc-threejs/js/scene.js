@@ -288,12 +288,17 @@
             var bs = (typeof globalThis !== "undefined") ? globalThis.__pulpBufWriteStats : null;
             if (bs) {
                 var ids80 = Object.keys(bs.byId80 || {}).slice(0, 10);
+                var latest = "";
+                if (bs.latest80) {
+                    for (var k in bs.latest80) {
+                        latest += " id" + k + "={" + bs.latest80[k] + "}";
+                    }
+                }
                 console.info("PULP_BUF_WRITE_STATS writeBuffer=" + bs.writeBuffer
                     + " mappedRangeUnmap=" + bs.getMappedRangeUnmap
                     + " sizes=" + JSON.stringify(bs.sizesSeen)
-                    + " 80B-ids=[" + ids80.join(",") + "] (out of "
-                    + Object.keys(bs.byId80 || {}).length + " total)"
-                    + " sampleFirst80=" + (bs.sampleFirst80 || "none"));
+                    + " 80B-ids=[" + ids80.join(",") + "]"
+                    + " latestBytes=" + latest);
             }
             console.info("PULP_THREE_RENDER: 60-frame avg "
                 + ms.toFixed(2) + " ms/frame ("

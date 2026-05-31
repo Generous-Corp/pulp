@@ -141,7 +141,8 @@ function __createMockGPUBuffer(init) {
         _destroyed: false,
         _bytes: new Uint8Array(init.size || 0),
         _mappedView: null,
-        _mappedOffset: 0
+        _mappedOffset: 0,
+        _mappedRanges: null
     };
     buffer.mapAsync = function() {
         buffer.mapState = "mapped";
@@ -158,28 +159,31 @@ function __createMockGPUBuffer(init) {
     // a fresh Uint8Array view backed by an independent ArrayBuffer
     // (so writes don't bleed into _bytes mid-frame), record the offset,
     // and copy back on unmap.
+    buffer._mappedRanges = [];
     buffer.getMappedRange = function(offset, size) {
         var begin = offset || 0;
         var actualSize = size == null ? Math.max(0, buffer.size - begin) : size;
         var view = new Uint8Array(actualSize);
-        // Seed the view with current contents so partial writes don't
-        // wipe pre-existing bytes (mappedAtCreation buffers start zeroed
-        // so this is a no-op there; for re-maps it preserves untouched
-        // regions).
         if (actualSize > 0 && begin + actualSize <= buffer._bytes.length) {
             view.set(buffer._bytes.subarray(begin, begin + actualSize));
         }
-        buffer._mappedView = view;
-        buffer._mappedOffset = begin;
+        // Track ALL mapped ranges so multiple getMappedRange calls before
+        // unmap don't lose writes (Three.js does this for multi-attribute
+        // vertex buffers).
+        buffer._mappedRanges.push({ view: view, offset: begin });
+        if (buffer._dbgGen != null) buffer._dbgGen += 1;
         return view.buffer;
     };
     buffer.unmap = function() {
-        if (buffer._mappedView) {
-            buffer._bytes.set(buffer._mappedView, buffer._mappedOffset);
-            buffer._mappedView = null;
+        if (buffer._mappedRanges && buffer._mappedRanges.length > 0) {
+            for (var ri = 0; ri < buffer._mappedRanges.length; ++ri) {
+                var r = buffer._mappedRanges[ri];
+                buffer._bytes.set(r.view, r.offset);
+            }
+            buffer._mappedRanges = [];
             if (typeof globalThis !== "undefined") {
                 if (!globalThis.__pulpBufWriteStats) {
-                    globalThis.__pulpBufWriteStats = { writeBuffer: 0, getMappedRangeUnmap: 0, sizesSeen: {} };
+                    globalThis.__pulpBufWriteStats = { writeBuffer: 0, getMappedRangeUnmap: 0, sizesSeen: {}, byId80: {}, sampleFirst80: null };
                 }
                 globalThis.__pulpBufWriteStats.getMappedRangeUnmap += 1;
             }
@@ -462,19 +466,19 @@ function __createMockGPUQueue(init) {
             var sk = String(buffer.size);
             globalThis.__pulpBufWriteStats.sizesSeen[sk] = (globalThis.__pulpBufWriteStats.sizesSeen[sk] || 0) + 1;
             // For 80B buffers (the per-mesh path), track per-id write counts
-            // and capture the first 16 bytes the very first time.
+            // and capture the LATEST 16 bytes per id so we can see the
+            // actual per-frame data Three.js writes (not just init zeros).
             if (buffer.size === 80) {
                 var idKey = String(buffer._dbgId);
                 globalThis.__pulpBufWriteStats.byId80[idKey] = (globalThis.__pulpBufWriteStats.byId80[idKey] || 0) + 1;
-                if (!globalThis.__pulpBufWriteStats.sampleFirst80) {
-                    var hex = "";
-                    for (var i = 0; i < 16 && i < buffer._bytes.length; ++i) {
-                        var b = buffer._bytes[i].toString(16);
-                        if (b.length < 2) b = "0" + b;
-                        hex += b + " ";
-                    }
-                    globalThis.__pulpBufWriteStats.sampleFirst80 = "id=" + idKey + " bytes=" + hex.trim();
+                if (!globalThis.__pulpBufWriteStats.latest80) globalThis.__pulpBufWriteStats.latest80 = {};
+                var hex2 = "";
+                for (var i2 = 0; i2 < 32 && i2 < buffer._bytes.length; ++i2) {
+                    var b2 = buffer._bytes[i2].toString(16);
+                    if (b2.length < 2) b2 = "0" + b2;
+                    hex2 += b2 + " ";
                 }
+                globalThis.__pulpBufWriteStats.latest80[idKey] = hex2.trim();
             }
         }
     };

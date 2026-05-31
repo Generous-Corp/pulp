@@ -106,8 +106,10 @@ function __installNativeGpuBufferedDrawAugmentation() {
                         hasDynamicOffset: !!(layoutEntry && layoutEntry.buffer && layoutEntry.buffer.hasDynamicOffset),
                         minBindingSize: layoutEntry && layoutEntry.buffer && layoutEntry.buffer.minBindingSize != null ? layoutEntry.buffer.minBindingSize : size,
                         size: size,
-                        // iOS-D.3c (#3217) — surface buffer id+gen for diagnostic
+                        // iOS-D.3c (#3217) — surface offset + buffer id+gen for diagnostic
                         // correlation with writeBuffer call sites.
+                        dbgOffset: offset,
+                        dbgBufSize: resource.buffer.size,
                         dbgId: resource.buffer._dbgId || 0,
                         dbgGen: resource.buffer._dbgGen || 0,
                         bufBytesAvailable: resource.buffer._bytes.length,

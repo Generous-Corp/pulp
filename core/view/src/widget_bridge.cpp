@@ -9769,7 +9769,9 @@ void WidgetBridge::register_api() {
                                     auto bt = en.hasObjectMember("bufferType") ? en["bufferType"].getWithDefault<std::string>("") : "";
                                     auto did = en.hasObjectMember("dbgId") ? en["dbgId"].getWithDefault<int32_t>(0) : 0;
                                     auto dgen = en.hasObjectMember("dbgGen") ? en["dbgGen"].getWithDefault<int32_t>(0) : 0;
-                                    ref = bt + "[" + std::to_string(sz) + "B,id=" + std::to_string(did) + ",gen=" + std::to_string(dgen) + "]";
+                                    auto doff = en.hasObjectMember("dbgOffset") ? en["dbgOffset"].getWithDefault<int32_t>(-1) : -1;
+                                    auto dbsz = en.hasObjectMember("dbgBufSize") ? en["dbgBufSize"].getWithDefault<int32_t>(0) : 0;
+                                    ref = bt + "[id=" + std::to_string(did) + " bufSize=" + std::to_string(dbsz) + " off=" + std::to_string(doff) + " size=" + std::to_string(sz) + " gen=" + std::to_string(dgen) + "]";
                                     // Dump first 16 bytes of the uniform to see if data
                                     // is propagating from JS to native, or arriving as zeros.
                                     if (en.hasObjectMember("data") && en["data"].isArray()) {

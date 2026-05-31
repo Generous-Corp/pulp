@@ -41,6 +41,7 @@
 #include "include/core/SkTileMode.h"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "include/core/SkColorFilter.h"
 // pulp #2183 hot-fix: WebGPU/Graphite native-texture wrap path was
 // missing these heavy includes after the split.
 #include "include/gpu/GpuTypes.h"                  // skgpu::Origin
