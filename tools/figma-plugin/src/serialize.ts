@@ -42,6 +42,37 @@ export function serializeExport(
   diagnostics: ExtractedDiagnostic[],
   ctx: SerializeContext,
 ): unknown {
+  // #43c orphan-font check — if the user dropped a TTF/OTF for
+  // (family, style) tuples that don't appear in font_family_assets
+  // (drop happened before scan, or selection changed before export),
+  // the bytes still ride in asset_manifest but no catalogue entry
+  // references them. The runtime can find them by hash, but the dead
+  // weight + lack of pointer is worth surfacing so the user knows
+  // they bundled bytes that won't auto-resolve.
+  if (ctx.userFonts && ctx.userFonts.size() > 0) {
+    const stampedKeys = new Set<string>();
+    for (const f of ctx.fontFamilyAssets ?? []) {
+      if (ctx.userFonts.lookup(f.family, f.style)) {
+        stampedKeys.add(`${f.family}|${f.style}`);
+      }
+    }
+    for (const userFont of ctx.userFonts.entries()) {
+      const key = `${userFont.family}|${userFont.style}`;
+      if (!stampedKeys.has(key)) {
+        diagnostics.push({
+          severity: "info",
+          code: "userfont-orphan",
+          kind: "fallback_used",
+          message: `User-supplied font "${userFont.family} ${userFont.style}" ` +
+                   `(${userFont.original_filename}) is bundled in asset_manifest ` +
+                   `but no text node in this selection references that (family, style). ` +
+                   `Runtime can still locate it by content_hash; consider re-scanning fonts before export.`,
+          path: "/font_family_assets",
+        });
+      }
+    }
+  }
+
   // Multi-root: wrap in a synthetic frame so the schema's single-root contract holds.
   const root = roots.length === 1
     ? toEnvelopeNode(roots[0])

@@ -52,22 +52,52 @@ export class UserFontCache {
 
   /// Add a user-supplied font, returning the asset_id. Idempotent on the
   /// (family, style) key — re-adding overwrites the previous bytes.
+  ///
+  /// Throws if the bytes don't look like a real font file. Two gates:
+  ///   1. Bytes must contain at least one full SFNT/WOFF header
+  ///      (4 magic + 8 table-count region = 12 bytes minimum). A 0-byte
+  ///      or under-12-byte drop is rejected here; the previous behaviour
+  ///      was to fall through to filename-based mime detection, which
+  ///      silently propagated an empty / corrupt blob into the zip.
+  ///   2. The bytes' SFNT magic OR a recognisable font-file extension
+  ///      must match — at least one must say "this is a font." Pure
+  ///      magic-byte rejection would be too strict (older font tools
+  ///      occasionally produce non-standard headers); pure
+  ///      filename-trust is too loose (any `.ttf`-renamed binary would
+  ///      pass). Requiring at least one signal catches the common
+  ///      "I dropped the wrong file" UX failure mode.
   async add(
     family: string,
     style: string,
     bytes: Uint8Array,
     original_filename: string,
   ): Promise<UserFontEntry> {
+    if (bytes.length === 0) {
+      throw new Error(
+        `font drop "${original_filename}" is empty (0 bytes); refusing to add to the asset cache.`,
+      );
+    }
+    if (bytes.length < 12) {
+      throw new Error(
+        `font drop "${original_filename}" is ${bytes.length} bytes — too short to be a valid SFNT/WOFF font (need at least 12 bytes for the header). Refusing to add.`,
+      );
+    }
+    const sniffed = detectFontMime(bytes, original_filename);
+    if (sniffed === "application/octet-stream") {
+      throw new Error(
+        `font drop "${original_filename}" doesn't match any known font format ` +
+        `(no SFNT/WOFF magic bytes, filename has no font extension). Refusing to add.`,
+      );
+    }
     const content_hash = await sha256Hex(bytes);
     const asset_id = `userfont-${content_hash.slice(0, 12)}`;
-    const mime = detectFontMime(bytes, original_filename);
     const entry: UserFontEntry = {
       family,
       style,
       asset_id,
       content_hash,
       bytes,
-      mime,
+      mime: sniffed,
       original_filename,
     };
     this.byKey.set(UserFontCache.makeKey(family, style), entry);

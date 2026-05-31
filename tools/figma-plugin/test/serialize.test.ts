@@ -235,7 +235,10 @@ import { UserFontCache } from "../src/user-fonts";
 
 test("serializeExport stamps user-supplied font asset_id (#43c)", async () => {
   const cache = new UserFontCache();
-  const bytes = new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef]);
+  // SFNT TrueType magic (0x00010000) + filler bytes to clear the 12-byte minimum header.
+  const bytes = new Uint8Array(16);
+  bytes[0] = 0x00; bytes[1] = 0x01; bytes[2] = 0x00; bytes[3] = 0x00;
+  for (let i = 4; i < 16; i++) bytes[i] = 0xab;
   const entry = await cache.add("Clash Grotesk", "Medium", bytes, "ClashGrotesk-Medium.ttf");
 
   const fontFamilyAssets = [
@@ -280,16 +283,118 @@ test("serializeExport stamps user-supplied font asset_id (#43c)", async () => {
 test("UserFontCache sniffs SFNT magic for font/ttf vs font/otf (#43c)", async () => {
   const cache = new UserFontCache();
 
-  // TrueType magic: 0x00 0x01 0x00 0x00
-  const ttf = await cache.add("F", "R", new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xff]), "any.ttf");
+  // TrueType magic: 0x00 0x01 0x00 0x00 + enough bytes to clear the 12-byte minimum.
+  const ttfBytes = new Uint8Array(16);
+  ttfBytes[0] = 0x00; ttfBytes[1] = 0x01; ttfBytes[2] = 0x00; ttfBytes[3] = 0x00;
+  const ttf = await cache.add("F", "R", ttfBytes, "any.ttf");
   assert.equal(ttf.mime, "font/ttf");
 
-  // OpenType CFF: "OTTO" (0x4f 0x54 0x54 0x4f)
-  const otf = await cache.add("F", "B", new Uint8Array([0x4f, 0x54, 0x54, 0x4f, 0xff]), "any.otf");
+  // OpenType CFF: "OTTO" (0x4f 0x54 0x54 0x4f).
+  const otfBytes = new Uint8Array(16);
+  otfBytes[0] = 0x4f; otfBytes[1] = 0x54; otfBytes[2] = 0x54; otfBytes[3] = 0x4f;
+  const otf = await cache.add("F", "B", otfBytes, "any.otf");
   assert.equal(otf.mime, "font/otf");
 
-  // Filename fallback when bytes are too short or unknown.
-  const fallback = await cache.add("F", "I", new Uint8Array([0xff]), "no-magic.otf");
+  // Filename fallback when bytes don't match a known magic but the filename
+  // has a font extension — still accepted (older font tools or transcoded
+  // assets can produce non-standard headers).
+  const fallbackBytes = new Uint8Array(16); // arbitrary non-magic bytes
+  const fallback = await cache.add("F", "I", fallbackBytes, "no-magic.otf");
   assert.equal(fallback.mime, "font/otf");
+});
+
+// ---------------------------------------------------------------------------
+// #43c follow-up — input validation hardening (filed after self-review).
+// Pulp's "no silent failures" rule: drag-drop UX gaps that let an empty /
+// corrupt blob into the asset cache get caught here, not at runtime three
+// systems away.
+// ---------------------------------------------------------------------------
+
+test("UserFontCache rejects 0-byte drops (#43c hardening)", async () => {
+  const cache = new UserFontCache();
+  await assert.rejects(
+    async () => cache.add("Garbage", "Regular", new Uint8Array(0), "empty.ttf"),
+    /empty/i,
+    "0-byte drop must throw, not silently succeed",
+  );
+  assert.equal(cache.size(), 0, "rejected drop must not enter the cache");
+});
+
+test("UserFontCache rejects too-short drops (#43c hardening)", async () => {
+  const cache = new UserFontCache();
+  // 5 bytes — has SFNT magic prefix but truncated before the 12-byte header
+  // SFNT needs (magic + numTables + searchRange + entrySelector + rangeShift =
+  // 12 bytes minimum). Anything shorter is definitely not a font, regardless
+  // of filename.
+  const truncated = new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xff]);
+  await assert.rejects(
+    async () => cache.add("Garbage", "Regular", truncated, "short.ttf"),
+    /too short/i,
+    "5-byte drop must throw — too short for any valid font header",
+  );
+  assert.equal(cache.size(), 0);
+});
+
+test("UserFontCache rejects non-font drops with no magic + no font extension (#43c hardening)", async () => {
+  const cache = new UserFontCache();
+  // Plain binary, no SFNT/WOFF magic, no font extension.
+  const blob = new Uint8Array(64);
+  blob.fill(0xab);
+  await assert.rejects(
+    async () => cache.add("Suspicious", "Regular", blob, "screenshot.png"),
+    /doesn't match any known font format/i,
+    "non-font binary with non-font filename must throw",
+  );
+  assert.equal(cache.size(), 0);
+});
+
+test("serializeExport emits userfont-orphan diagnostic for unmatched user fonts (#43c hardening)", async () => {
+  const cache = new UserFontCache();
+  const orphanBytes = new Uint8Array(16);
+  orphanBytes[0] = 0x00; orphanBytes[1] = 0x01; orphanBytes[2] = 0x00; orphanBytes[3] = 0x00;
+  await cache.add("Clash Grotesk", "Medium", orphanBytes, "ClashGrotesk-Medium.ttf");
+
+  // The font_family_assets catalogue is empty — the user dropped a TTF for a
+  // family that no text node in this selection references (drop happened
+  // before scan, or selection changed before export).
+  const diagnostics: any[] = [];
+  const out = serializeExport([knobNode()], diagnostics, ctx({
+    fontFamilyAssets: [],
+    userFonts: cache,
+  })) as Record<string, any>;
+
+  const env_diags = out.diagnostics as Array<Record<string, any>>;
+  const orphan = env_diags.find((d) => d.code === "userfont-orphan");
+  assert.ok(orphan, `expected userfont-orphan diagnostic, got: ${JSON.stringify(env_diags)}`);
+  assert.equal(orphan.severity, "info");
+  assert.equal(orphan.kind, "fallback_used");
+  assert.match(orphan.message, /Clash Grotesk Medium/, "diagnostic identifies the orphan family");
+  assert.match(orphan.message, /ClashGrotesk-Medium\.ttf/, "diagnostic identifies the source filename");
+
+  // The bytes still appear in asset_manifest — orphan is a warning, not a drop.
+  const assetEntry = (out.asset_manifest.assets as Array<Record<string, any>>).find(
+    (a) => a.asset_id.startsWith("userfont-"),
+  );
+  assert.ok(assetEntry, "orphan bytes still ride in asset_manifest by content_hash");
+});
+
+test("serializeExport does NOT emit userfont-orphan when every cached font is referenced (#43c hardening)", async () => {
+  const cache = new UserFontCache();
+  const okBytes = new Uint8Array(16);
+  okBytes[0] = 0x00; okBytes[1] = 0x01; okBytes[2] = 0x00; okBytes[3] = 0x00;
+  await cache.add("Inter", "Regular", okBytes, "Inter-Regular.ttf");
+
+  const diagnostics: any[] = [];
+  const out = serializeExport([knobNode()], diagnostics, ctx({
+    fontFamilyAssets: [{ family: "Inter", style: "Regular", weight: 400 }],
+    userFonts: cache,
+  })) as Record<string, any>;
+
+  const env_diags = out.diagnostics as Array<Record<string, any>>;
+  assert.equal(
+    env_diags.filter((d) => d.code === "userfont-orphan").length,
+    0,
+    "no orphan diagnostic when every cached font matches a catalogue entry",
+  );
 });
 
