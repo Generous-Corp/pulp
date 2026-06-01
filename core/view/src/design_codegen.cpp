@@ -225,6 +225,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
         ss << ind << var << ".style.background = '" << *s.background_gradient << "';\n";
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
+    emit_str("mixBlendMode", s.mix_blend_mode);
     emit_px("borderRadius", s.border_radius);
     emit_str("border", s.border);
     if (!s.box_shadow.empty())
@@ -412,6 +413,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         if (s.top)    ss << ind << "setTop('"    << target_id << "', " << *s.top    << ");\n";
         if (s.right)  ss << ind << "setRight('"  << target_id << "', " << *s.right  << ");\n";
         if (s.bottom) ss << ind << "setBottom('" << target_id << "', " << *s.bottom << ");\n";
+    };
+
+    // Emit the node's CSS mix-blend-mode (parse-normalized to a lowercase-
+    // hyphen keyword). The native engine compositing path (View::set_mix_blend
+    // _mode + the setMixBlendMode bridge) consumes it; a normal / pass-through
+    // mode is dropped at parse, so this only fires for a real blend.
+    auto emit_mix_blend_mode = [&](const std::string& target_id) {
+        if (node.style.mix_blend_mode && !node.style.mix_blend_mode->empty())
+            ss << ind << "setMixBlendMode('" << target_id << "', '"
+               << js_single_quote_escape(*node.style.mix_blend_mode) << "');\n";
     };
 
     // Phase 0a: emit the anchor trail in bridge-native-JS codegen too. Same
@@ -951,6 +962,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "// " << node.name << "\n";
             ss << ind << "createSvgPath('" << id << "', " << pid << ");\n";
             emit_position_if_absolute(id);
+            emit_mix_blend_mode(id);
             ss << ind << "setSvgPath('" << id << "', '"
                << js_single_quote_escape(pd->second) << "');\n";
             // viewBox is "minX minY width height" — the widget scales the path
@@ -1006,6 +1018,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "// " << node.name << "\n";
         ss << ind << "createImage('" << id << "', " << pid << ");\n";
         emit_position_if_absolute(id);
+        emit_mix_blend_mode(id);
         auto it = node.attributes.find("asset_path");
         if (it != node.attributes.end() && !it->second.empty()) {
             ss << ind << "setImageSource('" << id << "', '"
@@ -1127,6 +1140,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // Text node → createLabel with explicit height (Yoga requirement)
         ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";  // pulp #81
         emit_position_if_absolute(id);
+        emit_mix_blend_mode(id);
 
         // Honour the IR-declared height when present. Pre-fix this branch
         // unconditionally recomputed from font_size, which clobbered Figma's
@@ -1246,6 +1260,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         ss << ind << (is_row ? "createRow" : "createCol")
            << "('" << id << "', " << pid << ");\n";
         emit_position_if_absolute(id);
+        emit_mix_blend_mode(id);
 
         // Yoga: every container MUST have explicit height
         // Priority: _layoutHeight (from snapshot_layout) > style.height > fill > computed

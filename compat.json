@@ -8183,7 +8183,7 @@
         "interactive-promotion":            {"detected": "handled", "parsed": "partial", "codegen": "partial", "note": "button/input promotion from onclick/aria/cursor signals; native-arm disposition is promotion-dependent"},
         "grid-container":                   {"detected": "partial", "parsed": "missing", "codegen": "missing", "note": "Yoga 3.0 grid is in the engine; IRLayout grid fields + parse aliases pending"},
         "radial-angular-diamond-gradient":  {"detected": "handled", "parsed": "partial", "codegen": "partial", "note": "flat-color fallback; CSS radial/conic gradient emission is future work"},
-        "mix-blend-mode":                   {"detected": "handled", "parsed": "missing", "codegen": "missing", "note": "captured by some adapters, dropped in the IR; IRStyle.mix_blend_mode + bridge emit pending"},
+        "mix-blend-mode":                   {"detected": "handled", "parsed": "handled", "codegen": "partial", "note": "IRStyle.mix_blend_mode is parsed (style.mixBlendMode + figma.blend_mode, normalized to the CSS keyword; normal/pass-through dropped) and emitted on container/image/text/svg_path nodes (web style.mixBlendMode; native setMixBlendMode → View::set_mix_blend_mode + save_layer_with_blend). Not yet emitted on audio-widget nodes (knob/fader/meter), hence partial"},
         "masks-clip-paths":                 {"detected": "partial", "parsed": "missing", "codegen": "missing", "note": "mask metadata + render fallback pending"},
         "constraints":                      {"detected": "partial", "parsed": "missing", "codegen": "missing", "note": "Figma resize constraints -> flex/position mapping pending"}
       }
