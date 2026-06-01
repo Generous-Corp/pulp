@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import urllib.request
 import zipfile
@@ -183,6 +184,32 @@ def main(argv: list[str]) -> int:
     print(f"  url: {url}")
     print(f"  sha256: {expected_sha}")
     print(f"  expected lib: {expected_lib}")
+
+    # Opt-in baked-Skia short-circuit (PULP_USE_BAKED_SKIA — set ONLY by the
+    # Tart VM runner golden, never by releases or clean GitHub runners). The
+    # golden bakes Skia at $SKIA_DIR, so the workflow's fetch is redundant:
+    # FindSkia.cmake reads $SKIA_DIR before the checkout's external/skia-build.
+    # We skip the ~250-500 MiB download ONLY when the baked Skia's stamp matches
+    # the current manifest pin — so a pin bump on a not-yet-rebaked golden falls
+    # through to a normal fetch and is NEVER stuck on stale baked Skia. The same
+    # stamp invariant as the dest guard below, applied to $SKIA_DIR.
+    baked_dir = os.environ.get("SKIA_DIR", "").strip()
+    if os.environ.get("PULP_USE_BAKED_SKIA") and baked_dir:
+        baked_root = Path(baked_dir)
+        baked_lib = baked_root / expected_lib.relative_to("external/skia-build")
+        baked_stamp = baked_root / ".skia-asset-sha256"
+        if (baked_lib.is_file() and baked_stamp.is_file()
+                and baked_stamp.read_text(encoding="utf-8").strip() == expected_sha):
+            print(
+                f"OK: using baked Skia at {baked_dir} "
+                f"(sha256 {expected_sha} matches pin); skipping fetch "
+                f"(PULP_USE_BAKED_SKIA)"
+            )
+            return 0
+        print(
+            "PULP_USE_BAKED_SKIA set but baked Skia is missing or stale "
+            "(stamp != current pin) — re-fetching the pinned asset."
+        )
 
     # Idempotency stamp. A self-hosted CI runner checks out with
     # `clean: false`, so `external/skia-build/` persists between jobs;
