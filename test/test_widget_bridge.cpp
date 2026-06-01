@@ -559,6 +559,79 @@ TEST_CASE("WidgetBridge on() native registration is idempotent", "[view][bridge]
     REQUIRE(count == 1);
 }
 
+// Touch orbit (#3217 follow-up): a widget's pointer move/up must reach
+// DOCUMENT-level listeners, not just the widget's own. Three.js OrbitControls
+// registers its drag/pinch move+up handlers on `domElement.ownerDocument`
+// after pointerdown, so without document delivery the canvas sees the initial
+// press but no subsequent moves and touch orbit/pinch is inert. The element
+// bubble walk never reaches the `document` object (it owns a separate listener
+// map), so `__dispatch__` fans pointer events to `document` explicitly, and the
+// iOS GPU host drives the new `View::on_pointer_move` callback per touch. The
+// iOS AUv3 GPU path has no CI coverage, so this guards the JS half (dispatch +
+// document fan-out) on the headless engine lane.
+TEST_CASE("WidgetBridge fans pointer events to document listeners (OrbitControls touch)",
+          "[view][bridge][pointer][issue-3217]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Use a real <canvas> element (as the Three.js demo does) so it lives in
+    // __nativeElements__ and routes through the element dispatchEvent +
+    // document fan-out path — exactly the canvas OrbitControls binds to.
+    bridge.load_script(R"(
+        var doc_moves = 0, doc_ups = 0, widget_moves = 0;
+        document.addEventListener('pointermove', function() { doc_moves += 1; });
+        document.addEventListener('pointerup', function() { doc_ups += 1; });
+        var canvas = document.createElement('canvas');
+        canvas.id = 'orbit-canvas';
+        document.body.appendChild(canvas);
+        // addEventListener('pointermove') wires the canvas as a pointer target
+        // (registerPointer → on_pointer_event / on_pointer_move on its View).
+        canvas.addEventListener('pointermove', function() { widget_moves += 1; });
+    )");
+
+    auto nativeId = std::string(
+        engine.evaluate("document.getElementById('orbit-canvas')._id")
+            .getWithDefault<std::string_view>(""));
+    REQUIRE(!nativeId.empty());
+    auto* canvas = bridge.widget(nativeId);
+    REQUIRE(canvas != nullptr);
+    // The identity-preserving move callback must be wired by registerPointer.
+    REQUIRE(static_cast<bool>(canvas->on_pointer_move));
+    REQUIRE(static_cast<bool>(canvas->on_pointer_event));
+
+    // A touch move carrying real pointer identity must fire BOTH the canvas's
+    // own move listener AND the document-level listener (the latter is what
+    // OrbitControls relies on, and is what regressed without the fan-out).
+    MouseEvent move;
+    move.position = {10, 20};
+    move.window_position = {10, 20};
+    move.pointer_id = 0;
+    move.pointer_type = PointerType::touch;
+    move.is_down = true;
+    canvas->on_pointer_move(move);
+    // The canvas's own listener fires (>=1; the bridge's element + __callbacks__
+    // fan-out can deliver it more than once, which is pre-existing behavior and
+    // not what this test pins). The load-bearing assertion is that the
+    // document-level listener fires exactly once — that path regressed to zero
+    // without the fan-out, which is what broke OrbitControls touch.
+    REQUIRE(engine.evaluate("widget_moves").getWithDefault<int>(-1) >= 1);
+    REQUIRE(engine.evaluate("doc_moves").getWithDefault<int>(-1) == 1);
+
+    // A touch release (pointerup, is_down=false) must reach the document-level
+    // pointerup listener so OrbitControls tears down its drag session.
+    MouseEvent up;
+    up.position = {10, 20};
+    up.window_position = {10, 20};
+    up.pointer_id = 0;
+    up.pointer_type = PointerType::touch;
+    up.is_down = false;
+    canvas->on_pointer_event(up);
+    REQUIRE(engine.evaluate("doc_ups").getWithDefault<int>(-1) == 1);
+}
+
 TEST_CASE("WidgetBridge getLayoutRect accounts for scroll offsets", "[view][bridge][layout]") {
     ScriptEngine engine;
     View root;

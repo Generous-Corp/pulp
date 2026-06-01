@@ -485,6 +485,10 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         set(_bundler_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../scripts/bundle_threejs_for_jsc.mjs")
         if(_PULP_NODE_EXE AND EXISTS "${_three_shim_src}" AND EXISTS "${_bundler_script}")
             set(_three_in  "${threejs_SOURCE_DIR}/build/three.webgpu.js")
+            # OrbitControls addon — bundled into the same IIFE and exposed as
+            # THREE.OrbitControls so the demo's touch orbit (drag-rotate +
+            # pinch-zoom) works on the JSC iOS lane.
+            set(_three_orbit "${threejs_SOURCE_DIR}/examples/jsm/controls/OrbitControls.js")
             set(_three_iife "$<TARGET_BUNDLE_DIR:${target}_AUv3>/threejs/three.iife.js")
             set(_three_shim_out "$<TARGET_BUNDLE_DIR:${target}_AUv3>/threejs/web-compat-three-shim.js")
             add_custom_command(TARGET ${target}_AUv3 POST_BUILD
@@ -492,8 +496,9 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
                         "$<TARGET_BUNDLE_DIR:${target}_AUv3>/threejs"
                 COMMAND ${_PULP_NODE_EXE} ${_bundler_script}
                         --input "${_three_in}" --output "${_three_iife}"
+                        --orbit-controls "${_three_orbit}"
                 COMMAND ${CMAKE_COMMAND} -E copy "${_three_shim_src}" "${_three_shim_out}"
-                COMMENT "iOS-D.3b: bundle Three.js IIFE + shim into ${target}.appex/threejs/"
+                COMMENT "iOS-D.3b: bundle Three.js IIFE + OrbitControls + shim into ${target}.appex/threejs/"
                 VERBATIM
             )
         else()

@@ -621,6 +621,23 @@ function __dispatch__(id, eventName) {
                 }
                 el.dispatchEvent(ev);
                 stats.dispatched = (stats.dispatched || 0) + 1;
+                // Fan the bubbling pointer event to document-level listeners.
+                // In a real DOM, document is the top of the bubble path, but
+                // here `document` is a separate object with its own listener
+                // map that the element bubble (_parentElement chain) never
+                // reaches. Code that does `ownerDocument.addEventListener(
+                // 'pointermove'/'pointerup', ...)` therefore never fires —
+                // notably Three.js OrbitControls, which on pointerdown MOVES its
+                // drag/pinch move+up listeners onto the document. Without this
+                // fan-out OrbitControls receives the initial pointerdown on the
+                // canvas but no subsequent moves, so touch orbit/pinch is inert.
+                // Only pointer events are fanned (the synthesized mouse event
+                // below keeps its element-only delivery to avoid changing
+                // existing document-mouse semantics).
+                if (typeof document !== 'undefined' && document.dispatchEvent &&
+                    /^(pointerdown|pointermove|pointerup|pointercancel)$/.test(eventName)) {
+                    document.dispatchEvent(ev);
+                }
                 // For pointerdown/up, ALSO synthesize the mouse equivalent —
                 // many React components attach to onMouseDown rather than
                 // onPointerDown (Chainer is one). Skip if eventName is
@@ -2531,6 +2548,40 @@ void WidgetBridge::register_api() {
                 // onMouseMove handlers) AND window-level mousemove
                 // (fires window._listeners[mousemove] for Chainer-style
                 // useEffect drag handlers).
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('" + id + "', 'mousemove', " + data + ")",
+                    "per-widget mousemove");
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('__global__', 'mousemove', " + data + ")",
+                    "global mousemove");
+            };
+
+            // Identity-preserving pointermove (iOS multi-touch). on_drag above
+            // collapses every move to pointerId:0/pointerType:'mouse', which is
+            // fine for a single desktop pointer but loses the per-finger
+            // identity a multi-touch gesture needs. on_pointer_move forwards the
+            // real MouseEvent — distinct pointerId + pointerType:'touch' — so a
+            // scripted UI tracking two simultaneous touches (OrbitControls
+            // pinch-zoom keys its dolly distance on two pointerIds) sees each
+            // finger separately. clientX/Y carry the window-space (root) coords
+            // OrbitControls' touch path reads via pageX/pageY (web-compat
+            // synthesises pageX = clientX); offsetX/Y carry widget-local coords.
+            w->on_pointer_move = [alive, engine, id](const MouseEvent& me) {
+                std::string data = "{"
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) + ","
+                    "offsetX:" + std::to_string(me.position.x) + ","
+                    "offsetY:" + std::to_string(me.position.y) + ","
+                    "pointerId:" + std::to_string(me.pointer_id) + ","
+                    "pointerType:'" + std::string(me.pointerTypeString()) + "',"
+                    "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
+                    "pressure:" + std::to_string(me.pressure) + ","
+                    "button:0,buttons:1}";
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('" + id + "', 'pointermove', " + data + ")",
+                    "pointermove");
+                // Mouse fan-out parity with on_drag so JSX onMouseMove +
+                // window-level useEffect drag handlers also wire up on iOS.
                 safe_dispatch_eval(alive, engine,
                     "__dispatch__('" + id + "', 'mousemove', " + data + ")",
                     "per-widget mousemove");

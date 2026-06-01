@@ -43,13 +43,16 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REQUIRE = createRequire(import.meta.url);
 
 function parseArgs(argv) {
-    const args = { input: null, output: null };
+    const args = { input: null, output: null, orbitControls: null };
     for (let i = 0; i < argv.length; ++i) {
         if (argv[i] === "--input") args.input = argv[++i];
         else if (argv[i] === "--output") args.output = argv[++i];
+        // Optional: also bundle the OrbitControls addon and expose it as
+        // THREE.OrbitControls (the iOS Three.js demo uses it for touch orbit).
+        else if (argv[i] === "--orbit-controls") args.orbitControls = argv[++i];
     }
     if (!args.input || !args.output) {
-        console.error("usage: bundle_threejs_for_jsc.mjs --input <three.webgpu.js> --output <three.iife.js>");
+        console.error("usage: bundle_threejs_for_jsc.mjs --input <three.webgpu.js> --output <three.iife.js> [--orbit-controls <OrbitControls.js>]");
         process.exit(2);
     }
     return args;
@@ -104,29 +107,58 @@ async function main() {
 
     const inputAbs = path.resolve(args.input);
 
+    // Base esbuild options shared by both the plain three-only bundle and the
+    // three + OrbitControls bundle.
+    const buildOpts = {
+        bundle: true,
+        format: "iife",
+        globalName: "__pulp_three_iife_namespace__",
+        platform: "neutral",
+        target: ["es2020"],
+        write: false,
+        logLevel: "warning",
+        plugins: [stripHttpImports],
+        supported: {
+            // JSC supports top-level-await but our wrapper IIFE
+            // doesn't, and Three.js's webgpu entry doesn't need it.
+            "top-level-await": false,
+        },
+        // Keep names so iPad-device stack traces map to upstream
+        // Three.js symbols. Whitespace minification is fine.
+        minifyWhitespace: false,
+        minifyIdentifiers: false,
+        minifySyntax: false,
+    };
+
+    if (args.orbitControls) {
+        const orbitAbs = path.resolve(args.orbitControls);
+        if (!fs.existsSync(orbitAbs)) {
+            console.error(`bundle_threejs_for_jsc: --orbit-controls not found: ${orbitAbs}`);
+            process.exit(1);
+        }
+        // Synthetic entry that re-exports everything from three.webgpu.js plus
+        // OrbitControls. OrbitControls.js imports from the bare specifier
+        // 'three'; alias it to the SAME absolute three.webgpu.js path so esbuild
+        // resolves both references to one module instance (no duplicate three,
+        // so `OrbitControls extends Controls` uses the same class). three.webgpu
+        // re-exports Controls/MOUSE/TOUCH/Spherical/etc. from three.core, which
+        // is exactly OrbitControls' import set.
+        buildOpts.stdin = {
+            contents:
+                `export * from ${JSON.stringify(inputAbs)};\n` +
+                `export { OrbitControls } from ${JSON.stringify(orbitAbs)};\n`,
+            resolveDir: path.dirname(inputAbs),
+            sourcefile: "pulp-three-iife-entry.js",
+            loader: "js",
+        };
+        buildOpts.alias = { three: inputAbs };
+    } else {
+        buildOpts.entryPoints = [inputAbs];
+    }
+
     let result;
     try {
-        result = await esbuild.build({
-            entryPoints: [inputAbs],
-            bundle: true,
-            format: "iife",
-            globalName: "__pulp_three_iife_namespace__",
-            platform: "neutral",
-            target: ["es2020"],
-            write: false,
-            logLevel: "warning",
-            plugins: [stripHttpImports],
-            supported: {
-                // JSC supports top-level-await but our wrapper IIFE
-                // doesn't, and Three.js's webgpu entry doesn't need it.
-                "top-level-await": false,
-            },
-            // Keep names so iPad-device stack traces map to upstream
-            // Three.js symbols. Whitespace minification is fine.
-            minifyWhitespace: false,
-            minifyIdentifiers: false,
-            minifySyntax: false,
-        });
+        result = await esbuild.build(buildOpts);
     } catch (err) {
         console.error("bundle_threejs_for_jsc: esbuild build failed");
         console.error(err.message || err);

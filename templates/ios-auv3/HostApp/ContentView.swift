@@ -83,7 +83,16 @@ struct ContentView: View {
             // a SwiftUI-only screen with no visible editor — the "I can see
             // the rotating quad in the Simulator" deliverable lives here.
             #if os(iOS)
+            // Let the editor fill the whole pane below the controls instead of
+            // sitting at its intrinsic preferredContentSize (the plug-in's
+            // design size, e.g. the Three.js demo's 540×720 shell) pinned to
+            // the top-left. `maxWidth/maxHeight: .infinity` hands the AUv3
+            // editor the full available rectangle; the editor's own host
+            // (au_view_controller_ios.mm) then scales its fixed design viewport
+            // up to those bounds. Generic across every iOS AUv3 example —
+            // minHeight keeps a sensible floor when the pane is short.
             PulpAUv3EditorView(host: host)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .frame(minHeight: 280)
                 .background(Color.black.opacity(0.04))
                 .cornerRadius(8)

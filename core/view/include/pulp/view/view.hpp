@@ -693,6 +693,14 @@ public:
     std::function<void()> on_click;
     std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
     std::function<void(Point)> on_drag;   ///< JS pointermove during drag callback
+    /// JS pointermove carrying full pointer identity (id + type + pressure).
+    /// Distinct from `on_drag`, which collapses every move to
+    /// pointerId:0/pointerType:'mouse'. Multi-touch hosts (iOS) call this so a
+    /// scripted UI tracking >1 simultaneous pointer — e.g. OrbitControls
+    /// pinch-zoom, which keys its dolly on two distinct touch pointerIds —
+    /// receives each finger's move under its own identity. Desktop hosts that
+    /// only ever deliver one pointer can keep driving `on_drag`.
+    std::function<void(const MouseEvent&)> on_pointer_move;
     std::function<void(const GestureEvent&)> on_gesture_cb;    ///< JS gesture event callback
 
     /// Right-click context menu callback. If set, called on right-click with view-local coords.

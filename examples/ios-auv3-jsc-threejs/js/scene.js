@@ -92,6 +92,16 @@
     document.body.style.backgroundColor = "#040912";
     document.body.style.padding = "18px";
 
+    // iOS-D.3c polish: flex-fill the body so the shell uses whatever size the
+    // host hands the editor. The AUv3 GPU host pins the root to the 540×720
+    // design viewport and scales the composited output up to the editor pane
+    // (set_design_viewport in plugin_view_host_ios.mm), so filling the body
+    // here means the shell — and the cube card inside it — fill that pane
+    // edge-to-edge instead of sitting at a fixed size in one corner.
+    document.body.style.flexDirection = "column";
+    document.body.style.width = "100%";
+    document.body.style.height = "100%";
+
     var shell = document.createElement("div");
     shell.id = "pulp-three-demo-shell";
     shell.style.flexDirection = "column";
@@ -99,8 +109,13 @@
     shell.style.padding = "16px";
     shell.style.backgroundColor = "#0c1424";
     shell.style.borderRadius = "20px";
-    shell.style.width = Math.max(320, rootWidth - 36) + "px";
-    shell.style.height = Math.max(420, rootHeight - 36) + "px";
+    // Fill the available body box (flex column). minWidth/minHeight keep the
+    // layout sane if the host ever reports a degenerate size before the first
+    // real bounds land.
+    shell.style.flexGrow = "1";
+    shell.style.width = "100%";
+    shell.style.minWidth = Math.max(320, rootWidth - 36) + "px";
+    shell.style.minHeight = Math.max(420, rootHeight - 36) + "px";
     document.body.appendChild(shell);
 
     var eyebrow = document.createElement("span");
@@ -108,6 +123,12 @@
     eyebrow.style.color = "#7dd3fc";
     eyebrow.style.fontSize = "12px";
     eyebrow.style.fontWeight = "600";
+    // iOS-D.3c (#3217 follow-up): clamp the eyebrow to the shell width so the
+    // long "Pulp · iOS-D.3c · JSC + three.webgpu.js" label wraps instead of
+    // overflowing the rounded shell on narrow editor sizes (AUM, split-view).
+    eyebrow.style.maxWidth = "100%";
+    eyebrow.style.overflowWrap = "break-word";
+    eyebrow.style.wordBreak = "break-word";
     shell.appendChild(eyebrow);
 
     var title = document.createElement("h2");
@@ -115,6 +136,12 @@
     title.style.color = "#f8fafc";
     title.style.fontSize = "26px";
     title.style.fontWeight = "700";
+    title.style.margin = "0";
+    // Same containment for the title — keeps it inside the shell if a future
+    // edit lengthens it or the editor pane gets very narrow.
+    title.style.maxWidth = "100%";
+    title.style.overflowWrap = "break-word";
+    title.style.wordBreak = "break-word";
     shell.appendChild(title);
 
     var subtitle = document.createElement("p");
@@ -211,14 +238,59 @@
 
     var camera = new THREE.PerspectiveCamera(
         60, canvasWidth / canvasHeight, 0.1, 100);
-    camera.position.z = 2.4;
+    // iOS-D.3c polish (task 1 — fill the canvas): pull the camera in from 2.4
+    // to 1.7 and grow the cube from 0.9 to 1.0 so the rotating cube fills most
+    // of the canvas card. At z=1.7 with a 60° vertical FOV the visible
+    // half-height at the cube plane is 1.7·tan(30°) ≈ 0.98, comfortably larger
+    // than the cube's worst-case half-extent at a 45° spin (≈0.87 across the
+    // face diagonal), so it never clips at the rotation extremes.
+    camera.position.z = 1.7;
 
     var cube = new THREE.Mesh(
-        new THREE.BoxGeometry(0.9, 0.9, 0.9),
+        new THREE.BoxGeometry(1.0, 1.0, 1.0),
         new THREE.MeshBasicMaterial({ color: 0x76ff7a })
     );
     scene.add(cube);
     globalThis.__pulpThreeDemoMesh = cube;
+
+    // iOS-D.3c polish (task 4 — touch orbit). OrbitControls is bundled into
+    // three.iife.js alongside three.webgpu.js (see
+    // tools/scripts/bundle_threejs_for_jsc.mjs), so it is exposed as
+    // THREE.OrbitControls. Drag-rotate and pinch-zoom reach JS via the iOS
+    // AUv3 touch→pointer-event bridge added in
+    // core/view/platform/ios/plugin_view_host_ios.mm (PulpMetalPluginView).
+    // Pass the RAW native canvas element (not the PulpCanvas wrapper): the
+    // wrapper only forwards width/height/addEventListener, but OrbitControls
+    // also needs `ownerDocument` (to add document-level pointermove/pointerup
+    // listeners), `getRootNode`, `getBoundingClientRect`, and
+    // `setPointerCapture` — all provided by Pulp's native HTMLCanvasElement
+    // shim (web-compat-element.js), which the renderer's wrapper deliberately
+    // does not re-expose. This matches the macOS threejs-native-demo, which
+    // also hands OrbitControls the raw canvas while the renderer gets the
+    // wrapper.
+    var controls = null;
+    if (typeof THREE.OrbitControls === "function") {
+        controls = new THREE.OrbitControls(camera, canvasEl);
+        controls.enableDamping = true;   // inertial feel; needs update() each frame
+        controls.dampingFactor = 0.08;
+        controls.enablePan = false;       // pan is off per the demo spec
+        controls.enableRotate = true;     // one-finger drag → orbit
+        controls.enableZoom = true;       // two-finger pinch → dolly
+        controls.rotateSpeed = 0.9;
+        controls.zoomSpeed = 0.9;
+        // Keep the camera from diving inside the cube or drifting so far the
+        // cube shrinks to nothing.
+        controls.minDistance = 1.2;
+        controls.maxDistance = 6.0;
+        controls.target.set(0, 0, 0);
+        controls.update();
+        console.info(
+            "PULP_THREE_DEMO: OrbitControls wired (rotate+pinch-zoom, pan off, damping on)");
+    } else {
+        console.error(
+            "PULP_THREE_DEMO: THREE.OrbitControls missing — touch orbit disabled "
+            + "(three.iife.js bundle did not include the OrbitControls addon).");
+    }
 
     var firstFrameSubmitted = false;
     var frameCount = 0;
@@ -247,6 +319,12 @@
     function tick() {
         cube.rotation.x += 0.01;
         cube.rotation.y += 0.01;
+        // OrbitControls orbits the CAMERA around the target; the cube's own
+        // spin above is independent, so the demo stays alive while still
+        // responding to drag/pinch. update() applies damping inertia and any
+        // pending touch input — it must run every frame when enableDamping is
+        // on, even when the user isn't actively touching.
+        if (controls) controls.update();
         try {
             renderer.render(scene, camera);
         } catch (e) {

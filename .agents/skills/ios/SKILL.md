@@ -253,6 +253,44 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   `MouseEvent::pointer_type = PointerType::pen` plus altitude/azimuth.
 - **Multi-touch** — each `UITouch*` gets a stable `pointer_id` via
   `stableIdForTouch:` so widgets that use `set_pointer_capture()` work correctly.
+- **GPU AUv3 editor touch → JS pointer events** — the standalone CPU paths
+  call only the position-based `View::on_mouse_{down,up,drag}(Point)` virtuals,
+  which native widgets consume but which do NOT dispatch JS pointer events. The
+  GPU AUv3 editor view (`PulpMetalPluginView` in `plugin_view_host_ios.mm`)
+  originally had NO touch handlers at all, so a scripted/Three.js editor was
+  inert to touch. It now hit_tests `rootView`, captures a per-pointer drag
+  target, and fires `View::on_mouse_event` (→ JS `pointerdown`/`up`) plus the
+  new `View::on_pointer_move` (→ JS `pointermove` carrying real
+  `pointerId`+`pointerType:'touch'`, which `on_drag` collapses to
+  `pointerId:0/'mouse'`), mirroring the mac `pulp_plugin_mouse_*` dispatch.
+  Multi-pointer identity is what lets Three.js OrbitControls pinch-zoom track
+  two fingers. **Gotcha:** dispatching pointer events to a canvas widget id is
+  NOT enough — code that listens on `ownerDocument` (OrbitControls moves its
+  move/up listeners there after `pointerdown`) needs the bridge's
+  document fan-out in `__dispatch__` (widget_bridge.cpp); the element bubble
+  walk never reaches the `document` object. **`view_is_in_tree`-style
+  validation of a captured drag target MUST walk root→down (compare pointer
+  identity), never target→parent** — the captured `View*` can be freed by an
+  editor rebuild between touch events, so walking its `parent()` is a UAF.
+- **Touch injection on the Simulator is not scriptable here** — `simctl` has no
+  touch/gesture command, the Simulator exposes no AX window, and
+  `cliclick`/pyobjc-Quartz aren't installed, so a live finger-drag can't be
+  auto-injected. To prove a touch→JS chain, drive synthetic events through the
+  real `__dispatch__(<canvas._id>, 'pointermove', {...})` entrypoint (the same
+  one the native handlers call) from a hot-patched `scene.js` and assert camera
+  state / `document`-level listener counts in the `dev.pulp.runtime` log.
+- **GPU AUv3 editor design-viewport scaling** — `IOSGpuPluginViewHost` now
+  overrides `set_design_viewport`/`set_fixed_aspect_ratio`/
+  `set_design_viewport_top_align`/`window_to_root_point` (they were base
+  no-ops, so the AU view controller's existing calls did nothing and the
+  design rendered at native size in the pane's top-left). `render_frame` lays
+  the root out at the design size and applies an aspect-correct translate+scale
+  to the Skia canvas; the Three.js cube composites through that same scaled
+  canvas (`CanvasWidget` draws its Dawn texture at the widget's bounds), so it
+  scales coherently with the 2D UI. To actually fill the iPad pane you ALSO
+  need `templates/ios-auv3/HostApp/ContentView.swift` to give the editor
+  `.frame(maxWidth:.infinity, maxHeight:.infinity)` — without it SwiftUI pins
+  the editor to its intrinsic `preferredContentSize`.
 
 ### Plugin Editor Child Views
 
