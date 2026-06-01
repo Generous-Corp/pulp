@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03120"></a>
+## [0.312.0] - 2026-06-01
+
+- feat(view+import-design): preserve + emit CSS clip-path / mask ([#3288](https://github.com/danielraffel/pulp/pull/3288))
+- ci(tart): persistent launchd agent for the ephemeral VM runner ([#3302](https://github.com/danielraffel/pulp/pull/3302))
+- tart-ci skill + Skia/Dawn baked-cache optimization ([#3301](https://github.com/danielraffel/pulp/pull/3301))
+- ci(tart): Tart golden-VM macOS lane — layered goldens, ephemeral per-job runners, vm-image manifest ([#3300](https://github.com/danielraffel/pulp/pull/3300))
+
 <a id="v03110"></a>
 ## [0.311.0] - 2026-06-01
 
@@ -3417,6 +3425,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.312.0]: https://github.com/danielraffel/pulp/releases/tag/v0.312.0
 [0.311.0]: https://github.com/danielraffel/pulp/releases/tag/v0.311.0
 [0.310.0]: https://github.com/danielraffel/pulp/releases/tag/v0.310.0
 [0.309.0]: https://github.com/danielraffel/pulp/releases/tag/v0.309.0
