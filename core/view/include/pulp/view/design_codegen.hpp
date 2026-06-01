@@ -7,6 +7,7 @@
 
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/design_shortcuts.hpp>  // DetectedShortcut (CodeGenOptions::shortcuts)
+#include <pulp/view/design_fidelity.hpp>   // FidelityIssue + run_fidelity_checks (sink)
 #include <optional>
 #include <string>
 #include <vector>
@@ -59,44 +60,13 @@ struct CodeGenOptions {
     /// keydown into the engine. Empty vector = no shortcut emission.
     std::vector<DetectedShortcut> shortcuts;
 
-    /// Optional fidelity-report sink. When non-null, codegen records a
-    /// FidelityIssue for any image it cannot prove it sized faithfully — a
-    /// bleed sprite whose emitted aspect diverges from its source PNG (skew),
-    /// or one missing the pixel dims needed to preserve aspect at all. This is
-    /// a reference-free self-consistency check (it compares the emitted
-    /// geometry against the asset's own pixels), so it generalizes to any
-    /// import without overfitting. Non-owning; the caller owns the vector.
-    std::vector<struct FidelityIssue>* fidelity_report = nullptr;
+    /// Optional fidelity-report sink. When non-null, codegen runs every
+    /// registered reference-free fidelity self-check (see design_fidelity.hpp)
+    /// against each element it emits and appends any FidelityIssue here. The
+    /// import CLI surfaces these as `fidelity:` warnings and can fail on them
+    /// under `--strict-fidelity`. Non-owning; the caller owns the vector.
+    std::vector<FidelityIssue>* fidelity_report = nullptr;
 };
-
-/// A single import-fidelity self-check finding.
-struct FidelityIssue {
-    std::string node_id;    ///< sanitized bridge id of the offending node
-    std::string node_name;  ///< source layer name (for human-readable reports)
-    std::string kind;       ///< "skew" | "aspect-unverified" | "gross-size"
-    std::string detail;     ///< one-line explanation with the measured numbers
-};
-
-/// Reference-free check: did codegen size this image faithfully? Returns a
-/// finding when a BLEED sprite (render_bounds or asset_bleed) was emitted at an
-/// aspect that diverges from its source PNG (skew), or lacks the PNG dims
-/// needed to preserve aspect (aspect-unverified). Ordinary (non-bleed) images
-/// intentionally fill their declared box and are never flagged. Pure +
-/// testable in isolation; `emitted_w/h` are the dimensions codegen emitted.
-std::optional<FidelityIssue> check_image_sizing_fidelity(
-    const IRNode& node, const std::string& node_id,
-    float emitted_w, float emitted_h);
-
-/// Reference-free check: did codegen keep an explicitly-sized node's emitted
-/// box within 3× of its IR source box on both axes? Fires ONLY when BOTH axes
-/// are SizingMode::fixed (the user pinned the size); hug/fill axes are
-/// flex-driven by design and skipped, as are absolutely-positioned and
-/// display:none nodes. Catches errant flex-grow/shrink and paint-size bugs for
-/// ANY source — it reads only normalized IR geometry, never a source quirk.
-/// `emitted_w/h` are the dimensions codegen emitted for the node's box.
-std::optional<FidelityIssue> check_gross_size_divergence(
-    const IRNode& node, const std::string& node_id,
-    float emitted_w, float emitted_h);
 
 /// Generate Pulp JS code from a DesignIR.
 /// Native mode (default) uses createCol/createRow/createKnob + setFlex.

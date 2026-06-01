@@ -1796,19 +1796,37 @@ rasterized shapes). Each cost a visible fidelity bug.
   It needs a Figma token + network, so it is a developer-time export helper,
   never run in CI.
 
-## Fidelity self-check (reference-free no-skew invariant)
+## Fidelity self-checks (reference-free invariants) — `design_fidelity` module
 
-- **Codegen self-checks every sprite it sizes.** `check_image_sizing_fidelity`
-  (design_codegen.cpp) is a pure, testable function: for a BLEED sprite
-  (`render_bounds` or `asset_bleed`) it compares the dimensions codegen emitted
-  against the source PNG aspect and returns a `FidelityIssue` of kind `skew`
-  (>5% aspect divergence) or `aspect-unverified` (no PNG dims). Ordinary
-  non-bleed images intentionally fill their box and are never flagged. Pass a
-  `CodeGenOptions::fidelity_report` sink to collect findings.
-- **`pulp import-design --strict-fidelity`** prints any findings as
-  `fidelity: …` warnings and exits 4 when one is present (distinct from a
-  parse/IO error). This is the first reference-free invariant from the
-  fidelity-harness plan — it would have caught the original knob-skew bug at
-  import time, with no reference image, generalizing to any design. Keep new
-  sizing paths covered: assign the emitted w/h to `emitted_w/emitted_h` so the
-  check runs on every branch.
+- **All checks live in `core/view/src/design_fidelity.cpp`** (not codegen),
+  each a small pure function `optional<FidelityIssue>(const FidelityContext&)`.
+  A **registry** (`kChecks`, rows of `{FidelityElement applies_to, fn}`)
+  dispatches by element kind via `run_fidelity_checks(ctx, sink)`. `FidelityContext`
+  carries the node, sanitized id, the emitted w/h, and the element kind.
+  `design_codegen.cpp` keeps only thin call-sites: it captures the geometry it
+  already computes and calls `run_fidelity_checks` in the image and container
+  branches. **Adding an invariant = one function + one registry row + a case in
+  `test_design_fidelity.cpp`.** Codegen does not grow.
+- **Element dispatch is load-bearing.** A check runs ONLY for its element kind.
+  Critical gotcha: the gross-size check must NOT see images — a bleed sprite's
+  emitted box legitimately differs >3× from its style box (it sizes to
+  render_bounds/core), so running gross-size on images yields a flood of false
+  positives. The registry's `applies_to` prevents this; the e2e check below
+  catches it if a new invariant is mis-mapped.
+- **Checks shipped:** `check_image_sizing_fidelity` (image; bleed sprite emitted
+  aspect vs source PNG → `skew` / `aspect-unverified`; ordinary images fill
+  their box, never flagged) and `check_gross_size_divergence` (container; a
+  fixed/fixed node emitted >3× its source box → `gross-size`; hug/fill/absolute/
+  display:none self-skip).
+- **`pulp import-design --strict-fidelity`** prints findings as `fidelity: …`
+  warnings and exits 4 when any are present. Tests: unit cases per check in
+  `test/test_design_fidelity.cpp`; the codegen-routing case is in
+  `test_design_import.cpp`.
+- **Golden re-import regression — `tools/import-validation/golden_regression.py`.**
+  Re-imports a design from scratch and compares its render to a committed
+  baseline with TOLERANT/STRUCTURAL matching (per-pixel-over-tolerance fraction
+  is the primary gate; a shift-dilated edge-agreement is a lenient backstop) —
+  NOT exact-pixel, which false-positives on GPU AA noise + legit sub-pixel
+  sizing. Source-agnostic (any `--from`). Proprietary baselines stay local; CI
+  uses synthetic ones. Run it (and `--strict-fidelity` on a real import) after
+  any change to the sizing/fidelity paths to prove no visual regression.

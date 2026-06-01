@@ -3073,6 +3073,11 @@ target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMA
 catch_discover_tests(pulp-test-design-import
     TEST_SPEC "~[network]"
     PROPERTIES LABELS "parser-import")
+
+# Reference-free import-fidelity self-checks (core/view/src/design_fidelity.cpp).
+add_executable(pulp-test-design-fidelity test_design_fidelity.cpp)
+target_link_libraries(pulp-test-design-fidelity PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-fidelity PROPERTIES LABELS "parser-import")
 catch_discover_tests(pulp-test-design-import
     TEST_SPEC "[network]"
     PROPERTIES
