@@ -544,6 +544,45 @@ TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interac
     REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
 }
 
+TEST_CASE("pulp import-design normalizes + emits a Figma blend mode (end-to-end)",
+          "[cli][import-design][blend][shellout]") {
+    // The figma-plugin export carries the blend mode in the `figma` block in
+    // UPPER_SNAKE. parse_ir_node normalizes it to the CSS keyword and codegen
+    // emits setMixBlendMode — except PASS_THROUGH (= normal), which is dropped.
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-blend-mode");
+    {
+        std::ofstream f(tmp / "scene.pulp.json");
+        f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+    "children": [
+      {"type": "frame", "name": "Glow", "figma_node_id": "1:2",
+       "style": {"width": 80, "height": 80, "backgroundColor": "#ff8800"},
+       "figma": {"blend_mode": "COLOR_DODGE"}},
+      {"type": "frame", "name": "Plain", "figma_node_id": "1:3",
+       "style": {"width": 80, "height": 80, "backgroundColor": "#223344"},
+       "figma": {"blend_mode": "PASS_THROUGH"}}
+    ]}
+})";
+    }
+    auto js_out = tmp / "ui.js";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", (tmp / "scene.pulp.json").string(),
+                       "--output", js_out.string(), "--no-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    const auto js = read_text(js_out);
+    // COLOR_DODGE → normalized to the CSS keyword and emitted on the Glow node.
+    REQUIRE(js.find("setMixBlendMode('Glow") != std::string::npos);
+    REQUIRE(js.find("'color-dodge')") != std::string::npos);
+    // PASS_THROUGH is a no-op → no blend call for the Plain node.
+    REQUIRE(js.find("setMixBlendMode('Plain") == std::string::npos);
+}
+
 TEST_CASE("pulp import-design lowers an SVG path node to a native SvgPath (end-to-end)",
           "[cli][import-design][vector][shellout]") {
     // Full pipeline: the figma-plugin parser routes a `path` node carrying `d`

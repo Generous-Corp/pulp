@@ -173,6 +173,21 @@ std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows) {
 
 // ── IR from JSON ────────────────────────────────────────────────────────
 
+// Normalize a blend-mode keyword to its CSS lowercase-hyphen spelling. CSS
+// sources (v0 / Stitch / Pencil) already emit "multiply"; Figma's API uses
+// UPPER_SNAKE ("MULTIPLY", "COLOR_DODGE", "PASS_THROUGH"). The no-op modes
+// (normal / pass-through) return nullopt so codegen emits nothing for them.
+static std::optional<std::string> normalize_blend_mode(std::string raw) {
+    for (auto& c : raw) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (c == '_') c = '-';
+    }
+    if (raw.empty() || raw == "normal" || raw == "pass-through" ||
+        raw == "passthrough")
+        return std::nullopt;
+    return raw;
+}
+
 static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     IRStyle s;
     if (!obj.isObject()) return s;
@@ -214,6 +229,8 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("backgroundRepeat", s.background_repeat);
     set_opt_str("color", s.color);
     set_opt_float("opacity", s.opacity);
+    set_opt_str("mixBlendMode", s.mix_blend_mode);
+    if (s.mix_blend_mode) s.mix_blend_mode = normalize_blend_mode(*s.mix_blend_mode);
     set_opt_float("borderRadius", s.border_radius);
     set_opt_str("border", s.border);
     set_opt_str("borderColor", s.border_color);
@@ -664,6 +681,16 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
 
     if (obj.hasObjectMember("style"))
         node.style = parse_ir_style(obj["style"]);
+    // The figma-plugin export carries the blend mode in the `figma` block
+    // (e.g. {"figma": {"blend_mode": "MULTIPLY"}}), not in `style`. Promote it
+    // into the normalized IRStyle when `style.mixBlendMode` didn't already set
+    // one, so a Figma layer's blend mode survives the same as a CSS source's.
+    if (!node.style.mix_blend_mode && obj.hasObjectMember("figma") &&
+        obj["figma"].isObject() && obj["figma"].hasObjectMember("blend_mode") &&
+        obj["figma"]["blend_mode"].isString()) {
+        node.style.mix_blend_mode =
+            normalize_blend_mode(std::string(obj["figma"]["blend_mode"].toString()));
+    }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);
     if (obj.hasObjectMember("attributes") && obj["attributes"].isObject()) {
@@ -1344,6 +1371,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "backgroundRepeat", s.background_repeat);
     write_string_member(out, first, "color", s.color);
     write_float_member(out, first, "opacity", s.opacity);
+    write_string_member(out, first, "mixBlendMode", s.mix_blend_mode);
     write_float_member(out, first, "borderRadius", s.border_radius);
     write_string_member(out, first, "border", s.border);
     write_string_member(out, first, "borderColor", s.border_color);

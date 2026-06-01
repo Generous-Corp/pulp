@@ -75,6 +75,10 @@ struct IRStyle {
     std::optional<std::string> background_repeat;
     std::optional<std::string> color;                  // text color
     std::optional<float> opacity;
+    // CSS mix-blend-mode keyword (e.g. "multiply", "screen", "color-dodge").
+    // Normalized to the lowercase-hyphen CSS spelling at parse time; the
+    // engine's View::set_mix_blend_mode + setMixBlendMode bridge consume it.
+    std::optional<std::string> mix_blend_mode;
     std::optional<float> border_radius;
     std::optional<std::string> border;                 // e.g. "1px solid #333"
     std::optional<std::string> border_color;

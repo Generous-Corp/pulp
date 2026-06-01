@@ -4407,6 +4407,37 @@ TEST_CASE("codegen lowers a path-data vector to a native SvgPath (not dropped)",
     }
 }
 
+TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",
+          "[view][import][codegen][blend]") {
+    // A node's normalized mix_blend_mode lowers to setMixBlendMode (native
+    // bridge -> View::set_mix_blend_mode) and style.mixBlendMode (web-compat).
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+
+    IRNode overlay;
+    overlay.type = "frame";
+    overlay.name = "Overlay";
+    overlay.style.width = 100.0f;
+    overlay.style.height = 100.0f;
+    overlay.style.background_color = "#ff0000";
+    overlay.style.mix_blend_mode = "multiply";
+    ir.root.children.push_back(overlay);
+
+    CodeGenOptions nopts;
+    nopts.mode = CodeGenMode::bridge_native_js;
+    const auto njs = generate_pulp_js(ir, nopts);
+    INFO("native:\n" << njs);
+    CHECK(njs.find("setMixBlendMode('Overlay") != std::string::npos);
+    CHECK(njs.find("'multiply')") != std::string::npos);
+
+    CodeGenOptions wopts;
+    wopts.mode = CodeGenMode::web_compat;
+    const auto wjs = generate_pulp_js(ir, wopts);
+    INFO("web:\n" << wjs);
+    CHECK(wjs.find("mixBlendMode = 'multiply'") != std::string::npos);
+}
+
 TEST_CASE("web-compat codegen also runs the image-sizing fidelity check",
           "[view][import][codegen][fidelity][web-compat]") {
     // Codex #3267: fidelity checks previously ran only in the native-bridge
