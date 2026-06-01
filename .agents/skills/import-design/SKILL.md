@@ -318,14 +318,24 @@ results under `comparisons` for both baked lanes.
 A captured-art knob now stays a native `Knob` that actually TURNS:
 
 - **Importer hoist** (`pulp_import_design.cpp`, in the `!use_silver_knobs`
-  block): when a recognized knob carries its body art in a CHILD `image`
-  (the ELYSIUM shape — a captured disc + a separate stroked pointer), the
-  child's `asset_ref` + `renderBounds` are HOISTED onto the knob node and the
-  child is erased. The asset-resolution pass then stamps `asset_path` +
-  `art_core_*` on the knob (opaque-core recovery is gated on `render_bounds`,
-  which is why the bounds must be hoisted too). Knobs whose art lives on the
-  node itself (the kitchen-sink "knob" image-node shape) already carried
-  `asset_ref` and were never demoted — they just gained the overlay below.
+  block): the disposition is keyed on how many asset-backed image children
+  (captured layers) the knob has:
+  - **exactly one** (the ELYSIUM shape — a captured disc + a separate stroked
+    pointer the native notch replaces): HOIST the disc's `asset_ref` +
+    `renderBounds` onto the knob node and erase the child. The asset-resolution
+    pass then stamps `asset_path` + `art_core_*` on the knob (opaque-core
+    recovery is gated on `render_bounds`, which is why the bounds must be
+    hoisted too). The knob stays interactive.
+  - **more than one** (body + highlight + logo + …): DEMOTE to a plain
+    container (`audio_widget = none`) — the single-frame sprite skin can hold
+    only one layer and the leaf knob codegen would silently drop the rest, so
+    every layer renders as an image instead (faithful but not turnable; a
+    composited rotational strip is the Approach A follow-up). This preserves
+    the pre-interactive-sprite behavior and avoids silent layer loss.
+  - **zero**: leave the knob recognized; it falls through to the default knob.
+  Knobs whose art lives on the node itself (the kitchen-sink "knob" image-node
+  shape) already carried `asset_ref` and were never demoted — they just gained
+  the overlay below.
 - **Codegen** (`design_codegen.cpp` knob branch): emits
   `setKnobSpriteStrip(id, body, 1, 'vertical')` and, when the core was
   recovered, `setKnobSpriteCore(id, x, y, w, h)` (core rect in the frame's own

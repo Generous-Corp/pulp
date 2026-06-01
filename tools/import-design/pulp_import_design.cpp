@@ -1973,28 +1973,53 @@ int main(int argc, char* argv[]) {
     // keeps the native-vector widget. Generalizable: keyed on widget kind + an
     // asset-bearing image child, no layer-name match.
     if (!use_silver_knobs) {
-        std::function<void(IRNode&)> hoist = [&](IRNode& n) {
+        std::function<void(IRNode&)> convert = [&](IRNode& n) {
             if (n.audio_widget == pulp::view::AudioWidgetType::knob) {
-                for (auto it = n.children.begin(); it != n.children.end(); ++it) {
-                    if (it->type == "image" && it->attributes.count("asset_ref")) {
-                        n.attributes["asset_ref"] = it->attributes.at("asset_ref");
-                        // Carry the child's bleed extent up so opaque-core
-                        // recovery fires for the knob node (the knob frame
-                        // itself usually has no render_bounds).
-                        if (it->style.render_bounds && !n.style.render_bounds)
-                            n.style.render_bounds = it->style.render_bounds;
-                        // Single static body; a designer-supplied multi-frame
-                        // strip would set its own frame count (Approach A).
-                        if (!n.attributes.count("sprite_strip_frame_count"))
-                            n.attributes["sprite_strip_frame_count"] = "1";
-                        n.children.erase(it);  // its art now renders via the knob
-                        break;
+                // Count the captured image layers (each an asset-backed image
+                // child). The single-frame sprite skin can carry exactly one,
+                // and the native knob codegen is a leaf that does not emit
+                // image children — so the disposition depends on the count.
+                int asset_images = 0;
+                IRNode* body = nullptr;
+                for (auto& c : n.children) {
+                    if (c.type == "image" && c.attributes.count("asset_ref")) {
+                        ++asset_images;
+                        if (!body) body = &c;
                     }
                 }
+                if (asset_images == 1) {
+                    // The common separate-pointer knob: ONE captured disc
+                    // image + a stroked-vector pointer (which the native
+                    // rotating notch replaces). HOIST the disc onto the knob
+                    // so it stays interactive.
+                    n.attributes["asset_ref"] = body->attributes.at("asset_ref");
+                    // Carry the child's bleed extent up so opaque-core recovery
+                    // fires for the knob node (the knob frame itself usually
+                    // has no render_bounds).
+                    if (body->style.render_bounds && !n.style.render_bounds)
+                        n.style.render_bounds = body->style.render_bounds;
+                    // Single static body; a designer-supplied multi-frame strip
+                    // would set its own frame count (Approach A).
+                    if (!n.attributes.count("sprite_strip_frame_count"))
+                        n.attributes["sprite_strip_frame_count"] = "1";
+                    for (auto it = n.children.begin(); it != n.children.end(); ++it)
+                        if (&*it == body) { n.children.erase(it); break; }
+                } else if (asset_images > 1) {
+                    // Multiple captured image layers (e.g. body + highlight +
+                    // logo). A single-frame sprite skin can only hold one and
+                    // the leaf knob codegen would silently drop the rest, so
+                    // DEMOTE to a plain container (the pre-interactive-sprite
+                    // behavior): every layer renders as an image — faithful but
+                    // not turnable. Compositing the layers into one rotational
+                    // strip is Approach A (follow-up). No silent layer loss.
+                    n.audio_widget = pulp::view::AudioWidgetType::none;
+                }
+                // asset_images == 0: no captured art — leave the knob
+                // recognized; it falls through to the default knob paint.
             }
-            for (auto& c : n.children) hoist(c);
+            for (auto& c : n.children) convert(c);
         };
-        hoist(ir.root);
+        convert(ir.root);
     }
 
     // Resolve asset_ref → absolute file path. For envelopes that include an

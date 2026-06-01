@@ -544,6 +544,65 @@ TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interac
     REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
 }
 
+TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no silent drop)",
+          "[cli][import-design][sprite][shellout]") {
+    // Codex P2 on the hoist: a knob exported as MULTIPLE asset-backed image
+    // layers (body + logo/highlight) can't be a single-frame sprite skin, and
+    // the leaf knob codegen would silently drop every layer after the first.
+    // So when there is >1 asset-image child the importer DEMOTES to a plain
+    // container and every layer renders as an image (faithful, not turnable).
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-sprite-knob-multilayer");
+    fs::create_directories(tmp / "assets");
+    const auto png = repo_root() / "test" / "fixtures" / "imports" /
+                     "figma-plugin" / "synthetic-knob.png";
+    fs::copy_file(png, tmp / "assets" / "a.png", fs::copy_options::overwrite_existing);
+    fs::copy_file(png, tmp / "assets" / "b.png", fs::copy_options::overwrite_existing);
+    {
+        std::ofstream f(tmp / "scene.pulp.json");
+        f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "asset_manifest": {"version": 1, "assets": [
+    {"asset_id": "layerA", "local_path": "assets/a.png", "mime": "image/png"},
+    {"asset_id": "layerB", "local_path": "assets/b.png", "mime": "image/png"}]},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+    "children": [
+      {"type": "frame", "name": "MultiKnob", "audio_widget": "knob",
+       "figma_node_id": "1:2", "style": {"width": 56, "height": 56},
+       "children": [
+         {"type": "image", "name": "body", "figma_node_id": "1:3",
+          "asset_ref": "layerA",
+          "style": {"width": 56, "height": 56,
+                    "renderBounds": {"w": 64, "h": 96, "dx": -4, "dy": -4}}},
+         {"type": "image", "name": "logo", "figma_node_id": "1:4",
+          "asset_ref": "layerB", "style": {"width": 24, "height": 24}}
+       ]}
+    ]}
+})";
+    }
+    auto js_out = tmp / "ui.js";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", (tmp / "scene.pulp.json").string(),
+                       "--output", js_out.string(), "--no-tokens",
+                       "--knob-style", "sprite"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    const auto js = read_text(js_out);
+    // Demoted to a container: NOT a sprite knob, and BOTH layers survive as
+    // images (the pre-task behavior — no silent loss of the second layer).
+    REQUIRE(js.find("setKnobSpriteStrip") == std::string::npos);
+    REQUIRE(js.find("setKnobSpriteCore") == std::string::npos);
+    const auto count = [&](const std::string& needle) {
+        size_t n = 0, p = 0;
+        while ((p = js.find(needle, p)) != std::string::npos) { ++n; p += needle.size(); }
+        return n;
+    };
+    REQUIRE(count("setImageSource(") == 2);
+}
+
 TEST_CASE("pulp import-design default (silver) knob keeps the native vector body",
           "[cli][import-design][sprite][shellout]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
