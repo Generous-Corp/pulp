@@ -317,6 +317,7 @@ target_sources(pulp-view-core PRIVATE
     src/design_cpp_codegen.cpp
     src/design_tokens.cpp
     src/design_codegen.cpp
+    src/design_fidelity.cpp
     src/widget_skin_derive.cpp
     src/lock_to_source.cpp
     src/jsx_lock.cpp

@@ -1014,11 +1014,10 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             if (bleed_it != node.attributes.end() && bleed_it->second == "1")
                 ss << ind << "setObjectFit('" << id << "', 'none');\n";
         }
-        // Fidelity self-check: confirm a bleed sprite was sized without skew.
-        if (opts.fidelity_report) {
-            if (auto issue = check_image_sizing_fidelity(node, id, emitted_w, emitted_h))
-                opts.fidelity_report->push_back(std::move(*issue));
-        }
+        // Reference-free fidelity self-checks for this image (see design_fidelity).
+        if (opts.fidelity_report)
+            run_fidelity_checks({node, id, emitted_w, emitted_h, FidelityElement::image},
+                                *opts.fidelity_report);
         ss << "\n";
         return;
     }
@@ -1164,14 +1163,10 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             fidelity_emitted_w = *node.style.width;
         }
 
-        // Reference-free fidelity self-check: did codegen keep an explicitly
-        // fixed-sized container within tolerance of its authored box? Self-skips
-        // on hug/fill/absolute/display:none and on any unmeasured axis.
-        if (opts.fidelity_report) {
-            if (auto issue = check_gross_size_divergence(
-                    node, id, fidelity_emitted_w, fidelity_emitted_h))
-                opts.fidelity_report->push_back(std::move(*issue));
-        }
+        // Reference-free fidelity self-checks for this container (see design_fidelity).
+        if (opts.fidelity_report)
+            run_fidelity_checks({node, id, fidelity_emitted_w, fidelity_emitted_h,
+                                 FidelityElement::container}, *opts.fidelity_report);
 
         if (node.layout.gap > 0)
             ss << ind << "setFlex('" << id << "', 'gap', " << node.layout.gap << ");\n";
@@ -1372,83 +1367,6 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     if (node.style.background_color)
         ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
     ss << "\n";
-}
-
-// ── Fidelity self-check (reference-free no-skew invariant) ───────────────
-
-std::optional<FidelityIssue> check_image_sizing_fidelity(
-    const IRNode& node, const std::string& node_id,
-    float emitted_w, float emitted_h) {
-    // Only bleed sprites are sized to preserve aspect; an ordinary image
-    // intentionally fills its declared box, so it is never a skew finding.
-    const bool is_bleed =
-        node.style.render_bounds.has_value() ||
-        (node.attributes.count("asset_bleed") &&
-         node.attributes.at("asset_bleed") == "1");
-    if (!is_bleed) return std::nullopt;
-
-    auto attr_f = [&](const char* k) -> float {
-        auto it = node.attributes.find(k);
-        return it != node.attributes.end() ? std::strtof(it->second.c_str(), nullptr) : 0.0f;
-    };
-    const float png_w = attr_f("png_natural_w");
-    const float png_h = attr_f("png_natural_h");
-    if (png_w <= 0.0f || png_h <= 0.0f) {
-        return FidelityIssue{node_id, node.name, "aspect-unverified",
-            "bleed sprite has no source PNG dimensions; aspect could not be verified"};
-    }
-    if (emitted_w <= 0.0f || emitted_h <= 0.0f) return std::nullopt;
-
-    const float png_aspect = png_w / png_h;
-    const float emitted_aspect = emitted_w / emitted_h;
-    const float rel = std::fabs(emitted_aspect - png_aspect) / png_aspect;
-    if (rel > 0.05f) {
-        std::ostringstream d;
-        d << "emitted aspect " << emitted_aspect << " diverges from source PNG aspect "
-          << png_aspect << " (" << static_cast<int>(rel * 100.0f + 0.5f)
-          << "% off) — sprite skewed";
-        return FidelityIssue{node_id, node.name, "skew", d.str()};
-    }
-    return std::nullopt;
-}
-
-std::optional<FidelityIssue> check_gross_size_divergence(
-    const IRNode& node, const std::string& node_id,
-    float emitted_w, float emitted_h) {
-    // Only meaningful when the user explicitly pinned BOTH axes. hug/fill are
-    // flex-driven by design and must never be flagged — they legitimately grow
-    // or shrink away from the authored width/height.
-    if (node.layout.width_mode  != SizingMode::fixed) return std::nullopt;
-    if (node.layout.height_mode != SizingMode::fixed) return std::nullopt;
-
-    // False-positive gates (all IR-level, source-agnostic):
-    //  - absolute nodes size relative to their containing block, not sibling
-    //    flow, so a large emitted box vs. a small authored one is legitimate.
-    //  - display:none / hidden nodes are not rendered at all.
-    if (node.style.position.has_value() && *node.style.position == "absolute")
-        return std::nullopt;
-    if (node.layout.display.has_value() && *node.layout.display == "none")
-        return std::nullopt;
-
-    const float src_w = node.style.width.value_or(0.0f);
-    const float src_h = node.style.height.value_or(0.0f);
-    // Need a real source box on both axes to form a ratio, and an emitted box
-    // to compare it against. Missing either → cannot judge, so no finding.
-    if (src_w <= 0.0f || src_h <= 0.0f) return std::nullopt;
-    if (emitted_w <= 0.0f || emitted_h <= 0.0f) return std::nullopt;
-
-    auto ratio = [](float a, float b) { return std::max(a, b) / std::min(a, b); };
-    const float rw = ratio(emitted_w, src_w);
-    const float rh = ratio(emitted_h, src_h);
-    constexpr float kMaxRatio = 3.0f;
-    if (rw > kMaxRatio || rh > kMaxRatio) {
-        std::ostringstream d;
-        d << "fixed-sized node emitted box diverges from source: "
-          << "W " << rw << "x (source " << src_w << " emitted " << emitted_w << "px), "
-          << "H " << rh << "x (source " << src_h << " emitted " << emitted_h << "px)";
-        return FidelityIssue{node_id, node.name, "gross-size", d.str()};
-    }
-    return std::nullopt;
 }
 
 // ── Public code generation ──────────────────────────────────────────────
