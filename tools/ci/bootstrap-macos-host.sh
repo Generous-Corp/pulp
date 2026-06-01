@@ -17,7 +17,7 @@
 set -euo pipefail
 
 # ── configuration ───────────────────────────────────────────────────────────
-PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-26.4.1}"   # Xcode 26.4.1 (17E202)
+PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-26.5}"   # Xcode 26.5 (17F42)
 CI_ROOT="${PULP_CI_ROOT:-/Users/Shared/pulp-ci}"
 CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-80G}"
 REPO_SLUG="${PULP_REPO_SLUG:-danielraffel/pulp}"
