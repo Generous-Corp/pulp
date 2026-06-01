@@ -302,6 +302,32 @@ TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
     REQUIRE_FALSE(parse_design_source("unknown").has_value());
 }
 
+TEST_CASE("parse coerces CSS string dimensions to floats", "[view][import][parse]") {
+    // v0 / Stitch / Pencil emit CSS string dims ("100px", "12"); a bare
+    // getWithDefault<double> on a string returns 0 and degenerates the
+    // dimension. parse_ir_style now routes string values through the length
+    // parser so px-suffixed and numeric strings coerce correctly.
+    const std::string json = R"({
+      "version": 1, "source": "figma",
+      "root": {"type": "frame", "name": "Root",
+        "style": {"width": "120px", "height": "80", "borderWidth": "1px",
+                  "opacity": "0.5"}}
+    })";
+    const auto ir = parse_design_ir_json(json);
+    REQUIRE(ir.root.style.width == 120.0f);
+    REQUIRE(ir.root.style.height == 80.0f);
+    REQUIRE(ir.root.style.border_width == 1.0f);
+    REQUIRE(ir.root.style.opacity == 0.5f);
+
+    // A non-length string ("auto", "50%") is NOT a px length, so the float
+    // field stays unset for the sizing-mode / percent path to interpret.
+    const auto ir2 = parse_design_ir_json(
+        R"({"version":1,"source":"figma",
+            "root":{"type":"frame","style":{"width":"auto","height":"50%"}}})");
+    REQUIRE_FALSE(ir2.root.style.width.has_value());
+    REQUIRE_FALSE(ir2.root.style.height.has_value());
+}
+
 TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");
