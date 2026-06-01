@@ -86,6 +86,51 @@ elseif(UNIX)
 endif()
 catch_discover_tests(pulp-test-web-compat-prelude)
 
+# iOS-D.3c (#3217) — WebGPU mock GPUBuffer mapped-write + writeBuffer contract.
+# Runs under the default engine (no V8 / GPU / three.iife), so it executes in
+# every CI configuration and guards the geometry-upload round-trip that the
+# native Three.js cube depends on.
+add_executable(pulp-test-webgpu-mock-buffer
+    test_webgpu_mock_buffer.cpp
+)
+target_link_libraries(pulp-test-webgpu-mock-buffer PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-webgpu-mock-buffer PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-webgpu-mock-buffer PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+# Match the prelude target's larger stack — the mock GPU shims interleave
+# deeply through QuickJS↔C++ during bridge construction.
+if(APPLE)
+    target_link_options(pulp-test-webgpu-mock-buffer PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-webgpu-mock-buffer PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-webgpu-mock-buffer)
+
+# iOS-D.3c (#3217) — live native WebGPU buffered draw. Drives
+# __gpuQueueDrawBufferedImpl against a real Dawn device so the auto-pipeline-
+# layout + pipeline.GetBindGroupLayout() path the Three.js cube depends on is
+# covered headlessly. Gated on Skia+GPU; the test soft-skips at runtime when no
+# Dawn adapter is available so CI lanes without a working GPU don't hard-fail.
+if(PULP_HAS_SKIA AND PULP_ENABLE_GPU)
+    add_executable(pulp-test-webgpu-native-draw
+        test_webgpu_native_draw.cpp
+    )
+    target_link_libraries(pulp-test-webgpu-native-draw PRIVATE
+        pulp::view pulp::state pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-webgpu-native-draw PRIVATE
+        PULP_HAS_SKIA=1
+        PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test")
+    target_include_directories(pulp-test-webgpu-native-draw PRIVATE
+        ${WEBCOMPAT_INCLUDE_DIR} ${SKIA_INCLUDE_DIRS})
+    if(APPLE)
+        target_link_options(pulp-test-webgpu-native-draw PRIVATE -Wl,-stack_size,0x2000000)
+    elseif(UNIX)
+        target_link_options(pulp-test-webgpu-native-draw PRIVATE -Wl,-z,stacksize=16777216)
+    endif()
+    catch_discover_tests(pulp-test-webgpu-native-draw)
+endif()
+
 # Visual reftest runner (screenshot comparison against baselines)
 if(APPLE)
     add_executable(pulp-test-web-compat-reftest

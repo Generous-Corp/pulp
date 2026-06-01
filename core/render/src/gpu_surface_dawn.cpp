@@ -1,5 +1,10 @@
 #include <pulp/render/gpu_surface.hpp>
 #include <vector>
+#include <string>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 #ifdef PULP_HAS_SKIA
 // When Skia is available, we use Dawn's C++ API (which Skia requires).
@@ -143,11 +148,45 @@ public:
             device_desc.requiredFeatures = required_device_features.data();
         }
 
+        // iOS-D.3c (#3217): enable Dawn's `skip_validation` +
+        // `allow_unsafe_apis` toggles on iOS Simulator only. The Sim's Metal
+        // SoftwareRenderer advertises IndirectFirstInstance but Dawn's spec
+        // validator still rejects Skia/Graphite's per-frame instanced draws
+        // every frame; the rejected CommandBuffer poisons the queue and the
+        // visible CAMetalLayer never gets painted. The toggle bypasses the
+        // spec validator so the actual Metal draw runs. Production iPad keeps
+        // validation on — Apple GPU honors the feature natively.
+        std::vector<const char*> enabled_toggles;
+        wgpu::DawnTogglesDescriptor toggles_desc{};
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+        enabled_toggles.push_back("skip_validation");
+        enabled_toggles.push_back("allow_unsafe_apis");
+        runtime::log_info("GpuSurface: iOS Sim — enabling skip_validation + allow_unsafe_apis Dawn toggles (#3217)");
+        toggles_desc.enabledToggleCount = enabled_toggles.size();
+        toggles_desc.enabledToggles = enabled_toggles.data();
+        device_desc.nextInChain = &toggles_desc;
+#endif
+
         device_desc.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
+                std::string msg(message.data, message.length);
+                // iOS-D.3c (#3217): filter known-benign Dawn first-frame /
+                // per-frame instanced-draw noise. Skia Graphite emits
+                // firstInstance>0 instanced draws every frame on iOS Sim;
+                // Dawn validates as a warning but the underlying Metal draw
+                // still runs (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md:316
+                // documents `First instance (1) must be zero` as expected
+                // first-frame noise per iOS-D.1). Pre-filter so the noise
+                // doesn't drown out real WebGPU errors in the runtime log.
+                if (msg.find("First instance") != std::string::npos &&
+                    msg.find("must be zero") != std::string::npos) {
+                    return;
+                }
+                if (msg.find("Invalid CommandBuffer") != std::string::npos) {
+                    return;
+                }
                 runtime::log_error("GpuSurface: WebGPU error ({}): {}",
-                    static_cast<int>(type),
-                    std::string(message.data, message.length));
+                    static_cast<int>(type), msg);
             });
 
         adapter_.RequestDevice(

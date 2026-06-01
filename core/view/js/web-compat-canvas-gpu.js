@@ -482,6 +482,11 @@ function __createGPUCanvasContext(canvasEl) {
                 nativeCanvasId: context.canvas && context.canvas._id ? context.canvas._id : ""
             });
             bridgedTexture._nativeBridge = !!nativeTexture.nativeBridge;
+            // iOS-D.3c (#3217): stamp the canvas id directly onto the
+            // texture so its `createView()` propagates the bridge identity
+            // into the GPUTextureView attachment that encoder.draw inspects.
+            bridgedTexture._nativeCanvasId =
+                (context.canvas && context.canvas._id) ? context.canvas._id : "";
             return bridgedTexture;
         }
         var mockTexture = __createMockGPUTexture({

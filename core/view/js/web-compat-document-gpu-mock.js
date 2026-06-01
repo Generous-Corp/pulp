@@ -129,21 +129,54 @@ function __createMockGPUBuffer(init) {
         label: init.label || "",
         size: init.size || 0,
         usage: init.usage || 0,
-        mapState: "unmapped",
+        mapState: init.mappedAtCreation ? "mapped" : "unmapped",
         _destroyed: false,
-        _bytes: new Uint8Array(init.size || 0)
+        _bytes: new Uint8Array(init.size || 0),
+        // Outstanding mapped ranges handed out by getMappedRange(), flushed
+        // back into _bytes on unmap(). See the getMappedRange comment.
+        _mappedRanges: []
     };
     buffer.mapAsync = function() {
         buffer.mapState = "mapped";
         return Promise.resolve(undefined);
     };
+    // WebGPU semantics: getMappedRange() returns an ArrayBuffer the caller
+    // writes into, and unmap() commits those writes to the buffer's backing
+    // store. An ArrayBuffer cannot alias a *sliced* view of _bytes, so the
+    // previous implementation returned `_bytes.buffer.slice(...)` (an
+    // independent COPY) with a no-op unmap — every write to a mapped range was
+    // silently dropped. Three.js's WebGPUBackend uploads geometry through exactly this
+    // path (`createBuffer({mappedAtCreation:true})` → `new T(getMappedRange())
+    // .set(attr.array)` → `unmap()`), so vertex/index buffers arrived all-zero
+    // at the native bridge and the cube collapsed to a degenerate point
+    // (#3217). Uniforms survived only because they use queue.writeBuffer, which
+    // writes _bytes directly. Fix: hand back a standalone range seeded from the
+    // current backing bytes, record it, and copy each recorded range back into
+    // _bytes on unmap().
     buffer.getMappedRange = function(offset, size) {
         var begin = offset || 0;
-        var end = size == null ? buffer.size : begin + size;
-        return buffer._bytes.buffer.slice(begin, end);
+        var end = size == null ? buffer._bytes.length : begin + size;
+        if (end > buffer._bytes.length) { end = buffer._bytes.length; }
+        if (begin > end) { begin = end; }
+        var range = new ArrayBuffer(end - begin);
+        new Uint8Array(range).set(buffer._bytes.subarray(begin, end));
+        buffer._mappedRanges.push({ begin: begin, range: range });
+        return range;
     };
-    buffer.unmap = function() { buffer.mapState = "unmapped"; };
-    buffer.destroy = function() { buffer._destroyed = true; };
+    buffer.unmap = function() {
+        if (buffer._mappedRanges && buffer._mappedRanges.length) {
+            for (var i = 0; i < buffer._mappedRanges.length; i++) {
+                var r = buffer._mappedRanges[i];
+                buffer._bytes.set(new Uint8Array(r.range), r.begin);
+            }
+            buffer._mappedRanges = [];
+        }
+        buffer.mapState = "unmapped";
+    };
+    buffer.destroy = function() {
+        buffer._destroyed = true;
+        buffer._mappedRanges = [];
+    };
     return buffer;
 }
 
@@ -155,7 +188,17 @@ function __createMockGPUTextureView(init) {
         format: init.format || __mockPreferredCanvasFormat(),
         dimension: init.dimension || "2d",
         aspect: init.aspect || "all",
-        texture: init.texture || null
+        texture: init.texture || null,
+        // iOS-D.3c (#3217): propagate native-bridge identity from the
+        // owning texture so encoder.draw's createBufferedDrawPayload check
+        // (web-compat-gpu-buffered.js:194) sees attachmentView._nativeBridge
+        // and routes the draw through the native bridge instead of the mock
+        // no-op. Without this, Three.js's WebGPURenderer renders to a JS-
+        // side mock that drops every command, and the offscreen wgpu::Texture
+        // we hand Skia stays blank → invisible cube.
+        _nativeBridge: !!init._nativeBridge,
+        _nativeCanvasId: init._nativeCanvasId || "",
+        _nativeTextureId: init._nativeTextureId || ""
     };
 }
 
@@ -182,7 +225,13 @@ function __createMockGPUTexture(init) {
             format: descriptor.format || texture.format,
             dimension: descriptor.dimension || texture.dimension,
             aspect: descriptor.aspect || "all",
-            texture: texture
+            texture: texture,
+            // iOS-D.3c (#3217): forward the texture's native-bridge ids so
+            // the resulting view can route encoder.draw through the native
+            // bridge path (see __createMockGPUTextureView above).
+            _nativeBridge: !!texture._nativeBridge,
+            _nativeCanvasId: texture._nativeCanvasId || "",
+            _nativeTextureId: texture._nativeTextureId || ""
         });
     };
     texture.destroy = function() { texture._destroyed = true; };
@@ -259,6 +308,19 @@ function __createMockGPUComputePassEncoder(init) {
 function __createMockGPUCommandEncoder(init) {
     init = init || {};
     var computePasses = [];
+    // iOS-D.3c (#3217): collect render-pass commands here so they survive
+    // into the command buffer's `_commands` array. Without this, the
+    // canvas-gpu / buffered shims would push commands into a per-encoder
+    // `passCommands` and `encoder.end` would have nowhere to forward them
+    // (init.onEnd was never wired), and queue.submit would see
+    // `commandBuffer._commands.length === 0` even though Three.js had
+    // issued draws. Wiring onEnd → renderCommands.push lets the native
+    // queue.submit dispatcher route each draw through
+    // __gpuQueueDrawBufferedImpl / __gpuQueueDrawImpl.
+    var renderCommands = [];
+    var collectRenderCommand = function(cmd) {
+        if (cmd) renderCommands.push(cmd);
+    };
     return {
         _objectName: "GPUCommandEncoder",
         label: init.label || "",
@@ -266,7 +328,8 @@ function __createMockGPUCommandEncoder(init) {
         beginRenderPass: function(descriptor) {
             return __createMockGPURenderPassEncoder({
                 label: descriptor && descriptor.label ? descriptor.label : "",
-                descriptor: descriptor || {}
+                descriptor: descriptor || {},
+                onEnd: collectRenderCommand
             });
         },
         beginComputePass: function(descriptor) {
@@ -281,6 +344,10 @@ function __createMockGPUCommandEncoder(init) {
             var cmdBuf = __createMockGPUCommandBuffer({ label: descriptor && descriptor.label ? descriptor.label : "" });
             // Attach compute pass commands to the command buffer for native dispatch
             cmdBuf._computePasses = computePasses;
+            // iOS-D.3c (#3217): hand the captured render-pass commands to
+            // the command buffer so queue.submit can iterate them and call
+            // the per-command native dispatcher.
+            cmdBuf._commands = renderCommands.slice();
             return cmdBuf;
         }
     };
