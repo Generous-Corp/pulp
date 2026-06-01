@@ -4362,6 +4362,51 @@ TEST_CASE("codegen routes a dropped vector through the vector-renderability chec
     CHECK(found);
 }
 
+TEST_CASE("codegen lowers a path-data vector to a native SvgPath (not dropped)",
+          "[view][import][codegen][vector]") {
+    // A vector/path/svg_path node carrying path_data lowers to createSvgPath +
+    // setSvgPath (+ viewBox / fill / stroke), so it RENDERS and is NOT flagged
+    // by the dropped-vector invariant. Source-agnostic: keyed only on type +
+    // path_data, never a layer name.
+    for (const char* kind : {"path", "vector", "svg_path"}) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.name = "Root";
+        ir.root.style.width = 400.0f;
+        ir.root.style.height = 200.0f;
+
+        IRNode glyph;
+        glyph.type = kind;
+        glyph.name = "Glyph";
+        glyph.style.width = 64.0f;
+        glyph.style.height = 64.0f;
+        glyph.attributes["path_data"] = "M0 0 L64 0 L32 64 Z";
+        glyph.attributes["svg_fill"] = "#ff8800";
+        glyph.attributes["svg_stroke"] = "#102030";
+        glyph.attributes["svg_stroke_width"] = "2";
+        glyph.attributes["svg_viewbox"] = "0 0 64 64";
+        ir.root.children.push_back(glyph);
+
+        std::vector<pulp::view::FidelityIssue> report;
+        CodeGenOptions opts;            // defaults to bridge_native_js
+        opts.fidelity_report = &report;
+        const auto js = generate_pulp_js(ir, opts);
+
+        INFO("kind=" << kind << " js=\n" << js);
+        CHECK(js.find("createSvgPath('Glyph") != std::string::npos);
+        CHECK(js.find("setSvgPath('Glyph") != std::string::npos);
+        CHECK(js.find("M0 0 L64 0 L32 64 Z") != std::string::npos);
+        CHECK(js.find("setSvgViewBox('Glyph") != std::string::npos);
+        CHECK(js.find("setSvgFill('Glyph") != std::string::npos);
+        CHECK(js.find("setSvgStroke('Glyph") != std::string::npos);
+        // Renders → NOT flagged as a silent drop.
+        bool dropped = false;
+        for (const auto& iss : report)
+            if (iss.kind == "dropped-vector" && iss.node_name == "Glyph") dropped = true;
+        CHECK_FALSE(dropped);
+    }
+}
+
 TEST_CASE("web-compat codegen also runs the image-sizing fidelity check",
           "[view][import][codegen][fidelity][web-compat]") {
     // Codex #3267: fidelity checks previously ran only in the native-bridge

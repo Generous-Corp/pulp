@@ -544,6 +544,41 @@ TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interac
     REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
 }
 
+TEST_CASE("pulp import-design lowers an SVG path node to a native SvgPath (end-to-end)",
+          "[cli][import-design][vector][shellout]") {
+    // Full pipeline: the figma-plugin parser routes a `path` node carrying `d`
+    // through parse_ir_node (which preserves it as path_data) and codegen emits
+    // createSvgPath + setSvgPath — instead of silently dropping the vector.
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-vector-path");
+    {
+        std::ofstream f(tmp / "scene.pulp.json");
+        f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+    "children": [
+      {"type": "path", "name": "Glyph", "figma_node_id": "1:2",
+       "d": "M0 0 L64 0 L32 64 Z", "fill": "#ff8800",
+       "viewBox": "0 0 64 64",
+       "style": {"width": 64, "height": 64}}
+    ]}
+})";
+    }
+    auto js_out = tmp / "ui.js";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", (tmp / "scene.pulp.json").string(),
+                       "--output", js_out.string(), "--no-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    const auto js = read_text(js_out);
+    REQUIRE(js.find("createSvgPath('Glyph") != std::string::npos);
+    REQUIRE(js.find("setSvgPath('Glyph") != std::string::npos);
+    REQUIRE(js.find("M0 0 L64 0 L32 64 Z") != std::string::npos);
+}
+
 TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no silent drop)",
           "[cli][import-design][sprite][shellout]") {
     // Codex P2 on the hoist: a knob exported as MULTIPLE asset-backed image

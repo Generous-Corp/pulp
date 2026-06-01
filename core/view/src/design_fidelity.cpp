@@ -245,7 +245,11 @@ bool renders_as_image(const IRNode& n) {
 bool is_terminal_renderable(const IRNode& n) {
     return renders_as_image(n) ||
            n.audio_widget != AudioWidgetType::none ||
-           n.type == "text" || n.type == "label";
+           n.type == "text" || n.type == "label" ||
+           // A vector/path node carrying path-data lowers to a native
+           // SvgPathWidget (createSvgPath + setSvgPath), so it renders and
+           // must not be flagged as a silent drop.
+           (is_vector_kind(n.type) && n.attributes.count("path_data") > 0);
 }
 
 }  // namespace

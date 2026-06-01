@@ -694,6 +694,47 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         if (!ar.empty()) node.attributes["asset_ref"] = std::move(ar);
     }
 
+    // SVG path geometry — preserve the path-data string under a canonical key
+    // so codegen can lower vector/path/svg_path nodes to a native SvgPathWidget
+    // instead of silently dropping them (the dropped-vector invariant, #3275).
+    // Multi-spelling so Pencil / Stitch / v0 / Claude / RN SVG exports all
+    // survive (the figma lane rasterizes vectors to PNG, so this serves the
+    // path-carrying sources). First non-empty wins; an attributes-nested
+    // path_data copied above is not overwritten. svg_fill / svg_stroke /
+    // svg_stroke_width capture the path's own paint for the SvgPath skin.
+    if (node.attributes.find("path_data") == node.attributes.end()) {
+        for (const char* k : {"path_data", "pathData", "path_d", "d"}) {
+            if (obj.hasObjectMember(k) && obj[k].isString()) {
+                auto v = std::string(obj[k].toString());
+                if (!v.empty()) { node.attributes["path_data"] = std::move(v); break; }
+            }
+        }
+    }
+    if (node.attributes.count("path_data")) {
+        if (!node.attributes.count("svg_viewbox") &&
+            obj.hasObjectMember("viewBox") && obj["viewBox"].isString()) {
+            auto v = std::string(obj["viewBox"].toString());
+            if (!v.empty()) node.attributes["svg_viewbox"] = std::move(v);
+        }
+        auto capture_color = [&](const char* src, const char* dst) {
+            if (node.attributes.count(dst)) return;
+            if (obj.hasObjectMember(src) && obj[src].isString()) {
+                auto v = std::string(obj[src].toString());
+                if (!v.empty()) node.attributes[dst] = std::move(v);
+            }
+        };
+        capture_color("fill", "svg_fill");
+        capture_color("stroke", "svg_stroke");
+        if (!node.attributes.count("svg_stroke_width")) {
+            for (const char* k : {"strokeWidth", "stroke_width"}) {
+                if (obj.hasObjectMember(k)) {
+                    float sw = get_float(obj, k, 0.0f);
+                    if (sw > 0.0f) { node.attributes["svg_stroke_width"] = std::to_string(sw); break; }
+                }
+            }
+        }
+    }
+
     // Exact layout dimensions from snapshot_layout (injected by import skill)
     if (obj.hasObjectMember("_layoutHeight"))
         node.attributes["_layoutHeight"] = std::to_string(static_cast<int>(get_float(obj, "_layoutHeight", 0)));

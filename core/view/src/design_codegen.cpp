@@ -936,6 +936,60 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         return;
     }
 
+    // Vector / path node carrying SVG path-data → native SvgPathWidget.
+    // Terminal: it renders the path itself, so codegen does not descend into
+    // children (mirrors the image / text / widget terminals). Sources that ship
+    // a path `d` (Pencil / Stitch / v0 / Claude / RN SVG) lower here instead of
+    // silently dropping to an empty frame (the dropped-vector invariant); the
+    // figma lane rasterizes vectors to PNG and takes the image branch instead.
+    {
+        const bool is_path_kind =
+            node.type == "vector" || node.type == "path" || node.type == "svg_path";
+        auto pd = node.attributes.find("path_data");
+        if (is_path_kind && pd != node.attributes.end() && !pd->second.empty()) {
+            if (opts.include_comments && !node.name.empty() && depth > 0)
+                ss << ind << "// " << node.name << "\n";
+            ss << ind << "createSvgPath('" << id << "', " << pid << ");\n";
+            emit_position_if_absolute(id);
+            ss << ind << "setSvgPath('" << id << "', '"
+               << js_single_quote_escape(pd->second) << "');\n";
+            // viewBox is "minX minY width height" — the widget scales the path
+            // into its box from the (width, height) pair.
+            if (auto vb = node.attributes.find("svg_viewbox");
+                vb != node.attributes.end()) {
+                const char* p = vb->second.c_str();
+                char* end = nullptr;
+                float vals[4]; int got = 0;
+                while (got < 4) {
+                    float v = std::strtof(p, &end);
+                    if (end == p) break;
+                    vals[got++] = v; p = end;
+                }
+                if (got == 4 && vals[2] > 0.0f && vals[3] > 0.0f)
+                    ss << ind << "setSvgViewBox('" << id << "', "
+                       << vals[2] << ", " << vals[3] << ");\n";
+            }
+            if (auto f = node.attributes.find("svg_fill"); f != node.attributes.end())
+                ss << ind << "setSvgFill('" << id << "', '"
+                   << js_single_quote_escape(f->second) << "');\n";
+            if (auto s = node.attributes.find("svg_stroke"); s != node.attributes.end())
+                ss << ind << "setSvgStroke('" << id << "', '"
+                   << js_single_quote_escape(s->second) << "');\n";
+            if (auto sw = node.attributes.find("svg_stroke_width");
+                sw != node.attributes.end())
+                ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
+            const float vw = node.style.width.value_or(0.0f);
+            const float vh = node.style.height.value_or(0.0f);
+            if (vw > 0.0f) ss << ind << "setFlex('" << id << "', 'width', " << vw << ");\n";
+            if (vh > 0.0f) ss << ind << "setFlex('" << id << "', 'height', " << vh << ");\n";
+            if (opts.fidelity_report)
+                run_fidelity_checks({node, id, vw, vh, FidelityElement::container},
+                                    *opts.fidelity_report);
+            ss << "\n";
+            return;
+        }
+    }
+
     // Container, image, or text node
     bool is_image = (node.type == "image" || node.attributes.count("asset_path") > 0);
     bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
