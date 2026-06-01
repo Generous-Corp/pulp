@@ -4,8 +4,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <sstream>
+#include <string_view>
+#include <unordered_set>
 
 namespace pulp::view {
 namespace {
@@ -173,6 +177,133 @@ void run_fidelity_checks(const FidelityContext& ctx, std::vector<FidelityIssue>&
     for (const auto& c : kChecks)
         if (c.applies_to == ctx.element)
             if (auto issue = c.fn(ctx)) sink.push_back(std::move(*issue));
+}
+
+// ── Tree-level: vector-renderability ─────────────────────────────────────────
+namespace {
+
+// Vector/path-like source kinds, matched on normalized IR type only (never a
+// layer name) so the check is identical across figma/pencil/stitch/v0. Unions
+// the svg_*/path/rect/line kinds resolved in design_import_native_common.cpp
+// with the ellipse/rectangle shapes codegen consumes, plus the
+// polygon/polyline/star/circle/vector kinds vector sources emit.
+bool is_vector_kind(const std::string& type) {
+    static constexpr std::string_view kVectorKinds[] = {
+        "vector",  "path",     "svg_path",
+        "rect",    "svg_rect", "rectangle",
+        "line",    "svg_line",
+        "ellipse", "circle",
+        "polygon", "polyline", "star",
+    };
+    for (auto k : kVectorKinds)
+        if (type == k) return true;
+    return false;
+}
+
+bool attr_eq(const IRNode& n, const char* key, const char* val) {
+    auto it = n.attributes.find(key);
+    return it != n.attributes.end() && it->second == val;
+}
+
+bool is_invisible(const IRNode& n) {
+    if (n.style.opacity && *n.style.opacity <= 0.0f) return true;
+    if (n.layout.display && *n.layout.display == "none") return true;
+    if (attr_eq(n, "visibility", "hidden")) return true;
+    return false;
+}
+
+// A solid/gradient/image fill is author intent to paint the box. codegen's
+// generic-frame branch paints background_color directly; gradient/image fills
+// are tracked by the gradient/paint work, so treat any declared fill as
+// "renders" here to keep this invariant focused on the silent stroke/path drop.
+bool has_visible_fill(const IRNode& n) {
+    if (n.style.background_color && !n.style.background_color->empty()) return true;
+    if (n.style.background_gradient && !n.style.background_gradient->empty()) return true;
+    if (n.style.background_image && !n.style.background_image->empty() &&
+        *n.style.background_image != "none") return true;
+    return false;
+}
+
+// Mirrors codegen's is_image: an asset_path (or literal image type) routes
+// through the rasterized-image branch, which is terminal.
+bool renders_as_image(const IRNode& n) {
+    return n.type == "image" || n.type == "img" || n.attributes.count("asset_path") > 0;
+}
+
+// codegen lowers these to real primitives in TERMINAL branches (image L908,
+// widget L416-900, text L1035) — generate_native_node returns without
+// descending into their children. The tree walk must stop at the same nodes,
+// or a vector child consumed into a parent (e.g. a knob's stroke ellipse) is
+// falsely flagged as dropped.
+bool is_terminal_renderable(const IRNode& n) {
+    return renders_as_image(n) ||
+           n.audio_widget != AudioWidgetType::none ||
+           n.type == "text" || n.type == "label";
+}
+
+}  // namespace
+
+void check_vector_renderability(
+    const IRNode& root,
+    const std::vector<ImportDiagnostic>& diagnostics,
+    const std::function<std::string(const IRNode&)>& node_id_of,
+    std::vector<FidelityIssue>& sink) {
+
+    constexpr float kMinVectorArea = 16.0f * 16.0f;  // 256 px²; below = hairline/rule, skip
+
+    // Flag A — the "already surfaced to the user" gate. Adapters anchor an
+    // ImportDiagnostic to a node by stable_anchor_id and/or structural path
+    // ("$", "$/children[i]/…"; see design_import_native_common.cpp), so suppress
+    // a node when a render-affecting diagnostic already names it. The silent-drop
+    // finding exists to catch UNANNOUNCED degradations, not ones the importer
+    // already reported.
+    std::unordered_set<std::string> diagnosed_anchors;
+    std::unordered_set<std::string> diagnosed_paths;
+    for (const auto& d : diagnostics) {
+        const bool affects_render =
+            d.severity == ImportDiagnosticSeverity::error ||
+            d.kind == ImportDiagnosticKind::unsupported_property ||
+            d.kind == ImportDiagnosticKind::unresolved_asset ||
+            d.kind == ImportDiagnosticKind::fallback_used ||
+            d.kind == ImportDiagnosticKind::capture_partial;
+        if (!affects_render) continue;
+        if (d.anchor_id && !d.anchor_id->empty()) diagnosed_anchors.insert(*d.anchor_id);
+        if (!d.path.empty()) diagnosed_paths.insert(d.path);
+    }
+    auto already_diagnosed = [&](const IRNode& n, const std::string& path) {
+        if (n.confidence && *n.confidence == IRConfidence::not_impl) return true;
+        if (n.stable_anchor_id && !n.stable_anchor_id->empty() &&
+            diagnosed_anchors.count(*n.stable_anchor_id)) return true;
+        if (!path.empty() && diagnosed_paths.count(path)) return true;
+        return false;
+    };
+
+    // Depth-first walk mirroring generate_native_node's recursion. `path` tracks
+    // the same structural key adapters use to anchor diagnostics.
+    std::function<void(const IRNode&, const std::string&)> visit =
+        [&](const IRNode& n, const std::string& path) {
+        if (is_vector_kind(n.type) && !is_invisible(n) && !already_diagnosed(n, path)) {
+            const bool renders = is_terminal_renderable(n) ||
+                                 !n.children.empty() || has_visible_fill(n);
+            if (!renders) {
+                const float w = n.style.width.value_or(0.0f);
+                const float h = n.style.height.value_or(0.0f);
+                if (w > 0.0f && h > 0.0f && w * h >= kMinVectorArea) {
+                    std::ostringstream detail;
+                    detail << "vector node type='" << n.type << "' (" << w << "x" << h
+                           << "px) produced no renderable primitive (no rasterized "
+                              "asset, native widget, child, or visible fill) — shape "
+                              "dropped to an empty frame";
+                    sink.push_back(FidelityIssue{node_id_of(n), n.name,
+                                                 "dropped-vector", detail.str()});
+                }
+            }
+        }
+        if (is_terminal_renderable(n)) return;  // codegen does not descend here
+        for (std::size_t i = 0; i < n.children.size(); ++i)
+            visit(n.children[i], path + "/children[" + std::to_string(i) + "]");
+    };
+    visit(root, "$");
 }
 
 }  // namespace pulp::view

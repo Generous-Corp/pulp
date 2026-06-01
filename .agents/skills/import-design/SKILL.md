@@ -1805,8 +1805,20 @@ rasterized shapes). Each cost a visible fidelity bug.
   carries the node, sanitized id, the emitted w/h, and the element kind.
   `design_codegen.cpp` keeps only thin call-sites: it captures the geometry it
   already computes and calls `run_fidelity_checks` in the image and container
-  branches. **Adding an invariant = one function + one registry row + a case in
-  `test_design_fidelity.cpp`.** Codegen does not grow.
+  branches. **Adding a PER-ELEMENT invariant = one function + one registry row +
+  a case in `test_design_fidelity.cpp`.** Codegen does not grow.
+- **Two invariant shapes.** Most checks are *per-element registry rows* (above).
+  A few need subtree/coverage context a single `FidelityContext` can't carry —
+  those are *tree passes*: free functions taking `(root, diagnostics, node_id_of,
+  sink)`, called once from `generate_pulp_js` after the emit walk, NOT in the
+  registry. A tree pass must mirror codegen's recursion exactly — descend EXCEPT
+  into the terminal image/widget/text branches (which return without emitting
+  children). Skipping that is a real FP source: a knob consumes its child
+  ellipses into its native paint, so a naive full-tree walk would flag that
+  consumed stroke-ellipse as a dropped vector. The pass also takes
+  `DesignIR::diagnostics` so a node already carrying a render-affecting import
+  diagnostic (matched by `stable_anchor_id` or structural `$`/`/children[i]`
+  path) is suppressed — never double-report a drop the importer already surfaced.
 - **Element dispatch is load-bearing.** A check runs ONLY for its element kind.
   Critical gotcha: the gross-size check must NOT see images — a bleed sprite's
   emitted box legitimately differs >3× from its style box (it sizes to
@@ -1825,6 +1837,21 @@ rasterized shapes). Each cost a visible fidelity bug.
   single-line label in a tall slot left top-aligned → `text-vcenter`; the text
   call-site stamps `_emitted_vertical_align` so the check sees codegen's
   decision). All four fire 0 on a faithful import (regression guards).
+- **Tree pass shipped:** `check_vector_renderability` (root walk; a visible
+  vector/path-like node — `path`/`svg_path`/`rect`/`svg_rect`/`rectangle`/`line`/
+  `svg_line`/`ellipse`/`circle`/`polygon`/`polyline`/`star`/`vector` — above a
+  256px² area floor that produces no renderable primitive → `dropped-vector`).
+  "Renders" = a rasterized `asset_path`, a native/audio widget, any children, or
+  a visible fill (`background_color`/`gradient`/`image`). The childless
+  no-fill-no-asset case hits codegen's generic-frame fall-through, which paints
+  only `background_color` and drops stroke/border/path art to an empty
+  `createRow` — that silent drop is the target. FP gates: invisible
+  (`opacity:0`/`display:none`/`visibility:hidden`), sub-256px² area (kills the
+  hairline dividers + EQ grid lines real designs are full of — e.g. ELYSIUM's
+  width-0 separator vectors), and already-diagnosed (see tree-pass note above).
+  Findings carry the exact bridge id via codegen's real node→id map. Fires 0 on
+  a faithful import (substantive shape art is rasterized at export and routes
+  through the image branch).
 - **`pulp import-design --strict-fidelity`** prints findings as `fidelity: …`
   warnings and exits 4 when any are present. Tests: unit cases per check in
   `test/test_design_fidelity.cpp`; the codegen-routing case is in

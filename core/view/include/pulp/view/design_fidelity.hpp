@@ -12,6 +12,7 @@
 
 #include <pulp/view/design_ir.hpp>
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@ struct FidelityIssue {
     std::string node_name;  ///< source layer name (for human-readable reports)
     std::string kind;       ///< "skew" | "aspect-unverified" | "gross-size"
                             ///<   | "widget-size" | "widget-undersized" | "text-vcenter"
+                            ///<   | "dropped-vector"
     std::string detail;     ///< one-line explanation with the measured numbers
 };
 
@@ -70,5 +72,35 @@ std::optional<FidelityIssue> check_text_vertical_centering(const FidelityContext
 /// `sink`. This is the ONLY entry point codegen calls. The registry below is
 /// the single place to add a new invariant.
 void run_fidelity_checks(const FidelityContext& ctx, std::vector<FidelityIssue>& sink);
+
+// ── Tree-level invariants (need subtree / coverage context) ──────────────────
+
+/// Vector-renderability: every visible vector/path-like node (svg path/rect/
+/// line, ellipse, polygon, …) above an area threshold must map to a real
+/// renderable primitive — a rasterized asset, a native widget, child paint, or
+/// a visible fill — OR already carry an explicit unsupported diagnostic. A bare
+/// vector that codegen would drop to an empty `createRow` frame (no asset, no
+/// children, no fill — its stroke/path/border art silently vanishes) is
+/// reported as "dropped-vector".
+///
+/// This is a TREE pass, not a per-element registry check, for two reasons the
+/// single-node FidelityContext cannot serve: (1) the dropped node hits codegen's
+/// generic-frame fall-through, which has no run_fidelity_checks call site; and
+/// (2) the false-positive gate "a vector child consumed into a parent widget is
+/// not dropped" needs subtree context. The walk mirrors generate_native_node's
+/// recursion exactly — it descends EXCEPT into the terminal image/widget/text
+/// branches — so a knob's consumed stroke-ellipse is never falsely flagged.
+///
+/// `diagnostics` is `DesignIR::diagnostics`: a node already carrying a
+/// render-affecting import diagnostic (matched by stable_anchor_id or structural
+/// path) is suppressed so the silent-drop finding never double-reports a drop
+/// the importer already surfaced. `node_id_of` maps a node to the bridge id
+/// codegen emitted for it (codegen passes a lookup over its real id map; tests
+/// pass an identity-ish stub).
+void check_vector_renderability(
+    const IRNode& root,
+    const std::vector<ImportDiagnostic>& diagnostics,
+    const std::function<std::string(const IRNode&)>& node_id_of,
+    std::vector<FidelityIssue>& sink);
 
 }  // namespace pulp::view

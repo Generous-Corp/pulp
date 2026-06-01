@@ -4256,3 +4256,33 @@ TEST_CASE("codegen routes a fixed container through the gross-size check",
         if (iss.kind == "gross-size" && iss.node_name == "Box") found = true;
     CHECK(found);
 }
+
+TEST_CASE("codegen routes a dropped vector through the vector-renderability check",
+          "[view][import][fidelity][vector]") {
+    // A bare vector child (no asset_path / fill / children) hits codegen's
+    // generic-frame fall-through and silently degrades to an empty row. The
+    // tree-level vector-renderability pass, wired into generate_pulp_js on the
+    // native arm, must surface a "dropped-vector" finding for it.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 200.0f;
+
+    IRNode glyph;
+    glyph.type = "path";
+    glyph.name = "Glyph";
+    glyph.style.width = 64.0f;   // no asset_path / fill / children
+    glyph.style.height = 64.0f;
+    ir.root.children.push_back(glyph);
+
+    std::vector<pulp::view::FidelityIssue> report;
+    CodeGenOptions opts;            // defaults to bridge_native_js
+    opts.fidelity_report = &report;
+    (void)generate_pulp_js(ir, opts);
+
+    bool found = false;
+    for (const auto& iss : report)
+        if (iss.kind == "dropped-vector" && iss.node_name == "Glyph") found = true;
+    CHECK(found);
+}

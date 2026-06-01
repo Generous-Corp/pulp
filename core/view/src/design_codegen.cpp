@@ -20,7 +20,9 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <sstream>
+#include <unordered_map>
 
 namespace pulp::view {
 
@@ -374,10 +376,15 @@ static float compute_node_height(const IRNode& node) {
 
 static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                                   const CodeGenOptions& opts, int depth,
-                                  int& var_counter, const std::string& parent_id) {
+                                  int& var_counter, const std::string& parent_id,
+                                  std::unordered_map<const IRNode*, std::string>* id_map = nullptr) {
     std::string id = sanitize_var(node.name.empty() ? node.type : node.name);
     if (depth > 0) id += std::to_string(var_counter++);
     else id = opts.root_variable;
+    // Record the exact emitted bridge id so the tree-level fidelity pass
+    // (check_vector_renderability) can point findings at the real node id
+    // codegen used, not a re-derived best-effort name.
+    if (id_map) (*id_map)[&node] = id;
 
     std::string ind = indent(depth, opts.indent_spaces);
     std::string pid = parent_id.empty() ? "''" : ("'" + parent_id + "'");
@@ -1364,7 +1371,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                     nudge_this_child = true;
                 }
             }
-            generate_native_node(ss, child, opts, depth + 1, var_counter, id);
+            generate_native_node(ss, child, opts, depth + 1, var_counter, id, id_map);
             if (nudge_this_child) {
                 std::string child_ind = indent(depth + 1, opts.indent_spaces);
                 ss << child_ind << "setFlex('" << child_var_id_pre
@@ -1579,8 +1586,25 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     if (opts.mode == CodeGenMode::bridge_native_js) {
         // Native-bridge JS API
         int var_counter = 0;
-        generate_native_node(ss, ir.root, opts, 0, var_counter, "");
+        std::unordered_map<const IRNode*, std::string> id_map;
+        generate_native_node(ss, ir.root, opts, 0, var_counter, "", &id_map);
         ss << "void 0;\n";
+
+        // Tree-level fidelity pass: catch vector/path nodes codegen dropped to
+        // empty frames. No per-node branch fires for them (the generic-frame
+        // fall-through has no run_fidelity_checks call site), so this runs once
+        // over the IR after the emit walk. Native arm only — the web-compat
+        // lowering does not own the dropped-shape fall-through.
+        if (opts.fidelity_report) {
+            check_vector_renderability(
+                ir.root, ir.diagnostics,
+                [&id_map](const IRNode& n) -> std::string {
+                    auto it = id_map.find(&n);
+                    if (it != id_map.end()) return it->second;
+                    return sanitize_var(n.name.empty() ? n.type : n.name);
+                },
+                *opts.fidelity_report);
+        }
     } else {
         // Web-compat DOM API
         int var_counter = 0;

@@ -252,3 +252,153 @@ TEST_CASE("text-vcenter: a box with no vertical slack self-skips",
     CHECK_FALSE(check_text_vertical_centering(
         {n, "T0", 0.0f, 18.0f, FidelityElement::text}).has_value());
 }
+
+// ── Vector-renderability invariant (tree pass) ──────────────────────────────
+namespace {
+IRNode make_vector_node(const std::string& type, float w, float h) {
+    IRNode n;
+    n.type = type;
+    n.name = "Shape";
+    n.style.width = w;
+    n.style.height = h;
+    return n;
+}
+// Identity-ish id mapper for tests (codegen passes its real node→id map).
+std::string vec_id_of(const IRNode& n) { return n.name.empty() ? n.type : n.name; }
+const std::vector<ImportDiagnostic> kNoDiagnostics{};
+}  // namespace
+
+TEST_CASE("vector-renderability flags a bare path that produced no primitive",
+          "[view][import][fidelity][harness][vector]") {
+    IRNode n = make_vector_node("path", 64.0f, 48.0f);  // no asset_path, no fill, no children
+    std::vector<FidelityIssue> sink;
+    check_vector_renderability(n, kNoDiagnostics, vec_id_of, sink);
+    REQUIRE(sink.size() == 1);
+    CHECK(sink[0].kind == "dropped-vector");
+    CHECK(sink[0].node_id == "Shape");
+}
+
+TEST_CASE("vector-renderability flags a stroke-only rect (border dropped by frame branch)",
+          "[view][import][fidelity][harness][vector]") {
+    // A bare rect carrying only a border falls to codegen's generic-frame
+    // branch, which paints background_color only — the stroke silently vanishes.
+    IRNode n = make_vector_node("rect", 80.0f, 40.0f);
+    n.style.border_color = "#333333";
+    n.style.border_width = 1.0f;
+    std::vector<FidelityIssue> sink;
+    check_vector_renderability(n, kNoDiagnostics, vec_id_of, sink);
+    REQUIRE(sink.size() == 1);
+    CHECK(sink[0].kind == "dropped-vector");
+}
+
+TEST_CASE("vector-renderability passes a rasterized vector (has asset_path)",
+          "[view][import][fidelity][harness][vector]") {
+    IRNode n = make_vector_node("vector", 100.0f, 100.0f);
+    n.attributes["asset_path"] = "/tmp/shape.png";  // importer rasterized it → image branch
+    std::vector<FidelityIssue> sink;
+    check_vector_renderability(n, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+}
+
+TEST_CASE("vector-renderability passes a filled rect (renders via frame branch)",
+          "[view][import][fidelity][harness][vector]") {
+    IRNode n = make_vector_node("rect", 80.0f, 40.0f);
+    n.style.background_color = "#ff0000";  // solid fill renders
+    std::vector<FidelityIssue> sink;
+    check_vector_renderability(n, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+}
+
+TEST_CASE("vector-renderability skips invisible / zero-area / sub-threshold nodes",
+          "[view][import][fidelity][harness][vector]") {
+    std::vector<FidelityIssue> sink;
+
+    IRNode hidden = make_vector_node("path", 64.0f, 64.0f);
+    hidden.style.opacity = 0.0f;                       // invisible
+    check_vector_renderability(hidden, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+
+    IRNode none_disp = make_vector_node("ellipse", 64.0f, 64.0f);
+    none_disp.layout.display = "none";                 // display:none
+    check_vector_renderability(none_disp, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+
+    IRNode hairline = make_vector_node("line", 200.0f, 1.0f);  // area 200 < 256
+    check_vector_renderability(hairline, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+
+    IRNode zero = make_vector_node("rect", 0.0f, 0.0f);
+    check_vector_renderability(zero, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+}
+
+TEST_CASE("vector-renderability does not double-report an already-diagnosed vector",
+          "[view][import][fidelity][harness][vector]") {
+    SECTION("confidence == not_impl") {
+        IRNode n = make_vector_node("path", 64.0f, 64.0f);
+        n.confidence = IRConfidence::not_impl;         // importer already told the user
+        std::vector<FidelityIssue> sink;
+        check_vector_renderability(n, kNoDiagnostics, vec_id_of, sink);
+        CHECK(sink.empty());
+    }
+    SECTION("a render-affecting diagnostic anchors the node by structural path") {
+        IRNode n = make_vector_node("path", 64.0f, 64.0f);
+        ImportDiagnostic d;
+        d.kind = ImportDiagnosticKind::unsupported_property;
+        d.path = "$";                                  // root path of the node passed below
+        std::vector<ImportDiagnostic> diags{d};
+        std::vector<FidelityIssue> sink;
+        check_vector_renderability(n, diags, vec_id_of, sink);
+        CHECK(sink.empty());
+    }
+    SECTION("a render-affecting diagnostic anchors the node by stable_anchor_id") {
+        IRNode n = make_vector_node("path", 64.0f, 64.0f);
+        n.stable_anchor_id = "anchor-7";
+        ImportDiagnostic d;
+        d.kind = ImportDiagnosticKind::unresolved_asset;
+        d.anchor_id = "anchor-7";
+        std::vector<ImportDiagnostic> diags{d};
+        std::vector<FidelityIssue> sink;
+        check_vector_renderability(n, diags, vec_id_of, sink);
+        CHECK(sink.empty());
+    }
+}
+
+TEST_CASE("vector-renderability is a tree pass: group with renderable child passes, "
+          "lone bare child is flagged",
+          "[view][import][fidelity][harness][vector]") {
+    IRNode group = make_vector_node("vector", 200.0f, 200.0f);
+    group.name = "Group";
+    IRNode raster = make_vector_node("rect", 100.0f, 100.0f);
+    raster.name = "Raster";
+    raster.attributes["asset_path"] = "/tmp/icon.png";  // renderable child
+    group.children.push_back(raster);
+    IRNode dropped = make_vector_node("path", 50.0f, 50.0f);
+    dropped.name = "DroppedPath";
+    group.children.push_back(dropped);
+
+    std::vector<FidelityIssue> sink;
+    check_vector_renderability(group, kNoDiagnostics, vec_id_of, sink);
+    // Group passes (has children); raster child passes (asset_path); only the
+    // bare path is flagged.
+    REQUIRE(sink.size() == 1);
+    CHECK(sink[0].node_id == "DroppedPath");
+    CHECK(sink[0].kind == "dropped-vector");
+}
+
+TEST_CASE("vector-renderability does not descend into a widget subtree "
+          "(consumed stroke children are not flagged)",
+          "[view][import][fidelity][harness][vector]") {
+    // A knob consumes its child ellipses into its native paint; codegen's widget
+    // branch is terminal and never emits them, so they must not be flagged.
+    IRNode knob = make_vector_node("ellipse", 56.0f, 56.0f);
+    knob.name = "Knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    IRNode stroke = make_vector_node("ellipse", 40.0f, 40.0f);  // bare, would trip in isolation
+    stroke.name = "Stroke";
+    knob.children.push_back(stroke);
+
+    std::vector<FidelityIssue> sink;
+    check_vector_renderability(knob, kNoDiagnostics, vec_id_of, sink);
+    CHECK(sink.empty());
+}
