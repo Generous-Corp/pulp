@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03060"></a>
+## [0.306.0] - 2026-06-01
+
+- fix(view): render Three.js cube on iOS AUv3 GPU path (#3217) ([#3228](https://github.com/danielraffel/pulp/pull/3228))
+
 <a id="v03050"></a>
 ## [0.305.0] - 2026-06-01
 
@@ -3386,6 +3391,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.306.0]: https://github.com/danielraffel/pulp/releases/tag/v0.306.0
 [0.305.0]: https://github.com/danielraffel/pulp/releases/tag/v0.305.0
 [0.304.0]: https://github.com/danielraffel/pulp/releases/tag/v0.304.0
 [0.303.0]: https://github.com/danielraffel/pulp/releases/tag/v0.303.0
