@@ -78,6 +78,53 @@ int32_t eval_i32(ScriptEngine& engine, const std::string& code) {
 
 } // namespace
 
+// iOS-D.3c (#3217) regression: GPUQueue.writeBuffer's `dataOffset` and
+// `size` are measured in ELEMENTS when `data` is a TypedArray, not bytes
+// (only ArrayBuffer/DataView use byte units). The mock previously treated
+// them as bytes, so Three.js's `writeBuffer(buf, dst, Float32Array(16), 0,
+// 16)` — 16 floats = 64 bytes — copied only 16 BYTES = 4 floats, the first
+// column of each mat4x4. The full-array form (size undefined) was already
+// correct, which is why the [phase13] smoke stayed green; this pins the
+// explicit element-count form that the smoke never exercises.
+TEST_CASE("WebGPU mock writeBuffer: TypedArray dataOffset/size are in elements not bytes",
+          "[webcompat][gpu][mock][issue-3217]") {
+    if (!is_engine_available(JsEngineType::v8)) {
+        SKIP("V8 is required for the WebGPU mock prelude harness");
+    }
+    // GPU is not required — the mock prelude (__createMockGPUDevice etc.)
+    // is installed by WidgetBridge regardless of whether Dawn is available.
+    NativeV8Environment env(64, 64);
+    env.bridge->load_script("");
+
+    // 4 floats = 16 bytes; size=4 (element count). All four floats must land.
+    const auto full = eval_string(env.engine, R"JS(
+        (() => {
+            const dev = __createMockGPUDevice(__createMockGPUAdapter({}), {}, {});
+            const buf = dev.createBuffer({ size: 16, usage: 0 });
+            const f = new Float32Array([1, 2, 3, 4]);
+            dev.queue.writeBuffer(buf, 0, f, 0, f.length);
+            const v = new Float32Array(buf._bytes.buffer, buf._bytes.byteOffset, 4);
+            return Array.from(v).join(',');
+        })()
+    )JS");
+    INFO("writeBuffer full-array (element size) => " << full);
+    REQUIRE(full == "1,2,3,4");  // bug truncates to "1,0,0,0"
+
+    // dataOffset=2 elements (skip 10,20), size=2 elements (write 30,40).
+    const auto sliced = eval_string(env.engine, R"JS(
+        (() => {
+            const dev = __createMockGPUDevice(__createMockGPUAdapter({}), {}, {});
+            const buf = dev.createBuffer({ size: 8, usage: 0 });
+            const f = new Float32Array([10, 20, 30, 40]);
+            dev.queue.writeBuffer(buf, 0, f, 2, 2);
+            const v = new Float32Array(buf._bytes.buffer, buf._bytes.byteOffset, 2);
+            return Array.from(v).join(',');
+        })()
+    )JS");
+    INFO("writeBuffer element dataOffset/size => " << sliced);
+    REQUIRE(sliced == "30,40");  // bug reads bytes 2..4 -> garbage
+}
+
 TEST_CASE("Three.js native smoke initializes and renders through the Dawn-backed bridge", "[threejs][gpu][phase13]") {
     if (!is_engine_available(JsEngineType::v8)) {
         SKIP("V8 is required for native Three.js smoke");

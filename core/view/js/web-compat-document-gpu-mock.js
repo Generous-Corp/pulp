@@ -371,8 +371,20 @@ function __createMockGPUQueue(init) {
         if (!buffer || buffer._objectName !== "GPUBuffer") return;
         var source = __toUint8Array(data);
         var begin = bufferOffset || 0;
-        var sliceOffset = dataOffset || 0;
-        var sliceSize = size == null ? source.length - sliceOffset : size;
+        // iOS-D.3c (#3217): WebGPU spec — when `data` is a TypedArray,
+        // `dataOffset` and `size` are measured in ELEMENTS of that array,
+        // not bytes (only ArrayBuffer/DataView use byte units). The old
+        // code treated both as bytes, so Three.js's
+        // `writeBuffer(buf, dst, Float32Array(16), 0, 16)` — meaning 16
+        // floats = 64 bytes — copied only 16 BYTES = 4 floats = the first
+        // column of each mat4x4. Every camera + per-mesh matrix arrived
+        // 3/4 truncated, collapsing all geometry to a degenerate point and
+        // producing a blank canvas. Scale element counts to bytes here.
+        var bytesPerEl = (data && typeof data.BYTES_PER_ELEMENT === "number")
+            ? data.BYTES_PER_ELEMENT
+            : 1;
+        var sliceOffset = (dataOffset || 0) * bytesPerEl;
+        var sliceSize = size == null ? source.length - sliceOffset : size * bytesPerEl;
         buffer._bytes.set(source.slice(sliceOffset, sliceOffset + sliceSize), begin);
     };
     queue.writeTexture = function(destination, data, dataLayout, size) {

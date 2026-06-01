@@ -171,6 +171,38 @@ examples/ios-auv3-synth/
 </dict>
 ```
 
+### Required HostApp entitlement: `inter-app-audio`
+
+On **iOS 11+ real device**, `AVAudioUnitComponentManager.components(matching:)`
+returns an empty list when the host app lacks `inter-app-audio` — your AUv3
+appears invisible even though `pkd` indexed it correctly. The iOS Simulator
+does NOT enforce this, so the gap is silent until you test on hardware.
+
+The fix lives in two places:
+
+1. **One-time portal action** (covers every future Pulp example forever):
+   Apple Developer portal → Identifiers → the `com.<you>.pulpdev.*` wildcard
+   App ID → Edit → tick **Inter-App Audio** → Save. IAA is one of the few
+   capabilities Apple allows on a wildcard. Xcode auto-fetches the regenerated
+   profile on next build. See `docs/guides/ios-dev-signing.md`.
+2. **HostApp entitlements file** (already wired in
+   `templates/ios-auv3/HostApp/Entitlements.plist.in`):
+   ```xml
+   <key>inter-app-audio</key>
+   <true/>
+   ```
+   `pulp_add_ios_host_app()` configures this into each HostApp's
+   `${target}.entitlements` and sets `CODE_SIGN_ENTITLEMENTS`.
+
+Verify after build:
+```bash
+codesign -d --entitlements :- path/to/HostApp.app | plutil -p -
+# Expected: "inter-app-audio" => 1
+```
+
+Apple deprecated IAA in iOS 13 (no new IAA-only plug-ins on the Store), but the
+entitlement still gates AUv3 host scanning. Do not strip it from host apps.
+
 ## Validation
 
 ```bash

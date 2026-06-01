@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- iOS AUv3 HostApp entitlements.
+
+     inter-app-audio: required on the HOST APP for AVAudioUnitComponentManager
+     to enumerate AUv3 extensions on iOS 11+ device. Without it, the manager
+     returns an empty match list and the AUv3 is silently invisible (Sim does
+     not enforce this, so the missing entitlement is invisible until you try a
+     real device). Enable Inter-App Audio on the wildcard
+     com.danielraffel.pulpdev.* App ID once in the Apple Developer portal;
+     Xcode auto-fetches the regenerated profile on next build. -->
 <plist version="1.0">
 <dict>
+    <key>inter-app-audio</key>
+    <true/>
 </dict>
 </plist>

@@ -286,6 +286,24 @@ to be right end-to-end:
    device audio validation is authoritative; Sim is for build/discovery
    smoke only.**
 
+8. **iOS device requires `inter-app-audio` entitlement on the HostApp**
+   for `AVAudioUnitComponentManager.components(matching:)` to enumerate
+   AUv3 extensions on iOS 11+. Without it, the manager returns an empty
+   match list and your AUv3 appears invisible — even though `pkd`
+   indexed it correctly and `xcrun devicectl device install app`
+   succeeded. The iOS Simulator does NOT enforce this, so the missing
+   entitlement is silent until you try a real device. Fix in two places:
+   (a) one-time portal: enable Inter-App Audio on your wildcard
+   `com.<you>.pulpdev.*` App ID; Xcode auto-fetches the regenerated
+   profile on next build, (b) entitlements file: the shipped
+   `templates/ios-auv3/HostApp/Entitlements.plist.in` already includes
+   `<key>inter-app-audio</key><true/>`. Verify with
+   `codesign -d --entitlements :- HostApp.app | plutil -p -` →
+   `"inter-app-audio" => 1`. Apple deprecated IAA in iOS 13 (no new
+   IAA-only plug-ins on the Store) but the entitlement still gates
+   AUv3 host scanning — do not strip it. Full setup in
+   `docs/guides/ios-dev-signing.md`.
+
 ### iOS AUv3 diagnostic recipe
 
 When the HostApp shows "(no AUv3 found)" or instantiate fails silently:
