@@ -183,6 +183,23 @@ What is C++-side: id allocation in `WidgetBridge::__scheduleTimer__`, deadline t
 
 Don't refactor this into a "pure native" shape — there's no way to do it without copying the entire JS engine's value type into Pulp's bridge layer.
 
+### The mock `GPUBuffer` must COMMIT `getMappedRange()` writes on `unmap()`
+
+`web-compat-document-gpu-mock.js`'s `__createMockGPUBuffer` backs each buffer
+with a JS `_bytes` Uint8Array that the buffered-draw serializer
+(`web-compat-canvas-gpu.js`) ships to the native bridge. WebGPU's mapped-write
+contract is: `getMappedRange()` returns an ArrayBuffer the caller writes into,
+and `unmap()` commits those writes to the buffer. An ArrayBuffer cannot alias a
+*sliced* view of `_bytes`, so `getMappedRange()` MUST hand back a standalone
+range (seeded from `_bytes`), record it, and `unmap()` MUST copy each recorded
+range back into `_bytes`. The original code returned `_bytes.buffer.slice(...)`
+(an independent copy) with a no-op `unmap()`, so every mapped write was silently
+dropped. Three.js's WebGPUBackend uploads all geometry via
+`createBuffer({mappedAtCreation:true})` → `new T(getMappedRange()).set(...)` →
+`unmap()`, so vertex/index buffers arrived all-zero and meshes collapsed to a
+point — only `queue.writeBuffer`-backed uniforms survived. See the
+threejs-bridge skill for the full #3217 chronology.
+
 ### setTimeout(fn, 0) takes the microtask path, not the timer queue (#915)
 
 `setTimeout(fn, 0)` deliberately bypasses `__scheduleTimer__` and routes through `Promise.resolve().then(...)` so it drains on the next `pump_message_loop()` call. This matches React's scheduler expectations and makes tests deterministic (no host frame loop needed). Positive-delay timeouts go through the native deadline tracker and only fire when `service_frame_callbacks()` runs.

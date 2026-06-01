@@ -9214,12 +9214,15 @@ void WidgetBridge::register_api() {
         std::vector<wgpu::Buffer> bind_group_buffers;
         std::vector<wgpu::Sampler> bind_group_samplers;
         std::vector<wgpu::TextureView> bind_group_texture_views;
-        std::vector<wgpu::BindGroupLayout> bind_group_layouts;
         std::vector<wgpu::BindGroup> bind_groups;
+        // iOS-D.3c (#3217): (group_index, entries) captured during serialization
+        // and turned into bind groups AFTER the pipeline is built with an auto
+        // layout — see the deferred-creation comment below.
+        std::vector<std::pair<uint32_t, std::vector<wgpu::BindGroupEntry>>> deferred_bind_groups;
         if (payload.hasObjectMember("bindGroups") && payload["bindGroups"].isArray()) {
             auto bind_groups_payload = payload["bindGroups"];
             bind_group_indices.reserve(bind_groups_payload.size());
-            bind_group_layouts.reserve(bind_groups_payload.size());
+            deferred_bind_groups.reserve(bind_groups_payload.size());
             bind_groups.reserve(bind_groups_payload.size());
 
             for (uint32_t i = 0; i < bind_groups_payload.size(); ++i) {
@@ -9545,26 +9548,20 @@ void WidgetBridge::register_api() {
                     return choc::value::createBool(false);
                 }
 
-                wgpu::BindGroupLayoutDescriptor bind_group_layout_desc{};
-                bind_group_layout_desc.entryCount = bind_group_layout_entries.size();
-                bind_group_layout_desc.entries = bind_group_layout_entries.data();
-                auto bind_group_layout = device_ptr->CreateBindGroupLayout(&bind_group_layout_desc);
-                if (!bind_group_layout) {
-                    return choc::value::createBool(false);
-                }
-                bind_group_layouts.push_back(bind_group_layout);
-
-                wgpu::BindGroupDescriptor bind_group_desc{};
-                bind_group_desc.layout = bind_group_layout;
-                bind_group_desc.entryCount = bind_group_entries.size();
-                bind_group_desc.entries = bind_group_entries.data();
-                auto bind_group = device_ptr->CreateBindGroup(&bind_group_desc);
-                if (!bind_group) {
-                    return choc::value::createBool(false);
-                }
-
-                bind_group_indices.push_back(group_index);
-                bind_groups.push_back(bind_group);
+                // iOS-D.3c (#3217): defer bind-group creation until the pipeline
+                // exists. The JS serializer guesses each entry's visibility/type
+                // by regex-scanning the WGSL
+                // (web-compat-gpu-buffered.js inferVisibilityFromShaders); an
+                // explicit BindGroupLayout built from those guesses can silently
+                // diverge from Three.js's `layout:"auto"` pipeline interface.
+                // With the Sim's skip_validation toggle that divergence does NOT
+                // raise an error — it just leaves the vertex stage reading zeroed
+                // uniforms, collapsing the cube to a degenerate point (every
+                // matrix/vertex byte verified correct yet no fragments emit).
+                // Instead, build each group from pipeline.GetBindGroupLayout()
+                // below, exactly as the immediate __gpuQueueDrawImpl path does.
+                (void)bind_group_layout_entries;
+                deferred_bind_groups.emplace_back(group_index, std::move(bind_group_entries));
             }
         }
 
@@ -9616,17 +9613,11 @@ void WidgetBridge::register_api() {
         fragment_state.targets = &color_target;
 
         wgpu::RenderPipelineDescriptor pipeline_desc{};
-        wgpu::PipelineLayout explicit_pipeline_layout;
-        if (!bind_group_layouts.empty()) {
-            wgpu::PipelineLayoutDescriptor pipeline_layout_desc{};
-            pipeline_layout_desc.bindGroupLayoutCount = bind_group_layouts.size();
-            pipeline_layout_desc.bindGroupLayouts = bind_group_layouts.data();
-            explicit_pipeline_layout = device_ptr->CreatePipelineLayout(&pipeline_layout_desc);
-            if (!explicit_pipeline_layout) return choc::value::createBool(false);
-            pipeline_desc.layout = explicit_pipeline_layout;
-        } else {
-            pipeline_desc.layout = nullptr;
-        }
+        // iOS-D.3c (#3217): always use an AUTO pipeline layout. Bind groups are
+        // created below from pipeline.GetBindGroupLayout(group_index), so the
+        // layout is derived from the actual shader interface rather than the
+        // JS-side guessed layout (see deferred_bind_groups above).
+        pipeline_desc.layout = nullptr;
         pipeline_desc.vertex.module = vertex_module;
         pipeline_desc.vertex.entryPoint = vertex_entry.c_str();
         pipeline_desc.vertex.bufferCount = vertex_layouts.size();
@@ -9659,6 +9650,22 @@ void WidgetBridge::register_api() {
 
         auto pipeline = device_ptr->CreateRenderPipeline(&pipeline_desc);
         if (!pipeline) return choc::value::createBool(false);
+
+        // iOS-D.3c (#3217): now that the pipeline (auto layout) exists, build
+        // each bind group against the layout Dawn derived from the shader
+        // interface. This guarantees the binding visibility/types match what
+        // the WGSL actually declares, instead of the JS-side guessed layout
+        // that left the vertex stage reading zeroed uniforms on the Simulator.
+        for (auto& dg : deferred_bind_groups) {
+            wgpu::BindGroupDescriptor bind_group_desc{};
+            bind_group_desc.layout = pipeline.GetBindGroupLayout(dg.first);
+            bind_group_desc.entryCount = dg.second.size();
+            bind_group_desc.entries = dg.second.data();
+            auto bind_group = device_ptr->CreateBindGroup(&bind_group_desc);
+            if (!bind_group) return choc::value::createBool(false);
+            bind_group_indices.push_back(dg.first);
+            bind_groups.push_back(bind_group);
+        }
 
         auto texture_view = target_canvas_state != nullptr
             ? target_canvas_state->texture.CreateView()
