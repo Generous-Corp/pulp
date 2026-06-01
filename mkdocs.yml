@@ -158,6 +158,7 @@ nav:
       - GPU Validation: guides/gpu-validation-checklist.md
       - Text Shaping Determinism: reference/text-shaping.md
       - Test Coverage: guides/coverage.md
+      - CI Host Setup (Tart VMs, optional): guides/mac-ci-host-setup.md
   - Policies:
       - Code Style: policies/code-style.md
       - Agent Rules: policies/agent-contribution-rules.md

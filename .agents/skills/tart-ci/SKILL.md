@@ -19,6 +19,7 @@ Run every macOS build/validation in a **throwaway VM cloned from a versioned gol
 ## Core pieces (all in `tools/ci/`)
 | Script | Role |
 |---|---|
+| `setup-ci-host.sh` | **One-command host onboarding** (opinionated): install tart/sshpass, set `~/VMs` (no FDA), acquire the golden (`--copy-from` or bake), install the launchd runner agent with a `--class` label. Mirrors `docs/guides/mac-ci-host-setup.md`. |
 | `tart-provision.sh` | Build/refresh layered golden images; `verify`/`tag`/`resize`/`manifest` helpers. Subcommands: `base` → `apple-xcode` → `pulp` → `runner`. |
 | `tart-runner.sh` | **Ephemeral per-job GitHub Actions runner.** Mints a JIT (single-job) runner config, clones the runner golden, boots with host ccache mounted, runs one job, destroys the VM. `--loop` keeps a fresh one ready; `--once` for a pilot. |
 | `tart-run-job.sh` | **Direct** ephemeral build (no GitHub runner): clone golden → virtio-fs mount host caches → build+ctest in-guest → discard. Useful for Shipyard `backend` / manual builds. |
