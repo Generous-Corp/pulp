@@ -417,6 +417,17 @@ function __installNativeGpuBufferedDrawAugmentation() {
                 });
                 return;
             }
+            // iOS-D.3c (#3217): Three.js's WebGPURenderer creates encoders via
+            // the mock's beginRenderPass which does NOT pass init.onEnd. Without
+            // a fallback the draws fall through to originalDraw (canvas-gpu's
+            // version) which short-circuits when the buffered augmentation is
+            // installed — net result: zero native draws ever land. Fall back to
+            // a synchronous dispatch when we have a payload but no onEnd sink.
+            if (bufferedPayload && typeof __gpuQueueDrawBufferedImpl === "function") {
+                emittedBufferedDraw = true;
+                __gpuQueueDrawBufferedImpl(bufferedPayload);
+                return;
+            }
             if (typeof originalDraw === "function") {
                 return originalDraw.apply(encoder, arguments);
             }
@@ -438,6 +449,12 @@ function __installNativeGpuBufferedDrawAugmentation() {
                     type: "native-draw-current-texture-buffered",
                     payload: bufferedPayload
                 });
+                return;
+            }
+            // Same fallback as encoder.draw above (#3217).
+            if (bufferedPayload && typeof __gpuQueueDrawBufferedImpl === "function") {
+                emittedBufferedDraw = true;
+                __gpuQueueDrawBufferedImpl(bufferedPayload);
                 return;
             }
             if (typeof originalDrawIndexed === "function") {

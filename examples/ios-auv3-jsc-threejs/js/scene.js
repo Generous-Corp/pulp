@@ -122,6 +122,12 @@
         "THREE.WebGPURenderer painting through Pulp's Dawn/Metal surface inside an AUv3 .appex.";
     subtitle.style.color = "#cbd5e1";
     subtitle.style.fontSize = "13px";
+    // iOS-D.3c (#3217): clamp subtitle to fit the shell width on narrow
+    // editor sizes (AUM, iPad split-view, Logic AUv3 small-window mode).
+    subtitle.style.margin = "4px 0 8px 0";
+    subtitle.style.maxWidth = "100%";
+    subtitle.style.overflowWrap = "break-word";
+    subtitle.style.wordBreak = "break-word";
     shell.appendChild(subtitle);
 
     var canvasCard = document.createElement("div");

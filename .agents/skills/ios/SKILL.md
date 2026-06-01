@@ -596,6 +596,25 @@ GPU-plugin-view-host work):
   + CSS animations; liveness token; GpuSurface resized PHYSICAL, SkiaSurface
   LOGICAL+scale; CPU fallback in the factory when `is_gpu_backed()` is false.
 
+### `examples/ios-auv3-jsc-threejs` — Three.js cube through the AUv3 GPU host
+
+The `PulpThreeJsDemo` example runs real `three.webgpu.js` in JSC inside an
+AUv3 `.appex`, painting through `PulpMetalPluginView` → Dawn → Skia Graphite →
+CAMetalLayer. As of #3217 the rotating cube renders on the iOS Simulator (the
+plugin-view-host path above is no longer CI-unvalidated for this example — iOS
+Skia libs must be present: `external/skia-build/build/ios-gpu/.../libskia.a`,
+which the GPU build requires). Build with `-DPULP_ENABLE_GPU=ON
+-DPULP_REQUIRE_GPU_FOR_SDK=ON` for iphonesimulator arm64; the host app
+auto-presents the editor.
+
+The deep WebGPU-bridge gotchas (geometry uploaded as zero via
+`getMappedRange`, JS-guessed bind-group layout vs `layout:"auto"`, the
+load-bearing Sim `skip_validation` toggle, capturing the out-of-process appex's
+logs via the `dev.pulp.runtime` os_log subsystem, and the
+`$<PLATFORM_ID:Darwin,iOS,...>` host-classification link gate) live in the
+**`threejs-bridge`** skill — read it before touching the WebGPU shim or the
+iOS GPU draw path.
+
 ### Sim audio loop validation — recordVideo does NOT capture audio
 
 `xcrun simctl io booted recordVideo` produces a video-only `.mov` —

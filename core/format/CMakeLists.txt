@@ -15,9 +15,17 @@ target_sources(pulp-format PRIVATE
     src/validation_harness.cpp
     src/aax_model.cpp
     src/host_type.cpp
-    $<$<PLATFORM_ID:Darwin>:src/host_type_mac.mm>
+    # host_type.cpp / host_version.cpp #ifdef out their definitions on
+    # __APPLE__, so the Foundation-backed impls below must compile for ALL
+    # Apple targets — not just macOS. `$<PLATFORM_ID:Darwin>` is `iOS` (not
+    # `Darwin`) under an iphoneos/iphonesimulator cross-build, so the old
+    # Darwin-only gate dropped these TUs and left detect_host_version /
+    # current_auv3_wrapper_identifier undefined when the iOS AUv3 linked
+    # pulp-format (#3217). Both .mm files use only Foundation and are
+    # iOS-safe.
+    $<$<PLATFORM_ID:Darwin,iOS,tvOS,watchOS>:src/host_type_mac.mm>
     src/host_version.cpp
-    $<$<PLATFORM_ID:Darwin>:src/host_version_mac.mm>
+    $<$<PLATFORM_ID:Darwin,iOS,tvOS,watchOS>:src/host_version_mac.mm>
     $<$<PLATFORM_ID:Windows>:src/host_version_win.cpp>
     src/host_quirks.cpp
     src/ara.cpp

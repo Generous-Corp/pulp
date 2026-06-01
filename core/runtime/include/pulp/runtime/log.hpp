@@ -35,7 +35,14 @@ inline void log_impl(LogLevel level, std::string_view message) {
         case LogLevel::Warning: type = OS_LOG_TYPE_DEFAULT; break;
         case LogLevel::Error:   type = OS_LOG_TYPE_ERROR; break;
     }
-    os_log_with_type(OS_LOG_DEFAULT, type, "%{public}s%{public}s",
+    // Named subsystem so out-of-process logs (notably an AUv3 extension's)
+    // are capturable via `log stream --predicate 'subsystem ==
+    // "dev.pulp.runtime"'` and Console.app. OS_LOG_DEFAULT routes info/
+    // debug records that are not persisted for extension processes, so
+    // `simctl log show/stream` saw nothing during the #3217 cube
+    // investigation. A function-local static initializes the logger once.
+    static os_log_t pulp_log = os_log_create("dev.pulp.runtime", "runtime");
+    os_log_with_type(pulp_log, type, "%{public}s%{public}s",
                      prefix, std::string(message).c_str());
 #elif defined(_WIN32)
     auto full = std::string(prefix) + std::string(message) + "\n";

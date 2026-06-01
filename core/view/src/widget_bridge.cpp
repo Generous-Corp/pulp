@@ -9067,7 +9067,20 @@ void WidgetBridge::register_api() {
         for (size_t i = 0; i < bind_groups.size(); ++i) {
             pass.SetBindGroup(bind_group_indices[i], bind_groups[i], 0, nullptr);
         }
-        pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+        if (first_instance > 0 && device_ptr->HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+            runtime::log_info(
+                "PULP_WEBGPU_BRIDGE: DrawIndirect/immediate firstInstance={} vertexCount={} instanceCount={}",
+                first_instance, vertex_count, instance_count);
+            uint32_t indirect_args[4] = { vertex_count, instance_count, first_vertex, first_instance };
+            wgpu::BufferDescriptor ibd{};
+            ibd.size = sizeof(indirect_args);
+            ibd.usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::CopyDst;
+            auto ibuf = device_ptr->CreateBuffer(&ibd);
+            queue_ptr->WriteBuffer(ibuf, 0, indirect_args, sizeof(indirect_args));
+            pass.DrawIndirect(ibuf, 0);
+        } else {
+            pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+        }
         pass.End();
 
         auto command_buffer = encoder.Finish();
@@ -9219,12 +9232,15 @@ void WidgetBridge::register_api() {
         std::vector<wgpu::Buffer> bind_group_buffers;
         std::vector<wgpu::Sampler> bind_group_samplers;
         std::vector<wgpu::TextureView> bind_group_texture_views;
-        std::vector<wgpu::BindGroupLayout> bind_group_layouts;
         std::vector<wgpu::BindGroup> bind_groups;
+        // iOS-D.3c (#3217): (group_index, entries) captured during serialization
+        // and turned into bind groups AFTER the pipeline is built with an auto
+        // layout — see the deferred-creation comment below.
+        std::vector<std::pair<uint32_t, std::vector<wgpu::BindGroupEntry>>> deferred_bind_groups;
         if (payload.hasObjectMember("bindGroups") && payload["bindGroups"].isArray()) {
             auto bind_groups_payload = payload["bindGroups"];
             bind_group_indices.reserve(bind_groups_payload.size());
-            bind_group_layouts.reserve(bind_groups_payload.size());
+            deferred_bind_groups.reserve(bind_groups_payload.size());
             bind_groups.reserve(bind_groups_payload.size());
 
             for (uint32_t i = 0; i < bind_groups_payload.size(); ++i) {
@@ -9550,31 +9566,63 @@ void WidgetBridge::register_api() {
                     return choc::value::createBool(false);
                 }
 
-                wgpu::BindGroupLayoutDescriptor bind_group_layout_desc{};
-                bind_group_layout_desc.entryCount = bind_group_layout_entries.size();
-                bind_group_layout_desc.entries = bind_group_layout_entries.data();
-                auto bind_group_layout = device_ptr->CreateBindGroupLayout(&bind_group_layout_desc);
-                if (!bind_group_layout) {
-                    return choc::value::createBool(false);
-                }
-                bind_group_layouts.push_back(bind_group_layout);
-
-                wgpu::BindGroupDescriptor bind_group_desc{};
-                bind_group_desc.layout = bind_group_layout;
-                bind_group_desc.entryCount = bind_group_entries.size();
-                bind_group_desc.entries = bind_group_entries.data();
-                auto bind_group = device_ptr->CreateBindGroup(&bind_group_desc);
-                if (!bind_group) {
-                    return choc::value::createBool(false);
-                }
-
-                bind_group_indices.push_back(group_index);
-                bind_groups.push_back(bind_group);
+                // iOS-D.3c (#3217): defer bind-group creation until the pipeline
+                // exists. The JS serializer guesses each entry's visibility/type
+                // by regex-scanning the WGSL
+                // (web-compat-gpu-buffered.js inferVisibilityFromShaders); an
+                // explicit BindGroupLayout built from those guesses can silently
+                // diverge from Three.js's `layout:"auto"` pipeline interface.
+                // With the Sim's skip_validation toggle that divergence does NOT
+                // raise an error — it just leaves the vertex stage reading zeroed
+                // uniforms, collapsing the cube to a degenerate point (every
+                // matrix/vertex byte verified correct yet no fragments emit).
+                // Instead, build each group from pipeline.GetBindGroupLayout()
+                // below, exactly as the immediate __gpuQueueDrawImpl path does.
+                (void)bind_group_layout_entries;
+                deferred_bind_groups.emplace_back(group_index, std::move(bind_group_entries));
             }
         }
 
+        // iOS-D.3c (#3217 Codex pass 1): the pipeline's color attachment
+        // format MUST match the actual target texture's format, NOT the
+        // JS-supplied payload `format` field. Three.js may request a
+        // bgra8unorm RenderPass but the intermediate texture is created
+        // as rgba8unorm — Metal SoftwareRenderer silently rejects the
+        // pipeline (the mismatch is suppressed by skip_validation). Use
+        // the target's actual format so the pipeline matches the
+        // attachment.
+        std::string actual_target_format = target_canvas_state != nullptr
+            ? target_canvas_state->format
+            : (target_texture_state != nullptr ? target_texture_state->format : format);
+        if (format != actual_target_format) {
+            static int s_warned = 0;
+            if (++s_warned <= 3) {
+                runtime::log_info("PULP_WEBGPU_BRIDGE: draw target-format mismatch payload={} actual={} canvas={} texId={}",
+                    format, actual_target_format, canvas_id, target_texture_id);
+            }
+        }
         wgpu::ColorTargetState color_target{};
-        color_target.format = texture_format_from_string(format);
+        color_target.format = texture_format_from_string(actual_target_format);
+        // iOS-D.3c (#3217): writeMask was unset → defaulted to None →
+        // pipeline executed but never wrote color. The immediate __gpuQueueDrawImpl
+        // path sets `writeMask = All` (line 8767); buffered path must too,
+        // otherwise the magenta-clear test paints but Three.js's actual
+        // shader output silently vanishes. (Codex root-cause for #3217.)
+        color_target.writeMask = wgpu::ColorWriteMask::All;
+
+        // iOS-D.3c (#3217): for canvas-targeted draws specifically, drop
+        // the alpha channel from writeMask so the shader's alpha=0 output
+        // (Three.js's WebGPURenderer composite path) doesn't reset the
+        // destination alpha to 0. Combined with the loadOp=Clear/alpha=1
+        // override below at color_attachment, this keeps the canvas
+        // swapchain alpha at 1 (opaque) regardless of shader output —
+        // Skia then composites the RGB content the shader wrote instead
+        // of compositing src.alpha=0 against the canvasCard CSS bg.
+        if (target_canvas_state != nullptr) {
+            color_target.writeMask = wgpu::ColorWriteMask::Red
+                                   | wgpu::ColorWriteMask::Green
+                                   | wgpu::ColorWriteMask::Blue;
+        }
 
         wgpu::FragmentState fragment_state{};
         fragment_state.module = fragment_module;
@@ -9583,17 +9631,11 @@ void WidgetBridge::register_api() {
         fragment_state.targets = &color_target;
 
         wgpu::RenderPipelineDescriptor pipeline_desc{};
-        wgpu::PipelineLayout explicit_pipeline_layout;
-        if (!bind_group_layouts.empty()) {
-            wgpu::PipelineLayoutDescriptor pipeline_layout_desc{};
-            pipeline_layout_desc.bindGroupLayoutCount = bind_group_layouts.size();
-            pipeline_layout_desc.bindGroupLayouts = bind_group_layouts.data();
-            explicit_pipeline_layout = device_ptr->CreatePipelineLayout(&pipeline_layout_desc);
-            if (!explicit_pipeline_layout) return choc::value::createBool(false);
-            pipeline_desc.layout = explicit_pipeline_layout;
-        } else {
-            pipeline_desc.layout = nullptr;
-        }
+        // iOS-D.3c (#3217): always use an AUTO pipeline layout. Bind groups are
+        // created below from pipeline.GetBindGroupLayout(group_index), so the
+        // layout is derived from the actual shader interface rather than the
+        // JS-side guessed layout (see deferred_bind_groups above).
+        pipeline_desc.layout = nullptr;
         pipeline_desc.vertex.module = vertex_module;
         pipeline_desc.vertex.entryPoint = vertex_entry.c_str();
         pipeline_desc.vertex.bufferCount = vertex_layouts.size();
@@ -9627,6 +9669,22 @@ void WidgetBridge::register_api() {
         auto pipeline = device_ptr->CreateRenderPipeline(&pipeline_desc);
         if (!pipeline) return choc::value::createBool(false);
 
+        // iOS-D.3c (#3217): now that the pipeline (auto layout) exists, build
+        // each bind group against the layout Dawn derived from the shader
+        // interface. This guarantees the binding visibility/types match what
+        // the WGSL actually declares, instead of the JS-side guessed layout
+        // that left the vertex stage reading zeroed uniforms on the Simulator.
+        for (auto& dg : deferred_bind_groups) {
+            wgpu::BindGroupDescriptor bind_group_desc{};
+            bind_group_desc.layout = pipeline.GetBindGroupLayout(dg.first);
+            bind_group_desc.entryCount = dg.second.size();
+            bind_group_desc.entries = dg.second.data();
+            auto bind_group = device_ptr->CreateBindGroup(&bind_group_desc);
+            if (!bind_group) return choc::value::createBool(false);
+            bind_group_indices.push_back(dg.first);
+            bind_groups.push_back(bind_group);
+        }
+
         auto texture_view = target_canvas_state != nullptr
             ? target_canvas_state->texture.CreateView()
             : target_texture_state->texture.CreateView();
@@ -9644,6 +9702,18 @@ void WidgetBridge::register_api() {
                 static_cast<float>(clear_value.hasObjectMember("b") ? clear_value["b"].getWithDefault<double>(0.0) : 0.0),
                 static_cast<float>(clear_value.hasObjectMember("a") ? clear_value["a"].getWithDefault<double>(1.0) : 1.0)
             };
+        }
+        // iOS-D.3c (#3217): for canvas-targeted draws, force loadOp=Clear
+        // with alpha=1 so the destination alpha starts opaque. Combined
+        // with the canvas-specific writeMask (RGB only, set above on the
+        // pipeline's color_target), this keeps the canvas swapchain
+        // alpha at 1 across all draws regardless of what alpha the
+        // shader emits. Without this, Three.js's composite (which
+        // writes alpha=0 for the canvas pass) leaves the canvas
+        // transparent and the canvasCard CSS background shows through.
+        if (target_canvas_state != nullptr) {
+            color_attachment.loadOp = wgpu::LoadOp::Clear;
+            color_attachment.clearValue.a = 1.0f;
         }
 
         // Create depth texture if depth/stencil is requested
@@ -9736,14 +9806,41 @@ void WidgetBridge::register_api() {
             auto base_vertex = static_cast<int32_t>(payload.hasObjectMember("baseVertex") ? payload["baseVertex"].getWithDefault<int32_t>(0) : 0);
             auto first_instance = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("firstInstance") ? payload["firstInstance"].getWithDefault<int32_t>(0) : 0));
             if (index_count == 0) return choc::value::createBool(false);
-            pass.DrawIndexed(index_count, instance_count, first_index, base_vertex, first_instance);
+            if (first_instance > 0 && device_ptr->HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+                runtime::log_info(
+                    "PULP_WEBGPU_BRIDGE: DrawIndexedIndirect/buffered firstInstance={} indexCount={} instanceCount={}",
+                    first_instance, index_count, instance_count);
+                uint32_t indirect_args[5] = { index_count, instance_count, first_index,
+                                              static_cast<uint32_t>(base_vertex), first_instance };
+                wgpu::BufferDescriptor ibd{};
+                ibd.size = sizeof(indirect_args);
+                ibd.usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::CopyDst;
+                auto ibuf = device_ptr->CreateBuffer(&ibd);
+                queue_ptr->WriteBuffer(ibuf, 0, indirect_args, sizeof(indirect_args));
+                pass.DrawIndexedIndirect(ibuf, 0);
+            } else {
+                pass.DrawIndexed(index_count, instance_count, first_index, base_vertex, first_instance);
+            }
         } else {
             auto vertex_count = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("vertexCount") ? payload["vertexCount"].getWithDefault<int32_t>(0) : 0));
             auto instance_count = static_cast<uint32_t>(std::max(1, payload.hasObjectMember("instanceCount") ? payload["instanceCount"].getWithDefault<int32_t>(1) : 1));
             auto first_vertex = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("firstVertex") ? payload["firstVertex"].getWithDefault<int32_t>(0) : 0));
             auto first_instance = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("firstInstance") ? payload["firstInstance"].getWithDefault<int32_t>(0) : 0));
             if (vertex_count == 0) return choc::value::createBool(false);
-            pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+            if (first_instance > 0 && device_ptr->HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
+                runtime::log_info(
+                    "PULP_WEBGPU_BRIDGE: DrawIndirect/buffered firstInstance={} vertexCount={} instanceCount={}",
+                    first_instance, vertex_count, instance_count);
+                uint32_t indirect_args[4] = { vertex_count, instance_count, first_vertex, first_instance };
+                wgpu::BufferDescriptor ibd{};
+                ibd.size = sizeof(indirect_args);
+                ibd.usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::CopyDst;
+                auto ibuf = device_ptr->CreateBuffer(&ibd);
+                queue_ptr->WriteBuffer(ibuf, 0, indirect_args, sizeof(indirect_args));
+                pass.DrawIndirect(ibuf, 0);
+            } else {
+                pass.Draw(vertex_count, instance_count, first_vertex, first_instance);
+            }
         }
 
         pass.End();
