@@ -337,11 +337,15 @@ void expect_digest_matches(const Digest& actual, const Digest& expected,
 // raster baseline because Graphite produces close-but-not-identical
 // digests on Metal. The first CI run that lands these will tighten
 // them to the observed values.
+//
+// Reference host: macos-arm64 · Xcode 26.5 (17F42) · Skia chrome/m149.
+// The 'Hello'/Inter digest was regenerated for the Xcode 26.4.1→26.5
+// toolchain bump (210→244, 30518→31403), matching the raster baseline.
 
 constexpr Digest kGpuHelloInter14 {
     /*width=*/128, /*height=*/32,
-    /*opaque_pixels=*/210,
-    /*darkness_sum=*/30518,
+    /*opaque_pixels=*/244,
+    /*darkness_sum=*/31403,
 };
 
 constexpr Digest kGpuCjkInter14 {

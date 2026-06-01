@@ -224,14 +224,20 @@ void expect_digest_matches(const Digest& actual, const Digest& expected,
 // constants in the same PR as the bump and keep the LOC diff
 // auditable.
 //
+// Reference host: macos-arm64 · Xcode 26.5 (17F42) · Skia chrome/m149.
+// The 'Hello'/Inter digest was regenerated for the Xcode 26.4.1→26.5
+// toolchain bump (CoreText/HarfBuzz AA shifted opaque-pixel coverage
+// past the 5% band: 210→244, 30518→31403). CJK + Mono stayed within
+// tolerance and were left untouched.
+//
 // To regenerate: build + run this test, copy the `actual=` values
 // from the INFO line into the constants below, rebuild, rerun,
 // expect green.
 
 constexpr Digest kHelloInter14 {
     /*width=*/128, /*height=*/32,
-    /*opaque_pixels=*/210,
-    /*darkness_sum=*/30518,
+    /*opaque_pixels=*/244,
+    /*darkness_sum=*/31403,
 };
 
 constexpr Digest kCjkInter14 {
