@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03080"></a>
+## [0.308.0] - 2026-06-01
+
+- feat(view+import-design): lower SVG path-data vectors to a native SvgPath ([#3283](https://github.com/danielraffel/pulp/pull/3283))
+
 <a id="v03070"></a>
 ## [0.307.0] - 2026-06-01
 
@@ -3396,6 +3401,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.308.0]: https://github.com/danielraffel/pulp/releases/tag/v0.308.0
 [0.307.0]: https://github.com/danielraffel/pulp/releases/tag/v0.307.0
 [0.306.0]: https://github.com/danielraffel/pulp/releases/tag/v0.306.0
 [0.305.0]: https://github.com/danielraffel/pulp/releases/tag/v0.305.0
