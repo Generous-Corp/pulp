@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03030"></a>
+## [0.303.0] - 2026-05-31
+
+- feat(view): widget-intrinsic-size + text-vertical-centering fidelity invariants ([#3274](https://github.com/danielraffel/pulp/pull/3274))
+- iOS-D.3c: WebGPU writeBuffer element-vs-byte fix + inter-app-audio host entitlement (#3217) ([#3273](https://github.com/danielraffel/pulp/pull/3273))
+
 <a id="v03020"></a>
 ## [0.302.0] - 2026-05-31
 
@@ -3368,6 +3374,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.303.0]: https://github.com/danielraffel/pulp/releases/tag/v0.303.0
 [0.302.0]: https://github.com/danielraffel/pulp/releases/tag/v0.302.0
 [0.301.0]: https://github.com/danielraffel/pulp/releases/tag/v0.301.0
 [0.300.0]: https://github.com/danielraffel/pulp/releases/tag/v0.300.0
