@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03040"></a>
+## [0.304.0] - 2026-06-01
+
+- feat(view): vector-renderability fidelity invariant (dropped-vector) ([#3275](https://github.com/danielraffel/pulp/pull/3275))
+- fix(ci): pin macOS toolchain to Xcode 26.5 and regenerate drifted font goldens ([#3276](https://github.com/danielraffel/pulp/pull/3276))
+
 <a id="v03030"></a>
 ## [0.303.0] - 2026-05-31
 
@@ -3374,6 +3380,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.304.0]: https://github.com/danielraffel/pulp/releases/tag/v0.304.0
 [0.303.0]: https://github.com/danielraffel/pulp/releases/tag/v0.303.0
 [0.302.0]: https://github.com/danielraffel/pulp/releases/tag/v0.302.0
 [0.301.0]: https://github.com/danielraffel/pulp/releases/tag/v0.301.0
