@@ -2,6 +2,25 @@
 
 Opinionated runbook. Follow it top-to-bottom on a fresh/clean Apple-Silicon Mac and it should **just work**: your Mac will build Pulp in disposable Tart VMs and join the CI runner pool, with Shipyard merging on green. Companion to [`self-hosted-runner.md`](self-hosted-runner.md) (the bare-metal runner) — this is the **VM-isolated** lane. Agents working on this lane should read the `tart-ci` skill (`.agents/skills/tart-ci/SKILL.md`).
 
+## Is this for you? (optional — and why it's recommended)
+**You do not need any of this to use, build, test, or contribute to Pulp.** The normal path — `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && ctest`, open a PR, let GitHub Actions validate — works for everyone and needs none of the dependencies below. This page is an **optional, advanced setup** for contributors who want to run CI builds on their own hardware.
+
+- **It adds dependencies + disk.** Tart, a golden VM image (~45 GB) on top of a base (~30 GB) — budget **~100 GB+ free** (more if you keep several dated goldens), plus Xcode. Deliberately opt-in.
+- **Why it's worth it (how the maintainer works).** Every CI job runs in a **disposable, identical VM**, so your machine stays responsive, builds never corrupt each other's state, and the toolchain is **pinned/deterministic** (stable font/raster goldens). You validate on *your* fast local hardware instead of queuing on shared runners.
+- **On Shipyard — encouraged, never required.** Shipyard is the merge-on-green orchestrator (`shipyard pr`): one command runs Pulp's gates (skill-sync, version-bump), opens the PR, validates across platforms, and merges when green — and it can route the macOS lane to *this* local VM setup. We recommend it because it removes the manual juggling of `gh pr create` + version bumps + waiting on CI, and it's how core development flows here. **But it's an accelerator, not a gate:** you can always contribute with plain `gh` PRs + GitHub Actions. Use whichever fits you.
+
+## Quick start (one command)
+If you already have a golden on another host (or want to bake), `tools/ci/setup-ci-host.sh` automates the whole thing — installs Tart, sets up `~/VMs`, acquires the golden, and installs the runner agent:
+```bash
+cd ~/Code/pulp
+# Copy the golden from an existing host (recommended) and join the pool:
+tools/ci/setup-ci-host.sh --class m5 \
+  --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
+# Or, if the golden is already present, just wire the host + agent:
+tools/ci/setup-ci-host.sh --class m5
+```
+It's idempotent and prints the one thing it can't automate (the Full Disk Access GUI grant, **only** if you put VMs on an external `/Volumes`). The manual steps below are the reference for what it does.
+
 ## What you get
 - Every CI job runs in a **throwaway macOS VM** cloned from a versioned **golden image** → the host stays responsive, there's no build-dir churn (the ODR class of failures can't happen), and the toolchain is **deterministic** (pinned Xcode + Skia, so font/raster goldens are stable).
 - Your Mac joins the `pulp-build` runner pool **additively** and Shipyard merges PRs on green.
