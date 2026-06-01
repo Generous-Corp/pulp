@@ -251,6 +251,32 @@ TEST_CASE("pulp import-design --from claude emits classnames.json by default",
     REQUIRE(combined.find(classnames_out.string()) != std::string::npos);
 }
 
+TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean import",
+          "[cli][import-design][fidelity][shellout]") {
+    // Codex #3267: the dry-run branch must honor --strict-fidelity (return
+    // fidelity_failed ? 4 : 0), not an unconditional 0. A clean import has no
+    // hard findings, so a harness running --dry-run --strict-fidelity sees 0 —
+    // and the new return path is exercised. (The failure→4 path needs real
+    // skewed PNG assets; the geometry logic is unit-covered in
+    // test_design_fidelity.cpp / test_design_import.cpp.)
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-import-design-dryrun-strict");
+    auto html_in = fixture_dir() / "example.html";
+    auto js_out = tmp / "ui.js";
+
+    auto r = run_pulp({"import-design",
+                       "--from", "claude",
+                       "--file", html_in.string(),
+                       "--output", js_out.string(),
+                       "--dry-run",
+                       "--strict-fidelity"});
+    REQUIRE_FALSE(r.timed_out);
+    CHECK(r.exit_code == 0);
+    // --dry-run is a preview: it must not write the output file.
+    CHECK_FALSE(fs::exists(js_out));
+}
+
 TEST_CASE("pulp import-design --from claude --no-emit-classnames suppresses the artifact",
           "[cli][import-design][issue-1035][shellout]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

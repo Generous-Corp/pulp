@@ -129,7 +129,10 @@ std::optional<FidelityIssue> check_widget_intrinsic_size(const FidelityContext& 
       << "H " << rh << "x (src " << src_h << " emit " << ctx.emitted_h << "px)";
     if (only_clamp) {
         d << " — below native minimum, clamped up";
-        return FidelityIssue{ctx.node_id, node.name, "widget-undersized", d.str()};
+        // Informational: codegen legitimately enlarges a sub-minimum source, so
+        // this must not trip --strict-fidelity (the CLI skips informational).
+        return FidelityIssue{ctx.node_id, node.name, "widget-undersized", d.str(),
+                             /*informational=*/true};
     }
     return FidelityIssue{ctx.node_id, node.name, "widget-size", d.str()};
 }
@@ -150,6 +153,10 @@ std::optional<FidelityIssue> check_text_vertical_centering(const FidelityContext
     auto it = node.attributes.find("_emitted_vertical_align");
     const std::string va = it != node.attributes.end() ? it->second : "";
     if (va == "center") return std::nullopt;      // centered as expected
+    // "n-a": codegen synthesized this height from the font (no design-reserved
+    // slot — auto-height text), so there is nothing to center within. Only an
+    // EXPLICIT taller-than-font slot obliges vertical centering.
+    if (va == "n-a") return std::nullopt;
 
     std::ostringstream d;
     d << "single-line text in a " << box_h << "px slot (line ~" << line_h
@@ -304,6 +311,12 @@ void check_vector_renderability(
             visit(n.children[i], path + "/children[" + std::to_string(i) + "]");
     };
     visit(root, "$");
+}
+
+std::size_t count_strict_fidelity_failures(const std::vector<FidelityIssue>& issues) {
+    return static_cast<std::size_t>(
+        std::count_if(issues.begin(), issues.end(),
+                      [](const FidelityIssue& fi) { return !fi.informational; }));
 }
 
 }  // namespace pulp::view

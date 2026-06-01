@@ -12,6 +12,7 @@
 
 #include <pulp/view/design_ir.hpp>
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -27,6 +28,8 @@ struct FidelityIssue {
                             ///<   | "widget-size" | "widget-undersized" | "text-vcenter"
                             ///<   | "dropped-vector"
     std::string detail;     ///< one-line explanation with the measured numbers
+    bool informational = false;  ///< advisory only (e.g. a below-native-minimum
+                                 ///< clamp-up); --strict-fidelity must NOT fail on it
 };
 
 /// What codegen branch produced the emitted geometry — lets a check apply only
@@ -102,5 +105,11 @@ void check_vector_renderability(
     const std::vector<ImportDiagnostic>& diagnostics,
     const std::function<std::string(const IRNode&)>& node_id_of,
     std::vector<FidelityIssue>& sink);
+
+/// Number of findings that should fail `--strict-fidelity`. Informational
+/// findings (advisory clamp-ups etc.) are surfaced as warnings but never gate
+/// the import, so the CLI decides its exit code from this count, not the raw
+/// finding count.
+std::size_t count_strict_fidelity_failures(const std::vector<FidelityIssue>& issues);
 
 }  // namespace pulp::view

@@ -2205,12 +2205,18 @@ int main(int argc, char* argv[]) {
     // Reference-free fidelity self-check: surface any sprite the importer could
     // not prove it sized faithfully. Always reported as warnings; with
     // --strict-fidelity a finding makes the import exit non-zero.
+    // Informational findings (e.g. a below-native-minimum widget codegen clamps
+    // up) are surfaced as warnings but never gate the import — only "hard"
+    // findings trip --strict-fidelity (see count_strict_fidelity_failures).
     for (const auto& fi : fidelity_issues) {
         std::cerr << "fidelity: [" << fi.kind << "] " << fi.node_name
-                  << " (" << fi.node_id << "): " << fi.detail << "\n";
+                  << " (" << fi.node_id << "): " << fi.detail
+                  << (fi.informational ? "  [informational]" : "") << "\n";
     }
-    if (strict_fidelity && !fidelity_issues.empty()) {
-        std::cerr << "fidelity: " << fidelity_issues.size()
+    const std::size_t hard_findings =
+        pulp::view::count_strict_fidelity_failures(fidelity_issues);
+    if (strict_fidelity && hard_findings > 0) {
+        std::cerr << "fidelity: " << hard_findings
                   << " issue(s); failing due to --strict-fidelity\n";
         fidelity_failed = true;
     }
@@ -2225,7 +2231,9 @@ int main(int argc, char* argv[]) {
             std::cout << "\n=== W3C Design Tokens (" << tokens_file << ") ===\n\n";
             std::cout << w3c;
         }
-        return 0;
+        // --dry-run still honors --strict-fidelity: a harness that imports with
+        // both must see the non-zero exit, not a silent success.
+        return fidelity_failed ? 4 : 0;
     }
 
     auto t_codegen = std::chrono::steady_clock::now();

@@ -1852,10 +1852,31 @@ rasterized shapes). Each cost a visible fidelity bug.
   Findings carry the exact bridge id via codegen's real node→id map. Fires 0 on
   a faithful import (substantive shape art is rasterized at export and routes
   through the image branch).
+- **Informational vs hard findings (load-bearing for `--strict-fidelity`).**
+  `FidelityIssue::informational` marks advisory findings the importer should
+  surface but never fail on — currently `widget-undersized` (codegen
+  legitimately clamps a sub-native-minimum widget up). The CLI derives its exit
+  code from `count_strict_fidelity_failures()` (non-informational count), NOT the
+  raw finding count. If you add an advisory check, set `informational=true` at
+  construction AND assert it in a test — otherwise a "warn, don't fail" finding
+  silently exits 4 and breaks faithful imports.
+- **Auto-height text must self-skip the vcenter check.** When the IR carries no
+  explicit height, codegen synthesizes `label_h = font*1.4`, which lands inside
+  the tall-slot range and would falsely trip `text-vcenter` on ordinary labels.
+  The call-site stamps `_emitted_vertical_align = "n-a"` in that case and the
+  check treats `"n-a"` (like `"center"`) as a self-skip — only an EXPLICIT
+  taller-than-font slot is held to the centering invariant.
+- **`--strict-fidelity` covers BOTH codegen paths and `--dry-run`.** The checks
+  run in `generate_native_node` AND in `generate_node` (web-compat, image-skew
+  only — widget/text slot geometry differs on that path and full web-compat
+  coverage is a tracked hardening follow-up). `--dry-run` returns
+  `fidelity_failed ? 4 : 0`, not an unconditional 0 — a harness that imports with
+  `--dry-run --strict-fidelity` still sees the non-zero exit.
 - **`pulp import-design --strict-fidelity`** prints findings as `fidelity: …`
-  warnings and exits 4 when any are present. Tests: unit cases per check in
-  `test/test_design_fidelity.cpp`; the codegen-routing case is in
-  `test_design_import.cpp`.
+  warnings (informational ones tagged `[informational]`) and exits 4 when any
+  HARD finding is present. Tests: unit cases per check in
+  `test/test_design_fidelity.cpp`; codegen-routing + web-compat + informational
+  cases in `test_design_import.cpp`.
 - **Golden re-import regression — `tools/import-validation/golden_regression.py`.**
   Re-imports a design from scratch and compares its render to a committed
   baseline with TOLERANT/STRUCTURAL matching (per-pixel-over-tolerance fraction
@@ -1864,3 +1885,10 @@ rasterized shapes). Each cost a visible fidelity bug.
   sizing. Source-agnostic (any `--from`). Proprietary baselines stay local; CI
   uses synthetic ones. Run it (and `--strict-fidelity` on a real import) after
   any change to the sizing/fidelity paths to prove no visual regression.
+  - **uint8 wraparound gotcha:** the structural edge map (`edges()`) must cast
+    luminance to a SIGNED dtype before `np.diff` — on raw uint8 a `255→0`
+    dark-on-light edge wraps to `+1` and falls below the threshold, so the
+    strongest edges in dark-text/light-bg designs vanish and a removed/moved
+    thin feature can still read as "high edge agreement". The
+    `int16` cast fixes it. `golden_regression.py --selftest` (ctest
+    `golden-regression-selftest`, skips 77 without numpy) pins this.
