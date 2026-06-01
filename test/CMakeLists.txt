@@ -3078,6 +3078,15 @@ catch_discover_tests(pulp-test-design-import
 add_executable(pulp-test-design-fidelity test_design_fidelity.cpp)
 target_link_libraries(pulp-test-design-fidelity PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-fidelity PROPERTIES LABELS "parser-import")
+
+# Drift guard for the compat.json imports/object-coverage matrix. Reads the
+# matrix (PULP_SRC_DIR/compat.json) and validates each `types` row's codegen
+# claim against the real generate_pulp_js lowering.
+add_executable(pulp-test-import-object-coverage test_import_object_coverage.cpp)
+target_link_libraries(pulp-test-import-object-coverage PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-import-object-coverage PRIVATE
+    PULP_SRC_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-import-object-coverage PROPERTIES LABELS "parser-import")
 catch_discover_tests(pulp-test-design-import
     TEST_SPEC "[network]"
     PROPERTIES

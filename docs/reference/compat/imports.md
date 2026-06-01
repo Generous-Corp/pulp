@@ -43,6 +43,43 @@ Each `detected-formats` entry carries:
   - `tailwind-config-token` — Tailwind utility token presence (any-of)
 - `notes`: human-readable description.
 
+## Object coverage
+
+Beyond *format detection*, the `imports/object-coverage` block tracks
+which normalized **DesignIR object types** the pipeline lowers, at three
+stages:
+
+- `detected` — an adapter recognizes the source object.
+- `parsed` — it is lowered into the normalized IR.
+- `codegen` — `generate_pulp_js` emits a real renderable primitive for it.
+
+Levels are `handled | partial | missing`. The matrix is **IR-level and
+source-agnostic**: because the importer and codegen operate on the
+normalized IR, a `handled` type renders identically for every source
+(figma, figma-plugin, pencil, stitch, v0, claude).
+
+`types` rows are **drift-checked** by
+`test/test_import_object_coverage.cpp` (binary
+`pulp-test-import-object-coverage`, Catch2 tag `[object-coverage]`): it
+builds a synthetic `IRNode` per type, runs `generate_pulp_js`, and fails
+if a `codegen: handled` type drops to an empty frame, or a
+`codegen: missing` vector/path kind does not trip the dropped-vector
+invariant. This keeps the matrix honest against the code — a claim
+cannot silently rot.
+
+`features` rows track cross-cutting paint/layout capabilities
+(per-range text, gradients, masks, mix-blend-mode, constraints, grid)
+owned by separate hardening slices; they are documented here but not
+type-drift-checked.
+
+The current snapshot: `frame`/`text`/`label`/`image` are `codegen:
+handled`; all vector/path kinds (`vector`/`path`/`svg_*`/`rect`/
+`rectangle`/`line`/`ellipse`/`circle`/`polygon`/`polyline`/`star`) are
+`codegen: missing` — their bare form silently degrades, guarded by the
+dropped-vector invariant, while the faithful path rasterizes them at
+export. Seeded from
+`planning/2026-05-31-import-coverage-hardening-plan.md` §3.
+
 ## Adding a new format
 
 When a new import source lands or an existing source's export format
