@@ -200,13 +200,16 @@
         return;
     }
 
-    // Phase 3 viewport pin + aspect lock — paint at design size; host owns
-    // window size; PluginViewHost scales the paint/input transform.
-    if (w > 0 && h > 0) {
-        _viewHost->set_design_viewport(w, h);
-        _viewHost->set_fixed_aspect_ratio(static_cast<float>(w) /
-                                          static_cast<float>(h));
-    }
+    // iOS AU editors FILL the host pane and let the scripted UI reflow
+    // responsively — Pulp scenes are flex-based and adapt to any size. We
+    // deliberately do NOT pin a fixed design viewport here: aspect-locked
+    // letterboxing scaled the design uniformly and left dark bars on the
+    // sides of a scene (e.g. the Three.js cube) that can fill any size, and
+    // pushed header text to the pane edge. Laying the root out at the actual
+    // pane bounds (resizeEditorToViewBounds drives set_size + bridge resize)
+    // lets a responsive scene fill edge-to-edge. A fixed-design editor that
+    // genuinely needs letterboxing can call set_design_viewport itself.
+    // (#3286 follow-up — full-width responsive editor.)
 
     _viewHost->attach_to_parent((__bridge void*)self.view);
     if (_bridge) _bridge->notify_attached();

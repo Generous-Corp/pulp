@@ -139,6 +139,16 @@ move `notify_attached()` back inline; it reintroduces the first-paint clip.
 Rationale + the view-config/first-paint root cause are in
 `.agents/skills/auv3/SKILL.md → "Logic OOP first-paint clip"`. The same controller also calls `set_design_viewport_top_align(true)` so the AU design anchors to the TOP of a taller host pane (REAPER FX-chain) like CLAP/VST3 instead of centering between bands — see the auv3 SKILL.
 
+**iOS editor sizing differs from macOS — it FILLS the pane.**
+`au_view_controller_ios.mm` deliberately does NOT pin a design viewport: it
+lays the root out at the actual pane bounds (via `resizeEditorToViewBounds` →
+`set_size` + `ViewBridge::resize`) so a responsive flex scene fills edge-to-edge.
+Aspect-locked design-viewport scaling letterboxed the pane (dark bars on the
+sides) and pushed header text to the edge. The `notify_attached` → `resize`
+protocol is unchanged; only the viewport policy differs. A genuinely
+fixed-aspect iOS editor that wants letterboxing can call `set_design_viewport`
+itself. See the `ios` skill for the responsive-scene + `syncCanvasSize` contract.
+
 ## AU v2 dual-Processor gotcha (fixed)
 
 Pre-ViewBridge, the AU v2 Cocoa view factory called

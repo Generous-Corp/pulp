@@ -279,18 +279,32 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   real `__dispatch__(<canvas._id>, 'pointermove', {...})` entrypoint (the same
   one the native handlers call) from a hot-patched `scene.js` and assert camera
   state / `document`-level listener counts in the `dev.pulp.runtime` log.
-- **GPU AUv3 editor design-viewport scaling** — `IOSGpuPluginViewHost` now
-  overrides `set_design_viewport`/`set_fixed_aspect_ratio`/
-  `set_design_viewport_top_align`/`window_to_root_point` (they were base
-  no-ops, so the AU view controller's existing calls did nothing and the
-  design rendered at native size in the pane's top-left). `render_frame` lays
-  the root out at the design size and applies an aspect-correct translate+scale
-  to the Skia canvas; the Three.js cube composites through that same scaled
-  canvas (`CanvasWidget` draws its Dawn texture at the widget's bounds), so it
-  scales coherently with the 2D UI. To actually fill the iPad pane you ALSO
-  need `templates/ios-auv3/HostApp/ContentView.swift` to give the editor
-  `.frame(maxWidth:.infinity, maxHeight:.infinity)` — without it SwiftUI pins
-  the editor to its intrinsic `preferredContentSize`.
+- **GPU AUv3 editor fills the pane (responsive), no forced design viewport** —
+  `IOSGpuPluginViewHost` CAN scale a fixed design viewport (it overrides
+  `set_design_viewport`/`set_fixed_aspect_ratio`/`set_design_viewport_top_align`/
+  `window_to_root_point`, and `render_frame` applies an aspect-correct
+  translate+scale that the Three.js cube composites through coherently). BUT
+  the iOS AU view controller (`au_view_controller_ios.mm`) deliberately does
+  NOT force a design viewport: aspect-locked scaling letterboxed the pane (dark
+  bars on the sides) and pushed header text to the edge. It instead lays the
+  root out at the ACTUAL pane bounds (`resizeEditorToViewBounds` → `set_size` +
+  `bridge->resize`) so a responsive flex scene fills edge-to-edge. The scene
+  must be responsive to benefit: `examples/ios-auv3-jsc-threejs/js/scene.js`
+  flex-fills the body/shell at `width:100%` and `syncCanvasSize()` resizes the
+  Three.js drawing buffer + camera aspect to the canvas's measured size each
+  frame (a fixed-size canvas would just sit small in a wide pane). To fill the
+  pane you ALSO need `ContentView.swift` to give the editor
+  `.frame(maxWidth:.infinity, maxHeight:.infinity)`. A genuinely fixed-aspect
+  editor that wants letterboxing can call `set_design_viewport` itself.
+- **Host-app AUParameter slider must mirror value in `@State`** — binding a
+  SwiftUI `Slider` straight to `AUParameter.value` (get/set) does NOT update:
+  SwiftUI doesn't observe `AUParameter`, so dragging writes the param but never
+  re-renders, leaving the thumb + readout stuck at 0.00. The `ParameterRow`
+  view in `templates/ios-auv3/HostApp/ContentView.swift` mirrors the value in
+  `@State` (slider + readout bind to that, so they move live), writes through
+  in `onChange` via `setValue(_, originator: token)`, and installs an
+  `AUParameterObserverToken` to reflect host/automation changes back — passing
+  the token as originator so the observer doesn't echo the gesture.
 
 ### Plugin Editor Child Views
 

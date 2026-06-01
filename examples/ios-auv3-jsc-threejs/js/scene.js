@@ -92,12 +92,11 @@
     document.body.style.backgroundColor = "#040912";
     document.body.style.padding = "18px";
 
-    // iOS-D.3c polish: flex-fill the body so the shell uses whatever size the
-    // host hands the editor. The AUv3 GPU host pins the root to the 540×720
-    // design viewport and scales the composited output up to the editor pane
-    // (set_design_viewport in plugin_view_host_ios.mm), so filling the body
-    // here means the shell — and the cube card inside it — fill that pane
-    // edge-to-edge instead of sitting at a fixed size in one corner.
+    // Flex-fill the body so the shell uses the full editor pane the host hands
+    // us. The iOS AU editor now lays the root out at the actual pane bounds
+    // (no fixed design viewport — see au_view_controller_ios.mm), so a body +
+    // shell at width:100% fill the pane edge-to-edge with no letterbox bars;
+    // `syncCanvasSize()` then sizes the cube canvas to match.
     document.body.style.flexDirection = "column";
     document.body.style.width = "100%";
     document.body.style.height = "100%";
@@ -158,24 +157,28 @@
     shell.appendChild(subtitle);
 
     var canvasCard = document.createElement("div");
+    canvasCard.style.flexDirection = "column";  // so the canvas can flex-fill it
     canvasCard.style.flexGrow = "1";
     canvasCard.style.padding = "12px";
     canvasCard.style.backgroundColor = "#06101c";
     canvasCard.style.borderRadius = "16px";
     shell.appendChild(canvasCard);
 
-    // ── Canvas: sized in CSS pixels; Three.js sets the drawing buffer
-    //    via `renderer.setSize` below. The exact pixel size is less
-    //    important than the canvas existing before
-    //    `canvas.getContext('webgpu')` is queried.
+    // ── Canvas: flex-fills the card so it tracks the full editor width.
+    //    The width/height ATTRIBUTES seed the drawing buffer before
+    //    `getContext('webgpu')` is queried; `syncCanvasSize()` (in the frame
+    //    loop) then resizes the buffer + camera to the canvas's measured
+    //    layout size so the cube fills whatever width the pane gives it,
+    //    without stretching.
     var canvasWidth = Math.max(260, rootWidth - 84);
     var canvasHeight = Math.max(320, rootHeight - 220);
     var canvasEl = document.createElement("canvas");
     canvasEl.id = "pulp-three-demo-canvas";
     canvasEl.width = canvasWidth;
     canvasEl.height = canvasHeight;
-    canvasEl.style.width = canvasWidth + "px";
-    canvasEl.style.height = canvasHeight + "px";
+    canvasEl.style.width = "100%";
+    canvasEl.style.height = "100%";
+    canvasEl.style.flexGrow = "1";
     canvasEl.style.borderRadius = "12px";
     canvasCard.appendChild(canvasEl);
 
@@ -292,6 +295,38 @@
             + "(three.iife.js bundle did not include the OrbitControls addon).");
     }
 
+    // Responsive sizing: the editor fills the host pane (no fixed design
+    // viewport), so the canvas card can be any size/aspect. Track the canvas's
+    // laid-out size each frame and resize the Three.js drawing buffer + camera
+    // aspect to match, so the cube fills the full-width canvas without
+    // stretching. Only acts when the measured size actually changes, so it's a
+    // cheap getBoundingClientRect compare on a static pane.
+    // Measure the CARD (a plain div that flex-stretches to the full pane
+    // width), not the canvas: Pulp's CanvasWidget lays out from its width/height
+    // ATTRIBUTES (the drawing buffer), not CSS flex, so a canvas left at its
+    // initial 456px never grows. We drive the canvas attributes — and the
+    // Three.js drawing buffer + camera aspect — from the card's measured
+    // content box so the cube fills whatever width the pane gives us.
+    var CARD_PAD = 12;  // canvasCard padding (keep in sync with the style above)
+    var lastCanvasW = 0, lastCanvasH = 0;
+    function syncCanvasSize() {
+        var rect = (typeof canvasCard.getBoundingClientRect === "function")
+            ? canvasCard.getBoundingClientRect() : null;
+        if (!rect) return;
+        var w = Math.round(rect.width) - CARD_PAD * 2;
+        var h = Math.round(rect.height) - CARD_PAD * 2;
+        if (w <= 0 || h <= 0) return;                 // layout not ready yet
+        if (w === lastCanvasW && h === lastCanvasH) return;
+        lastCanvasW = w;
+        lastCanvasH = h;
+        canvasEl.width = w;   // drawing buffer == card content; widget lays out here
+        canvasEl.height = h;
+        // false → don't let Three.js overwrite our CSS sizing.
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+    }
+
     var firstFrameSubmitted = false;
     var frameCount = 0;
     var lastSampleTime = 0;
@@ -317,6 +352,7 @@
     // is itself driven by the iOS PluginViewHost's `idle_callback_`
     // running before the per-vsync repaint (pulp #1402 contract).
     function tick() {
+        syncCanvasSize();  // fill whatever width the pane currently gives us
         cube.rotation.x += 0.01;
         cube.rotation.y += 0.01;
         // OrbitControls orbits the CAMERA around the target; the cube's own

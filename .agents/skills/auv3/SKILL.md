@@ -599,9 +599,14 @@ directly while cfprefsd is killed.
 `PulpAUMacViewController` + `PulpAUViewController` implement
 `AUAudioUnitFactory`, open `ViewBridge` against the AU's real
 `pulpProcessor` + `pulpStore`, build `PluginViewHost` via
-`decide_gpu_host`, and call `set_design_viewport(w, h)` +
+`decide_gpu_host`, and (on macOS) call `set_design_viewport(w, h)` +
 `set_fixed_aspect_ratio(w/h)` so the editor paints at design size and
-host-driven window resize is letterboxed proportionally.
+host-driven window resize is letterboxed proportionally. **iOS differs:**
+`au_view_controller_ios.mm` deliberately does NOT force a design viewport —
+it lays the root out at the actual pane bounds so a responsive flex scene
+fills edge-to-edge (aspect-locked scaling left dark letterbox bars on the
+sides and pushed header text to the edge). A fixed-aspect iOS editor that
+needs letterboxing can call `set_design_viewport` itself; see the `ios` skill.
 
 On macOS, the view controller's root view must be created at the
 compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available.

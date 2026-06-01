@@ -58,19 +58,7 @@ struct ContentView: View {
             }
 
             ForEach(host.parameters, id: \.address) { p in
-                HStack {
-                    Text(p.displayName).frame(maxWidth: .infinity, alignment: .leading)
-                    Slider(
-                        value: Binding(
-                            get: { Double(p.value) },
-                            set: { p.value = AUValue($0) }
-                        ),
-                        in: Double(p.minValue)...Double(p.maxValue)
-                    )
-                    Text(String(format: "%.2f", p.value))
-                        .frame(width: 56, alignment: .trailing)
-                        .monospacedDigit()
-                }
+                ParameterRow(param: p)
             }
 
             // Phase iOS-D.2 — mount the AUv3 extension's own view inside
@@ -153,6 +141,52 @@ struct ContentView: View {
                     if host.audioUnit != nil { return }
                     host.discover()
                 }
+            }
+        }
+    }
+}
+
+// One parameter row. The earlier inline `Slider(value: Binding(get/set))`
+// bound straight to `AUParameter.value`, which SwiftUI does not observe — so
+// dragging wrote the AU param but never re-rendered, leaving the thumb and the
+// "0.00" readout stuck. Mirroring the value in `@State` makes the slider move
+// and the number update live as you drag, while `onChange` writes through to
+// the AU parameter, and an observer reflects host/automation changes back.
+@available(iOS 15.0, macOS 12.0, *)
+private struct ParameterRow: View {
+    let param: AUParameter
+    @State private var value: Double
+    @State private var observerToken: AUParameterObserverToken?
+
+    init(param: AUParameter) {
+        self.param = param
+        _value = State(initialValue: Double(param.value))
+    }
+
+    var body: some View {
+        HStack {
+            Text(param.displayName).frame(maxWidth: .infinity, alignment: .leading)
+            Slider(value: $value, in: Double(param.minValue)...Double(param.maxValue))
+                .onChange(of: value) { newValue in
+                    // Write through as the user drags. Pass our own observer
+                    // token as originator so the observer below doesn't echo
+                    // this back into `value` and fight the gesture.
+                    param.setValue(AUValue(newValue), originator: observerToken)
+                }
+            Text(String(format: "%.2f", value))
+                .frame(width: 56, alignment: .trailing)
+                .monospacedDigit()
+        }
+        .onAppear {
+            value = Double(param.value)
+            observerToken = param.token(byAddingParameterObserver: { _, newValue in
+                Task { @MainActor in value = Double(newValue) }
+            })
+        }
+        .onDisappear {
+            if let token = observerToken {
+                param.removeParameterObserver(token)
+                observerToken = nil
             }
         }
     }
