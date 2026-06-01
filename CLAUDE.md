@@ -913,13 +913,14 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
+| `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
 | `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
 | `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-25 skills as of 2026-04-27. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+26 skills as of 2026-06-01. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 

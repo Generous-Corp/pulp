@@ -245,6 +245,14 @@
         "examples/stream-*/**"
       ]
     },
+    "tart-ci": {
+      "paths": [
+        "tools/ci/tart-*.sh",
+        "tools/ci/pulp-worktree.sh",
+        "tools/ci/examples/vm-image.*",
+        ".shipyard/vm-image.toml"
+      ]
+    },
     "threejs-bridge": {
       "paths": [
         "examples/threejs-*/**"

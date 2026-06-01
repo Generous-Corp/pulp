@@ -229,6 +229,7 @@ provision_runner(){ # $1=from-pulp-vm  $2=new-vm
   vm_ssh "$ip" 'cat > ~/actions-runner/.env <<ENVV
 PATH=/Users/admin/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
 SKIA_DIR=/Users/admin/pulp-skia-build
+PULP_USE_BAKED_SKIA=1
 CMAKE_C_COMPILER_LAUNCHER=ccache
 CMAKE_CXX_COMPILER_LAUNCHER=ccache
 CCACHE_DIR=/Users/admin/Library/Caches/ccache

@@ -188,5 +188,63 @@ class FetchSkiaForReleaseExtraTests(unittest.TestCase):
             self.assertIn("expected library not found", err.getvalue())
 
 
+class BakedSkiaShortCircuit(unittest.TestCase):
+    """PULP_USE_BAKED_SKIA: the Tart VM runner bakes Skia at $SKIA_DIR, so the
+    workflow fetch is redundant — but only skip when the baked stamp matches the
+    current pin, so a pin bump on a stale golden re-fetches (never stuck)."""
+
+    def _manifest(self, digest: str) -> None:
+        manifest = pathlib.Path("tools/deps/manifest.json")
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"dependencies": [{
+                "name": "Skia",
+                "determinism": {"release_assets": {
+                    "mac-arm64": {"url": "https://example.invalid/skia.zip", "sha256": digest},
+                }},
+            }]}),
+            encoding="utf-8",
+        )
+
+    def _bake(self, root: pathlib.Path, stamp: str) -> None:
+        lib = root / "build/mac-gpu/lib/Release/libskia.a"
+        lib.parent.mkdir(parents=True, exist_ok=True)
+        lib.write_bytes(b"baked")
+        (root / ".skia-asset-sha256").write_text(stamp, encoding="utf-8")
+
+    def test_baked_matching_stamp_skips_fetch_without_download(self) -> None:
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            digest = "a" * 64
+            self._manifest(digest)
+            baked = pathlib.Path("baked"); self._bake(baked, digest)
+
+            def _boom(*a, **k):
+                raise AssertionError("urlopen must NOT be called when baked Skia matches the pin")
+
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"PULP_USE_BAKED_SKIA": "1", "SKIA_DIR": str(baked.resolve())}), \
+                 mock.patch.object(skia.urllib.request, "urlopen", side_effect=_boom), \
+                 contextlib.redirect_stdout(out):
+                self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertIn("PULP_USE_BAKED_SKIA", out.getvalue())
+            self.assertIn("skipping fetch", out.getvalue())
+            self.assertFalse(pathlib.Path("external/skia-build").exists())
+
+    def test_baked_stale_stamp_refetches(self) -> None:
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"fresh")
+            digest = hashlib.sha256(data).hexdigest()
+            self._manifest(digest)
+            baked = pathlib.Path("baked"); self._bake(baked, "0" * 64)  # stale stamp != pin
+
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"PULP_USE_BAKED_SKIA": "1", "SKIA_DIR": str(baked.resolve())}), \
+                 mock.patch.object(skia.urllib.request, "urlopen", return_value=_FakeResponse(data)), \
+                 contextlib.redirect_stdout(out):
+                self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertIn("missing or stale", out.getvalue())
+            self.assertTrue(pathlib.Path("external/skia-build/build/mac-gpu/lib/Release/libskia.a").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
