@@ -4286,3 +4286,72 @@ TEST_CASE("codegen routes a dropped vector through the vector-renderability chec
         if (iss.kind == "dropped-vector" && iss.node_name == "Glyph") found = true;
     CHECK(found);
 }
+
+TEST_CASE("web-compat codegen also runs the image-sizing fidelity check",
+          "[view][import][codegen][fidelity][web-compat]") {
+    // Codex #3267: fidelity checks previously ran only in the native-bridge
+    // branch, so `--web-compat --strict-fidelity` exited 0 even for a skewed
+    // bleed sprite. The web-compat <img> emits the style box directly, so the
+    // image-sizing check now runs on that path too.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+
+    IRNode img;
+    img.type = "image";
+    img.name = "Sprite";
+    img.attributes["asset_bleed"]   = "1";    // bleed marker
+    img.attributes["png_natural_w"] = "100";  // source aspect 1.0
+    img.attributes["png_natural_h"] = "100";
+    img.style.width  = 100.0f;                 // emitted aspect 2.0 → skewed
+    img.style.height = 50.0f;
+    ir.root.children.push_back(img);
+
+    std::vector<pulp::view::FidelityIssue> report;
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.fidelity_report = &report;
+    (void)generate_pulp_js(ir, opts);
+
+    bool skew = false;
+    for (const auto& iss : report)
+        if (iss.kind == "skew" && iss.node_name == "Sprite") skew = true;
+    CHECK(skew);
+}
+
+
+TEST_CASE("an undersized widget reports informational (never a hard finding)",
+          "[view][import][codegen][fidelity]") {
+    // Codex #3274: a below-native-minimum widget is legitimately clamped up by
+    // codegen, so its finding must carry the informational flag and never be a
+    // hard finding the import CLI fails on under --strict-fidelity. The xy_pad
+    // branch clamps its emitted size up to the 80px native minimum (sz =
+    // max(width, 80)), so a 20px source produces the widget-undersized path.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+
+    IRNode pad;
+    pad.type = "frame";
+    pad.name = "Tiny";
+    pad.audio_widget = AudioWidgetType::xy_pad;
+    pad.style.width  = 20.0f;   // far below the 80px native minimum → clamped up
+    pad.style.height = 20.0f;
+    ir.root.children.push_back(pad);
+
+    std::vector<pulp::view::FidelityIssue> report;
+    CodeGenOptions opts;
+    opts.fidelity_report = &report;
+    (void)generate_pulp_js(ir, opts);
+
+    bool saw_undersized = false;
+    for (const auto& iss : report) {
+        if (iss.kind == "widget-undersized") {
+            saw_undersized = true;
+            CHECK(iss.informational);          // the load-bearing assertion
+        }
+        // Whatever else surfaces, nothing about a clamp-up may be a hard finding.
+        if (iss.node_name == "Tiny") CHECK(iss.informational);
+    }
+    CHECK(saw_undersized);
+}

@@ -256,6 +256,17 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_px("maxWidth", s.max_width);
     emit_px("maxHeight", s.max_height);
 
+    // Reference-free image-sizing fidelity self-check on the web-compat path
+    // too (mirrors generate_native_node). The web-compat <img> emits the style
+    // box directly, so the emitted geometry is exactly s.width/s.height. The
+    // widget/text slot checks depend on native-emitted geometry and don't map
+    // 1:1 to web-compat output; full web-compat coverage is tracked as a
+    // hardening follow-up (see planning/2026-05-31-import-coverage-hardening-plan.md).
+    if (node.type == "image" && opts.fidelity_report && s.width && s.height) {
+        run_fidelity_checks({node, var, *s.width, *s.height, FidelityElement::image},
+                            *opts.fidelity_report);
+    }
+
     // Text content
     if (!node.text_content.empty())
         ss << ind << var << ".textContent = '" << js_single_quote_escape(node.text_content) << "';\n";  // pulp #81
@@ -1141,7 +1152,12 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // node is const here, so stamp the emitted vertical-align onto a copy.
         if (opts.fidelity_report) {
             IRNode fnode = node;
-            fnode.attributes["_emitted_vertical_align"] = emitted_vcenter ? "center" : "top";
+            // When the IR carried no explicit height, label_h is synthesized
+            // from the font (font_h * 1.4) — there is no design-reserved slot,
+            // so stamp "n-a" and the text check self-skips. Only an explicit
+            // taller-than-font slot is held to the vertical-centering invariant.
+            fnode.attributes["_emitted_vertical_align"] =
+                !ir_height_is_explicit ? "n-a" : (emitted_vcenter ? "center" : "top");
             run_fidelity_checks({fnode, id, 0.0f, label_h, FidelityElement::text},
                                 *opts.fidelity_report);
         }

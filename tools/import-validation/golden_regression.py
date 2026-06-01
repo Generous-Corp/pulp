@@ -48,8 +48,13 @@ def render(args, out_png) -> bool:
 
 def edges(gray):
     np = _np()
-    gx = np.abs(np.diff(gray, axis=1, prepend=gray[:, :1]))
-    gy = np.abs(np.diff(gray, axis=0, prepend=gray[:1, :]))
+    # Cast to signed before differencing: on uint8 luminance np.diff wraps
+    # negative deltas (a 255->0 dark-on-light edge becomes +1, below threshold),
+    # so the strongest edges in dark-text/light-bg designs would vanish from the
+    # structural map. int16 keeps the true signed magnitude.
+    g = gray.astype(np.int16)
+    gx = np.abs(np.diff(g, axis=1, prepend=g[:, :1]))
+    gy = np.abs(np.diff(g, axis=0, prepend=g[:1, :]))
     return ((gx + gy) > 32)  # binary edge map, threshold robust to soft noise
 
 def _dilate(mask, r=2):
@@ -115,7 +120,29 @@ def _write_compare(base, cur, diff, frac, edge_agree, path):
     canvas.save(path)
     print(f"golden: wrote comparison {path}")
 
+def _selftest() -> int:
+    """Verify edges() captures strong dark-on-light transitions (the uint8
+    wraparound regression). Skips cleanly if numpy is unavailable."""
+    try:
+        np = _np()
+    except Exception as e:  # numpy not installed in this environment
+        print(f"golden: selftest skipped (numpy unavailable: {e})")
+        return 77  # ctest SKIP_RETURN_CODE
+    # A 255 -> 0 column transition is the strongest possible dark-on-light edge.
+    # Under the old uint8 np.diff it wrapped to +1 and fell below the threshold,
+    # so the edge vanished; with the int16 cast it must be detected.
+    row = np.array([[255, 255, 0, 0]], dtype=np.uint8)
+    e = edges(row)
+    assert bool(e[0, 2]), "edges() missed a 255->0 dark-on-light transition"
+    # An ascending 0 -> 255 edge must likewise be detected (symmetry).
+    row2 = np.array([[0, 0, 255, 255]], dtype=np.uint8)
+    assert bool(edges(row2)[0, 2]), "edges() missed a 0->255 transition"
+    print("golden: selftest passed (edges() handles signed luminance deltas)")
+    return 0
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return _selftest()
     ap = argparse.ArgumentParser()
     ap.add_argument("--from", dest="source", required=True)
     ap.add_argument("--file", required=True)

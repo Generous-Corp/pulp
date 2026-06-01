@@ -156,6 +156,19 @@ if(Python3_Interpreter_FOUND)
         LABELS "import;fidelity;slow"
         TIMEOUT 120)
 
+    # Golden re-import regression tool (tools/import-validation/golden_regression.py)
+    # — self-test for its structural edge map. Guards the uint8-wraparound fix
+    # (a 255->0 dark-on-light edge must not vanish). Exits 77 (skips) when numpy
+    # is unavailable.
+    add_test(NAME golden-regression-selftest
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/import-validation/golden_regression.py
+                --selftest)
+    set_tests_properties(golden-regression-selftest PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "import;fidelity"
+        TIMEOUT 30)
+
     # Labeled comparison-montage helper (tools/import-design/montage.py).
     # Builds titled reference-vs-render(s) montages (labels ON by default).
     # PIL-based; exits 77 (skips) on a PIL-less interpreter.

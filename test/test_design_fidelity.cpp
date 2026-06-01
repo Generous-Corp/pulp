@@ -194,6 +194,19 @@ TEST_CASE("widget-size: below-native-minimum clamp-up is informational",
         {n, "K0", 56.0f, 56.0f, FidelityElement::widget});
     REQUIRE(i.has_value());
     CHECK(i->kind == "widget-undersized");
+    // Codex #3274: the clamp-up is advisory — it must carry the informational
+    // flag so --strict-fidelity (which fails on hard findings only) ignores it.
+    CHECK(i->informational);
+}
+
+TEST_CASE("widget-size: a real divergence is a hard (non-informational) finding",
+          "[view][import][fidelity][harness]") {
+    const auto n = make_widget_node(AudioWidgetType::knob, 62, 62);
+    const auto i = check_widget_intrinsic_size(
+        {n, "K0", 130.0f, 62.0f, FidelityElement::widget});  // ~2.1x, above native min
+    REQUIRE(i.has_value());
+    CHECK(i->kind == "widget-size");
+    CHECK_FALSE(i->informational);
 }
 
 TEST_CASE("widget-size: reads the shape_* attribute as the source",
@@ -401,4 +414,39 @@ TEST_CASE("vector-renderability does not descend into a widget subtree "
     std::vector<FidelityIssue> sink;
     check_vector_renderability(knob, kNoDiagnostics, vec_id_of, sink);
     CHECK(sink.empty());
+}
+
+TEST_CASE("count_strict_fidelity_failures ignores informational findings",
+          "[view][import][fidelity][harness]") {
+    // The CLI derives its --strict-fidelity exit code from this count, so an
+    // informational finding (clamp-up) must not contribute a failure.
+    std::vector<FidelityIssue> issues = {
+        {"a", "A", "skew", "hard", /*informational=*/false},
+        {"b", "B", "widget-undersized", "advisory", /*informational=*/true},
+        {"c", "C", "gross-size", "hard", /*informational=*/false},
+    };
+    CHECK(count_strict_fidelity_failures(issues) == 2);
+
+    std::vector<FidelityIssue> all_info = {
+        {"b", "B", "widget-undersized", "advisory", /*informational=*/true},
+    };
+    CHECK(count_strict_fidelity_failures(all_info) == 0);
+    CHECK(count_strict_fidelity_failures({}) == 0);
+}
+
+TEST_CASE("text-vcenter: an auto-height label (n-a) in a tall slot self-skips",
+          "[view][import][fidelity][harness]") {
+    // Codex #3274: when the IR carries no explicit height, codegen synthesizes
+    // label_h = font*1.4 (19.6 for 14px), which lands in the tall-slot range and
+    // is stamped top-aligned. Without the "n-a" guard this fires a FALSE
+    // text-vcenter on every ordinary auto-height label and breaks
+    // --strict-fidelity. The stamp must make it self-skip.
+    IRNode n;
+    n.type = "text";
+    n.name = "T";
+    n.text_content = "Search";
+    n.style.font_size = 14.0f;
+    n.attributes["_emitted_vertical_align"] = "n-a";
+    CHECK_FALSE(check_text_vertical_centering(
+        {n, "T0", 0.0f, 19.6f, FidelityElement::text}).has_value());
 }
