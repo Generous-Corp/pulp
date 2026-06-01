@@ -438,6 +438,19 @@ runners (`pulp-m1-01`, `pulp-m1-02`) via
 `backend = "local"`; do not flip it to `cloud` unless the operator is
 explicitly re-enabling Namespace.
 
+**Tart VM ephemeral runners** are graduating into the `pulp-build` pool:
+each CI job runs in a throwaway clone of the `pulp-build-runner` golden,
+then the VM is destroyed (no build-dir churn / state drift). Driven by
+`tools/ci/tart-runner.sh`, persisted via
+`tools/launchd/pulp-tart-runner.plist.template` (needs Full Disk Access
+for the `/Volumes` VM store; launchd doesn't expand `$HOME`). Add VM
+runners additively while the bare-metal runners remain the safety net;
+never leave the required label with zero online runners. Full guide:
+the `tart-ci` skill. NOTE: shipyard `backend = "local"` validates in the
+editing checkout, which false-fails via Debug-over-Release build-dir
+churn + host-keychain prompts — Phase 2 points that validation at the
+VM lane instead.
+
 Linux and Windows CI legs default to GitHub-hosted runners. The legacy
 Shipyard SSH targets (`ubuntu`, `windows`) are optional local validation
 hosts and may be unreachable; use `--skip-target ubuntu --skip-target

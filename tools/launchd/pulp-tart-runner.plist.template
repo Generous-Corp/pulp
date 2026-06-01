@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the Tart ephemeral GitHub Actions runner supervisor
+  (tools/ci/tart-runner.sh). Keeps one fresh ephemeral VM runner ready: each
+  CI job runs in a throwaway clone of the pulp-build-runner golden, then the VM
+  is destroyed. See the `tart-ci` skill.
+
+  Install (per Mac that hosts Tart VMs — Studio, M5, …):
+
+    1. Provision the golden first: tools/ci/tart-provision.sh ... runner ; tag pulp-build-runner
+    2. Copy this file to ~/Library/LaunchAgents/, replacing BOTH $PULP_REPO and
+       $HOME with absolute paths — launchd does NOT expand shell variables in
+       plist values (a literal "$HOME" log path fails to open → exit 78):
+
+         sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+           tools/launchd/pulp-tart-runner.plist.template \
+           > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist
+
+    3. **Grant Full Disk Access** (REQUIRED when TART_HOME / the repo live on a
+       /Volumes external drive): macOS TCC blocks a LaunchAgent from reading the
+       external volume — without FDA you get exit 126 "Operation not permitted".
+       System Settings → Privacy & Security → Full Disk Access → enable for the
+       executable launchd spawns (e.g. /bin/bash, or wrap the script in a signed
+       helper you grant). The interactive shell has this access; the agent does not.
+    4. Load it:  launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist
+    5. Verify:   launchctl list | grep pulp.tart-runner ; tail -F ~/Library/Logs/pulp/tart-runner.log
+
+  Stop:   launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist
+
+  PILOT vs GRADUATE: the default label below is the REQUIRED `pulp-build` pool.
+  For a non-required pilot first, change `pulp-build` → `pulp-build-vm` and
+  route a workflow_dispatch at it. Never leave the required label with zero
+  online runners — keep the bare-metal runners until the VM lane is proven.
+
+  Requires on this host:
+    * tart (brew install cirruslabs/cli/tart) + the pulp-build-runner golden in TART_HOME
+    * gh authenticated for danielraffel/pulp (config-file token storage avoids
+      the keychain dependency) — minting JIT runner configs needs repo admin
+    * ~/.ssh/id_ed25519 injected into the golden (Tier 0)
+    * macOS 2-VM/host cap: a persistent operator VM (e.g. pulp-vm) consumes one
+      of the two slots; for >1 concurrent ephemeral runner, free that slot or
+      distribute across hosts.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.tart-runner</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$PULP_REPO/tools/ci/tart-runner.sh</string>
+        <string>--loop</string>
+        <string>--labels</string>
+        <string>self-hosted,macos,arm64,pulp-build</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PULP_REPO</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp/tart-runner.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp/tart-runner.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- tart + gh + shipyard must resolve; default launchd PATH is minimal.
+             Adjust to where they're installed on this host. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
+        <key>TART_HOME</key>
+        <string>/Volumes/Workshop/VMs</string>
+    </dict>
+</dict>
+</plist>
