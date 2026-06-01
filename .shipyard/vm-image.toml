@@ -1,0 +1,57 @@
+# Pulp golden VM image manifest — the per-repo "unit of reuse" from
+# planning/2026-06-01-macos-ci-isolation-plan.md, Phase 3.
+#
+# One manifest, two strategies (see `strategy` below):
+#   • bake             — pre-bake a project image (fast clones for hot repos)
+#   • configure-on-boot — clone the bare base + apply this manifest on first boot
+#                          (flexible; good for new/low-volume repos)
+#
+# Consumed by tools/ci/tart-provision.sh (`manifest <path> <vm>`) today, and by
+# Shipyard's multi-Mac controller (Shipyard #316) when it lands. The schema is
+# deliberately small and declarative so a new repo only writes this file.
+schema   = 1
+name     = "pulp-build-base"
+strategy = "bake"
+
+# macOS 26 "Tahoe" matches Xcode 26.5 (build 17F42). Clones are CoW.
+base       = "ghcr.io/cirruslabs/macos-tahoe-base:latest"
+disk_gb    = 150
+auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
+
+[toolchain]
+# Pin Xcode in-image so font/raster goldens are reproducible. Prefer copying a
+# host-installed Xcode (tart-provision PULP_HOST_XCODE_APP) over an in-guest
+# xcodes download (interactive 2FA).
+xcode = "26.5"
+
+[brew]
+# Tier 0 universal CI tooling + Tier 2 Pulp build deps.
+packages = [
+  "git", "gh", "rsync", "ccache", "jq", "coreutils", "tailscale",  # tier 0
+  "cmake", "ninja", "python@3.12",                                  # tier 2
+]
+
+[pip]
+# Visual-harness / screenshot tooling.
+packages = ["pillow", "numpy"]
+
+[caches]
+# ccache is the durable artifact; build dirs are disposable.
+ccache_max = "80G"
+
+# Host dirs mounted into each ephemeral job VM (virtio-fs). Paths are expanded
+# on the host; ccache TEMPDIR stays in-guest (handled by tart-run-job.sh).
+[[mounts]]
+name = "ccache"
+host = "~/.cache/pulp-ci/ccache"
+mode = "rw"
+
+[[mounts]]
+name = "skia"
+host = "~/.cache/pulp-ci/skia-build"
+mode = "ro"
+
+[[mounts]]
+name = "fetchcontent"
+host = "~/.cache/pulp-ci/fetchcontent-src"
+mode = "rw"

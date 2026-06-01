@@ -130,6 +130,14 @@ SigningInfo check_codesign(const std::string& path) {
 }
 
 bool check_notarization(const std::string& path) {
+    // A path that doesn't exist cannot be notarized — short-circuit before
+    // consulting spctl. CI base images commonly disable Gatekeeper assessment
+    // (`spctl --master-disable`), in which case `spctl --assess` returns 0 for
+    // ANY argument (even a nonexistent path), so it can't be the sole signal.
+    // (Surfaced by the Tart VM CI lane: the cirruslabs macOS bases ship with
+    // assessment disabled, unlike a stock Mac where assess fails on a bad path.)
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return false;
     return exec_status("spctl --assess --type exec \"" + path + "\" 2>/dev/null") == 0;
 }
 

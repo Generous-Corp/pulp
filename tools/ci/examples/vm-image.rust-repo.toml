@@ -1,0 +1,35 @@
+# Example vm-image manifest for a SECOND, non-Pulp repo — proves the golden
+# image template generalizes (planning/2026-06-01-macos-ci-isolation-plan.md,
+# Phase 3 "reusable template" acceptance criterion).
+#
+# This is a light Rust profile (e.g. a `shipyard-build-base`): same Tier 0
+# universal base, but NO Xcode and NO Skia — just the rust toolchain. A new
+# repo drops a file like this in its own `.shipyard/vm-image.toml`; the same
+# tools/ci/tart-provision.sh bakes/clones it with zero hand-provisioning.
+#
+# Strategy `configure-on-boot` shows the other half of the template: instead of
+# pre-baking a project image, clone the bare macos-build-base and apply this
+# manifest on first boot. Good for new or low-volume repos that don't justify a
+# dedicated baked image.
+schema   = 1
+name     = "rust-build-base"
+strategy = "configure-on-boot"
+
+base       = "ghcr.io/cirruslabs/macos-tahoe-base:latest"
+disk_gb    = 80            # no Xcode/Skia → much smaller than Pulp's 150
+auto_login = false         # CLI/test-only repo; no GPU/WindowServer tests
+
+# No [toolchain].xcode key → tart-provision skips the entire Tier 1 Xcode step.
+
+[brew]
+# `rustup` is keg-only (not symlinked to PATH); a configure-on-boot repo would
+# run `"$(brew --prefix rustup)"/bin/rustup-init -y` to lay down the toolchain.
+packages = ["git", "gh", "rsync", "ccache", "jq", "rustup"]
+
+[caches]
+ccache_max = "20G"
+
+[[mounts]]
+name = "cargo"
+host = "~/.cache/rust-ci/cargo"
+mode = "rw"

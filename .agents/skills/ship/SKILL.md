@@ -218,6 +218,20 @@ export ANDROID_HOME=~/Library/Android/sdk  # macOS
   (not just a development cert).
 - Check the notarization log: `xcrun notarytool log <UUID>`.
 
+### `check_notarization` and Gatekeeper-disabled CI environments
+
+`check_notarization(path)` runs `spctl --assess --type exec <path>`. On a stock
+Mac, `spctl --assess` returns non-zero for an unsigned or **nonexistent** path.
+But CI base images (notably the cirruslabs macOS bases used by the Tart VM lane)
+ship with Gatekeeper assessment **disabled** (`spctl --master-disable`), in which
+case `spctl --assess` returns **0 for any argument** — so it cannot distinguish a
+notarized binary from a bogus path. The fix (already applied in
+`ship/platform/mac/codesign_mac.mm`) is an explicit `fs::exists` short-circuit:
+a path that doesn't exist returns false before `spctl` is consulted, which is
+correct in both environments. If you add new spctl/codesign predicates, don't
+rely on `spctl --assess` alone for negative cases — guard with an existence /
+signature pre-check so they hold on Gatekeeper-disabled runners too.
+
 ### "Gradle build failed"
 
 - Run `pulp doctor` to check Android SDK/NDK/Java versions
