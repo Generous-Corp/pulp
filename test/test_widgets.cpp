@@ -114,6 +114,93 @@ TEST_CASE("Knob with format function shows value text", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
+TEST_CASE("Knob silver style draws the rotating indicator notch", "[view][widget][silver]") {
+    // Pins the silver path after the indicator notch was factored into the
+    // shared draw_knob_indicator_notch helper: exactly the two notch strokes
+    // (dark backing + bright pointer), and the pointer sweeps with value.
+    auto outer_x_at = [](float value) {
+        Knob knob;
+        knob.set_bounds({0, 0, 48, 48});
+        knob.set_render_style(WidgetRenderStyle::silver);
+        knob.set_show_label(false);
+        knob.set_value(value);
+        RecordingCanvas canvas;
+        knob.paint(canvas);
+        auto lines = commands_of(canvas, DrawCommand::Type::stroke_line);
+        REQUIRE(lines.size() == 2);          // backing + bright, same endpoints
+        REQUIRE(lines[0].f[2] == Catch::Approx(lines[1].f[2]));
+        return lines.back().f[2];            // outer endpoint x
+    };
+    const float cx = 24.0f;
+    // value 0 → pointer to the lower-left; value 1 → lower-right; 0.5 → up.
+    REQUIRE(outer_x_at(0.0f) < cx);
+    REQUIRE(outer_x_at(1.0f) > cx);
+    REQUIRE(outer_x_at(0.5f) == Catch::Approx(cx).margin(0.01));
+}
+
+TEST_CASE("Knob single-frame sprite overlays a rotating indicator", "[view][widget][sprite]") {
+    // A single-frame strip is a static captured disc; the engine overlays the
+    // native indicator so the imported sprite knob still TURNS with value.
+    auto notch_outer_x = [](float value) {
+        Knob knob;
+        knob.set_bounds({0, 0, 48, 48});
+        knob.set_show_label(false);
+        knob.set_sprite_strip(make_sprite_strip(48, 48, 1, SpriteStrip::Orientation::vertical));
+        knob.set_value(value);
+        RecordingCanvas canvas;
+        knob.paint(canvas);
+        auto lines = commands_of(canvas, DrawCommand::Type::stroke_line);
+        REQUIRE(lines.size() == 2);          // the notch, drawn over the body
+        return lines.back().f[2];
+    };
+    const float cx = 24.0f;
+    REQUIRE(notch_outer_x(0.0f) < cx);
+    REQUIRE(notch_outer_x(1.0f) > cx);
+    REQUIRE(notch_outer_x(0.5f) == Catch::Approx(cx).margin(0.01));
+}
+
+TEST_CASE("Knob multi-frame sprite has no indicator overlay", "[view][widget][sprite]") {
+    // Multi-frame strips encode rotation in the frames themselves, so the
+    // engine must NOT draw a redundant native notch over them.
+    Knob knob;
+    knob.set_bounds({0, 0, 48, 48});
+    knob.set_show_label(false);
+    knob.set_sprite_strip(make_sprite_strip(48, 48 * 16, 16, SpriteStrip::Orientation::vertical));
+    knob.set_value(0.5f);
+    RecordingCanvas canvas;
+    knob.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
+}
+
+TEST_CASE("Knob sprite core-fit sizes the disc to the box", "[view][widget][sprite]") {
+    // With a recovered opaque-core rect, the whole frame scales so the core
+    // fills the layout box (shadow bleed extends beyond) and the core centers.
+    Knob knob;
+    knob.set_bounds({0, 0, 50, 50});
+    knob.set_show_label(false);
+    auto strip = std::make_shared<SpriteStrip>();
+    strip->load_from_file("/tmp/synthetic-knob.png", 200, 300, 1,
+                          SpriteStrip::Orientation::vertical);
+    knob.set_sprite_strip(std::move(strip));
+    // Core: 100×100 opaque disc at (40,20) within the 200×300 PNG.
+    knob.set_sprite_core(40.0f, 20.0f, 100.0f, 100.0f);
+    knob.set_value(0.5f);
+
+    RecordingCanvas canvas;
+    knob.paint(canvas);
+
+    auto images = commands_of(canvas, DrawCommand::Type::draw_image);
+    REQUIRE(images.size() == 1);
+    const auto& img = images.front();
+    // s = min(50/100, 50/100) = 0.5 → whole frame 100×150, core centered.
+    REQUIRE(img.f[0] == Catch::Approx(-20.0f));  // dst_x = -core_x*s + pad_x
+    REQUIRE(img.f[1] == Catch::Approx(-10.0f));  // dst_y = -core_y*s + pad_y
+    REQUIRE(img.f[2] == Catch::Approx(100.0f));  // dst_w = png_w*s
+    REQUIRE(img.f[3] == Catch::Approx(150.0f));  // dst_h = png_h*s
+    // Single frame → indicator overlay present.
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 2);
+}
+
 TEST_CASE("Fader value clamping", "[view][widget]") {
     Fader fader;
     fader.set_value(0.7f);

@@ -392,8 +392,26 @@ public:
     void set_sprite_strip(std::shared_ptr<SpriteStrip> strip) { sprite_strip_ = std::move(strip); }
     const std::shared_ptr<SpriteStrip>& sprite_strip() const { return sprite_strip_; }
 
+    /// Opaque-core rectangle of the sprite body frame, in the FRAME's own
+    /// pixel space (x, y, w, h). When set on a single-frame strip, Knob::paint
+    /// scales the frame so the core fills the layout box (the soft drop-shadow
+    /// bleed extends beyond) and centers the core — then draws the native
+    /// rotating indicator notch over the static disc, sized to that core.
+    /// Mirrors the importer's compute_opaque_core / have_core sizing so an
+    /// imported sprite knob turns at the right size. Zero w/h leaves it unset
+    /// (the legacy natural/2× centering path).
+    void set_sprite_core(float x, float y, float w, float h) {
+        sprite_core_x_ = x; sprite_core_y_ = y;
+        sprite_core_w_ = w; sprite_core_h_ = h;
+    }
+    bool has_sprite_core() const { return sprite_core_w_ > 0.0f && sprite_core_h_ > 0.0f; }
+
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
+    float sprite_core_x_ = 0.0f;
+    float sprite_core_y_ = 0.0f;
+    float sprite_core_w_ = 0.0f;
+    float sprite_core_h_ = 0.0f;
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────

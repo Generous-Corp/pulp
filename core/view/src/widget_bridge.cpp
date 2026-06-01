@@ -1675,6 +1675,24 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setKnobSpriteCore(id, core_x, core_y, core_w, core_h) — opaque-core rect
+    // of the sprite body frame, in the frame's own pixel space. The importer
+    // recovers this from the captured PNG (compute_opaque_core) and emits it
+    // alongside a single-frame setKnobSpriteStrip so the engine scales the
+    // disc to fill the knob box (shadow bleed extends beyond) and the native
+    // indicator notch sweeps within it. No-op on a non-Knob id.
+    engine_.register_function("setKnobSpriteCore", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* k = dynamic_cast<Knob*>(widget(id));
+        if (!k) return choc::value::Value();
+        k->set_sprite_core(static_cast<float>(args.get<double>(1, 0.0)),
+                           static_cast<float>(args.get<double>(2, 0.0)),
+                           static_cast<float>(args.get<double>(3, 0.0)),
+                           static_cast<float>(args.get<double>(4, 0.0)));
+        k->request_repaint();
+        return choc::value::Value();
+    });
+
     // Inline hex-color parser shared by the fader/meter skin setters. Mirrors
     // setAccentColor's inline parser (parseColor is registered later in
     // register_api, so we don't depend on registration order). Accepts

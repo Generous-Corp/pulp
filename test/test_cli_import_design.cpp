@@ -474,3 +474,93 @@ TEST_CASE("pulp import-design --from figma auto-routes a figma-plugin envelope",
     REQUIRE(fs::exists(js_out));
     REQUIRE(read_text(js_out).find("Hello world") != std::string::npos);
 }
+
+// ── Interactive sprite knobs (task #22) ──────────────────────────────────
+// A recognized knob whose body art lives in a CHILD image (the ELYSIUM shape:
+// captured disc + a separate pointer) used to be DEMOTED to a plain image in
+// sprite mode — pixel-faithful but dead (it never turned). The importer now
+// HOISTS the body art onto the knob node so it stays a live Knob skinned with
+// a single-frame strip, and the recovered opaque core is passed through so the
+// engine fits the disc to the box and sweeps the native indicator within it.
+// Synthetic envelope + a synthetic knob PNG (no proprietary export).
+namespace {
+fs::path write_sprite_knob_fixture(const fs::path& tmp) {
+    fs::create_directories(tmp / "assets");
+    const auto png_src = repo_root() / "test" / "fixtures" / "imports" /
+                         "figma-plugin" / "synthetic-knob.png";
+    fs::copy_file(png_src, tmp / "assets" / "synthetic-knob.png",
+                  fs::copy_options::overwrite_existing);
+    auto scene = tmp / "scene.pulp.json";
+    std::ofstream f(scene);
+    // A knob FRAME (explicit audio_widget) whose body art is a child image
+    // carrying an asset_ref + renderBounds — the hoist's target shape.
+    f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "asset_manifest": {"version": 1, "assets": [
+    {"asset_id": "knob_body", "local_path": "assets/synthetic-knob.png",
+     "mime": "image/png"}]},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+    "children": [
+      {"type": "frame", "name": "GainKnob", "audio_widget": "knob",
+       "figma_node_id": "1:2", "style": {"width": 56, "height": 56},
+       "children": [
+         {"type": "image", "name": "body", "figma_node_id": "1:3",
+          "asset_ref": "knob_body",
+          "style": {"width": 56, "height": 56,
+                    "renderBounds": {"w": 64, "h": 96, "dx": -4, "dy": -4}}}
+       ]}
+    ]}
+})";
+    return scene;
+}
+} // namespace
+
+TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interactive",
+          "[cli][import-design][sprite][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-sprite-knob-hoist");
+    auto scene = write_sprite_knob_fixture(tmp);
+    auto js_out = tmp / "ui.js";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", scene.string(), "--output", js_out.string(),
+                       "--no-tokens", "--knob-style", "sprite"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(js_out));
+    const auto js = read_text(js_out);
+
+    // Stays a live Knob skinned with a single-frame body strip — NOT demoted.
+    REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setKnobSpriteStrip('GainKnob") != std::string::npos);
+    REQUIRE(js.find(", 1, 'vertical')") != std::string::npos);
+    // Opaque core recovered end-to-end from the synthetic PNG (disc bbox is
+    // 100×100 within the 128×192 image) → disc fits the box, indicator sweeps.
+    REQUIRE(js.find("setKnobSpriteCore('GainKnob") != std::string::npos);
+    REQUIRE(js.find(", 100, 100)") != std::string::npos);
+    // Sprite mode does NOT apply the silver vector style.
+    REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
+}
+
+TEST_CASE("pulp import-design default (silver) knob keeps the native vector body",
+          "[cli][import-design][sprite][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-sprite-knob-silver");
+    auto scene = write_sprite_knob_fixture(tmp);
+    auto js_out = tmp / "ui.js";
+    // No --knob-style → silver is the figma-plugin default.
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", scene.string(), "--output", js_out.string(),
+                       "--no-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    const auto js = read_text(js_out);
+
+    REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setWidgetStyle('GainKnob") != std::string::npos);  // silver
+    REQUIRE(js.find("setKnobSpriteStrip('GainKnob") == std::string::npos);
+    REQUIRE(js.find("setKnobSpriteCore('GainKnob") == std::string::npos);
+}

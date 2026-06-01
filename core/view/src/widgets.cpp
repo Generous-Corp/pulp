@@ -336,6 +336,36 @@ void Toggle::advance_animations(float dt) {
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
 
+// Rotating indicator notch, shared by the silver vector knob and the
+// single-frame sprite-body knob. Draws a short radial line at the value's
+// angle (value 0..1 → [-135°, +135°], the analog-synth convention), centered
+// at (cx, cy): a dark backing stroke for contrast plus the bright pointer on
+// top. `notch_r` is the extent — the line runs from 35% to 95% of it; the two
+// stroke widths scale from `width_ref`. Factored out of the silver path so an
+// imported sprite knob (a captured static disc + a separate pointer) can still
+// show a turning pointer drawn natively over the disc.
+static void draw_knob_indicator_notch(canvas::Canvas& canvas,
+                                      float cx, float cy,
+                                      float notch_r, float width_ref,
+                                      float value) {
+    const canvas::Color kBacking   = canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.85f);
+    const canvas::Color kIndicator = canvas::Color::rgba(0.97f, 0.97f, 0.97f, 1.0f);
+    float angle = -1.5707963f /* -90° */
+                  + (value - 0.5f) * 4.7123890f /* 270° total range */;
+    float outer_x = cx + notch_r * 0.95f * std::cos(angle);
+    float outer_y = cy + notch_r * 0.95f * std::sin(angle);
+    float inner_x = cx + notch_r * 0.35f * std::cos(angle);
+    float inner_y = cy + notch_r * 0.35f * std::sin(angle);
+    // Subtle dark backing line for contrast on the bright top arc.
+    canvas.set_stroke_color(kBacking);
+    canvas.set_line_width(std::max(2.5f, width_ref * 0.10f));
+    canvas.stroke_line(inner_x, inner_y, outer_x, outer_y);
+    // Bright top line — the actual indicator.
+    canvas.set_stroke_color(kIndicator);
+    canvas.set_line_width(std::max(1.5f, width_ref * 0.07f));
+    canvas.stroke_line(inner_x, inner_y, outer_x, outer_y);
+}
+
 void Knob::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float cx = b.width * 0.5f;
@@ -350,27 +380,54 @@ void Knob::paint(canvas::Canvas& canvas) {
         sprite_strip_->frame_offset(frame, fx, fy);
         float fw = static_cast<float>(sprite_strip_->frame_width());
         float fh = static_cast<float>(sprite_strip_->frame_height());
+        // Radius the rotating-indicator overlay (single-frame strips only)
+        // sweeps within. Defaults to the layout box; the core-fit branch
+        // below tightens it to the disc's actual rendered radius.
+        float notch_r = std::min(b.width, b.height) * 0.5f;
         if (sprite_strip_->source() == SpriteStrip::Source::image_file) {
-            // Render the frame at its NATURAL logical size centered on the
-            // layout box. Figma's PNG export captures the node's
-            // absoluteRenderBounds (bounding box + drop-shadow bleed) at a
-            // known scale (2× via the figma-plugin extractor), so the PNG's
-            // intended logical size is pixel_size / kExportScale. Centering
-            // on the layout box lets the shadow halo naturally extend over
-            // neighboring widgets — matching Figma's own behavior where
-            // overlapping shadows reinforce each other. Aspect-cover into
-            // the layout box would clamp the smaller knobs to the box
-            // height and visibly under-scale them relative to a larger
-            // sibling that shares the same shadow ratio.
-            constexpr float kExportScale = 2.0f;
-            float dst_w = fw / kExportScale;
-            float dst_h = fh / kExportScale;
-            float dst_x = (b.width  - dst_w) * 0.5f;
-            float dst_y = (b.height - dst_h) * 0.5f;
-            canvas.draw_image_from_file_rect(
-                sprite_strip_->path(),
-                static_cast<float>(fx), static_cast<float>(fy), fw, fh,
-                dst_x, dst_y, dst_w, dst_h);
+            if (has_sprite_core()) {
+                // Core-fit: scale the WHOLE frame uniformly so its opaque core
+                // fills the layout box (the soft drop-shadow bleed extends
+                // beyond), then center the core in the box. Mirrors the
+                // importer's have_core image sizing (design_codegen.cpp) so an
+                // imported sprite knob lands at the knob's logical size, not the
+                // PNG's natural shadow-inflated size (which oversized it and
+                // overlapped neighbours). The core dims are in the frame's own
+                // pixel space, so `s` also folds in the export scale.
+                float s = std::min(b.width / sprite_core_w_, b.height / sprite_core_h_);
+                float dst_w = fw * s;
+                float dst_h = fh * s;
+                float core_box_w = sprite_core_w_ * s;
+                float core_box_h = sprite_core_h_ * s;
+                float pad_x = (b.width  - core_box_w) * 0.5f;
+                float pad_y = (b.height - core_box_h) * 0.5f;
+                float dst_x = -sprite_core_x_ * s + pad_x;
+                float dst_y = -sprite_core_y_ * s + pad_y;
+                notch_r = std::min(core_box_w, core_box_h) * 0.5f;
+                canvas.draw_image_from_file_rect(
+                    sprite_strip_->path(),
+                    static_cast<float>(fx), static_cast<float>(fy), fw, fh,
+                    dst_x, dst_y, dst_w, dst_h);
+            } else {
+                // Legacy fallback (no recovered core): render the frame at its
+                // NATURAL logical size centered on the layout box. Figma's PNG
+                // export captures the node's absoluteRenderBounds (bounding box
+                // + drop-shadow bleed) at a known scale (2× via the
+                // figma-plugin extractor), so the PNG's intended logical size
+                // is pixel_size / kExportScale. Centering on the layout box
+                // lets the shadow halo naturally extend over neighboring
+                // widgets — matching Figma's own behavior where overlapping
+                // shadows reinforce each other.
+                constexpr float kExportScale = 2.0f;
+                float dst_w = fw / kExportScale;
+                float dst_h = fh / kExportScale;
+                float dst_x = (b.width  - dst_w) * 0.5f;
+                float dst_y = (b.height - dst_h) * 0.5f;
+                canvas.draw_image_from_file_rect(
+                    sprite_strip_->path(),
+                    static_cast<float>(fx), static_cast<float>(fy), fw, fh,
+                    dst_x, dst_y, dst_w, dst_h);
+            }
         } else {
             // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
             // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded
@@ -393,6 +450,14 @@ void Knob::paint(canvas::Canvas& canvas) {
                                              static_cast<float>(sprite_strip_->total_height()));
                 canvas.restore();
             }
+        }
+        // A single-frame strip is a static body (the captured disc): overlay
+        // the native rotating indicator notch so the imported sprite knob
+        // still TURNS with value. Multi-frame strips encode the rotation in
+        // the frames themselves (frame_for_value picks the angle), so they
+        // get no overlay.
+        if (sprite_strip_->frame_count() == 1) {
+            draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, value_);
         }
         // Fall through to draw labels on top
     }
@@ -454,8 +519,6 @@ void Knob::paint(canvas::Canvas& canvas) {
         const canvas::Color kSilverBodyMid          = canvas::Color::rgba(0.62f, 0.65f, 0.70f, 1.0f);
         const canvas::Color kSilverBodyDim          = canvas::Color::rgba(0.40f, 0.43f, 0.49f, 1.0f);
         const canvas::Color kSilverInnerBevel       = canvas::Color::rgba(0.18f, 0.20f, 0.23f, 0.55f);
-        const canvas::Color kSilverIndicatorBacking = canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.85f);
-        const canvas::Color kSilverIndicator        = canvas::Color::rgba(0.97f, 0.97f, 0.97f, 1.0f);
 
         float full_r = std::min(cx, cy) - 2.0f;
         float body_r = full_r - 1.5f;         // chrome body radius
@@ -511,21 +574,10 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.stroke_arc(cx, cy, inner_r * 0.94f,
                           0.785398f /* 45° */, 2.356194f /* 135° */);
 
-        // 5. Indicator notch
-        float angle = -1.5707963f /* -90° */
-                      + (value_ - 0.5f) * 4.7123890f /* 270° total range */;
-        float ind_outer_x = cx + inner_r * 0.95f * std::cos(angle);
-        float ind_outer_y = cy + inner_r * 0.95f * std::sin(angle);
-        float ind_inner_x = cx + inner_r * 0.35f * std::cos(angle);
-        float ind_inner_y = cy + inner_r * 0.35f * std::sin(angle);
-        // Subtle dark backing line for contrast on the bright top arc
-        canvas.set_stroke_color(kSilverIndicatorBacking);
-        canvas.set_line_width(std::max(2.5f, body_r * 0.10f));
-        canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
-        // Bright top line — the actual indicator
-        canvas.set_stroke_color(kSilverIndicator);
-        canvas.set_line_width(std::max(1.5f, body_r * 0.07f));
-        canvas.stroke_line(ind_inner_x, ind_inner_y, ind_outer_x, ind_outer_y);
+        // 5. Indicator notch — the rotating pointer (shared with the
+        //    single-frame sprite-body path). Extent rides the inner radius;
+        //    stroke widths scale from the chrome body radius.
+        draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, value_);
     } else {
         // ── Default C++ paint path ──────────────────────────────────────
 

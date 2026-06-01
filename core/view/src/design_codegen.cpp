@@ -716,6 +716,25 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setKnobSpriteStrip('" << id << "', '"
                    << js_single_quote_escape(skin_it->second) << "', "
                    << frames << ", 'vertical');\n";
+                // Core-fit: when the importer recovered the body art's opaque
+                // core (single-frame sprite bodies only), pass it so the engine
+                // scales the disc to fill the knob box (shadow bleed extends
+                // beyond) and the native rotating indicator sweeps within it.
+                // Same have_core data the image branch uses — no hardcoding.
+                if (frames == 1) {
+                    auto kattr_f = [&](const char* k) -> float {
+                        auto a = node.attributes.find(k);
+                        return a != node.attributes.end()
+                                   ? std::strtof(a->second.c_str(), nullptr) : 0.0f;
+                    };
+                    const float cw = kattr_f("art_core_w");
+                    const float ch = kattr_f("art_core_h");
+                    if (cw > 0.0f && ch > 0.0f) {
+                        ss << ind << "setKnobSpriteCore('" << id << "', "
+                           << kattr_f("art_core_x") << ", " << kattr_f("art_core_y")
+                           << ", " << cw << ", " << ch << ");\n";
+                    }
+                }
             }
             emit_style(id);
             // Per-knob stroke color from child ellipse (used by minimal paint path)

@@ -2079,6 +2079,81 @@ TEST_CASE("generate_pulp_js bridge_native_js mode produces Pulp API", "[view][im
     REQUIRE(js.find("void 0;") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_js sprite knob emits an interactive single-frame strip + core-fit",
+          "[view][import][sprite]") {
+    // Interactive sprite knobs (task #22): in sprite mode a recognized knob
+    // carrying captured body art stays a native Knob skinned with a
+    // single-frame strip (createKnob + setKnobSpriteStrip), and the recovered
+    // opaque core is passed through (setKnobSpriteCore) so the engine fits the
+    // disc to the box and sweeps the native indicator within it — it is NOT
+    // demoted to a bare image, and silver style is NOT applied.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Controls";
+    ir.root.style.width = 300.0f;
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "GainKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.style.width = 64.0f;
+    knob.style.height = 64.0f;
+    // Post-hoist + asset-resolution state stamped by the CLI importer.
+    knob.attributes["asset_path"] = "/tmp/synthetic-knob-body.png";
+    knob.attributes["png_natural_w"] = "128";
+    knob.attributes["png_natural_h"] = "192";
+    knob.attributes["art_core_x"] = "14";
+    knob.attributes["art_core_y"] = "10";
+    knob.attributes["art_core_w"] = "100";
+    knob.attributes["art_core_h"] = "100";
+    knob.attributes["sprite_strip_frame_count"] = "1";
+    ir.root.children.push_back(knob);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.use_silver_knobs = false;  // --knob-style sprite
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setKnobSpriteStrip('GainKnob") != std::string::npos);
+    REQUIRE(js.find(", 1, 'vertical')") != std::string::npos);
+    REQUIRE(js.find("setKnobSpriteCore('GainKnob") != std::string::npos);
+    REQUIRE(js.find(", 100, 100)") != std::string::npos);   // core w, h
+    REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js silver knob still wins over a sprite skin", "[view][import][sprite]") {
+    // The default (silver) mode keeps the native-vector body even when body
+    // art is present: silver style applied, no sprite strip emitted.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Controls";
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "GainKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 64.0f;
+    knob.style.height = 64.0f;
+    knob.attributes["asset_path"] = "/tmp/synthetic-knob-body.png";
+    knob.attributes["art_core_w"] = "100";
+    knob.attributes["art_core_h"] = "100";
+    ir.root.children.push_back(knob);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.use_silver_knobs = true;  // default
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setWidgetStyle('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setKnobSpriteStrip('GainKnob") == std::string::npos);
+    REQUIRE(js.find("setKnobSpriteCore('GainKnob") == std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js bridge_native_js mode handles audio widgets with Yoga constraints", "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;

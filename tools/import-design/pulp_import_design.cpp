@@ -1959,29 +1959,42 @@ int main(int argc, char* argv[]) {
         opts.shortcuts = detected_shortcuts;
     }
 
-    // Sprite knob style = pixel-exact Figma reproduction. When a knob frame
-    // ships a captured graphic child (an image with an asset_ref — e.g. a
-    // silver-knob body group), the most faithful sprite rendering is to draw
-    // that PNG directly at its full render_bounds extent — exactly what the
-    // image codegen path does — rather than collapse the frame into a native
-    // knob and skin it (which fits the art to the knob box and loses the
-    // bleed/3-D chrome). So in sprite mode we DEMOTE such recognized knobs
-    // back to plain containers; their art child then renders as a normal
-    // bleed-sized image. Silver mode keeps the native-vector widget. This is
-    // the swap the design-import contract promises: sprite = captured art,
-    // silver = native vector. Generalizable: keyed on widget kind + an
+    // Sprite knob style = pixel-exact Figma reproduction that still TURNS.
+    // When a recognized knob ships a captured graphic child (an image with an
+    // asset_ref — e.g. a silver-knob body group), HOIST that body art onto the
+    // knob node so codegen emits a single-frame sprite skin (createKnob +
+    // setKnobSpriteStrip) instead of a native vector body. The engine then
+    // draws the captured disc as the static body and overlays the native
+    // rotating indicator notch — so the imported sprite knob stays
+    // interactive (the old path DEMOTED the knob to a plain image, which was
+    // pixel-faithful but dead: it never rotated). The hoisted render_bounds
+    // triggers the importer's opaque-core recovery below, so the disc fits the
+    // knob box at the right size (shadow bleed extends beyond). Silver mode
+    // keeps the native-vector widget. Generalizable: keyed on widget kind + an
     // asset-bearing image child, no layer-name match.
     if (!use_silver_knobs) {
-        std::function<void(IRNode&)> demote = [&](IRNode& n) {
+        std::function<void(IRNode&)> hoist = [&](IRNode& n) {
             if (n.audio_widget == pulp::view::AudioWidgetType::knob) {
-                bool has_art = false;
-                for (auto& c : n.children)
-                    if (c.type == "image" && c.attributes.count("asset_ref")) { has_art = true; break; }
-                if (has_art) n.audio_widget = pulp::view::AudioWidgetType::none;
+                for (auto it = n.children.begin(); it != n.children.end(); ++it) {
+                    if (it->type == "image" && it->attributes.count("asset_ref")) {
+                        n.attributes["asset_ref"] = it->attributes.at("asset_ref");
+                        // Carry the child's bleed extent up so opaque-core
+                        // recovery fires for the knob node (the knob frame
+                        // itself usually has no render_bounds).
+                        if (it->style.render_bounds && !n.style.render_bounds)
+                            n.style.render_bounds = it->style.render_bounds;
+                        // Single static body; a designer-supplied multi-frame
+                        // strip would set its own frame count (Approach A).
+                        if (!n.attributes.count("sprite_strip_frame_count"))
+                            n.attributes["sprite_strip_frame_count"] = "1";
+                        n.children.erase(it);  // its art now renders via the knob
+                        break;
+                    }
+                }
             }
-            for (auto& c : n.children) demote(c);
+            for (auto& c : n.children) hoist(c);
         };
-        demote(ir.root);
+        hoist(ir.root);
     }
 
     // Resolve asset_ref → absolute file path. For envelopes that include an
