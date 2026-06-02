@@ -4578,6 +4578,85 @@ TEST_CASE("synthesis leaves filled and container primitives untouched",
     CHECK(js.find("Caption") != std::string::npos);
 }
 
+TEST_CASE("parse_design_ir_json normalizes Figma resize constraints",
+          "[view][import][constraints]") {
+    // Node-level constraints, the nested figma{} block variant, and the Figma
+    // MIN/MAX/CENTER/STRETCH/SCALE spelling all normalize to the IR token set.
+    const auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "layout": { "direction": "column" },
+        "children": [
+            { "type": "frame", "name": "A",
+              "constraints": { "horizontal": "CENTER", "vertical": "MAX" } },
+            { "type": "frame", "name": "B",
+              "constraints": { "horizontal": "SCALE", "vertical": "STRETCH" } },
+            { "type": "frame", "name": "C",
+              "figma": { "constraints": { "horizontal": "MIN", "vertical": "MIN" } } }
+        ]
+    })json");
+    REQUIRE(ir.root.children.size() == 3);
+    CHECK(ir.root.children[0].layout.h_constraint == "center");
+    CHECK(ir.root.children[0].layout.v_constraint == "bottom");
+    CHECK(ir.root.children[1].layout.h_constraint == "scale");
+    CHECK(ir.root.children[1].layout.v_constraint == "stretch");
+    CHECK(ir.root.children[2].layout.h_constraint == "left");
+    CHECK(ir.root.children[2].layout.v_constraint == "top");
+}
+
+TEST_CASE("codegen lowers resize constraints to flex within the parent",
+          "[view][import][codegen][constraints]") {
+    auto emit = [](const std::string& h, const std::string& v) {
+        DesignIR ir;
+        ir.root.type = "frame"; ir.root.name = "Root";
+        ir.root.style.width = 400.0f; ir.root.style.height = 400.0f;
+        IRNode child; child.type = "frame"; child.name = "Child";
+        child.style.width = 50.0f; child.style.height = 50.0f;
+        if (!h.empty()) child.layout.h_constraint = h;
+        if (!v.empty()) child.layout.v_constraint = v;
+        ir.root.children.push_back(child);
+        CodeGenOptions opts;  // bridge_native_js
+        return generate_pulp_js(ir, opts);
+    };
+    // center → auto margins on both sides of each axis (id suffix-tolerant).
+    {
+        auto js = emit("center", "center");
+        INFO(js);
+        CHECK(js.find("'margin_left', 'auto')")   != std::string::npos);
+        CHECK(js.find("'margin_right', 'auto')")  != std::string::npos);
+        CHECK(js.find("'margin_top', 'auto')")    != std::string::npos);
+        CHECK(js.find("'margin_bottom', 'auto')") != std::string::npos);
+    }
+    // right/bottom → leading auto margin only (push to the trailing edge).
+    {
+        auto js = emit("right", "bottom");
+        INFO(js);
+        CHECK(js.find("'margin_left', 'auto')") != std::string::npos);
+        CHECK(js.find("'margin_top', 'auto')")  != std::string::npos);
+        CHECK(js.find("margin_right")  == std::string::npos);
+        CHECK(js.find("margin_bottom") == std::string::npos);
+    }
+    // scale → flex-grow:1.
+    {
+        auto js = emit("scale", "");
+        INFO(js);
+        CHECK(js.find("'flex_grow', 1)") != std::string::npos);
+    }
+    // stretch (pin both edges) → align-self:stretch.
+    {
+        auto js = emit("stretch", "");
+        INFO(js);
+        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
+    }
+    // left/top → flex default: nothing emitted.
+    {
+        auto js = emit("left", "top");
+        INFO(js);
+        CHECK(js.find("margin_left") == std::string::npos);
+        CHECK(js.find("margin_top")  == std::string::npos);
+        CHECK(js.find("align_self")  == std::string::npos);
+    }
+}
+
 TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",
           "[view][import][codegen][blend]") {
     // A node's normalized mix_blend_mode lowers to setMixBlendMode (native

@@ -630,6 +630,31 @@ static void extract_widget_shape_dims(IRNode& node) {
 
 }
 
+// Figma resize-constraint normalization. Figma's API spells these MIN / MAX /
+// CENTER / STRETCH / SCALE; we also accept already-normalized tokens and the
+// CSS-ish "left_right"/"top_bottom" spellings other tools emit. Returns nullopt
+// for an unrecognized value so it is simply left unconstrained.
+static std::optional<std::string> normalize_h_constraint(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (s == "min" || s == "left")  return std::string("left");
+    if (s == "max" || s == "right") return std::string("right");
+    if (s == "center")              return std::string("center");
+    if (s == "scale")               return std::string("scale");
+    if (s == "stretch" || s == "left_right" || s == "leftright")
+        return std::string("stretch");
+    return std::nullopt;
+}
+static std::optional<std::string> normalize_v_constraint(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (s == "min" || s == "top")    return std::string("top");
+    if (s == "max" || s == "bottom") return std::string("bottom");
+    if (s == "center")               return std::string("center");
+    if (s == "scale")                return std::string("scale");
+    if (s == "stretch" || s == "top_bottom" || s == "topbottom")
+        return std::string("stretch");
+    return std::nullopt;
+}
+
 IRNode parse_ir_node(const choc::value::ValueView& obj) {
     IRNode node;
     node.type = get_string(obj, "type", "frame");
@@ -711,6 +736,29 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);
+    // Resize constraints. Figma carries them at node level as
+    // `constraints: {horizontal, vertical}`; the figma-plugin export nests the
+    // same under a `figma` block; CSS-ish sources may put them inside `layout`.
+    // Read all three, first non-empty wins. Source-agnostic: keyed on the
+    // normalized token, never a layer name.
+    auto read_constraints = [&](const choc::value::ValueView& c) {
+        if (!c.isObject()) return;
+        if (!node.layout.h_constraint && c.hasObjectMember("horizontal") &&
+            c["horizontal"].isString())
+            node.layout.h_constraint =
+                normalize_h_constraint(std::string(c["horizontal"].toString()));
+        if (!node.layout.v_constraint && c.hasObjectMember("vertical") &&
+            c["vertical"].isString())
+            node.layout.v_constraint =
+                normalize_v_constraint(std::string(c["vertical"].toString()));
+    };
+    if (obj.hasObjectMember("constraints")) read_constraints(obj["constraints"]);
+    if (obj.hasObjectMember("figma") && obj["figma"].isObject() &&
+        obj["figma"].hasObjectMember("constraints"))
+        read_constraints(obj["figma"]["constraints"]);
+    if (obj.hasObjectMember("layout") && obj["layout"].isObject() &&
+        obj["layout"].hasObjectMember("constraints"))
+        read_constraints(obj["layout"]["constraints"]);
     if (obj.hasObjectMember("attributes") && obj["attributes"].isObject()) {
         auto attrs = obj["attributes"];
         for (uint32_t i = 0; i < attrs.size(); ++i) {
