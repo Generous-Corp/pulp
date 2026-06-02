@@ -161,10 +161,23 @@ def extract_text_runs(n):
     if not chars or not isinstance(overrides, list) or not isinstance(table, dict):
         return []
 
-    # char-index -> UTF-8 byte offset (prefix-length lookup; len(overrides) may
-    # exceed len(chars), so clamp).
+    # UTF-16 code-unit index -> UTF-8 byte offset. Figma's
+    # characterStyleOverrides is indexed by UTF-16 code units (a BMP char is 1
+    # unit, an astral char like an emoji is a surrogate pair = 2 units), while
+    # the IR contract is UTF-8 byte offsets into `content`. Build the map up
+    # front so a run beginning after an emoji lands on the right byte (a plain
+    # `chars[:i]` code-point slice would be off by one byte-position per astral
+    # char before the run). u16_to_byte[k] = byte offset at UTF-16 unit k.
+    u16_to_byte = []
+    _byte = 0
+    for ch in chars:
+        units = 2 if ord(ch) > 0xFFFF else 1
+        for _ in range(units):
+            u16_to_byte.append(_byte)
+        _byte += len(ch.encode("utf-8"))
+    u16_to_byte.append(_byte)  # past-the-end sentinel
     def byte_off(ci):
-        return len(chars[:min(ci, len(chars))].encode("utf-8"))
+        return u16_to_byte[ci] if 0 <= ci < len(u16_to_byte) else _byte
 
     runs = []
     i, L = 0, len(overrides)
