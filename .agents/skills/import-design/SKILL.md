@@ -198,6 +198,13 @@ mind when touching this:
 - **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
   A generic/visual frame that happens to carry a `binding` attribute gets NO
   synthesized binding — it stays a generic node. Don't loosen this gate.
+- **`detect_audio_widget` matches whole WORD TOKENS, not substrings.** It
+  tokenizes the layer name on non-alnum + camelCase (acronym-aware, so
+  `VUMeter`→{vu,meter}) + letter↔digit, then matches whole tokens (simple
+  plural tolerated: `Knobs`→knob). This is deliberate: the old `find()` substring
+  match promoted `Dialog`/`Radial`→knob and `Parameter`/`Diameter`→meter (gap
+  survey). Don't revert to substring matching; add new keywords as tokens + a
+  false-positive regression case in `test_design_import.cpp`.
 - **Module/param split.** Split on the FIRST `.`: `"filter.cutoff_hz"` →
   `pulpBindingModule="filter"`, `pulpBindingParam="cutoff_hz"`,
   `pulpParamKey="filter.cutoff_hz"`. No dot → empty module, whole string is the

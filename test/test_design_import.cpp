@@ -1636,6 +1636,27 @@ TEST_CASE("detect_audio_widget identifies widget types from names", "[view][impo
     REQUIRE(detect_audio_widget("save_button") == AudioWidgetType::none);
 }
 
+TEST_CASE("detect_audio_widget matches whole words not substrings", "[view][import]") {
+    // Regression (gap survey): substring matching promoted any name *containing*
+    // a keyword. These embed a keyword as a substring but are NOT audio widgets —
+    // word-boundary tokenization must return none.
+    REQUIRE(detect_audio_widget("Dialog") == AudioWidgetType::none);      // "dial"og
+    REQUIRE(detect_audio_widget("Radial") == AudioWidgetType::none);      // ra"dial"
+    REQUIRE(detect_audio_widget("Parameter") == AudioWidgetType::none);   // para"meter"
+    REQUIRE(detect_audio_widget("Diameter") == AudioWidgetType::none);    // dia"meter"
+    REQUIRE(detect_audio_widget("sublevel") == AudioWidgetType::none);    // sub"level"
+    REQUIRE(detect_audio_widget("Knobby") == AudioWidgetType::none);      // "knob"by
+
+    // True positives still recognized: separators, acronym camelCase, plurals.
+    REQUIRE(detect_audio_widget("VUMeter") == AudioWidgetType::meter);    // acronym→Word: {vu,meter}
+    REQUIRE(detect_audio_widget("xy pad") == AudioWidgetType::xy_pad);    // space-separated
+    REQUIRE(detect_audio_widget("XYPad") == AudioWidgetType::xy_pad);     // {xy,pad}
+    REQUIRE(detect_audio_widget("Knob 01") == AudioWidgetType::knob);     // letter↔digit split keeps "knob"
+    REQUIRE(detect_audio_widget("main-fader") == AudioWidgetType::fader);
+    REQUIRE(detect_audio_widget("Knobs") == AudioWidgetType::knob);       // simple plural still matches
+    REQUIRE(detect_audio_widget("Faders") == AudioWidgetType::fader);
+}
+
 // ── Figma JSON parsing ──────────────────────────────────────────────────
 
 TEST_CASE("parse_figma_json parses IR format", "[view][import]") {

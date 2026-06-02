@@ -467,23 +467,57 @@ static std::string to_lower(const std::string& s) {
     return result;
 }
 
+// Split a layer name into lowercase WORD tokens. Boundaries: any non-alnum
+// char, camelCase (lower→Upper), acronym→Word (Upper→Upper-then-lower), and
+// letter↔digit. So "GainKnob"→{gain,knob}, "VUMeter"→{vu,meter},
+// "FilterXYPad"→{filter,xy,pad}, "knob_01"→{knob,01} — but "Dialog"→{dialog}
+// and "Parameter"→{parameter} (NOT split into dial/meter). Word-boundary
+// matching is what kills the substring false-positives below.
+static std::vector<std::string> tokenize_name(const std::string& name) {
+    std::vector<std::string> tokens;
+    std::string cur;
+    auto flush = [&] { if (!cur.empty()) { tokens.push_back(cur); cur.clear(); } };
+    const std::size_t n = name.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if (!std::isalnum(c)) { flush(); continue; }
+        if (!cur.empty()) {
+            const unsigned char p = static_cast<unsigned char>(name[i - 1]);
+            bool boundary = false;
+            if (std::islower(p) && std::isupper(c)) boundary = true;            // aB → a|B
+            else if (std::isupper(p) && std::isupper(c) && i + 1 < n
+                     && std::islower(static_cast<unsigned char>(name[i + 1])))
+                boundary = true;                                               // ABc → A|Bc (acronym→Word)
+            else if ((std::isdigit(p) != 0) != (std::isdigit(c) != 0))
+                boundary = true;                                               // a1 / 1a
+            if (boundary) flush();
+        }
+        cur += static_cast<char>(std::tolower(c));
+    }
+    flush();
+    return tokens;
+}
+
+// Recognize audio widgets by WHOLE-WORD name tokens, not substrings. The old
+// substring match promoted any name *containing* "dial"/"meter"/… — so
+// "Dialog"/"Radial"/"Medallion" became knobs and "Parameter"/"diameter" became
+// meters. Token matching (pulp design-import gap survey) fixes those while
+// keeping "xy_pad"/"xypad" and acronym names like "VUMeter".
 AudioWidgetType detect_audio_widget(const std::string& name) {
-    auto lower = to_lower(name);
-    if (lower.find("knob") != std::string::npos)      return AudioWidgetType::knob;
-    if (lower.find("dial") != std::string::npos)       return AudioWidgetType::knob;
-    if (lower.find("fader") != std::string::npos)      return AudioWidgetType::fader;
-    if (lower.find("slider") != std::string::npos)     return AudioWidgetType::fader;
-    if (lower.find("meter") != std::string::npos)      return AudioWidgetType::meter;
-    if (lower.find("level") != std::string::npos)      return AudioWidgetType::meter;
-    if (lower.find("vu") != std::string::npos)         return AudioWidgetType::meter;
-    if (lower.find("xypad") != std::string::npos)      return AudioWidgetType::xy_pad;
-    if (lower.find("xy_pad") != std::string::npos)     return AudioWidgetType::xy_pad;
-    if (lower.find("xy pad") != std::string::npos)     return AudioWidgetType::xy_pad;
-    if (lower.find("waveform") != std::string::npos)   return AudioWidgetType::waveform;
-    if (lower.find("oscilloscope") != std::string::npos) return AudioWidgetType::waveform;
-    if (lower.find("spectrum") != std::string::npos)   return AudioWidgetType::spectrum;
-    if (lower.find("analyzer") != std::string::npos)   return AudioWidgetType::spectrum;
-    if (lower.find("analyser") != std::string::npos)   return AudioWidgetType::spectrum;
+    const auto toks = tokenize_name(name);
+    const std::unordered_set<std::string> t(toks.begin(), toks.end());
+    // Whole-token match, tolerant of a simple English plural ("Knobs"/"Faders"
+    // → knob/fader) which the old substring match also caught — but never a
+    // substring ("Dialog"/"Parameter" stay unmatched).
+    auto has = [&](const std::string& w) {
+        return t.find(w) != t.end() || t.find(w + "s") != t.end();
+    };
+    if (has("knob") || has("dial"))                            return AudioWidgetType::knob;
+    if (has("fader") || has("slider"))                         return AudioWidgetType::fader;
+    if (has("meter") || has("level") || has("vu"))             return AudioWidgetType::meter;
+    if (has("xypad") || (has("xy") && has("pad")))             return AudioWidgetType::xy_pad;
+    if (has("waveform") || has("oscilloscope"))                return AudioWidgetType::waveform;
+    if (has("spectrum") || has("analyzer") || has("analyser")) return AudioWidgetType::spectrum;
     return AudioWidgetType::none;
 }
 
