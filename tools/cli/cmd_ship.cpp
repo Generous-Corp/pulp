@@ -230,6 +230,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         fs::create_directories(artifacts);
 
         std::string version, target, keystore_path, key_alias, store_pass, key_pass, abi_arg;
+        std::string installer_identity;  // Developer ID Installer (macOS .pkg signing)
         bool per_user = false, apk_only = false, aab_only = false;
         // Item 7.5: per-artifact packaging on macOS. When the user
         // passes neither flag we use the historical default — `.pkg`
@@ -257,6 +258,8 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], key_pass)) return 2;
             } else if (args[i] == "--abi") {
                 if (!take_ship_value(args, i, sub, args[i], abi_arg)) return 2;
+            } else if (args[i] == "--installer-identity") {
+                if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
             }
             else if (args[i] == "--apk-only") apk_only = true;
             else if (args[i] == "--aab-only") aab_only = true;
@@ -390,6 +393,15 @@ int cmd_ship(const std::vector<std::string>& args) {
         // distribution pattern).
         int pkg_count = 0, dmg_count = 0;
 
+        // Resolve the Developer ID Installer identity for flat-package
+        // signing. Apple's installer-distribution flow requires the `.pkg`
+        // itself to be signed (separate from the Developer ID *Application*
+        // identity that signs the bundles), or notarization rejects it. When
+        // none is configured we build an unsigned `.pkg` as before; `release`
+        // then declines to notarize it rather than submitting garbage.
+        installer_identity = ship_config(installer_identity, "PULP_INSTALLER_IDENTITY",
+                                         "signing.apple", "installer_identity");
+
 #ifdef __APPLE__
         // Standalone `.app` bundles → `.dmg` by default (or when --dmg).
         auto standalone_dir = build_dir / "Standalone";
@@ -450,12 +462,15 @@ int cmd_ship(const std::vector<std::string>& args) {
                 else install_loc = pulp::runtime::get_env("HOME").value_or("~")
                                  + "/Library/Audio/Plug-Ins/Components/";
 
-                std::cout << "Packaging " << name << " (" << dir_name << " → .pkg)...\n";
+                std::cout << "Packaging " << name << " (" << dir_name << " → .pkg"
+                          << (installer_identity.empty() ? "" : ", signed") << ")...\n";
                 std::string cmd = "pkgbuild --component \"" + entry.path().string() + "\""
                     + " --identifier \"com.pulp." + name + "." + format_lower + "\""
                     + " --version \"" + version + "\""
-                    + " --install-location \"" + install_loc + "\""
-                    + " \"" + pkg_path.string() + "\" 2>/dev/null";
+                    + " --install-location \"" + install_loc + "\"";
+                if (!installer_identity.empty())
+                    cmd += " --sign \"" + installer_identity + "\"";
+                cmd += " \"" + pkg_path.string() + "\" 2>/dev/null";
                 if (run(cmd) == 0) ++pkg_count;
                 else std::cerr << "  FAILED\n";
             }
@@ -588,6 +603,22 @@ int cmd_ship(const std::vector<std::string>& args) {
         // `share` one-shot points at.
         std::vector<std::string> bundles;
         if (!explicit_paths.empty()) {
+            // notarytool only accepts upload containers — UDIF disk images
+            // (.dmg), signed flat packages (.pkg), and .zip archives. A raw
+            // .app bundle cannot be submitted directly, so reject it with a
+            // pointer to `share` (which wraps it in a DMG) rather than letting
+            // notarytool fail mid-submission.
+            for (const auto& p : explicit_paths) {
+                if (fs::path(p).extension() == ".app") {
+                    std::cerr << "pulp ship notarize: notarytool cannot submit a raw"
+                                 " .app bundle:\n  " << p << "\n"
+                                 "  Use `pulp ship share " << p << "` (wraps it in a"
+                                 " DMG, signs, notarizes, staples),\n"
+                                 "  or zip it first:"
+                                 " ditto -c -k --keepParent \"" << p << "\" out.zip\n";
+                    return 2;
+                }
+            }
             bundles = explicit_paths;
         } else {
             for (auto dir_name : {"VST3", "CLAP", "AU"}) {
@@ -762,7 +793,7 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub == "release") {
         std::string target = "macos";
         std::string identity, apple_id, team_id, password, version;
-        std::string api_key, api_key_id, api_issuer;
+        std::string api_key, api_key_id, api_issuer, installer_identity;
         bool want_pkg = false, want_dmg = false;
         bool skip_sign = false, skip_package = false, skip_notarize = false;
 
@@ -771,6 +802,8 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], target)) return 2;
             } else if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--installer-identity") {
+                if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
             } else if (args[i] == "--apple-id") {
                 if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
             } else if (args[i] == "--team-id") {
@@ -829,6 +862,27 @@ int cmd_ship(const std::vector<std::string>& args) {
                              "before package/notarize.\n";
                 return sign_rc;
             }
+            // The bundle pass above only walks VST3/CLAP/AU. Standalone
+            // `.app` bundles (which the package stage wraps into a DMG) must
+            // be signed too, or notarizing the resulting disk image fails on
+            // an unsigned app. Sign each one explicitly via `sign --path`.
+            auto standalone = build_dir / "Standalone";
+            if (fs::exists(standalone)) {
+                for (auto& e : fs::directory_iterator(standalone)) {
+                    if (e.path().extension() != ".app") continue;
+                    std::vector<std::string> app_args =
+                        {"sign", "--path", e.path().string()};
+                    if (!identity.empty()) {
+                        app_args.push_back("--identity");
+                        app_args.push_back(identity);
+                    }
+                    if (cmd_ship(app_args) != 0) {
+                        std::cerr << "pulp ship release: failed to sign standalone app "
+                                  << e.path().filename().string() << "\n";
+                        return 1;
+                    }
+                }
+            }
         } else {
             std::cout << "── Stage 1/4: sign (SKIPPED) ──────────────────────\n";
         }
@@ -854,6 +908,12 @@ int cmd_ship(const std::vector<std::string>& args) {
             }
             if (want_pkg) pkg_args.push_back("--pkg");
             if (want_dmg) pkg_args.push_back("--dmg");
+            // Plumb the Developer ID Installer identity so `package` signs the
+            // flat package it builds — an unsigned .pkg cannot be notarized.
+            if (!installer_identity.empty()) {
+                pkg_args.push_back("--installer-identity");
+                pkg_args.push_back(installer_identity);
+            }
             int pkg_rc = cmd_ship(pkg_args);
             if (pkg_rc != 0) {
                 std::cerr << "pulp ship release: package stage failed; "
@@ -869,6 +929,23 @@ int cmd_ship(const std::vector<std::string>& args) {
                     auto mtime = fs::last_write_time(entry.path(), ec);
                     if (!ec && mtime >= pkg_t0)
                         release_artifacts.push_back(entry.path().string());
+                }
+            }
+            // `package` builds the DMG but does not sign the disk image
+            // itself. Sign each freshly-built .dmg (unless signing was
+            // skipped) so it passes the signature guard below and Gatekeeper
+            // accepts the downloaded image.
+            if (!skip_sign) {
+                for (auto& a : release_artifacts) {
+                    if (fs::path(a).extension() != ".dmg") continue;
+                    std::vector<std::string> dmg_args = {"sign", "--path", a};
+                    if (!identity.empty()) {
+                        dmg_args.push_back("--identity");
+                        dmg_args.push_back(identity);
+                    }
+                    if (cmd_ship(dmg_args) != 0)
+                        std::cerr << "pulp ship release: warning — failed to sign "
+                                  << fs::path(a).filename().string() << "\n";
                 }
             }
         } else {
@@ -898,16 +975,40 @@ int cmd_ship(const std::vector<std::string>& args) {
         if (!apple_id.empty()) { nz_args.push_back("--apple-id"); nz_args.push_back(apple_id); }
         if (!team_id.empty())  { nz_args.push_back("--team-id");  nz_args.push_back(team_id); }
         if (!password.empty()) { nz_args.push_back("--password"); nz_args.push_back(password); }
-        // Notarize + staple the distributable artifact(s) when packaging
-        // produced any. Falling back to the notarize handler's own bundle
-        // scan only when packaging was skipped keeps `--skip-package`
-        // working for plugin-only flows.
-        if (!release_artifacts.empty()) {
-            for (auto& a : release_artifacts) {
-                nz_args.push_back("--path");
-                nz_args.push_back(a);
-                std::cout << "  artifact: " << fs::path(a).filename().string() << "\n";
+        // Only submit artifacts that are actually signed. notarytool rejects
+        // an unsigned .pkg/.dmg, and an unsigned installer would never pass
+        // Gatekeeper, so verify each and skip (loudly) the unsigned ones
+        // instead of submitting garbage. `.pkg` needs a Developer ID
+        // Installer signature; `.dmg` a Developer ID Application one.
+        std::vector<std::string> signed_artifacts;
+        for (auto& a : release_artifacts) {
+            auto ext = fs::path(a).extension().string();
+            std::string verify = (ext == ".pkg")
+                ? "pkgutil --check-signature \"" + a + "\" >/dev/null 2>&1"
+                : "codesign --verify \"" + a + "\" >/dev/null 2>&1";
+            if (run(verify) == 0) {
+                signed_artifacts.push_back(a);
+            } else {
+                std::cerr << "  skipping unsigned artifact "
+                          << fs::path(a).filename().string()
+                          << (ext == ".pkg"
+                                  ? " — pass --installer-identity \"Developer ID Installer: ...\"\n"
+                                  : " — needs a Developer ID Application signature\n");
             }
+        }
+        // When packaging produced artifacts but none are signed, refuse to
+        // fall through to the bundle scan (that would notarize loose bundles
+        // the user didn't ask to distribute). Only the genuine
+        // `--skip-package` plugin flow keeps the bundle-scan fallback.
+        if (!release_artifacts.empty() && signed_artifacts.empty()) {
+            std::cerr << "pulp ship release: no signed distributable to notarize"
+                         " — configure the signing identities and re-run.\n";
+            return 1;
+        }
+        for (auto& a : signed_artifacts) {
+            nz_args.push_back("--path");
+            nz_args.push_back(a);
+            std::cout << "  artifact: " << fs::path(a).filename().string() << "\n";
         }
         int nz_rc = cmd_ship(nz_args);
         if (nz_rc != 0) {
@@ -1414,17 +1515,19 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
     std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
     std::cout << "             --apple-id you@example.com --team-id ABCDE12345        (legacy)\n";
-    std::cout << "             --path <dmg|pkg|app>  (notarize+staple an explicit artifact; repeatable)\n";
+    std::cout << "             --path <dmg|pkg|zip>  (notarize+staple an explicit artifact; repeatable; not a raw .app)\n";
     std::cout << "             --env-file <path>  (override ~/.config/pulp/secrets/notary.env)\n";
     std::cout << "             --staple   (staple only, skip submission)\n";
     std::cout << "             --dry-run  (print resolved notarytool argv, no submission)\n";
     std::cout << "  package    Create installers for the target platform\n";
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
+    std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
-    std::cout << "             --pkg | --dmg   (notarizes the .pkg/.dmg it builds)   (item 7.5)\n";
+    std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
+    std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
     std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
     std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [creds]\n";

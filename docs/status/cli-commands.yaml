@@ -90,7 +90,7 @@ commands:
         args:
           - name: --path
             required: false
-            description: Notarize + staple an explicit artifact (.dmg/.pkg/.app); repeatable
+            description: Notarize + staple an explicit artifact (.dmg/.pkg/.zip — not a raw .app); repeatable
           - name: --api-key
             required: false
           - name: --api-key-id
@@ -126,6 +126,9 @@ commands:
             required: false
           - name: --abi
             required: false
+          - name: --installer-identity
+            required: false
+            description: Developer ID Installer identity used to sign the macOS .pkg
           - name: --apk-only
             required: false
           - name: --aab-only

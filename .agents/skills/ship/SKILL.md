@@ -129,6 +129,18 @@ that packaging produced** (selected by build time), so `release --dmg` leaves a
 Gatekeeper-ready disk image in `artifacts/`, not a signed-but-unnotarized one.
 `--skip-sign` / `--skip-package` / `--skip-notarize` gate stages for CI dry-runs.
 
+**Signing identities matter per artifact.** A `.pkg` must be signed with a
+**Developer ID Installer** identity (distinct from the Developer ID
+*Application* identity that signs bundles/apps/dmgs) or notarization rejects it.
+Pass it via `--installer-identity "Developer ID Installer: …"` (or
+`signing.apple.installer_identity` in config); `release` also signs standalone
+`.app`s and the produced `.dmg`. As a safety net, the notarize stage verifies
+each artifact's signature and **skips (does not submit) any unsigned `.pkg`/
+`.dmg`** — so a missing installer identity yields a clear "skipping unsigned
+artifact" warning instead of a failed notarytool submission. `notarize --path`
+likewise rejects a raw `.app` (notarytool needs a `.dmg`/`.pkg`/`.zip`
+container — use `share` for an app).
+
 ### macOS: Build → Sign → Notarize → Package → Appcast
 
 ```bash

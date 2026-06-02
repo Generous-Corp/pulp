@@ -399,6 +399,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "sign", "--bogus"}, "unknown argument"},
         {{"ship", "package", "--version"}, "--version requires a value"},
         {{"ship", "package", "--abi"}, "--abi requires a value"},
+        {{"ship", "package", "--installer-identity"}, "--installer-identity requires a value"},
         {{"ship", "package", "--bogus"}, "unknown argument"},
         {{"ship", "check", "--target"}, "--target requires a value"},
         {{"ship", "check", "--bogus"}, "unknown argument"},
@@ -419,6 +420,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "release", "--team-id"}, "--team-id requires a value"},
         {{"ship", "release", "--password"}, "--password requires a value"},
         {{"ship", "release", "--version"}, "--version requires a value"},
+        {{"ship", "release", "--installer-identity"}, "--installer-identity requires a value"},
         {{"ship", "share", "--identity"}, "--identity requires a value"},
         {{"ship", "share", "--version"}, "--version requires a value"},
         {{"ship", "share", "--bogus"}, "unknown argument"},
@@ -1179,30 +1181,54 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
-                 "pulp ship release --dmg notarizes the disk image it builds",
+                 "pulp ship notarize --path rejects a raw .app bundle",
+                 "[cli][shellout][ship][notarize][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-path-app", true);
+    auto appp = (root / "Demo.app").string();
+
+    // notarytool can't submit a bare .app (Codex P2). Reject it with a
+    // pointer to `share`, before any submission — even in --dry-run.
+    auto r = run_pulp_in(root, {"ship", "notarize", "--path", appp, "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "cannot submit a raw .app"));
+    REQUIRE(contains(combined, "pulp ship share"));
+    // Must not have produced a notarytool submit line for the app.
+    REQUIRE_FALSE(contains(combined, "notarytool submit \"" + appp));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship release --dmg builds the disk image and refuses to notarize it unsigned",
                  "[cli][shellout][ship][release][oneoff]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("release-dmg-notarize", true);
     // A standalone .app under build/Standalone is packaged to a .dmg by the
-    // package stage; release must then hand THAT dmg to notarize via --path.
+    // package stage; release collects THAT dmg as the distributable.
     auto app = root / "build" / "Standalone" / "PulpDemo.app";
     fs::create_directories(app / "Contents");
     { std::ofstream out(app / "Contents" / "Info.plist");
       out << "<plist><dict></dict></plist>\n"; }
 
-    // No notary credentials are configured (fixture isolates them), so the
-    // notarize stage fails *after* the dmg is built and selected — which is
-    // exactly the signal we assert on: the dmg reached the notarize step.
+    // --skip-sign leaves the dmg unsigned. The signature guard must skip it
+    // rather than submit an unsigned image to notarytool (Codex P1 fix:
+    // never route an unsigned .pkg/.dmg to notarization).
     auto r = run_pulp_in(root, {"ship", "release", "--dmg", "--skip-sign"}, 90000);
     REQUIRE_FALSE(r.timed_out);
     auto combined = r.stdout_output + r.stderr_output;
     INFO("release output:\n" << combined);
     REQUIRE(r.exit_code != 0);
-    // The built dmg was collected and routed to notarization...
-    REQUIRE(contains(combined, "artifact: PulpDemo-2.3.4.dmg"));
-    // ...and notarization stopped on missing credentials, not on "no bundles".
-    REQUIRE(contains(combined, "no notary credentials"));
+    // The dmg WAS built and considered (proving package + collection ran)...
+    REQUIRE(contains(combined, "PulpDemo-2.3.4.dmg"));
+    // ...but was skipped as unsigned and never submitted.
+    REQUIRE(contains(combined, "skipping unsigned artifact"));
+    REQUIRE(contains(combined, "no signed distributable to notarize"));
+    // It must NOT have fallen through to notarizing loose bundles.
     REQUIRE_FALSE(contains(combined, "No plugin bundles found"));
+    REQUIRE_FALSE(contains(combined, "no notary credentials"));
 
     fs::remove_all(root);
 }
