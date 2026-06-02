@@ -132,6 +132,15 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
     std::sort(runs.begin(), runs.end(),
               [](const IRTextRun* a, const IRTextRun* b) { return a->start < b->start; });
 
+    // Run offsets are UTF-8 byte offsets, but defend against a source that
+    // passes a boundary landing mid-codepoint: snap forward to the next
+    // codepoint start (continuation bytes are 10xxxxxx) so we never slice a
+    // multibyte character in half and emit invalid UTF-8.
+    auto snap = [&](int k) {
+        while (k > 0 && k < n && (static_cast<unsigned char>(text[k]) & 0xC0) == 0x80) ++k;
+        return k;
+    };
+
     auto append_plain = [&](int a, int b) {
         if (b <= a) return;
         ss << ind << var << ".appendChild(document.createTextNode('"
@@ -140,7 +149,7 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
 
     int cursor = 0, idx = 0;
     for (const auto* r : runs) {
-        int rs = std::max(0, r->start), re = std::min(n, r->end);
+        int rs = snap(std::max(0, r->start)), re = snap(std::min(n, r->end));
         if (re <= cursor) continue;          // wholly behind cursor (overlap) — skip
         if (rs < cursor) rs = cursor;        // clip a partial overlap
         append_plain(cursor, rs);            // base-styled gap before the run
@@ -276,7 +285,12 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // Apply visual styles
     auto& s = node.style;
     auto emit_str = [&](const char* prop, const std::optional<std::string>& val) {
-        if (val) ss << ind << var << ".style." << prop << " = '" << *val << "';\n";
+        // Escape the value — raw CSS (esp. clip-path / mask, which can carry
+        // url("...") with quotes) must not break out of the JS string literal
+        // (#3288 P2). js_single_quote_escape is a no-op for the common
+        // quote-free keyword/color values, so this is regression-safe.
+        if (val) ss << ind << var << ".style." << prop << " = '"
+                    << js_single_quote_escape(*val) << "';\n";
     };
     auto emit_px = [&](const char* prop, const std::optional<float>& val) {
         if (val) ss << ind << var << ".style." << prop << " = '" << format_px(*val) << "';\n";
@@ -287,7 +301,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
 
     emit_str("backgroundColor", s.background_color);
     if (s.background_gradient)
-        ss << ind << var << ".style.background = '" << *s.background_gradient << "';\n";
+        ss << ind << var << ".style.background = '" << js_single_quote_escape(*s.background_gradient) << "';\n";
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
     emit_str("mixBlendMode", s.mix_blend_mode);
@@ -508,6 +522,11 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 grow();
             } else if (h == "stretch") {
                 stretch();
+                // Pin both horizontal edges = fill width. min-width:100% keeps
+                // this effective even when the node ALSO has an explicit width
+                // (Yoga clamps the final width up to min-width), so STRETCH is no
+                // longer a no-op against a defined cross-size.
+                ss << ind << "setFlex('" << target_id << "', 'min_width', '100%');\n";
             }
         }
         if (L.v_constraint) {
@@ -521,14 +540,15 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 grow();
             } else if (v == "stretch") {
                 stretch();
+                ss << ind << "setFlex('" << target_id << "', 'min_height', '100%');\n";
             }
         }
     };
 
     // Grid item placement: a child of a grid container can carry grid-column /
-    // grid-row LINE placement ("1 / 3", "2"). Lower to setGrid column/row
-    // start/end on the child. Non-numeric forms (span N, named lines, auto) are
-    // skipped — they fall through to the grid's auto-placement.
+    // grid-row LINE placement ("1 / 3", "2", "1 / span 2"). Lower to setGrid
+    // column/row start/end on the child. A "span N" END resolves to start+N.
+    // Span-only (no start line) and named lines are left to auto-placement.
     auto emit_grid_item_placement = [&](const std::string& target_id) {
         if (depth == 0) return;
         auto emit_track = [&](const std::optional<std::string>& v,
@@ -547,15 +567,24 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 if (t.empty()) return false;
                 char* e = nullptr;
                 long n = std::strtol(t.c_str(), &e, 10);
-                if (e == t.c_str()) return false;  // span / named / auto -> skip
+                if (e == t.c_str()) return false;  // named / auto -> skip
                 out = static_cast<int>(n);
                 return true;
             };
-            int iv;
-            if (as_int(lo, iv))
-                ss << ind << "setGrid('" << target_id << "', '" << start_key << "', " << iv << ");\n";
-            if (as_int(hi, iv))
-                ss << ind << "setGrid('" << target_id << "', '" << end_key << "', " << iv << ");\n";
+            int lo_i = 0;
+            const bool have_lo = as_int(lo, lo_i);
+            if (have_lo)
+                ss << ind << "setGrid('" << target_id << "', '" << start_key << "', " << lo_i << ");\n";
+            int hi_i;
+            if (as_int(hi, hi_i)) {
+                ss << ind << "setGrid('" << target_id << "', '" << end_key << "', " << hi_i << ");\n";
+            } else if (have_lo && hi.rfind("span", 0) == 0) {
+                // "<start> / span <n>"  ->  end line = start + n
+                int span = 0;
+                if (as_int(trim(hi.substr(4)), span) && span > 0)
+                    ss << ind << "setGrid('" << target_id << "', '" << end_key << "', "
+                       << (lo_i + span) << ");\n";
+            }
         };
         emit_track(node.layout.grid_column, "column_start", "column_end");
         emit_track(node.layout.grid_row, "row_start", "row_end");

@@ -128,6 +128,17 @@ class TextRunsTest(unittest.TestCase):
         runs = frx.extract_text_runs(n)
         self.assertEqual([(r["start"], r["end"]) for r in runs], [(0, 1), (1, 2)])
 
+    def test_run_offsets_are_utf8_byte_offsets(self):
+        # "café world": é is 2 UTF-8 bytes, so the run over "world" (char index 5)
+        # must be emitted as BYTE offset 6, not char index 5.
+        n = {"type": "TEXT", "characters": "café world",
+             "characterStyleOverrides": [0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+             "styleOverrideTable": {"1": {"fontWeight": 700}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["start"], 6)   # byte offset (char index would be 5)
+        self.assertEqual(runs[0]["end"], 11)
+
     def test_no_overrides_yields_no_runs(self):
         self.assertEqual(frx.extract_text_runs({"characters": "hi"}), [])
         self.assertEqual(frx.extract_text_runs(

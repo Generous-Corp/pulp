@@ -151,14 +151,21 @@ def extract_style(n):
 def extract_text_runs(n):
     # Figma per-character style overrides -> ordered IR text runs. Group
     # consecutive characters that share a non-zero override id into [start,end)
-    # ranges and resolve each id through styleOverrideTable. Char indices are
-    # UTF-16 code units (Figma); for non-ASCII text the consumer's byte-offset
-    # slicing is approximate — a follow-up. Returns [] when no overrides.
+    # ranges and resolve each id through styleOverrideTable. The IR contract is
+    # UTF-8 BYTE offsets into `content` (the native slicer is byte-based), so we
+    # convert the per-character index to a byte offset here — correct for all
+    # BMP text (accents/CJK/etc.). Returns [] when no overrides.
     chars = n.get("characters", "")
     overrides = n.get("characterStyleOverrides")
     table = n.get("styleOverrideTable")
     if not chars or not isinstance(overrides, list) or not isinstance(table, dict):
         return []
+
+    # char-index -> UTF-8 byte offset (prefix-length lookup; len(overrides) may
+    # exceed len(chars), so clamp).
+    def byte_off(ci):
+        return len(chars[:min(ci, len(chars))].encode("utf-8"))
+
     runs = []
     i, L = 0, len(overrides)
     while i < L:
@@ -170,7 +177,7 @@ def extract_text_runs(n):
             j += 1
         st = table.get(str(sid)) or table.get(sid)
         if st:
-            run = {"start": i, "end": j}
+            run = {"start": byte_off(i), "end": byte_off(j)}
             if "fontSize" in st:   run["fontSize"] = st["fontSize"]
             if "fontWeight" in st: run["fontWeight"] = st["fontWeight"]
             fn = st.get("fontName") or {}

@@ -414,10 +414,10 @@ Facts / gotchas:
   grid too). Per-item placement (`emit_grid_item_placement`, folded into
   `emit_position_if_absolute`): `grid_column`/`grid_row` `"N / M"` → `setGrid(id,
   'column_start'/'column_end'/'row_start'/'row_end', N)`.
-- **Deferred** (codegen partial): `span N`, named lines, and `minmax()` are not
-  emitted as explicit placement — they fall through to the grid's auto-flow.
-  `setGrid` `column/row_start/end` take **ints** only, so non-numeric placement
-  is skipped. Stays within Flex+Grid (CLAUDE.md layout-model contract).
+- **Span**: `"<start> / span <n>"` resolves to `column/row_end = start + n`.
+  Still deferred (auto-placed): span-WITHOUT-a-start-line, named lines, and
+  `minmax()` track sizing — `setGrid column/row_start/end` take **ints** only.
+  Stays within Flex+Grid (CLAUDE.md layout-model contract).
 - Native arm only; `compat.json features.grid-container` tracks it (parsed
   handled, codegen partial). Tests: `[view][import][grid]`.
 
@@ -477,10 +477,13 @@ per-range styling. Now:
   the `Label` widget doesn't expose them — wiring `Label::set_attributed_string`
   + a `setRichText` bridge is the follow-up. Hence `compat.json
   features.text-per-range-styles` = parsed handled, **codegen partial**.
-- **Gotcha**: char offsets are treated as BYTE indices into `text_content`;
-  Figma supplies UTF-16 code-unit indices, so non-ASCII text needs UTF-16→byte
-  conversion (follow-up). Tests use ASCII. Tests: `[view][import][text]` +
-  the figma exporter python tests.
+- **Offsets are UTF-8 BYTE offsets** into `text_content`. The Figma exporter
+  converts its per-character `characterStyleOverrides` indices to byte offsets
+  (`len(chars[:i].encode('utf-8'))`, correct for all BMP text); `emit_web_text_runs`
+  slices by byte and snaps boundaries forward to the next codepoint start
+  (continuation bytes are `10xxxxxx`) so a stray mid-codepoint offset never emits
+  invalid UTF-8. Tests: `[view][import][text]` (incl. a multibyte case) + the
+  figma exporter python tests.
 
 ### Design-import IR round-trip + review-hardening gotchas
 
@@ -504,10 +507,10 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
 - **Web-compat run children don't inherit.** Pulp's web-compat `<span>` Labels
   don't inherit typography from the parent, so `emit_web_text_runs` copies the
   node's dominant style onto each run child before applying the run override.
-- **Known follow-ups (documented, not yet fixed):** text-run offsets are byte
-  indices but Figma supplies UTF-16 code units (non-ASCII slices are
-  approximate); a `STRETCH` constraint is a no-op when the node also has an
-  explicit cross-axis dimension.
+  A `STRETCH` constraint now also emits `min_width`/`min_height: '100%'` so it
+  fills its axis even when the node has an explicit cross-axis size (Yoga clamps
+  up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
+  also handled now — see the per-range text section.)
 
 ### Interactive (turnable) sprite knobs — `--knob-style sprite`
 

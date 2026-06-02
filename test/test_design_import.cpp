@@ -4887,6 +4887,75 @@ TEST_CASE("per-range run children carry the node's dominant style",
     CHECK(count(".style.color = '#222222'") >= 2);
 }
 
+TEST_CASE("STRETCH constraint fills its axis even with an explicit size",
+          "[view][import][codegen][constraints]") {
+    // A STRETCH constraint pins both edges = fill that dimension. min-width/
+    // height:100% makes it effective even when the node also has an explicit
+    // pixel size (Yoga clamps up to min), so STRETCH is no longer a no-op.
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Root";
+    ir.root.style.width = 400.0f; ir.root.style.height = 400.0f;
+    IRNode c; c.type = "frame"; c.name = "C";
+    c.style.width = 50.0f; c.style.height = 50.0f;   // explicit cross-size
+    c.layout.h_constraint = "stretch";
+    c.layout.v_constraint = "stretch";
+    ir.root.children.push_back(c);
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("'min_width', '100%'") != std::string::npos);
+    CHECK(js.find("'min_height', '100%'") != std::string::npos);
+}
+
+TEST_CASE("grid item 'N / span M' resolves to an end line",
+          "[view][import][codegen][grid]") {
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "G";
+    ir.root.layout.display = "grid";
+    ir.root.layout.grid_template_columns = "1fr 1fr 1fr";
+    IRNode a; a.type = "frame"; a.name = "A"; a.style.width = 10.0f; a.style.height = 10.0f;
+    a.layout.grid_column = "1 / span 2";  // start line 1, span 2 -> end line 3
+    ir.root.children.push_back(a);
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("'column_start', 1)") != std::string::npos);
+    CHECK(js.find("'column_end', 3)") != std::string::npos);
+}
+
+TEST_CASE("web codegen escapes clip-path / mask CSS (no JS string break)",
+          "[view][import][codegen][mask]") {
+    // Raw clip-path/mask CSS can carry url('...') with quotes; emit_str must
+    // escape it so it can't break out of the JS string literal (#3288 P2).
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Root";
+    ir.root.style.clip_path = "url('#a')";  // contains single quotes
+    CodeGenOptions opts; opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("\\'#a\\'") != std::string::npos);          // quotes escaped
+    CHECK(js.find("clipPath = 'url('#a')'") == std::string::npos);  // not raw
+}
+
+TEST_CASE("per-range text runs slice multibyte text on byte offsets",
+          "[view][import][codegen][text]") {
+    // "café world" — é is 2 UTF-8 bytes, so "world" begins at BYTE offset 6.
+    // The run must slice on bytes (not char index 5), leaving the "café " gap
+    // intact and the run text == "world".
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Root";
+    IRNode t; t.type = "text"; t.name = "M";
+    t.text_content = "caf\xc3\xa9 world";   // "café world", é = 0xC3 0xA9
+    IRTextRun run; run.start = 6; run.end = 11; run.font_weight = 700;  // "world"
+    t.text_runs.push_back(run);
+    ir.root.children.push_back(t);
+    CodeGenOptions opts; opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("createTextNode('caf\xc3\xa9 ')") != std::string::npos);  // gap intact
+    CHECK(js.find(".textContent = 'world'") != std::string::npos);          // run text
+}
+
 TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",
           "[view][import][codegen][blend]") {
     // A node's normalized mix_blend_mode lowers to setMixBlendMode (native

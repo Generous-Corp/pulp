@@ -262,7 +262,9 @@ struct IRProvenance {
 };
 
 /// One styled character range inside a text node. Offsets are [start, end)
-/// indices into `IRNode::text_content`. Only the fields a run actually overrides
+/// UTF-8 BYTE offsets into `IRNode::text_content` (the Figma exporter converts
+/// its per-character indices to byte offsets; codegen slices by byte and snaps
+/// to codepoint boundaries defensively). Only the fields a run actually overrides
 /// are set; everything else inherits the node's dominant style. Mixed-style text
 /// (a bold word, a colored span, a different size mid-string) becomes an ordered
 /// list of these so codegen can emit per-range <span>s instead of collapsing to
