@@ -154,8 +154,10 @@ specifics are out of scope.
     form (center / `from <angle>` / stops) and `View::paint` dispatches
     to the canvas radial / sweep shader (Skia `SkGradientShader::
     MakeRadial` / `MakeSweep`; CoreGraphics native radial + software
-    conic). Explicit sizing keywords (`closest-side` /
-    `farthest-corner` / explicit radii) are not yet sized precisely.
+    conic). Radial extent keywords (`closest-side` / `closest-corner` /
+    `farthest-side` / `farthest-corner`) map to an approximate radius
+    fraction of `max(w,h)`; exact per-keyword geometry (needs w/h +
+    center) and explicit `px` radii are not yet sized precisely.
     multiple-bg / size-in-shorthand are `arch-single-bg`. `backgroundClip text` is
     `arch-paint-deferred` (SkBlendMode::kSrcIn against text glyphs is
     queued; the slot stores the value). `backgroundPosition` /

@@ -801,3 +801,21 @@ TEST_CASE("setBackgroundGradient parses linear / radial / conic into the right k
     CHECK(kind("conic-gradient(from 90deg at 50% 50%, #ff0000, #00ff00, #0000ff)") == 3);
     CHECK(kind("conic-gradient(#ff0000, #00ff00)") == 3);   // no prefix
 }
+
+TEST_CASE("setBackgroundGradient maps radial sizing keywords to a radius",
+          "[view][widget-bridge][gradient]") {
+    auto radius = [](const std::string& css) {
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0, 0, 200, 200});
+        root.set_theme(Theme::dark());
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        bridge.load_script("setBackgroundGradient('', '" + css + "');");
+        return root.background_gradient_radius();
+    };
+    auto near = [](float a, float b) { return std::abs(a - b) < 0.001f; };
+    CHECK(near(radius("radial-gradient(circle closest-side at 50% 50%, #fff, #000)"), 0.5f));
+    CHECK(near(radius("radial-gradient(farthest-corner at 50% 50%, #fff, #000)"), 0.7071f));
+    CHECK(near(radius("radial-gradient(#fff, #000)"), 0.7071f));  // no keyword -> default
+}

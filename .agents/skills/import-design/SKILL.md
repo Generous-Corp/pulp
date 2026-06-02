@@ -436,8 +436,10 @@ only the CSS parser, the View paint dispatch, and the Figma exporter:
 - **View** (`view.hpp`/`view.cpp`): `set_background_gradient_radial`/`_conic`
   store kind (`bg_gradient_type_` 2/3) + center/radius/angle; `View::paint`
   dispatches to `canvas.set_fill_gradient_radial`/`_conic`. `radius_frac`
-  defaults to ~farthest-corner (0.7071 × max(w,h)); precise sizing keywords are
-  deferred (codegen partial).
+  defaults to ~farthest-corner (0.7071 × max(w,h)). CSS radial extent keywords
+  (`closest-side`/`closest-corner`/`farthest-side`/`farthest-corner`) map to an
+  approximate `radius_frac` in the bridge parser — exact per-keyword geometry
+  (needs w/h+center) and explicit `px` radii stay deferred (codegen partial).
 - **Figma export** (`figma_rest_export.py`): `GRADIENT_RADIAL`/`GRADIENT_DIAMOND`
   → `radial-gradient(...)`, `GRADIENT_ANGULAR` → `conic-gradient(...)` (diamond
   approximated by radial). Falls back to flat only when there are no stops.

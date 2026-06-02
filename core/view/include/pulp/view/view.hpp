@@ -1296,6 +1296,8 @@ public:
     bool has_background_gradient() const { return bg_gradient_type_ > 0; }
     /// 0=none, 1=linear, 2=radial, 3=conic. Exposed for tests/inspection.
     int background_gradient_type() const { return bg_gradient_type_; }
+    /// Radial radius as a fraction of max(w,h). Exposed for tests/inspection.
+    float background_gradient_radius() const { return bg_grad_radius_; }
 
     /// Text overflow: ellipsis (CSS text-overflow: ellipsis)
     void set_text_overflow_ellipsis(bool e) { text_ellipsis_ = e; }

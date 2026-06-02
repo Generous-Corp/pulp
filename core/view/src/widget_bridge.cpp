@@ -6899,6 +6899,7 @@ void WidgetBridge::register_api() {
         else if (gradient.substr(0, 16) == "radial-gradient(") {
             std::string inner = gradient.substr(16, gradient.size() - 17);
             float cx = 0.5f, cy = 0.5f;
+            float radius_frac = 0.7071f;  // ~farthest-corner of a square box (default)
             size_t color_start = 0;
             size_t fc = top_level_comma(inner);
             if (fc != std::string::npos) {
@@ -6909,6 +6910,15 @@ void WidgetBridge::register_api() {
                     seg.rfind("circle", 0) == 0 || seg.rfind("ellipse", 0) == 0 ||
                     seg.rfind("closest", 0) == 0 || seg.rfind("farthest", 0) == 0) {
                     parse_at_center(seg, cx, cy);
+                    // CSS radial-extent keyword -> approximate radius as a
+                    // fraction of max(w,h); the View resolves it against its box.
+                    // Exact per-keyword geometry needs w/h + center (unavailable
+                    // here), so these are best-effort: closest-side reaches the
+                    // nearest edge (~half the box), farthest-corner the diagonal.
+                    if (seg.find("closest-side") != std::string::npos)        radius_frac = 0.5f;
+                    else if (seg.find("closest-corner") != std::string::npos) radius_frac = 0.6f;
+                    else if (seg.find("farthest-side") != std::string::npos)  radius_frac = 0.6f;
+                    else if (seg.find("farthest-corner") != std::string::npos) radius_frac = 0.7071f;
                     color_start = fc + 1;
                 }
             }
@@ -6916,7 +6926,7 @@ void WidgetBridge::register_api() {
             std::vector<float> positions;
             parse_stops(inner.substr(color_start), colors, positions);
             if (!colors.empty())
-                v->set_background_gradient_radial(cx, cy, 0.7071f, colors, positions);
+                v->set_background_gradient_radial(cx, cy, radius_frac, colors, positions);
         }
         // conic-gradient([from <angle>] [at <pos>],] stop, stop, ...). Painted
         // via the canvas sweep gradient. CSS measures `from` clockwise from the
