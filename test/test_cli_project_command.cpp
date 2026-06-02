@@ -168,6 +168,26 @@ void require_run_ok(const std::string& cmd) {
     REQUIRE(run(cmd) == 0);
 }
 
+// A set GIT_DIR/GIT_WORK_TREE in the environment OVERRIDES `git -C <dir>`
+// discovery. When this binary runs under a git hook or `shipyard` (which
+// inject those vars), the throwaway `git -C <tempdir>` commands below would
+// commit "initial" / branch / flip core.bare on the SOURCE worktree instead of
+// the temp repo. Scrub the inherited git environment so temp-repo git is
+// isolated regardless of who launched the test. (Mirrors the scrub in the
+// pre-push hook, local_diff_cover.sh, and test_mcp_server.cpp.)
+void clear_inherited_git_env() {
+    for (const char* var : {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                            "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                            "GIT_PREFIX", "GIT_NAMESPACE",
+                            "GIT_QUARANTINE_PATH"}) {
+#if defined(_WIN32)
+        _putenv_s(var, "");
+#else
+        ::unsetenv(var);
+#endif
+    }
+}
+
 void configure_git_identity(const fs::path& repo) {
     require_run_ok("git -C " + quote(repo) + " config user.name \"Pulp Test\"");
     require_run_ok("git -C " + quote(repo) + " config user.email \"pulp-test@example.com\"");
@@ -226,6 +246,7 @@ void make_fake_sdk(const fs::path& sdk_root,
 }
 
 void init_clean_git_repo(const fs::path& repo) {
+    clear_inherited_git_env();  // don't let an inherited GIT_DIR hijack `git -C`
     require_run_ok("git init -q " + quote(repo));
     configure_git_identity(repo);
     require_run_ok("git -C " + quote(repo) + " add CMakeLists.txt pulp.toml");

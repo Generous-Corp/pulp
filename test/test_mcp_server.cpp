@@ -135,6 +135,29 @@ private:
     bool had_previous_ = false;
 };
 
+// Several tests below shell out to `git -C <tempdir> …` on throwaway repos.
+// If this binary is launched from a git-invoked context — a hook (pre-push),
+// `shipyard`, or any parent `git` process — then GIT_DIR / GIT_WORK_TREE are
+// inherited in the environment. A set GIT_DIR *overrides* `git -C <dir>`
+// repository discovery, so those commands would silently operate on the
+// SOURCE worktree's repo instead of their temp repo: stray "initial" commits,
+// throwaway branches, and `core.bare` flips in the shared config. Clearing the
+// inherited git environment makes temp-repo git deterministic regardless of
+// who launched the test. (The pre-push hook and local_diff_cover.sh scrub the
+// same vars; this is the in-process belt-and-suspenders for other runners.)
+void clear_inherited_git_env() {
+    for (const char* var : {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                            "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+                            "GIT_PREFIX", "GIT_NAMESPACE",
+                            "GIT_QUARANTINE_PATH"}) {
+#if defined(_WIN32)
+        _putenv_s(var, "");
+#else
+        ::unsetenv(var);
+#endif
+    }
+}
+
 bool has_repo_markers(const std::filesystem::path& candidate) {
     return std::filesystem::exists(candidate / "CMakeLists.txt") &&
            std::filesystem::exists(candidate / "tools" / "mcp" / "pulp_mcp.cpp");
@@ -742,6 +765,7 @@ TEST_CASE("MCP status quotes project roots before reading Git branch",
 #if defined(_WIN32)
     SKIP("POSIX shell quoting assertion is only used on non-Windows");
 #else
+    clear_inherited_git_env();  // never let an inherited GIT_DIR hijack `git -C`
     TempDir scratch;
     const auto project = scratch.path / "Project With Spaces And 'Quotes'";
     std::filesystem::create_directories(project / "core");
@@ -759,6 +783,53 @@ TEST_CASE("MCP status quotes project roots before reading Git branch",
     require_contains(response, R"JSON("id":37)JSON");
     require_contains(response, "Project With Spaces And 'Quotes'");
     require_contains(response, "Branch: mcp-status-quoted-root");
+#endif
+}
+
+// Regression: a throwaway temp repo must stay isolated even when the process
+// inherited a GIT_DIR/GIT_WORK_TREE pointing at another repo (as happens when
+// the suite runs under a git hook). Before the fix, `git -C <temp>` honored the
+// inherited GIT_DIR and mutated the WRONG repo — corrupting live worktrees
+// during pre-push / shipyard ctest runs.
+TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
+          "[mcp][git-isolation][regression][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX git-environment isolation assertion is only used on non-Windows");
+#else
+    // A "sentinel" repo standing in for the source worktree. If isolation
+    // breaks, the temp-repo git commands below would land here.
+    TempDir sentinel;
+    REQUIRE(std::system(("git -C " + shell_quote(sentinel.path.string()) +
+                         " init --quiet").c_str()) == 0);
+    REQUIRE(std::system(("git -C " + shell_quote(sentinel.path.string()) +
+                         " symbolic-ref HEAD refs/heads/sentinel-main").c_str()) == 0);
+
+    // Simulate the hook environment: export GIT_DIR/GIT_WORK_TREE at the
+    // sentinel, exactly what a parent `git` process would inject.
+    ScopedEnvVar git_dir("GIT_DIR", (sentinel.path / ".git").string());
+    ScopedEnvVar git_work_tree("GIT_WORK_TREE", sentinel.path.string());
+
+    // The code under test: scrub the inherited git environment.
+    clear_inherited_git_env();
+    REQUIRE(std::getenv("GIT_DIR") == nullptr);
+    REQUIRE(std::getenv("GIT_WORK_TREE") == nullptr);
+
+    // Now a temp-repo git op must target the temp repo, not the sentinel.
+    TempDir project;
+    REQUIRE(std::system(("git -C " + shell_quote(project.path.string()) +
+                         " init --quiet").c_str()) == 0);
+    REQUIRE(std::system(("git -C " + shell_quote(project.path.string()) +
+                         " checkout -b isolated-branch --quiet").c_str()) == 0);
+
+    // The project's own repo was created and switched (proves the temp-repo
+    // git commands actually ran against the temp repo).
+    REQUIRE(std::filesystem::exists(project.path / ".git" / "HEAD"));
+    // The sentinel repo is untouched: it still has no isolated-branch.
+    const int sentinel_has_branch = std::system(
+        ("git -C " + shell_quote(sentinel.path.string()) +
+         " rev-parse --verify --quiet refs/heads/isolated-branch >/dev/null")
+            .c_str());
+    REQUIRE(sentinel_has_branch != 0);  // sentinel must NOT have the branch
 #endif
 }
 

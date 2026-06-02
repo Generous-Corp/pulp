@@ -42,6 +42,21 @@ Slice 6 (#551).
 
 ## GitHub workflow gotchas
 
+- **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
+  worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
+  a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
+  hook (or `shipyard`) runs the full `ctest` and a test does
+  `git -C <tempdir> init/commit/checkout`, those commands silently hit THIS
+  worktree's repo instead — stray `initial` commits, throwaway branches, and a
+  `core.bare=true` flip in the shared config (which makes the main checkout
+  look "not a work tree"). `.githooks/pre-push` and
+  `tools/scripts/local_diff_cover.sh` now `unset GIT_DIR GIT_WORK_TREE …`
+  before running gates/ctest, and the git-shelling tests scrub the same vars
+  in-process (see the regression test in `test_mcp_server.cpp`). If you add a
+  test that shells out to git on a temp repo, clear the inherited git env first
+  (or run from a context with no `GIT_DIR`), and never assume `-C` alone
+  isolates it. Recovery if a worktree was hit: `git config core.bare false`,
+  reset the branch off the stray `initial` commit, delete the throwaway branch.
 - The required `macos` alias in `.github/workflows/build.yml` mirrors the
   macOS matrix leg by polling the Actions jobs API. Keep that poll retry-safe:
   API failures or malformed JSON must log and continue the loop, not trip
