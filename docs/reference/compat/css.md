@@ -149,8 +149,14 @@ specifics are out of scope.
   * **Background family (5 entries — `background`, `backgroundImage`,
     `backgroundClip`, `backgroundPosition`, `backgroundSize`):**
     `url()` / `image-set()` are `arch-deferred-image-loader`;
-    `conic-gradient` is `arch-skia-no-conic-gradient`; multiple-bg /
-    size-in-shorthand are `arch-single-bg`. `backgroundClip text` is
+    `linear-gradient`, `radial-gradient`, and `conic-gradient`
+    backgrounds now render — `setBackgroundGradient` parses the CSS
+    form (center / `from <angle>` / stops) and `View::paint` dispatches
+    to the canvas radial / sweep shader (Skia `SkGradientShader::
+    MakeRadial` / `MakeSweep`; CoreGraphics native radial + software
+    conic). Explicit sizing keywords (`closest-side` /
+    `farthest-corner` / explicit radii) are not yet sized precisely.
+    multiple-bg / size-in-shorthand are `arch-single-bg`. `backgroundClip text` is
     `arch-paint-deferred` (SkBlendMode::kSrcIn against text glyphs is
     queued; the slot stores the value). `backgroundPosition` /
     `backgroundSize` are `partial-deferred-paint-time` — the JS shim

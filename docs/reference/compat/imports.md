@@ -73,11 +73,16 @@ owned by separate hardening slices; they are documented here but not
 type-drift-checked.
 
 The current snapshot: `frame`/`text`/`label`/`image` are `codegen:
-handled`; all vector/path kinds (`vector`/`path`/`svg_*`/`rect`/
-`rectangle`/`line`/`ellipse`/`circle`/`polygon`/`polyline`/`star`) are
-`codegen: missing` — their bare form silently degrades, guarded by the
-dropped-vector invariant, while the faithful path rasterizes them at
-export. Seeded from
+handled`. The vector SHAPE PRIMITIVES (`rect`/`rectangle`/`svg_rect`/
+`line`/`svg_line`/`ellipse`/`circle`/`polygon`/`star`) are now `codegen:
+handled` — the importer synthesizes SVG path-data from their geometry so
+they lower to a native `SvgPath` instead of dropping. The generic
+`vector`/`path`/`svg_path` kinds are `codegen: partial` (render only when
+they carry authored `path_data`); `polyline` stays `codegen: missing`
+(an open run of explicit points, not synthesizable from geometry). Among
+`features`: radial/conic background gradients now render (was a flat
+fallback), Figma resize constraints map to flex/position, and grid
+containers lower to the native grid bridge. Seeded from
 `planning/2026-05-31-import-coverage-hardening-plan.md` §3.
 
 ## Adding a new format
