@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03172"></a>
+## [0.317.2] - 2026-06-01
+
+- fix(view): use a portable pi constant in design-import polygon synthesis ([#3319](https://github.com/danielraffel/pulp/pull/3319))
+
 <a id="v03171"></a>
 ## [0.317.1] - 2026-06-01
 
@@ -3464,6 +3469,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.317.2]: https://github.com/danielraffel/pulp/releases/tag/v0.317.2
 [0.317.1]: https://github.com/danielraffel/pulp/releases/tag/v0.317.1
 [0.317.0]: https://github.com/danielraffel/pulp/releases/tag/v0.317.0
 [0.316.0]: https://github.com/danielraffel/pulp/releases/tag/v0.316.0
