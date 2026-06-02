@@ -689,24 +689,54 @@ Signing and packaging subcommands.
 ```bash
 pulp ship sign --identity "Developer ID Application: ..."
 pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
+pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
 pulp ship notarize --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
-pulp ship notarize --dry-run                     # print resolved argv, no submit
+pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
+pulp ship notarize --dry-run                       # print resolved argv, no submit
+pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+verify
 ```
 
 **Subcommands**:
 
 | Subcommand | What it does |
 |------------|-------------|
-| `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU) |
-| `notarize` | Submit signed bundles to Apple notarytool (macOS) |
-| `package`  | Create `.pkg` installers in `artifacts/` |
+| `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
+| `notarize` | Submit signed bundles (or `--path` artifacts) to Apple notarytool (macOS) |
+| `package`  | Create `.pkg`/`.dmg` installers in `artifacts/` |
+| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
+| `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `check`    | Check signing status of all built plugins |
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
+`--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;
+`.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
 
-`package` creates per-format `.pkg` files using `pkgbuild`. macOS only.
+`package` creates per-format `.pkg` files using `pkgbuild` (or `.dmg` with `--dmg`). macOS only.
+
+#### `pulp ship share` — one-off "sign it for a friend"
+
+`share` is the opinionated, single-command path for handing a build to someone
+without running the full release pipeline. Point it at a `.app`, `.dmg`, or
+`.pkg`:
+
+```bash
+pulp ship share MyApp.app --identity "Developer ID Application: Name (TEAMID)"
+pulp ship share MyApp.app --dry-run        # print the plan, do nothing
+```
+
+For a `.app` it code-signs (hardened runtime + secure timestamp), wraps it in a
+DMG under `artifacts/`, signs the DMG, notarizes + staples it, then runs the
+exact `spctl -a -t open --context context:primary-signature` check Gatekeeper
+performs on download. A green result means the recipient will **not** see
+"Unnotarized Developer ID". Notarization credentials resolve through the same
+chain as `pulp ship notarize` (App Store Connect API key preferred). `.dmg`
+inputs skip the wrap step; `.pkg` inputs are assumed already installer-signed
+and are only notarized + verified.
+
+`release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
+the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
 
 #### `pulp ship notarize`
 

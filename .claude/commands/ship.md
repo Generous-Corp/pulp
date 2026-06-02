@@ -28,13 +28,29 @@ Ship a Pulp plugin or app — sign, notarize, package, and generate update feeds
    - "Android SDK not found. Would you like help setting it up?"
    - Options: "Show install instructions" / "I'll set it up myself" / "Skip Android"
 
-## Standard workflow order
+## Pick the path first: one-off share vs full release
+
+- **"Make a build I can send a friend / share / put on a download page"**, or any
+  single `.app`/`.dmg`/`.pkg` you want to hand off → use **`pulp ship share`**
+  (one command: sign → wrap `.app` in a DMG → notarize → staple → Gatekeeper-verify).
+  This is the right tool when the user says things like "sign this so my friend can
+  open it", "bundle the app to share", "make a DMG I can send". It does NOT touch the
+  repo / GitHub release pipeline.
+- **Full distribution release** (versioned GitHub Release, appcast, all example
+  plugins) → that runs through CI (`sign-and-release.yml`), not these local
+  subcommands. For shipping a PR/release say "ship this" or use the `ci` skill.
+
+## Standard workflow order (manual, per-stage)
 
 1. **Build** — `pulp build` (must complete before signing)
 2. **Sign** — `pulp ship sign` (must sign before notarizing)
 3. **Notarize** — `pulp ship notarize` (macOS only, after signing)
 4. **Package** — `pulp ship package` (creates installer from signed bundles)
 5. **Appcast** — `pulp ship appcast` (generate update feed pointing to packaged artifact)
+
+Or collapse 2–4 into one command: `pulp ship release --pkg` / `--dmg` signs,
+packages, and **notarizes + staples the .pkg/.dmg it builds** (not just the loose
+bundles), so the artifact in `artifacts/` is Gatekeeper-ready.
 
 ## Subcommands
 
@@ -46,10 +62,22 @@ Ship a Pulp plugin or app — sign, notarize, package, and generate update feeds
 
 Note: `--key-pass` defaults to `--store-pass` if omitted. `sign --target android` operates on existing APK/AAB files in `artifacts/` — use `package --target android` to build from Gradle.
 
+- `pulp ship sign --path MyApp.app` — sign one explicit `.app`/`.dmg`/bundle (not the whole build dir)
+
 **Notarization (macOS only):**
 - `pulp ship notarize` — uses apple_id/team_id from config
 - `pulp ship notarize --apple-id you@example.com --team-id ABCDE12345 --password @keychain:AC_PASSWORD`
+- `pulp ship notarize --path MyApp-1.0.dmg` — notarize + staple one explicit artifact (repeatable)
 - `pulp ship notarize --staple` — staple only (skip submission)
+
+**One-off share (macOS only) — sign + notarize + verify in one shot:**
+- `pulp ship share MyApp.app --identity "Developer ID Application: ..."` — for an
+  `.app`: signs, wraps in a DMG under `artifacts/`, signs the DMG, notarizes,
+  staples, then runs the exact `spctl` Gatekeeper check. A green result means the
+  recipient won't see "Unnotarized Developer ID".
+- `pulp ship share MyApp.dmg` / `pulp ship share Installer.pkg` — skips the wrap step
+- `pulp ship share MyApp.app --dry-run` — print the plan without doing anything
+- Credentials resolve through the same chain as `notarize` (App Store Connect API key preferred)
 
 **Packaging:**
 - `pulp ship package --version 1.0.0` — .pkg (macOS) or NSIS .exe (Windows)
@@ -137,6 +165,8 @@ This "show then confirm" pattern applies to:
 - `pulp ship notarize` — show credentials and bundles
 - `pulp ship package` — show target, version, and signing mode
 - `pulp ship package --target android` — show ABIs, keystore, Gradle project
+- `pulp ship share <artifact>` — show the input, resolved identity, and the
+  sign→wrap→notarize→staple→verify plan (offer `--dry-run` first if creds are unconfirmed)
 
 Run the appropriate subcommand based on $ARGUMENTS. If no arguments, run `pulp ship check` to show current signing status, then use AskUserQuestion to suggest next steps:
 - "Sign plugin bundles" (if unsigned bundles found)

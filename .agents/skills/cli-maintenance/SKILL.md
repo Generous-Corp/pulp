@@ -275,6 +275,32 @@ Reference implementation: PR landing `feature/asc-notary-key-flow`
 `tools/cli/cmd_ship.cpp` (`notarize` block), `test/test_notary_env.cpp`,
 `test/test_cli_ship_shellout.cpp` ASC-key cases.
 
+### A subcommand that orchestrates other subcommands (`pulp ship share`)
+
+`cmd_ship` calls itself recursively (`cmd_ship({"notarize", "--path", ...})`)
+to compose stages — `share` and `release` both reuse the `notarize` handler's
+credential-resolution chain rather than duplicating it. When you add a flag
+like `--path` to a leaf subcommand, any orchestrating subcommand can thread it
+through for free. Conventions that kept this testable without Apple creds:
+
+- Add a `--dry-run` to orchestrators (`share`) that prints the plan and returns
+  0 before any `codesign`/`notarytool`/`spctl` call — shellout tests assert the
+  plan text. Mirror the existing `notarize --dry-run` / `auv3-xcodeproj
+  --dry-run` pattern.
+- Put guard rails (input not found, unsupported extension, missing identity)
+  *before* the side-effecting work so they're exercised by credential-free
+  shellout tests.
+- A subcommand of `ship` does NOT need its own top-level slash command or a
+  `commands` top-level entry — it lives under the `ship` entry's `subcommands`
+  in `cli-commands.yaml` and the `/ship` slash command. `cli_sync_check.py`
+  only diffs top-level commands, so a new ship subcommand won't show there;
+  keep the `ship` subcommand list in `cli-commands.yaml` current by hand.
+
+Reference: `feature/ship-oneoff-notarize` (2026-06-01). Files:
+`tools/cli/cmd_ship.cpp` (`sign --path`, `notarize --path`, `release` artifact
+selection, `share`), `test/test_cli_ship_shellout.cpp` `[oneoff]` cases,
+`.claude/commands/ship.md`, `.agents/skills/ship/SKILL.md`.
+
 ## Removing a CLI Command
 
 - [ ] Remove from `cmd_*.cpp` and command table in `pulp_cli.cpp`

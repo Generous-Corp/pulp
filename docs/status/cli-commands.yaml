@@ -70,6 +70,9 @@ commands:
         args:
           - name: --identity
             required: false
+          - name: --path
+            required: false
+            description: Sign one explicit artifact (.app/.dmg/bundle) instead of scanning build dirs
           - name: --entitlements
             required: false
           - name: --target
@@ -85,6 +88,9 @@ commands:
       - name: notarize
         summary: Submit signed bundles for Apple notarization (macOS)
         args:
+          - name: --path
+            required: false
+            description: Notarize + staple an explicit artifact (.dmg/.pkg/.zip — not a raw .app); repeatable
           - name: --api-key
             required: false
           - name: --api-key-id
@@ -120,6 +126,9 @@ commands:
             required: false
           - name: --abi
             required: false
+          - name: --installer-identity
+            required: false
+            description: Developer ID Installer identity used to sign the macOS .pkg
           - name: --apk-only
             required: false
           - name: --aab-only
@@ -143,6 +152,35 @@ commands:
         summary: Check signing status of built plugins or Android artifacts
         args:
           - name: --target
+            required: false
+      - name: share
+        summary: "One-shot sign → wrap (.app → DMG) → notarize → staple → Gatekeeper-verify a single artifact for sharing (macOS)"
+        args:
+          - name: input
+            kind: positional
+            required: true
+            description: The .app, .dmg, or .pkg to prepare for sharing
+          - name: --identity
+            required: false
+          - name: --version
+            required: false
+          - name: --output
+            required: false
+          - name: --entitlements
+            required: false
+          - name: --api-key
+            required: false
+          - name: --api-key-id
+            required: false
+          - name: --api-issuer
+            required: false
+          - name: --apple-id
+            required: false
+          - name: --team-id
+            required: false
+          - name: --password
+            required: false
+          - name: --dry-run
             required: false
     docs: reference/cli.md#ship
 
