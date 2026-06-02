@@ -541,6 +541,46 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     return m;
 }
 
+LabelAlign Label::resolve_effective_align_() {
+    // issue-969: text-align cascade. Own value wins, otherwise inherited.
+    LabelAlign effective = text_align_;
+    if (!has_own_text_align_) {
+        if (auto inh = inheritable_text_align(); inh.has_value()) {
+            int v = inh.value();
+            if (v == 1) effective = LabelAlign::center;
+            else if (v == 2) effective = LabelAlign::right;
+            else if (v == 3) effective = LabelAlign::auto_;
+            else if (v == 4) effective = LabelAlign::justify;
+            else if (v == 5) effective = LabelAlign::match_parent;
+            else effective = LabelAlign::left;
+        }
+    }
+    // pulp #1434 — resolve `match-parent` at paint time: the computed value
+    // matches the parent's resolved text-align. Walk the ancestor chain
+    // manually (skipping intermediate match-parent ancestors); fall back to
+    // `left` (CSS default) if no ancestor sets a concrete value. See PR #1879.
+    if (effective == LabelAlign::match_parent) {
+        LabelAlign parent_resolved = LabelAlign::left;
+        for (auto* anc = parent(); anc != nullptr; anc = anc->parent()) {
+            auto inh = anc->inheritable_text_align();
+            if (!inh.has_value()) continue;
+            int v = inh.value();
+            if (v == 5) continue;  // intermediate match-parent — keep walking
+            if      (v == 1) parent_resolved = LabelAlign::center;
+            else if (v == 2) parent_resolved = LabelAlign::right;
+            else if (v == 3) parent_resolved = LabelAlign::auto_;
+            else if (v == 4) parent_resolved = LabelAlign::justify;
+            else             parent_resolved = LabelAlign::left;
+            break;
+        }
+        effective = parent_resolved;
+    }
+    // pulp #1434 — `auto` is writing-direction-relative; Pulp is LTR-only for
+    // now, so `auto` degrades to `left`.
+    if (effective == LabelAlign::auto_) effective = LabelAlign::left;
+    return effective;
+}
+
 void Label::paint_attributed_(canvas::Canvas& canvas) {
     const auto& spans = attributed_runs_.spans();
     if (spans.empty()) return;
@@ -550,8 +590,22 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
     // web-compat nested <span> path.
     const float fs = spans.front().font_size;
     const float baseline = bounds().height * 0.5f + fs * 0.32f;
+    // Each span is drawn left-anchored at an explicit x, so honor text-align
+    // by shifting the STARTING x rather than the canvas anchor (which only
+    // positions a single draw call). Measure the full run first. (Codex #3336.)
     canvas.set_text_align(canvas::TextAlign::left);
+    float total = 0.0f;
+    for (const auto& s : spans) {
+        const std::string fam = s.font_family.empty() ? std::string("Inter") : s.font_family;
+        canvas.set_font_full(fam, s.font_size, s.font_weight, s.italic ? 1 : 0, s.letter_spacing);
+        total += canvas.measure_text(s.text);
+    }
     float x = 0.0f;
+    switch (resolve_effective_align_()) {
+        case LabelAlign::center: x = (bounds().width - total) * 0.5f; break;
+        case LabelAlign::right:  x = bounds().width - total; break;
+        default: break;  // left / justify → leading edge at 0
+    }
     for (const auto& s : spans) {
         const std::string fam = s.font_family.empty() ? std::string("Inter") : s.font_family;
         canvas.set_font_full(fam, s.font_size, s.font_weight, s.italic ? 1 : 0, s.letter_spacing);
@@ -734,85 +788,10 @@ void Label::paint(canvas::Canvas& canvas) {
             break;
     }
 
-    // issue-969: text-align cascade. Own value wins, otherwise inherited.
-    LabelAlign effective_text_align = text_align_;
-    if (!has_own_text_align_) {
-        if (auto inh = inheritable_text_align(); inh.has_value()) {
-            int v = inh.value();
-            if (v == 1) effective_text_align = LabelAlign::center;
-            else if (v == 2) effective_text_align = LabelAlign::right;
-            else if (v == 3) effective_text_align = LabelAlign::auto_;
-            else if (v == 4) effective_text_align = LabelAlign::justify;
-            else if (v == 5) effective_text_align = LabelAlign::match_parent;
-            else effective_text_align = LabelAlign::left;
-        }
-    }
-
-    // pulp #1434 — resolve `match-parent` at paint time. CSS spec: the
-    // computed value matches the parent's resolved `text-align`. We walk
-    // the View parent chain via `inheritable_text_align()` starting from
-    // `parent_` (NOT the Label itself — the Label's own value IS
-    // match-parent, which would loop). If no ancestor set a value, fall
-    // back to `left` (the CSS spec default for `text-align`).
-    //
-    // If the parent's resolved value is itself `start`/`end` (encoded as
-    // `left`/`right` here since pulp aliases them at the setter), the
-    // existing LTR-only writing-direction policy applies — same as `auto`.
-    if (effective_text_align == LabelAlign::match_parent) {
-        // Walk ancestor chain manually, skipping any intermediate
-        // View whose own inh_text_align_ is also 5 (match-parent).
-        // `View::inheritable_text_align()` is unsuitable here because
-        // it returns the first SET value, not the first NON-match-parent
-        // value — if the immediate parent is also match-parent, the
-        // walk has to continue. Codex P1 on PR #1879 (2026-05-12).
-        //
-        // Example chain we now resolve correctly:
-        //   grandparent  text-align: center        (slot = 1)
-        //   parent       text-align: match-parent  (slot = 5)
-        //   child Label  text-align: match-parent  → renders center
-        //
-        // Previous code stopped at parent.inheritable_text_align()
-        // returning 5 and degraded to `left`.
-        LabelAlign parent_resolved = LabelAlign::left;
-        for (auto* anc = parent(); anc != nullptr; anc = anc->parent()) {
-            auto inh = anc->inheritable_text_align();
-            if (!inh.has_value()) continue;
-            int v = inh.value();
-            if (v == 5) {
-                // Intermediate match-parent ancestor — keep walking.
-                // Note: `inheritable_text_align()` already walks up
-                // until it finds a SET value. We need the loop here
-                // because the SET value might itself be 5; we want
-                // the first non-5 SET value in the chain.
-                //
-                // To skip past this anc's own slot in the next
-                // iteration, we must continue from its parent and
-                // re-enter inheritable_text_align() — but since
-                // inheritable walks again from there, we need to
-                // explicitly bypass anc's slot. Easiest: peek at
-                // anc->parent() directly and re-loop.
-                continue;
-            }
-            if      (v == 1) parent_resolved = LabelAlign::center;
-            else if (v == 2) parent_resolved = LabelAlign::right;
-            else if (v == 3) parent_resolved = LabelAlign::auto_;
-            else if (v == 4) parent_resolved = LabelAlign::justify;
-            else             parent_resolved = LabelAlign::left;
-            break;
-        }
-        // If every ancestor stored 5 (or no ancestor set anything),
-        // CSS spec says fall back to `start` ≡ `left` under LTR.
-        effective_text_align = parent_resolved;
-    }
-
-    // pulp #1434 — resolve `auto` at paint time. `auto` is CSS
-    // writing-direction-relative: LTR → left, RTL → right. Pulp doesn't
-    // model RTL yet (yoga/direction is still NOT-IMPL), so `auto`
-    // currently degrades to `left`. When RTL lands, this becomes a
-    // lookup against the writing-direction context.
-    if (effective_text_align == LabelAlign::auto_) {
-        effective_text_align = LabelAlign::left;
-    }
+    // issue-969 / pulp #1434 — text-align cascade with `auto` + `match-parent`
+    // fully resolved. Shared with paint_attributed_() so per-range styled text
+    // honors the same alignment. (Codex #3336.)
+    const LabelAlign effective_text_align = resolve_effective_align_();
 
     float x = 0;
     switch (effective_text_align) {
