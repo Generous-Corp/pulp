@@ -27,6 +27,18 @@ set -u
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
 
+# Git exports GIT_DIR / GIT_WORK_TREE (and friends) into hook environments.
+# A set GIT_DIR OVERRIDES `git -C <dir>` repository discovery, so any test the
+# downstream gates run via ctest (e.g. local_diff_cover.sh) that shells out to
+# `git -C <tempdir> …` would silently operate on THIS worktree's repo instead —
+# committing fixtures, creating throwaway branches, and flipping core.bare in
+# the shared config. Scrub the inherited git environment now that we've cd'd to
+# the worktree root; the hook's own later `git` calls rediscover the repo from
+# cwd. (Root-caused after a full-suite ctest under this hook corrupted a live
+# worktree — see tools/scripts/local_diff_cover.sh and test_mcp_server.cpp.)
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_COMMON_DIR GIT_PREFIX GIT_NAMESPACE GIT_QUARANTINE_PATH
+
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
     exit 0

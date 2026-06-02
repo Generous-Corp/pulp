@@ -65,6 +65,36 @@ if(NOT _pulp_rs_cargo_version_result EQUAL 0)
     return()
 endif()
 
+# `cargo` can be present without a working `rustc` — a partial Rust install
+# (e.g. a Homebrew `cargo` with no rustup toolchain, or a CI runner where the
+# toolchain was never completed). `cargo --version` still succeeds in that
+# state, but `cargo build` then hard-fails with
+# `error: could not execute process \`rustc -vV\``. Verify rustc is both found
+# AND runnable so an incomplete toolchain SKIPS the experimental CLI instead of
+# breaking the whole build (this is what wedged the required macOS CI lane).
+find_program(RUSTC_EXECUTABLE rustc
+    HINTS "$ENV{HOME}/.cargo/bin" "$ENV{USERPROFILE}/.cargo/bin")
+
+if(NOT RUSTC_EXECUTABLE)
+    message(STATUS
+        "pulp-rs: skipped (cargo found at ${CARGO_EXECUTABLE} but rustc is not "
+        "on PATH — incomplete Rust toolchain; run `rustup default stable` or "
+        "set PULP_SKIP_RUST_CLI=1 to silence this message)")
+    return()
+endif()
+
+execute_process(
+    COMMAND "${RUSTC_EXECUTABLE}" --version
+    RESULT_VARIABLE _pulp_rs_rustc_version_result
+    OUTPUT_QUIET ERROR_QUIET)
+
+if(NOT _pulp_rs_rustc_version_result EQUAL 0)
+    message(STATUS
+        "pulp-rs: skipped (rustc at ${RUSTC_EXECUTABLE} is not runnable; "
+        "set PULP_SKIP_RUST_CLI=1 to silence this message)")
+    return()
+endif()
+
 # Pick the Cargo profile. Default to release for installable
 # artifacts; let the build matrix override via PULP_RUST_CLI_PROFILE
 # (e.g. "debug" for faster CI iteration where binary speed doesn't

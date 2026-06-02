@@ -47,6 +47,18 @@ CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 HTML_REPORT="${TMPDIR:-/tmp}/diff-cover.html"
 
+# Scrub any inherited git environment. When this script runs from a git hook
+# (e.g. pre-push) or another git-invoked context, GIT_DIR / GIT_WORK_TREE are
+# set — and a set GIT_DIR OVERRIDES `git -C <dir>` discovery, so the test
+# binaries ctest runs below (which shell out to `git -C <tempdir> …`) would
+# operate on THIS worktree's repo instead of their throwaway temp repos,
+# corrupting it (stray "initial" commits, throwaway branches, core.bare flips).
+# This script discovers the repo from cwd, so unsetting these is also correct
+# for its own `git`/diff-cover calls. Root-caused: a full-suite ctest under the
+# pre-push hook mutated a live worktree's .git.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_COMMON_DIR GIT_PREFIX GIT_NAMESPACE GIT_QUARANTINE_PATH
+
 # ── PULP_SKIP_DIFF_COVER bypass ─────────────────────────────────────────────
 # Honor PULP_SKIP_DIFF_COVER=1 before doing ANY other work (no config
 # read, no dep check) so a workflow-only or doc-only PR can bypass even
