@@ -166,6 +166,13 @@ struct IRLayout {
     std::optional<std::string> overflow_y;
     SizingMode width_mode = SizingMode::fixed;
     SizingMode height_mode = SizingMode::fixed;
+    // Figma-style resize CONSTRAINTS, normalized to a small token set and mapped
+    // onto flex/position at codegen (margin:auto / flex-grow / align-self), never
+    // a new layout primitive. Horizontal: left | right | center | scale |
+    // stretch (pin both edges). Vertical: top | bottom | center | scale |
+    // stretch. Empty = unconstrained (the flex default, anchored start).
+    std::optional<std::string> h_constraint;
+    std::optional<std::string> v_constraint;
 };
 
 /// Audio widget type detected from naming conventions or annotations.

@@ -361,6 +361,34 @@ so codegen lowers it like any other path. Key facts / gotchas:
   `codegen: handled`) + the `[object-coverage]` drift guard + the
   `[view][import][codegen][vector]` tests.
 
+### Figma resize constraints → flex/position
+
+Figma layout **constraints** (a node's resize behavior relative to its parent)
+parse into `IRLayout.h_constraint` / `v_constraint` (normalized tokens
+`left|right|center|scale|stretch` and `top|bottom|center|scale|stretch`) and
+lower to flex at codegen. Facts / gotchas:
+
+- **Parse** (`design_ir_json.cpp`, `parse_ir_node`): reads `constraints:
+  {horizontal, vertical}` at node level, also under a `figma{}` block, also
+  inside `layout{}` — first non-empty wins. Figma's `MIN/MAX/CENTER/STRETCH/
+  SCALE` normalize to the token set (`normalize_h_constraint` /
+  `normalize_v_constraint`); unrecognized → unset. Source-agnostic.
+- **Codegen map** (`design_codegen.cpp`, `emit_layout_constraints`, folded into
+  `emit_position_if_absolute` so it fires at every create site, depth>0 only):
+  `center` → `margin_left/right` (or `top/bottom`) `'auto'`; `right`/`bottom` →
+  leading `margin_*: 'auto'` (push to trailing edge); `scale` → `flex_grow:1`;
+  `stretch` (pin both edges) → `align_self:'stretch'`; `left`/`top` → flex
+  default (emit nothing). The bridge `setFlex` accepts `'auto'` only for
+  `margin_*` (not padding).
+- **Best-effort, hence `codegen: partial`**: axis-exact `scale`/`stretch`
+  depends on the parent's main axis, which the child doesn't carry. Stays inside
+  Flexbox primitives — do NOT add block/table/float to make it axis-perfect
+  (CLAUDE.md "Layout Model — Flex + Grid only").
+- Native arm only so far; web-compat (`generate_node`) constraint emission is a
+  follow-up. `compat.json features.constraints` tracks this (parsed handled,
+  codegen partial); `features` rows are documented-only (not probed by the
+  `[object-coverage]` drift guard). Tests: `[view][import][constraints]`.
+
 ### Interactive (turnable) sprite knobs — `--knob-style sprite`
 
 `--knob-style sprite` no longer DEMOTES a recognized knob to a static image.

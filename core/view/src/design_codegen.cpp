@@ -410,7 +410,56 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     // nodes whose IRStyle indicates absolute positioning (Figma plugin import
     // lane: children of non-auto-layout frames). The target may be the node
     // id or a wrapper id (e.g. audio-widget col_id).
+    // Map Figma resize CONSTRAINTS (node.layout.h/v_constraint) onto flex within
+    // the parent: center → auto margins both sides; right/bottom → auto margin on
+    // the leading side (pushes to the trailing edge); scale → flex-grow:1 (fill
+    // the main axis); stretch (pin both edges) → align-self:stretch (fill the
+    // cross axis). left/top are the flex default (start-anchored) so they emit
+    // nothing. Stays entirely within Flexbox primitives — no new layout engine.
+    auto emit_layout_constraints = [&](const std::string& target_id) {
+        if (depth == 0) return;  // the root is not laid out within a parent
+        const auto& L = node.layout;
+        bool grow_done = false, stretch_done = false;
+        auto grow = [&] {
+            if (grow_done) return;
+            ss << ind << "setFlex('" << target_id << "', 'flex_grow', 1);\n";
+            grow_done = true;
+        };
+        auto stretch = [&] {
+            if (stretch_done) return;
+            ss << ind << "setFlex('" << target_id << "', 'align_self', 'stretch');\n";
+            stretch_done = true;
+        };
+        if (L.h_constraint) {
+            const std::string& h = *L.h_constraint;
+            if (h == "center") {
+                ss << ind << "setFlex('" << target_id << "', 'margin_left', 'auto');\n";
+                ss << ind << "setFlex('" << target_id << "', 'margin_right', 'auto');\n";
+            } else if (h == "right") {
+                ss << ind << "setFlex('" << target_id << "', 'margin_left', 'auto');\n";
+            } else if (h == "scale") {
+                grow();
+            } else if (h == "stretch") {
+                stretch();
+            }
+        }
+        if (L.v_constraint) {
+            const std::string& v = *L.v_constraint;
+            if (v == "center") {
+                ss << ind << "setFlex('" << target_id << "', 'margin_top', 'auto');\n";
+                ss << ind << "setFlex('" << target_id << "', 'margin_bottom', 'auto');\n";
+            } else if (v == "bottom") {
+                ss << ind << "setFlex('" << target_id << "', 'margin_top', 'auto');\n";
+            } else if (v == "scale") {
+                grow();
+            } else if (v == "stretch") {
+                stretch();
+            }
+        }
+    };
+
     auto emit_position_if_absolute = [&](const std::string& target_id) {
+        emit_layout_constraints(target_id);
         const auto& s = node.style;
         if (!s.position || *s.position != "absolute") return;
         ss << ind << "setPosition('" << target_id << "', 'absolute');\n";
@@ -1516,6 +1565,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
     // Generic frame without children (divider, spacer, etc.)
     ss << ind << "createRow('" << id << "', " << pid << ");\n";
+    emit_layout_constraints(id);
     if (node.style.height)
         ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
     else
