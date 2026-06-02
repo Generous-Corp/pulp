@@ -483,12 +483,14 @@ per-range styling. Now:
   stays **codegen partial**. `Label::set_attributed_string` + the `setTextRuns`
   bridge fn are the wiring (offsets are UTF-8 byte offsets, same as the web arm).
 - **Offsets are UTF-8 BYTE offsets** into `text_content`. The Figma exporter
-  converts its per-character `characterStyleOverrides` indices to byte offsets
-  (`len(chars[:i].encode('utf-8'))`, correct for all BMP text); `emit_web_text_runs`
+  builds a UTF-16-code-unit → UTF-8-byte map (`characterStyleOverrides` is
+  UTF-16-indexed: a BMP char is 1 unit, an astral char / emoji is a surrogate
+  pair = 2 units) so a run after an emoji lands on the right byte — a plain
+  code-point slice was off by a byte-position per astral char. `emit_web_text_runs`
   slices by byte and snaps boundaries forward to the next codepoint start
   (continuation bytes are `10xxxxxx`) so a stray mid-codepoint offset never emits
   invalid UTF-8. Tests: `[view][import][text]` (incl. a multibyte case) + the
-  figma exporter python tests.
+  figma exporter python tests (incl. an emoji/surrogate-pair case).
 
 ### Design-import IR round-trip + review-hardening gotchas
 

@@ -139,6 +139,19 @@ class TextRunsTest(unittest.TestCase):
         self.assertEqual(runs[0]["start"], 6)   # byte offset (char index would be 5)
         self.assertEqual(runs[0]["end"], 11)
 
+    def test_astral_emoji_offsets_use_utf16_to_byte_map(self):
+        # "A😀B": the emoji is 2 UTF-16 code units (a surrogate pair) and 4 UTF-8
+        # bytes. characterStyleOverrides is UTF-16-indexed (length 4), so a run
+        # over "B" begins at UTF-16 unit 3 -> byte offset 5 (A=1 + emoji=4), not
+        # code-point index 2. Guards the surrogate-pair conversion.
+        n = {"type": "TEXT", "characters": "A\U0001F600B",
+             "characterStyleOverrides": [0, 0, 0, 1],
+             "styleOverrideTable": {"1": {"fontWeight": 700}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["start"], 5)
+        self.assertEqual(runs[0]["end"], 6)
+
     def test_no_overrides_yields_no_runs(self):
         self.assertEqual(frx.extract_text_runs({"characters": "hi"}), [])
         self.assertEqual(frx.extract_text_runs(
