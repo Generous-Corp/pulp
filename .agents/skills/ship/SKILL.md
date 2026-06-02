@@ -42,9 +42,11 @@ Advisory only — never blocks. Full contract + override knobs in the
 
 | Command | Platform | What It Does |
 |---------|----------|-------------|
-| `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB |
-| `notarize` | macOS only | Submit to Apple notarization, poll, staple |
-| `package` | All | Create .pkg (macOS), NSIS (Windows), APK+AAB (Android) |
+| `sign` | macOS, Windows, Android | Sign plugin bundles or APK/AAB; `--path <file>` signs one explicit `.app`/`.dmg`/bundle |
+| `notarize` | macOS only | Submit to Apple notarization, poll, staple; `--path <file>` notarizes one explicit `.dmg`/`.pkg`/`.app` (repeatable) |
+| `package` | All | Create .pkg/.dmg (macOS), NSIS (Windows), APK+AAB (Android) |
+| `release` | macOS only | One command: sign → package → **notarize + staple the .pkg/.dmg it builds** → verify |
+| `share` | macOS only | One-off: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify a single artifact for sharing |
 | `appcast` | All | Generate Sparkle-compatible XML update feed |
 | `check` | All | Verify signing status of built artifacts |
 
@@ -78,6 +80,54 @@ Before executing any signing, notarization, or packaging action, the `/ship` com
 When invoked via skill trigger (not slash command), apply the same pattern: always show what will happen and confirm before executing.
 
 ## Workflows
+
+### One-off share (macOS): hand a build to a friend, properly signed
+
+When a developer just wants to give someone a working `.app`/`.dmg`/`.pkg` —
+NOT cut a versioned GitHub release — reach for `share`. It is the opinionated
+one-command path and is fully separate from the repo release pipeline.
+
+```bash
+# .app → signs, wraps in a DMG, signs the DMG, notarizes, staples, then runs
+# the exact `spctl -a -t open --context context:primary-signature` Gatekeeper
+# check. Green = the recipient will NOT see "Unnotarized Developer ID".
+pulp ship share MyApp.app --identity "Developer ID Application: Name (TEAMID)"
+
+pulp ship share MyApp.dmg            # already a DMG → skip the wrap step
+pulp ship share Installer.pkg        # pkg assumed installer-signed → notarize only
+pulp ship share MyApp.app --dry-run  # print the plan; sign/notarize nothing
+```
+
+Why this exists: a Developer-ID-signed-but-**unnotarized** DMG is rejected by
+Gatekeeper (`source=Unnotarized Developer ID`). The cert is fine; the gap is
+notarization. `share` closes that gap in one step. Credentials resolve through
+the same chain as `pulp ship notarize` (App Store Connect API key preferred);
+without creds, the notarize step fails loudly rather than shipping unnotarized.
+
+The composable primitives underneath:
+- `pulp ship sign --path <app|dmg|bundle>` — sign exactly one artifact.
+- `pulp ship notarize --path <dmg|pkg|app>` — notarize + staple one artifact (repeatable).
+
+**Do not confuse with the production release.** `share`/`release`/`sign`/
+`notarize` are local developer commands. The versioned GitHub Release (all
+example plugins, appcast, downloads) runs through CI
+(`.github/workflows/sign-and-release.yml`), which does its own
+`codesign` + `pkgbuild`/`productbuild` + `xcrun notarytool submit` +
+`stapler staple` and never calls these CLI subcommands. Changing the CLI
+ship subcommands cannot affect a regular release.
+
+### macOS one-command pipeline: `pulp ship release`
+
+```bash
+pulp ship release --dmg --identity "Developer ID Application: ..."   # standalone app
+pulp ship release --pkg --identity "..."                            # plugin installers
+```
+
+Runs sign → package → notarize → staple as one command. Unlike calling the
+stages by hand, the notarize stage targets the **distributable `.pkg`/`.dmg`
+that packaging produced** (selected by build time), so `release --dmg` leaves a
+Gatekeeper-ready disk image in `artifacts/`, not a signed-but-unnotarized one.
+`--skip-sign` / `--skip-package` / `--skip-notarize` gate stages for CI dry-runs.
 
 ### macOS: Build → Sign → Notarize → Package → Appcast
 

@@ -71,10 +71,13 @@ int cmd_ship(const std::vector<std::string>& args) {
     // ── sign ────────────────────────────────────────────────────────────────
     if (sub == "sign") {
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
+        std::string sign_path;  // --path: sign one explicit artifact (.app/.dmg/bundle)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--path") {
+                if (!take_ship_value(args, i, sub, args[i], sign_path)) return 2;
             } else if (args[i] == "--entitlements") {
                 if (!take_ship_value(args, i, sub, args[i], entitlements)) return 2;
             } else if (args[i] == "--target") {
@@ -161,6 +164,40 @@ int cmd_ship(const std::vector<std::string>& args) {
             std::cerr << "    identity = \"Developer ID Application: Your Name (TEAMID)\"\n\n";
             std::cerr << "  Or run: pulp config set signing.apple.identity \"Developer ID Application: ...\"\n";
             return 1;
+        }
+
+        // --path: sign exactly one artifact instead of auto-scanning the
+        // build dirs. This is the composable primitive behind the one-off
+        // "I built an app/DMG and want to hand it to a friend" flow — point
+        // it at a standalone `.app`, a `.dmg`, or a single plugin bundle.
+        // `.pkg` installers are signed at creation time (`productsign` via
+        // `create_pkg`'s signing_identity), not here, so reject them with a
+        // pointer rather than producing a broken signature.
+        if (!sign_path.empty()) {
+            if (!fs::exists(sign_path)) {
+                std::cerr << "pulp ship sign: --path not found: " << sign_path << "\n";
+                return 1;
+            }
+            auto ext = fs::path(sign_path).extension().string();
+            if (ext == ".pkg") {
+                std::cerr << "pulp ship sign: .pkg installers are signed when created"
+                             " — pass a Developer ID Installer identity to\n"
+                             "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
+                return 1;
+            }
+            // Hardened runtime + secure timestamp are mandatory for
+            // notarization. Entitlements only apply to executables, so we
+            // only attach them for app/plugin bundles, never a `.dmg`.
+            std::cout << "Signing " << fs::path(sign_path).filename().string() << "...\n";
+            const bool is_disk_image = (ext == ".dmg");
+            bool ok = pulp::ship::codesign(
+                sign_path, identity, is_disk_image ? "" : entitlements);
+            if (!ok) {
+                std::cerr << "  FAILED to sign " << sign_path << "\n";
+                return 1;
+            }
+            std::cout << "Signed " << sign_path << "\n";
+            return 0;
         }
 
         int signed_count = 0;
@@ -516,11 +553,16 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string apple_id, team_id, password;
         std::string api_key, api_key_id, api_issuer;
         std::string env_file_override;
+        std::vector<std::string> explicit_paths;  // --path (repeatable)
         bool staple_only = false;
         bool dry_run = false;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--apple-id") {
                 if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
+            } else if (args[i] == "--path") {
+                std::string p;
+                if (!take_ship_value(args, i, sub, args[i], p)) return 2;
+                explicit_paths.push_back(p);
             } else if (args[i] == "--team-id") {
                 if (!take_ship_value(args, i, sub, args[i], team_id)) return 2;
             } else if (args[i] == "--password") {
@@ -539,19 +581,30 @@ int cmd_ship(const std::vector<std::string>& args) {
             else return unknown_ship_arg(sub, args[i]);
         }
 
+        // When --path is given, notarize exactly those artifacts (a
+        // `.dmg`, `.pkg`, `.app`, or zipped bundle) instead of auto-
+        // scanning the plugin build dirs. This is what lets `release`
+        // notarize the distributable it just packaged, and what the
+        // `share` one-shot points at.
         std::vector<std::string> bundles;
-        for (auto dir_name : {"VST3", "CLAP", "AU"}) {
-            auto dir = build_dir / dir_name;
-            if (!fs::exists(dir)) continue;
-            for (auto& entry : fs::directory_iterator(dir)) {
-                auto ext = entry.path().extension().string();
-                if (ext == ".vst3" || ext == ".clap" || ext == ".component")
-                    bundles.push_back(entry.path().string());
+        if (!explicit_paths.empty()) {
+            bundles = explicit_paths;
+        } else {
+            for (auto dir_name : {"VST3", "CLAP", "AU"}) {
+                auto dir = build_dir / dir_name;
+                if (!fs::exists(dir)) continue;
+                for (auto& entry : fs::directory_iterator(dir)) {
+                    auto ext = entry.path().extension().string();
+                    if (ext == ".vst3" || ext == ".clap" || ext == ".component")
+                        bundles.push_back(entry.path().string());
+                }
             }
         }
 
         if (bundles.empty() && !dry_run) {
-            std::cerr << "No plugin bundles found.\n";
+            std::cerr << (explicit_paths.empty()
+                              ? "No plugin bundles found.\n"
+                              : "No --path artifacts to notarize.\n");
             return 1;
         }
 
@@ -782,6 +835,16 @@ int cmd_ship(const std::vector<std::string>& args) {
 
         // Stage 2: package. The pkg vs dmg decision lives in cmd_ship
         // 'package' itself (item 7.5 wiring below).
+        //
+        // We notarize the *distributable* (the `.dmg`/`.pkg` this stage
+        // produces), not the loose plugin bundles — otherwise `release
+        // --dmg` would emit a signed-but-unnotarized disk image and the
+        // command name would be a lie (Gatekeeper rejects it with
+        // "Unnotarized Developer ID"). Stamp the time before packaging so
+        // we can tell freshly-built artifacts from stale ones left in
+        // artifacts/ by an earlier run.
+        std::vector<std::string> release_artifacts;
+        auto pkg_t0 = fs::file_time_type::clock::now();
         if (!skip_package) {
             std::cout << "── Stage 2/4: package ─────────────────────────────\n";
             std::vector<std::string> pkg_args = {"package"};
@@ -796,6 +859,17 @@ int cmd_ship(const std::vector<std::string>& args) {
                 std::cerr << "pulp ship release: package stage failed; "
                              "aborting before notarize.\n";
                 return pkg_rc;
+            }
+            auto artifacts = root / "artifacts";
+            if (fs::exists(artifacts)) {
+                for (auto& entry : fs::directory_iterator(artifacts)) {
+                    auto ext = entry.path().extension().string();
+                    if (ext != ".dmg" && ext != ".pkg") continue;
+                    std::error_code ec;
+                    auto mtime = fs::last_write_time(entry.path(), ec);
+                    if (!ec && mtime >= pkg_t0)
+                        release_artifacts.push_back(entry.path().string());
+                }
             }
         } else {
             std::cout << "── Stage 2/4: package (SKIPPED) ───────────────────\n";
@@ -824,6 +898,17 @@ int cmd_ship(const std::vector<std::string>& args) {
         if (!apple_id.empty()) { nz_args.push_back("--apple-id"); nz_args.push_back(apple_id); }
         if (!team_id.empty())  { nz_args.push_back("--team-id");  nz_args.push_back(team_id); }
         if (!password.empty()) { nz_args.push_back("--password"); nz_args.push_back(password); }
+        // Notarize + staple the distributable artifact(s) when packaging
+        // produced any. Falling back to the notarize handler's own bundle
+        // scan only when packaging was skipped keeps `--skip-package`
+        // working for plugin-only flows.
+        if (!release_artifacts.empty()) {
+            for (auto& a : release_artifacts) {
+                nz_args.push_back("--path");
+                nz_args.push_back(a);
+                std::cout << "  artifact: " << fs::path(a).filename().string() << "\n";
+            }
+        }
         int nz_rc = cmd_ship(nz_args);
         if (nz_rc != 0) {
             std::cerr << "pulp ship release: notarize stage failed.\n";
@@ -1127,6 +1212,193 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 0;
     }
 
+    // ── share ─────────────────────────────────────────────────────────────
+    //
+    // Opinionated one-shot for the "I built something cool and want to hand
+    // it to a friend / put it on a TestFlight-style page" case — point it at
+    // a standalone `.app`, a `.dmg`, or a `.pkg` and it produces a signed,
+    // notarized, stapled, Gatekeeper-accepted distributable without the full
+    // repo release pipeline. Built on the `sign --path` / `notarize --path`
+    // primitives:
+    //
+    //   .app  → codesign (hardened runtime) → wrap in DMG → codesign DMG →
+    //           notarize+staple DMG → spctl verify
+    //   .dmg  → codesign DMG → notarize+staple → spctl verify
+    //   .pkg  → notarize+staple (already productsigned) → spctl verify
+    //
+    // The final `spctl` is the exact check a downloader's Gatekeeper runs, so
+    // a green result here means the friend will not see "Unnotarized
+    // Developer ID". `--dry-run` prints the plan without touching anything.
+    if (sub == "share") {
+#ifndef __APPLE__
+        std::cerr << "pulp ship share: macOS-only (codesign + notarization + DMG).\n";
+        return 1;
+#else
+        std::string input, identity, version, output_dir, entitlements;
+        std::string api_key, api_key_id, api_issuer, apple_id, team_id, password;
+        bool dry_run = false;
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--identity") {
+                if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--version") {
+                if (!take_ship_value(args, i, sub, args[i], version)) return 2;
+            } else if (args[i] == "--output") {
+                if (!take_ship_value(args, i, sub, args[i], output_dir)) return 2;
+            } else if (args[i] == "--entitlements") {
+                if (!take_ship_value(args, i, sub, args[i], entitlements)) return 2;
+            } else if (args[i] == "--api-key") {
+                if (!take_ship_value(args, i, sub, args[i], api_key)) return 2;
+            } else if (args[i] == "--api-key-id") {
+                if (!take_ship_value(args, i, sub, args[i], api_key_id)) return 2;
+            } else if (args[i] == "--api-issuer") {
+                if (!take_ship_value(args, i, sub, args[i], api_issuer)) return 2;
+            } else if (args[i] == "--apple-id") {
+                if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
+            } else if (args[i] == "--team-id") {
+                if (!take_ship_value(args, i, sub, args[i], team_id)) return 2;
+            } else if (args[i] == "--password") {
+                if (!take_ship_value(args, i, sub, args[i], password)) return 2;
+            } else if (args[i] == "--dry-run") {
+                dry_run = true;
+            } else if (!args[i].empty() && args[i][0] != '-' && input.empty()) {
+                input = args[i];
+            } else {
+                return unknown_ship_arg(sub, args[i]);
+            }
+        }
+
+        if (input.empty()) {
+            std::cerr <<
+                "Usage: pulp ship share <app-or-dmg-or-pkg> [--identity \"...\"]\n"
+                "                       [--version X.Y.Z] [--output <dir>]\n"
+                "                       [notarization creds] [--dry-run]\n"
+                "Signs, notarizes, staples, and Gatekeeper-verifies a single\n"
+                "artifact for sharing. .app inputs are wrapped in a DMG first.\n";
+            return 2;
+        }
+        if (!fs::exists(input)) {
+            std::cerr << "pulp ship share: not found: " << input << "\n";
+            return 1;
+        }
+        auto ext = fs::path(input).extension().string();
+        if (ext != ".app" && ext != ".dmg" && ext != ".pkg") {
+            std::cerr << "pulp ship share: unsupported input '" << ext
+                      << "' — expected .app, .dmg, or .pkg.\n";
+            return 2;
+        }
+
+        if (version.empty()) version = read_project_cmake_version(root);
+        if (version.empty()) version = PULP_SDK_VERSION;
+        identity = ship_config(identity, "PULP_SIGN_IDENTITY",
+                               "signing.apple", "identity");
+        if (entitlements.empty()) {
+            auto def = root / "ship" / "templates" / "entitlements.plist";
+            if (fs::exists(def)) entitlements = def.string();
+        }
+
+        auto artifacts = output_dir.empty() ? (root / "artifacts")
+                                            : fs::path(output_dir);
+        auto stem = fs::path(input).stem().string();
+        auto dmg_target = (artifacts / (stem + "-" + version + ".dmg")).string();
+
+        if (dry_run) {
+            std::cout << "pulp ship share plan for " << input << ":\n";
+            if (ext == ".app") {
+                std::cout << "  1. codesign (hardened runtime) " << input << "\n"
+                          << "  2. create DMG → " << dmg_target << "\n"
+                          << "  3. codesign DMG\n"
+                          << "  4. notarize --path <DMG> + staple\n"
+                          << "  5. spctl -a -t open --context context:primary-signature -vv <DMG>\n";
+            } else if (ext == ".dmg") {
+                std::cout << "  1. codesign (hardened runtime) " << input << "\n"
+                          << "  2. notarize --path " << input << " + staple\n"
+                          << "  3. spctl -a -t open --context context:primary-signature -vv " << input << "\n";
+            } else {
+                std::cout << "  1. notarize --path " << input
+                          << " + staple  (.pkg already productsigned)\n"
+                          << "  2. spctl --assess --type install -vv " << input << "\n";
+            }
+            std::cout << "  identity: "
+                      << (identity.empty() ? "(unset — required for .app/.dmg)"
+                                           : identity)
+                      << "\n  version : " << version << "\n";
+            std::cout << "(--dry-run: nothing signed, packaged, or notarized)\n";
+            return 0;
+        }
+
+        if (ext != ".pkg" && identity.empty()) {
+            std::cerr << "pulp ship share: a Developer ID Application identity is "
+                         "required to sign a " << ext << ".\n";
+            std::cerr << "  pulp ship share " << input
+                      << " --identity \"Developer ID Application: Name (TEAMID)\"\n";
+            std::cerr << "  Or: pulp config set signing.apple.identity \"...\"\n";
+            return 1;
+        }
+
+        fs::create_directories(artifacts);
+        std::string artifact;  // the distributable we notarize + verify
+        if (ext == ".app") {
+            std::cout << "Signing app " << fs::path(input).filename().string()
+                      << "...\n";
+            if (!pulp::ship::codesign(input, identity, entitlements)) {
+                std::cerr << "  FAILED to codesign " << input << "\n";
+                return 1;
+            }
+            std::cout << "Wrapping into DMG → "
+                      << fs::path(dmg_target).filename().string() << "...\n";
+            if (!pulp::ship::create_dmg(input, dmg_target, stem)) {
+                std::cerr << "  FAILED to create DMG\n";
+                return 1;
+            }
+            std::cout << "Signing DMG...\n";
+            if (!pulp::ship::codesign(dmg_target, identity, "")) {
+                std::cerr << "  FAILED to codesign DMG\n";
+                return 1;
+            }
+            artifact = dmg_target;
+        } else if (ext == ".dmg") {
+            std::cout << "Signing DMG " << fs::path(input).filename().string()
+                      << "...\n";
+            if (!pulp::ship::codesign(input, identity, "")) {
+                std::cerr << "  FAILED to codesign " << input << "\n";
+                return 1;
+            }
+            artifact = input;
+        } else {  // .pkg — installer cert signing happens at build time
+            std::cout << "Using pre-signed .pkg as-is (installer cert).\n";
+            artifact = input;
+        }
+
+        std::vector<std::string> nz_args = {"notarize", "--path", artifact};
+        if (!api_key.empty())    { nz_args.push_back("--api-key");    nz_args.push_back(api_key); }
+        if (!api_key_id.empty()) { nz_args.push_back("--api-key-id"); nz_args.push_back(api_key_id); }
+        if (!api_issuer.empty()) { nz_args.push_back("--api-issuer"); nz_args.push_back(api_issuer); }
+        if (!apple_id.empty())   { nz_args.push_back("--apple-id");   nz_args.push_back(apple_id); }
+        if (!team_id.empty())    { nz_args.push_back("--team-id");    nz_args.push_back(team_id); }
+        if (!password.empty())   { nz_args.push_back("--password");   nz_args.push_back(password); }
+        int nz_rc = cmd_ship(nz_args);
+        if (nz_rc != 0) {
+            std::cerr << "pulp ship share: notarization failed.\n";
+            return nz_rc;
+        }
+
+        std::cout << "Verifying Gatekeeper acceptance...\n";
+        std::string verify_cmd = (ext == ".pkg")
+            ? "spctl --assess --type install -vv " + shell_quote(artifact)
+            : "spctl -a -t open --context context:primary-signature -vv "
+              + shell_quote(artifact);
+        if (run(verify_cmd) == 0) {
+            std::cout << "\n✓ " << fs::path(artifact).filename().string()
+                      << " is signed, notarized, stapled, and Gatekeeper-accepted.\n"
+                      << "  Ready to share: " << artifact << "\n";
+            return 0;
+        }
+        std::cerr << "\n✗ Gatekeeper did not accept " << artifact
+                  << " — inspect the spctl output above.\n";
+        return 1;
+#endif
+    }
+
     if (sub != "help" && sub != "--help" && sub != "-h") {
         std::cerr << "pulp ship: unknown subcommand: " << sub << "\n";
         return 2;
@@ -1137,10 +1409,12 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "Subcommands:\n";
     std::cout << "  sign       Sign plugin bundles or Android artifacts\n";
     std::cout << "             --identity \"Developer ID Application: ...\"  (macOS/Windows)\n";
+    std::cout << "             --path <app|dmg|bundle>  (sign one explicit artifact)\n";
     std::cout << "             --target android --keystore key.jks  (Android)\n";
     std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
     std::cout << "             --api-key <p8> --api-key-id <id> --api-issuer <uuid>   (preferred)\n";
     std::cout << "             --apple-id you@example.com --team-id ABCDE12345        (legacy)\n";
+    std::cout << "             --path <dmg|pkg|app>  (notarize+staple an explicit artifact; repeatable)\n";
     std::cout << "             --env-file <path>  (override ~/.config/pulp/secrets/notary.env)\n";
     std::cout << "             --staple   (staple only, skip submission)\n";
     std::cout << "             --dry-run  (print resolved notarytool argv, no submission)\n";
@@ -1150,8 +1424,11 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
-    std::cout << "             --pkg | --dmg                                       (item 7.5)\n";
+    std::cout << "             --pkg | --dmg   (notarizes the .pkg/.dmg it builds)   (item 7.5)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
+    std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
+    std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [creds]\n";
+    std::cout << "             --dry-run  (print the plan without doing anything)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
     std::cout << "  check      Check signing status of built plugins\n";

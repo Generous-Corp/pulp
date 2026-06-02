@@ -290,7 +290,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(r.exit_code == 0);
     // Help branch reached — every shipping subcommand must be listed.
     for (const char* sub : {"sign", "notarize", "package", "appcast",
-                            "check", "auv3-xcodeproj"}) {
+                            "check", "auv3-xcodeproj", "release", "share"}) {
         INFO("ship help missing subcommand: " << sub);
         REQUIRE(contains(r.stdout_output, sub));
     }
@@ -395,6 +395,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     };
     std::vector<ParserCase> cases = {
         {{"ship", "sign", "--identity"}, "--identity requires a value"},
+        {{"ship", "sign", "--path"}, "--path requires a value"},
         {{"ship", "sign", "--bogus"}, "unknown argument"},
         {{"ship", "package", "--version"}, "--version requires a value"},
         {{"ship", "package", "--abi"}, "--abi requires a value"},
@@ -410,6 +411,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "notarize", "--apple-id"}, "--apple-id requires a value"},
         {{"ship", "notarize", "--team-id"}, "--team-id requires a value"},
         {{"ship", "notarize", "--password"}, "--password requires a value"},
+        {{"ship", "notarize", "--path"}, "--path requires a value"},
         {{"ship", "notarize", "--bogus"}, "unknown argument"},
         {{"ship", "release", "--target"}, "--target requires a value"},
         {{"ship", "release", "--identity"}, "--identity requires a value"},
@@ -417,6 +419,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         {{"ship", "release", "--team-id"}, "--team-id requires a value"},
         {{"ship", "release", "--password"}, "--password requires a value"},
         {{"ship", "release", "--version"}, "--version requires a value"},
+        {{"ship", "share", "--identity"}, "--identity requires a value"},
+        {{"ship", "share", "--version"}, "--version requires a value"},
+        {{"ship", "share", "--bogus"}, "unknown argument"},
     });
 #endif
 
@@ -1103,3 +1108,219 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 #endif
+
+// ── one-off signing/notarization primitives (sign --path, notarize --path,
+//    release-notarizes-the-dmg, share) ────────────────────────────────────
+//
+// These cover the "a developer built an app/DMG and wants to hand it to a
+// friend, signed + notarized, without the full repo release pipeline" flow.
+// The success paths call real `codesign`/`notarytool`/`spctl` and need Apple
+// credentials, so the automated coverage exercises the argument plumbing,
+// guard rails, and dry-run plans that run without contacting Apple.
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign --path rejects a missing artifact",
+                 "[cli][shellout][ship][sign][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("sign-path-missing", true);
+
+    auto r = run_pulp_in(root,
+        {"ship", "sign", "--identity", "Developer ID Application: Fake",
+         "--path", (root / "does-not-exist.app").string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "--path not found"));
+    // Must not have attempted to scan/sign the build dirs.
+    REQUIRE_FALSE(contains(combined, "No plugin bundles found"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign --path refuses a .pkg with a productsign pointer",
+                 "[cli][shellout][ship][sign][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("sign-path-pkg", true);
+    auto pkg = root / "Installer.pkg";
+    { std::ofstream out(pkg); out << "not a real pkg"; }
+
+    auto r = run_pulp_in(root,
+        {"ship", "sign", "--identity", "Developer ID Application: Fake",
+         "--path", pkg.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, ".pkg installers are signed when created"));
+
+    fs::remove_all(root);
+}
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize --path targets the explicit artifact in dry-run argv",
+                 "[cli][shellout][ship][notarize][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("notarize-path", true);
+    auto dmg = (root / "PulpDemo-1.2.3.dmg").string();
+
+    auto r = run_pulp_in(root,
+        {"ship", "notarize", "--dry-run", "--path", dmg,
+         "--api-key", "/path/AuthKey_FAKE.p8",
+         "--api-key-id", "FAKEKEYID", "--api-issuer", "fake-issuer"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    // The submit argv must point at our explicit artifact, not a scanned bundle.
+    REQUIRE(contains(combined, "xcrun notarytool submit \"" + dmg + "\""));
+    REQUIRE(contains(combined, "PulpDemo-1.2.3.dmg"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship release --dmg notarizes the disk image it builds",
+                 "[cli][shellout][ship][release][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("release-dmg-notarize", true);
+    // A standalone .app under build/Standalone is packaged to a .dmg by the
+    // package stage; release must then hand THAT dmg to notarize via --path.
+    auto app = root / "build" / "Standalone" / "PulpDemo.app";
+    fs::create_directories(app / "Contents");
+    { std::ofstream out(app / "Contents" / "Info.plist");
+      out << "<plist><dict></dict></plist>\n"; }
+
+    // No notary credentials are configured (fixture isolates them), so the
+    // notarize stage fails *after* the dmg is built and selected — which is
+    // exactly the signal we assert on: the dmg reached the notarize step.
+    auto r = run_pulp_in(root, {"ship", "release", "--dmg", "--skip-sign"}, 90000);
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO("release output:\n" << combined);
+    REQUIRE(r.exit_code != 0);
+    // The built dmg was collected and routed to notarization...
+    REQUIRE(contains(combined, "artifact: PulpDemo-2.3.4.dmg"));
+    // ...and notarization stopped on missing credentials, not on "no bundles".
+    REQUIRE(contains(combined, "no notary credentials"));
+    REQUIRE_FALSE(contains(combined, "No plugin bundles found"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share requires an input artifact",
+                 "[cli][shellout][ship][share][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("share-usage", true);
+
+    auto r = run_pulp_in(root, {"ship", "share"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(contains(r.stdout_output + r.stderr_output,
+                     "Usage: pulp ship share"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share rejects a missing and an unsupported input",
+                 "[cli][shellout][ship][share][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("share-bad-input", true);
+
+    auto missing = run_pulp_in(root,
+        {"ship", "share", (root / "ghost.app").string()});
+    REQUIRE_FALSE(missing.timed_out);
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE(contains(missing.stdout_output + missing.stderr_output, "not found"));
+
+    auto bad = root / "notes.txt";
+    { std::ofstream out(bad); out << "x"; }
+    auto unsupported = run_pulp_in(root, {"ship", "share", bad.string()});
+    REQUIRE_FALSE(unsupported.timed_out);
+    REQUIRE(unsupported.exit_code == 2);
+    REQUIRE(contains(unsupported.stdout_output + unsupported.stderr_output,
+                     "unsupported input"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share --dry-run prints the full plan for an app",
+                 "[cli][shellout][ship][share][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("share-dry-app", true);
+    auto app = root / "Cube.app";
+    fs::create_directories(app / "Contents");
+    { std::ofstream out(app / "Contents" / "Info.plist");
+      out << "<plist><dict></dict></plist>\n"; }
+
+    auto r = run_pulp_in(root,
+        {"ship", "share", app.string(), "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "share plan"));
+    REQUIRE(contains(combined, "create DMG"));
+    REQUIRE(contains(combined, "notarize --path"));
+    REQUIRE(contains(combined, "spctl -a -t open"));
+    // Version falls back to the project CMakeLists value (2.3.4).
+    REQUIRE(contains(combined, "Cube-2.3.4.dmg"));
+    // Nothing was actually performed.
+    REQUIRE_FALSE(contains(combined, "Wrapping into DMG"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share --dry-run notes pkg is already productsigned",
+                 "[cli][shellout][ship][share][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("share-dry-pkg", true);
+    auto pkg = root / "Demo.pkg";
+    { std::ofstream out(pkg); out << "x"; }
+
+    auto r = run_pulp_in(root, {"ship", "share", pkg.string(), "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "already productsigned"));
+    REQUIRE(contains(combined, "spctl --assess --type install"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share without an identity refuses to sign an app",
+                 "[cli][shellout][ship][share][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("share-no-identity", true);
+    auto app = root / "Cube.app";
+    fs::create_directories(app / "Contents");
+    { std::ofstream out(app / "Contents" / "Info.plist");
+      out << "<plist><dict></dict></plist>\n"; }
+
+    // Real run (not --dry-run), no identity resolvable (fixture isolation).
+    auto r = run_pulp_in(root, {"ship", "share", app.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "Developer ID Application identity is required"));
+    // Must not have created or signed anything.
+    REQUIRE_FALSE(contains(combined, "Wrapping into DMG"));
+
+    fs::remove_all(root);
+}
+#else  // !__APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship share is macOS-only on other platforms",
+                 "[cli][shellout][ship][share][oneoff]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("share-non-apple", true);
+    auto r = run_pulp_in(root, {"ship", "share", "whatever.app"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stdout_output + r.stderr_output, "macOS-only"));
+    fs::remove_all(root);
+}
+#endif  // __APPLE__
