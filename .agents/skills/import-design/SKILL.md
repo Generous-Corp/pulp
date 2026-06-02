@@ -447,6 +447,38 @@ only the CSS parser, the View paint dispatch, and the Figma exporter:
   `compat.json features.radial-angular-diamond-gradient`: parsed handled,
   codegen partial.
 
+### Per-range text styles → nested `<span>`s
+
+A text node used to take the FIRST-CHAR dominant style only (one run); mixed
+text (a bold word, a colored span, a different size mid-string) lost its
+per-range styling. Now:
+
+- **IR**: `IRNode.text_runs` — an ordered list of `IRTextRun{start,end +
+  optional font_size/font_weight/font_style/color/letter_spacing/
+  text_decoration}`. `[start,end)` are offsets into `text_content`. The dominant
+  style stays the node default; runs override.
+- **Parse** (`design_ir_json.cpp`): reads a `runs`/`textRuns` array (start/end +
+  the per-run fields, plus `italic:true` → `font_style:"italic"`). Source-
+  agnostic.
+- **Figma export** (`figma_rest_export.py`, `extract_text_runs`): groups
+  consecutive `characterStyleOverrides` ids into ranges and resolves each
+  through `styleOverrideTable` (fontWeight, fontName.style→italic,
+  letterSpacing.value, textDecoration, fills→color). Emitted as the node's
+  `runs`.
+- **Codegen — web (primary)**: `emit_web_text_runs` emits the covered ranges as
+  styled `<span style=…>` children and the gaps as plain `createTextNode` (so
+  gaps inherit the dominant style). Single-run text keeps the plain
+  `.textContent` path (no regression).
+- **Codegen — native (deferred)**: still a single dominant-style `createLabel`.
+  The canvas `AttributedString`/`TextShaper` already supports styled runs, but
+  the `Label` widget doesn't expose them — wiring `Label::set_attributed_string`
+  + a `setRichText` bridge is the follow-up. Hence `compat.json
+  features.text-per-range-styles` = parsed handled, **codegen partial**.
+- **Gotcha**: char offsets are treated as BYTE indices into `text_content`;
+  Figma supplies UTF-16 code-unit indices, so non-ASCII text needs UTF-16→byte
+  conversion (follow-up). Tests use ASCII. Tests: `[view][import][text]` +
+  the figma exporter python tests.
+
 ### Interactive (turnable) sprite knobs — `--knob-style sprite`
 
 `--knob-style sprite` no longer DEMOTES a recognized knob to a static image.

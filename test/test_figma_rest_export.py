@@ -105,5 +105,35 @@ class GradientFillTest(unittest.TestCase):
         self.assertTrue(s.get("background_gradient", "").startswith("linear-gradient("))
 
 
+class TextRunsTest(unittest.TestCase):
+    def test_character_style_overrides_become_runs(self):
+        n = {"type": "TEXT", "characters": "Hello world",
+             "characterStyleOverrides": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+             "styleOverrideTable": {"1": {
+                 "fontWeight": 700,
+                 "fontName": {"family": "Inter", "style": "Bold Italic"},
+                 "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0, "b": 0, "a": 1}}]}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["start"], 6)
+        self.assertEqual(runs[0]["end"], 11)
+        self.assertEqual(runs[0]["fontWeight"], 700)
+        self.assertEqual(runs[0]["fontStyle"], "italic")
+        self.assertTrue(runs[0]["color"].startswith("#"))
+
+    def test_two_distinct_overrides_two_runs(self):
+        n = {"type": "TEXT", "characters": "ab",
+             "characterStyleOverrides": [1, 2],
+             "styleOverrideTable": {"1": {"fontSize": 20}, "2": {"fontSize": 30}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual([(r["start"], r["end"]) for r in runs], [(0, 1), (1, 2)])
+
+    def test_no_overrides_yields_no_runs(self):
+        self.assertEqual(frx.extract_text_runs({"characters": "hi"}), [])
+        self.assertEqual(frx.extract_text_runs(
+            {"characters": "hi", "characterStyleOverrides": [0, 0],
+             "styleOverrideTable": {}}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

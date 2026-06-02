@@ -261,11 +261,29 @@ struct IRProvenance {
     std::string source_uri;  // source identifier (file path, URL, MCP handle)
 };
 
+/// One styled character range inside a text node. Offsets are [start, end)
+/// indices into `IRNode::text_content`. Only the fields a run actually overrides
+/// are set; everything else inherits the node's dominant style. Mixed-style text
+/// (a bold word, a colored span, a different size mid-string) becomes an ordered
+/// list of these so codegen can emit per-range <span>s instead of collapsing to
+/// the first-char dominant style.
+struct IRTextRun {
+    int start = 0;
+    int end = 0;
+    std::optional<float> font_size;
+    std::optional<int> font_weight;
+    std::optional<std::string> font_style;       // "italic" / "normal"
+    std::optional<std::string> color;
+    std::optional<float> letter_spacing;
+    std::optional<std::string> text_decoration;  // "underline" / "line-through"
+};
+
 /// A single node in the normalized design IR.
 struct IRNode {
     std::string type;   // "frame", "text", "image", "button", "input", "slider"
     std::string name;
     std::string text_content;            // For text nodes
+    std::vector<IRTextRun> text_runs;    // Per-range style overrides (mixed text)
     IRStyle style;
     IRLayout layout;
     AudioWidgetType audio_widget = AudioWidgetType::none;

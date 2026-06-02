@@ -4732,6 +4732,65 @@ TEST_CASE("codegen preserves radial/conic background gradients",
     }
 }
 
+TEST_CASE("parse_design_ir_json reads per-range text style runs",
+          "[view][import][text]") {
+    auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "children": [
+            { "type": "text", "name": "T", "content": "Hello world",
+              "runs": [ { "start": 6, "end": 11, "fontWeight": 700,
+                          "color": "#ff0000", "italic": true } ] }
+        ]
+    })json");
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& t = ir.root.children[0];
+    REQUIRE(t.text_runs.size() == 1);
+    CHECK(t.text_runs[0].start == 6);
+    CHECK(t.text_runs[0].end == 11);
+    CHECK(t.text_runs[0].font_weight == 700);
+    CHECK(t.text_runs[0].color == "#ff0000");
+    CHECK(t.text_runs[0].font_style == "italic");
+}
+
+TEST_CASE("web codegen emits per-range text style runs as nested spans",
+          "[view][import][codegen][text]") {
+    // Mixed-style text emits a base span whose covered range becomes a styled
+    // <span> child while the gap inherits the dominant style as plain text.
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Root";
+    ir.root.style.width = 200.0f; ir.root.style.height = 40.0f;
+    IRNode t; t.type = "text"; t.name = "Caption";
+    t.text_content = "Hello world";
+    IRTextRun run; run.start = 6; run.end = 11;  // "world"
+    run.font_weight = 700; run.color = "#ff0000";
+    t.text_runs.push_back(run);
+    ir.root.children.push_back(t);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("createTextNode('Hello ')") != std::string::npos);  // base-styled gap
+    CHECK(js.find("document.createElement('span')") != std::string::npos);
+    CHECK(js.find(".style.fontWeight = '700'") != std::string::npos);
+    CHECK(js.find(".style.color = '#ff0000'") != std::string::npos);
+    CHECK(js.find(".textContent = 'world'") != std::string::npos);
+}
+
+TEST_CASE("single-run text keeps the plain textContent path (no regression)",
+          "[view][import][codegen][text]") {
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Root";
+    IRNode t; t.type = "text"; t.name = "Plain"; t.text_content = "Just text";
+    ir.root.children.push_back(t);
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find(".textContent = 'Just text'") != std::string::npos);
+    CHECK(js.find("createTextNode(") == std::string::npos);  // no run splitting
+}
+
 TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",
           "[view][import][codegen][blend]") {
     // A node's normalized mix_blend_mode lowers to setMixBlendMode (native

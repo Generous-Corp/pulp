@@ -148,6 +148,50 @@ def extract_style(n):
     if n.get("clipsContent") is True: s["overflow"] = "clip"
     return s
 
+def extract_text_runs(n):
+    # Figma per-character style overrides -> ordered IR text runs. Group
+    # consecutive characters that share a non-zero override id into [start,end)
+    # ranges and resolve each id through styleOverrideTable. Char indices are
+    # UTF-16 code units (Figma); for non-ASCII text the consumer's byte-offset
+    # slicing is approximate — a follow-up. Returns [] when no overrides.
+    chars = n.get("characters", "")
+    overrides = n.get("characterStyleOverrides")
+    table = n.get("styleOverrideTable")
+    if not chars or not isinstance(overrides, list) or not isinstance(table, dict):
+        return []
+    runs = []
+    i, L = 0, len(overrides)
+    while i < L:
+        sid = overrides[i]
+        if not sid:           # 0 / falsy = inherits the node's dominant style
+            i += 1; continue
+        j = i
+        while j < L and overrides[j] == sid:
+            j += 1
+        st = table.get(str(sid)) or table.get(sid)
+        if st:
+            run = {"start": i, "end": j}
+            if "fontSize" in st:   run["fontSize"] = st["fontSize"]
+            if "fontWeight" in st: run["fontWeight"] = st["fontWeight"]
+            fn = st.get("fontName") or {}
+            if "italic" in str(fn.get("style", "")).lower():
+                run["fontStyle"] = "italic"
+            ls = st.get("letterSpacing")
+            if isinstance(ls, dict) and "value" in ls:
+                run["letterSpacing"] = ls["value"]
+            td = st.get("textDecoration")
+            if td and td != "NONE":
+                run["textDecoration"] = ("underline" if td == "UNDERLINE"
+                                         else "line-through" if td == "STRIKETHROUGH"
+                                         else str(td).lower())
+            fills = st.get("fills")
+            if isinstance(fills, list) and fills and fills[0].get("type") == "SOLID":
+                run["color"] = paint_to_color(fills[0])
+            if len(run) > 2:  # carries at least one override beyond start/end
+                runs.append(run)
+        i = j
+    return runs
+
 def extract_text_style(n, s):
     st = n.get("style", {})
     if "fontSize" in st: s["font_size"] = st["fontSize"]
@@ -289,6 +333,9 @@ def walk(n, parent, z):
         out["content"] = n.get("characters", "")
         extract_text_style(n, style)
         _record_font(n)
+        runs = extract_text_runs(n)
+        if runs:
+            out["runs"] = runs
 
     # Audio-widget recognition (mirrors importer detect_audio_widget). A
     # knob/fader/meter node is emitted as a recognized leaf widget so the

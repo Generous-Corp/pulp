@@ -117,6 +117,54 @@ static const char* align_to_css(LayoutAlign a) {
     return "flex-start";
 }
 
+// Emit a text node's content as per-range <span>s (web-compat). Runs that
+// override style become styled <span> children; the gaps between them are
+// appended as plain text so they inherit the node's dominant style. Offsets are
+// byte indices into text_content (UTF-16 surrogate handling is a follow-up;
+// callers/tests use byte-safe ranges).
+static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
+                               const std::string& var, const IRNode& node) {
+    const std::string& text = node.text_content;
+    const int n = static_cast<int>(text.size());
+    std::vector<const IRTextRun*> runs;
+    for (const auto& r : node.text_runs)
+        if (r.start < r.end && r.start < n) runs.push_back(&r);
+    std::sort(runs.begin(), runs.end(),
+              [](const IRTextRun* a, const IRTextRun* b) { return a->start < b->start; });
+
+    auto append_plain = [&](int a, int b) {
+        if (b <= a) return;
+        ss << ind << var << ".appendChild(document.createTextNode('"
+           << js_single_quote_escape(text.substr(a, b - a)) << "'));\n";
+    };
+
+    int cursor = 0, idx = 0;
+    for (const auto* r : runs) {
+        int rs = std::max(0, r->start), re = std::min(n, r->end);
+        if (re <= cursor) continue;          // wholly behind cursor (overlap) — skip
+        if (rs < cursor) rs = cursor;        // clip a partial overlap
+        append_plain(cursor, rs);            // base-styled gap before the run
+        const std::string child = var + "_r" + std::to_string(idx++);
+        ss << ind << "const " << child << " = document.createElement('span');\n";
+        if (r->font_weight)
+            ss << ind << child << ".style.fontWeight = '" << *r->font_weight << "';\n";
+        if (r->font_size)
+            ss << ind << child << ".style.fontSize = '" << *r->font_size << "px';\n";
+        if (r->font_style)
+            ss << ind << child << ".style.fontStyle = '" << js_single_quote_escape(*r->font_style) << "';\n";
+        if (r->color)
+            ss << ind << child << ".style.color = '" << js_single_quote_escape(*r->color) << "';\n";
+        if (r->letter_spacing)
+            ss << ind << child << ".style.letterSpacing = '" << *r->letter_spacing << "px';\n";
+        if (r->text_decoration)
+            ss << ind << child << ".style.textDecoration = '" << js_single_quote_escape(*r->text_decoration) << "';\n";
+        ss << ind << child << ".textContent = '" << js_single_quote_escape(text.substr(rs, re - rs)) << "';\n";
+        ss << ind << var << ".appendChild(" << child << ");\n";
+        cursor = re;
+    }
+    append_plain(cursor, n);  // trailing base-styled text
+}
+
 static void generate_node(std::ostringstream& ss, const IRNode& node,
                            const CodeGenOptions& opts, int depth,
                            int& var_counter, const std::string& parent_var) {
@@ -274,8 +322,11 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                             *opts.fidelity_report);
     }
 
-    // Text content
-    if (!node.text_content.empty())
+    // Text content. Mixed-style text (per-range runs) emits nested styled
+    // <span>s; plain single-style text keeps the simple textContent assignment.
+    if (!node.text_runs.empty() && !node.text_content.empty())
+        emit_web_text_runs(ss, ind, var, node);
+    else if (!node.text_content.empty())
         ss << ind << var << ".textContent = '" << js_single_quote_escape(node.text_content) << "';\n";  // pulp #81
 
     // Append to parent

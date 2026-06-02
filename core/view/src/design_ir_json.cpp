@@ -676,6 +676,32 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     node.type = get_string(obj, "type", "frame");
     node.name = get_string(obj, "name");
     node.text_content = get_string(obj, "content");
+    // Per-range text style runs (mixed bold/colored/sized text). Accept `runs`
+    // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
+    // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
+    // any source expressing styled ranges feeds the same IR runs.
+    for (const char* runs_key : {"runs", "textRuns"}) {
+        if (!obj.hasObjectMember(runs_key) || !obj[runs_key].isArray()) continue;
+        const auto runs = obj[runs_key];
+        for (uint32_t i = 0; i < runs.size(); ++i) {
+            const auto r = runs[i];
+            if (!r.isObject()) continue;
+            IRTextRun run;
+            run.start = static_cast<int>(get_float(r, "start"));
+            run.end   = static_cast<int>(get_float(r, "end"));
+            if (run.end <= run.start) continue;
+            if (r.hasObjectMember("fontSize"))   run.font_size = get_float(r, "fontSize");
+            if (r.hasObjectMember("fontWeight"))
+                run.font_weight = static_cast<int>(get_float(r, "fontWeight"));
+            if (r.hasObjectMember("fontStyle"))  run.font_style = get_string(r, "fontStyle");
+            else if (get_bool(r, "italic"))      run.font_style = "italic";
+            if (r.hasObjectMember("color"))      run.color = get_string(r, "color");
+            if (r.hasObjectMember("letterSpacing")) run.letter_spacing = get_float(r, "letterSpacing");
+            if (r.hasObjectMember("textDecoration")) run.text_decoration = get_string(r, "textDecoration");
+            node.text_runs.push_back(std::move(run));
+        }
+        if (!node.text_runs.empty()) break;
+    }
 
     // Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
     // capture the source-native ID so the `adapter` anchor strategy can use
