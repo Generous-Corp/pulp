@@ -4657,6 +4657,62 @@ TEST_CASE("codegen lowers resize constraints to flex within the parent",
     }
 }
 
+TEST_CASE("parse_design_ir_json reads CSS grid container + item placement",
+          "[view][import][grid]") {
+    auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Grid",
+        "layout": { "display": "grid", "gridTemplateColumns": "1fr 1fr",
+                    "gridTemplateRows": "auto", "gridAutoFlow": "row dense", "gap": 8 },
+        "children": [
+            { "type": "frame", "name": "A", "layout": { "gridColumn": "1 / 3", "gridRow": "2" } },
+            { "type": "frame", "name": "B", "layout": { "grid_column": "2" } }
+        ]
+    })json");
+    CHECK(ir.root.layout.display == "grid");
+    CHECK(ir.root.layout.grid_template_columns == "1fr 1fr");
+    CHECK(ir.root.layout.grid_template_rows == "auto");
+    CHECK(ir.root.layout.grid_auto_flow == "row dense");
+    REQUIRE(ir.root.children.size() == 2);
+    CHECK(ir.root.children[0].layout.grid_column == "1 / 3");
+    CHECK(ir.root.children[0].layout.grid_row == "2");
+    CHECK(ir.root.children[1].layout.grid_column == "2");
+}
+
+TEST_CASE("codegen lowers a grid container to the native grid bridge",
+          "[view][import][codegen][grid]") {
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Grid";
+    ir.root.style.width = 300.0f; ir.root.style.height = 200.0f;
+    ir.root.layout.display = "grid";
+    ir.root.layout.grid_template_columns = "1fr 1fr";
+    ir.root.layout.grid_template_rows = "auto auto";
+    ir.root.layout.grid_auto_flow = "row";
+    ir.root.layout.gap = 12.0f;
+    ir.root.layout.justify = LayoutAlign::center;  // flex-only; must NOT be emitted for grid
+    IRNode a; a.type = "frame"; a.name = "A"; a.style.width = 10.0f; a.style.height = 10.0f;
+    a.layout.grid_column = "1 / 3"; a.layout.grid_row = "1";
+    IRNode b; b.type = "frame"; b.name = "B"; b.style.width = 10.0f; b.style.height = 10.0f;
+    b.layout.grid_row = "2";
+    ir.root.children.push_back(a);
+    ir.root.children.push_back(b);
+
+    CodeGenOptions opts;  // bridge_native_js
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    // Container lowers to createGrid (not createCol/createRow) + track template.
+    CHECK(js.find("createGrid(") != std::string::npos);
+    CHECK(js.find("'template_columns', '1fr 1fr')") != std::string::npos);
+    CHECK(js.find("'template_rows', 'auto auto')") != std::string::npos);
+    CHECK(js.find("'auto_flow', 'row')") != std::string::npos);
+    CHECK(js.find("'gap', 12)") != std::string::npos);
+    // Per-item line placement.
+    CHECK(js.find("'column_start', 1)") != std::string::npos);
+    CHECK(js.find("'column_end', 3)") != std::string::npos);
+    CHECK(js.find("'row_start', 2)") != std::string::npos);
+    // Flex alignment is meaningless for a grid container and must be suppressed.
+    CHECK(js.find("justify_content") == std::string::npos);
+}
+
 TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",
           "[view][import][codegen][blend]") {
     // A node's normalized mix_blend_mode lowers to setMixBlendMode (native

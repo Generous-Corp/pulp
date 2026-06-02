@@ -395,6 +395,22 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("heightMode"))
         l.height_mode = parse_sizing(get_string(obj, "heightMode"));
 
+    // CSS Grid (camelCase + snake_case). Stored as raw CSS strings; the codegen
+    // lowers them to createGrid/setGrid. Source-agnostic.
+    auto first_str = [&](std::initializer_list<const char*> keys) -> std::optional<std::string> {
+        for (const char* k : keys)
+            if (obj.hasObjectMember(k)) {
+                auto s = get_string(obj, k);
+                if (!s.empty()) return s;
+            }
+        return std::nullopt;
+    };
+    l.grid_template_columns = first_str({"gridTemplateColumns", "grid_template_columns"});
+    l.grid_template_rows    = first_str({"gridTemplateRows", "grid_template_rows"});
+    l.grid_auto_flow        = first_str({"gridAutoFlow", "grid_auto_flow"});
+    l.grid_column           = first_str({"gridColumn", "grid_column"});
+    l.grid_row              = first_str({"gridRow", "grid_row"});
+
     return l;
 }
 
