@@ -50,6 +50,11 @@ public:
     void set_text(std::string text) {
         if (text == text_) return;
         text_ = std::move(text);
+        // A plain set_text() supersedes any per-range styled runs from a
+        // prior set_attributed_string(): the old spans index into the OLD
+        // string and are stale. Drop them so paint() takes the single-style
+        // path for the new text. (Codex #3336.)
+        has_attributed_ = false;
         // WYSIWYG P5 FIX 4 — the Yoga measure callback (yoga_measure ->
         // Label::intrinsic_width / measured_height) re-runs TextShaper::prepare
         // keyed on the CURRENT text_, so a text change re-shapes correctly —
@@ -267,6 +272,7 @@ private:
     canvas::AttributedString attributed_runs_;  ///< per-range styled text (mixed)
     bool has_attributed_ = false;
     void paint_attributed_(canvas::Canvas& canvas);  ///< single-line span draw
+    LabelAlign resolve_effective_align_();            ///< text-align cascade (auto/match-parent resolved)
     bool has_own_font_size_ = false;
     bool has_own_font_weight_ = false;
     bool has_own_letter_spacing_ = false;

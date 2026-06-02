@@ -837,3 +837,75 @@ TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
     CHECK(lbl->has_attributed_string());
     CHECK(lbl->attributed_span_count() == 2);  // "Hello" styled run + " world" gap
 }
+
+// Codex #3336: a plain set_text() must supersede prior per-range runs. The old
+// spans index into the OLD string, so leaving has_attributed_ set would paint
+// stale, mis-indexed runs over the new text.
+TEST_CASE("set_text clears stale attributed runs (Codex #3336)",
+          "[view][widget][text][issue-3336]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 40});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('t', 'Hello world', '');\n"
+        "setTextRuns('t', [{ start: 0, end: 5, fontWeight: 700 }]);");
+    auto* lbl = dynamic_cast<Label*>(bridge.widget("t"));
+    REQUIRE(lbl != nullptr);
+    REQUIRE(lbl->has_attributed_string());
+    lbl->set_text("Different text");
+    CHECK_FALSE(lbl->has_attributed_string());  // runs dropped → single-style path
+}
+
+// Codex #3336: paint_attributed_ must honor the text-align cascade instead of
+// hard-coding a left/x=0 anchor. RecordingCanvas measures 7px/char, so the two
+// spans ("Hello"+" world" = 11 chars) span 77px inside a 200px-wide label.
+TEST_CASE("paint_attributed_ honors text-align (Codex #3336)",
+          "[view][widget][text][issue-3336]") {
+    using pulp::canvas::DrawCommand;
+    using pulp::canvas::RecordingCanvas;
+    auto first_fill_x = [](RecordingCanvas& rc) -> float {
+        for (const auto& c : rc.commands())
+            if (c.type == DrawCommand::Type::fill_text) return c.f[0];
+        return -999.0f;
+    };
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 40});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('t', 'Hello world', '');\n"
+        "setFontSize('t', 16);\n"
+        "setTextRuns('t', [{ start: 0, end: 5, fontWeight: 700, color: '#ff0000' }]);");
+    auto* lbl = dynamic_cast<Label*>(bridge.widget("t"));
+    REQUIRE(lbl != nullptr);
+    REQUIRE(lbl->has_attributed_string());
+    lbl->set_bounds({0, 0, 200, 40});
+
+    constexpr float kTotal = 11 * 7.0f;  // RecordingCanvas measure model
+
+    lbl->set_text_align(LabelAlign::left);
+    RecordingCanvas left;
+    lbl->paint(left);
+    const float xl = first_fill_x(left);
+    REQUIRE_THAT(xl, WithinAbs(0.0f, 1e-4f));
+
+    lbl->set_text_align(LabelAlign::center);
+    RecordingCanvas center;
+    lbl->paint(center);
+    const float xc = first_fill_x(center);
+    REQUIRE_THAT(xc, WithinAbs((200.0f - kTotal) * 0.5f, 1e-4f));
+    CHECK(xc > xl);
+
+    lbl->set_text_align(LabelAlign::right);
+    RecordingCanvas right;
+    lbl->paint(right);
+    const float xr = first_fill_x(right);
+    REQUIRE_THAT(xr, WithinAbs(200.0f - kTotal, 1e-4f));
+    CHECK(xr > xc);
+}
