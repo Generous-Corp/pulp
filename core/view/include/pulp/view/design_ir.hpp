@@ -173,6 +173,18 @@ struct IRLayout {
     // stretch. Empty = unconstrained (the flex default, anchored start).
     std::optional<std::string> h_constraint;
     std::optional<std::string> v_constraint;
+    // CSS Grid. Pulp's engine has a native grid layout (LayoutMode::grid via the
+    // createGrid/setGrid bridge); design-import lowers a grid container here
+    // instead of flattening it to flex. Container tracks are raw CSS track lists
+    // ("1fr 1fr", "100px auto"); auto_flow is "row"/"column"(+ " dense").
+    // grid_column/grid_row are per-item placements ("1 / 3", "2"); span/named
+    // lines are deferred (left to the flex fallback). display=="grid" OR a
+    // template present is the grid signal.
+    std::optional<std::string> grid_template_columns;
+    std::optional<std::string> grid_template_rows;
+    std::optional<std::string> grid_auto_flow;
+    std::optional<std::string> grid_column;   // item placement (column line/span)
+    std::optional<std::string> grid_row;      // item placement (row line/span)
 };
 
 /// Audio widget type detected from naming conventions or annotations.

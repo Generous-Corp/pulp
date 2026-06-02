@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <sstream>
@@ -458,8 +459,45 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         }
     };
 
+    // Grid item placement: a child of a grid container can carry grid-column /
+    // grid-row LINE placement ("1 / 3", "2"). Lower to setGrid column/row
+    // start/end on the child. Non-numeric forms (span N, named lines, auto) are
+    // skipped — they fall through to the grid's auto-placement.
+    auto emit_grid_item_placement = [&](const std::string& target_id) {
+        if (depth == 0) return;
+        auto emit_track = [&](const std::optional<std::string>& v,
+                              const char* start_key, const char* end_key) {
+            if (!v || v->empty()) return;
+            auto trim = [](std::string x) {
+                auto a = x.find_first_not_of(" \t");
+                auto b = x.find_last_not_of(" \t");
+                return a == std::string::npos ? std::string() : x.substr(a, b - a + 1);
+            };
+            const std::string& raw = *v;
+            auto slash = raw.find('/');
+            std::string lo = trim(slash == std::string::npos ? raw : raw.substr(0, slash));
+            std::string hi = slash == std::string::npos ? std::string() : trim(raw.substr(slash + 1));
+            auto as_int = [](const std::string& t, int& out) {
+                if (t.empty()) return false;
+                char* e = nullptr;
+                long n = std::strtol(t.c_str(), &e, 10);
+                if (e == t.c_str()) return false;  // span / named / auto -> skip
+                out = static_cast<int>(n);
+                return true;
+            };
+            int iv;
+            if (as_int(lo, iv))
+                ss << ind << "setGrid('" << target_id << "', '" << start_key << "', " << iv << ");\n";
+            if (as_int(hi, iv))
+                ss << ind << "setGrid('" << target_id << "', '" << end_key << "', " << iv << ");\n";
+        };
+        emit_track(node.layout.grid_column, "column_start", "column_end");
+        emit_track(node.layout.grid_row, "row_start", "row_end");
+    };
+
     auto emit_position_if_absolute = [&](const std::string& target_id) {
         emit_layout_constraints(target_id);
+        emit_grid_item_placement(target_id);
         const auto& s = node.style;
         if (!s.position || *s.position != "absolute") return;
         ss << ind << "setPosition('" << target_id << "', 'absolute');\n";
@@ -1080,6 +1118,12 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
     bool is_text = (node.type == "text" || node.type == "label");
     bool is_row = (node.layout.direction == LayoutDirection::row);
+    // A grid container lowers to the native grid layout (createGrid +
+    // LayoutMode::grid) instead of flex. Signal: display:grid or an explicit
+    // track template. Pulp's engine owns the grid layout (no Yoga grid needed).
+    bool is_grid = is_container &&
+        ((node.layout.display && *node.layout.display == "grid") ||
+         node.layout.grid_template_columns || node.layout.grid_template_rows);
 
     if (is_image) {
         // Image node → createImage + setImageSource. Honors absolute positioning
@@ -1330,10 +1374,21 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         if (opts.include_comments && !node.name.empty() && depth > 0)
             ss << ind << "// " << node.name << "\n";
 
-        ss << ind << (is_row ? "createRow" : "createCol")
+        ss << ind << (is_grid ? "createGrid" : (is_row ? "createRow" : "createCol"))
            << "('" << id << "', " << pid << ");\n";
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
+        if (is_grid) {
+            if (node.layout.grid_template_columns)
+                ss << ind << "setGrid('" << id << "', 'template_columns', '"
+                   << js_single_quote_escape(*node.layout.grid_template_columns) << "');\n";
+            if (node.layout.grid_template_rows)
+                ss << ind << "setGrid('" << id << "', 'template_rows', '"
+                   << js_single_quote_escape(*node.layout.grid_template_rows) << "');\n";
+            if (node.layout.grid_auto_flow)
+                ss << ind << "setGrid('" << id << "', 'auto_flow', '"
+                   << js_single_quote_escape(*node.layout.grid_auto_flow) << "');\n";
+        }
 
         // Yoga: every container MUST have explicit height
         // Priority: _layoutHeight (from snapshot_layout) > style.height > fill > computed
@@ -1374,7 +1429,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                                  FidelityElement::container}, *opts.fidelity_report);
 
         if (node.layout.gap > 0)
-            ss << ind << "setFlex('" << id << "', 'gap', " << node.layout.gap << ");\n";
+            ss << ind << (is_grid ? "setGrid('" : "setFlex('") << id
+               << "', 'gap', " << node.layout.gap << ");\n";
 
         // Padding
         bool uniform = (node.layout.padding_top == node.layout.padding_right &&
@@ -1402,12 +1458,15 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // left edge of their 29×20 button boxes). When the IR
         // says space_between AND there's exactly one child, the design
         // intent is centering — emit that.
+        // Flex alignment (justify-content / align-items) does not apply to a
+        // grid container — its track template + item placement drive layout —
+        // so emit it for the flex path only (guarded with !is_grid).
         LayoutAlign effective_justify = node.layout.justify;
         if (effective_justify == LayoutAlign::space_between &&
             node.children.size() == 1) {
             effective_justify = LayoutAlign::center;
         }
-        if (effective_justify != LayoutAlign::flex_start)
+        if (!is_grid && effective_justify != LayoutAlign::flex_start)
             ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(effective_justify) << "');\n";
         // Baseline override: a row that flexes text children of DIFFERENT
         // font sizes (typical "BIG_TITLE small_subtitle" header pattern)
@@ -1431,9 +1490,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 if (mx - mn >= 1.5f) baseline_override = true;
             }
         }
-        if (baseline_override) {
+        if (!is_grid && baseline_override) {
             ss << ind << "setFlex('" << id << "', 'align_items', 'baseline');\n";
-        } else if (node.layout.align != LayoutAlign::stretch)
+        } else if (!is_grid && node.layout.align != LayoutAlign::stretch)
             ss << ind << "setFlex('" << id << "', 'align_items', '" << align_to_css(node.layout.align) << "');\n";
 
         // Visual styles

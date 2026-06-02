@@ -389,6 +389,35 @@ lower to flex at codegen. Facts / gotchas:
   codegen partial); `features` rows are documented-only (not probed by the
   `[object-coverage]` drift guard). Tests: `[view][import][constraints]`.
 
+### Grid containers → native grid bridge (NOT Yoga grid)
+
+Pulp's engine has its **own** grid layout (`LayoutMode::grid` + `layout_grid()`
+in `view.cpp`, driven by the `createGrid`/`setGrid` bridge + `GridStyle`) — the
+vendored Yoga (v3.2.1) has **no** grid API (no `YGDisplayGrid`; grid only exists
+on Yoga's unreleased `main`). So "wire grid" for design-import is *not* a Yoga
+task — it's emitting `createGrid`/`setGrid` instead of `createCol`/`createRow`.
+Facts / gotchas:
+
+- **Parse** (`design_ir_json.cpp`, `parse_ir_layout`): `display:grid`,
+  `gridTemplateColumns`/`Rows`, `gridAutoFlow`, and per-item `gridColumn`/`Row`
+  (camelCase + snake_case) → `IRLayout.grid_template_columns`/`_rows`/
+  `_auto_flow`/`grid_column`/`grid_row` (raw CSS strings).
+- **Codegen** (`design_codegen.cpp`): `is_grid = is_container && (display=="grid"
+  || a track template present)`. Emits `createGrid` + `setGrid(id,
+  'template_columns'|'template_rows'|'auto_flow', …)` + `setGrid(id,'gap',…)`
+  (NOT `setFlex` gap), and **suppresses flex `justify_content`/`align_items`**
+  (guarded with `!is_grid` — they're meaningless for grid; do NOT wrap the child
+  recursion loop, it's interwoven with the flex nudge heuristics and must run for
+  grid too). Per-item placement (`emit_grid_item_placement`, folded into
+  `emit_position_if_absolute`): `grid_column`/`grid_row` `"N / M"` → `setGrid(id,
+  'column_start'/'column_end'/'row_start'/'row_end', N)`.
+- **Deferred** (codegen partial): `span N`, named lines, and `minmax()` are not
+  emitted as explicit placement — they fall through to the grid's auto-flow.
+  `setGrid` `column/row_start/end` take **ints** only, so non-numeric placement
+  is skipped. Stays within Flex+Grid (CLAUDE.md layout-model contract).
+- Native arm only; `compat.json features.grid-container` tracks it (parsed
+  handled, codegen partial). Tests: `[view][import][grid]`.
+
 ### Interactive (turnable) sprite knobs — `--knob-style sprite`
 
 `--knob-style sprite` no longer DEMOTES a recognized knob to a static image.
