@@ -353,6 +353,182 @@ void resolve_references(DesignMdParseResult& result) {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
+// ── Body-section token scan (frontmatter-less DESIGN.md) ─────────────────
+// Some tools (e.g. Google Stitch brand exports) author DESIGN.md as Markdown
+// prose with NO YAML frontmatter, so the structured-frontmatter path above
+// recovers zero tokens. Scan the body sections so those files still import a
+// usable token set. Clean-room (reimplemented from the documented design.md
+// structure, not copied): recognizes `## Colors|Spacing|Border Radius|Shadows`
+// and reads `name: value` list items or `| name | value |` table rows.
+// `### Light Mode` / `### Dark Mode` subsections route colors to the bare name
+// (light/default) or a `<name>.dark` suffix (dark) — the SAME multi-mode
+// convention the Figma plugin uses, so dark themes survive into the flat maps.
+
+enum class BodySection { none, colors, spacing, radius, shadows };
+
+std::string strip_md_emphasis(std::string s) {
+    s = trim(s);
+    auto strip_pair = [&](char c) {
+        while (s.size() >= 2 && s.front() == c && s.back() == c) {
+            s = trim(s.substr(1, s.size() - 2));
+        }
+    };
+    strip_pair('*');
+    strip_pair('_');
+    strip_pair('`');
+    return s;
+}
+
+std::string normalize_body_name(const std::string& raw) {
+    std::string s = lower(strip_md_emphasis(raw));
+    std::string out;
+    bool last_dash = false;
+    for (char c : s) {
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
+            out += c;
+            last_dash = (c == '-');
+        } else if (std::isspace(static_cast<unsigned char>(c)) || c == '/') {
+            if (!out.empty() && !last_dash) {
+                out += '-';
+                last_dash = true;
+            }
+        }
+        // drop any other punctuation
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    return out;
+}
+
+std::optional<std::string> first_hex(const std::string& value) {
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] != '#') continue;
+        size_t j = i + 1;
+        while (j < value.size() && std::isxdigit(static_cast<unsigned char>(value[j]))) ++j;
+        size_t digits = j - (i + 1);
+        if (digits == 3 || digits == 4 || digits == 6 || digits == 8) {
+            return value.substr(i, digits + 1);
+        }
+    }
+    return std::nullopt;
+}
+
+bool value_has_digit(const std::string& s) {
+    for (char c : s) if (std::isdigit(static_cast<unsigned char>(c))) return true;
+    return false;
+}
+
+// Split a `name: value` list item or `| name | value |` table row into parts.
+// Returns false for blank lines, table separators (---|---), and non-token rows.
+bool parse_body_token_line(const std::string& line, std::string& name, std::string& value) {
+    std::string t = trim(line);
+    if (t.empty()) return false;
+    if (t.front() == '|') {
+        std::vector<std::string> cells;
+        std::string cur;
+        for (size_t i = 1; i < t.size(); ++i) {
+            if (t[i] == '|') {
+                cells.push_back(trim(cur));
+                cur.clear();
+            } else {
+                cur += t[i];
+            }
+        }
+        if (!trim(cur).empty()) cells.push_back(trim(cur));
+        if (cells.size() < 2) return false;
+        bool sep = true;
+        for (char c : cells[0] + cells[1]) {
+            if (c != '-' && c != ':' && c != ' ') { sep = false; break; }
+        }
+        if (sep) return false;
+        name = cells[0];
+        value = cells[1];
+        return !name.empty() && !value.empty();
+    }
+    if (t.front() == '-' || t.front() == '*') {
+        std::string rest = trim(t.substr(1));
+        auto colon = rest.find(':');
+        if (colon == std::string::npos) return false;
+        name = rest.substr(0, colon);
+        value = trim(rest.substr(colon + 1));
+        return !name.empty() && !value.empty();
+    }
+    return false;
+}
+
+int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
+    BodySection section = BodySection::none;
+    std::string mode;  // "", "light", or "dark"
+    int emitted = 0;
+    std::istringstream iss(body);
+    std::string line;
+    while (std::getline(iss, line)) {
+        std::string t = trim(line);
+        // `## Section`
+        if (t.size() >= 3 && t[0] == '#' && t[1] == '#' && t[2] != '#') {
+            std::string h = lower(trim(t.substr(2)));
+            mode.clear();
+            if (h == "colors" || h == "color" || h == "colours" || h == "color palette" || h == "palette")
+                section = BodySection::colors;
+            else if (h == "spacing" || h == "spacing scale" || h == "space")
+                section = BodySection::spacing;
+            else if (h == "border radius" || h == "border radii" || h == "radius"
+                     || h == "corner radius" || h == "rounded")
+                section = BodySection::radius;
+            else if (h == "shadows" || h == "shadow" || h == "elevation"
+                     || h == "elevation & depth" || h == "elevations")
+                section = BodySection::shadows;
+            else
+                section = BodySection::none;
+            continue;
+        }
+        // `### Subsection` → light/dark mode within the current section
+        if (t.size() >= 4 && t[0] == '#' && t[1] == '#' && t[2] == '#' && t[3] != '#') {
+            std::string h = lower(trim(t.substr(3)));
+            if (h.find("dark") != std::string::npos)        mode = "dark";
+            else if (h.find("light") != std::string::npos)  mode = "light";
+            else                                            mode.clear();
+            continue;
+        }
+        if (section == BodySection::none) continue;
+
+        std::string rawName, rawValue;
+        if (!parse_body_token_line(t, rawName, rawValue)) continue;
+        std::string name = normalize_body_name(rawName);
+        if (name.empty()) continue;
+
+        switch (section) {
+            case BodySection::colors: {
+                // Only accept rows whose value is actually a color — this also
+                // skips table header rows like `| Token | Value |`.
+                auto hex = first_hex(rawValue);
+                std::string lv = lower(rawValue);
+                bool is_func = lv.rfind("rgb", 0) == 0 || lv.rfind("hsl", 0) == 0;
+                if (!hex && !is_token_reference(trim(rawValue)) && !is_func) break;
+                std::string value = hex ? *hex : trim(rawValue);
+                std::string key = (mode == "dark") ? name + ".dark" : name;
+                if (result.ir.tokens.colors.emplace(key, value).second) ++emitted;
+                break;
+            }
+            case BodySection::spacing:
+            case BodySection::radius: {
+                auto px = parse_dimension(rawValue);
+                if (!px) break;  // skip headers / prose without a parseable size
+                const std::string prefix = (section == BodySection::spacing) ? "spacing" : "rounded";
+                if (result.ir.tokens.dimensions.emplace(prefix + "-" + name, *px).second) ++emitted;
+                break;
+            }
+            case BodySection::shadows: {
+                if (!value_has_digit(rawValue)) break;  // skip header rows
+                if (result.ir.tokens.strings.emplace("shadow-" + name, trim(rawValue)).second) ++emitted;
+                break;
+            }
+            case BodySection::none:
+                break;
+        }
+    }
+    return emitted;
+}
+
 DesignMdParseResult parse_designmd(const std::string& markdown) {
     DesignMdParseResult result;
     result.ir.source = DesignSource::designmd;
@@ -380,9 +556,18 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     }
 
     if (!slice.present) {
-        result.diagnostics.push_back(make_diag(
-            DesignMdSeverity::info, "no-frontmatter", "", 0, 0,
-            "no YAML frontmatter found; emitting empty token set"));
+        int recovered = parse_body_tokens(slice.body, result);
+        if (recovered > 0) {
+            result.diagnostics.push_back(make_diag(
+                DesignMdSeverity::info, "body-tokens", "", 0, 0,
+                "no YAML frontmatter; recovered " + std::to_string(recovered) +
+                " token(s) from Markdown body sections (Colors/Spacing/Border Radius/Shadows). "
+                "Dark-mode colors use a \".dark\" suffix."));
+        } else {
+            result.diagnostics.push_back(make_diag(
+                DesignMdSeverity::info, "no-frontmatter", "", 0, 0,
+                "no YAML frontmatter found; emitting empty token set"));
+        }
         return finalize_result(std::move(result));
     }
 

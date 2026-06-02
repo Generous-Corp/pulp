@@ -497,3 +497,109 @@ TEST_CASE("export_designmd throws std::logic_error until pulp #1307 lands",
     DesignMdProseHints hints;
     REQUIRE_THROWS_AS(export_designmd(t, hints), std::logic_error);
 }
+
+// ── Frontmatter-less body-section token recovery ─────────────────────────
+// Stitch/Brand-Kit DESIGN.md files are often authored as Markdown body prose
+// with no YAML frontmatter; recover their tokens from the body sections so
+// they don't import as an empty token set. Dark-mode colors use the same
+// "<name>.dark" suffix convention as the Figma multi-mode token capture.
+
+TEST_CASE("frontmatter-less DESIGN.md recovers list-form tokens incl. dark mode",
+          "[view][import][designmd][body]") {
+    const std::string md = R"md(# My Brand
+
+## Colors
+
+### Light Mode
+- Primary: #6750A4
+- On Surface: #1A1C1E
+
+### Dark Mode
+- Primary: #D0BCFF
+- On Surface: #E3E2E6
+
+## Spacing
+- sm: 4px
+- md: 8px
+
+## Border Radius
+- sm: 4px
+- lg: 16px
+
+## Shadows
+- card: 0 1px 3px rgba(0,0,0,0.2)
+)md";
+    auto result = parse_designmd(md);
+    REQUIRE_FALSE(result.had_frontmatter);
+    // Light (default) → bare name; Dark → ".dark" suffix.
+    REQUIRE(result.ir.tokens.colors.at("primary") == "#6750A4");
+    REQUIRE(result.ir.tokens.colors.at("primary.dark") == "#D0BCFF");
+    REQUIRE(result.ir.tokens.colors.at("on-surface") == "#1A1C1E");
+    REQUIRE(result.ir.tokens.colors.at("on-surface.dark") == "#E3E2E6");
+    // Spacing + radius → px dimensions under the same prefixes as frontmatter.
+    REQUIRE(result.ir.tokens.dimensions.at("spacing-sm") == 4.0f);
+    REQUIRE(result.ir.tokens.dimensions.at("spacing-md") == 8.0f);
+    REQUIRE(result.ir.tokens.dimensions.at("rounded-sm") == 4.0f);
+    REQUIRE(result.ir.tokens.dimensions.at("rounded-lg") == 16.0f);
+    // Shadow → string token.
+    REQUIRE(result.ir.tokens.strings.at("shadow-card").find("rgba") != std::string::npos);
+    // Diagnostic reports recovery, not the empty-set message.
+    REQUIRE(has_diag_code(result.diagnostics, "body-tokens"));
+    REQUIRE_FALSE(has_diag_code(result.diagnostics, "no-frontmatter"));
+}
+
+TEST_CASE("frontmatter-less DESIGN.md parses table-form colors and skips the header row",
+          "[view][import][designmd][body]") {
+    const std::string md = R"md(# Brand
+
+## Colors
+
+| Token | Value |
+| --- | --- |
+| Primary | #112233 |
+| Secondary | #445566 |
+)md";
+    auto result = parse_designmd(md);
+    REQUIRE_FALSE(result.had_frontmatter);
+    REQUIRE(result.ir.tokens.colors.at("primary") == "#112233");
+    REQUIRE(result.ir.tokens.colors.at("secondary") == "#445566");
+    // The "| Token | Value |" header row must NOT become a token (its value
+    // cell isn't a color), and the "| --- | --- |" separator is skipped.
+    REQUIRE(result.ir.tokens.colors.find("token") == result.ir.tokens.colors.end());
+}
+
+TEST_CASE("frontmatter-less DESIGN.md with no token sections still emits an empty set",
+          "[view][import][designmd][body]") {
+    const std::string md = "# Title\n\n## Overview\n\nSome prose, no tokens here.\n";
+    auto result = parse_designmd(md);
+    REQUIRE_FALSE(result.had_frontmatter);
+    REQUIRE(result.ir.tokens.colors.empty());
+    REQUIRE(has_diag_code(result.diagnostics, "no-frontmatter"));
+    REQUIRE_FALSE(has_diag_code(result.diagnostics, "body-tokens"));
+}
+
+TEST_CASE("frontmatter-less DESIGN.md handles emphasis, slashes, rgb(), refs, and * bullets",
+          "[view][import][designmd][body]") {
+    const std::string md = R"md(# Brand
+
+## Colors
+* **Brand/Primary**: #abcdef
+* Accent: rgba(10, 20, 30, 0.5)
+* Link: {colors.brand-primary}
+* Note this line has no value
+
+## Spacing
+- weird: not-a-size
+)md";
+    auto result = parse_designmd(md);
+    REQUIRE_FALSE(result.had_frontmatter);
+    // `*` bullet + `**emphasis**` stripped + `/` normalized to `-`.
+    REQUIRE(result.ir.tokens.colors.at("brand-primary") == "#abcdef");
+    // rgb()/rgba() and {token.reference} values are accepted verbatim.
+    REQUIRE(result.ir.tokens.colors.at("accent").rfind("rgba", 0) == 0);
+    REQUIRE(result.ir.tokens.colors.at("link") == "{colors.brand-primary}");
+    // A list item with no ':' is not a token line.
+    REQUIRE(result.ir.tokens.colors.find("note-this-line-has-no-value") == result.ir.tokens.colors.end());
+    // A non-dimension spacing value is skipped, not stored.
+    REQUIRE(result.ir.tokens.dimensions.find("spacing-weird") == result.ir.tokens.dimensions.end());
+}

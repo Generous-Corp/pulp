@@ -60,10 +60,27 @@ unknowns" policy.
 | Unknown top-level keys | passthrough | Stored on the IR, not emitted into `tokens.json`. The parser warns once per unknown key. |
 | Unknown component properties | passthrough | Per the spec, unknown component props are preserved as opaque strings. |
 
-The Markdown body after the closing `---` fence is parsed for headings
-and code blocks but is not currently used to drive token emission.
-Phase 2's `pulp design lint` will use the body for cross-references
-between sections and prose.
+When frontmatter is present it is the sole token source; the Markdown body
+after the closing `---` fence is parsed for headings only (Phase 2's
+`pulp design lint` will use the body for cross-references between sections
+and prose).
+
+When a file has **no frontmatter**, the parser falls back to scanning the
+Markdown body so prose-authored files (common for Stitch / Brand-Kit
+exports) don't import as an empty token set. It reads `name: value` list
+items and `| name | value |` table rows under these sections:
+
+| Body section | Tokens |
+|--------------|--------|
+| `## Colors` / `## Color Palette` | `color` tokens (header/separator rows skipped) |
+| `## Spacing` | `spacing-<name>` dimensions |
+| `## Border Radius` / `## Rounded` | `rounded-<name>` dimensions |
+| `## Shadows` / `## Elevation` | `shadow-<name>` string tokens |
+
+A `### Light Mode` / `### Dark Mode` subsection under `## Colors` routes
+values to the bare token name (light/default) or a `<name>.dark` suffix
+(dark) — the same multi-mode convention the Figma plugin uses, so dark
+themes land in the flat token maps.
 
 ## Reference resolution
 
