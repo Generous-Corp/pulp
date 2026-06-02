@@ -78,7 +78,13 @@ jobs:
             external/AudioUnitSDK
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        # -DPULP_BUILD_EXAMPLES=OFF: the release ships the CLI + plugins
+        # (build/VST3, build/CLAP, build/AU), never the example apps. The
+        # pulp-design-tool example hard-fails configure when PULP_HAS_SKIA is
+        # FALSE (this runner has no Skia), so building examples here aborts the
+        # whole sign-and-release run and no GitHub Release is published. Skip
+        # examples to match build.yml's release legs.
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DPULP_BUILD_EXAMPLES=OFF
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)

@@ -42,6 +42,18 @@ Slice 6 (#551).
 
 ## GitHub workflow gotchas
 
+- **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
+  `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
+  is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
+  GitHub-hosted macOS runner with no Skia, so configuring the full tree
+  (examples included) aborts the entire run → **no GitHub Release publishes**
+  even when `release-cli.yml` (the CLI build) is green. This silently broke
+  Release publication (the release watchdog flagged the missing Releases). The
+  release ships the CLI + plugins
+  (`build/VST3`,`/CLAP`,`/AU`), never the example apps, so the release legs
+  build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
+  new release/packaging workflow, configure with examples OFF (or a populated
+  `SKIA_DIR`), or the design-tool Skia gate will block it.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
