@@ -64,6 +64,10 @@ gh auth status >/dev/null 2>&1 && ok "gh authenticated" || warn "gh not authenti
 # ── 2. VM store ─────────────────────────────────────────────────────────────
 note "2/6 VM store at $TART_HOME"
 mkdir -p "$TART_HOME"; touch "$TART_HOME/.metadata_never_index"
+# Pre-create the host ccache dir that the ephemeral runner bind-mounts into each
+# VM (`tart run --dir`). Missing on a fresh host → `tart run` fails and the
+# runner reports a misleading "no IP" (see the tart-ci skill gotchas).
+mkdir -p "${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}/ccache"
 grep -q "export TART_HOME=$TART_HOME" "$HOME/.zprofile" 2>/dev/null || echo "export TART_HOME=$TART_HOME" >> "$HOME/.zprofile"
 EXTERNAL=0; case "$TART_HOME" in /Volumes/*) EXTERNAL=1;; esac
 [ "$EXTERNAL" = 1 ] && warn "TART_HOME is on an external /Volumes drive → the launchd agent needs Full Disk Access (step 5)."

@@ -71,11 +71,24 @@ run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
 
   note "[$i] clone $GOLDEN → $vm (CoW) + boot with host ccache mounted"
   tart clone "$GOLDEN" "$vm"
-  local rpid; tart run --no-graphics --dir="ccache:$CACHE_ROOT/ccache" "$vm" >/dev/null 2>&1 & rpid=$!
+  # The --dir mount target MUST exist on the host. If it doesn't, `tart run`
+  # exits instantly with "directory sharing device configuration is invalid"
+  # (VZErrorDomain Code=2) and the VM never boots — which then surfaces only as
+  # a misleading "no IP" below. Create it so a fresh host can't trip on it.
+  mkdir -p "$CACHE_ROOT/ccache"
+  local boot_log; boot_log="$(mktemp -t "tart-run-$vm")"
+  local rpid; tart run --no-graphics --dir="ccache:$CACHE_ROOT/ccache" "$vm" >"$boot_log" 2>&1 & rpid=$!
 
   local ip=""; local k
   for k in $(seq 1 60); do ip="$(tart ip "$vm" 2>/dev/null || true)"; [ -n "$ip" ] && break; sleep 2; done
-  [ -n "$ip" ] || { tart stop "$vm" >/dev/null 2>&1||true; kill "$rpid" 2>/dev/null||true; tart delete "$vm" >/dev/null 2>&1||true; die "[$i] no IP"; }
+  if [ -z "$ip" ]; then
+    # Surface the real reason instead of a bare "no IP": the boot log usually
+    # names it (bad --dir mount, vmnet/Local-Network permission, slow boot).
+    note "[$i] no IP after 120s — last lines of \`tart run\` ($boot_log):"; tail -3 "$boot_log" >&2 2>/dev/null || true
+    tart stop "$vm" >/dev/null 2>&1||true; kill "$rpid" 2>/dev/null||true; tart delete "$vm" >/dev/null 2>&1||true
+    rm -f "$boot_log"; die "[$i] no IP (see \`tart run\` output above)"
+  fi
+  rm -f "$boot_log"
   for k in $(seq 1 90); do ssh "${SSH_OPTS[@]}" -i "$SSH_KEY_PRIV" "$VM_USER@$ip" true 2>/dev/null && break; sleep 2; done
   note "[$i] vm $vm up at $ip — wiring ccache mount + launching JIT runner (one job)"
 
