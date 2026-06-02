@@ -12,6 +12,7 @@
 // Relocated so codegen work no longer recompiles the whole importer.
 
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_fidelity.hpp>
 #include <pulp/view/input_events.hpp>
 
 #include "design_import_internal.hpp"
@@ -973,8 +974,12 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     // silently dropping to an empty frame (the dropped-vector invariant); the
     // figma lane rasterizes vectors to PNG and takes the image branch instead.
     {
-        const bool is_path_kind =
-            node.type == "vector" || node.type == "path" || node.type == "svg_path";
+        // Any vector/path-like kind carrying path-data lowers here — including
+        // the rect/line/ellipse/polygon/star primitives whose `d` the importer
+        // synthesizes from geometry (synthesize_primitive_paths). Shares
+        // is_vector_kind with the dropped-vector invariant so the two never
+        // disagree about what counts as a path node.
+        const bool is_path_kind = is_vector_kind(node.type);
         auto pd = node.attributes.find("path_data");
         if (is_path_kind && pd != node.attributes.end() && !pd->second.empty()) {
             if (opts.include_comments && !node.name.empty() && depth > 0)
@@ -1707,10 +1712,21 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     }
 
     if (opts.mode == CodeGenMode::bridge_native_js) {
-        // Native-bridge JS API
+        // Native-bridge JS API.
+        //
+        // First synthesize SVG path-data for bare vector shape primitives
+        // (rect/line/ellipse/polygon/star) on a mutable copy of the tree, so
+        // both the emit walk below and the dropped-vector fidelity pass see the
+        // synthesized `path_data` and lower the shape to a native SvgPath
+        // instead of dropping it to an empty frame. The copy keeps the caller's
+        // IR untouched; the web-compat arm (which does not own the dropped-shape
+        // fall-through) is intentionally not affected.
+        IRNode native_root = ir.root;
+        synthesize_primitive_paths(native_root);
+
         int var_counter = 0;
         std::unordered_map<const IRNode*, std::string> id_map;
-        generate_native_node(ss, ir.root, opts, 0, var_counter, "", &id_map);
+        generate_native_node(ss, native_root, opts, 0, var_counter, "", &id_map);
         ss << "void 0;\n";
 
         // Tree-level fidelity pass: catch vector/path nodes codegen dropped to
@@ -1720,7 +1736,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // lowering does not own the dropped-shape fall-through.
         if (opts.fidelity_report) {
             check_vector_renderability(
-                ir.root, ir.diagnostics,
+                native_root, ir.diagnostics,
                 [&id_map](const IRNode& n) -> std::string {
                     auto it = id_map.find(&n);
                     if (it != id_map.end()) return it->second;

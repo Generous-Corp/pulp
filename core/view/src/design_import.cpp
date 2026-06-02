@@ -1645,4 +1645,194 @@ DesignIR parse_pencil_json(const std::string& json) {
 }
 
 
+namespace {
+
+// Compact, locale-stable float formatter for synthesized SVG path data: fixed
+// 3-decimal precision, trailing zeros (and a dangling '.') trimmed. Always
+// emits '.' regardless of locale so the `d` string parses identically on every
+// host.
+std::string svg_num(float v) {
+    if (v == 0.0f) return "0";  // also normalizes -0
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.3f", v);
+    std::string s(buf);
+    const auto dot = s.find('.');
+    if (dot != std::string::npos) {
+        auto last = s.find_last_not_of('0');
+        if (last == dot) last = dot - 1;  // drop the now-bare '.'
+        s.erase(last + 1);
+    }
+    return s;
+}
+
+// The vector SHAPE PRIMITIVE kinds whose `d` we can synthesize from geometry
+// alone. Deliberately excludes "vector"/"path"/"svg_path" (those need a real
+// authored `d`) and "polyline" (an open run of explicit points we do not have
+// without path data). Matched on IR type only — source-agnostic.
+bool is_synthesizable_primitive(const std::string& t) {
+    return t == "rect" || t == "rectangle" || t == "svg_rect" ||
+           t == "line" || t == "svg_line" ||
+           t == "ellipse" || t == "circle" ||
+           t == "polygon" || t == "star";
+}
+
+// Read an integer-valued geometry attribute (e.g. polygon/star pointCount),
+// tolerating the camelCase and snake_case spellings different sources emit.
+std::optional<long> int_attr(const IRNode& n, std::initializer_list<const char*> keys) {
+    for (const char* k : keys) {
+        auto it = n.attributes.find(k);
+        if (it == n.attributes.end() || it->second.empty()) continue;
+        char* end = nullptr;
+        const long v = std::strtol(it->second.c_str(), &end, 10);
+        if (end != it->second.c_str()) return v;
+    }
+    return std::nullopt;
+}
+
+std::optional<float> float_attr(const IRNode& n, std::initializer_list<const char*> keys) {
+    for (const char* k : keys) {
+        auto it = n.attributes.find(k);
+        if (it == n.attributes.end() || it->second.empty()) continue;
+        char* end = nullptr;
+        const float v = std::strtof(it->second.c_str(), &end);
+        if (end != it->second.c_str()) return v;
+    }
+    return std::nullopt;
+}
+
+std::string synth_rect_path(float w, float h, const IRStyle& s) {
+    // Per-corner radius (CSS border-<corner>-radius wins over the uniform
+    // border-radius shorthand), each clamped to half the shorter side so the
+    // arcs never overrun the box.
+    const float base = s.border_radius.value_or(0.0f);
+    const float cap = std::min(w, h) * 0.5f;
+    auto corner = [&](const std::optional<float>& v) {
+        return std::clamp(v.value_or(base), 0.0f, cap);
+    };
+    const float tl = corner(s.border_top_left_radius);
+    const float tr = corner(s.border_top_right_radius);
+    const float br = corner(s.border_bottom_right_radius);
+    const float bl = corner(s.border_bottom_left_radius);
+    std::ostringstream d;
+    if (tl <= 0.0f && tr <= 0.0f && br <= 0.0f && bl <= 0.0f) {
+        d << "M0 0 H" << svg_num(w) << " V" << svg_num(h) << " H0 Z";
+        return d.str();
+    }
+    // Clockwise from just past the top-left corner; arc sweep flag 1 = CW.
+    // Zero-radius corners degenerate to lineto per the SVG arc spec.
+    d << "M" << svg_num(tl) << " 0"
+      << " H" << svg_num(w - tr)
+      << " A" << svg_num(tr) << " " << svg_num(tr) << " 0 0 1 " << svg_num(w) << " " << svg_num(tr)
+      << " V" << svg_num(h - br)
+      << " A" << svg_num(br) << " " << svg_num(br) << " 0 0 1 " << svg_num(w - br) << " " << svg_num(h)
+      << " H" << svg_num(bl)
+      << " A" << svg_num(bl) << " " << svg_num(bl) << " 0 0 1 0 " << svg_num(h - bl)
+      << " V" << svg_num(tl)
+      << " A" << svg_num(tl) << " " << svg_num(tl) << " 0 0 1 " << svg_num(tl) << " 0"
+      << " Z";
+    return d.str();
+}
+
+std::string synth_ellipse_path(float w, float h) {
+    const float rx = w * 0.5f, ry = h * 0.5f, cy = ry;
+    std::ostringstream d;
+    // Two half-arcs trace the full ellipse inside the (w, h) box.
+    d << "M0 " << svg_num(cy)
+      << " A" << svg_num(rx) << " " << svg_num(ry) << " 0 1 0 " << svg_num(w) << " " << svg_num(cy)
+      << " A" << svg_num(rx) << " " << svg_num(ry) << " 0 1 0 0 " << svg_num(cy)
+      << " Z";
+    return d.str();
+}
+
+std::string synth_line_path(float w, float h) {
+    // The line spans the bounding-box diagonal; a horizontal line has h≈0 and
+    // collapses to M0 0 L w 0, which is what those sources intend.
+    std::ostringstream d;
+    d << "M0 0 L" << svg_num(w) << " " << svg_num(h);
+    return d.str();
+}
+
+// Regular polygon / star vertices inscribed in the (w, h) box. `points` is the
+// number of polygon corners (star spikes); `inner_ratio` < 1 alternates an
+// inner radius to form a star (ignored for a plain polygon).
+std::string synth_polygon_path(float w, float h, int points, float inner_ratio) {
+    if (points < 3) points = 3;
+    const float cx = w * 0.5f, cy = h * 0.5f, rx = w * 0.5f, ry = h * 0.5f;
+    const bool is_star = inner_ratio > 0.0f && inner_ratio < 1.0f;
+    const int verts = is_star ? points * 2 : points;
+    const float step = 2.0f * static_cast<float>(M_PI) / static_cast<float>(verts);
+    const float start = -static_cast<float>(M_PI) * 0.5f;  // first point at top
+    std::ostringstream d;
+    for (int i = 0; i < verts; ++i) {
+        const float a = start + step * static_cast<float>(i);
+        const float scale = (is_star && (i % 2 == 1)) ? inner_ratio : 1.0f;
+        const float x = cx + rx * scale * std::cos(a);
+        const float y = cy + ry * scale * std::sin(a);
+        d << (i == 0 ? "M" : " L") << svg_num(x) << " " << svg_num(y);
+    }
+    d << " Z";
+    return d.str();
+}
+
+bool node_has_visible_fill(const IRNode& n) {
+    return (n.style.background_color && !n.style.background_color->empty()) ||
+           (n.style.background_gradient && !n.style.background_gradient->empty()) ||
+           (n.style.background_image && !n.style.background_image->empty() &&
+            *n.style.background_image != "none");
+}
+
+void synthesize_node(IRNode& n) {
+    if (!is_synthesizable_primitive(n.type)) return;
+    // Only step in for the EXACT case codegen would otherwise drop: no authored
+    // path, no children to paint, no fill, no rasterized asset, not a widget.
+    // Anything already renderable is left exactly as-is (zero behavior change).
+    if (n.attributes.count("path_data")) return;
+    if (!n.children.empty()) return;
+    if (n.audio_widget != AudioWidgetType::none) return;
+    if (n.attributes.count("asset_path")) return;
+    if (node_has_visible_fill(n)) return;
+    const float w = n.style.width.value_or(0.0f);
+    const float h = n.style.height.value_or(0.0f);
+    const bool is_line = (n.type == "line" || n.type == "svg_line");
+    // A line spans a diagonal, so one extent may legitimately be 0 (a perfectly
+    // horizontal/vertical rule). Every other primitive needs real area.
+    if (is_line ? (w <= 0.0f && h <= 0.0f) : (w <= 0.0f || h <= 0.0f)) return;
+
+    std::string d;
+    if (n.type == "rect" || n.type == "rectangle" || n.type == "svg_rect")
+        d = synth_rect_path(w, h, n.style);
+    else if (n.type == "line" || n.type == "svg_line")
+        d = synth_line_path(w, h);
+    else if (n.type == "ellipse" || n.type == "circle")
+        d = synth_ellipse_path(w, h);
+    else if (n.type == "polygon")
+        d = synth_polygon_path(w, h,
+                               static_cast<int>(int_attr(n, {"pointCount", "point_count", "points"}).value_or(3)),
+                               /*inner_ratio=*/0.0f);
+    else if (n.type == "star")
+        d = synth_polygon_path(w, h,
+                               static_cast<int>(int_attr(n, {"pointCount", "point_count", "points"}).value_or(5)),
+                               float_attr(n, {"innerRadius", "inner_radius", "innerRadiusRatio"}).value_or(0.5f));
+    if (d.empty()) return;
+
+    n.attributes["path_data"] = d;
+    n.attributes["svg_viewbox"] = "0 0 " + svg_num(w) + " " + svg_num(h);
+    // We only reach here when the node has no visible fill, so force the
+    // SvgPathWidget's default opaque-black fill off — otherwise a stroke-only or
+    // empty shape would render as a solid black box.
+    n.attributes["svg_fill"] = "none";
+    if (n.style.border_color && !n.style.border_color->empty()) {
+        n.attributes["svg_stroke"] = *n.style.border_color;
+        n.attributes["svg_stroke_width"] = svg_num(n.style.border_width.value_or(1.0f));
+    }
+}
+
+}  // namespace
+
+void synthesize_primitive_paths(IRNode& root) {
+    synthesize_node(root);
+    for (auto& child : root.children)
+        synthesize_primitive_paths(child);
+}
+
 } // namespace pulp::view

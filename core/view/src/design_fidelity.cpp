@@ -187,13 +187,13 @@ void run_fidelity_checks(const FidelityContext& ctx, std::vector<FidelityIssue>&
 }
 
 // ── Tree-level: vector-renderability ─────────────────────────────────────────
-namespace {
 
 // Vector/path-like source kinds, matched on normalized IR type only (never a
 // layer name) so the check is identical across figma/pencil/stitch/v0. Unions
 // the svg_*/path/rect/line kinds resolved in design_import_native_common.cpp
 // with the ellipse/rectangle shapes codegen consumes, plus the
-// polygon/polyline/star/circle/vector kinds vector sources emit.
+// polygon/polyline/star/circle/vector kinds vector sources emit. Exposed via
+// design_fidelity.hpp so codegen's path-lowering branch shares the same set.
 bool is_vector_kind(const std::string& type) {
     static constexpr std::string_view kVectorKinds[] = {
         "vector",  "path",     "svg_path",
@@ -206,6 +206,8 @@ bool is_vector_kind(const std::string& type) {
         if (type == k) return true;
     return false;
 }
+
+namespace {
 
 bool attr_eq(const IRNode& n, const char* key, const char* val) {
     auto it = n.attributes.find(key);

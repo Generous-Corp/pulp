@@ -4454,6 +4454,130 @@ TEST_CASE("codegen lowers a path-data vector to a native SvgPath (not dropped)",
     }
 }
 
+TEST_CASE("codegen synthesizes SVG paths for bare vector shape primitives",
+          "[view][import][codegen][vector]") {
+    // rect/line/ellipse/circle/polygon/star with no path_data, no fill, and no
+    // children would otherwise drop to an empty frame. synthesize_primitive_paths
+    // derives a `d` from geometry so each lowers to a native SvgPath. svg_fill is
+    // forced to "none" so the SvgPathWidget's default opaque-black fill never
+    // paints a phantom box. Source-agnostic: keyed only on IR type + geometry.
+    struct Case { const char* type; float w; float h; const char* expect_d; };
+    const Case cases[] = {
+        {"rect",    100.0f, 40.0f, "M0 0 H100 V40 H0 Z"},
+        {"line",     80.0f, 24.0f, "M0 0 L80 24"},
+        {"ellipse",  60.0f, 60.0f, "A30 30"},     // two half-arcs
+        {"circle",   60.0f, 60.0f, "A30 30"},
+        {"polygon", 100.0f, 100.0f, "M50 0"},     // top vertex of a triangle
+        {"star",    100.0f, 100.0f, "M50 0"},     // first spike at top
+    };
+    for (const auto& c : cases) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.name = "Root";
+        ir.root.style.width = 400.0f;
+        ir.root.style.height = 400.0f;
+
+        IRNode shape;
+        shape.type = c.type;
+        shape.name = "Shape";
+        shape.style.width = c.w;
+        shape.style.height = c.h;
+        ir.root.children.push_back(shape);
+
+        std::vector<pulp::view::FidelityIssue> report;
+        CodeGenOptions opts;
+        opts.fidelity_report = &report;
+        const auto js = generate_pulp_js(ir, opts);
+
+        INFO("type=" << c.type << " js=\n" << js);
+        CHECK(js.find("createSvgPath('Shape") != std::string::npos);
+        CHECK(js.find("setSvgPath('Shape") != std::string::npos);
+        CHECK(js.find(c.expect_d) != std::string::npos);
+        // svg_fill forced to none (codegen suffixes the id, so match the value).
+        CHECK(js.find("setSvgFill('Shape") != std::string::npos);
+        CHECK(js.find("', 'none')") != std::string::npos);
+        bool dropped = false;
+        for (const auto& iss : report)
+            if (iss.kind == "dropped-vector" && iss.node_name == "Shape") dropped = true;
+        CHECK_FALSE(dropped);
+    }
+}
+
+TEST_CASE("synthesized rect honors border-radius and stroke-only borders",
+          "[view][import][codegen][vector]") {
+    // A rounded rect emits arc commands; a stroke-only shape carries its border
+    // color/width onto the SvgPath stroke (and never a fill).
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode rounded;
+    rounded.type = "rect";
+    rounded.name = "Rounded";
+    rounded.style.width = 100.0f;
+    rounded.style.height = 40.0f;
+    rounded.style.border_radius = 8.0f;
+    rounded.style.border_color = "#334455";
+    rounded.style.border_width = 3.0f;
+    ir.root.children.push_back(rounded);
+
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+    CHECK(js.find("createSvgPath('Rounded") != std::string::npos);
+    CHECK(js.find("A8 8") != std::string::npos);                       // rounded corner arc
+    // Border → stroke; fill forced to none (codegen suffixes the bridge id).
+    CHECK(js.find("setSvgStroke('Rounded") != std::string::npos);
+    CHECK(js.find("'#334455')") != std::string::npos);
+    CHECK(js.find("setSvgStrokeWidth('Rounded") != std::string::npos);
+    CHECK(js.find("setSvgFill('Rounded") != std::string::npos);
+    CHECK(js.find("', 'none')") != std::string::npos);
+}
+
+TEST_CASE("synthesis leaves filled and container primitives untouched",
+          "[view][import][codegen][vector]") {
+    // The synthesizer steps in ONLY for the exact drop case. A filled rect still
+    // renders through the generic-frame branch; a rect with children keeps them.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode filled;
+    filled.type = "rect";
+    filled.name = "Filled";
+    filled.style.width = 50.0f;
+    filled.style.height = 50.0f;
+    filled.style.background_color = "#ff0000";
+    ir.root.children.push_back(filled);
+
+    IRNode container;
+    container.type = "rect";
+    container.name = "Container";
+    container.style.width = 80.0f;
+    container.style.height = 80.0f;
+    IRNode label;
+    label.type = "text";
+    label.name = "Caption";
+    label.text_content = "Hi";
+    label.style.width = 40.0f;
+    label.style.height = 16.0f;
+    container.children.push_back(label);
+    ir.root.children.push_back(container);
+
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+    // Neither is converted to an SvgPath.
+    CHECK(js.find("createSvgPath('Filled") == std::string::npos);
+    CHECK(js.find("createSvgPath('Container") == std::string::npos);
+    // The container's child survives.
+    CHECK(js.find("Caption") != std::string::npos);
+}
+
 TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",
           "[view][import][codegen][blend]") {
     // A node's normalized mix_blend_mode lowers to setMixBlendMode (native

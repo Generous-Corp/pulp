@@ -319,6 +319,48 @@ actually the dominant bottleneck for the measured fixture. Keep the legacy
 top-level `comparison` entry pointed at `baked-native`, and add per-lane
 results under `comparisons` for both baked lanes.
 
+### Vector shape primitives → synthesized SVG path
+
+`vector`/`path`/`svg_path` nodes carrying an authored `path_data` (`d`) already
+lower to a native `SvgPathWidget` (`createSvgPath`+`setSvgPath`).
+The shape PRIMITIVES — `rect`/`rectangle`/`svg_rect`, `line`/`svg_line`,
+`ellipse`/`circle`, `polygon`, `star` — usually arrive with NO `d`, so they used
+to drop to an empty frame (caught by the `dropped-vector` invariant).
+`synthesize_primitive_paths` (in `core/view/src/design_import.cpp`, declared in
+`design_import.hpp`) now derives a `d` from geometry and stamps it onto the node
+so codegen lowers it like any other path. Key facts / gotchas:
+
+- **Runs as a codegen pre-pass, on a copy.** `generate_pulp_js` copies the IR
+  root in the native arm, runs `synthesize_primitive_paths`, then emits AND runs
+  the `dropped-vector` fidelity walk over that copy — so both see the synthesized
+  `path_data`. The caller's IR and the web-compat arm are untouched. (Putting it
+  in the parse pipeline instead would miss the `[object-coverage]` drift guard,
+  which calls `generate_pulp_js` directly on hand-built nodes.)
+- **Drop-case ONLY — zero behavior change for renderable nodes.** It fires only
+  when a primitive has no `path_data`, no children, no visible fill
+  (background_color/gradient/image), no `asset_path`, and is not an audio widget.
+  A filled rect still renders via the generic-frame branch; a rect with children
+  keeps them. Don't widen this to filled/childful nodes — converting them to a
+  terminal `SvgPath` would drop their children / box-shadow / border.
+- **`svg_fill` is forced to `"none"`.** `SvgPathWidget`'s default fill is OPAQUE
+  BLACK (`has_fill_=true`, `{0,0,0,1}`). A synthesized shape with no IR fill must
+  emit `setSvgFill(id,'none')` (→ `clear_fill()`) or it paints a phantom black
+  box. A border becomes `svg_stroke`/`svg_stroke_width`.
+- **Geometry only — source-agnostic.** Paths are derived from `width`/`height`,
+  per-corner `border-radius` (rounded rect via SVG arcs; the `SvgPathWidget`
+  parser supports `H`/`V`/`A`), and optional `pointCount` (polygon default 3,
+  star default 5) / `innerRadius` ratio (star default 0.5) ATTRIBUTES — never a
+  layer name. A `line` may have one zero extent (a horizontal/vertical rule).
+- **`polyline` is intentionally NOT synthesized** — it is an open run of explicit
+  points that geometry alone can't reconstruct; it stays `codegen: missing`
+  (carry `path_data` or rasterize at export).
+- **`is_vector_kind` is the shared classifier.** Exposed from
+  `design_fidelity.hpp`; codegen's `is_path_kind` and the `dropped-vector`
+  invariant both call it so they never disagree about what is a path node.
+- Source of truth: `compat.json imports/object-coverage` (these 9 types are now
+  `codegen: handled`) + the `[object-coverage]` drift guard + the
+  `[view][import][codegen][vector]` tests.
+
 ### Interactive (turnable) sprite knobs — `--knob-style sprite`
 
 `--knob-style sprite` no longer DEMOTES a recognized knob to a static image.

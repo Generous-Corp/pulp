@@ -46,6 +46,13 @@ struct FidelityContext {
     FidelityElement element = FidelityElement::container;
 };
 
+/// True for every normalized IR type that represents a vector / path-like
+/// shape (svg path/rect/line, ellipse/circle, polygon/polyline/star, …),
+/// matched on the IR type string only so the classification is identical
+/// across figma/pencil/stitch/v0. Shared by the dropped-vector invariant and
+/// codegen's path-lowering branch so the two never drift.
+bool is_vector_kind(const std::string& type);
+
 // ── Individual invariants (pure; testable in isolation) ──────────────────────
 
 /// No-skew: a BLEED sprite (render_bounds or asset_bleed) must be emitted at an

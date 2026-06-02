@@ -85,11 +85,20 @@ std::map<std::string, Probe> build_registry() {
     r["label"] = {[] { IRNode n = sized("label", "probe_label"); n.text_content = "Hi"; return n; }, "createLabel"};
     r["image"] = {[] { IRNode n = sized("image", "probe_image"); n.attributes["asset_path"] = "/tmp/x.png"; return n; }, "createImage"};
 
-    // Vector/path kinds: bare (no asset / fill / children) -> dropped, flagged
-    // by the dropped-vector invariant.
-    for (const char* t : {"vector", "path", "svg_path", "rect", "svg_rect",
-                          "rectangle", "line", "svg_line", "ellipse", "circle",
-                          "polygon", "polyline", "star"}) {
+    // Vector SHAPE PRIMITIVES: a bare node (no asset / fill / children) has its
+    // SVG `d` synthesized from geometry by synthesize_primitive_paths, so codegen
+    // lowers it to a native SvgPath (createSvgPath) and the dropped-vector
+    // invariant must NOT flag it.
+    for (const char* t : {"rect", "svg_rect", "rectangle", "line", "svg_line",
+                          "ellipse", "circle", "polygon", "star"}) {
+        const std::string type = t;
+        r[type] = {[type] { return sized(type, "probe_" + type); }, "createSvgPath('probe_" + type};
+    }
+
+    // Generic vector/path kinds need an authored `d`; a polyline needs explicit
+    // points. None are synthesizable from geometry, so the bare form still drops
+    // and must be flagged by the dropped-vector invariant.
+    for (const char* t : {"vector", "path", "svg_path", "polyline"}) {
         const std::string type = t;
         r[type] = {[type] { return sized(type, "probe_" + type); }, ""};
     }

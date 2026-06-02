@@ -156,4 +156,19 @@ std::unique_ptr<View> build_native_view_tree(
     const IRAssetManifest& manifest,
     const NativeMaterializeOptions& options = {});
 
+/// Source-agnostic IR normalization for vector SHAPE PRIMITIVES. Walks the tree
+/// and, for each rect/rectangle/line/ellipse/circle/polygon/star node that
+/// would otherwise be dropped to an empty frame — no `path_data`, no children,
+/// no visible fill, no rasterized asset, not an audio widget — synthesizes an
+/// SVG path `d` (plus `svg_viewbox` and, when the node carries a border, an
+/// `svg_stroke`/`svg_stroke_width`; `svg_fill` is forced to "none" so the
+/// SvgPathWidget's default opaque-black fill never paints a phantom box) from
+/// the node's geometry. Codegen then lowers it to a native SvgPath via
+/// createSvgPath+setSvgPath instead of silently dropping the shape. Idempotent:
+/// nodes that already carry `path_data`, render some other way, or are not
+/// synthesizable primitives are left untouched. Geometry is derived from IR
+/// fields only (width/height, corner radii, and optional pointCount/innerRadius
+/// attributes) — never a layer name or source quirk.
+void synthesize_primitive_paths(IRNode& root);
+
 } // namespace pulp::view
