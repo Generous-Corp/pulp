@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03121"></a>
+## [0.312.1] - 2026-06-01
+
+- fix(import-design): detect_audio_widget matches whole words not substrings ([#3306](https://github.com/danielraffel/pulp/pull/3306))
+- docs: codify local-dev audio etiquette in CLAUDE.md + ios/auv3 skills ([#3190](https://github.com/danielraffel/pulp/pull/3190))
+- docs+tooling: CI-host onboarding page (nav) + one-command setup-ci-host.sh ([#3304](https://github.com/danielraffel/pulp/pull/3304))
+- docs: opinionated runbook to set up a Mac as a Pulp Tart VM CI host ([#3303](https://github.com/danielraffel/pulp/pull/3303))
+
 <a id="v03120"></a>
 ## [0.312.0] - 2026-06-01
 
@@ -3425,6 +3433,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.312.1]: https://github.com/danielraffel/pulp/releases/tag/v0.312.1
 [0.312.0]: https://github.com/danielraffel/pulp/releases/tag/v0.312.0
 [0.311.0]: https://github.com/danielraffel/pulp/releases/tag/v0.311.0
 [0.310.0]: https://github.com/danielraffel/pulp/releases/tag/v0.310.0
