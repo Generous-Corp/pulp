@@ -541,8 +541,31 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     return m;
 }
 
+void Label::paint_attributed_(canvas::Canvas& canvas) {
+    const auto& spans = attributed_runs_.spans();
+    if (spans.empty()) return;
+    // Vertical-center the single line within the box (close to the default
+    // single-line label band). Each span paints with its own font + color,
+    // advancing x by the span's measured width — the native equivalent of the
+    // web-compat nested <span> path.
+    const float fs = spans.front().font_size;
+    const float baseline = bounds().height * 0.5f + fs * 0.32f;
+    canvas.set_text_align(canvas::TextAlign::left);
+    float x = 0.0f;
+    for (const auto& s : spans) {
+        const std::string fam = s.font_family.empty() ? std::string("Inter") : s.font_family;
+        canvas.set_font_full(fam, s.font_size, s.font_weight, s.italic ? 1 : 0, s.letter_spacing);
+        canvas.set_fill_color({s.color.r, s.color.g, s.color.b, s.color.a});
+        canvas.fill_text(s.text, x, baseline);
+        x += canvas.measure_text(s.text);
+    }
+}
+
 void Label::paint(canvas::Canvas& canvas) {
     if (text_.empty()) return;
+    // Per-range styled (mixed) text on a single line lowers to the span draw;
+    // multi-line / unstyled falls through to the single-style path below.
+    if (has_attributed_ && !multi_line_) { paint_attributed_(canvas); return; }
 
     // issue-969: CSS-style typography cascade. For each property:
     //   1. Use the Label's own value if explicitly set.

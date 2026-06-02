@@ -474,11 +474,14 @@ per-range styling. Now:
   styled `<span style=…>` children and the gaps as plain `createTextNode` (so
   gaps inherit the dominant style). Single-run text keeps the plain
   `.textContent` path (no regression).
-- **Codegen — native (deferred)**: still a single dominant-style `createLabel`.
-  The canvas `AttributedString`/`TextShaper` already supports styled runs, but
-  the `Label` widget doesn't expose them — wiring `Label::set_attributed_string`
-  + a `setRichText` bridge is the follow-up. Hence `compat.json
-  features.text-per-range-styles` = parsed handled, **codegen partial**.
+- **Codegen — native**: now wired. The native arm emits `setTextRuns(id,
+  [...])`; the bridge builds a `canvas::AttributedString` from the runs over the
+  Label's dominant style, and `Label::paint_attributed_` draws each span with
+  its own font/color (advancing x by `measure_text`) for a SINGLE-LINE label.
+  Multi-line mixed text still degrades to the dominant single-style path (the
+  span loop is single-line), so `compat.json features.text-per-range-styles`
+  stays **codegen partial**. `Label::set_attributed_string` + the `setTextRuns`
+  bridge fn are the wiring (offsets are UTF-8 byte offsets, same as the web arm).
 - **Offsets are UTF-8 BYTE offsets** into `text_content`. The Figma exporter
   converts its per-character `characterStyleOverrides` indices to byte offsets
   (`len(chars[:i].encode('utf-8'))`, correct for all BMP text); `emit_web_text_runs`

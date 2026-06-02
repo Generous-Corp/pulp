@@ -81,8 +81,11 @@ they lower to a native `SvgPath` instead of dropping. The generic
 they carry authored `path_data`); `polyline` stays `codegen: missing`
 (an open run of explicit points, not synthesizable from geometry). Among
 `features`: radial/conic background gradients now render (was a flat
-fallback), Figma resize constraints map to flex/position, and grid
-containers lower to the native grid bridge. Seeded from
+fallback), Figma resize constraints map to flex/position, grid
+containers lower to the native grid bridge, and per-range text styles
+render on BOTH arms — web nested `<span>`s and native `setTextRuns` →
+`canvas::AttributedString` (single-line; multi-line still degrades).
+Seeded from
 `planning/2026-05-31-import-coverage-hardening-plan.md` §3.
 
 ## Adding a new format
