@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <pulp/view/view.hpp>
+#include <pulp/canvas/attributed_string.hpp>
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/sprite_strip.hpp>
@@ -61,6 +62,19 @@ public:
         invalidate_layout();
     }
     const std::string& text() const { return text_; }
+
+    // Per-range styled text (design-import mixed text). When set with >=1 span,
+    // a single-line Label paints each span with its own font/color via
+    // paint_attributed_() instead of the single-style path. Empty / multi-line
+    // falls back to the dominant single-style text().
+    void set_attributed_string(canvas::AttributedString a) {
+        attributed_runs_ = std::move(a);
+        has_attributed_ = !attributed_runs_.spans().empty();
+        invalidate_layout();
+    }
+    void clear_attributed_string() { has_attributed_ = false; }
+    bool has_attributed_string() const { return has_attributed_; }
+    std::size_t attributed_span_count() const { return attributed_runs_.spans().size(); }
 
     // issue-969: each setter marks the corresponding has_own_* flag so
     // paint() can distinguish "default value" from "explicitly set" and
@@ -250,6 +264,9 @@ private:
     // whether to honor the field or fall through to View::inheritable_*().
     canvas::Color text_color_{};
     bool has_own_text_color_ = false;
+    canvas::AttributedString attributed_runs_;  ///< per-range styled text (mixed)
+    bool has_attributed_ = false;
+    void paint_attributed_(canvas::Canvas& canvas);  ///< single-line span draw
     bool has_own_font_size_ = false;
     bool has_own_font_weight_ = false;
     bool has_own_letter_spacing_ = false;

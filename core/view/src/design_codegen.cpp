@@ -1396,6 +1396,24 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setTextAlign('" << id << "', '" << *node.style.text_align << "');\n";
         if (node.style.letter_spacing)
             ss << ind << "setLetterSpacing('" << id << "', " << *node.style.letter_spacing << ");\n";
+        // Per-range styled text → native styled runs (the bridge builds a
+        // canvas::AttributedString; mirrors the web nested-<span> path). Offsets
+        // are UTF-8 byte offsets, matching emit_web_text_runs.
+        if (!node.text_runs.empty()) {
+            ss << ind << "setTextRuns('" << id << "', [";
+            for (size_t ri = 0; ri < node.text_runs.size(); ++ri) {
+                const auto& r = node.text_runs[ri];
+                if (ri) ss << ", ";
+                ss << "{ start: " << r.start << ", end: " << r.end;
+                if (r.font_weight) ss << ", fontWeight: " << *r.font_weight;
+                if (r.font_size) ss << ", fontSize: " << *r.font_size;
+                if (r.font_style) ss << ", fontStyle: '" << js_single_quote_escape(*r.font_style) << "'";
+                if (r.color) ss << ", color: '" << js_single_quote_escape(*r.color) << "'";
+                if (r.letter_spacing) ss << ", letterSpacing: " << *r.letter_spacing;
+                ss << " }";
+            }
+            ss << "]);\n";
+        }
         // Inflate min-width when the label is text-transformed to uppercase.
         // Figma stores the source-text width but renders the transformed
         // glyphs — uppercase Latin is typically ~15-20% wider than the

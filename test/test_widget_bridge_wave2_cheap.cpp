@@ -819,3 +819,21 @@ TEST_CASE("setBackgroundGradient maps radial sizing keywords to a radius",
     CHECK(near(radius("radial-gradient(farthest-corner at 50% 50%, #fff, #000)"), 0.7071f));
     CHECK(near(radius("radial-gradient(#fff, #000)"), 0.7071f));  // no keyword -> default
 }
+
+TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
+          "[view][widget-bridge][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 40});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('t', 'Hello world', '');\n"
+        "setFontSize('t', 16);\n"
+        "setTextRuns('t', [{ start: 0, end: 5, fontWeight: 700, color: '#ff0000' }]);");
+    auto* lbl = dynamic_cast<Label*>(bridge.widget("t"));
+    REQUIRE(lbl != nullptr);
+    CHECK(lbl->has_attributed_string());
+    CHECK(lbl->attributed_span_count() == 2);  // "Hello" styled run + " world" gap
+}

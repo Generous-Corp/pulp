@@ -4923,6 +4923,26 @@ TEST_CASE("grid item 'N / span M' resolves to an end line",
     CHECK(js.find("'column_end', 3)") != std::string::npos);
 }
 
+TEST_CASE("native codegen emits setTextRuns for per-range text",
+          "[view][import][codegen][text]") {
+    // The native (bridge) arm now lowers per-range text to setTextRuns (the
+    // bridge builds a canvas::AttributedString), not just the web <span> path.
+    DesignIR ir;
+    ir.root.type = "frame"; ir.root.name = "Root";
+    IRNode t; t.type = "text"; t.name = "T"; t.text_content = "Hello world";
+    t.style.font_size = 16.0f;
+    IRTextRun run; run.start = 0; run.end = 5; run.font_weight = 700; run.color = "#ff0000";
+    t.text_runs.push_back(run);
+    ir.root.children.push_back(t);
+    CodeGenOptions opts;  // bridge_native_js (default)
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("setTextRuns('T") != std::string::npos);
+    CHECK(js.find("start: 0, end: 5") != std::string::npos);
+    CHECK(js.find("fontWeight: 700") != std::string::npos);
+    CHECK(js.find("color: '#ff0000'") != std::string::npos);
+}
+
 TEST_CASE("web codegen escapes clip-path / mask CSS (no JS string break)",
           "[view][import][codegen][mask]") {
     // Raw clip-path/mask CSS can carry url('...') with quotes; emit_str must
