@@ -7,9 +7,11 @@
 //   tokens.strings[name]    → string
 //
 // Variable modes: a variable can have different values per mode (light/dark,
-// breakpoints). For v1 we capture the DEFAULT mode only and log a
-// `capture_partial` diagnostic when other modes exist. Multi-mode support is a
-// follow-up slice.
+// breakpoints). We capture EVERY mode — the default mode keeps the bare token
+// name and each other mode is emitted under a "<name>.<mode>" suffix (e.g.
+// "color.bg" + "color.bg.dark") so themed values survive import into Pulp's
+// flat theme maps. Aliases are resolved per mode, so a semantic color that
+// points at a different base-palette entry per mode yields the right value.
 
 import type { ExtractedDiagnostic } from "./extract-model";
 
@@ -56,11 +58,12 @@ async function ingestCollection(
 ): Promise<void> {
   const defaultModeId = coll.defaultModeId;
   if (coll.modes.length > 1) {
+    const defaultName = coll.modes.find((m) => m.modeId === defaultModeId)?.name ?? "?";
     diagnostics.push({
       severity: "info",
       code: "variable-multi-mode",
       kind: "capture_partial",
-      message: `Variable collection "${coll.name}" has ${coll.modes.length} modes; only the default mode "${coll.modes.find((m) => m.modeId === defaultModeId)?.name ?? "?"}" was captured.`,
+      message: `Variable collection "${coll.name}" has ${coll.modes.length} modes; all are captured — the default mode "${defaultName}" uses the bare token name and each other mode is suffixed (e.g. "token.dark"). Cross-collection alias values resolve against the referent's default mode.`,
       path: `/tokens/collection/${coll.name}`,
     });
   }
@@ -73,26 +76,20 @@ async function ingestCollection(
       continue;
     }
     if (!v) continue;
-    const name = canonicalName(coll.name, v.name);
-    out.variableIdToName[v.id] = name;
-    const raw = v.valuesByMode[defaultModeId];
-    if (raw === undefined) continue;
-    switch (v.resolvedType) {
-      case "COLOR":
-        out.colors[name] = renderColorValue(raw, defaultModeId);
-        break;
-      case "FLOAT":
-        if (typeof raw === "number") out.dimensions[name] = raw;
-        else out.dimensions[name] = await resolveNumberAlias(raw, defaultModeId);
-        break;
-      case "STRING":
-        if (typeof raw === "string") out.strings[name] = raw;
-        else out.strings[name] = String(await resolveAlias(raw, defaultModeId));
-        break;
-      case "BOOLEAN":
-        // Booleans don't fit IRTokens cleanly; encode as "true" / "false" strings.
-        if (typeof raw === "boolean") out.strings[name] = raw ? "true" : "false";
-        break;
+    const baseName = canonicalName(coll.name, v.name);
+    // Style references bind to the default-mode (bare) token name.
+    out.variableIdToName[v.id] = baseName;
+    for (const mode of coll.modes) {
+      const raw = v.valuesByMode[mode.modeId];
+      if (raw === undefined) continue;
+      // Default mode keeps the bare name (back-compat + the name style refs
+      // resolve to); every other mode is captured under "<name>.<mode>" so
+      // light/dark (and any multi-mode) values survive import.
+      const slug = modeSlug(mode.name);
+      const name = mode.modeId === defaultModeId || slug.length === 0
+        ? baseName
+        : `${baseName}.${slug}`;
+      await assignToken(out, name, raw, v.resolvedType, mode.modeId);
     }
   }
 }
@@ -107,7 +104,7 @@ function canonicalName(collectionName: string, varName: string): string {
     .replace(/[^a-z0-9._-]/g, "");
 }
 
-function renderColorValue(raw: VariableValue, modeId: string): string {
+function renderColorValue(raw: VariableValue): string {
   if (typeof raw === "object" && raw && "r" in raw && "g" in raw && "b" in raw) {
     const { r, g, b, a } = raw as RGBA;
     const rh = Math.round(r * 255).toString(16).padStart(2, "0");
@@ -119,19 +116,57 @@ function renderColorValue(raw: VariableValue, modeId: string): string {
   return "#000000";
 }
 
-async function resolveAlias(raw: VariableValue, modeId: string): Promise<unknown> {
+/** Sanitize a Figma mode name into a token-name-safe slug (same rules as canonicalName). */
+function modeSlug(modeName: string): string {
+  return modeName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9._-]/g, "");
+}
+
+/**
+ * Follow VARIABLE_ALIAS references for a given mode until a concrete value is
+ * reached (bounded to avoid cycles). Resolving per-mode is what makes
+ * multi-mode capture meaningful: a semantic variable usually aliases a
+ * different base-palette entry in each mode (light vs dark). A referenced
+ * variable in another collection won't share this collection's modeId, so we
+ * fall back to the referent's own first/default mode value.
+ */
+async function resolveValue(
+  raw: VariableValue,
+  modeId: string,
+  depth = 0,
+): Promise<VariableValue> {
+  if (depth >= 10) return raw;
   if (typeof raw === "object" && raw && "type" in raw && (raw as VariableAlias).type === "VARIABLE_ALIAS") {
     const referent = await figma.variables.getVariableByIdAsync((raw as VariableAlias).id);
-    if (referent) {
-      const next = referent.valuesByMode[modeId];
-      if (next !== undefined) return next;
-    }
+    if (!referent) return raw;
+    const next = referent.valuesByMode[modeId] ?? Object.values(referent.valuesByMode)[0];
+    if (next === undefined) return raw;
+    return resolveValue(next, modeId, depth + 1);
   }
   return raw;
 }
 
-async function resolveNumberAlias(raw: VariableValue, modeId: string): Promise<number> {
-  const resolved = await resolveAlias(raw, modeId);
-  if (typeof resolved === "number") return resolved;
-  return 0;
+/** Resolve + assign one variable's value for a given mode into the token maps. */
+async function assignToken(
+  out: ExtractedTokens,
+  name: string,
+  raw: VariableValue,
+  resolvedType: Variable["resolvedType"],
+  modeId: string,
+): Promise<void> {
+  const value = await resolveValue(raw, modeId);
+  switch (resolvedType) {
+    case "COLOR":
+      if (typeof value === "object" && value && "r" in value) out.colors[name] = renderColorValue(value);
+      break;
+    case "FLOAT":
+      if (typeof value === "number") out.dimensions[name] = value;
+      break;
+    case "STRING":
+      if (typeof value === "string") out.strings[name] = value;
+      break;
+    case "BOOLEAN":
+      // Booleans don't fit IRTokens cleanly; encode as "true" / "false" strings.
+      if (typeof value === "boolean") out.strings[name] = value ? "true" : "false";
+      break;
+  }
 }
