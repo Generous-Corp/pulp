@@ -351,6 +351,9 @@ so codegen lowers it like any other path. Key facts / gotchas:
   parser supports `H`/`V`/`A`), and optional `pointCount` (polygon default 3,
   star default 5) / `innerRadius` ratio (star default 0.5) ATTRIBUTES — never a
   layer name. A `line` may have one zero extent (a horizontal/vertical rule).
+  **MSVC gotcha:** the polygon/star angle math must NOT use `M_PI` — MSVC does
+  not define it without `_USE_MATH_DEFINES`, which broke the Windows CLI build
+  (and the whole release pipeline) once. Use the local `kSynthPi` constant.
 - **`polyline` is intentionally NOT synthesized** — it is an open run of explicit
   points that geometry alone can't reconstruct; it stays `codegen: missing`
   (carry `path_data` or rasterize at export).

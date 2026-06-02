@@ -1752,6 +1752,10 @@ std::string synth_line_path(float w, float h) {
     return d.str();
 }
 
+// Portable pi — MSVC does not define M_PI without _USE_MATH_DEFINES, so use an
+// explicit constant rather than relying on a macro (or its include ordering).
+constexpr float kSynthPi = 3.14159265358979323846f;
+
 // Regular polygon / star vertices inscribed in the (w, h) box. `points` is the
 // number of polygon corners (star spikes); `inner_ratio` < 1 alternates an
 // inner radius to form a star (ignored for a plain polygon).
@@ -1760,8 +1764,8 @@ std::string synth_polygon_path(float w, float h, int points, float inner_ratio) 
     const float cx = w * 0.5f, cy = h * 0.5f, rx = w * 0.5f, ry = h * 0.5f;
     const bool is_star = inner_ratio > 0.0f && inner_ratio < 1.0f;
     const int verts = is_star ? points * 2 : points;
-    const float step = 2.0f * static_cast<float>(M_PI) / static_cast<float>(verts);
-    const float start = -static_cast<float>(M_PI) * 0.5f;  // first point at top
+    const float step = 2.0f * kSynthPi / static_cast<float>(verts);
+    const float start = -kSynthPi * 0.5f;  // first point at top
     std::ostringstream d;
     for (int i = 0; i < verts; ++i) {
         const float a = start + step * static_cast<float>(i);
