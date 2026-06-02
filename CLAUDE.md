@@ -768,6 +768,14 @@ sync. The pre-push hook runs this check enforcing-by-default
 (pulp #1144); `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes it to
 advisory if you genuinely need to push a known coverage gap.
 
+**Two different knobs — pick the right one.** `PULP_DISABLE_PREPUSH_DIFF_COVER=1`
+still runs the full configure + build, then only *demotes the failure* to
+advisory — so it does NOT make the push faster (a push that looks "hung" right
+after this is the diff-cover build compiling, not the network). To skip the
+build entirely, use `PULP_SKIP_DIFF_COVER=1`, which exits before any
+configure/build while skill-sync / version-bump / compat gates still run. Reach
+for `PULP_SKIP_PREPUSH=1` only when those other gates must be skipped too.
+
 The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
@@ -796,7 +804,8 @@ maps to the one gate you genuinely need to skip, not the nuclear
 
 | When you need to                          | Use (surgical)                                  | Avoid (nuclear)                  |
 |-------------------------------------------|-------------------------------------------------|----------------------------------|
-| Skip only diff-coverage (slow, flaky)     | `PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push`    | `PULP_SKIP_PREPUSH=1 git push`   |
+| Skip the diff-cover BUILD (push fast)     | `PULP_SKIP_DIFF_COVER=1 git push`               | `PULP_SKIP_PREPUSH=1 git push`   |
+| Run diff-cover but ignore its result      | `PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push` (still builds) | `PULP_SKIP_PREPUSH=1 git push`   |
 | Demote all gates to advisory              | `PULP_DISABLE_PREPUSH_GATES=1 git push`         | `PULP_SKIP_PREPUSH=1 git push`   |
 | Skip skill-sync for a single commit       | `Skill-Update: skip skill=<name> reason="…"` trailer | `PULP_SKIP_PREPUSH=1 git push`   |
 | Skip version-bump for a single commit     | `Version-Bump: skip reason="…"` trailer         | `PULP_SKIP_PREPUSH=1 git push`   |
