@@ -1,0 +1,20 @@
+# Real Rust DSP core (a stereo gain) for the Phase 2b end-to-end proof: a native
+# Rust core that actually processes audio through the C ABI, driven by the C++
+# NativeCoreProcessor adapter. TEST FIXTURE — built only under
+# PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS (default OFF).
+[package]
+name = "pulp-gain-rust-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "pulp_gain_rust_core"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

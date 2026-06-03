@@ -900,6 +900,17 @@ if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
     pulp_add_test_suite(pulp-test-rust-dsp-ffi
         SOURCES test_rust_dsp_ffi.cpp native_components/rt_intercept_test_support.cpp
         LIBRARIES pulp::native-components pulp::runtime pulp-noop-rust-core)
+
+    # Phase 2b: a real Rust gain DSP core driven through the C++
+    # NativeCoreProcessor adapter — proves native audio end-to-end.
+    pulp_add_cargo_staticlib(
+        NAME pulp-gain-rust-core
+        MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native-components/gain-rust-core/Cargo.toml
+        LIB_NAME pulp_gain_rust_core
+        PROFILE dev)
+    pulp_add_test_suite(pulp-test-rust-dsp-processor
+        SOURCES test_rust_dsp_processor.cpp
+        LIBRARIES pulp::format pulp-gain-rust-core)
 endif()
 
 # #334: AudioFocusRegistry — cross-platform observer for OS audio-focus
