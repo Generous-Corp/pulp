@@ -884,6 +884,12 @@ pulp_add_test_suite(pulp-test-native-core-processor
     SOURCES test_native_core_processor.cpp
     LIBRARIES pulp::format)
 
+# Public node ABI (pulp_node_v1) conformance — always built, no Rust. Pins the
+# ABI shape, version negotiation, and a C node's full lifecycle.
+pulp_add_test_suite(pulp-test-pulp-node-v1
+    SOURCES test_pulp_node_v1.cpp
+    LIBRARIES pulp::native-components pulp::runtime)
+
 # Opt-in Rust lane: build a Cargo staticlib reference core (with an RT-checking
 # global allocator) and link the FFI round-trip + RT-safety death tests. OFF by
 # default, so default builds need no Rust toolchain. The death tests fork() a
@@ -911,6 +917,17 @@ if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
     pulp_add_test_suite(pulp-test-rust-dsp-processor
         SOURCES test_rust_dsp_processor.cpp
         LIBRARIES pulp::format pulp-gain-rust-core)
+
+    # Phase 6: a Rust node implementing the public pulp_node_v1 ABI, proving a C
+    # node and a Rust node load through the same contract.
+    pulp_add_cargo_staticlib(
+        NAME pulp-node-rust
+        MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native-components/node-rust/Cargo.toml
+        LIB_NAME pulp_node_rust
+        PROFILE dev)
+    pulp_add_test_suite(pulp-test-pulp-node-v1-rust
+        SOURCES test_pulp_node_v1_rust.cpp
+        LIBRARIES pulp::native-components pulp-node-rust)
 endif()
 
 # #334: AudioFocusRegistry — cross-platform observer for OS audio-focus

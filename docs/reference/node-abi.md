@@ -23,10 +23,11 @@ node ABI would need a dedicated C shim. Pulp does not expose that shim today.
 
 Pulp's current custom-node decision is:
 
-> Pulp supports source-compatible custom nodes today. A stable `pulp_node_v1`
-> C ABI is deferred until there is concrete demand for precompiled third-party
-> node binaries. In the meantime, keep the internal node model compatible with
-> a future C ABI boundary.
+> Pulp supports source-compatible custom nodes (`CustomNodeType`) and now also
+> ships the language-neutral `pulp_node_v1` C ABI (experimental) for nodes
+> written against a stable binary contract. Runtime loading of *binary* node
+> packs from disk (signing / trust / packaging) remains deferred. See
+> "`pulp_node_v1` C ABI (shipped, experimental)" below.
 
 Here, "compatible with a future C ABI boundary" is a design constraint, not a
 binary compatibility promise. New node-facing APIs should be shaped so they can
@@ -53,24 +54,41 @@ oriented:
 | Stable binary compatibility | A precompiled third-party node binary loads across supported Pulp builds without recompilation. Pulp does not promise this today. |
 | Frozen ABI | A stable binary contract that cannot remove or reinterpret existing fields, callbacks, symbols, or behavior within the supported compatibility window. Nothing in `pulp_node_v1.draft.0` is frozen. |
 
-## Deferred `pulp_node_v1` C ABI
+## `pulp_node_v1` C ABI (shipped, experimental)
 
-`pulp_node_v1` is reserved as the name for a possible future stable C ABI for
-precompiled custom `SignalGraph` nodes. It is separate from
-`PULP_NODE_ABI_VERSION`, which tracks the current SDK-facing source and
-serialized node-interface generation.
+`pulp_node_v1` is the language-neutral C ABI for custom `SignalGraph` nodes. It
+ships as a real header —
+`core/native-components/include/pulp/native_components/pulp_node_v1.h` (module
+`pulp::native-components`) — derived from the Phase 5 source-level
+`CustomNodeType` lifecycle/state experience. Its `PULP_NODE_V1_ABI_MAJOR` tracks
+`PULP_NODE_ABI_VERSION` (the cross-module equality is asserted in
+`test/test_pulp_node_v1.cpp`).
 
-Do not ship a public `pulp_node_v1` header until at least one trigger is real:
+Scope is **custom `SignalGraph` nodes only** — not the Processor-level FFI
+(`native_core.h`), not a format-adapter replacement. The contract:
 
-- third-party authors need to distribute precompiled node binaries;
-- Pulp ships a prebuilt SDK boundary that users do not rebuild against;
-- host applications need to load independently versioned node modules at
-  runtime;
-- the graph, parameter, event, state, and threading contracts have enough
-  production history to freeze a small C surface without adapter churn.
+- POD only: leading `uint32_t size` + `uint32_t abi_major`; opaque
+  `pulp_node_instance_v1` / host handles; status codes; capability flags; no STL,
+  templates, exceptions, RTTI, virtuals, `std::function`, or references.
+- One exported symbol, `pulp_node_v1_entry()`, returning a `pulp_node_entry_v1*`
+  vtable (descriptor / create / prepare / reset / process / release / save_state /
+  load_state / report_latency). The host checks `abi_major` + `size` and refuses
+  on mismatch.
+- Host owns audio buffers (borrowed planar float32 for the call); state crosses
+  via a host writer (save) + a byte span (load), validate-before-commit; a
+  host-services struct carries alloc/free/log/now_ns, each labelled RT-callable
+  or NON-RT-only.
+- **Same-major compatibility:** within major 1 the contract is append-only —
+  fields grow via `size`, behaviour via capability bits; a host accepts any node
+  with a matching major and at least its minimum `size`, ignoring trailing
+  fields. A different major is rejected.
 
-Until then, keep `pulp_node_v1` as a design target and test shape, not as a
-public compatibility promise.
+It is **experimental**: the contract may still gain capability bits / trailing
+fields (additively) before it is declared frozen. A C node and a Rust node are
+proven to load through the identical contract (`test_pulp_node_v1.cpp` +
+`test_pulp_node_v1_rust.cpp`). Runtime loading of *binary* node packs from disk
+(signing / trust / per-platform packaging) is the separate, still-deferred
+dynamic-distribution work.
 
 ## API Layers
 
