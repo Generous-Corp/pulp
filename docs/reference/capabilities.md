@@ -185,6 +185,21 @@ Key headers: `pulp/dsl/dsl_processor.hpp`, `pulp/dsl/faust_processor.hpp`
 
 ---
 
+## Native Components
+
+Opt-in native-language audio components behind a language-neutral C ABI (Rust
+first). OFF by default — a default build needs no Rust toolchain. See the
+[native-components reference](native-components.md) for scope, the C-ABI contract,
+and the iOS static-only limits.
+
+| Capability | Status | Module | Docs | Examples |
+|---|---|---|---|---|
+| Rust/C/Zig DSP behind a C++ `Processor` adapter via a private C-shaped FFI | experimental | [format](modules.md#format) | [native-components](native-components.md) | |
+| Native non-RT domain logic behind `EditorBridge` | experimental | [view](modules.md#view) | [native-components](native-components.md), [editor-bridge](editor-bridge.md) | |
+| Source-built custom `SignalGraph` nodes (toward `pulp_node_v1` C ABI) | experimental | [host](modules.md#host) | [node-abi](node-abi.md), [signal-graph](signal-graph.md) | |
+
+---
+
 ## State and Automation
 
 | Capability | Status | Module | Docs | Examples |

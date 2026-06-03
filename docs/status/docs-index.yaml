@@ -354,6 +354,11 @@ docs:
     kind: reference
     summary: Source-ABI policy for Processor and PluginSlot node interfaces
 
+  - slug: native-components
+    path: reference/native-components.md
+    kind: reference
+    summary: Opt-in native-language (Rust-first) audio components behind a language-neutral C ABI, with iOS static-only limits
+
   # Policies
   - slug: code-style
     path: policies/code-style.md

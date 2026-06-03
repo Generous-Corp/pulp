@@ -68,6 +68,20 @@ plugin_extensions:
       - "AraDocumentController is a stub — playback renderer not implemented."
       - "VST3, CLAP, AU adapters do not declare ARA extension support."
       - "Celemony ARA SDK is developer-supplied; not bundled."
+  native_components:
+    status: experimental
+    notes: >
+      Opt-in native-language audio components (Rust first) behind a private
+      C-shaped FFI: a C++ Processor adapter owns a source-built Rust/C/Zig DSP
+      core. Boundary is a language-neutral C ABI, OFF by default — default
+      builds need no Rust toolchain. Rationale and scope:
+      docs/reference/native-components.md. Implementation is readiness-gated;
+      the contract stance is committed.
+    limitations:
+      - "No frozen binary ABI yet — source-build/rebuild against the SDK is required."
+      - "iOS / AUv3 / sandboxed targets: static-bundled, signed native code only — no runtime-loaded or downloaded native DSP."
+      - "Dynamic node packs are desktop-and-Android only, separately gated (core/host is compiled out on iOS)."
+      - "Pulp ships the FFI skeleton, bindings, CMake/Cargo glue, and reference cores — not a bundled DSP framework or crate-selection opinions."
 # Known limitations per format. Keyed the same as `formats:`. The renderer
 # in capabilities.md surfaces these as a "Known limitations" link on each
 # row. Production-readiness workstream 08 sub-deliverable 8.5.

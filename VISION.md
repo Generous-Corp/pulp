@@ -24,6 +24,8 @@ Write C++20. The core gives you a `Processor` base class, a thread-safe paramete
 
 If you prefer writing DSP in a dedicated language, Pulp integrates with Faust (offline codegen into native `Processor` instances), Cmajor (external toolchain with validation and generation), and JSFX (bounded subset parsing and validation).
 
+Pulp also supports **language-neutral native components**: opt-in audio cores written in Rust, C, or Zig behind a stable C ABI, owned by a thin C++ `Processor` adapter. The feature is OFF by default — a default build needs no Rust toolchain — and is desktop-first; on iOS native components are static-bundled and signed only. (Details: [`docs/reference/native-components.md`](docs/reference/native-components.md).)
+
 ### Start from design
 
 Import from Figma, Pencil.dev, Google Stich and more. Define your visual identity as a design token system — colors, typography, widget geometry, knob styles, button shapes, shadows, gradients. Apply one design language across many plugins. Change a token, and changes appear live in the standalone host via hot-reload.
@@ -71,6 +73,8 @@ Header-only C++ across six categories: oscillators, filters (biquad, SVF, ladder
 **Cmajor** — External toolchain integration with validation and code generation for C++ and CLAP targets.
 
 **JSFX** — Bounded subset support for REAPER-style effect scripts with parameter extraction.
+
+**Rust (and C / Zig)** — Write a DSP core in a native language and wrap it in a thin C++ `Processor` adapter through a private, C-shaped FFI. The stable boundary is a language-neutral C ABI, not a Rust-only one. Opt-in (OFF by default; no Rust toolchain for default builds), desktop-first, with host-owned buffers and strict real-time-safety rules. On iOS, native components are static-bundled and signed only — never runtime-loaded.
 
 ### Three JavaScript Engines
 
