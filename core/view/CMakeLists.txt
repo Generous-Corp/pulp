@@ -199,20 +199,44 @@ if(PULP_JS_ENGINE STREQUAL "v8" OR (PULP_JS_ENGINE STREQUAL "auto" AND DEFINED V
             if(V8_LIBRARY_NAME)
                 list(APPEND PULP_V8_PROVIDER_NAMES ${V8_LIBRARY_NAME})
             endif()
-            list(APPEND PULP_V8_PROVIDER_NAMES v8_monolith node.141 node)
+            # `node` (unversioned) matches a libnode.so/.dylib dev symlink as
+            # shipped by Linux distro libnode-dev. `v8_monolith` matches a
+            # self-built or prebuilt static V8 (e.g. rusty_v8, kuoruan/libv8).
+            list(APPEND PULP_V8_PROVIDER_NAMES v8_monolith node)
 
             find_library(PULP_V8_PROVIDER_LIBRARY
                 NAMES ${PULP_V8_PROVIDER_NAMES}
                 PATHS ${V8_LIB_DIR}
                 NO_DEFAULT_PATH
             )
+            set(PULP_V8_PROVIDER "${PULP_V8_PROVIDER_LIBRARY}")
 
-            if(PULP_V8_PROVIDER_LIBRARY)
-                target_link_libraries(pulp-view-script PRIVATE ${PULP_V8_PROVIDER_LIBRARY})
+            # Homebrew libnode (and a non-dev distro libnode) is version-
+            # suffixed — libnode.147.dylib on macOS, libnode.so.115 on Linux —
+            # so it is invisible to find_library's NAMES matching. Glob for any
+            # versioned libnode so the V8 lane survives Node upgrades without a
+            # hard-coded ABI pin, and pick the highest version present.
+            if(NOT PULP_V8_PROVIDER)
+                file(GLOB _pulp_v8_libnode
+                    "${V8_LIB_DIR}/libnode.*.dylib"
+                    "${V8_LIB_DIR}/libnode.so.*"
+                    "${V8_LIB_DIR}/libnode.*.so")
+                if(_pulp_v8_libnode)
+                    list(SORT _pulp_v8_libnode COMPARE NATURAL)
+                    list(POP_BACK _pulp_v8_libnode PULP_V8_PROVIDER)
+                endif()
+                unset(_pulp_v8_libnode)
+            endif()
+
+            if(PULP_V8_PROVIDER)
+                target_link_libraries(pulp-view-script PRIVATE ${PULP_V8_PROVIDER})
+                message(STATUS "Pulp V8 provider library: ${PULP_V8_PROVIDER}")
             else()
                 message(FATAL_ERROR
                     "Could not find a V8 provider library in ${V8_LIB_DIR}. "
-                    "Set V8_LIBRARY_PATH to a full library path or V8_LIBRARY_NAME to the library basename."
+                    "Looked for v8_monolith, node, and versioned libnode.* "
+                    "(e.g. libnode.147.dylib, libnode.so.115). Set V8_LIBRARY_PATH "
+                    "to a full library path or V8_LIBRARY_NAME to the library basename."
                 )
             endif()
         endif()

@@ -173,6 +173,61 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
 
 The engine choice is a **build-time** CMake option. Changing it requires reconfigure + rebuild. The abstraction ensures all JS bridge code works identically across engines — the switch is invisible to UI scripts.
 
+## V8 provider libraries (how V8 is obtained)
+
+Pulp does **not** build V8 from source. It links a prebuilt V8 via three
+cache variables consumed in `core/view/CMakeLists.txt`:
+
+- `V8_INCLUDE_DIR` — header root containing `v8.h`
+- `V8_LIB_DIR` — directory searched for the provider library
+- `V8_LIBRARY_PATH` — full path to the provider when it can't be matched
+  by name (the usual case for a version-suffixed `libnode`)
+- `V8_LIBRARY_NAME` — optional basename override
+
+Resolution order when `V8_LIBRARY_PATH` is unset: `find_library` for
+`v8_monolith` then `node`, then a `file(GLOB)` fallback for version-
+suffixed `libnode.*.dylib` / `libnode.so.*` (highest version wins, by
+natural sort). The glob exists because Homebrew/distro `libnode` is
+ABI-suffixed (`libnode.147.dylib`, `libnode.so.115`) and invisible to
+`find_library`'s NAMES matching — so the lane survives Node upgrades
+without a hard-coded pin. The configure log prints the resolved provider
+(`-- Pulp V8 provider library: ...`); check it if a V8 build links the
+wrong thing.
+
+**macOS (proven lane):** Homebrew Node's `libnode`.
+
+```bash
+cmake -S . -B build -DPULP_JS_ENGINE=v8 \
+  -DV8_INCLUDE_DIR=/opt/homebrew/opt/node/include/node \
+  -DV8_LIB_DIR=/opt/homebrew/opt/node/lib \
+  -DV8_LIBRARY_PATH=/opt/homebrew/opt/node/lib/libnode.147.dylib \
+  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+```
+
+Passing `V8_LIBRARY_PATH` explicitly is still the most robust on macOS;
+the glob is the fallback when it's omitted.
+
+**Cross-platform provider options (not yet validated):**
+
+- **Linux:** distro `libnode` is the direct analog of the macOS lane —
+  `apt install libnode-dev` (Debian/Ubuntu; `libv8-dev` aliases it) or
+  `dnf install nodejs-devel`. The dev package ships an unversioned
+  `libnode.so` symlink that `find_library NAMES node` matches directly.
+- **Windows:** no clean dev `libnode` package. Either build Node
+  `--shared` (inherits Node's sealed ICU — cleanest), or use a prebuilt
+  static `v8_monolith` (denoland/rusty_v8, kuoruan/libv8) via
+  `V8_LIBRARY_PATH`.
+
+**The ICU caveat that makes the macOS lane work:** `libnode` keeps its
+bundled ICU/zlib symbols private (two-level namespace / hidden
+visibility), so they don't collide with Skia's bundled-but-flat-named
+ICU/HarfBuzz (in `libskunicode_icu.a` / `libskshaper.a`) at the final
+link. A self-built `v8_monolith` flat-exports ICU and will clash with
+Skia unless those symbols are hidden. Confirm a provider is safe with
+`nm -gU <lib> | grep -cE '_ubrk_|_ucnv_|_uloc_'` — it should print 0.
+This is also why V8 is confined to `js_v8_engine.cpp` and never shares a
+translation unit with any Skia/Dawn header.
+
 ## Gotchas
 
 ### Web-API global registration is hybrid native+JS by design (#915)
@@ -363,7 +418,7 @@ registration module forgets the contract.
 
 | Engine | Public ESM API | Status |
 |---|---|---|
-| **V8** (`libnode.141.dylib` on macOS) | `import.meta`, dynamic `import()`, `setModuleLoaderDelegate`-equivalent | ✅ Full ESM. Used by `examples/threejs-native-demo/main.cpp:221` for macOS Three.js. |
+| **V8** (`libnode` on macOS, version-suffixed) | `import.meta`, dynamic `import()`, `setModuleLoaderDelegate`-equivalent | ✅ Full ESM. Used by `examples/threejs-native-demo/main.cpp:221` for macOS Three.js. |
 | **JSC** (system framework on iOS) | NO public ESM module loader on iOS | ❌ `JSScript.h` + `JSModuleLoaderDelegate` are private. Shipping them in an `.appex` risks App Store rejection. |
 | **JSC** (system framework on macOS) | `JSScript` exposed via framework headers | 🟡 Available, but typically unused since macOS uses V8. |
 | **QuickJS** (vendored under `external/quickjs/`) | Full ESM via `JS_NewModule*` | ✅ Used as a fallback when V8 is unavailable + jitless V8 isn't an option. |
