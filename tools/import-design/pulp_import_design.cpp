@@ -2061,7 +2061,28 @@ int main(int argc, char* argv[]) {
         swift_opts.emit_theme = include_tokens;
         swift_opts.emit_binding_manifest = true;
 
+        // B2 fidelity: the SwiftUI lowering reports each divergence a SwiftUI
+        // stack cannot reproduce (flex-wrap, justify distribution, align-
+        // stretch, absolute position, grid, skew/matrix transforms, per-side
+        // borders, multi/inset shadows). Surface them like the JS path and let
+        // --strict-fidelity gate on the non-informational ones.
+        std::vector<pulp::view::FidelityIssue> swift_fidelity;
+        swift_opts.fidelity_report = &swift_fidelity;
+
         const auto swift = generate_pulp_swift(ir, ir.asset_manifest, swift_opts);
+
+        for (const auto& fi : swift_fidelity) {
+            std::cerr << "fidelity: [" << fi.kind << "] " << fi.node_name
+                      << " (" << fi.node_id << "): " << fi.detail
+                      << (fi.informational ? "  [informational]" : "") << "\n";
+        }
+        const std::size_t swift_hard =
+            pulp::view::count_strict_fidelity_failures(swift_fidelity);
+        const bool swift_fidelity_failed = strict_fidelity && swift_hard > 0;
+        if (swift_fidelity_failed)
+            std::cerr << "fidelity: " << swift_hard
+                      << " issue(s); failing due to --strict-fidelity\n";
+
         if (dry_run) {
             std::cout << "=== Generated SwiftUI view (" << paths.view.string() << ") ===\n\n";
             std::cout << swift.view_source;
@@ -2071,8 +2092,9 @@ int main(int argc, char* argv[]) {
             }
             std::cout << "\n=== SwiftUI binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
             std::cout << swift.binding_manifest;
-            return 0;
+            return swift_fidelity_failed ? 4 : 0;
         }
+        if (swift_fidelity_failed) return 4;
 
         if (!write_file(paths.view.string(), swift.view_source)) return 1;
         if (!swift.theme_source.empty() &&

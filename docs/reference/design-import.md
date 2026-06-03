@@ -114,9 +114,18 @@ bind to `PulpKnob`/`PulpSlider`/`PulpToggle`. Tokens lower to a code-first
 target) whose `.dark`-suffixed entries become light/dark dynamic colors. Binding resolves
 a generated key by exact `PulpParameter.name` match (Pulp has no stable string
 param key); missing or duplicate names render a visible placeholder rather than
-silently binding the wrong parameter. This is an MVP — flex fidelity is
-approximate (SwiftUI stacks are not Yoga), and the meter/xy_pad/waveform/
-spectrum/image/svg widgets are not yet mapped.
+silently binding the wrong parameter. The full visual style set is emitted
+(opacity, corner radius, border, box-shadow, linear gradient, transform,
+mix-blend-mode, and mixed-style text), and `rgb()`/`rgba()` colours are
+supported alongside hex. Because SwiftUI stacks are not Yoga, flex layout is
+approximate: cross-axis alignment maps to the stack's `alignment:`, and
+space-between/around is approximated with `Spacer()`s. Anything a SwiftUI stack
+cannot reproduce — flex-wrap, justify distribution, `align:stretch`,
+`position:absolute` (approximated with `.offset`), CSS grid, skew/matrix
+transforms, per-side borders, and multi-/inset shadows — is reported as a
+`fidelity:` warning; the ones that genuinely render wrong fail the import under
+`--strict-fidelity` (exit 4). The meter/xy_pad/waveform/spectrum/image/svg
+widgets are not yet mapped.
 
 For `--from jsx --mode live --emit js`, Pulp writes the precompiled bundle
 verbatim for runtime import. That pass-through path does not parse or render

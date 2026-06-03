@@ -358,6 +358,282 @@ TEST_CASE("generated SwiftUI type-checks with hostile control chars in names/tex
     require_generated_swift_compiles(ir, "hostile-controls");
 }
 
+// ── B2: full style, text-runs, flex-fidelity warnings ─────────────────────
+
+namespace {
+
+// Generate the view with a fidelity sink attached and return both.
+struct B2Out { std::string view; std::vector<FidelityIssue> issues; };
+B2Out generate_with_fidelity(const DesignIR& ir, SwiftExportOptions opts = {}) {
+    B2Out o;
+    opts.fidelity_report = &o.issues;
+    o.view = generate_pulp_swift(ir, ir.asset_manifest, opts).view_source;
+    return o;
+}
+
+bool has_kind(const std::vector<FidelityIssue>& issues, const std::string& kind) {
+    for (const auto& i : issues) if (i.kind == kind) return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("generate_pulp_swift emits the full B2 visual style set",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("card", "Card", 200.0f, 120.0f, LayoutDirection::column);
+    auto& st = ir.root.style;
+    st.opacity = 0.8f;
+    st.border_radius = 12.0f;
+    st.border_width = 2.0f;
+    st.border_color = "#334455";
+    st.background_gradient = "linear-gradient(90deg, #ff0000, #0000ff)";
+    st.transform = "rotate(5deg) scale(1.1)";
+    IRBoxShadow sh; sh.offset_x = 0.0f; sh.offset_y = 4.0f; sh.blur = 8.0f;
+    sh.color = "rgba(0, 0, 0, 0.25)";
+    st.box_shadow.push_back(sh);
+    ir.root.children.push_back(text_node("t", "hi", 12.0f, "#ffffff"));
+
+    const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    INFO(view);
+    REQUIRE(contains(view, ".opacity(0.8)"));
+    REQUIRE(contains(view, ".cornerRadius(12)"));
+    REQUIRE(contains(view, ".overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.sRGB"));
+    REQUIRE(contains(view, ", lineWidth: 2))"));
+    REQUIRE(contains(view, ".background(LinearGradient(colors: ["));
+    REQUIRE(contains(view, "startPoint: .leading, endPoint: .trailing"));
+    REQUIRE(contains(view, ".shadow(color: Color(.sRGB"));
+    REQUIRE(contains(view, "radius: 4, x: 0, y: 4)"));
+    REQUIRE(contains(view, ".rotationEffect(.degrees(5))"));
+    REQUIRE(contains(view, ".scaleEffect(1.1)"));
+}
+
+TEST_CASE("generate_pulp_swift parses rgb()/rgba() colour tokens",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 50.0f, 50.0f, LayoutDirection::column);
+    ir.root.style.background_color = "rgb(255, 128, 0)";
+    const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    INFO(view);
+    // 255→1, 128→~0.501961, 0→0, default alpha 1.
+    REQUIRE(contains(view, ".background(Color(.sRGB, red: 1, green: 0.50"));
+}
+
+TEST_CASE("generate_pulp_swift parses gradients with rgba stops (internal spaces)",
+          "[view][import][swiftui]") {
+    // rgba() stops carry commas AND spaces inside their own parens; the stop
+    // splitter must not truncate the colour at the first internal space.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 50.0f, 50.0f, LayoutDirection::column);
+    ir.root.style.background_gradient =
+        "linear-gradient(to right, rgba(10, 20, 30, 0.5), #ffffff)";
+    const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    INFO(view);
+    REQUIRE(contains(view, "LinearGradient(colors: ["));
+    // Both stops survived: the rgba red 10/255≈0.0392 (not truncated at the
+    // internal space) and the trailing white hex.
+    REQUIRE(contains(view, "red: 0.039"));
+    REQUIRE(contains(view, "Color(.sRGB, red: 1, green: 1, blue: 1"));
+    REQUIRE(contains(view, "startPoint: .leading, endPoint: .trailing"));
+}
+
+TEST_CASE("generate_pulp_swift lowers mixed-style text_runs to concatenated Text",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 200.0f, 40.0f, LayoutDirection::column);
+    auto label = text_node("label", "Hello bold world", 14.0f, "#111111");
+    IRTextRun bold; bold.start = 6; bold.end = 10; bold.font_weight = 700;  // "bold"
+    label.text_runs.push_back(bold);
+    ir.root.children.push_back(std::move(label));
+
+    const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    INFO(view);
+    REQUIRE(contains(view, "Text(\"Hello \")"));
+    REQUIRE(contains(view, "+ Text(\"bold\")"));
+    REQUIRE(contains(view, ".fontWeight(.bold)"));
+    REQUIRE(contains(view, "+ Text(\" world\")"));
+}
+
+TEST_CASE("generate_pulp_swift flags per-side borders and multi/inset shadows",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 80.0f, 80.0f, LayoutDirection::column);
+    auto& st = ir.root.style;
+    st.border_top_width = 4.0f;
+    st.border_bottom_width = 1.0f;   // differs → per-side
+    st.border_color = "#222222";
+    IRBoxShadow a; a.blur = 4.0f; a.color = "#000000";
+    IRBoxShadow b; b.blur = 2.0f; b.color = "#111111";
+    st.box_shadow = {a, b};          // >1 layer → informational drop
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    REQUIRE(contains(out.view, ", lineWidth: 4))"));  // heaviest side
+    REQUIRE(has_kind(out.issues, "swiftui-per-side-border"));
+    REQUIRE(has_kind(out.issues, "swiftui-multi-shadow"));
+    // Both lose visible appearance (a dropped glow / a side's distinct stroke),
+    // so they are hard divergences --strict-fidelity must catch (Codex review).
+    REQUIRE(count_strict_fidelity_failures(out.issues) >= 2);
+}
+
+TEST_CASE("generate_pulp_swift flags a per-side border that differs only in colour",
+          "[view][import][swiftui]") {
+    // Uniform widths but a distinct per-side colour still loses a side; the
+    // width-only check would have missed it (Codex review).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 60.0f, 60.0f, LayoutDirection::column);
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_top_color = "#ff0000";
+    ir.root.style.border_right_color = "#00ff00";  // differs → per-side
+    auto out = generate_with_fidelity(ir);
+    REQUIRE(has_kind(out.issues, "swiftui-per-side-border"));
+    REQUIRE(count_strict_fidelity_failures(out.issues) >= 1);
+}
+
+TEST_CASE("generate_pulp_swift flags a single side overriding the border shorthand",
+          "[view][import][swiftui]") {
+    // border-color:#fff (shorthand) + border-top-color:#f00 → effective sides
+    // [#f00, #fff, #fff, #fff]; comparing side overrides alone would miss it,
+    // so the effective-value comparison is what catches it (Codex review #2b).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 60.0f, 60.0f, LayoutDirection::column);
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "#ffffff";       // shorthand
+    ir.root.style.border_top_color = "#ff0000";   // overrides only the top
+    auto out = generate_with_fidelity(ir);
+    REQUIRE(has_kind(out.issues, "swiftui-per-side-border"));
+    REQUIRE(count_strict_fidelity_failures(out.issues) >= 1);
+}
+
+TEST_CASE("generate_pulp_swift treats a uniform border (shorthand only) as uniform",
+          "[view][import][swiftui]") {
+    // No side overrides → no per-side divergence; the overlay is emitted clean.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 60.0f, 60.0f, LayoutDirection::column);
+    ir.root.style.border_width = 2.0f;
+    ir.root.style.border_color = "#334455";
+    auto out = generate_with_fidelity(ir);
+    REQUIRE(contains(out.view, ", lineWidth: 2))"));
+    REQUIRE_FALSE(has_kind(out.issues, "swiftui-per-side-border"));
+}
+
+TEST_CASE("generate_pulp_swift does not mis-parse repeating-linear-gradient as linear",
+          "[view][import][swiftui]") {
+    // `repeating-linear-gradient(...)` contains the substring `linear-gradient`;
+    // fn_args' boundary check must reject it so it falls back to flat fill, not
+    // a silently-non-repeating LinearGradient (Codex review).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 50.0f, 50.0f, LayoutDirection::column);
+    ir.root.style.background_gradient =
+        "repeating-linear-gradient(45deg, #f00, #00f 10px)";
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    REQUIRE_FALSE(contains(out.view, "LinearGradient(colors:"));
+    REQUIRE(has_kind(out.issues, "swiftui-gradient"));  // unsupported → flagged
+}
+
+TEST_CASE("generate_pulp_swift approximates single-child space-between as flex-start",
+          "[view][import][swiftui]") {
+    // CSS space-between with one item is flex-start; SwiftUI needs a trailing
+    // Spacer to push it to the main-axis start (Codex review).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "Row", 200.0f, 40.0f, LayoutDirection::row);
+    ir.root.layout.justify = LayoutAlign::space_between;
+    ir.root.children.push_back(text_node("only", "X", 12.0f, "#fff"));
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    REQUIRE(contains(out.view, "Spacer()"));
+}
+
+TEST_CASE("generate_pulp_swift maps cross-axis alignment and approximates justify",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "Row", 300.0f, 40.0f, LayoutDirection::row);
+    ir.root.layout.align = LayoutAlign::flex_end;          // → .bottom on an HStack
+    ir.root.layout.justify = LayoutAlign::space_between;   // → Spacer interposition
+    ir.root.children.push_back(text_node("a", "A", 12.0f, "#fff"));
+    ir.root.children.push_back(text_node("b", "B", 12.0f, "#fff"));
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    REQUIRE(contains(out.view, "HStack(alignment: .bottom, spacing:"));
+    REQUIRE(contains(out.view, "Spacer()"));
+    REQUIRE(has_kind(out.issues, "swiftui-flex-justify"));
+    REQUIRE(count_strict_fidelity_failures(out.issues) == 0);  // Spacer approx is advisory
+}
+
+TEST_CASE("generate_pulp_swift flags absolute/grid/wrap/skew as hard divergences",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "R", 200.0f, 200.0f, LayoutDirection::column);
+    ir.root.layout.display = "grid";
+    ir.root.layout.wrap = true;
+    ir.root.style.transform = "skewX(10deg)";
+
+    auto abs_child = frame_node("a", "Abs", 40.0f, 40.0f, LayoutDirection::column);
+    abs_child.style.position = "absolute";
+    abs_child.style.left = 10.0f;
+    abs_child.style.top = 20.0f;
+    abs_child.children.push_back(text_node("c", "x", 10.0f, "#fff"));
+    ir.root.children.push_back(std::move(abs_child));
+
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    REQUIRE(contains(out.view, ".offset(x: 10, y: 20)"));
+    REQUIRE(has_kind(out.issues, "swiftui-grid"));
+    REQUIRE(has_kind(out.issues, "swiftui-flex-wrap"));
+    REQUIRE(has_kind(out.issues, "swiftui-transform"));
+    REQUIRE(has_kind(out.issues, "swiftui-absolute-position"));
+    // These genuinely render wrong, so --strict-fidelity must be able to gate.
+    REQUIRE(count_strict_fidelity_failures(out.issues) >= 4);
+}
+
+TEST_CASE("generated SwiftUI with full B2 style + text-runs type-checks",
+          "[view][import][swiftui][swiftc]") {
+    // Compile-gate the new modifier surface: gradient, border overlay, shadow,
+    // opacity, corner radius, transform, mixed-style Text concatenation, and the
+    // Spacer-distributed / absolute-offset container paths all in one view.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Card", 240.0f, 180.0f, LayoutDirection::column);
+    ir.root.layout.justify = LayoutAlign::space_between;
+    ir.root.layout.align = LayoutAlign::center;
+    ir.root.style.opacity = 0.9f;
+    ir.root.style.border_radius = 8.0f;
+    ir.root.style.border_width = 1.5f;
+    ir.root.style.border_color = "#445566";
+    ir.root.style.background_gradient = "linear-gradient(to bottom, #102030, rgba(20,30,40,0.5))";
+    IRBoxShadow sh; sh.offset_y = 3.0f; sh.blur = 6.0f; sh.color = "rgba(0,0,0,0.3)";
+    ir.root.style.box_shadow.push_back(sh);
+    ir.root.style.transform = "rotate(2deg)";
+
+    auto label = text_node("hdr", "Mix and bold tail", 16.0f, "#eeeeee");
+    IRTextRun run; run.start = 8; run.end = 12; run.font_weight = 700;
+    run.color = "#ffaa00"; run.font_style = "italic";
+    label.text_runs.push_back(run);
+    ir.root.children.push_back(std::move(label));
+
+    auto abs_box = frame_node("badge", "Badge", 24.0f, 24.0f, LayoutDirection::column);
+    abs_box.style.position = "absolute";
+    abs_box.style.left = 6.0f; abs_box.style.top = 6.0f;
+    abs_box.style.border_top_left_radius = 4.0f;     // partial per-corner
+    abs_box.style.border_top_right_radius = 12.0f;   // uneven → uniform fallback
+    abs_box.children.push_back(text_node("n", "9", 10.0f, "#000000"));
+    ir.root.children.push_back(std::move(abs_box));
+
+    require_generated_swift_compiles(ir, "b2-style");
+}
+
 TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and compiles",
           "[view][import][swiftui][swiftc]") {
     // Exercise + compile-gate the degradation paths: an unsupported leaf widget

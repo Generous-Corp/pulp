@@ -160,7 +160,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("pulp import-design") != std::string::npos);
         REQUIRE(r.stdout_output.find("--from <source>") != std::string::npos);
         REQUIRE(r.stdout_output.find("--output <path>   Destination file for the primary artifact") != std::string::npos);
-        REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp}") != std::string::npos);
+        REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--mode {live|baked}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
         REQUIRE(r.stdout_output.find("Precompiled React JSX runtime bundle") != std::string::npos);
@@ -560,7 +560,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
                                         "--snapshot-semantics", "warn"});
         REQUIRE_FALSE(baked.timed_out);
         REQUIRE(baked.exit_code == 2);
-        REQUIRE(baked.stderr_output.find("--mode baked requires --emit ir-json or --emit cpp") != std::string::npos);
+        REQUIRE(baked.stderr_output.find("--mode baked requires --emit ir-json, --emit cpp, or --emit swiftui") != std::string::npos);
     }
 
     SECTION("persistent import-design defaults can select baked DesignIR") {

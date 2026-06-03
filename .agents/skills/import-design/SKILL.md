@@ -1482,12 +1482,43 @@ base/`.dark` partition *algorithm* as `export_css_variables` (color.bg + color.b
 → a nested-private dynamic light/dark Color helper). Generated views are generic over
 `PulpParameterResolving` and resolve a binding key by **exact `PulpParameter.name`
 match** (there is no stable string param key; `missing`/`duplicate` are surfaced,
-never silently mis-bound — see `apple/Sources/PulpSwift/PulpParameter.swift`). B1 is
-an MVP skeleton: full style/text-runs/flex-fidelity (B2), the remaining widgets
-(B3), binding-manifest parity (B4), and grid/assets/host scaffold (B5) follow. B1's
-test gate is golden strings **plus** a `swiftc -typecheck` of the generated Swift
-against the real PulpSwift module (golden C++-string asserts alone can ship
-non-compiling Swift).
+never silently mis-bound — see `apple/Sources/PulpSwift/PulpParameter.swift`).
+The remaining widgets (B3), binding-manifest parity (B4), and grid/assets/host
+scaffold (B5) follow. The test gate is golden strings **plus** a `swiftc
+-typecheck` of the generated Swift against the real PulpSwift module (golden
+C++-string asserts alone can ship non-compiling Swift).
+
+**B2 (full style + text-runs + flex-fidelity).** `emit_modifiers` now emits the
+full visual set: opacity, corner radius (uniform; uneven per-corner → largest +
+advisory note), border overlay stroke, box-shadow (first layer; SwiftUI radius =
+CSS blur / 2), linear-gradient background, CSS transform, mix-blend-mode. CSS
+colour parsing accepts hex AND `rgb()`/`rgba()` (`parse_css_color`). Mixed-style
+text (`IRTextRun`) lowers to a `+`-concatenated chain of styled `Text` segments
+(SwiftUI's Text-returning modifier overloads keep the chain typed as Text), byte
+offsets snapped to UTF-8 boundaries. Flex→stack mapping: cross-axis `align` →
+the stack's `alignment:` argument (emitted only when non-`.center`, so B1 goldens
+are unchanged); `justify` space-between/around/flex-end approximated with
+`Spacer()` interposition **only** when the resulting subview count stays ≤ 10
+(the ViewBuilder arity limit), else flagged and dropped. Anything a SwiftUI stack
+cannot reproduce becomes a `FidelityIssue` via the `SwiftExportOptions::
+fidelity_report` sink (same sink the JS path uses): `swiftui-grid`,
+`swiftui-flex-wrap`, `swiftui-flex-justify`, `swiftui-align-stretch`,
+`swiftui-absolute-position` (approximated with `.offset` from the natural
+position — CSS anchors top-left, SwiftUI has no flow-relative absolute layout),
+`swiftui-transform` (skew/matrix/3D dropped), `swiftui-per-side-border`,
+`swiftui-multi-shadow`, `swiftui-inset-shadow`. **Severity matters for
+`--strict-fidelity`**: a finding that genuinely renders wrong (per-side
+border/colour collapse, dropped shadow layer, inset shadow, absolute/grid/wrap/
+skew) is non-informational and gates; a faithful-enough approximation
+(Spacer-distributed justify, uneven-corner clamp, dropped gradient stop
+positions) is `informational` and does not. The CLI's `--emit swiftui` branch
+prints these as `fidelity:` lines and exits 4 under `--strict-fidelity`.
+Gotchas the swiftc gate can't catch (so they have dedicated unit tests):
+`fn_args` must match on an identifier boundary (`repeating-linear-gradient` must
+NOT match `linear-gradient`); gradient stop-colour extraction must respect
+parens so `rgba(0, 0, 0, .5)` isn't truncated at its internal space;
+`parse_rgb_color` must reject partial numeric parses (`1px`) via the `std::stod`
+consumed-index check.
 - Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"` and `import_design.default_emit = "js|ir-json|cpp|swiftui"`, set through `pulp config set import_design.default_mode ...` and `pulp config set import_design.default_emit ...`. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and `PULP_IMPORT_DESIGN_DEFAULT_EMIT` override config for one environment/session, and direct CLI flags override the matching preference. If only `default_mode=baked` is set, `ir-json` is implied.
 - The standalone import helper and MCP status helper each have a small config reader for these defaults; keep them compatible with TOML single-quoted and double-quoted strings, matching the main CLI config reader.
 - Mental model: live/runtime import means "run the original app"; baked DesignIR means "save the materialized UI tree"; baked C++ means "compile that saved tree into native code". You can move live iteration -> baked IR -> baked C++; you cannot reconstruct live React from baked IR because hooks, closures, loops, and arbitrary JS logic were not preserved.

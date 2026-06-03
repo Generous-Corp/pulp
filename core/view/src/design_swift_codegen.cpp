@@ -16,8 +16,16 @@
 /// `export_css_variables`. Binding resolves a generated key by exact
 /// `PulpParameter.name` match (there is no stable string param key today),
 /// surfacing missing/duplicate rather than silently binding the wrong param.
-/// Full style, text-runs, flex-fidelity warnings, the remaining widgets, the
-/// binding-manifest parity, grid/assets, and the host scaffold are B2–B5.
+///
+/// B2 adds the full visual style set (opacity, corner radius, uniform/per-side
+/// border overlay, box-shadow, linear gradient, transform, mix-blend-mode),
+/// mixed-style text via per-range `text_runs` concatenated as styled `Text`,
+/// and the flex→stack fidelity-warning system: cross-axis alignment mapping,
+/// Spacer-based justify approximation, and `FidelityIssue`s for the
+/// divergences SwiftUI stacks cannot reproduce (flex-wrap, space distribution,
+/// align-stretch, absolute position, grid, skew/matrix transforms). The
+/// remaining widgets, binding-manifest parity, grid/assets, and the host
+/// scaffold are B3–B5.
 
 #include <pulp/view/design_codegen.hpp>
 
@@ -27,6 +35,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <map>
 #include <optional>
 #include <set>
@@ -220,20 +229,79 @@ std::optional<std::array<unsigned, 4>> parse_hex_color(std::string_view value) {
     return std::nullopt;
 }
 
-// Swift `Color(.sRGB, red:…, green:…, blue:…, opacity:…)` for a hex string.
-// Returns empty if the value isn't a parseable hex color (callers skip it).
-std::string swift_color_expr(std::string_view value) {
-    auto c = parse_hex_color(value);
-    if (!c) return {};
+// Parse a CSS `rgb(r,g,b)` / `rgba(r,g,b,a)` token → [r,g,b,a] in 0..255.
+// r/g/b are 0..255 integers (percentages and the modern slash syntax are not
+// emitted by Pulp's adapters, so they are intentionally unhandled); alpha is a
+// 0..1 float scaled to 0..255. Whitespace is tolerated; a malformed token
+// returns nullopt so the caller can skip it.
+std::optional<std::array<unsigned, 4>> parse_rgb_color(std::string_view value) {
+    std::string s;
+    s.reserve(value.size());
+    for (char c : value)
+        if (!std::isspace(static_cast<unsigned char>(c))) s += static_cast<char>(std::tolower(c));
+    const bool has_alpha = s.rfind("rgba(", 0) == 0;
+    const bool plain = s.rfind("rgb(", 0) == 0;
+    if (!has_alpha && !plain) return std::nullopt;
+    const std::size_t open = s.find('(');
+    const std::size_t close = s.find(')', open);
+    if (close == std::string::npos) return std::nullopt;
+    std::vector<std::string> parts;
+    std::string cur;
+    for (std::size_t i = open + 1; i < close; ++i) {
+        if (s[i] == ',') { parts.push_back(cur); cur.clear(); }
+        else cur += s[i];
+    }
+    parts.push_back(cur);
+    if (parts.size() < 3) return std::nullopt;
+    // parts are already whitespace-free, so a valid number must consume the
+    // WHOLE token: "1px" (idx 1 != 3) is malformed, not 1. (Percentages remain
+    // intentionally unhandled — documented above.)
+    auto to_u8 = [](const std::string& t, bool* ok) -> unsigned {
+        try { std::size_t idx = 0; double d = std::stod(t, &idx);
+              if (idx != t.size()) { *ok = false; return 0; }
+              *ok = true;
+              return static_cast<unsigned>(std::clamp<long>(std::lround(d), 0, 255)); }
+        catch (...) { *ok = false; return 0; }
+    };
+    bool ok = true;
+    unsigned r = to_u8(parts[0], &ok); if (!ok) return std::nullopt;
+    unsigned g = to_u8(parts[1], &ok); if (!ok) return std::nullopt;
+    unsigned b = to_u8(parts[2], &ok); if (!ok) return std::nullopt;
+    unsigned a = 255;
+    if (parts.size() >= 4) {
+        try { std::size_t idx = 0; double af = std::stod(parts[3], &idx);
+              if (idx != parts[3].size()) return std::nullopt;
+              a = static_cast<unsigned>(std::clamp(af, 0.0, 1.0) * 255.0 + 0.5); }
+        catch (...) { return std::nullopt; }
+    }
+    return std::array<unsigned, 4>{r, g, b, a};
+}
+
+// Parse any CSS color token Pulp's adapters emit (hex or rgb/rgba) → 0..255.
+std::optional<std::array<unsigned, 4>> parse_css_color(std::string_view value) {
+    if (auto hex = parse_hex_color(value)) return hex;
+    return parse_rgb_color(value);
+}
+
+// Swift `Color(.sRGB, red:…, green:…, blue:…, opacity:…)` for an RGBA quad.
+std::string swift_color_from_rgba(const std::array<unsigned, 4>& c) {
     auto comp = [](unsigned v) {
         std::ostringstream ss;
         ss << (static_cast<double>(v) / 255.0);
         return ss.str();
     };
     std::ostringstream ss;
-    ss << "Color(.sRGB, red: " << comp((*c)[0]) << ", green: " << comp((*c)[1])
-       << ", blue: " << comp((*c)[2]) << ", opacity: " << comp((*c)[3]) << ")";
+    ss << "Color(.sRGB, red: " << comp(c[0]) << ", green: " << comp(c[1])
+       << ", blue: " << comp(c[2]) << ", opacity: " << comp(c[3]) << ")";
     return ss.str();
+}
+
+// Swift `Color(...)` for a hex or rgb/rgba string. Returns empty if the value
+// isn't a parseable color (callers skip it).
+std::string swift_color_expr(std::string_view value) {
+    auto c = parse_css_color(value);
+    if (!c) return {};
+    return swift_color_from_rgba(*c);
 }
 
 // ── Token partition (base vs `.dark`) → code-first PulpTheme ─────────────
@@ -406,7 +474,28 @@ std::string emit_theme(const DesignIR& ir, const SwiftExportOptions& opts) {
 struct SwiftEmitCtx {
     const SwiftExportOptions& opts;
     const IRAssetManifest& manifest;
+    // Non-owning fidelity sink (== opts.fidelity_report). B2 pushes
+    // SwiftUI-specific divergence findings here (flex justify/wrap, absolute
+    // position, grid, skew/matrix transforms, per-side borders, multi-/inset
+    // shadows) so the import CLI can surface them as `fidelity:` warnings and
+    // `--strict-fidelity` can gate on the non-informational ones.
+    std::vector<FidelityIssue>* fidelity = nullptr;
 };
+
+// Report a SwiftUI-lowering divergence against the fidelity sink (if any).
+// `informational` findings are advisory (we emitted a faithful-enough
+// approximation); non-informational ones count toward --strict-fidelity.
+void push_fidelity(const SwiftEmitCtx& ctx, const IRNode& node,
+                   std::string kind, std::string detail, bool informational) {
+    if (!ctx.fidelity) return;
+    FidelityIssue issue;
+    issue.node_id = node.source_node_id.value_or(node.name);
+    issue.node_name = node.name;
+    issue.kind = std::move(kind);
+    issue.detail = std::move(detail);
+    issue.informational = informational;
+    ctx.fidelity->push_back(std::move(issue));
+}
 
 // The string the generated control resolves against PulpParameter.name. B1's
 // convention is an exact match on the runtime parameter's *display name*, so we
@@ -509,9 +598,206 @@ void emit_children(std::ostringstream& out, const SwiftEmitCtx& ctx,
     emit_child_range(out, ctx, node, resolved, 0, count, depth);
 }
 
-// Append the B1 fixed-style modifiers (.frame / .padding / .background) to the
-// view expression just emitted. Modifiers are emitted as continuation lines
-// indented one level deeper than the view keyword.
+// ── B2 style helpers (gradient / transform / corner / border / shadow) ───
+
+// Split a CSS function-argument list on TOP-LEVEL commas only (commas inside
+// nested parens — rgb()/rgba() — are preserved). Each part is trimmed.
+std::vector<std::string> split_top_level_commas(std::string_view s) {
+    std::vector<std::string> out;
+    std::string cur;
+    int depth = 0;
+    for (char c : s) {
+        if (c == '(') { depth++; cur += c; }
+        else if (c == ')') { depth = std::max(0, depth - 1); cur += c; }
+        else if (c == ',' && depth == 0) { out.push_back(cur); cur.clear(); }
+        else cur += c;
+    }
+    out.push_back(cur);
+    for (auto& p : out) {
+        std::size_t b = p.find_first_not_of(" \t\n\r");
+        std::size_t e = p.find_last_not_of(" \t\n\r");
+        p = (b == std::string::npos) ? std::string() : p.substr(b, e - b + 1);
+    }
+    return out;
+}
+
+// Inner argument list of `name(...)`, case-insensitive on the function name.
+// Returns nullopt if the value isn't that function. The match must sit on an
+// identifier boundary so `name="linear-gradient"` does NOT match the substring
+// inside `repeating-linear-gradient(...)`, and `name="rotate"` does not match
+// `xrotate(...)`. CSS function names can contain hyphens, so the boundary char
+// must be neither alphanumeric NOR a hyphen.
+std::optional<std::string> fn_args(std::string_view value, std::string_view name) {
+    std::string lower;
+    for (char c : value) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const std::string prefix = std::string(name) + "(";
+    auto is_ident = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '-';
+    };
+    std::size_t pos = lower.find(prefix);
+    while (pos != std::string::npos) {
+        if (pos == 0 || !is_ident(value[pos - 1])) {
+            const std::size_t open = pos + prefix.size() - 1;
+            int depth = 0;
+            for (std::size_t i = open; i < value.size(); ++i) {
+                if (value[i] == '(') depth++;
+                else if (value[i] == ')') { if (--depth == 0)
+                    return std::string(value.substr(open + 1, i - open - 1)); }
+            }
+            return std::nullopt;  // matched name but unbalanced parens
+        }
+        pos = lower.find(prefix, pos + 1);
+    }
+    return std::nullopt;
+}
+
+// Map a CSS linear-gradient direction (angle or `to <side>`) to a SwiftUI
+// (startPoint, endPoint) UnitPoint pair. CSS 0deg = upward; SwiftUI y grows
+// downward, so we snap the angle to the nearest 45° and pick the matching
+// pair. Default (no/￼unparseable direction) is CSS's `to bottom`.
+std::pair<std::string, std::string> gradient_unit_points(const std::string& dir) {
+    std::string d;
+    for (char c : dir) if (!std::isspace((unsigned char)c)) d += (char)std::tolower((unsigned char)c);
+    auto pts = [](const char* a, const char* b) { return std::make_pair(std::string(a), std::string(b)); };
+    if (d == "toright")       return pts(".leading", ".trailing");
+    if (d == "toleft")        return pts(".trailing", ".leading");
+    if (d == "totop")         return pts(".bottom", ".top");
+    if (d == "tobottom")      return pts(".top", ".bottom");
+    if (d == "totopright"   || d == "torighttop")    return pts(".bottomLeading", ".topTrailing");
+    if (d == "totopleft"    || d == "tolefttop")     return pts(".bottomTrailing", ".topLeading");
+    if (d == "tobottomright"|| d == "torightbottom") return pts(".topLeading", ".bottomTrailing");
+    if (d == "tobottomleft" || d == "toleftbottom")  return pts(".topTrailing", ".bottomLeading");
+    // Angle form, e.g. "45deg".
+    const std::size_t deg = d.find("deg");
+    if (deg != std::string::npos) {
+        try {
+            double a = std::stod(d.substr(0, deg));
+            a = std::fmod(std::fmod(a, 360.0) + 360.0, 360.0);
+            const int oct = static_cast<int>(std::lround(a / 45.0)) % 8;  // 0=up
+            static const std::pair<const char*, const char*> ring[8] = {
+                {".bottom", ".top"},            // 0deg → up
+                {".bottomLeading", ".topTrailing"},
+                {".leading", ".trailing"},      // 90deg → right
+                {".topLeading", ".bottomTrailing"},
+                {".top", ".bottom"},            // 180deg → down
+                {".topTrailing", ".bottomLeading"},
+                {".trailing", ".leading"},      // 270deg → left
+                {".bottomTrailing", ".topLeading"},
+            };
+            return pts(ring[oct].first, ring[oct].second);
+        } catch (...) {}
+    }
+    return pts(".top", ".bottom");
+}
+
+// Build a SwiftUI `LinearGradient(...)` for a CSS `linear-gradient(...)` value.
+// Returns the expression plus whether explicit non-uniform stop positions were
+// dropped (SwiftUI's colors: initializer spaces stops evenly). nullopt if the
+// value isn't a parseable linear-gradient with >= 2 colors.
+struct GradientResult { std::string expr; bool dropped_positions = false; };
+std::optional<GradientResult> swift_linear_gradient_expr(std::string_view value) {
+    auto inner = fn_args(value, "linear-gradient");
+    if (!inner) return std::nullopt;
+    std::vector<std::string> parts = split_top_level_commas(*inner);
+    if (parts.empty()) return std::nullopt;
+    std::string start = ".top", end = ".bottom";
+    std::size_t first_stop = 0;
+    const std::string& head = parts.front();
+    std::string head_l;
+    for (char c : head) if (!std::isspace((unsigned char)c)) head_l += (char)std::tolower((unsigned char)c);
+    if (head_l.rfind("to", 0) == 0 || head_l.find("deg") != std::string::npos) {
+        std::tie(start, end) = gradient_unit_points(head);
+        first_stop = 1;
+    }
+    std::vector<std::string> colors;
+    bool dropped = false;
+    for (std::size_t i = first_stop; i < parts.size(); ++i) {
+        // A stop is "<color> [<position>]". The colour itself may contain spaces
+        // when it is a function — rgb(0, 0, 0) / rgba(0, 0, 0, 0.5) — so split on
+        // the function's matching paren, not the first space.
+        const std::string& tok = parts[i];
+        std::size_t paren = tok.find('(');
+        std::size_t space = tok.find_first_of(" \t");
+        std::string col;
+        if (paren != std::string::npos && (space == std::string::npos || paren < space)) {
+            int d = 0; std::size_t close = std::string::npos;
+            for (std::size_t k = paren; k < tok.size(); ++k) {
+                if (tok[k] == '(') d++;
+                else if (tok[k] == ')' && --d == 0) { close = k; break; }
+            }
+            col = (close == std::string::npos) ? tok : tok.substr(0, close + 1);
+            // Anything non-blank after the colour function is an explicit stop.
+            if (close != std::string::npos &&
+                tok.find_first_not_of(" \t", close + 1) != std::string::npos)
+                dropped = true;
+        } else {
+            col = (space == std::string::npos) ? tok : tok.substr(0, space);
+            if (space != std::string::npos) dropped = true;
+        }
+        std::string expr = swift_color_expr(col);
+        if (!expr.empty()) colors.push_back(expr);
+    }
+    if (colors.size() < 2) return std::nullopt;
+    std::ostringstream ss;
+    ss << "LinearGradient(colors: [";
+    for (std::size_t i = 0; i < colors.size(); ++i) ss << (i ? ", " : "") << colors[i];
+    ss << "], startPoint: " << start << ", endPoint: " << end << ")";
+    return GradientResult{ss.str(), dropped};
+}
+
+// Append CSS `transform` → SwiftUI modifier lines. rotate/scale/translate map
+// cleanly; skew/matrix/3D have no SwiftUI 2-D equivalent and are reported as a
+// non-informational fidelity divergence (the visual will be wrong, not just
+// approximate). Returns the modifier lines to emit, in source order.
+std::vector<std::string> swift_transform_modifiers(const SwiftEmitCtx& ctx,
+                                                    const IRNode& node) {
+    std::vector<std::string> mods;
+    const std::string& css = *node.style.transform;
+    if (auto a = fn_args(css, "rotate")) {
+        std::string v = *a; std::size_t deg = v.find("deg");
+        std::string num = (deg == std::string::npos) ? v : v.substr(0, deg);
+        try { mods.push_back(".rotationEffect(.degrees(" + format_float((float)std::stod(num)) + "))"); }
+        catch (...) {}
+    }
+    if (auto a = fn_args(css, "scale")) {
+        auto comps = split_top_level_commas(*a);
+        try {
+            if (comps.size() >= 2)
+                mods.push_back(".scaleEffect(x: " + format_float((float)std::stod(comps[0]))
+                               + ", y: " + format_float((float)std::stod(comps[1])) + ")");
+            else if (comps.size() == 1)
+                mods.push_back(".scaleEffect(" + format_float((float)std::stod(comps[0])) + ")");
+        } catch (...) {}
+    }
+    auto px = [](std::string t) {
+        std::size_t p = t.find("px"); return (p == std::string::npos) ? t : t.substr(0, p);
+    };
+    if (auto a = fn_args(css, "translate")) {
+        auto comps = split_top_level_commas(*a);
+        try {
+            float x = comps.size() >= 1 ? (float)std::stod(px(comps[0])) : 0.0f;
+            float y = comps.size() >= 2 ? (float)std::stod(px(comps[1])) : 0.0f;
+            mods.push_back(".offset(x: " + format_float(x) + ", y: " + format_float(y) + ")");
+        } catch (...) {}
+    }
+    if (auto a = fn_args(css, "translatex"))
+        try { mods.push_back(".offset(x: " + format_float((float)std::stod(px(*a))) + ")"); } catch (...) {}
+    if (auto a = fn_args(css, "translatey"))
+        try { mods.push_back(".offset(y: " + format_float((float)std::stod(px(*a))) + ")"); } catch (...) {}
+    std::string lower;
+    for (char c : css) lower += (char)std::tolower((unsigned char)c);
+    if (lower.find("skew") != std::string::npos || lower.find("matrix") != std::string::npos ||
+        lower.find("rotate3d") != std::string::npos || lower.find("perspective") != std::string::npos)
+        push_fidelity(ctx, node, "swiftui-transform",
+                      "transform `" + css + "` uses skew/matrix/3D, which SwiftUI's "
+                      "2-D modifiers cannot represent; dropped", /*informational=*/false);
+    return mods;
+}
+
+// Append the style modifiers to the view expression just emitted. Modifiers are
+// emitted as continuation lines indented one level deeper than the view keyword.
+// Order matters for SwiftUI: sizing → padding → fill/gradient → corner clip →
+// border overlay → shadow → opacity → transform.
 void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
                     const IRNode& node, int depth) {
     const int s = ctx.opts.indent_spaces;
@@ -533,11 +819,328 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
             << ", trailing: " << format_float(ly.padding_right) << "))";
         emit_line(out, depth + 1, s, pad.str());
     }
-    if (st.background_color) {
+
+    // Fill: a gradient wins over a flat color (CSS layers background-image over
+    // background-color). A non-parseable gradient falls back to the flat color.
+    bool filled = false;
+    if (st.background_gradient) {
+        if (auto g = swift_linear_gradient_expr(*st.background_gradient)) {
+            emit_line(out, depth + 1, s, ".background(" + g->expr + ")");
+            filled = true;
+            if (g->dropped_positions)
+                push_fidelity(ctx, node, "swiftui-gradient-stops",
+                              "linear-gradient explicit colour-stop positions dropped; "
+                              "SwiftUI spaces stops evenly", /*informational=*/true);
+        } else {
+            push_fidelity(ctx, node, "swiftui-gradient",
+                          "background gradient `" + *st.background_gradient +
+                          "` is not a 2-colour linear-gradient; using flat fill",
+                          /*informational=*/true);
+        }
+    }
+    if (!filled && st.background_color) {
         std::string color = swift_color_expr(*st.background_color);
         if (!color.empty())
             emit_line(out, depth + 1, s, ".background(" + color + ")");
     }
+
+    // Corner radius. SwiftUI `.cornerRadius` is uniform; non-uniform per-corner
+    // radii degrade to the largest corner + an informational note.
+    const std::optional<float> corners[4] = {
+        st.border_top_left_radius, st.border_top_right_radius,
+        st.border_bottom_right_radius, st.border_bottom_left_radius};
+    bool any_corner = false; float max_corner = 0.0f; bool uneven = false;
+    float first_corner = 0.0f; bool first_set = false;
+    for (auto c : corners) if (c) {
+        any_corner = true; max_corner = std::max(max_corner, *c);
+        if (!first_set) { first_corner = *c; first_set = true; }
+        else if (*c != first_corner) uneven = true;
+    }
+    float radius = 0.0f;
+    if (st.border_radius) { radius = *st.border_radius; }
+    else if (any_corner) {
+        radius = max_corner;
+        if (uneven)
+            push_fidelity(ctx, node, "swiftui-corner-radius",
+                          "per-corner radii are not uniform; SwiftUI .cornerRadius is "
+                          "uniform, using the largest corner", /*informational=*/true);
+    }
+    if (radius > 0.0f)
+        emit_line(out, depth + 1, s, ".cornerRadius(" + format_float(radius) + ")");
+
+    // Border → an overlay stroke following the corner radius. SwiftUI's stroke
+    // is uniform; a border whose WIDTH or COLOUR differs per side genuinely
+    // loses a side's appearance, so it is a hard divergence (not advisory): we
+    // approximate with the heaviest side's width + the first declared colour.
+    // Compute the EFFECTIVE per-side width/colour: a side falls back to the
+    // `border-width`/`border-color` shorthand when it has no override. Comparing
+    // effective values (not just the side overrides among themselves) catches a
+    // single side overriding the shorthand — e.g. `border-color:#fff` +
+    // `border-top-color:#f00` (Codex review #2).
+    auto eff_w = [&](const std::optional<float>& side) -> std::optional<float> {
+        return side ? side : st.border_width;
+    };
+    auto eff_c = [&](const std::optional<std::string>& side) -> std::optional<std::string> {
+        return side ? side : st.border_color;
+    };
+    const std::optional<float> ew[4] = {eff_w(st.border_top_width), eff_w(st.border_right_width),
+                                        eff_w(st.border_bottom_width), eff_w(st.border_left_width)};
+    const std::optional<std::string> ec[4] = {
+        eff_c(st.border_top_color), eff_c(st.border_right_color),
+        eff_c(st.border_bottom_color), eff_c(st.border_left_color)};
+
+    bool per_side = false; float border_w = 0.0f;
+    std::optional<float> w_first;
+    for (const auto& w : ew) if (w) {
+        border_w = std::max(border_w, *w);
+        if (!w_first) w_first = *w;
+        else if (*w != *w_first) per_side = true;
+    }
+    if (st.border_width) border_w = std::max(border_w, *st.border_width);
+
+    std::string border_color_tok;
+    std::optional<std::string> c_first;
+    for (const auto& c : ec) if (c) {
+        if (border_color_tok.empty()) border_color_tok = *c;  // first effective colour
+        if (!c_first) c_first = *c;
+        else if (*c != *c_first) per_side = true;
+    }
+    if (border_color_tok.empty() && st.border_color) border_color_tok = *st.border_color;
+    if (border_w > 0.0f && !border_color_tok.empty()) {
+        std::string color = swift_color_expr(border_color_tok);
+        if (!color.empty()) {
+            std::string shape = radius > 0.0f
+                ? "RoundedRectangle(cornerRadius: " + format_float(radius) + ")"
+                : "Rectangle()";
+            emit_line(out, depth + 1, s,
+                      ".overlay(" + shape + ".stroke(" + color +
+                      ", lineWidth: " + format_float(border_w) + "))");
+            if (per_side)
+                push_fidelity(ctx, node, "swiftui-per-side-border",
+                              "per-side border width/colour differs; SwiftUI overlay stroke "
+                              "is uniform, using the heaviest side + first colour",
+                              /*informational=*/false);
+        }
+    }
+
+    // Shadow → the first box-shadow layer. SwiftUI's radius is roughly half the
+    // CSS blur. Inset and additional layers have no SwiftUI .shadow equivalent.
+    if (!st.box_shadow.empty()) {
+        const auto& sh = st.box_shadow.front();
+        if (sh.inset) {
+            push_fidelity(ctx, node, "swiftui-inset-shadow",
+                          "inset box-shadow has no SwiftUI .shadow equivalent; dropped",
+                          /*informational=*/false);
+        } else {
+            std::string color = sh.color.empty() ? "Color.black.opacity(0.33)"
+                                                  : swift_color_expr(sh.color);
+            if (color.empty()) color = "Color.black.opacity(0.33)";
+            std::ostringstream sm;
+            sm << ".shadow(color: " << color << ", radius: " << format_float(sh.blur / 2.0f)
+               << ", x: " << format_float(sh.offset_x) << ", y: " << format_float(sh.offset_y) << ")";
+            emit_line(out, depth + 1, s, sm.str());
+        }
+        // Dropping a layer can erase a visible glow/inner-ring, so a multi-layer
+        // shadow is a hard divergence, not advisory.
+        if (st.box_shadow.size() > 1)
+            push_fidelity(ctx, node, "swiftui-multi-shadow",
+                          "only the first of " + std::to_string(st.box_shadow.size()) +
+                          " box-shadow layers is emitted (SwiftUI .shadow is single-layer)",
+                          /*informational=*/false);
+    }
+
+    // Opacity.
+    if (st.opacity && *st.opacity < 1.0f)
+        emit_line(out, depth + 1, s, ".opacity(" + format_float(*st.opacity) + ")");
+
+    // Transform (rotate/scale/translate; skew/matrix/3D flagged).
+    if (st.transform)
+        for (const auto& m : swift_transform_modifiers(ctx, node))
+            emit_line(out, depth + 1, s, m);
+
+    // mix-blend-mode → SwiftUI .blendMode for the modes that map; the rest are
+    // flagged. CSS `multiply/screen/overlay/...` share spelling with SwiftUI's
+    // BlendMode cases, but `normal` is the default (no modifier).
+    if (st.mix_blend_mode && *st.mix_blend_mode != "normal") {
+        static const std::set<std::string> supported = {
+            "multiply","screen","overlay","darken","lighten","colorDodge","colorBurn",
+            "softLight","hardLight","difference","exclusion","hue","saturation","color",
+            "luminosity","plusDarker","plusLighter"};
+        // CSS spells these hyphenated; map to SwiftUI's camelCase enum spelling.
+        std::string m = *st.mix_blend_mode;
+        std::string camel;
+        bool up = false;
+        for (char c : m) { if (c == '-') { up = true; } else { camel += up ? (char)std::toupper((unsigned char)c) : c; up = false; } }
+        if (supported.count(camel))
+            emit_line(out, depth + 1, s, ".blendMode(." + camel + ")");
+        else
+            push_fidelity(ctx, node, "swiftui-blend-mode",
+                          "mix-blend-mode `" + m + "` has no SwiftUI BlendMode; dropped",
+                          /*informational=*/false);
+    }
+}
+
+// ── B2 text: mixed-style runs → concatenated Text ─────────────────────────
+
+// CSS numeric font-weight → SwiftUI Font.Weight case (nearest bucket).
+std::string swift_font_weight(int w) {
+    if (w <= 150) return ".ultraLight";
+    if (w <= 250) return ".thin";
+    if (w <= 350) return ".light";
+    if (w <= 450) return ".regular";
+    if (w <= 550) return ".medium";
+    if (w <= 650) return ".semibold";
+    if (w <= 750) return ".bold";
+    if (w <= 850) return ".heavy";
+    return ".black";
+}
+
+// Snap a byte index up to the next UTF-8 codepoint boundary (run offsets are
+// byte offsets into text_content; never slice mid-codepoint).
+std::size_t snap_utf8(const std::string& s, std::size_t i) {
+    if (i > s.size()) return s.size();
+    while (i < s.size() && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) ++i;
+    return i;
+}
+
+// One Text(...) segment with its (possibly inherited) styling, as a Swift
+// expression. SwiftUI's Text-returning modifier overloads keep the whole
+// `Text(..).font(..) + Text(..)` chain typed as Text.
+std::string text_segment_expr(std::string_view slice,
+                              std::optional<float> size,
+                              std::optional<int> weight,
+                              bool italic,
+                              const std::string& color_tok,
+                              const std::string& decoration) {
+    std::string e = "Text(" + swift_string_literal(slice) + ")";
+    if (size)   e += ".font(.system(size: " + format_float(*size) + "))";
+    if (weight) e += ".fontWeight(" + swift_font_weight(*weight) + ")";
+    if (italic) e += ".italic()";
+    if (!color_tok.empty()) {
+        std::string c = swift_color_expr(color_tok);
+        if (!c.empty()) e += ".foregroundColor(" + c + ")";
+    }
+    if (decoration == "underline")        e += ".underline()";
+    else if (decoration == "line-through") e += ".strikethrough()";
+    return e;
+}
+
+// Emit a text node. With per-range `text_runs` it becomes a concatenation of
+// styled Text segments; without them it is the simple single Text + dominant
+// style (B1 behaviour). Run byte offsets index into node.text_content.
+void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
+                    const IRNode& node, const ResolvedNativeNode& resolved, int depth) {
+    const int s = ctx.opts.indent_spaces;
+    const auto& base = node.style;
+
+    if (node.text_runs.empty()) {
+        std::string text = resolved.text ? *resolved.text : node.text_content;
+        emit_line(out, depth, s, "Text(" + swift_string_literal(text) + ")");
+        if (base.font_size)
+            emit_line(out, depth + 1, s,
+                      ".font(.system(size: " + format_float(*base.font_size) + "))");
+        if (base.font_weight)
+            emit_line(out, depth + 1, s, ".fontWeight(" + swift_font_weight(*base.font_weight) + ")");
+        if (base.font_style && *base.font_style == "italic")
+            emit_line(out, depth + 1, s, ".italic()");
+        if (base.color) {
+            std::string color = swift_color_expr(*base.color);
+            if (!color.empty())
+                emit_line(out, depth + 1, s, ".foregroundColor(" + color + ")");
+        }
+        return;
+    }
+
+    // Mixed-style: build segments over the full text, filling gaps with the
+    // node's dominant style and overriding inside each run.
+    const std::string& full = node.text_content;
+    std::vector<IRTextRun> runs = node.text_runs;
+    std::sort(runs.begin(), runs.end(),
+              [](const IRTextRun& a, const IRTextRun& b) { return a.start < b.start; });
+    const std::string base_deco = base.text_decoration.value_or("");
+    const std::string base_color = base.color.value_or("");
+    const bool base_italic = base.font_style && *base.font_style == "italic";
+
+    std::vector<std::string> segs;
+    auto base_seg = [&](std::size_t a, std::size_t b) {
+        if (b <= a) return;
+        segs.push_back(text_segment_expr(std::string_view(full).substr(a, b - a),
+                                         base.font_size, base.font_weight, base_italic,
+                                         base_color, base_deco));
+    };
+    std::size_t cursor = 0;
+    for (const auto& r : runs) {
+        if (r.end <= r.start) continue;
+        std::size_t a = snap_utf8(full, static_cast<std::size_t>(std::max(0, r.start)));
+        std::size_t b = snap_utf8(full, static_cast<std::size_t>(std::max(0, r.end)));
+        a = std::max(a, cursor);
+        b = std::min(b, full.size());
+        if (b <= a) continue;
+        base_seg(cursor, a);  // gap before the run inherits the dominant style
+        segs.push_back(text_segment_expr(
+            std::string_view(full).substr(a, b - a),
+            r.font_size ? r.font_size : base.font_size,
+            r.font_weight ? r.font_weight : base.font_weight,
+            r.font_style ? (*r.font_style == "italic") : base_italic,
+            r.color ? *r.color : base_color,
+            r.text_decoration ? *r.text_decoration : base_deco));
+        cursor = b;
+    }
+    base_seg(cursor, full.size());
+    if (segs.empty()) segs.push_back("Text(" + swift_string_literal(full) + ")");
+
+    if (segs.size() == 1) {
+        emit_line(out, depth, s, segs.front());
+        return;
+    }
+    // Emit the `+`-joined chain across lines: first segment, then `+ seg`.
+    emit_line(out, depth, s, segs.front());
+    for (std::size_t i = 1; i < segs.size(); ++i)
+        emit_line(out, depth + 1, s, "+ " + segs[i]);
+}
+
+// ── B2 flex → stack mapping ───────────────────────────────────────────────
+
+// Cross-axis alignment → SwiftUI stack alignment token. `*stretch` is set when
+// the source asked to stretch children to fill the cross axis (SwiftUI stacks
+// size to content; this is an approximation worth flagging).
+std::string stack_alignment_token(bool row, LayoutAlign align, bool* stretch) {
+    *stretch = false;
+    switch (align) {
+        case LayoutAlign::flex_start: return row ? ".top" : ".leading";
+        case LayoutAlign::center:     return ".center";
+        case LayoutAlign::flex_end:   return row ? ".bottom" : ".trailing";
+        case LayoutAlign::stretch:    *stretch = true; return ".center";
+        case LayoutAlign::space_between:
+        case LayoutAlign::space_around: return ".center";
+    }
+    return ".center";
+}
+
+void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
+               const IRNode& node, const ResolvedNativeNode& resolved, int depth);
+
+// Emit a container's children with Spacer interposition to approximate a
+// main-axis `justify` of space-between / space-around / flex-end. Used only
+// when the resulting subview count stays within the ViewBuilder arity limit;
+// callers fall back to plain (batched) children + a fidelity note otherwise.
+void emit_children_distributed(std::ostringstream& out, const SwiftEmitCtx& ctx,
+                               const IRNode& node, const ResolvedNativeNode& resolved,
+                               int depth, LayoutAlign justify) {
+    const int s = ctx.opts.indent_spaces;
+    const std::size_t count = std::min(node.children.size(), resolved.children.size());
+    const bool around = justify == LayoutAlign::space_around;
+    const bool between = justify == LayoutAlign::space_between;
+    const bool end = justify == LayoutAlign::flex_end;
+    if (around || end) emit_line(out, depth, s, "Spacer()");
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i > 0 && (around || between)) emit_line(out, depth, s, "Spacer()");
+        emit_node(out, ctx, node.children[i], resolved.children[i], depth);
+    }
+    if (around) emit_line(out, depth, s, "Spacer()");
+    // space-between with a single child is flex-start: a trailing Spacer pushes
+    // it to the main-axis start (there is no interior gap to place).
+    else if (between && count == 1) emit_line(out, depth, s, "Spacer()");
 }
 
 // Emit a single SwiftUI view expression for one (node, resolved) pair.
@@ -551,16 +1154,7 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
 
     // Text.
     if (kind == NativeWidgetKind::label || node.type == "text") {
-        std::string text = resolved.text ? *resolved.text : node.text_content;
-        emit_line(out, depth, s, "Text(" + swift_string_literal(text) + ")");
-        if (node.style.font_size)
-            emit_line(out, depth + 1, s,
-                      ".font(.system(size: " + format_float(*node.style.font_size) + "))");
-        if (node.style.color) {
-            std::string color = swift_color_expr(*node.style.color);
-            if (!color.empty())
-                emit_line(out, depth + 1, s, ".foregroundColor(" + color + ")");
-        }
+        emit_text_node(out, ctx, node, resolved, depth);
         return;
     }
 
@@ -591,15 +1185,84 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         if (kind != NativeWidgetKind::view && ctx.opts.include_comments)
             emit_line(out, depth, s, "// " + std::string(native_widget_kind_name(kind))
                                           + " lowered as a container in B1");
-        const char* stack = (node.layout.direction == LayoutDirection::row) ? "HStack" : "VStack";
-        std::string open = std::string(stack) + "(spacing: " + format_float(node.layout.gap) + ") {";
+
+        const auto& ly = node.layout;
+        const bool row = ly.direction == LayoutDirection::row;
+
+        // Flex/grid divergences SwiftUI stacks cannot reproduce. Grid is B5; a
+        // grid container still lowers to a stack here so its subtree renders.
+        if (ly.display && *ly.display == "grid")
+            push_fidelity(ctx, node, "swiftui-grid",
+                          "CSS grid container lowered to a SwiftUI stack (grid is B5); "
+                          "track placement is lost", /*informational=*/false);
+        else if (ly.grid_template_columns || ly.grid_template_rows)
+            push_fidelity(ctx, node, "swiftui-grid",
+                          "grid template present; lowered to a SwiftUI stack (grid is B5)",
+                          /*informational=*/false);
+        if (ly.wrap)
+            push_fidelity(ctx, node, "swiftui-flex-wrap",
+                          "flex-wrap has no SwiftUI HStack/VStack equivalent; children "
+                          "stay on one axis", /*informational=*/false);
+
+        bool stretch = false;
+        const std::string align_tok = stack_alignment_token(row, ly.align, &stretch);
+        if (stretch)
+            push_fidelity(ctx, node, "swiftui-align-stretch",
+                          "align-items:stretch can't fill the cross axis of a content-sized "
+                          "SwiftUI stack; using center", /*informational=*/true);
+
+        const char* stack = row ? "HStack" : "VStack";
+        std::string open = std::string(stack) + "(";
+        if (align_tok != ".center") open += "alignment: " + align_tok + ", ";
+        open += "spacing: " + format_float(ly.gap) + ") {";
         emit_line(out, depth, s, open);
-        if (child_count == 0)
+
+        // Main-axis distribution. SwiftUI stacks pack content; space-between/
+        // space-around/flex-end are approximated with Spacers when the subview
+        // count stays within the ViewBuilder arity limit, else flagged only.
+        const LayoutAlign j = ly.justify;
+        const bool wants_spacers = j == LayoutAlign::space_between ||
+                                   j == LayoutAlign::space_around ||
+                                   j == LayoutAlign::flex_end;
+        std::size_t subviews = child_count;
+        // space-between with N>=2 → N-1 interior Spacers; with exactly 1 child it
+        // is flex-start, approximated with a single trailing Spacer.
+        if (j == LayoutAlign::space_between)
+            subviews += (child_count >= 2 ? child_count - 1 : (child_count == 1 ? 1 : 0));
+        else if (j == LayoutAlign::space_around) subviews += child_count + 1;
+        else if (j == LayoutAlign::flex_end) subviews += 1;
+
+        if (child_count == 0) {
             emit_line(out, depth + 1, s, "EmptyView()");
-        else
+        } else if (wants_spacers && subviews <= 10) {
+            emit_children_distributed(out, ctx, node, resolved, depth + 1, j);
+            push_fidelity(ctx, node, "swiftui-flex-justify",
+                          std::string("justify-content approximated with Spacers; exact ") +
+                          "distribution depends on the parent giving the stack free space",
+                          /*informational=*/true);
+        } else {
+            if (wants_spacers)
+                push_fidelity(ctx, node, "swiftui-flex-justify",
+                              "justify-content distribution dropped: too many children for "
+                              "Spacer interposition within the ViewBuilder arity limit",
+                              /*informational=*/false);
             emit_children(out, ctx, node, resolved, depth + 1);
+        }
         emit_line(out, depth, s, "}");
         emit_modifiers(out, ctx, node, depth);
+
+        // Absolute positioning: CSS anchors the top-left of the box at (left,
+        // top); SwiftUI has no flow-relative absolute layout. `.offset` shifts
+        // from the natural position — a close-but-not-equivalent approximation.
+        if (node.style.position && *node.style.position == "absolute") {
+            const float x = node.style.left.value_or(0.0f);
+            const float y = node.style.top.value_or(0.0f);
+            emit_line(out, depth + 1, s,
+                      ".offset(x: " + format_float(x) + ", y: " + format_float(y) + ")");
+            push_fidelity(ctx, node, "swiftui-absolute-position",
+                          "position:absolute approximated with .offset from natural position; "
+                          "SwiftUI has no flow-relative absolute layout", /*informational=*/false);
+        }
         return;
     }
 
@@ -627,7 +1290,7 @@ std::string emit_view(const DesignIR& ir, const ResolvedNativeNode& resolved,
     out << "        self.resolver = resolver\n";
     out << "    }\n\n";
     out << "    public var body: some View {\n";
-    SwiftEmitCtx ctx{opts, ir.asset_manifest};
+    SwiftEmitCtx ctx{opts, ir.asset_manifest, opts.fidelity_report};
     emit_node(out, ctx, ir.root, resolved, 2);
     out << "    }\n";
     out << "}\n";
