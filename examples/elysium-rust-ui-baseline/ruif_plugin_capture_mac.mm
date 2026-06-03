@@ -21,11 +21,14 @@ struct Args {
     std::string output_png;
     uint32_t width = 1000;
     uint32_t height = 600;
+    int hold_seconds = 0;
+    bool visible = false;
 };
 
 [[noreturn]] void usage() {
     std::cerr << "usage: pulp-elysium-ruif-plugin-capture-mac "
-              << "--bundle-binary <path> --output <png> [--width N] [--height N]\n";
+              << "--bundle-binary <path> --output <png> [--width N] [--height N] "
+                 "[--visible] [--hold-seconds N]\n";
     std::exit(2);
 }
 
@@ -46,6 +49,10 @@ Args parse_args(int argc, char** argv) {
             args.width = static_cast<uint32_t>(std::stoul(next()));
         } else if (key == "--height") {
             args.height = static_cast<uint32_t>(std::stoul(next()));
+        } else if (key == "--hold-seconds") {
+            args.hold_seconds = std::stoi(next());
+        } else if (key == "--visible") {
+            args.visible = true;
         } else {
             usage();
         }
@@ -165,9 +172,13 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        const NSWindowStyleMask style = args.visible
+            ? (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+               NSWindowStyleMaskMiniaturizable)
+            : NSWindowStyleMaskBorderless;
         NSWindow* window =
             [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, args.width, args.height)
-                                        styleMask:NSWindowStyleMaskBorderless
+                                        styleMask:style
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
@@ -175,6 +186,12 @@ int main(int argc, char** argv) {
             gui->destroy(plugin);
             destroy_plugin();
             return 1;
+        }
+        if (args.visible) {
+            [window setTitle:@"Pulp ELYSIUM RUIF Rust CLAP"];
+            [window center];
+            [window makeKeyAndOrderFront:nil];
+            [NSApp activateIgnoringOtherApps:YES];
         }
 
         clap_window_t cw{};
@@ -220,6 +237,16 @@ int main(int argc, char** argv) {
         write_file(args.output_png, png);
         std::cout << "captured " << png.size() << " bytes from GPU CLAP editor: "
                   << args.output_png << "\n";
+
+        if (args.hold_seconds > 0) {
+            std::cout << "holding CLAP editor window for " << args.hold_seconds
+                      << " seconds\n";
+            const auto deadline = std::chrono::steady_clock::now()
+                + std::chrono::seconds(args.hold_seconds);
+            while (std::chrono::steady_clock::now() < deadline && [window isVisible]) {
+                pump_run_loop(1);
+            }
+        }
 
         [window close];
         gui->destroy(plugin);
