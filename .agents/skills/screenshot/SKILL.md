@@ -69,6 +69,18 @@ gradient-heavy design. Treat the % as a smoke signal; **eyeball the montage**
   Skia backend for an imported `ui.js`.
 - **`pulp::view::render_to_file`** in tests — headless view-tree PNGs in CI.
 
+## Render size: use the design's true root, not the source bbox
+
+`--render-size WxH` must match the imported design's **root frame** size, not
+the source tool's reported node bounding box. A Figma node's screenshot bbox
+includes page margin / shadow bleed around the frame (e.g. ELYSIUM: node bbox
+1146×746, but the actual root "VST Style" frame is 1000×600). Render at the
+bbox and the design lays out at top-left with the host's dark background
+filling the extra pixels — looks like a "wrong window size." Read the root
+size from `scene.pulp.json` `root.style.width/height` (or the generated
+`setSize('root', …)`), and render at that. When in doubt, render at the root
+size — the result fills the canvas and matches the design's own proportions.
+
 ## Gotchas
 
 - A fresh GPU-less build silently returns the CPU host on macOS
