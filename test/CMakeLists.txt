@@ -913,6 +913,23 @@ if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
         LIBRARIES pulp::format pulp-gain-rust-core)
 endif()
 
+# RUIF-4 opt-in Rust UI lane: build a Cargo staticlib provider that returns a
+# whole-screen canonical DesignIR recipe for C++ validation/materialization.
+# OFF by default, so ordinary builds/imports never require cargo/rustc.
+if(PULP_BUILD_NATIVE_UI_RUST_TESTS AND NOT WIN32)
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpCargoStaticlib.cmake)
+    pulp_add_cargo_staticlib(
+        NAME pulp-elysium-rust-ui-provider
+        MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native-ui/elysium-rust-ui-provider/Cargo.toml
+        LIB_NAME pulp_elysium_rust_ui_provider
+        PROFILE dev)
+    pulp_add_test_suite(pulp-test-rust-ui-provider
+        SOURCES test_rust_ui_provider.cpp
+        LIBRARIES pulp::view pulp::native-components pulp-elysium-rust-ui-provider)
+    target_compile_definitions(pulp-test-rust-ui-provider PRIVATE
+        PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+endif()
+
 # #334: AudioFocusRegistry — cross-platform observer for OS audio-focus
 # signals (Android AudioManager.OnAudioFocusChangeListener,
 # AVAudioSession interruptions). Pure C++ unit tests — no platform deps.

@@ -1,0 +1,21 @@
+# RUIF-4 Rust UI provider fixture. TEST FIXTURE ONLY.
+#
+# Built only when PULP_BUILD_NATIVE_UI_RUST_TESTS=ON. It proves a Rust
+# staticlib can return a whole-screen canonical DesignIR recipe for C++ to
+# validate and materialize. It is not a renderer and does not own Pulp Views.
+[package]
+name = "pulp-elysium-rust-ui-provider"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "pulp_elysium_rust_ui_provider"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

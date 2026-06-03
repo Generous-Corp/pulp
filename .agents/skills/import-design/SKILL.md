@@ -188,6 +188,31 @@ same way as `srcAssetId`. If `local_path` is relative, emit it as a relative
 resource path such as `assets/logo.png`; only absolute `local_path` values
 should become `file:///...` URIs.
 
+#### Opt-in Rust/native UI provider lane
+
+Default imported-design materialization is still baked/native C++. Do not route
+imports through Rust or any other native provider unless the user explicitly
+asks for the Rust/native-provider experiment or a reviewed provider manifest
+opts in. The Rust UI lane is experimental and must remain a recipe provider:
+Rust may return canonical `DesignIR` JSON, but C++ validates it and owns the
+final `View` tree, Yoga layout, renderer, windows, plugin editor lifecycle, and
+assets.
+
+The draft UI provider ABI lives in
+`core/native-components/include/pulp/native_components/native_ui.h`, separate
+from the DSP/domain `native_core.h`. Do not extend `native_core.h` or
+`NativeCoreProcessor` for imported UI. The first Rust proof is gated by
+`PULP_BUILD_NATIVE_UI_RUST_TESTS=ON` and uses a test-only staticlib fixture
+under `test/fixtures/native-ui/`; default builds and ordinary C++ imports must
+not require `cargo`, `rustc`, provider discovery, or Rust provider lookup.
+
+When validating Rust/native-provider imports, compare against the baked C++
+baseline first: canonical `DesignIR`, diagnostics, layout snapshots, and later
+Skia GPU screenshots from the live GPU host. CPU screenshots are not acceptable
+for parity claims. Treat whole-screen Rust that only re-emits `DesignIR` as a
+seam proof, not product value, until standalone and plugin validation show a
+maintainable benefit or a path toward explicit anchored Rust components.
+
 #### figma-plugin `binding` → canonical `pulp*` binding contract
 
 The figma-plugin extractor (`tools/figma-plugin/`) exports a recognized Pulp

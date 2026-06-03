@@ -48,8 +48,9 @@ function(pulp_add_cargo_staticlib)
     if(NOT _cargo OR NOT _rustc)
         message(FATAL_ERROR
             "pulp_add_cargo_staticlib(${CS_NAME}): a Rust toolchain (cargo+rustc) "
-            "is required when PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS=ON. Install "
-            "via https://rustup.rs, or leave the option OFF (the default).")
+            "is required for this opt-in Rust staticlib lane. Install via "
+            "https://rustup.rs, or leave the relevant Pulp Rust test option OFF "
+            "(the default).")
     endif()
 
     # cargo writes lib<LIB_NAME>.a under target/<triple?>/<profile-dir>/.

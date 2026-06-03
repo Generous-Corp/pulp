@@ -73,6 +73,10 @@ option(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS
        "Build the opt-in Rust staticlib reference core + FFI/RT-safety tests \
         (requires a Rust toolchain). OFF by default; no Rust for default builds."
        OFF)
+option(PULP_BUILD_NATIVE_UI_RUST_TESTS
+       "Build the opt-in Rust staticlib native-UI provider fixture tests \
+        (requires a Rust toolchain). OFF by default; no Rust for default builds."
+       OFF)
 # SDK-release safety net for pulp #1817. When ON, configure FAILS if
 # PULP_ENABLE_GPU is set but Skia binaries weren't located. The release
 # workflow flips this ON so an SDK tarball can never ship with the GPU
