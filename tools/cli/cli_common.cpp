@@ -27,6 +27,10 @@
 #include <thread>
 #include <utility>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_StringUtilities.h>
 #include <choc/text/choc_Files.h>
@@ -115,8 +119,25 @@ void pulp_debug(const char* phase) {
 
 // ── Shell Execution ───��─────────────────────────────────────────────────────
 
+// std::system returns an implementation-defined wait status, NOT the child's
+// exit code. On POSIX it is a waitpid status, so a child that exits 2 comes
+// back as 0x200; a caller that propagates it as its own exit code then has it
+// truncated to 0 by the shell's `& 0xFF`, silently turning a delegated failure
+// (e.g. `pulp import-design --format bogus`, which exits 2) into success.
+// Decode it to the real child exit code so delegated commands keep their codes.
+int decode_system_status(int status) {
+    if (status == -1) return 127;  // shell could not be launched
+#ifdef _WIN32
+    return status;                 // already the child exit code on Windows
+#else
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return status != 0 ? 1 : 0;
+#endif
+}
+
 int run(const std::string& cmd) {
-    return std::system(cmd.c_str());
+    return decode_system_status(std::system(cmd.c_str()));
 }
 
 std::string shell_quote(const std::string& s) {
@@ -248,7 +269,7 @@ int run_with_spinner(const std::string& cmd, const std::string& label) {
     std::atomic<int> result{0};
 
     std::thread worker([&]() {
-        result = std::system(redirected.c_str());
+        result = decode_system_status(std::system(redirected.c_str()));
         done = true;
     });
 

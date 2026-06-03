@@ -152,6 +152,19 @@ that was tried and gives the exact `cmake --build` line to remediate;
 do not regress to "Run `pulp build` first" — that's misleading if the
 top-level target doesn't depend on the missing helper.
 
+**Delegated exit codes must be decoded (2026-06-02):** `run()` in
+`tools/cli/cli_common.cpp` returns `std::system`, which on POSIX is a
+*waitpid status*, NOT the child exit code — a child exit of 2 comes back
+as `0x200`, and propagating it as the CLI's own exit code truncates to 0
+(`& 0xFF`). That silently turned delegated failures into success: e.g.
+`pulp import-design --export-tokens --format bogus` (which the helper
+exits 2 for) read as exit 0 through `pulp-cpp`. `run()` now routes through
+`decode_system_status()` (WIFEXITED/WEXITSTATUS on POSIX, raw on Windows,
+128+signal for signalled children); the spinner-runner does the same.
+Any new `std::system` call that feeds an exit code MUST decode it the same
+way. Covered by `pulp delegates a non-zero child exit code intact` in
+`test/test_cli_shellout.cpp` (which runs against `pulp-cpp`, the delegate).
+
 ### Numeric CLI flags
 
 For count-like flags such as `pulp run --frames`, parsers should accept only
@@ -169,6 +182,18 @@ vocabulary. Accepted import-design artifact or runtime values must stay aligned
 across `pulp_import_design.cpp`, `docs/reference/cli.md`,
 `docs/reference/design-import.md`, `docs/status/cli-commands.yaml`, and the
 import-design skill.
+
+`--format` is a separate axis from `--emit`: it picks the **token file** format,
+not the primary artifact kind. Values are `w3c` (default, DTCG JSON),
+`css-variables` (CSS custom properties; base → `:root`, `.dark`-suffixed modes →
+`@media (prefers-color-scheme: dark)`; sidecar default flips from `tokens.json`
+to `theme.css`), and the `tailwind`/`json-tailwind`/`css-tailwind` variants.
+Token dispatch is exhaustive on purpose: an unknown `--format` exits 2, and the
+Tailwind variants are gated to `--from designmd` (they re-parse DESIGN.md for
+section context) — on `--export-tokens` or any non-designmd source they exit 2
+rather than silently emitting W3C under the requested name (generalizing them is
+Workstream A2). Keep `--format` values aligned across `pulp_import_design.cpp`,
+the help text, `docs/reference/design-import.md`, and the import-design skill.
 
 For `--emit ir-json`, asset-manifest flags are part of that same synced surface:
 `--allow-network-fetch`, `--asset-cache`, `--asset-timeout-ms`, and repeated

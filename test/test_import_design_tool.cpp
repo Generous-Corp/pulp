@@ -44,6 +44,26 @@ ProcessResult run_import_design(const std::vector<std::string>& args, int timeou
     return exec(bin.string(), args, timeout_ms);
 }
 
+// Like run_import_design but with a chosen working directory, so
+// default-output-filename behavior (e.g. theme.css written to cwd) can be
+// asserted without writing into the test runner's directory. The binary path
+// is resolved absolute since the child's cwd moves.
+ProcessResult run_import_design_in(const fs::path& cwd,
+                                   const std::vector<std::string>& args,
+                                   int timeout_ms = 30000) {
+    const auto bin = tool_binary();
+    if (bin.empty() || !fs::exists(bin)) {
+        ProcessResult r;
+        r.exit_code = -1;
+        r.stderr_output = "pulp-import-design binary not at " + bin.string();
+        return r;
+    }
+    ProcessOptions opts;
+    opts.working_directory = cwd.string();
+    opts.timeout_ms = timeout_ms;
+    return ChildProcess::run(fs::absolute(bin).string(), args, opts);
+}
+
 class TempDir {
 public:
     explicit TempDir(const std::string& prefix) {
@@ -1249,4 +1269,146 @@ TEST_CASE("pulp-import-design refuses .pulp.zip exceeding the file-count cap",
     REQUIRE(r.exit_code != 0);
     INFO("stderr: " << r.stderr_output);
     REQUIRE(r.stderr_output.find("entries (>") != std::string::npos);
+}
+
+// ── Workstream A1 — `--format css-variables` token export ────────────────
+// export_css_variables is unit-covered in test_design_import_w3c_tokens.cpp.
+// These exercise the CLI dispatch end-to-end through the standalone tool (true
+// exit codes): the --format flag selects the body, the sidecar default flips
+// to theme.css, and an unknown format fails loudly instead of silently W3C.
+
+TEST_CASE("pulp-import-design --export-tokens --format css-variables writes theme.css",
+          "[cli][import-design][tool][css]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-export-tokens-css");
+    // No --tokens: the css-variables default leaf is theme.css, written to cwd.
+    auto r = run_import_design_in(tmp.path, {"--export-tokens",
+                                             "--format", "css-variables"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+
+    // Default sidecar flipped to theme.css (NOT the W3C tokens.json default).
+    REQUIRE(fs::exists(tmp.path / "theme.css"));
+    REQUIRE_FALSE(fs::exists(tmp.path / "tokens.json"));
+
+    const auto css = read_text(tmp.path / "theme.css");
+    REQUIRE(css.find(":root {") != std::string::npos);
+    REQUIRE(css.find("--") != std::string::npos);          // at least one custom prop
+    REQUIRE(css.find("$value") == std::string::npos);      // not the W3C JSON shape
+
+    // Stdout names the format so users notice the non-default path.
+    REQUIRE(r.stdout_output.find("format=css-variables") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design --export-tokens defaults to W3C tokens.json",
+          "[cli][import-design][tool][css]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-export-tokens-w3c");
+    auto r = run_import_design_in(tmp.path, {"--export-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+
+    // W3C remains the default: tokens.json, JSON shape, no theme.css.
+    REQUIRE(fs::exists(tmp.path / "tokens.json"));
+    REQUIRE_FALSE(fs::exists(tmp.path / "theme.css"));
+    REQUIRE(read_text(tmp.path / "tokens.json").find("$value") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design --export-tokens --tokens honors an explicit css path",
+          "[cli][import-design][tool][css]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-export-tokens-css-explicit");
+    auto out = tmp.path / "custom-theme.css";
+    auto r = run_import_design({"--export-tokens",
+                                "--format", "css-variables",
+                                "--tokens", out.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out));
+    REQUIRE(read_text(out).find(":root {") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design rejects an unknown --format value",
+          "[cli][import-design][tool][css]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-export-tokens-bogus");
+    auto out = tmp.path / "out.txt";
+    auto r = run_import_design({"--export-tokens",
+                                "--format", "bogus-format",
+                                "--tokens", out.string()});
+    REQUIRE_FALSE(r.timed_out);
+    // Config error (exit 2), not a silent W3C fallback.
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("unsupported --format") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(out));
+}
+
+// Tailwind formats are gated to --from designmd until Workstream A2. They must
+// be rejected (exit 2) rather than silently emitting W3C under the requested
+// format name — both in --export-tokens (no designmd context) and on a
+// non-designmd import source.
+TEST_CASE("pulp-import-design --export-tokens rejects tailwind formats",
+          "[cli][import-design][tool][css]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-export-tokens-tailwind");
+    for (const char* fmt : {"tailwind", "json-tailwind", "css-tailwind"}) {
+        auto out = tmp.path / (std::string("out-") + fmt);
+        auto r = run_import_design({"--export-tokens",
+                                    "--format", fmt,
+                                    "--tokens", out.string()});
+        INFO("format: " << fmt << " stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("designmd") != std::string::npos);
+        REQUIRE_FALSE(fs::exists(out));  // no silent W3C write under a tailwind name
+    }
+}
+
+TEST_CASE("pulp-import-design rejects tailwind format on a non-designmd source",
+          "[cli][import-design][tool][css]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-tailwind-nondesignmd");
+    // Minimal figma-plugin envelope; we never get to parse it — the format
+    // gate fires right after source validation.
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                      R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                      R"("source_uri":"figma://x/1:1"},)"
+                      R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+    auto r = run_import_design({"--from", "figma-plugin",
+                               "--file", scene.string(),
+                               "--output", (tmp.path / "ui.js").string(),
+                               "--format", "tailwind"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("requires --from designmd") != std::string::npos);
+}
+
+// --validate's render backend selector. Skia is the faithful default (it
+// composites file-backed images; CoreGraphics renders an image's filename
+// placeholder). An unknown value is rejected up front.
+TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
+          "[cli][import-design][tool][screenshot]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-screenshot-backend-bogus");
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                      R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                      R"("source_uri":"figma://x/1:1"},)"
+                      R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+    auto r = run_import_design({"--from", "figma-plugin",
+                               "--file", scene.string(),
+                               "--output", (tmp.path / "ui.js").string(),
+                               "--no-tokens", "--validate",
+                               "--screenshot-backend", "bogus"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
 }

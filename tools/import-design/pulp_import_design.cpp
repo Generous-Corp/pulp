@@ -792,6 +792,26 @@ CppOutputPaths resolve_cpp_output_paths(const std::string& output_file) {
     return paths;
 }
 
+// Tailwind formats re-parse DESIGN.md for section context, so they are gated to
+// `--from designmd` (generalizing them to any source is Workstream A2). Callers
+// must reject these before reaching the theme-only exporter below.
+bool is_tailwind_format(const std::string& format) {
+    return format == "tailwind" || format == "json-tailwind" ||
+           format == "css-tailwind";
+}
+
+// Resolve a token-export body for a theme-based `--format` value. W3C DTCG is
+// the default; `css-variables` emits CSS custom properties (base → :root,
+// `.dark`-suffixed → @media prefers-color-scheme). Only `w3c`/`css-variables`
+// reach here — Tailwind formats are dispatched (designmd) or rejected upstream
+// via is_tailwind_format(), so this never silently downgrades Tailwind to W3C.
+std::string export_theme_tokens(const std::string& format,
+                                const pulp::view::Theme& theme) {
+    if (format == "css-variables")
+        return pulp::view::export_css_variables(theme);
+    return pulp::view::export_w3c_tokens(theme);
+}
+
 } // namespace
 
 static void print_usage() {
@@ -827,12 +847,20 @@ static void print_usage() {
     std::cout << "                    Per-request asset fetch timeout (default: 30000)\n";
     std::cout << "  --asset-hash <uri=sha256>\n";
     std::cout << "                    Expected asset content hash; may be repeated\n";
-    std::cout << "  --tokens <path>   Output W3C token file (default: tokens.json)\n";
+    std::cout << "  --tokens <path>   Output token file (default: tokens.json; theme.css for css-variables)\n";
+    std::cout << "  --format {w3c|css-variables|tailwind|json-tailwind|css-tailwind}\n";
+    std::cout << "                    Token export format (default: w3c). css-variables emits CSS\n";
+    std::cout << "                    custom properties (.dark modes → @media prefers-color-scheme);\n";
+    std::cout << "                    tailwind variants currently require --from designmd\n";
     std::cout << "  --dry-run         Show generated code without writing files\n";
     std::cout << "  --no-tokens       Skip token extraction\n";
     std::cout << "  --no-comments     Omit comments from generated code\n";
     std::cout << "  --web-compat      Use DOM API instead of native Pulp API\n";
     std::cout << "  --validate        Render generated JS and validate layout\n";
+    std::cout << "  --screenshot-backend {skia|coregraphics}\n";
+    std::cout << "                    Render backend for --validate (default: skia). Only the\n";
+    std::cout << "                    Skia backend composites file-backed images; coregraphics\n";
+    std::cout << "                    draws an image's filename placeholder (not faithful).\n";
     std::cout << "  --strict-fidelity Fail (exit 4) if the import-time fidelity self-check\n";
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
@@ -851,6 +879,8 @@ static void print_usage() {
     std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
     std::cout << "                    walk the materialized DOM (--from claude only).\n";
     std::cout << "                    Falls back to the static parser on any harness failure.\n";
+    std::cout << "  --export-tokens   Export a Pulp theme (from --file theme JSON, or the built-in\n";
+    std::cout << "                    dark theme when no input) in the --format token format.\n";
     std::cout << "  --detect-only     Detect (source, format-version, parser-version) for\n";
     std::cout << "                    --file or --directory <path> against compat.json without\n";
     std::cout << "                    parsing. Prints match counts and confidence.\n";
@@ -876,6 +906,8 @@ static void print_usage() {
     std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";
     std::cout << "  pulp import-design --from pencil --file design.json --validate --reference source.png\n";
     std::cout << "  pulp import-design --from claude --file design.html\n";
+    std::cout << "  pulp import-design --from figma --file design.json --format css-variables --tokens theme.css\n";
+    std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp\n";
 }
@@ -1182,6 +1214,14 @@ int main(int argc, char* argv[]) {
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
     int render_height = 280;
+    // --validate render backend. Default to Skia: it composites file-backed
+    // images (ImageView decodes via the canvas's draw_image_from_file
+    // primitive, which the Skia canvas implements but the CoreGraphics one
+    // does not — CG renders an image as its filename placeholder). A
+    // CoreGraphics render is therefore NOT faithful for designs with assets;
+    // it's offered only as an explicit escape hatch.
+    pulp::view::ScreenshotBackend screenshot_backend =
+        pulp::view::ScreenshotBackend::skia;
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
     bool bridge_output_explicit = false;                 // pulp friction-fix #4
     bool emit_bridge_scaffold = true;                    // default on for --from claude
@@ -1261,6 +1301,16 @@ int main(int argc, char* argv[]) {
             if (x != std::string::npos) {
                 render_width = std::stoi(sz.substr(0, x));
                 render_height = std::stoi(sz.substr(x + 1));
+            }
+        } else if (std::strcmp(argv[i], "--screenshot-backend") == 0 && i + 1 < argc) {
+            std::string b = argv[++i];
+            if (b == "skia") {
+                screenshot_backend = pulp::view::ScreenshotBackend::skia;
+            } else if (b == "coregraphics" || b == "cg") {
+                screenshot_backend = pulp::view::ScreenshotBackend::coregraphics;
+            } else {
+                std::cerr << "Error: --screenshot-backend must be skia or coregraphics\n";
+                return 2;
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
             preview_mode = true;
@@ -1417,6 +1467,25 @@ int main(int argc, char* argv[]) {
     if (artifact_emit == ArtifactEmit::cpp && !output_explicit)
         output_file = "imported_ui.cpp";
 
+    // --format css-variables emits a CSS file, so its sidecar defaults to
+    // theme.css rather than tokens.json (the W3C default). The leaf name also
+    // feeds the friction-fix #4 anchoring below.
+    const char* tokens_default_leaf =
+        (export_format == "css-variables") ? "theme.css" : "tokens.json";
+    if (export_format == "css-variables" && !tokens_file_explicit)
+        tokens_file = tokens_default_leaf;
+
+    // Reject unknown --format values up front with a helpful message rather
+    // than silently falling back to W3C. Tailwind variants stay source-gated
+    // to DESIGN.md at the write site; the rest are theme-based.
+    if (export_format != "w3c" && export_format != "css-variables" &&
+        export_format != "tailwind" && export_format != "json-tailwind" &&
+        export_format != "css-tailwind") {
+        std::cerr << "Error: unsupported --format value '" << export_format
+                  << "' (expected: w3c, css-variables, tailwind, json-tailwind, css-tailwind)\n";
+        return 2;
+    }
+
     // pulp friction-fix #4 — when the user passes --output <dir>/ui.js,
     // anchor the sidecar files (bridge_handlers.cpp, classnames.json,
     // tokens.json) to the same directory so they don't scatter to cwd.
@@ -1430,37 +1499,46 @@ int main(int argc, char* argv[]) {
             if (!bridge_output_explicit)     anchor(bridge_output,     "bridge_handlers.cpp");
             if (!classnames_output_explicit) anchor(classnames_output, "classnames.json");
             if (!shortcuts_output_explicit)  anchor(shortcuts_output,  "shortcuts.json");
-            if (!tokens_file_explicit)       anchor(tokens_file,       "tokens.json");
+            if (!tokens_file_explicit)       anchor(tokens_file,       tokens_default_leaf);
         }
     }
 
-    // Export-tokens mode: read a Pulp theme JSON and export as W3C tokens
+    // Export-tokens mode: read a Pulp theme JSON and export in --format.
     if (export_tokens_mode) {
+        // Tailwind formats need DESIGN.md section context that --export-tokens
+        // (a flat theme → tokens path) does not have. Reject rather than
+        // silently emit W3C under the requested-but-unhonored format name.
+        if (is_tailwind_format(export_format)) {
+            std::cerr << "Error: --format " << export_format
+                      << " requires an import with --from designmd; "
+                         "--export-tokens supports w3c and css-variables only\n";
+            return 2;
+        }
         if (input_file.empty()) {
             // No input = export the built-in dark theme
             auto theme = Theme::dark();
-            auto w3c = export_w3c_tokens(theme);
+            auto body = export_theme_tokens(export_format, theme);
             if (dry_run) {
-                std::cout << w3c;
+                std::cout << body;
                 return 0;
             }
-            if (!write_file(tokens_file, w3c)) return 1;
+            if (!write_file(tokens_file, body)) return 1;
             std::cout << "Exported " << (theme.colors.size() + theme.dimensions.size() + theme.strings.size())
-                      << " tokens → " << tokens_file << "\n";
+                      << " tokens → " << tokens_file << " (format=" << export_format << ")\n";
             return 0;
         }
-        // Read theme JSON → export as W3C
+        // Read theme JSON → export in the requested token format
         auto content = read_file(input_file);
         if (content.empty()) return 1;
         auto theme = Theme::from_json(content);
-        auto w3c = export_w3c_tokens(theme);
+        auto body = export_theme_tokens(export_format, theme);
         if (dry_run) {
-            std::cout << w3c;
+            std::cout << body;
             return 0;
         }
-        if (!write_file(tokens_file, w3c)) return 1;
+        if (!write_file(tokens_file, body)) return 1;
         std::cout << "Exported " << (theme.colors.size() + theme.dimensions.size() + theme.strings.size())
-                  << " tokens → " << tokens_file << "\n";
+                  << " tokens → " << tokens_file << " (format=" << export_format << ")\n";
         return 0;
     }
 
@@ -1559,6 +1637,18 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
         std::cerr << "Valid sources: figma, stitch, v0, pencil, claude, designmd, jsx\n";
         return 1;
+    }
+
+    // Tailwind formats are gated to DESIGN.md (they re-parse it for section
+    // context — see the designmd dispatch in the token-write block). On any
+    // other source they would silently fall through to W3C while reporting the
+    // requested format, so reject up front. Generalizing Tailwind to all
+    // sources is Workstream A2.
+    if (is_tailwind_format(export_format) && *source != DesignSource::designmd) {
+        std::cerr << "Error: --format " << export_format
+                  << " currently requires --from designmd (got --from "
+                  << source_str << ")\n";
+        return 2;
     }
 
     if (input_file.empty() && input_url.empty()) {
@@ -2265,9 +2355,11 @@ int main(int argc, char* argv[]) {
 
         if (include_tokens && (!ir.tokens.colors.empty() || !ir.tokens.dimensions.empty())) {
             auto theme = ir_tokens_to_theme(ir.tokens);
-            auto w3c = export_w3c_tokens(theme);
-            std::cout << "\n=== W3C Design Tokens (" << tokens_file << ") ===\n\n";
-            std::cout << w3c;
+            auto body = export_theme_tokens(export_format, theme);
+            const char* label = (export_format == "css-variables")
+                                    ? "CSS Variables" : "W3C Design Tokens";
+            std::cout << "\n=== " << label << " (" << tokens_file << ") ===\n\n";
+            std::cout << body;
         }
         // --dry-run still honors --strict-fidelity: a harness that imports with
         // both must see the non-zero exit, not a silent success.
@@ -2328,7 +2420,7 @@ int main(int argc, char* argv[]) {
                        : export_tailwind_v3_json(pr);
         } else {
             auto theme = ir_tokens_to_theme(ir.tokens);
-            body = export_w3c_tokens(theme);
+            body = export_theme_tokens(export_format, theme);
         }
         if (write_file(tokens_file, body)) {
             size_t token_count = ir.tokens.colors.size() + ir.tokens.dimensions.size() + ir.tokens.strings.size();
@@ -2465,7 +2557,7 @@ int main(int argc, char* argv[]) {
 
         auto rendered_png = render_to_png(render_root,
             static_cast<uint32_t>(render_width),
-            static_cast<uint32_t>(render_height), 2.0f);
+            static_cast<uint32_t>(render_height), 2.0f, screenshot_backend);
 
         if (rendered_png.empty()) {
             std::cerr << "Validation error: headless render failed\n";

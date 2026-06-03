@@ -45,6 +45,17 @@ void pulp_debug(const char* phase);
 
 // ── Shell Execution ─────────────────────────────────────────────────────────
 
+// Decode std::system()'s return into the child's exit code. On POSIX
+// std::system returns a waitpid status (a normal exit of N comes back as
+// N<<8), so callers that propagate it as their own exit code truncate it via
+// the shell's `& 0xFF`; this normalizes it. Exposed for unit testing.
+//   status == -1            → 127 (shell could not launch)
+//   normal exit             → the child's exit code (WEXITSTATUS)
+//   killed by signal        → 128 + signal number
+// On Windows std::system already returns the child exit code, so it passes
+// through unchanged. See run().
+int decode_system_status(int status);
+
 int run(const std::string& cmd);
 int run_with_spinner(const std::string& cmd, const std::string& label);
 std::string exec_output(const std::string& cmd);

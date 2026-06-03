@@ -698,6 +698,7 @@ Use only these values for `status:` fields in manifests:
 - The component inspector (pulp-inspect) doubles as a validation tool
 - WebDriver-based automation via tauri-plugin-webdriver patterns
 - **Headless screenshot verification**: Before launching a UI window for visual inspection, use `render_to_file()` or the `--screenshot` flag on preview apps to capture a headless PNG and verify the rendering is correct. Never show the user an empty or broken window. Example: `./build/examples/ui-preview/pulp-ui-preview --screenshot` renders to `/tmp/pulp-animation-preview.png` without opening a window.
+  - **Use the Skia backend for any UI with images** (assets, icons, imported designs). `render_to_png`'s default macOS backend is CoreGraphics, whose canvas does NOT implement `draw_image_from_file` — so `ImageView` renders each image's *filename as placeholder text* (empty boxes + scattered `*.png`), which looks like a broken import but is just the backend. The Skia backend (`ScreenshotBackend::skia`) composites file images correctly. `pulp import-design --validate` defaults to `--screenshot-backend skia` for this reason; only pass `coregraphics` deliberately. Showing a non-faithful CoreGraphics render of an asset-rich design wastes a review cycle — re-render with Skia first. See the `screenshot` skill.
 
 **Audio:**
 - Golden-file comparison: render known input → compare output against reference
@@ -956,6 +957,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): single-platform watch + rebuild, AOT analyzer, ar-swap, PR-state monitor |
+| `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
@@ -966,7 +968,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-26 skills as of 2026-06-01. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+27 skills as of 2026-06-02. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 

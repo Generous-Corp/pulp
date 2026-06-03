@@ -616,7 +616,7 @@ python3 tools/import-design/figma_rest_export.py \
   --url 'https://figma.com/design/<KEY>/...?node-id=3-42' --out scene.pulp.json
 pulp import-design --from figma-plugin --file scene.pulp.json --output ui.js
 ```
-Token resolves from `--token`, then `$FIGMA_TOKEN`, then `~/.config/pulp/figma-token`; lifecycle (added/expiry) tracked in `~/.config/pulp/figma.json`. PATs expire (≤90 days) — regenerate same-scope; Figma OAuth2 is the permanent path (future). The plugin lane remains source-of-truth (audio-widget recognition, Pulp Library matching); the REST port covers generic frames/text/vectors/assets, which is what non-library designs (e.g. ELYSIUM) use. **Asset PNGs only raster-render in a GPU/Skia-enabled build** (`PULP_HAS_SKIA`); a GPU-off build draws filename placeholders for images while native widgets still paint.
+Token resolves from `--token`, then `$FIGMA_TOKEN`, then `~/.config/pulp/figma-token`; lifecycle (added/expiry) tracked in `~/.config/pulp/figma.json`. PATs expire (≤90 days) — regenerate same-scope; Figma OAuth2 is the permanent path (future). The plugin lane remains source-of-truth (audio-widget recognition, Pulp Library matching); the REST port covers generic frames/text/vectors/assets, which is what non-library designs (e.g. ELYSIUM) use. **Asset PNGs only composite when the render uses the SKIA backend.** Two independent gates: (1) a GPU/Skia-enabled build (`PULP_HAS_SKIA`), and (2) the **Skia screenshot backend** — `render_to_png`'s macOS default is CoreGraphics, whose canvas lacks `draw_image_from_file`, so `ImageView` draws each image's *filename as placeholder text* (empty boxes + scattered `*.png`) even in a Skia build. `pulp import-design --validate` now defaults to `--screenshot-backend skia` so a fresh import render is faithful; only pass `coregraphics` deliberately. If a validate render shows missing images + filename text, it's the backend, not the import — re-render with Skia. See the `screenshot` skill.
 
 **Bundled (non-system) fonts — `font_family_assets` → `registerFont` (#43b).** When the envelope carries `font_family_assets` (#43a: `[{family, style, weight, asset_id}]`) with the `.ttf`/`.otf` shipped in `assets/`, the importer registers each so a non-system family actually loads instead of `setFontFamily` silently falling back to a same-named system font. Pipeline: `parse_figma_plugin_json` → `DesignIR.font_family_assets`; the CLI resolves each `asset_id` → absolute path (same pass as image `asset_path`); `generate_pulp_js` emits `registerFont('<family>','<path>')` in the JS header **before any `setFontFamily`**; the `registerFont` bridge calls `AssetManager::register_font_family` → `canvas::register_font_file` (Skia typeface; no-op stub off-GPU). **Gotcha:** if the design's font is *also* system-installed (e.g. Inter on macOS), a render can't distinguish bundled-load from system-fallback — verify with a non-system family. Covered by `[issue-43b]` in `test_design_import.cpp`.
 
@@ -1478,6 +1478,31 @@ Import artifact flag vocabulary:
 - URL imports fetch through argv-safe `curl` into a unique temporary file; literal `--file` paths are read directly and may contain normal filesystem punctuation, while `--url` rejects shell metacharacters before fetching.
 
 Use `--dry-run` to preview without writing files.
+
+### Token export formats (`--format`)
+
+`--format` is the **token-format axis** (which token file to emit), distinct from
+the `--emit` **artifact-kind axis** (js / ir-json / cpp). Values:
+
+- `w3c` (default) — W3C DTCG `tokens.json`. The fidelity-first canonical form.
+- `css-variables` — CSS custom properties (`export_css_variables`, `core/view/src/design_tokens.cpp`).
+  Base tokens → `:root`; `.dark`-suffixed multi-mode tokens → `@media (prefers-color-scheme: dark)`.
+  Names map `.`→`-` (`color.bg` → `--color-bg`); colors→hex, dims→`px`, strings verbatim.
+  The sidecar default flips from `tokens.json` to **`theme.css`** when `--tokens` is unset.
+- `tailwind` / `json-tailwind` / `css-tailwind` — Tailwind v3 JSON / v4 `@theme` CSS. **Still
+  gated to `--from designmd`** (they re-parse DESIGN.md for section context). Generalizing these
+  to any source is Workstream A2 (`planning/2026-06-02-design-token-export-and-swiftui-path.md`),
+  not yet landed.
+
+An unknown `--format` value is a hard error (exit 2), never a silent W3C fallback.
+`css-variables` is an **external themeable artifact** — Pulp resolves `var(--x)`, but a runtime
+loader that applies a themed `@media` CSS file is a separate, later step; the exporter does not
+claim runtime consumption, and deliberately emits only `@media` (no `[data-theme]` selector).
+
+```bash
+pulp import-design --from figma --file design.json --format css-variables --tokens theme.css
+pulp export-tokens --format css-variables                 # built-in dark theme → theme.css
+```
 
 Detect-only directory inputs (`pulp import-design --detect-only --directory <dir>`) prefer
 `code.html`, then `index.html`, then the first sorted `.html` / `.htm` payload. Keep fixture

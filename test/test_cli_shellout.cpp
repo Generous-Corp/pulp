@@ -2435,3 +2435,21 @@ TEST_CASE("PULP_DEBUG=1 surfaces phase markers to stderr (#682)",
 
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
 }
+
+// The CLI delegates `import-design` to the sibling pulp-import-design binary
+// via std::system (cli_common.cpp run()/delegate_to_build_binary). std::system
+// returns a waitpid status, not the child exit code, so a child exit of 2 would
+// truncate to 0 unless decoded. This guards that a delegated non-zero exit code
+// (an unsupported --format → exit 2) survives the delegation boundary instead
+// of silently reading as success.
+TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --format)",
+          "[cli][shellout][delegate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto r = run_pulp({"import-design", "--export-tokens",
+                       "--format", "bogus-format"}, 30000);
+    REQUIRE_FALSE(r.timed_out);
+    // Exit 2 must survive: NOT collapsed to 0 by an undecoded wait status.
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("unsupported --format") != std::string::npos);
+}
