@@ -41,6 +41,7 @@ pulp import-design --from <source> [options]
 | `--no-comments` | Omit comments from generated code | — |
 | `--web-compat` | Use DOM API instead of native Pulp API | — |
 | `--validate` | Render generated JS and validate layout | — |
+| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. **Skia** (default) composites file-backed images; **CoreGraphics** does not (it draws an image's filename placeholder — not faithful). | `skia` |
 | `--reference <png>` | Compare render against reference screenshot | — |
 | `--diff <png>` | Save visual diff image | — |
 | `--render-size WxH` | Render dimensions | `340x280` |

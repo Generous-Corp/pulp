@@ -712,6 +712,9 @@ commands:
       - name: --validate
         kind: flag
         description: Render generated JS and validate layout
+      - name: --screenshot-backend
+        kind: option
+        description: "--validate render backend: skia (default; composites file-backed images) or coregraphics (draws image filename placeholders — not faithful for asset-rich designs)"
       - name: --reference
         kind: option
         description: Compare render against reference screenshot PNG

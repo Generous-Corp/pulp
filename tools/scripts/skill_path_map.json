@@ -229,6 +229,13 @@
         "examples/sdf-*/**"
       ]
     },
+    "screenshot": {
+      "paths": [
+        "core/view/src/screenshot*.cpp",
+        "core/view/platform/mac/screenshot_mac.mm",
+        "core/view/include/pulp/view/screenshot.hpp"
+      ]
+    },
     "ship": {
       "paths": [
         "ship/**",

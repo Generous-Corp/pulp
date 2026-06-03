@@ -857,6 +857,10 @@ static void print_usage() {
     std::cout << "  --no-comments     Omit comments from generated code\n";
     std::cout << "  --web-compat      Use DOM API instead of native Pulp API\n";
     std::cout << "  --validate        Render generated JS and validate layout\n";
+    std::cout << "  --screenshot-backend {skia|coregraphics}\n";
+    std::cout << "                    Render backend for --validate (default: skia). Only the\n";
+    std::cout << "                    Skia backend composites file-backed images; coregraphics\n";
+    std::cout << "                    draws an image's filename placeholder (not faithful).\n";
     std::cout << "  --strict-fidelity Fail (exit 4) if the import-time fidelity self-check\n";
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
@@ -1210,6 +1214,14 @@ int main(int argc, char* argv[]) {
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
     int render_height = 280;
+    // --validate render backend. Default to Skia: it composites file-backed
+    // images (ImageView decodes via the canvas's draw_image_from_file
+    // primitive, which the Skia canvas implements but the CoreGraphics one
+    // does not — CG renders an image as its filename placeholder). A
+    // CoreGraphics render is therefore NOT faithful for designs with assets;
+    // it's offered only as an explicit escape hatch.
+    pulp::view::ScreenshotBackend screenshot_backend =
+        pulp::view::ScreenshotBackend::skia;
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
     bool bridge_output_explicit = false;                 // pulp friction-fix #4
     bool emit_bridge_scaffold = true;                    // default on for --from claude
@@ -1289,6 +1301,16 @@ int main(int argc, char* argv[]) {
             if (x != std::string::npos) {
                 render_width = std::stoi(sz.substr(0, x));
                 render_height = std::stoi(sz.substr(x + 1));
+            }
+        } else if (std::strcmp(argv[i], "--screenshot-backend") == 0 && i + 1 < argc) {
+            std::string b = argv[++i];
+            if (b == "skia") {
+                screenshot_backend = pulp::view::ScreenshotBackend::skia;
+            } else if (b == "coregraphics" || b == "cg") {
+                screenshot_backend = pulp::view::ScreenshotBackend::coregraphics;
+            } else {
+                std::cerr << "Error: --screenshot-backend must be skia or coregraphics\n";
+                return 2;
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
             preview_mode = true;
@@ -2535,7 +2557,7 @@ int main(int argc, char* argv[]) {
 
         auto rendered_png = render_to_png(render_root,
             static_cast<uint32_t>(render_width),
-            static_cast<uint32_t>(render_height), 2.0f);
+            static_cast<uint32_t>(render_height), 2.0f, screenshot_backend);
 
         if (rendered_png.empty()) {
             std::cerr << "Validation error: headless render failed\n";

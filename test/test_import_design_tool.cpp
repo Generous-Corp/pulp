@@ -1389,3 +1389,26 @@ TEST_CASE("pulp-import-design rejects tailwind format on a non-designmd source",
     REQUIRE(r.exit_code == 2);
     REQUIRE(r.stderr_output.find("requires --from designmd") != std::string::npos);
 }
+
+// --validate's render backend selector. Skia is the faithful default (it
+// composites file-backed images; CoreGraphics renders an image's filename
+// placeholder). An unknown value is rejected up front.
+TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
+          "[cli][import-design][tool][screenshot]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-screenshot-backend-bogus");
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                      R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                      R"("source_uri":"figma://x/1:1"},)"
+                      R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+    auto r = run_import_design({"--from", "figma-plugin",
+                               "--file", scene.string(),
+                               "--output", (tmp.path / "ui.js").string(),
+                               "--no-tokens", "--validate",
+                               "--screenshot-backend", "bogus"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
+}

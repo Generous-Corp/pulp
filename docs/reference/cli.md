@@ -1094,6 +1094,7 @@ exit codes, diagnostics, and the staged rollout split).
 | `--emit classnames` | Force-emit `classnames.json` (default on for `--from claude`). |
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
+| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
 | `--format {w3c\|css-variables\|tailwind\|json-tailwind\|css-tailwind}` | Token export format. `w3c` (DTCG JSON) is the default; `css-variables` emits CSS custom properties (`.dark` modes → `@media (prefers-color-scheme: dark)`); the `tailwind` variants require `--from designmd`. Unknown values exit 2. |
 
 With `--emit ir-json`, relative asset references from a `--url` import resolve
