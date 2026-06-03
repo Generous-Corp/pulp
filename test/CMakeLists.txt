@@ -3159,6 +3159,13 @@ target_link_libraries(pulp-test-design-import-native-materializer PRIVATE pulp::
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-design-import-provider test_design_import_provider.cpp)
+target_link_libraries(pulp-test-design-import-provider PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-provider PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-import-provider
+    PROPERTIES LABELS "parser-import")
+
 add_executable(pulp-test-view-core-link test_view_core_link.cpp)
 target_link_libraries(pulp-test-view-core-link PRIVATE pulp::view-core Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-core-link

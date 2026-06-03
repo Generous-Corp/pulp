@@ -314,6 +314,7 @@ target_sources(pulp-view-core PRIVATE
     src/design_ir_json.cpp
     src/design_import_v0_tsx.cpp
     src/design_import_native_common.cpp
+    src/design_import_provider.cpp
     src/design_cpp_codegen.cpp
     src/design_tokens.cpp
     src/design_codegen.cpp

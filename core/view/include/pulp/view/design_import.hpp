@@ -46,6 +46,93 @@ struct NativeMaterializeOptions {
     std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
 };
 
+enum class NativeDesignProviderMode {
+    baked_cpp_only,
+    provider_with_fallback,
+    provider_strict
+};
+
+struct NativeDesignProviderProvenance {
+    std::string provider_id;
+    std::string provider_version;
+    std::string source_design_hash;
+};
+
+struct NativeDesignProviderRequest {
+    const DesignIR* source_ir = nullptr;
+    const IRAssetManifest* source_manifest = nullptr;
+    std::string canonical_source_design_ir_json;
+    std::string source_design_hash;
+    bool strict_mode = false;
+};
+
+struct NativeDesignProviderOutput {
+    bool ok = true;
+    std::string canonical_design_ir_json;
+    IRAssetManifest asset_manifest;
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeDesignProviderProvenance provenance;
+    std::string failure_reason;
+};
+
+class NativeDesignProvider {
+public:
+    virtual ~NativeDesignProvider() = default;
+    virtual std::string provider_id() const = 0;
+    virtual std::string provider_version() const { return {}; }
+    virtual NativeDesignProviderOutput import_design(const NativeDesignProviderRequest& request) = 0;
+};
+
+class NativeDesignProviderRegistry {
+public:
+    bool register_provider(std::shared_ptr<NativeDesignProvider> provider);
+    NativeDesignProvider* find_provider(std::string_view provider_id) const;
+    std::vector<std::string> provider_ids() const;
+
+private:
+    std::vector<std::shared_ptr<NativeDesignProvider>> providers_;
+};
+
+struct NativeDesignProviderValidationOptions {
+    std::string expected_provider_id;
+    std::string source_design_hash;
+    bool require_canonical_json = true;
+    bool reject_duplicate_source_anchors = true;
+};
+
+struct NativeDesignProviderValidationResult {
+    bool ok = false;
+    DesignIR design_ir;
+    IRAssetManifest asset_manifest;
+    std::string canonical_design_ir_json;
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeDesignProviderProvenance provenance;
+};
+
+NativeDesignProviderValidationResult validate_native_design_provider_output(
+    const NativeDesignProviderOutput& output,
+    const NativeDesignProviderValidationOptions& options = {});
+
+struct NativeDesignProviderAttempt {
+    bool provider_attempted = false;
+    bool strict_mode = false;
+    bool fallback_used = false;
+    std::string provider_id;
+    std::string provider_version;
+    std::string source_design_hash;
+    std::string failure_reason;
+    std::vector<ImportDiagnostic> diagnostics;
+};
+
+struct NativeDesignProviderMaterializeOptions {
+    NativeDesignProviderMode mode = NativeDesignProviderMode::baked_cpp_only;
+    std::string provider_id;
+    const NativeDesignProviderRegistry* registry = nullptr;
+    std::string source_design_hash;
+    NativeDesignProviderAttempt* attempt_out = nullptr;
+    bool reject_duplicate_source_anchors = true;
+};
+
 struct NativeImportBindingDescriptor {
     std::string_view route_id;
     std::string_view param_key;
@@ -155,6 +242,12 @@ std::unique_ptr<View> build_native_view_tree(
     const DesignIR& ir,
     const IRAssetManifest& manifest,
     const NativeMaterializeOptions& options = {});
+
+std::unique_ptr<View> build_native_view_tree_with_provider(
+    const DesignIR& ir,
+    const IRAssetManifest& manifest,
+    const NativeMaterializeOptions& materialize_options,
+    const NativeDesignProviderMaterializeOptions& provider_options);
 
 /// Source-agnostic IR normalization for vector SHAPE PRIMITIVES. Walks the tree
 /// and, for each rect/rectangle/line/ellipse/circle/polygon/star node that
