@@ -1349,48 +1349,155 @@ std::string emit_view(const DesignIR& ir, const ResolvedNativeNode& resolved,
     return out.str();
 }
 
-// ── Minimal SwiftUI binding manifest (B1) ───────────────────────────────
-// B4 brings this to parity with the C++ binding_manifest; B1 records just the
-// name-keyed bound widgets so a host can pre-flight the resolver.
+// ── SwiftUI binding manifest (B4 — parity with the C++ manifest) ─────────
+// The SwiftUI manifest carries the same per-entry binding-contract fields the
+// C++ path emits (render_binding_manifest_entry in design_cpp_codegen.cpp), so
+// a SwiftUI host gets the same data, PLUS the SwiftUI-specific resolution block
+// (B1's exact-`PulpParameter.name` strategy — Pulp's state model has no stable
+// string key, so bound controls resolve by display name). An entry is emitted
+// for any node the C++ manifest would include (carries `pulp*` binding
+// metadata) OR any resolvable bound widget — the union gives the host both the
+// full contract and the name-resolution pre-flight. The field set is asserted
+// to match the C++ manifest by a cross-check test (test_design_swift_codegen).
 
-struct BindingEntry {
-    std::string primitive;       // native widget kind
-    std::string resolve_name;    // matched against PulpParameter.name (B1)
-    std::string canonical_key;   // pulpParamKey, if any — metadata for B4
+// The same manifest-eligibility predicate the C++ path uses (the `pulp*`
+// contract keys). Kept in sync with node_has_binding_manifest_metadata in
+// design_cpp_codegen.cpp; the cross-check parity test fails if the two drift.
+bool swift_node_has_binding_metadata(const IRNode& node) {
+    for (std::string_view key : {
+             "pulpRouteId", "pulpRouteType", "pulpSourceFamily", "pulpSourcePath",
+             "pulpParamKey", "pulpBindingModule", "pulpBindingParam", "pulpChoiceValue",
+             "pulpChoiceLabel", "pulpParamKeyX", "pulpParamKeyY", "pulpBindingModuleX",
+             "pulpBindingParamX", "pulpBindingModuleY", "pulpBindingParamY", "pulpMeterSource",
+             "pulpMeterChannel", "pulpMeterValueKey", "pulpWaveformShape", "pulpValueKey",
+             "pulpInitialValue", "pulpPlaceholder", "pulpFocusContract", "pulpPayloadContract",
+             "pulpHostActionLabel", "pulpTypeLabel", "pulpDescription", "pulpEventContract",
+             "pulpGestureContract", "pulpHostAction", "pulpStyleTokens",
+             "pulpDefaultValueSource", "pulpFallbackReason",
+         }) {
+        auto it = node.attributes.find(std::string(key));
+        if (it != node.attributes.end() && !it->second.empty()) return true;
+    }
+    return false;
+}
+
+void swift_append_json_field(std::ostringstream& out, bool& first,
+                             std::string_view key, const std::optional<std::string>& value) {
+    if (!value || value->empty()) return;
+    out << (first ? "" : ", ") << "\"" << key << "\": \"" << json_string_escape(*value) << "\"";
+    first = false;
+}
+
+struct SwiftBindingEntry {
+    std::string ir_path;
+    const IRNode* node = nullptr;
+    NativeWidgetKind kind = NativeWidgetKind::view;
+    bool bound = false;  // a name-resolvable control (gets the resolve_name block)
 };
 
-void collect_bindings(const IRNode& node, const ResolvedNativeNode& resolved,
-                      std::vector<BindingEntry>& out) {
-    if (is_bound_widget(resolved.kind)) {
-        const std::string name = binding_resolve_name(node);
-        if (!name.empty()) {
-            const auto meta = NativeBindingMetadata::parse(node);
-            out.push_back({native_widget_kind_name(resolved.kind), name,
-                           meta.param_key.value_or("")});
-        }
-    }
+void collect_swift_bindings(const IRNode& node, const ResolvedNativeNode& resolved,
+                            std::string_view ir_path, std::vector<SwiftBindingEntry>& out) {
+    const bool bound = is_bound_widget(resolved.kind) && !binding_resolve_name(node).empty();
+    if (bound || swift_node_has_binding_metadata(node))
+        out.push_back({std::string(ir_path), &node, resolved.kind, bound});
     const std::size_t count = std::min(node.children.size(), resolved.children.size());
     for (std::size_t i = 0; i < count; ++i)
-        collect_bindings(node.children[i], resolved.children[i], out);
+        collect_swift_bindings(node.children[i], resolved.children[i],
+                               std::string(ir_path) + "/" + std::to_string(i), out);
 }
 
 std::string emit_binding_manifest(const IRNode& root, const ResolvedNativeNode& resolved) {
-    std::vector<BindingEntry> bindings;
-    collect_bindings(root, resolved, bindings);
+    std::vector<SwiftBindingEntry> entries;
+    collect_swift_bindings(root, resolved, "root", entries);
+
     std::ostringstream out;
     out << "{\n";
     out << "  \"schema\": \"pulp-native-swiftui-binding-manifest-v1\",\n";
     out << "  \"resolution\": { \"strategy\": \"pulp_parameter_name_exact\", "
            "\"source_field\": \"resolve_name\" },\n";
+    // The convention the generated controls honour (mirrors PulpViews.swift):
+    // gesture-grouped writes (beginGesture/endGesture), normalized 0…1 range
+    // mapped to [minValue, maxValue], and host-automation pickup via poll().
+    out << "  \"conventions\": { \"gesture_grouping\": true, "
+           "\"value_range\": \"normalized_0_1\", \"automation\": \"poll\" },\n";
     out << "  \"entries\": [";
-    for (std::size_t i = 0; i < bindings.size(); ++i) {
-        out << (i == 0 ? "\n" : ",\n");
-        out << "    { \"native_primitive\": \"" << json_string_escape(bindings[i].primitive)
-            << "\", \"resolve_name\": \"" << json_string_escape(bindings[i].resolve_name)
-            << "\", \"canonical_key\": \"" << json_string_escape(bindings[i].canonical_key)
-            << "\", \"resolution_strategy\": \"pulp_parameter_name_exact\" }";
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const auto& e = entries[i];
+        const IRNode& node = *e.node;
+        const auto md = NativeBindingMetadata::parse(node);
+        out << (i == 0 ? "\n" : ",\n") << "    {";
+        bool first = true;
+        // id: route_id ?: anchor ?: name (matches the C++ entry's id precedence).
+        if (md.route_id && !md.route_id->empty())
+            swift_append_json_field(out, first, "id", md.route_id);
+        else if (node.stable_anchor_id && !node.stable_anchor_id->empty())
+            swift_append_json_field(out, first, "id", node.stable_anchor_id);
+        else if (!node.name.empty())
+            swift_append_json_field(out, first, "id", std::optional<std::string>(node.name));
+        swift_append_json_field(out, first, "ir_path", std::optional<std::string>(e.ir_path));
+        if (node.stable_anchor_id && !node.stable_anchor_id->empty())
+            swift_append_json_field(out, first, "anchor_id", node.stable_anchor_id);
+        swift_append_json_field(out, first, "native_primitive",
+                                std::optional<std::string>(native_widget_kind_name(e.kind)));
+        // Full binding-contract fields — same names AND order as the C++
+        // manifest, emitted contiguously right after native_primitive so the
+        // shared field sequence is identical (the SwiftUI-only resolution
+        // fields are appended AFTER this run, below).
+        swift_append_json_field(out, first, "route_type", md.route_type);
+        swift_append_json_field(out, first, "source_family", md.source_family);
+        swift_append_json_field(out, first, "source_path", md.source_path);
+        swift_append_json_field(out, first, "param_key", md.param_key);
+        swift_append_json_field(out, first, "binding_module", md.binding_module);
+        swift_append_json_field(out, first, "binding_param", md.binding_param);
+        swift_append_json_field(out, first, "choice_value", md.choice_value);
+        swift_append_json_field(out, first, "choice_label", md.choice_label);
+        swift_append_json_field(out, first, "x_param_key", md.x_param_key);
+        swift_append_json_field(out, first, "y_param_key", md.y_param_key);
+        swift_append_json_field(out, first, "x_binding_module", md.x_binding_module);
+        swift_append_json_field(out, first, "x_binding_param", md.x_binding_param);
+        swift_append_json_field(out, first, "y_binding_module", md.y_binding_module);
+        swift_append_json_field(out, first, "y_binding_param", md.y_binding_param);
+        swift_append_json_field(out, first, "meter_source", md.meter_source);
+        swift_append_json_field(out, first, "meter_channel", md.meter_channel);
+        swift_append_json_field(out, first, "meter_value_key", md.meter_value_key);
+        swift_append_json_field(out, first, "waveform_shape", md.waveform_shape);
+        swift_append_json_field(out, first, "value_key", md.value_key);
+        swift_append_json_field(out, first, "initial_value", md.initial_value);
+        swift_append_json_field(out, first, "placeholder", md.placeholder);
+        swift_append_json_field(out, first, "focus_contract", md.focus_contract);
+        swift_append_json_field(out, first, "payload_contract", md.payload_contract);
+        swift_append_json_field(out, first, "host_action_label", md.host_action_label);
+        swift_append_json_field(out, first, "component_type_label", md.type_label);
+        swift_append_json_field(out, first, "description", md.description);
+        swift_append_json_field(out, first, "thumb_shape", md.thumb_shape);
+        swift_append_json_field(out, first, "thumb_width", md.thumb_width);
+        swift_append_json_field(out, first, "thumb_height", md.thumb_height);
+        swift_append_json_field(out, first, "thumb_corner_radius", md.thumb_corner_radius);
+        swift_append_json_field(out, first, "on_background_color", md.on_background_color);
+        swift_append_json_field(out, first, "off_background_color", md.off_background_color);
+        swift_append_json_field(out, first, "on_text_color", md.on_text_color);
+        swift_append_json_field(out, first, "off_text_color", md.off_text_color);
+        swift_append_json_field(out, first, "on_border_color", md.on_border_color);
+        swift_append_json_field(out, first, "off_border_color", md.off_border_color);
+        swift_append_json_field(out, first, "corner_radius", md.corner_radius);
+        swift_append_json_field(out, first, "font_size", md.font_size);
+        swift_append_json_field(out, first, "event_contract", md.event_contract);
+        swift_append_json_field(out, first, "gesture_contract", md.gesture_contract);
+        swift_append_json_field(out, first, "host_action", md.host_action);
+        swift_append_json_field(out, first, "style_tokens", md.style_tokens);
+        swift_append_json_field(out, first, "default_value_source", md.default_value_source);
+        swift_append_json_field(out, first, "fallback_reason", md.fallback_reason);
+        // SwiftUI-only resolution (name-exact) for resolvable controls — appended
+        // after the shared C++ field run so the parity fields stay contiguous.
+        if (e.bound) {
+            swift_append_json_field(out, first, "resolve_name",
+                                    std::optional<std::string>(binding_resolve_name(node)));
+            swift_append_json_field(out, first, "resolution_strategy",
+                                    std::optional<std::string>("pulp_parameter_name_exact"));
+        }
+        out << "}";
     }
-    out << (bindings.empty() ? "" : "\n  ") << "]\n";
+    out << (entries.empty() ? "" : "\n  ") << "]\n";
     out << "}\n";
     return out.str();
 }

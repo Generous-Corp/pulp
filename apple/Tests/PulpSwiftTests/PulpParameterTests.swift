@@ -159,8 +159,58 @@ final class PulpParameterTests: XCTestCase {
         _ = PulpKnob(parameter: store.parameters[0]).body
         _ = PulpSlider(parameter: store.parameters[0]).body
         _ = PulpToggle(parameter: store.parameters[1]).body
+        // B3 widgets.
+        _ = PulpMeter(parameter: store.parameters[0]).body
+        _ = PulpXYPad(parameter: store.parameters[0]).body
+        _ = PulpWaveform(parameter: store.parameters[0]).body
+        _ = PulpSpectrum(parameter: store.parameters[0]).body
         _ = PulpAutoUI(store: store).body
         _ = PulpEditorView(pluginName: "Test") { Text("Hello") }.body
+    }
+
+    // ── B4: a bound control round-trips through a mock store ───────────────
+
+    func testBoundControlRoundTripsValueAndGestureThroughMockStore() {
+        // Mirrors what a generated control's drag does: resolve by name, open a
+        // gesture, write normalized + denormalized value, close the gesture.
+        // The mock bridge must observe the gesture grouping, the normalized
+        // write, and the [min,max]-mapped value — the B4 adapter convention.
+        installBridge(parameters: [
+            .init(id: 5, name: "Mix", unit: "%", minValue: 0, maxValue: 100, defaultValue: 50, step: 0.1),
+        ])
+        let store = PulpParameterStore()
+
+        guard case .resolved(let p) = store.resolveParameter(named: "Mix") else {
+            return XCTFail("expected Mix to resolve")
+        }
+        p.beginGesture()
+        p.normalizedValue = 0.75
+        p.value = p.minValue + 0.75 * (p.maxValue - p.minValue)
+        p.endGesture()
+
+        XCTAssertEqual(bridge.gestureBegan, [5])
+        XCTAssertEqual(bridge.gestureEnded, [5])
+        XCTAssertEqual(bridge.normalizedSetCalls.last?.value ?? 0, 0.75, accuracy: 0.001)
+        XCTAssertEqual(bridge.values[5] ?? 0, 75, accuracy: 0.001)   // normalized → [0,100]
+    }
+
+    func testMissingAndDuplicateResolutionsAreInertForRoundTrip() {
+        // A generated control over a missing/duplicate name must NOT touch the
+        // bridge (it renders a placeholder instead of binding the wrong param).
+        installBridge(parameters: [
+            .init(id: 1, name: "Drive", unit: "", minValue: 0, maxValue: 1, defaultValue: 0, step: 0.1),
+            .init(id: 2, name: "Drive", unit: "", minValue: 0, maxValue: 1, defaultValue: 0, step: 0.1),
+        ])
+        let store = PulpParameterStore()
+        let before = bridge.setCalls.count
+
+        if case .resolved = store.resolveParameter(named: "Drive") {
+            XCTFail("ambiguous name must not resolve to a single parameter")
+        }
+        if case .resolved = store.resolveParameter(named: "Absent") {
+            XCTFail("missing name must not resolve")
+        }
+        XCTAssertEqual(bridge.setCalls.count, before)  // nothing written
     }
 
     // ── Generated-view name resolver (Workstream B1) ──────────────────────

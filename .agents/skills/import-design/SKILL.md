@@ -1484,8 +1484,13 @@ base/`.dark` partition *algorithm* as `export_css_variables` (color.bg + color.b
 match** (there is no stable string param key; `missing`/`duplicate` are surfaced,
 never silently mis-bound — see `apple/Sources/PulpSwift/PulpParameter.swift`).
 B3 adds the remaining widgets (`PulpMeter`/`PulpXYPad`/`PulpWaveform`/
-`PulpSpectrum` in `PulpViews.swift`, plus text buttons → SwiftUI `Button`);
-binding-manifest parity (B4) and grid/assets/host scaffold (B5) follow. The
+`PulpSpectrum` in `PulpViews.swift`, plus text buttons → SwiftUI `Button`). B4
+brings the SwiftUI binding manifest to parity with the C++ manifest — it emits
+the same `NativeBindingMetadata` field set per entry (a cross-check test asserts
+the field/value pairs match `generate_pulp_cpp`'s manifest), adds a
+`conventions` block (gesture grouping / normalized range / poll), and the
+generated controls round-trip through a mock store (`PulpParameterTests`). The
+grid/assets/host scaffold (B5) follows. The
 visualizers (waveform/spectrum) have no audio buffer in a baked import and
 xy_pad's second axis has no IR source, so they bind the one available parameter
 and emit an informational fidelity note; image/svg/canvas leaves still degrade

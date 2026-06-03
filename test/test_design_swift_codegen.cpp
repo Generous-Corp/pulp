@@ -196,7 +196,7 @@ TEST_CASE("generate_pulp_swift emits a code-first PulpTheme with .dark partition
     REQUIRE(contains(theme, "public static let classDark: String ="));
 }
 
-TEST_CASE("generate_pulp_swift emits a minimal name-keyed binding manifest",
+TEST_CASE("generate_pulp_swift emits a name-keyed binding manifest with the resolution block",
           "[view][import][swiftui]") {
     const auto ir = build_swift_fixture();
     const auto manifest = generate_pulp_swift(ir, ir.asset_manifest).binding_manifest;
@@ -204,14 +204,60 @@ TEST_CASE("generate_pulp_swift emits a minimal name-keyed binding manifest",
 
     REQUIRE(contains(manifest, "\"schema\": \"pulp-native-swiftui-binding-manifest-v1\""));
     REQUIRE(contains(manifest, "\"strategy\": \"pulp_parameter_name_exact\""));
+    // B4 conventions block (gesture grouping / normalized range / poll).
+    REQUIRE(contains(manifest, "\"gesture_grouping\": true"));
+    REQUIRE(contains(manifest, "\"value_range\": \"normalized_0_1\""));
     REQUIRE(contains(manifest, "\"native_primitive\": \"knob\""));
     // resolve_name is the display-name matched against PulpParameter.name;
-    // canonical_key preserves pulpParamKey as metadata for B4.
+    // param_key carries pulpParamKey in the same field the C++ manifest uses.
     REQUIRE(contains(manifest, "\"resolve_name\": \"Drive\""));
-    REQUIRE(contains(manifest, "\"canonical_key\": \"Drive\""));
+    REQUIRE(contains(manifest, "\"param_key\": \"Drive\""));
+    REQUIRE(contains(manifest, "\"resolution_strategy\": \"pulp_parameter_name_exact\""));
     REQUIRE(contains(manifest, "\"native_primitive\": \"fader\""));
     REQUIRE(contains(manifest, "\"native_primitive\": \"toggle_button\""));
     REQUIRE(contains(manifest, "\"resolve_name\": \"Bypass\""));
+}
+
+TEST_CASE("SwiftUI binding manifest carries the same contract fields as the C++ manifest",
+          "[view][import][swiftui]") {
+    // B4 parity: a node with the full pulp* binding contract must surface the
+    // identical field/value pairs in BOTH the C++ manifest and the SwiftUI
+    // manifest. This pins parity + the eligibility gate, so neither side drifts.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Panel", 200.0f, 200.0f, LayoutDirection::column);
+    auto knob = frame_node("k", "Drive", 60.0f, 60.0f, LayoutDirection::column);
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Drive";
+    knob.stable_anchor_id = "anchor-knob";
+    knob.attributes["pulpRouteId"] = "route.drive";
+    knob.attributes["pulpRouteType"] = "native_cpp";
+    knob.attributes["pulpParamKey"] = "filter.cutoff_hz";
+    knob.attributes["pulpBindingModule"] = "filter";
+    knob.attributes["pulpBindingParam"] = "cutoff_hz";
+    knob.attributes["pulpDescription"] = "Cutoff frequency";
+    ir.root.children.push_back(std::move(knob));
+
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest).binding_manifest;
+    const auto swift = generate_pulp_swift(ir, ir.asset_manifest).binding_manifest;
+    INFO("cpp manifest:\n" << cpp);
+    INFO("swift manifest:\n" << swift);
+    for (const char* kv : {
+             "\"id\": \"route.drive\"",
+             "\"anchor_id\": \"anchor-knob\"",
+             "\"native_primitive\": \"knob\"",
+             "\"route_type\": \"native_cpp\"",
+             "\"param_key\": \"filter.cutoff_hz\"",
+             "\"binding_module\": \"filter\"",
+             "\"binding_param\": \"cutoff_hz\"",
+             "\"description\": \"Cutoff frequency\"",
+         }) {
+        REQUIRE(contains(cpp, kv));    // present in the C++ manifest
+        REQUIRE(contains(swift, kv));  // and the identical field in the SwiftUI manifest
+    }
+    // The SwiftUI manifest additionally carries the name-resolution block.
+    REQUIRE(contains(swift, "\"resolve_name\": \"Drive\""));
+    REQUIRE_FALSE(contains(cpp, "pulp_parameter_name_exact"));  // cpp resolves by C++ binding, not name
 }
 
 TEST_CASE("generate_pulp_swift sanitizes a caller-supplied theme type name",
