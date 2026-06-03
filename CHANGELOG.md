@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03290"></a>
+## [0.329.0] - 2026-06-03
+
+- feat(import-design): full SwiftUI style + text-runs + flex-fidelity (Workstream B2) ([#3393](https://github.com/danielraffel/pulp/pull/3393))
+- test(import-design): sync CLI assertions to --emit swiftui; doc local runner-log diagnosis ([#3390](https://github.com/danielraffel/pulp/pull/3390))
+
 <a id="v03280"></a>
 ## [0.328.0] - 2026-06-03
 
@@ -3545,6 +3551,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.329.0]: https://github.com/danielraffel/pulp/releases/tag/v0.329.0
 [0.328.0]: https://github.com/danielraffel/pulp/releases/tag/v0.328.0
 [0.327.0]: https://github.com/danielraffel/pulp/releases/tag/v0.327.0
 [0.326.0]: https://github.com/danielraffel/pulp/releases/tag/v0.326.0
