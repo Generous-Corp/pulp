@@ -166,7 +166,20 @@ predictable output, no MIDI.
   `set_custom_node_state`; `GraphSerializer` persists it as `state_b64` and keeps
   the blob even for **unresolved** nodes (save → load-missing-type → save keeps
   state). Do not pull the `pulp_native_state_*` C ABI into `CustomNodeType` —
-  that's the deferred `pulp_node_v1` (Phase 6).
+  that's the `pulp_node_v1` (Phase 6).
+- **Signed node-pack loader (Phase 7, `core/host/node_pack.{hpp,cpp}`).**
+  `load_node_pack(dir, manifest, trust)` loads a precompiled `pulp_node_v1` node
+  pack (a `.dylib`/`.so`/`.dll` exporting `pulp_node_v1_entry` + a JSON manifest).
+  It verifies trust BEFORE any `dlopen`: the signer key must be in the
+  `NodePackTrust` set, the Ed25519 signature over `node_pack_signed_message()`
+  (pack_id + abi_major + binary SHA-256) must be authentic, the on-disk binary's
+  SHA-256 must match the signed hash, and the entry's `abi_major` must match —
+  any failure returns a `NodePackError` and loads nothing. Revocation = drop a
+  key from the trust set. Desktop + Android only; `pulp-host` (and this loader)
+  is compiled out on iOS, where native components are static-bundled + signed
+  with the app. The crypto comes from `pulp::runtime` (`ed25519_verify`,
+  `sha256_hex`); OS codesign/notarization is a separate, additional distribution
+  step on top of the manifest signature.
 
 ## Common tripwires
 

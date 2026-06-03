@@ -16,10 +16,17 @@ target_sources(pulp-host PRIVATE
     src/scan_cache.cpp
     src/background_scanner.cpp
     src/isolated_scanner.cpp
+    src/node_pack.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::midi pulp::runtime pulp::state)
+target_link_libraries(pulp-host PUBLIC pulp::native-components)
 target_link_libraries(pulp-host PRIVATE pulp::platform)
+# node_pack.cpp dlopen()s signed node packs (desktop + Android). iOS never builds
+# pulp-host. Link the dynamic-loader libs where they are a separate library.
+if(NOT WIN32)
+    target_link_libraries(pulp-host PRIVATE ${CMAKE_DL_LIBS})
+endif()
 
 # CLAP plugin loader + scanner (requires CLAP SDK)
 if(PULP_HAS_CLAP)

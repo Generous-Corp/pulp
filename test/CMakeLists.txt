@@ -890,6 +890,25 @@ pulp_add_test_suite(pulp-test-pulp-node-v1
     SOURCES test_pulp_node_v1.cpp
     LIBRARIES pulp::native-components pulp::runtime)
 
+# Phase 7 — signed node-pack loader. Build a real loadable node MODULE and a
+# test that signs its manifest (Ed25519) then verifies trusted load + every
+# rejection path (untrusted/bad-sig/hash-mismatch/abi-mismatch/missing). Desktop
+# only: pulp::host (and dlopen) is compiled out on iOS.
+if(TARGET pulp::host)
+    add_library(pulp-test-node-pack-module MODULE
+        fixtures/native-components/node_pack_test_module.cpp)
+    target_link_libraries(pulp-test-node-pack-module PRIVATE pulp::native-components)
+    # Only the explicitly-exported pulp_node_v1_entry should be visible.
+    set_target_properties(pulp-test-node-pack-module PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    pulp_add_test_suite(pulp-test-node-pack
+        SOURCES test_node_pack.cpp
+        LIBRARIES pulp::host pulp::native-components pulp::runtime)
+    add_dependencies(pulp-test-node-pack pulp-test-node-pack-module)
+    target_compile_definitions(pulp-test-node-pack PRIVATE
+        PULP_NODE_PACK_MODULE_PATH="$<TARGET_FILE:pulp-test-node-pack-module>")
+endif()
+
 # Opt-in Rust lane: build a Cargo staticlib reference core (with an RT-checking
 # global allocator) and link the FFI round-trip + RT-safety death tests. OFF by
 # default, so default builds need no Rust toolchain. The death tests fork() a

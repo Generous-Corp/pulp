@@ -158,6 +158,27 @@ builds. Dynamic native node packs are a **desktop-and-Android** capability,
 separately gated. This mirrors the existing honest phrasing in
 [`../guides/ios-auv3-guidance.md`](../guides/ios-auv3-guidance.md).
 
+## Dynamic node packs (desktop + Android)
+
+Where the platform allows it, a precompiled `pulp_node_v1` node can ship as a
+**signed node pack**: a dynamic library (`.dylib` / `.so` / `.dll`) exporting
+`pulp_node_v1_entry`, plus a JSON manifest declaring the pack identity, ABI
+major, the binary's SHA-256, the declared node type-ids/capabilities, and an
+**Ed25519 signature** by a publisher key. The host loader
+(`core/host/node_pack.hpp`) verifies trust *before* it loads any code:
+
+1. the signer key must be in the host's trust set (drop a key to revoke it);
+2. the signature over `pack_id + abi_major + binary-hash` must be authentic;
+3. the on-disk binary's SHA-256 must match the signed hash;
+4. the entry's `abi_major` must match the host's `pulp_node_v1` major.
+
+Any failure rejects the pack and loads nothing — untrusted, tampered, or
+ABI-mismatched packs never execute. This is the host-level integrity gate; OS
+code-signing / notarization (Gatekeeper, Authenticode) is an additional,
+separate distribution step. **iOS / AUv3 / sandboxed targets do not load node
+packs at all** — `core/host` is compiled out there, and native components are
+static-bundled and signed with the app.
+
 ## Honest tradeoff
 
 A language-neutral native component seam is more build/CI surface (Cargo + CMake +
