@@ -1,7 +1,5 @@
 #pragma once
 
-#include "elysium_imported_ui.hpp"
-
 #include <pulp/format/processor.hpp>
 
 #include <memory>
@@ -25,5 +23,6 @@ public:
 };
 
 std::unique_ptr<format::Processor> create_elysium_ruif_processor();
+std::unique_ptr<format::Processor> create_elysium_ruif_rust_provider_processor();
 
 }  // namespace pulp::examples

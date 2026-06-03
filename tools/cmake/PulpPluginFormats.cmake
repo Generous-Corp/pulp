@@ -42,9 +42,13 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp)
     endif()
 
-    # Find VST3 entry point (convention: vst3_entry.cpp in source dir)
+    # Find VST3 entry point. Multi-plugin directories may provide a
+    # target-specific entry; existing single-plugin directories keep using the
+    # legacy vst3_entry.cpp convention.
     set(vst3_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${target}_vst3_entry.cpp")
+        set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/${target}_vst3_entry.cpp")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
         set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
     endif()
 
@@ -129,9 +133,13 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP GUI targets require Pulp::view")
     endif()
 
-    # Find CLAP entry point (convention: clap_entry.cpp in source dir)
+    # Find CLAP entry point. Multi-plugin directories may provide a
+    # target-specific entry; existing single-plugin directories keep using the
+    # legacy clap_entry.cpp convention.
     set(clap_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${target}_clap_entry.cpp")
+        set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/${target}_clap_entry.cpp")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
         set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
     endif()
 

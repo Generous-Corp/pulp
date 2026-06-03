@@ -75,7 +75,7 @@ target_compile_features(PulpElysiumRuifCppBaseline_Core PUBLIC cxx_std_20)
 target_compile_definitions(PulpElysiumRuifCppBaseline_Core PUBLIC
     PULP_ELYSIUM_RUIF_ASSET_DIR="${PULP_ELYSIUM_RUIF_BASELINE_ASSET_DIR}")
 
-if(PULP_BUILD_NATIVE_UI_RUST_TESTS AND APPLE AND PULP_HAS_SKIA)
+if(PULP_BUILD_NATIVE_UI_RUST_TESTS AND APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA)
     include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpCargoStaticlib.cmake)
     if(NOT TARGET pulp-elysium-rust-ui-provider)
         pulp_add_cargo_staticlib(
@@ -86,7 +86,8 @@ if(PULP_BUILD_NATIVE_UI_RUST_TESTS AND APPLE AND PULP_HAS_SKIA)
     endif()
 
     add_executable(pulp-elysium-ruif-rust-provider MACOSX_BUNDLE
-        rust_provider_main.cpp)
+        rust_provider_main.cpp
+        elysium_rust_provider_bridge.cpp)
 
     add_dependencies(pulp-elysium-ruif-rust-provider pulp-elysium-ruif-assets)
 
@@ -107,9 +108,56 @@ if(PULP_BUILD_NATIVE_UI_RUST_TESTS AND APPLE AND PULP_HAS_SKIA)
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.pulp.elysium-ruif-rust-provider"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
         MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0")
+
+    pulp_add_plugin(PulpElysiumRuifRustProvider
+        FORMATS         ${PULP_ELYSIUM_RUIF_PLUGIN_FORMATS}
+        SOURCES         elysium_ruif_rust_processor.cpp
+                        elysium_rust_provider_bridge.cpp
+        PLUGIN_NAME     "PulpElysiumRuifRustProvider"
+        BUNDLE_ID       "com.pulp.elysium-ruif-rust-provider"
+        MANUFACTURER    "Pulp"
+        VERSION         "0.1.0"
+        CATEGORY        Effect
+        PLUGIN_CODE     "ERrs"
+        MANUFACTURER_CODE "Pulp"
+        DESIGN_WIDTH    1000
+        DESIGN_HEIGHT   600
+        DESIGN_MIN_WIDTH 667
+        DESIGN_MIN_HEIGHT 400
+        DESIGN_MAX_WIDTH 2000
+        DESIGN_MAX_HEIGHT 1200
+    )
+
+    add_dependencies(PulpElysiumRuifRustProvider_Core
+        pulp-elysium-ruif-assets
+        pulp-elysium-rust-ui-provider)
+
+    target_link_libraries(PulpElysiumRuifRustProvider_Core PUBLIC
+        pulp::native-components
+        pulp-elysium-rust-ui-provider)
+
+    target_compile_features(PulpElysiumRuifRustProvider_Core PUBLIC cxx_std_20)
+
+    target_compile_definitions(PulpElysiumRuifRustProvider_Core PUBLIC
+        PULP_ELYSIUM_RUIF_ASSET_DIR="${PULP_ELYSIUM_RUIF_BASELINE_ASSET_DIR}"
+        PULP_ELYSIUM_RUIF_DESIGNIR_JSON="${PULP_ELYSIUM_RUIF_BASELINE_DESIGNIR_JSON}")
+
+    if(PULP_HAS_CLAP)
+        find_library(PULP_RUIF_COCOA_FRAMEWORK Cocoa REQUIRED)
+        add_executable(pulp-elysium-ruif-plugin-capture-mac
+            ruif_plugin_capture_mac.mm)
+        target_link_libraries(pulp-elysium-ruif-plugin-capture-mac PRIVATE
+            pulp::format
+            pulp::view
+            clap
+            ${PULP_RUIF_COCOA_FRAMEWORK})
+        target_compile_features(pulp-elysium-ruif-plugin-capture-mac PRIVATE cxx_std_20)
+        target_compile_definitions(pulp-elysium-ruif-plugin-capture-mac PRIVATE
+            PULP_CLAP_GUI=1)
+    endif()
 elseif(PULP_BUILD_NATIVE_UI_RUST_TESTS)
     message(WARNING
-        "pulp-elysium-ruif-rust-provider requires macOS Skia GPU validation; "
+        "pulp-elysium-ruif-rust-provider requires macOS Skia GPU validation with PULP_ENABLE_GPU=ON; "
         "skipping Rust standalone target for this platform/configuration.")
 endif()
 
@@ -121,6 +169,15 @@ if(PULP_HAS_CLAP AND APPLE)
     set_tests_properties(clap-dlopen-PulpElysiumRuifCppBaseline PROPERTIES
         LABELS "validation;clap;native-ui;ruif"
         TIMEOUT 10)
+    if(TARGET PulpElysiumRuifRustProvider_CLAP)
+        add_test(
+            NAME clap-dlopen-PulpElysiumRuifRustProvider
+            COMMAND bash -c "python3 -c \"import ctypes; ctypes.CDLL('${CMAKE_BINARY_DIR}/CLAP/PulpElysiumRuifRustProvider.clap/Contents/MacOS/PulpElysiumRuifRustProvider'); print('OK')\""
+        )
+        set_tests_properties(clap-dlopen-PulpElysiumRuifRustProvider PROPERTIES
+            LABELS "validation;clap;native-ui;ruif;rust"
+            TIMEOUT 10)
+    endif()
 endif()
 
 if(PULP_HAS_VST3)

@@ -1,5 +1,7 @@
 #include "elysium_ruif_processor.hpp"
 
+#include "elysium_imported_ui.hpp"
+
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
