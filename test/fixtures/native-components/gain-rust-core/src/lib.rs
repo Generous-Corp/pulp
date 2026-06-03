@@ -16,6 +16,7 @@ const ABI_VERSION: u32 = 1;
 const OK: i32 = 0;
 const ERR_MALFORMED_STATE: i32 = 5;
 const CAP_STATE: u32 = 1 << 7;
+const CAP_EDITOR_COMMAND: u32 = 1 << 9;
 const PARAM_AUTOMATABLE: u32 = 1 << 0;
 const EVENT_AUTOMATION: i32 = 0;
 
@@ -172,7 +173,7 @@ static DESC: Sync_<Descriptor> = Sync_(Descriptor {
     vendor: VENDOR.as_ptr() as *const c_char,
     vendor_len: VENDOR.len(),
     plugin_version: 1,
-    capabilities: CAP_STATE,
+    capabilities: CAP_STATE | CAP_EDITOR_COMMAND,
     default_input_bus_count: 1,
     default_output_bus_count: 1,
     latency_frames: 0,
@@ -317,22 +318,45 @@ extern "C" fn report_latency(_i: *mut c_void) -> u32 {
 extern "C" fn report_tail(_i: *mut c_void) -> u32 {
     0
 }
+// Non-RT domain logic in Rust: answer an editor command with JSON. Allocation
+// is fine here (this is NOT the audio thread). The host copies the reply then
+// calls free_editor_reply with the same (ptr, len).
 extern "C" fn editor_command(
-    _i: *mut c_void,
-    _r: *const u8,
-    _rl: usize,
+    inst: *mut c_void,
+    _req: *const u8,
+    req_len: usize,
     out_r: *mut *mut u8,
     out_n: *mut usize,
 ) -> i32 {
+    if req_len == 0 {
+        if !out_r.is_null() {
+            unsafe { *out_r = core::ptr::null_mut() };
+        }
+        if !out_n.is_null() {
+            unsafe { *out_n = 0 };
+        }
+        return 1; // UNSUPPORTED
+    }
+    let gain = unsafe { (inst as *const GainInstance).as_ref() }
+        .map(|g| g.gain)
+        .unwrap_or(1.0);
+    let reply = format!(r#"{{"engine":"rust","gain":{}}}"#, gain);
+    let boxed: Box<[u8]> = reply.into_bytes().into_boxed_slice();
+    let len = boxed.len();
+    let ptr = Box::into_raw(boxed) as *mut u8;
     if !out_r.is_null() {
-        unsafe { *out_r = core::ptr::null_mut() };
+        unsafe { *out_r = ptr };
     }
     if !out_n.is_null() {
-        unsafe { *out_n = 0 };
+        unsafe { *out_n = len };
     }
-    1
+    OK
 }
-extern "C" fn free_editor_reply(_i: *mut c_void, _r: *mut u8, _n: usize) {}
+extern "C" fn free_editor_reply(_i: *mut c_void, r: *mut u8, n: usize) {
+    if !r.is_null() {
+        unsafe { drop(Box::from_raw(core::ptr::slice_from_raw_parts_mut(r, n))) };
+    }
+}
 
 static CORE: Sync_<Core> = Sync_(Core {
     size: core::mem::size_of::<Core>() as u32,

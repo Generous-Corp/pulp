@@ -4,7 +4,9 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace pulp::format {
 
@@ -290,6 +292,28 @@ bool NativeCoreProcessor::deserialize_plugin_state(std::span<const uint8_t> data
 int NativeCoreProcessor::latency_samples() const {
     if (instance_ == nullptr) return 0;
     return static_cast<int>(core_->report_latency(instance_));
+}
+
+std::optional<std::string> NativeCoreProcessor::editor_command(
+    std::string_view request_json) {
+    if (instance_ == nullptr || core_->editor_command == nullptr) {
+        return std::nullopt;
+    }
+    uint8_t* reply = nullptr;
+    std::size_t reply_len = 0;
+    const pulp_native_status st = core_->editor_command(
+        instance_, reinterpret_cast<const uint8_t*>(request_json.data()),
+        request_json.size(), &reply, &reply_len);
+    if (st != PULP_NATIVE_OK) {
+        if (reply != nullptr) core_->free_editor_reply(instance_, reply, reply_len);
+        return std::nullopt;  // unsupported / rejected — never unwinds
+    }
+    std::string out;
+    if (reply != nullptr && reply_len > 0) {
+        out.assign(reinterpret_cast<const char*>(reply), reply_len);
+    }
+    if (reply != nullptr) core_->free_editor_reply(instance_, reply, reply_len);
+    return out;
 }
 
 }  // namespace pulp::format

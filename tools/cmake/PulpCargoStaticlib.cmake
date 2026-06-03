@@ -72,6 +72,14 @@ function(pulp_add_cargo_staticlib)
 
     # PIC so the archive links into Pulp's globally-PIC build; panic=abort is
     # also pinned in the crate's Cargo.toml as belt-and-suspenders.
+    # Track the crate's sources so CMake re-invokes cargo when they change.
+    # Without DEPENDS the OUTPUT rule only fires when the archive is missing, so
+    # edits to lib.rs would silently link a stale archive. The glob is
+    # CONFIGURE_DEPENDS so adding/removing a source file re-runs CMake. cargo is
+    # itself incremental, so re-invoking it when nothing changed is cheap.
+    get_filename_component(_crate_dir "${CS_MANIFEST}" DIRECTORY)
+    file(GLOB_RECURSE _crate_sources CONFIGURE_DEPENDS
+        "${_crate_dir}/src/*.rs")
     add_custom_command(
         OUTPUT "${_archive}"
         COMMAND ${CMAKE_COMMAND} -E env
@@ -79,6 +87,7 @@ function(pulp_add_cargo_staticlib)
             "RUSTFLAGS=-C relocation-model=pic -C panic=abort"
             ${_cargo} build ${_profile_flag} ${_feature_args}
             --manifest-path "${CS_MANIFEST}"
+        DEPENDS ${_crate_sources} "${CS_MANIFEST}"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         COMMENT "cargo build (staticlib) ${CS_NAME} [${CS_PROFILE}]"
         VERBATIM)
