@@ -33,6 +33,18 @@ Theme parse_w3c_tokens(const std::string& json);
 /// Export a Pulp Theme to W3C Design Tokens JSON format.
 std::string export_w3c_tokens(const Theme& theme);
 
+/// Export a Pulp Theme to CSS custom properties (variables).
+///
+/// Base (light/default) tokens are emitted under `:root`; tokens whose name
+/// ends in the `.dark` multi-mode suffix (the convention the Figma plugin and
+/// DESIGN.md body parser use for dark-mode values) are emitted as overrides
+/// under `@media (prefers-color-scheme: dark) { :root { … } }`. Token names map
+/// to custom properties by replacing `.` with `-` (e.g. `color.bg` →
+/// `--color-bg`); colors become hex, dimensions get a `px` unit, strings are
+/// emitted verbatim. This is the themed output sink for the modes the importers
+/// capture — consumable by Pulp's `var(--x)` runtime and by web tooling.
+std::string export_css_variables(const Theme& theme);
+
 /// Convert IR tokens to a Pulp Theme.
 Theme ir_tokens_to_theme(const IRTokens& tokens);
 
