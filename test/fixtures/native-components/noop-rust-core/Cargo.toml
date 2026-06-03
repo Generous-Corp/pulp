@@ -1,0 +1,33 @@
+# Reference no-op native DSP core for the opt-in Phase 1 Rust lane.
+#
+# This is a TEST FIXTURE, not a shipped crate. It proves the canonical C ABI
+# (core/native-components/include/pulp/native_components/native_core.h) links and
+# round-trips from Rust, and it hosts the RT-checking global allocator used by
+# the allocation self-test. It is built only when
+# PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS=ON (default OFF).
+[package]
+name = "pulp-noop-rust-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "pulp_noop_rust_core"
+# Static archive linked into the C++ test executable. No cdylib: the contract is
+# static-link-first (and the only shape iOS allows).
+crate-type = ["staticlib"]
+
+[features]
+# When enabled, install a global allocator that calls the host's
+# pulp_rt_trap_if_no_alloc_scope before every Rust allocation, so an allocation
+# inside a no-alloc scope is trapped. The C++ death-test enables this.
+pulp_rt_check_allocator = []
+
+# Abort (never unwind) across the C boundary, in every profile. Belt-and-
+# suspenders alongside RUSTFLAGS=-C panic=abort from PulpCargoStaticlib.cmake.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
