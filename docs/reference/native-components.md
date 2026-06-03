@@ -9,11 +9,17 @@ freezes later.
 This is the rationale-and-scope document. It states what Pulp supports, what it
 deliberately does not, and why — in the same spirit as
 [`layout-model.md`](layout-model.md). The companion engineering reference for the
-node-interface generation and the deferred `pulp_node_v1` C ABI is
+node-interface generation and the public `pulp_node_v1` C ABI is
 [`node-abi.md`](node-abi.md).
 
-> **Status: experimental.** The contract stance is committed; the implementation
-> lands in readiness-gated phases. Nothing here is a frozen binary ABI yet.
+> **Status: experimental, implemented.** The full seam has landed across its
+> phased rollout — the Processor-level FFI (`native_core.h`) and its
+> `NativeCoreProcessor` adapter, the opt-in Rust staticlib lane, native non-RT
+> domain logic via `editor_command`, stateful custom `SignalGraph` nodes, the
+> public `pulp_node_v1` node ABI, and signed dynamic node packs. It remains
+> **experimental** and is **not a frozen binary ABI** — source-rebuild against the
+> SDK is still required, and contracts may still evolve additively before any
+> freeze.
 
 ## What Pulp supports
 
@@ -43,10 +49,12 @@ node-interface generation and the deferred `pulp_node_v1` C ABI is
   sample indexing, library/package management, analysis, and import/migration can
   be Rust-owned: a C++ `EditorBridge` handler calls Rust over FFI and returns JSON,
   always off the audio thread.
-- **Source-built custom `SignalGraph` nodes today, a public node ABI later.**
-  `CustomNodeType` hosts simple source-built native nodes now and is extended
-  toward the deferred `pulp_node_v1` C ABI for precompiled third-party nodes
-  (desktop and Android only).
+- **Source-built custom `SignalGraph` nodes and a public node ABI.**
+  `CustomNodeType` hosts stateful source-built native nodes (opaque per-node
+  instance, save/load state preserved across graph serialization), and the public
+  `pulp_node_v1` C ABI ships for precompiled third-party nodes — distributed as
+  signed node packs on desktop and Android (compiled out on iOS). See
+  [`node-abi.md`](node-abi.md).
 
 ## What Pulp does NOT support — by design
 
@@ -94,10 +102,11 @@ node-interface generation and the deferred `pulp_node_v1` C ABI is
    that *other* people compose. Most plugin code is not DSP (presets, sample
    indexing, browsers, metadata, import/export, analysis) — a clean component seam
    serves all of it.
-5. **Get one narrow thing boringly correct first.** Rust-behind-`Processor`,
-   desktop-first, source-built. The same primitives then extend to graph nodes. The
-   readiness gates ensure no public ABI is frozen before the source-built shape has
-   proven itself.
+5. **Get one narrow thing boringly correct first.** The seam started with
+   Rust-behind-`Processor`, desktop-first, source-built, then extended the same
+   primitives outward to stateful graph nodes, the public `pulp_node_v1` ABI, and
+   signed node packs. The phased rollout kept any public ABI from freezing before
+   the source-built shape had proven itself — and nothing is frozen yet.
 
 ## The C ABI contract
 

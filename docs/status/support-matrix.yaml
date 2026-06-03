@@ -72,15 +72,19 @@ plugin_extensions:
     status: experimental
     notes: >
       Opt-in native-language audio components (Rust first) behind a private
-      C-shaped FFI: a C++ Processor adapter owns a source-built Rust/C/Zig DSP
-      core. Boundary is a language-neutral C ABI, OFF by default — default
-      builds need no Rust toolchain. Rationale and scope:
-      docs/reference/native-components.md. Implementation is readiness-gated;
-      the contract stance is committed.
+      C-shaped FFI: a C++ NativeCoreProcessor adapter owns a source-built
+      Rust/C/Zig DSP core. Boundary is a language-neutral C ABI, OFF by default —
+      default builds need no Rust toolchain. The full seam is implemented across
+      its phased rollout: the Processor-level FFI + adapter, the opt-in Rust
+      staticlib lane (pulp_add_cargo_staticlib), non-RT domain logic via
+      editor_command, stateful custom SignalGraph nodes, the public pulp_node_v1
+      node ABI, and signed dynamic node packs (core/host/node_pack.hpp). Still
+      experimental — not a frozen binary ABI. Rationale and scope:
+      docs/reference/native-components.md.
     limitations:
-      - "No frozen binary ABI yet — source-build/rebuild against the SDK is required."
+      - "No frozen binary ABI yet — source-build/rebuild against the SDK is required; pulp_node_v1 is same-major append-only, not a frozen cross-release promise."
       - "iOS / AUv3 / sandboxed targets: static-bundled, signed native code only — no runtime-loaded or downloaded native DSP."
-      - "Dynamic node packs are desktop-and-Android only, separately gated (core/host is compiled out on iOS)."
+      - "Dynamic node packs are desktop-and-Android only (core/host is compiled out on iOS)."
       - "Pulp ships the FFI skeleton, bindings, CMake/Cargo glue, and reference cores — not a bundled DSP framework or crate-selection opinions."
 # Known limitations per format. Keyed the same as `formats:`. The renderer
 # in capabilities.md surfaces these as a "Known limitations" link on each

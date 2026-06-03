@@ -221,3 +221,57 @@ The function delegates the byte-to-C-array encoding to the
 - Python (`find_package(Python3 COMPONENTS Interpreter REQUIRED)`) is the
   only added build-time dependency; Python is already required elsewhere
   in the Pulp build.
+
+## pulp_add_cargo_staticlib
+
+**Status**: experimental
+
+Build a Rust (Cargo) `staticlib` and expose it as an `IMPORTED` static-library
+target, for an opt-in [native-component](native-components.md) DSP core written in
+Rust (or any language that compiles to a C-ABI staticlib). Available via
+`include(PulpCargoStaticlib)`. It requires a Rust toolchain (`cargo` + `rustc`,
+install from [rustup.rs](https://rustup.rs)) and is intended for the opt-in lane
+gated behind `PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS` — **OFF by default, so a
+default Pulp build never needs Rust**.
+
+```cmake
+include(PulpCargoStaticlib)
+
+pulp_add_cargo_staticlib(
+    NAME      MyGain_Core               # IMPORTED target name to create
+    MANIFEST  ${CMAKE_CURRENT_SOURCE_DIR}/rust-core/Cargo.toml
+    LIB_NAME  my_gain_core              # crate's [lib] name → libmy_gain_core.a
+    PROFILE   release                   # optional: dev (default) | release
+    FEATURES  simd                      # optional: forwarded as --features
+)
+
+# Link it into your component target; a direct symbol reference pulls the
+# archive into the final module.
+target_link_libraries(MyPlugin_Core PRIVATE MyGain_Core)
+```
+
+### Parameters
+
+| Parameter  | Required | Default | Description |
+|------------|----------|---------|-------------|
+| `NAME`     | Yes | -- | Name of the `IMPORTED` target to create |
+| `MANIFEST` | Yes | -- | Absolute path to the crate's `Cargo.toml` |
+| `LIB_NAME` | Yes | -- | The crate's `[lib] name` (the archive is `lib<LIB_NAME>.a`) |
+| `PROFILE`  | No  | `dev` | `dev` or `release` cargo profile |
+| `FEATURES` | No  | -- | Cargo features, forwarded to `--features` |
+
+### Implementation notes
+
+- The archive is built `-C relocation-model=pic -C panic=abort` (PIC so it links
+  into Pulp's globally-PIC build; `panic=abort` so a Rust panic can never unwind
+  across the `extern "C"` boundary — also pinned in the crate's `Cargo.toml` as
+  belt-and-suspenders).
+- The custom command `DEPENDS` on a `CONFIGURE_DEPENDS` glob of the crate's
+  `src/*.rs` plus its `Cargo.toml`, so editing Rust sources re-invokes cargo on
+  the next build (cargo is itself incremental, so a no-op re-invoke is cheap).
+  Without this, the `OUTPUT` rule would only fire when the archive was missing and
+  could silently link a stale archive.
+- On Linux/Android the IMPORTED target's `INTERFACE_LINK_LIBRARIES` pulls in the
+  system libraries the Rust `std` archive needs (`Threads::Threads`,
+  `${CMAKE_DL_LIBS}`, `m`); macOS resolves these through `libSystem`
+  automatically.
