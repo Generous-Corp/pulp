@@ -30,7 +30,7 @@ set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-format
     pulp-canvas pulp-view-core pulp-view-script pulp-view
-    pulp-standalone pulp-dsl
+    pulp-standalone pulp-dsl pulp-native-components
 )
 
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
@@ -159,7 +159,7 @@ if(TARGET SDL3_Headers)
 endif()
 
 # Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal format canvas render view)
+foreach(subsystem platform runtime events state audio midi signal format canvas render view native-components)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"

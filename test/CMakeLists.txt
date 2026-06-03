@@ -878,6 +878,12 @@ pulp_add_test_suite(pulp-test-native-core-ffi
     SOURCES test_native_core_ffi.cpp
     LIBRARIES pulp::native-components)
 
+# Seam test: the C++ NativeCoreProcessor adapter driving an in-test C-ABI gain
+# core (no Rust). Proves descriptor/param/automation/audio/state bridging.
+pulp_add_test_suite(pulp-test-native-core-processor
+    SOURCES test_native_core_processor.cpp
+    LIBRARIES pulp::format)
+
 # Opt-in Rust lane: build a Cargo staticlib reference core (with an RT-checking
 # global allocator) and link the FFI round-trip + RT-safety death tests. OFF by
 # default, so default builds need no Rust toolchain. The death tests fork() a

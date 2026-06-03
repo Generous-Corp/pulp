@@ -34,6 +34,7 @@ target_sources(pulp-format PRIVATE
     src/descriptor_validation.cpp
     src/view_bridge.cpp
     src/remote_view_session.cpp
+    src/native_core_processor.cpp
 )
 
 target_link_libraries(pulp-format
@@ -44,6 +45,7 @@ target_link_libraries(pulp-format
         pulp::state
         pulp::view
         pulp::runtime
+        pulp::native-components
 )
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     # Inspector is desktop-only AND GPU-only — pulp-inspect is added in
