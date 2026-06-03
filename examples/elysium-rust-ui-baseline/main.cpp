@@ -1,5 +1,6 @@
 #include "elysium_imported_ui.hpp"
 
+#include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -45,17 +46,35 @@ bool write_png(const std::filesystem::path& path, const std::vector<uint8_t>& pn
     return out.good();
 }
 
+bool write_text(const std::filesystem::path& path, std::string_view text) {
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    if (!out.is_open())
+        return false;
+    out << text;
+    return out.good();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     std::filesystem::path screenshot_path;
+    std::filesystem::path layout_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
-        constexpr std::string_view prefix = "--screenshot=";
-        if (arg.rfind(prefix, 0) == 0) {
-            screenshot_path = arg.substr(prefix.size());
+        constexpr std::string_view screenshot_prefix = "--screenshot=";
+        constexpr std::string_view layout_prefix = "--layout=";
+        if (arg.rfind(screenshot_prefix, 0) == 0) {
+            screenshot_path = arg.substr(screenshot_prefix.size());
+        } else if (arg.rfind(layout_prefix, 0) == 0) {
+            layout_path = arg.substr(layout_prefix.size());
         }
     }
+    if (!screenshot_path.empty())
+        screenshot_path = std::filesystem::absolute(screenshot_path);
+    if (!layout_path.empty())
+        layout_path = std::filesystem::absolute(layout_path);
 
     const auto assets = asset_dir();
     if (!std::filesystem::exists(assets / "assets")) {
@@ -75,6 +94,18 @@ int main(int argc, char** argv) {
     root->set_requires_gpu_host(true);
     root->set_bounds({0.0f, 0.0f, 1000.0f, 600.0f});
     root->layout_children();
+    if (!layout_path.empty()) {
+        const auto layout = pulp::view::dump_layout_tree(
+            *root,
+            {.surface = "ruif-standalone",
+             .fixture = "elysium-cpp-baseline",
+             .viewport_width = 1000.0f,
+             .viewport_height = 600.0f});
+        if (!write_text(layout_path, layout)) {
+            std::cerr << "failed to write ELYSIUM layout snapshot: " << layout_path << "\n";
+            return 1;
+        }
+    }
 
     pulp::view::WindowOptions options;
     options.title = "Pulp ELYSIUM RUIF C++ Baseline";
@@ -84,7 +115,7 @@ int main(int argc, char** argv) {
     options.min_height = 400.0f;
     options.resizable = true;
     options.use_gpu = true;
-    options.initially_hidden = false;
+    options.initially_hidden = !screenshot_path.empty();
 
     auto window = pulp::view::WindowHost::create(*root, options);
     if (!window) {
@@ -96,17 +127,13 @@ int main(int argc, char** argv) {
     window->set_close_callback([] {});
 
     if (!screenshot_path.empty()) {
-        int frame_count = 0;
-        window->set_idle_callback([&] {
-            if (++frame_count < 30)
-                return;
-            auto png = window->capture_png();
-            if (png.empty() || !write_png(screenshot_path, png)) {
-                std::cerr << "failed to capture ELYSIUM GPU screenshot: "
-                          << screenshot_path << "\n";
-            }
-            window->request_close();
-        });
+        auto png = window->capture_back_buffer_png();
+        if (png.empty() || !write_png(screenshot_path, png)) {
+            std::cerr << "failed to capture ELYSIUM GPU screenshot: "
+                      << screenshot_path << "\n";
+            return 1;
+        }
+        return 0;
     }
 
     window->run_event_loop();

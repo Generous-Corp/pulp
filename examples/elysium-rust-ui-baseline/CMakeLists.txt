@@ -2,6 +2,8 @@ set(PULP_ELYSIUM_RUIF_BASELINE_GENERATED_DIR
     "${CMAKE_SOURCE_DIR}/planning/artifacts/rust-ui/ruif-1/cpp-baseline/generated")
 set(PULP_ELYSIUM_RUIF_BASELINE_GENERATED_CPP
     "${PULP_ELYSIUM_RUIF_BASELINE_GENERATED_DIR}/elysium_imported_ui.cpp")
+set(PULP_ELYSIUM_RUIF_BASELINE_DESIGNIR_JSON
+    "${CMAKE_SOURCE_DIR}/planning/artifacts/rust-ui/ruif-1/cpp-baseline/ir/elysium.designir.json")
 set(PULP_ELYSIUM_RUIF_BASELINE_FIXTURE
     "${CMAKE_SOURCE_DIR}/planning/fixtures/figma-plugin/real-designs/elysium.pulp.zip")
 set(PULP_ELYSIUM_RUIF_BASELINE_ASSET_DIR
@@ -72,6 +74,44 @@ target_compile_features(PulpElysiumRuifCppBaseline_Core PUBLIC cxx_std_20)
 
 target_compile_definitions(PulpElysiumRuifCppBaseline_Core PUBLIC
     PULP_ELYSIUM_RUIF_ASSET_DIR="${PULP_ELYSIUM_RUIF_BASELINE_ASSET_DIR}")
+
+if(PULP_BUILD_NATIVE_UI_RUST_TESTS AND APPLE AND PULP_HAS_SKIA)
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpCargoStaticlib.cmake)
+    if(NOT TARGET pulp-elysium-rust-ui-provider)
+        pulp_add_cargo_staticlib(
+            NAME pulp-elysium-rust-ui-provider
+            MANIFEST ${CMAKE_SOURCE_DIR}/test/fixtures/native-ui/elysium-rust-ui-provider/Cargo.toml
+            LIB_NAME pulp_elysium_rust_ui_provider
+            PROFILE dev)
+    endif()
+
+    add_executable(pulp-elysium-ruif-rust-provider MACOSX_BUNDLE
+        rust_provider_main.cpp)
+
+    add_dependencies(pulp-elysium-ruif-rust-provider pulp-elysium-ruif-assets)
+
+    target_link_libraries(pulp-elysium-ruif-rust-provider PRIVATE
+        pulp::view-core
+        pulp::native-components
+        pulp-elysium-rust-ui-provider)
+
+    target_compile_features(pulp-elysium-ruif-rust-provider PRIVATE cxx_std_20)
+
+    target_compile_definitions(pulp-elysium-ruif-rust-provider PRIVATE
+        PULP_ELYSIUM_RUIF_ASSET_DIR="${PULP_ELYSIUM_RUIF_BASELINE_ASSET_DIR}"
+        PULP_ELYSIUM_RUIF_DESIGNIR_JSON="${PULP_ELYSIUM_RUIF_BASELINE_DESIGNIR_JSON}")
+
+    set_target_properties(pulp-elysium-ruif-rust-provider PROPERTIES
+        OUTPUT_NAME "PulpElysiumRuifRustProvider"
+        MACOSX_BUNDLE_BUNDLE_NAME "Pulp ELYSIUM RUIF Rust Provider"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.pulp.elysium-ruif-rust-provider"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+        MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0")
+elseif(PULP_BUILD_NATIVE_UI_RUST_TESTS)
+    message(WARNING
+        "pulp-elysium-ruif-rust-provider requires macOS Skia GPU validation; "
+        "skipping Rust standalone target for this platform/configuration.")
+endif()
 
 if(PULP_HAS_CLAP AND APPLE)
     add_test(
