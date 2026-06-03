@@ -741,6 +741,97 @@ TEST_CASE("GraphSerializer round-trips registered custom node identity",
     REQUIRE(saw_custom);
 }
 
+namespace {
+// A stateful custom type (Phase 5): instance holds a `level` serialized as 4
+// little-endian bytes via save/load_state.
+struct SerLevel {
+    float level = 1.0f;
+};
+pulp::host::CustomNodeType make_stateful_level_type(const char* id, int ver) {
+    pulp::host::CustomNodeType t;
+    t.type_id = id;
+    t.version = ver;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Level";
+    t.create = []() -> void* { return new SerLevel(); };
+    t.destroy = [](void* p) { delete static_cast<SerLevel*>(p); };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& o,
+                            const pulp::audio::BufferView<const float>& i, int n) {
+        const float lvl = static_cast<SerLevel*>(p)->level;
+        for (int s = 0; s < n; ++s) o.channel_ptr(0)[s] = i.channel_ptr(0)[s] * lvl;
+    };
+    t.save_state = [](void* p) {
+        const float lvl = static_cast<SerLevel*>(p)->level;
+        std::vector<uint8_t> b(sizeof(float));
+        std::memcpy(b.data(), &lvl, sizeof(float));
+        return b;
+    };
+    t.load_state = [](void* p, const std::vector<uint8_t>& b) {
+        if (b.size() != sizeof(float)) return false;
+        std::memcpy(&static_cast<SerLevel*>(p)->level, b.data(), sizeof(float));
+        return true;
+    };
+    return t;
+}
+std::vector<uint8_t> ser_level_bytes(float lvl) {
+    std::vector<uint8_t> b(sizeof(float));
+    std::memcpy(b.data(), &lvl, sizeof(float));
+    return b;
+}
+}  // namespace
+
+TEST_CASE("GraphSerializer round-trips opaque custom-node state",
+          "[host][serializer][node-abi]") {
+    SignalGraph src;
+    REQUIRE(src.register_custom_node_type(
+        make_stateful_level_type("pulp.test.level", 1)));
+    auto node = src.add_custom_node("pulp.test.level", "Level A");
+    REQUIRE(node != 0);
+    REQUIRE(src.set_custom_node_state(node, ser_level_bytes(2.5f)));
+
+    const auto json = GraphSerializer::to_json(src);
+    REQUIRE(json.find("\"state_b64\"") != std::string::npos);
+
+    SignalGraph dst;
+    REQUIRE(dst.register_custom_node_type(
+        make_stateful_level_type("pulp.test.level", 1)));
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_custom_node_types.empty());
+    REQUIRE(dst.nodes().size() == 1);
+    const NodeId dst_node = dst.nodes()[0].id;
+    REQUIRE(dst.custom_node_state(dst_node) == ser_level_bytes(2.5f));
+
+    // After prepare(), the live instance carries the restored state.
+    REQUIRE(dst.prepare(48000.0, 8));
+    REQUIRE(dst.custom_node_state(dst_node) == ser_level_bytes(2.5f));
+}
+
+TEST_CASE("GraphSerializer preserves opaque state for unresolved custom nodes",
+          "[host][serializer][node-abi]") {
+    SignalGraph src;
+    REQUIRE(src.register_custom_node_type(
+        make_stateful_level_type("pulp.test.level", 1)));
+    auto node = src.add_custom_node("pulp.test.level", "Level A");
+    REQUIRE(src.set_custom_node_state(node, ser_level_bytes(1.75f)));
+    const auto json = GraphSerializer::to_json(src);
+
+    // Load into a graph WITHOUT the type — node becomes an unresolved placeholder.
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE_FALSE(result.missing_custom_node_types.empty());
+    REQUIRE(dst.nodes().size() == 1);
+    const NodeId dst_node = dst.nodes()[0].id;
+    // State survives even though no instance exists.
+    REQUIRE(dst.custom_node_state(dst_node) == ser_level_bytes(1.75f));
+
+    // Re-serializing preserves the blob (save-load-save keeps the state).
+    const auto json2 = GraphSerializer::to_json(dst);
+    REQUIRE(json2.find("\"state_b64\"") != std::string::npos);
+}
+
 TEST_CASE("GraphSerializer preserves unresolved custom node identity",
           "[host][serializer][node-abi]") {
     SignalGraph src;

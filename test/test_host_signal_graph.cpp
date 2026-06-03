@@ -115,6 +115,90 @@ TEST_CASE("SignalGraph registers and processes custom nodes",
     for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i] * 2.0f);
 }
 
+namespace {
+// A stateful custom node for the Phase 5 lifecycle tests: its opaque instance
+// holds a `level` multiplier; process_instance scales the input by it;
+// save/load_state serialize the level as 4 little-endian bytes.
+struct StatefulLevel {
+    float level = 1.0f;
+};
+pulp::host::CustomNodeType make_level_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.level";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Level";
+    t.create = []() -> void* { return new StatefulLevel(); };
+    t.destroy = [](void* p) { delete static_cast<StatefulLevel*>(p); };
+    t.reset = [](void* p) { static_cast<StatefulLevel*>(p)->level = 1.0f; };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in,
+                            int n) {
+        const float lvl = static_cast<StatefulLevel*>(p)->level;
+        for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * lvl;
+    };
+    t.save_state = [](void* p) {
+        const float lvl = static_cast<StatefulLevel*>(p)->level;
+        std::vector<uint8_t> b(sizeof(float));
+        std::memcpy(b.data(), &lvl, sizeof(float));
+        return b;
+    };
+    t.load_state = [](void* p, const std::vector<uint8_t>& b) {
+        if (b.size() != sizeof(float)) return false;
+        std::memcpy(&static_cast<StatefulLevel*>(p)->level, b.data(), sizeof(float));
+        return true;
+    };
+    return t;
+}
+std::vector<uint8_t> level_bytes(float lvl) {
+    std::vector<uint8_t> b(sizeof(float));
+    std::memcpy(b.data(), &lvl, sizeof(float));
+    return b;
+}
+}  // namespace
+
+TEST_CASE("SignalGraph stateful custom node: lifecycle + state round-trip",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_level_type()));
+
+    auto input = graph.add_input_node(1, "Input");
+    auto node = graph.add_custom_node("pulp.test.level", "Level A");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(node != 0);
+    REQUIRE(graph.connect(input, 0, node, 0));
+    REQUIRE(graph.connect(node, 0, output, 0));
+
+    // Load opaque state (level = 3.0) before prepare; applied on prepare().
+    REQUIRE(graph.set_custom_node_state(node, level_bytes(3.0f)));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_s[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_s[4] = {-1, -1, -1, -1};
+    const float* in_p[1] = {in_s};
+    float* out_p[1] = {out_s};
+    pulp::audio::BufferView<const float> in_view(in_p, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_p, 1, 4);
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
+
+    // The live instance's state reflects the loaded level.
+    REQUIRE(graph.custom_node_state(node) == level_bytes(3.0f));
+
+    // A node with no instance (not a custom node) yields empty state.
+    REQUIRE(graph.custom_node_state(input).empty());
+    REQUIRE_FALSE(graph.set_custom_node_state(input, level_bytes(1.0f)));
+
+    // release() drives the stateful instance's release callback; the instance
+    // (and its state) survive for a subsequent re-prepare.
+    graph.release();
+    REQUIRE(graph.custom_node_state(node) == level_bytes(3.0f));
+    REQUIRE(graph.prepare(48000.0, 4));
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
+}
+
 TEST_CASE("SignalGraph custom node registry keeps versions distinct",
           "[host][graph][node-abi]") {
     SignalGraph graph;

@@ -296,3 +296,28 @@ stable. Serialized graphs store the custom `type_id` and `version`, and loads
 preserve that identity even when the target graph has not registered a matching
 factory. Multiple versions of the same custom `type_id` can be registered at
 once; deserialization resolves by exact `(type_id, version)`.
+
+### Stateful custom nodes (Phase 5)
+
+`CustomNodeType` is additively extended with an optional **stateful lifecycle**.
+When `create` is set, the graph owns one opaque instance per node (RAII via
+`destroy`); `process_instance` runs instead of the stateless `process`, and
+`prepare` / `release` / `reset` / `save_state` / `load_state` operate on that
+instance. All callbacks default-empty, so a process-only node behaves exactly as
+before (no instance, no serialized state).
+
+The instance is created and prepared on the UI/main thread inside
+`SignalGraph::prepare()` — mirroring `PluginSlot` — and captured into each
+immutable `CompiledGraph` snapshot by `shared_ptr`, so the audio thread never
+allocates and an in-flight snapshot keeps its instance alive. `process_instance`
+runs on the audio thread and must be real-time-safe; `save_state` / `load_state`
+are non-RT control-path calls (use them while the graph is not live, or after an
+invalidate + re-prepare), the same expectation as plugin state.
+
+Opaque state is a `std::vector<uint8_t>` (mirroring `PluginSlot::save_state`),
+reachable via `SignalGraph::custom_node_state(NodeId)` /
+`set_custom_node_state(NodeId, bytes)`. `GraphSerializer` persists it as
+`state_b64` inside the node's `custom` object, and **preserves the blob even for
+unresolved nodes** so a save → load (missing type) → save cycle keeps the state.
+This is the source-level C++ API; the binary `pulp_node_v1` C ABI remains
+deferred to a future freeze.

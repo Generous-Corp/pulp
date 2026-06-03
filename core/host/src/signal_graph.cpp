@@ -67,6 +67,19 @@ std::string custom_node_key(std::string_view type_id, int version) {
     return key;
 }
 
+// Phase 5 — make a per-node opaque instance owned via shared_ptr, with the
+// type's destroy callback as the deleter (RAII). Returns nullptr for stateless
+// types (no `create`).
+std::shared_ptr<void> make_custom_instance(const CustomNodeType& type) {
+    if (!type.create) return nullptr;
+    void* raw = type.create();
+    if (raw == nullptr) return nullptr;
+    auto destroy = type.destroy;
+    return std::shared_ptr<void>(raw, [destroy](void* p) {
+        if (destroy && p) destroy(p);
+    });
+}
+
 } // namespace
 
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
@@ -646,9 +659,24 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         if (n.type == NodeType::Custom) {
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
-                type && type->process
-                && custom_type_matches_node_shape(*type, n)) {
-                cg->custom_processors[n.id] = type->process;
+                type && custom_type_matches_node_shape(*type, n)) {
+                if (n.custom_instance && type->process_instance) {
+                    // Phase 5 — bind the stateful processor. The lambda captures
+                    // the instance shared_ptr BY VALUE, so this snapshot keeps
+                    // the instance alive for its whole audio-thread lifetime
+                    // (same guarantee as cg->plugins[...] for plugin nodes). No
+                    // raw pointer into GraphNode is stored.
+                    auto inst = n.custom_instance;
+                    auto fn = type->process_instance;
+                    cg->custom_processors[n.id] =
+                        [inst, fn](audio::BufferView<float>& out,
+                                   const audio::BufferView<const float>& in,
+                                   int num_samples) {
+                            fn(inst.get(), out, in, num_samples);
+                        };
+                } else if (type->process) {
+                    cg->custom_processors[n.id] = type->process;
+                }
             }
         }
     }
@@ -715,6 +743,31 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
         }
     }
 
+    // Phase 5 — create/prepare stateful custom-node instances on this (UI)
+    // thread before the snapshot is published, mirroring the plugin step above.
+    // A freshly-loaded state blob is applied exactly once via load_state.
+    for (auto& n : nodes_) {
+        if (n.type != NodeType::Custom) continue;
+        const CustomNodeType* type =
+            custom_node_type(n.custom_type_id, n.custom_type_version);
+        if (type == nullptr || !type->create
+            || !custom_type_matches_node_shape(*type, n)) {
+            continue;  // stateless / unresolved / shape-mismatch: no instance
+        }
+        if (!n.custom_instance) {
+            n.custom_instance = make_custom_instance(*type);
+        }
+        if (n.custom_instance) {
+            if (n.custom_state_pending && type->load_state) {
+                type->load_state(n.custom_instance.get(), n.custom_state_blob);
+                n.custom_state_pending = false;
+            }
+            if (type->prepare) {
+                type->prepare(n.custom_instance.get(), sample_rate, max_block_size);
+            }
+        }
+    }
+
     auto cg = compile_(sample_rate, max_block_size);
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     std::atomic_store_explicit(&live_, std::move(cg), std::memory_order_release);
@@ -723,8 +776,53 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
 
 void SignalGraph::release() {
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
+    // Phase 5 — release stateful custom instances (UI thread), mirroring the
+    // plugin release above. The instance object stays alive until its snapshots
+    // also drop; release() just lets the type free scratch.
+    for (auto& n : nodes_) {
+        if (n.type != NodeType::Custom || !n.custom_instance) continue;
+        if (const auto* type =
+                custom_node_type(n.custom_type_id, n.custom_type_version);
+            type && type->release) {
+            type->release(n.custom_instance.get());
+        }
+    }
     std::atomic_store_explicit(&live_, std::shared_ptr<CompiledGraph>(nullptr), std::memory_order_release);
     total_latency_samples_.store(0, std::memory_order_relaxed);
+}
+
+std::vector<uint8_t> SignalGraph::custom_node_state(NodeId id) const {
+    for (const auto& n : nodes_) {
+        if (n.id != id) continue;
+        if (n.type != NodeType::Custom) return {};
+        // Prefer the live instance's current state; fall back to the stored blob
+        // (e.g. unresolved nodes, or before the first prepare()).
+        if (n.custom_instance) {
+            if (const auto* type =
+                    custom_node_type(n.custom_type_id, n.custom_type_version);
+                type && type->save_state) {
+                return type->save_state(n.custom_instance.get());
+            }
+        }
+        return n.custom_state_blob;
+    }
+    return {};
+}
+
+bool SignalGraph::set_custom_node_state(NodeId id,
+                                        const std::vector<uint8_t>& bytes) {
+    for (auto& n : nodes_) {
+        if (n.id != id) continue;
+        if (n.type != NodeType::Custom) return false;
+        n.custom_state_blob = bytes;
+        // Apply to the live instance on the next prepare() (one-shot). The blob
+        // is retained regardless, so it survives even when the type is
+        // unresolved and is re-emitted on the next serialize.
+        n.custom_state_pending = true;
+        invalidate_live_();
+        return true;
+    }
+    return false;
 }
 
 void SignalGraph::process(audio::BufferView<float>& output,
