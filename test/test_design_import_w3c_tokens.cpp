@@ -79,6 +79,7 @@ TEST_CASE("export_css_variables emits :root + dark @media keyed off the .dark su
     theme.colors["color.bg"] = color_from_hex(0xffffff);
     theme.colors["color.bg.dark"] = color_from_hex(0x000000);   // dark override
     theme.colors["on-surface"] = color_from_hex(0x1a1c1e);
+    theme.colors["overlay"] = color_from_hex_alpha(0x00000080); // translucent → 8-digit hex
     theme.dimensions["spacing-sm"] = 4.0f;
     theme.strings["shadow-card"] = "0 1px 3px rgba(0,0,0,0.2)";
 
@@ -88,6 +89,8 @@ TEST_CASE("export_css_variables emits :root + dark @media keyed off the .dark su
     REQUIRE(css.find(":root {") != std::string::npos);
     REQUIRE(css.find("--color-bg: #ffffff;") != std::string::npos);
     REQUIRE(css.find("--on-surface: #1a1c1e;") != std::string::npos);
+    // A non-opaque color emits the 8-digit #rrggbbaa form (alpha branch).
+    REQUIRE(css.find("--overlay: #00000080;") != std::string::npos);
     REQUIRE(css.find("--spacing-sm: 4px;") != std::string::npos);
     REQUIRE(css.find("--shadow-card: 0 1px 3px rgba(0,0,0,0.2);") != std::string::npos);
 

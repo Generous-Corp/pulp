@@ -168,3 +168,28 @@ TEST_CASE("shell_quote path overload matches string overload on POSIX", "[cli][s
 }
 
 #endif
+
+// decode_system_status normalizes std::system()'s return into the child exit
+// code so delegated commands keep their real codes (a child exit 2 must not
+// truncate to 0). Tested directly here — cli_common.cpp is compiled into this
+// target — so coverage doesn't depend on subprocess profile attribution.
+TEST_CASE("decode_system_status maps std::system wait status to child exit code",
+          "[cli][shell-quote][exit-code]") {
+    // A shell that couldn't launch → 127, on every platform.
+    REQUIRE(decode_system_status(-1) == 127);
+#ifndef _WIN32
+    // POSIX: std::system returns a waitpid status. A normal exit of code N is
+    // encoded as (N << 8); decode must recover N.
+    REQUIRE(decode_system_status(0) == 0);
+    REQUIRE(decode_system_status(2 << 8) == 2);
+    REQUIRE(decode_system_status(1 << 8) == 1);
+    REQUIRE(decode_system_status(42 << 8) == 42);
+    // Killed by a signal (low 7 bits = signal number, bit 7 clear) → 128 + sig.
+    REQUIRE(decode_system_status(9) == 128 + 9);    // SIGKILL
+    REQUIRE(decode_system_status(15) == 128 + 15);  // SIGTERM
+#else
+    // Windows: std::system already returns the child exit code; pass-through.
+    REQUIRE(decode_system_status(0) == 0);
+    REQUIRE(decode_system_status(2) == 2);
+#endif
+}
