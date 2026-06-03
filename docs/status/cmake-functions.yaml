@@ -100,3 +100,18 @@ functions:
       - ${target}
       - ${target}_Embed
     docs: getting-started/ios-deployment.md
+
+  - name: pulp_add_cargo_staticlib
+    status: experimental
+    summary: Build a Rust (Cargo) staticlib as a PIC/panic=abort IMPORTED target for an opt-in native-component DSP core. Requires a Rust toolchain; intended for use under PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS=ON (OFF by default — no Rust in default builds).
+    required:
+      - NAME
+      - MANIFEST
+      - LIB_NAME
+    optional:
+      - PROFILE
+      - FEATURES
+    creates:
+      - ${NAME}
+      - ${NAME}-cargo-build
+    docs: reference/cmake.md#pulp_add_cargo_staticlib

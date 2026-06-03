@@ -23,11 +23,12 @@ node ABI would need a dedicated C shim. Pulp does not expose that shim today.
 
 Pulp's current custom-node decision is:
 
-> Pulp supports source-compatible custom nodes (`CustomNodeType`) and now also
-> ships the language-neutral `pulp_node_v1` C ABI (experimental) for nodes
-> written against a stable binary contract. Runtime loading of *binary* node
-> packs from disk (signing / trust / packaging) remains deferred. See
-> "`pulp_node_v1` C ABI (shipped, experimental)" below.
+> Pulp supports source-compatible custom nodes (`CustomNodeType`) and also ships
+> the language-neutral `pulp_node_v1` C ABI (experimental) for nodes written
+> against a stable binary contract, plus runtime loading of *binary* node packs
+> from disk (Ed25519 signing / trust / packaging) via `core/host/node_pack.hpp`
+> on desktop and Android. See "`pulp_node_v1` C ABI (shipped, experimental)" and
+> "Signed node packs" below.
 
 Here, "compatible with a future C ABI boundary" is a design constraint, not a
 binary compatibility promise. New node-facing APIs should be shaped so they can
@@ -87,8 +88,30 @@ It is **experimental**: the contract may still gain capability bits / trailing
 fields (additively) before it is declared frozen. A C node and a Rust node are
 proven to load through the identical contract (`test_pulp_node_v1.cpp` +
 `test_pulp_node_v1_rust.cpp`). Runtime loading of *binary* node packs from disk
-(signing / trust / per-platform packaging) is the separate, still-deferred
-dynamic-distribution work.
+(signing / trust / per-platform packaging) now ships as a separate layer — see
+"Signed node packs" below.
+
+## Signed node packs
+
+A precompiled `pulp_node_v1` node can be distributed as a **signed node pack**: a
+dynamic library (`.dylib` / `.so` / `.dll`) exporting `pulp_node_v1_entry`, plus a
+JSON manifest declaring the pack identity, ABI major, the binary's SHA-256, the
+declared node type-ids/capabilities, and an **Ed25519 signature**. The host loader
+`core/host/node_pack.hpp` (`load_node_pack(dir, manifest, trust)`) verifies trust
+*before* it `dlopen`s anything:
+
+1. the signer key must be in the host's trust set (drop a key to revoke it);
+2. the signature over `pack_id + abi_major + binary-hash` must be authentic;
+3. the on-disk binary's SHA-256 must match the signed hash;
+4. the entry's `abi_major` must match the host's `pulp_node_v1` major.
+
+Any failure rejects the pack and loads no code. This is the host-level integrity
+gate; OS code-signing / notarization (Gatekeeper, Authenticode) is an additional,
+separate distribution step. **Desktop and Android only** — `core/host` is compiled
+out on iOS / AUv3 / sandboxed targets, where native components are static-bundled
+and signed with the app. Still experimental (the manifest/loader may evolve
+additively); see [`native-components.md`](native-components.md) for the
+platform-policy rationale.
 
 ## API Layers
 
@@ -96,7 +119,7 @@ dynamic-distribution work.
 |-------|----------|-----------------------|----------|
 | Internal/private APIs | Pulp runtime implementation | May change at any time. Not an extension contract. | `CompiledGraph`, graph scratch buffers, serializer internals. |
 | Experimental public APIs | SDK users willing to rebuild and track changes | Source-oriented, explicitly experimental, breakage allowed between releases. | `CustomNodeType`, custom node registration, graph serialization of custom `type_id` + `version`. |
-| Future stable ABI boundary | Precompiled third-party node binaries | Not promised today. Would require a separate versioned C header, loader, tests, and compatibility policy. | Possible future `pulp_node_v1`. |
+| Experimental binary ABI boundary | Precompiled third-party node binaries | Shipped but experimental: same-major append-only within `pulp_node_v1`; not yet a *frozen* cross-release promise. | `pulp_node_v1` header + `pulp_node_v1_entry`; signed node packs via `core/host/node_pack.hpp`. |
 
 Experimental public APIs should remain small. The current minimum useful
 surface is:
@@ -116,8 +139,11 @@ clear line between experimental source APIs and a future frozen binary ABI.
 
 **Draft id:** `pulp_node_v1.draft.0`
 
-**Status:** non-binding architecture draft. This is not a shipped header, not a
-loader contract, and not a stable ABI.
+**Status:** historical, **superseded**. This sketch predates the shipped
+`pulp_node_v1.h` header and `core/host/node_pack.hpp` loader; it is retained as a
+design record of the review target. For the real, current contract see
+"`pulp_node_v1` C ABI (shipped, experimental)" and "Signed node packs" above. The
+shipped header is still not a *frozen* stable ABI.
 
 **Scope:** custom `SignalGraph` nodes only. Full `Processor` binaries are out of
 scope because they overlap with VST3, AU, CLAP, and Pulp's format adapters.
@@ -238,7 +264,7 @@ rules:
 | State serialization | Graph serializer stores versions and preserves unresolved custom node identity. | Custom nodes have no save/load state callbacks yet. |
 | RT safety | Host thread rules clearly forbid allocation, locks, and blocking in audio callbacks. | The custom node callback type cannot enforce RT safety by itself; tests/lints would be needed for ABI-shaped experiments. |
 | Versioning | `PULP_NODE_ABI_VERSION`, graph format versions, node capabilities, and custom node versions already exist. | These are source/serialization markers, not a binary negotiation protocol. |
-| Dynamic loading | The deferred design can choose the right per-platform packaging later. | `.dylib`/`.bundle`, `.dll`, `.so`, code signing, notarization, sandboxing, iOS, AUv3, and hardened runtime constraints are unresolved. |
+| Dynamic loading | Signed node packs ship via `core/host/node_pack.hpp` (Ed25519 trust verified before `dlopen`) on desktop + Android. | iOS / AUv3 / sandboxed targets compile `core/host` out entirely — static-bundled, app-signed native code only. OS notarization/Gatekeeper/Authenticode remain a separate distribution step. |
 
 ## Recommendation Tiers
 
@@ -246,7 +272,8 @@ rules:
 |------|----------------|
 | Safe to implement now | Keep public docs explicit that Pulp is source-compatible, experimental, and rebuild-oriented. Keep custom node IDs and versions stable. Prefer additive capability bits and POD-shaped internal DTOs where useful. Add tests for serialization, unresolved reload, and no audio-thread allocation around new graph/runtime work. |
 | Experimental only | Grow the source-level custom node API in small steps: lifecycle hooks, param/event descriptors, state callbacks, and latency reporting. Prototype ABI-shaped structs behind internal or test-only headers. Add static assertions for POD/trivial layout. Build adapters from C-shaped structs into current C++ types without shipping a loader. |
-| Must defer until ABI freeze | Dynamic loading, manifest format, exported symbols, extension registry, code-signing policy, cross-version loader tests, and same-major compatibility guarantee. |
+| Shipped (experimental) | Dynamic loading, manifest format, the exported `pulp_node_v1_entry` symbol, Ed25519 signing/trust policy, accept/reject loader tests, and the same-major append-only contract now ship via `pulp_node_v1` + `core/host/node_pack.hpp`. |
+| Must defer until ABI freeze | A *frozen* cross-release binary guarantee and a formal extension registry. Until then, packs are rebuilt against the SDK major they target. |
 | Dangerous to expose publicly | Current `CustomNodeType`, `CustomNodeProcessFn`, `Processor`, `PluginSlot`, `audio::BufferView`, `MidiBuffer`, STL containers, exceptions, virtual tables, or `std::function` as a stable binary ABI. |
 
 ## Draft Changelog
@@ -337,5 +364,6 @@ reachable via `SignalGraph::custom_node_state(NodeId)` /
 `set_custom_node_state(NodeId, bytes)`. `GraphSerializer` persists it as
 `state_b64` inside the node's `custom` object, and **preserves the blob even for
 unresolved nodes** so a save → load (missing type) → save cycle keeps the state.
-This is the source-level C++ API; the binary `pulp_node_v1` C ABI remains
-deferred to a future freeze.
+This is the source-level C++ API; the binary `pulp_node_v1` C ABI (above) was
+derived from this lifecycle/state experience and now ships experimentally — not
+yet frozen.

@@ -919,7 +919,10 @@ staticlib lane lives behind the `PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS` CMake
 option (OFF by default).
 
 This is the *Processor-level* FFI, deliberately independent of `SignalGraph`.
-See [node-abi](node-abi.md) for the deferred public `pulp_node_v1` node ABI.
+The module also ships the public `pulp_node_v1` node ABI (`pulp_node_v1.h`) for
+custom graph nodes; its `NativeCoreProcessor` adapter lives in `pulp::format`, and
+signed dynamic node-pack loading lives in `pulp::host` (`node_pack.hpp`). See
+[node-abi](node-abi.md) for the `pulp_node_v1` contract and node packs.
 
 ---
 
