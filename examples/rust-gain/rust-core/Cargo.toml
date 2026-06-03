@@ -1,0 +1,19 @@
+# Rust DSP core for the PulpRustGain example — a stereo gain implementing the
+# Pulp native-component Processor-level C ABI (exports pulp_native_core_entry_v1).
+# Built only under PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS (no Rust in default builds).
+[package]
+name = "pulp-rust-gain-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "pulp_rust_gain_core"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

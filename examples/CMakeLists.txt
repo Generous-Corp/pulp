@@ -10,6 +10,12 @@ endif()
 # Phase 2-3: PulpGain (trivial gain plugin)
 add_subdirectory(pulp-gain)
 
+# PulpRustGain — a Rust DSP core packaged as a CLAP plugin (native-components
+# capstone). Opt-in: needs a Rust toolchain and the Cargo staticlib lane.
+if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
+    add_subdirectory(rust-gain)
+endif()
+
 # DAW bench harness — load in real DAWs to graduate host-quirk rows from
 # Speculative → Validated. See docs/validation/daw-bench/.
 add_subdirectory(host-bench-plugin)

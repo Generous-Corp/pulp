@@ -194,7 +194,7 @@ and the iOS static-only limits.
 
 | Capability | Status | Module | Docs | Examples |
 |---|---|---|---|---|
-| Rust/C/Zig DSP behind a C++ `Processor` adapter via a private C-shaped FFI | experimental | [format](modules.md#format) | [native-components](native-components.md) | |
+| Rust/C/Zig DSP behind a C++ `Processor` adapter via a private C-shaped FFI | experimental | [format](modules.md#format) | [native-components](native-components.md) | rust-gain (opt-in) |
 | Native non-RT domain logic behind `EditorBridge` | experimental | [view](modules.md#view) | [native-components](native-components.md), [editor-bridge](editor-bridge.md) | |
 | Source-built custom `SignalGraph` nodes (toward `pulp_node_v1` C ABI) | experimental | [host](modules.md#host) | [node-abi](node-abi.md), [signal-graph](signal-graph.md) | |
 
