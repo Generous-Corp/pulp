@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03210"></a>
+## [0.321.0] - 2026-06-02
+
+- feat(import-design): recover tokens from frontmatter-less DESIGN.md bodies ([#3357](https://github.com/danielraffel/pulp/pull/3357))
+- feat(figma-plugin): capture all variable modes (light/dark) as tokens ([#3354](https://github.com/danielraffel/pulp/pull/3354))
+- chore: gitignore fetched Skia build artifacts + clarify diff-cover bypass knobs ([#3353](https://github.com/danielraffel/pulp/pull/3353))
+
 <a id="v03200"></a>
 ## [0.320.0] - 2026-06-02
 
@@ -3499,6 +3506,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.321.0]: https://github.com/danielraffel/pulp/releases/tag/v0.321.0
 [0.320.0]: https://github.com/danielraffel/pulp/releases/tag/v0.320.0
 [0.319.0]: https://github.com/danielraffel/pulp/releases/tag/v0.319.0
 [0.318.0]: https://github.com/danielraffel/pulp/releases/tag/v0.318.0
