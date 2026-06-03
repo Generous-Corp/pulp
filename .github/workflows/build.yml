@@ -739,6 +739,45 @@ jobs:
           fi
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
 
+      - name: Surface ctest failures (non-Windows)
+        # On a SELF-HOSTED runner the test step's log is not retrievable via
+        # `gh run view --log` (you get only "Process completed with exit code
+        # 8") and check-run annotations are empty — so a failing test is
+        # invisible remotely (see #3392; cost ~hours on 2026-06-03). ctest's own
+        # result logs name it: dump them into the job summary so the failing
+        # test(s) + assertions show in the GitHub UI without host access.
+        if: failure() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          tdir="$PULP_BUILD_DIR/Testing/Temporary"
+          {
+            echo "## ❌ ctest failures — ${{ matrix.name }} [${{ matrix.provider }}]"
+            if [ -f "$tdir/LastTestsFailed.log" ]; then
+              echo "### Failed tests"
+              echo '```'; cat "$tdir/LastTestsFailed.log"; echo '```'
+              echo "### Failing assertions (from LastTest.log)"
+              echo '```'
+              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60
+              echo '```'
+            else
+              echo "_No ctest result log at \`$tdir\` — the test step likely failed before ctest ran (configure/build/crash)._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Also echo failed-test names to the (locally-readable) job log.
+          { [ -f "$tdir/LastTestsFailed.log" ] && { echo "=== ctest failed tests ==="; cat "$tdir/LastTestsFailed.log"; }; } || true
+
+      - name: Upload ctest logs on failure
+        # Full Testing/Temporary/ (LastTest.log, LastTestsFailed.log, …) as an
+        # artifact — the authoritative per-test output, downloadable from the
+        # run page even for self-hosted legs.
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ctest-logs-${{ matrix.key }}
+          path: ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
         # processes receive filter args (test names with em-dashes

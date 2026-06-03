@@ -810,6 +810,26 @@ can act on it without parsing the human text. Source design:
 `https://github.com/danielraffel/Shipyard/issues/303` + the codex-
 vetted comment thread there.
 
+**Self-hosted blind spot (important).** The footer parser reads the
+**GitHub step log** — which is EMPTY for a self-hosted macOS leg
+(`gh run view --log` yields only "Process completed with exit code 8";
+check-run annotations are empty too). So for a self-hosted failure the
+parsed `Tests:` block is blank and you can't tell which test failed from
+Shipyard/`gh` alone. Three ways to recover the failing test:
+1. **Job summary + artifact (build.yml #3392):** the macOS leg now writes
+   an "❌ ctest failures" block (failed test names + the `FAILED:` /
+   `with expansion:` assertion lines) to the run's **summary page**, and
+   uploads `Testing/Temporary/` as a `ctest-logs-<key>` artifact — visible
+   with no host access.
+2. **Runner-local ctest logs (on the host):** read
+   `<workFolder>/<repo>/<repo>/build-macos/Testing/Temporary/LastTestsFailed.log`
+   + `LastTest.log` (workFolder from `<runner>/.runner`, NOT `_work`). Full
+   recipe in the **`tart-ci` skill → "Diagnosing a red macOS leg"**.
+3. Shipyard-side fix tracked at danielraffel/Shipyard#344 (teach the footer
+   parser to fall back to the runner-local ctest logs when the GH log is
+   empty). Related new requests: #345 (rerun should re-resolve provider),
+   #346 (reconcile ship-state SHA drift).
+
 ## Phase 2 watch diagnostics (>= v0.59.0)
 
 Shipyard v0.59.0 (Shipyard PR #310, 2026-05-19) extends `shipyard
