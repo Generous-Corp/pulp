@@ -304,7 +304,23 @@
 #   transition for the lifetime of the watch invocation. Reuses Phase 1's
 #   256 KB log-tail cap. Phase 3 (sandboxed `failure_parser_cmd` escape
 #   hatch) still deferred. See Shipyard PR #310.
-version = "v0.59.0"
+#
+# v0.60.0–v0.65.6 — runner-ops + doctor UX hardening: `shipyard rescue`
+#   wedged-runner recovery, `runner watch --kill-hung-workers`, host-pool
+#   capacity accounting, ship-state reconcile, and de-alarmed `doctor`
+#   github-auth / nsc messaging. All additive; no breaking changes in range.
+# v0.66.0 — `shipyard ship/pr --adopt-head` (Shipyard #346): reconciles
+#   ship-state SHA drift after an out-of-band amend/force-push (e.g. adding a
+#   required `Version-Bump: skip` trailer) instead of dead-ending on
+#   "ship state SHA drift"; clears prior evidence so the new head re-validates.
+# v0.67.0 — `shipyard rescue` re-resolves the provider + re-dispatches FAILED
+#   runs (Shipyard #345): `--rerun-failed` now also pulls failed/timed-out runs
+#   (not just watchdog-cancelled), and omitting `--to` re-resolves a failed leg
+#   local-first (overflow-aware) instead of forcing github-hosted — the lever
+#   to recover a saturated/timed-out macOS gate. Plus self-hosted empty-log
+#   diagnostics now point at the uploaded ctest-logs artifact (Shipyard #344).
+#   These three (#344/#345/#346) are why Pulp jumps to this pin.
+version = "v0.67.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

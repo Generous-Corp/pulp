@@ -411,7 +411,8 @@ shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch the GHA build workflow
 shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
-shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
+shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
+shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
 shipyard update --check --json            # installed vs latest Shipyard drift report
 shipyard update                           # apply latest stable Shipyard
