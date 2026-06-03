@@ -83,6 +83,17 @@ TEST_CASE("Rust gain core: real audio processing through the adapter",
     REQUIRE(out.r[0] == 0.25f);
 }
 
+TEST_CASE("Rust gain core: non-RT editor_command returns Rust-built JSON",
+          "[rust-dsp-processor]") {
+    format::NativeCoreProcessor proc(pulp_native_core_entry_v1());
+    const auto reply = proc.editor_command(R"({"cmd":"info"})");
+    REQUIRE(reply.has_value());
+    // The reply JSON is built in Rust off the audio thread.
+    REQUIRE(reply->find("\"engine\":\"rust\"") != std::string::npos);
+    // Empty request is unsupported -> nullopt, no unwinding across the boundary.
+    REQUIRE_FALSE(proc.editor_command("").has_value());
+}
+
 TEST_CASE("Rust gain core: opaque state round-trips through the adapter",
           "[rust-dsp-processor]") {
     format::NativeCoreProcessor proc(pulp_native_core_entry_v1());

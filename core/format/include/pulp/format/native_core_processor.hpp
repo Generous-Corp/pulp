@@ -24,7 +24,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::format {
@@ -61,6 +63,17 @@ public:
     std::vector<uint8_t> serialize_plugin_state() const override;
     bool deserialize_plugin_state(std::span<const uint8_t> data) override;
     int latency_samples() const override;
+
+    /// Non-RT (host/UI thread) command channel into the native core's domain
+    /// logic: send a JSON request, get a JSON reply. This is the seam for
+    /// Rust-owned non-real-time work — preset/sample browsers, metadata,
+    /// import/export, analysis — never the audio thread.
+    ///
+    /// Returns std::nullopt when the core declares no editor-command support,
+    /// rejects the request (malformed input returns nullopt, not an exception),
+    /// or the adapter is inert. A successful command with no payload returns an
+    /// empty string.
+    std::optional<std::string> editor_command(std::string_view request_json);
 
     /// True once a compatible core instance was created. When false the adapter
     /// is inert (silent) but safe to use.

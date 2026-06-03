@@ -152,13 +152,24 @@ pulp_native_status gain_load_state(pulp_native_instance* i,
 }
 uint32_t gain_report_latency(pulp_native_instance*) { return 0; }
 uint32_t gain_report_tail(pulp_native_instance*) { return 0; }
+const char kPong[] = R"({"pong":true})";
 pulp_native_status gain_editor_command(pulp_native_instance*, const uint8_t*,
-                                       size_t, uint8_t** r, size_t* n) {
-    if (r) *r = nullptr;
-    if (n) *n = 0;
-    return PULP_NATIVE_ERR_UNSUPPORTED;
+                                       size_t req_len, uint8_t** r, size_t* n) {
+    if (req_len == 0) {  // empty request is unsupported
+        if (r) *r = nullptr;
+        if (n) *n = 0;
+        return PULP_NATIVE_ERR_UNSUPPORTED;
+    }
+    const size_t len = std::strlen(kPong);
+    auto* buf = static_cast<uint8_t*>(std::malloc(len));
+    std::memcpy(buf, kPong, len);
+    if (r) *r = buf;
+    if (n) *n = len;
+    return PULP_NATIVE_OK;
 }
-void gain_free_editor_reply(pulp_native_instance*, uint8_t*, size_t) {}
+void gain_free_editor_reply(pulp_native_instance*, uint8_t* r, size_t) {
+    std::free(r);
+}
 
 pulp_native_core_v1 g_core = [] {
     pulp_native_core_v1 c{};
@@ -294,6 +305,23 @@ TEST_CASE("NativeCoreProcessor round-trips opaque state",
     // Malformed state (wrong size) is rejected without unwinding.
     std::vector<uint8_t> bad(3, 0);
     REQUIRE_FALSE(proc.deserialize_plugin_state(bad));
+}
+
+TEST_CASE("NativeCoreProcessor editor_command round-trips JSON off the RT thread",
+          "[native-core-processor]") {
+    format::NativeCoreProcessor proc(&g_core);
+    const auto reply = proc.editor_command(R"({"cmd":"ping"})");
+    REQUIRE(reply.has_value());
+    REQUIRE(*reply == R"({"pong":true})");
+
+    // An empty / unsupported request returns nullopt without unwinding.
+    REQUIRE_FALSE(proc.editor_command("").has_value());
+
+    // Inert adapter: no instance, no command support.
+    pulp_native_core_v1 bad = g_core;
+    bad.abi_version = PULP_NATIVE_CORE_ABI_VERSION + 1;
+    format::NativeCoreProcessor inert(&bad);
+    REQUIRE_FALSE(inert.editor_command(R"({"cmd":"ping"})").has_value());
 }
 
 TEST_CASE("NativeCoreProcessor is inert (silent) for an incompatible core",
