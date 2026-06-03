@@ -1483,10 +1483,15 @@ base/`.dark` partition *algorithm* as `export_css_variables` (color.bg + color.b
 `PulpParameterResolving` and resolve a binding key by **exact `PulpParameter.name`
 match** (there is no stable string param key; `missing`/`duplicate` are surfaced,
 never silently mis-bound — see `apple/Sources/PulpSwift/PulpParameter.swift`).
-The remaining widgets (B3), binding-manifest parity (B4), and grid/assets/host
-scaffold (B5) follow. The test gate is golden strings **plus** a `swiftc
--typecheck` of the generated Swift against the real PulpSwift module (golden
-C++-string asserts alone can ship non-compiling Swift).
+B3 adds the remaining widgets (`PulpMeter`/`PulpXYPad`/`PulpWaveform`/
+`PulpSpectrum` in `PulpViews.swift`, plus text buttons → SwiftUI `Button`);
+binding-manifest parity (B4) and grid/assets/host scaffold (B5) follow. The
+visualizers (waveform/spectrum) have no audio buffer in a baked import and
+xy_pad's second axis has no IR source, so they bind the one available parameter
+and emit an informational fidelity note; image/svg/canvas leaves still degrade
+to a sized `Color.clear` (assets are B5). The test gate is golden strings
+**plus** a `swiftc -typecheck` of the generated Swift against the real PulpSwift
+module (golden C++-string asserts alone can ship non-compiling Swift).
 
 **B2 (full style + text-runs + flex-fidelity).** `emit_modifiers` now emits the
 full visual set: opacity, corner radius (uniform; uneven per-corner → largest +

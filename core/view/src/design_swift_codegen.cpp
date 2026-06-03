@@ -23,9 +23,12 @@
 /// and the flex→stack fidelity-warning system: cross-axis alignment mapping,
 /// Spacer-based justify approximation, and `FidelityIssue`s for the
 /// divergences SwiftUI stacks cannot reproduce (flex-wrap, space distribution,
-/// align-stretch, absolute position, grid, skew/matrix transforms). The
-/// remaining widgets, binding-manifest parity, grid/assets, and the host
-/// scaffold are B3–B5.
+/// align-stretch, absolute position, grid, skew/matrix transforms).
+///
+/// B3 maps the remaining widgets: meter/xy_pad/waveform/spectrum bind to native
+/// PulpMeter/PulpXYPad/PulpWaveform/PulpSpectrum views and text buttons lower to
+/// a SwiftUI Button. Binding-manifest parity (B4) and grid/assets/host scaffold
+/// (B5) follow.
 
 #include <pulp/view/design_codegen.hpp>
 
@@ -517,6 +520,10 @@ bool is_bound_widget(NativeWidgetKind kind) {
         case NativeWidgetKind::fader:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::xy_pad:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
             return true;
         default:
             return false;
@@ -544,6 +551,27 @@ void emit_bound_control(std::ostringstream& out, const SwiftEmitCtx& ctx,
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::checkbox:
             control = "PulpToggle(parameter: p)";
+            break;
+        case NativeWidgetKind::meter:
+            control = "PulpMeter(parameter: p)";
+            break;
+        case NativeWidgetKind::xy_pad:
+            control = "PulpXYPad(parameter: p)";
+            push_fidelity(ctx, node, "swiftui-xypad-single-axis",
+                          "xy_pad binds its X axis to the one parameter the IR carries; "
+                          "the Y axis is unbound visual state", /*informational=*/true);
+            break;
+        case NativeWidgetKind::waveform:
+            control = "PulpWaveform(parameter: p)";
+            push_fidelity(ctx, node, "swiftui-static-visualizer",
+                          "waveform has no audio buffer in a baked import; rendered as a "
+                          "static shape scaled by the bound parameter", /*informational=*/true);
+            break;
+        case NativeWidgetKind::spectrum:
+            control = "PulpSpectrum(parameter: p)";
+            push_fidelity(ctx, node, "swiftui-static-visualizer",
+                          "spectrum has no audio buffer in a baked import; rendered as a "
+                          "static shape scaled by the bound parameter", /*informational=*/true);
             break;
         default:
             control = "EmptyView()";
@@ -1171,6 +1199,30 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
             return;
         }
         emit_bound_control(out, ctx, kind, node, key, depth);
+        return;
+    }
+
+    // Momentary text button → SwiftUI Button. The IR carries no action target
+    // (clicks were React handlers / host commands, not a parameter), so the
+    // generated button has an empty action; flag that it is inert.
+    if (kind == NativeWidgetKind::text_button) {
+        const std::size_t btn_children =
+            std::min(node.children.size(), resolved.children.size());
+        emit_line(out, depth, s, "Button(action: {}) {");
+        if (btn_children > 0) {
+            // A button with label/icon children renders them in the label
+            // closure (e.g. an icon + text); dropping them would lose content.
+            emit_children(out, ctx, node, resolved, depth + 1);
+        } else {
+            std::string label = resolved.text ? *resolved.text
+                              : (!node.text_content.empty() ? node.text_content : node.name);
+            emit_line(out, depth + 1, s, "Text(" + swift_string_literal(label) + ")");
+        }
+        emit_line(out, depth, s, "}");
+        emit_modifiers(out, ctx, node, depth);
+        push_fidelity(ctx, node, "swiftui-inert-button",
+                      "text button has no action target in the IR; generated with an empty "
+                      "action", /*informational=*/true);
         return;
     }
 

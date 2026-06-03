@@ -634,13 +634,101 @@ TEST_CASE("generated SwiftUI with full B2 style + text-runs type-checks",
     require_generated_swift_compiles(ir, "b2-style");
 }
 
+// ── B3: widget coverage (meter/xy_pad/waveform/spectrum + text button) ─────
+
+namespace {
+
+IRNode audio_widget_node(std::string id, std::string label, AudioWidgetType type) {
+    IRNode n = frame_node(std::move(id), label, 80.0f, 40.0f, LayoutDirection::column);
+    n.audio_widget = type;
+    n.audio_label = label;
+    return n;
+}
+
+DesignIR build_b3_widget_fixture() {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Widgets", 320.0f, 240.0f, LayoutDirection::column);
+    ir.root.children.push_back(audio_widget_node("m", "Level", AudioWidgetType::meter));
+    ir.root.children.push_back(audio_widget_node("xy", "Pan", AudioWidgetType::xy_pad));
+    ir.root.children.push_back(audio_widget_node("wf", "Scope", AudioWidgetType::waveform));
+    ir.root.children.push_back(audio_widget_node("sp", "Analyzer", AudioWidgetType::spectrum));
+    auto btn = frame_node("go", "Go", 60.0f, 24.0f, LayoutDirection::column);
+    btn.type = "button";
+    btn.text_content = "Go";
+    ir.root.children.push_back(std::move(btn));
+    return ir;
+}
+
+} // namespace
+
+TEST_CASE("generate_pulp_swift binds meter/xy_pad/waveform/spectrum + emits text buttons",
+          "[view][import][swiftui]") {
+    const auto ir = build_b3_widget_fixture();
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    // Each visualizer/meter resolves by name and binds its parameter.
+    REQUIRE(contains(out.view, "switch resolver.resolveParameter(named: \"Level\")"));
+    REQUIRE(contains(out.view, "PulpMeter(parameter: p)"));
+    REQUIRE(contains(out.view, "PulpXYPad(parameter: p)"));
+    REQUIRE(contains(out.view, "PulpWaveform(parameter: p)"));
+    REQUIRE(contains(out.view, "PulpSpectrum(parameter: p)"));
+    // Text button → an inert SwiftUI Button carrying the label.
+    REQUIRE(contains(out.view, "Button(action: {}) {"));
+    REQUIRE(contains(out.view, "Text(\"Go\")"));
+    // The approximations are flagged but advisory (they still render + bind).
+    REQUIRE(has_kind(out.issues, "swiftui-xypad-single-axis"));
+    REQUIRE(has_kind(out.issues, "swiftui-static-visualizer"));
+    REQUIRE(has_kind(out.issues, "swiftui-inert-button"));
+    REQUIRE(count_strict_fidelity_failures(out.issues) == 0);
+}
+
+TEST_CASE("generate_pulp_swift renders a text button's label/icon children",
+          "[view][import][swiftui]") {
+    // A button with children must render them in the label closure, not drop
+    // them for a bare Text(name) (Codex review).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "R", 120.0f, 40.0f, LayoutDirection::column);
+    auto btn = frame_node("save", "Save", 80.0f, 24.0f, LayoutDirection::row);
+    btn.type = "button";
+    btn.children.push_back(text_node("ico", "*", 12.0f, "#ffffff"));
+    btn.children.push_back(text_node("lbl", "Save", 12.0f, "#ffffff"));
+    ir.root.children.push_back(std::move(btn));
+    const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    INFO(view);
+    REQUIRE(contains(view, "Button(action: {}) {"));
+    REQUIRE(contains(view, "Text(\"*\")"));     // icon child rendered
+    REQUIRE(contains(view, "Text(\"Save\")"));  // label child rendered
+    require_generated_swift_compiles(ir, "button-children");
+}
+
+TEST_CASE("generate_pulp_swift records the new audio widgets in the binding manifest",
+          "[view][import][swiftui]") {
+    const auto ir = build_b3_widget_fixture();
+    const auto manifest = generate_pulp_swift(ir, ir.asset_manifest).binding_manifest;
+    INFO(manifest);
+    REQUIRE(contains(manifest, "\"native_primitive\": \"meter\""));
+    REQUIRE(contains(manifest, "\"native_primitive\": \"xy_pad\""));
+    REQUIRE(contains(manifest, "\"native_primitive\": \"waveform\""));
+    REQUIRE(contains(manifest, "\"native_primitive\": \"spectrum\""));
+    REQUIRE(contains(manifest, "\"resolve_name\": \"Analyzer\""));
+}
+
+TEST_CASE("generated SwiftUI with the B3 widget set type-checks",
+          "[view][import][swiftui][swiftc]") {
+    // Compile-gate every new widget view (PulpMeter/PulpXYPad/PulpWaveform/
+    // PulpSpectrum) + the Button path against the real PulpSwift module.
+    require_generated_swift_compiles(build_b3_widget_fixture(), "b3-widgets");
+}
+
 TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and compiles",
           "[view][import][swiftui][swiftc]") {
     // Exercise + compile-gate the degradation paths: an unsupported leaf widget
-    // (meter → Color.clear), an unsupported widget that has children (lowered as
-    // a container), a dark-only color / dark-only dimension+string (no light
-    // base), a non-hex color token (skipped), and an unbound control (no
-    // label/name → visible placeholder, not a silent bind).
+    // (a bare image leaf → Color.clear; assets are B5), an unsupported widget
+    // that has children (lowered as a container), a dark-only color / dark-only
+    // dimension+string (no light base), a non-hex color token (skipped), and an
+    // unbound control (no label/name → visible placeholder, not a silent bind).
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.tokens.colors["overlayOnly.dark"] = "#0a0b0c";          // dark-only color
@@ -650,8 +738,12 @@ TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and com
     ir.root = frame_node("root", "Panel", 320.0f, 240.0f, LayoutDirection::column);
 
     auto meter = frame_node("lvl", "Level", 80.0f, 16.0f, LayoutDirection::column);
-    meter.audio_widget = AudioWidgetType::meter;               // unsupported leaf in B1
+    meter.audio_widget = AudioWidgetType::meter;               // B3: now a bound PulpMeter
     ir.root.children.push_back(std::move(meter));
+
+    auto icon = frame_node("ico", "Icon", 24.0f, 24.0f, LayoutDirection::column);
+    icon.type = "image";                                       // bare image leaf → Color.clear (B5)
+    ir.root.children.push_back(std::move(icon));
 
     auto img = frame_node("logo", "Logo", 40.0f, 40.0f, LayoutDirection::column);
     img.type = "image";                                        // unsupported, but...
@@ -664,7 +756,8 @@ TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and com
 
     const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
     INFO(view);
-    REQUIRE(contains(view, "Color.clear"));                    // unsupported meter leaf
+    REQUIRE(contains(view, "Color.clear"));                    // bare image leaf (assets are B5)
+    REQUIRE(contains(view, "PulpMeter(parameter: p)"));        // B3: meter now binds
     REQUIRE(contains(view, "⚠︎ unbound"));                     // unbound control placeholder
     const auto theme = generate_pulp_swift(ir, ir.asset_manifest).theme_source;
     REQUIRE(contains(theme, "overlayOnly"));                   // dark-only color emitted

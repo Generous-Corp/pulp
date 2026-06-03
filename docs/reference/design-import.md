@@ -124,8 +124,9 @@ cannot reproduce — flex-wrap, justify distribution, `align:stretch`,
 `position:absolute` (approximated with `.offset`), CSS grid, skew/matrix
 transforms, per-side borders, and multi-/inset shadows — is reported as a
 `fidelity:` warning; the ones that genuinely render wrong fail the import under
-`--strict-fidelity` (exit 4). The meter/xy_pad/waveform/spectrum/image/svg
-widgets are not yet mapped.
+`--strict-fidelity` (exit 4). The audio meter/xy_pad/waveform/spectrum widgets
+map to native `PulpMeter`/`PulpXYPad`/`PulpWaveform`/`PulpSpectrum` views and
+text buttons to a SwiftUI `Button`; image/svg/canvas assets remain deferred.
 
 For `--from jsx --mode live --emit js`, Pulp writes the precompiled bundle
 verbatim for runtime import. That pass-through path does not parse or render
