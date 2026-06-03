@@ -151,6 +151,22 @@ predictable output, no MIDI.
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
+- **Stateful custom nodes (native-components Phase 5).** `CustomNodeType` has an
+  optional lifecycle: set `create` and the graph owns one opaque instance per
+  node (RAII via `destroy`); `process_instance` runs instead of the stateless
+  `process`, and `prepare`/`release`/`reset`/`save_state`/`load_state` operate on
+  it. Empty callbacks = today's stateless node (no instance, no serialized
+  state). The instance is created/prepared on the UI thread inside
+  `SignalGraph::prepare()` (mirroring `PluginSlot`) and captured into each
+  `CompiledGraph` snapshot by `shared_ptr` — never allocate or create instances
+  on the audio thread, and never store a raw `GraphNode` pointer in the snapshot.
+  `process_instance` must be RT-safe; call `save_state`/`load_state` only on the
+  control path (graph not live, or after invalidate + re-prepare). Opaque state
+  is `std::vector<uint8_t>` via `SignalGraph::custom_node_state` /
+  `set_custom_node_state`; `GraphSerializer` persists it as `state_b64` and keeps
+  the blob even for **unresolved** nodes (save → load-missing-type → save keeps
+  state). Do not pull the `pulp_native_state_*` C ABI into `CustomNodeType` —
+  that's the deferred `pulp_node_v1` (Phase 6).
 
 ## Common tripwires
 

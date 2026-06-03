@@ -53,7 +53,31 @@ struct CustomNodeType {
     int num_input_ports = 0;
     int num_output_ports = 0;
     std::string default_name;
-    CustomNodeProcessFn process;
+    CustomNodeProcessFn process;  // stateless (used when `create` is empty)
+
+    // ── Optional stateful lifecycle (Phase 5) ──────────────────────────────
+    // When `create` is set, the graph owns ONE opaque instance per node (RAII
+    // via `destroy`). `process_instance` runs instead of `process`, and
+    // prepare/release/reset/save_state/load_state operate on that instance. All
+    // empty == today's stateless process-only node, byte-for-byte unchanged
+    // (no instance is created and no state is serialized).
+    //
+    // Threading mirrors PluginSlot: create/prepare/release/save_state/load_state
+    // are called on the UI/main thread (never from process()); process_instance
+    // runs on the audio thread and must be real-time-safe. As with plugin
+    // state, call save_state/load_state from non-audio control paths (graph not
+    // live, or after invalidate + re-prepare).
+    std::function<void*()> create;
+    std::function<void(void* /*instance*/)> destroy;
+    std::function<void(void* /*instance*/, double /*sample_rate*/, int /*max_block*/)> prepare;
+    std::function<void(void* /*instance*/)> release;
+    std::function<void(void* /*instance*/)> reset;
+    std::function<void(void* /*instance*/, audio::BufferView<float>& /*output*/,
+                       const audio::BufferView<const float>& /*input*/,
+                       int /*num_samples*/)>
+        process_instance;
+    std::function<std::vector<uint8_t>(void* /*instance*/)> save_state;
+    std::function<bool(void* /*instance*/, const std::vector<uint8_t>& /*bytes*/)> load_state;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -129,6 +153,17 @@ struct GraphNode {
     // distinguished from newer incompatible factories.
     std::string custom_type_id;
     int custom_type_version = 0;
+
+    // Phase 5 — opaque state for a stateful custom node. `custom_instance` is
+    // the live per-node object (RAII via the type's destroy), created on the UI
+    // thread in prepare() and captured into each compiled snapshot like a
+    // plugin shared_ptr so old audio snapshots stay alive. `custom_state_blob`
+    // is the serialized form, preserved even when the type is unresolved (so a
+    // round-trip through .pulpgraph keeps the state). `custom_state_pending`
+    // marks a freshly-loaded blob to apply to the instance exactly once.
+    std::shared_ptr<void> custom_instance;
+    std::vector<uint8_t> custom_state_blob;
+    bool custom_state_pending = false;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -172,6 +207,16 @@ public:
                                       int num_inputs,
                                       int num_outputs,
                                       const std::string& name);
+
+    // Phase 5 — opaque per-node state for stateful custom nodes.
+    // custom_node_state() returns the live instance's save_state() when the node
+    // is resolved + stateful, else the last-loaded blob (preserved for
+    // unresolved nodes). Empty when `id` is not a custom node or has no state.
+    // set_custom_node_state() stores the blob to apply to the instance on the
+    // next prepare(); returns false when `id` is not a custom node. Both run on
+    // the UI/main thread — never the audio thread.
+    std::vector<uint8_t> custom_node_state(NodeId id) const;
+    bool set_custom_node_state(NodeId id, const std::vector<uint8_t>& bytes);
 
     // Remove a node and all its connections
     bool remove_node(NodeId id);
