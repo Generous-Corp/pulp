@@ -878,6 +878,24 @@ pulp_add_test_suite(pulp-test-native-core-ffi
     SOURCES test_native_core_ffi.cpp
     LIBRARIES pulp::native-components)
 
+# Opt-in Rust lane: build a Cargo staticlib reference core (with an RT-checking
+# global allocator) and link the FFI round-trip + RT-safety death tests. OFF by
+# default, so default builds need no Rust toolchain. The death tests fork() a
+# child that deliberately allocates inside a no-alloc scope and assert it is
+# trapped — never run in the Catch2 parent (Unix-only; the lane is desktop).
+if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpCargoStaticlib.cmake)
+    pulp_add_cargo_staticlib(
+        NAME pulp-noop-rust-core
+        MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native-components/noop-rust-core/Cargo.toml
+        LIB_NAME pulp_noop_rust_core
+        FEATURES pulp_rt_check_allocator
+        PROFILE dev)
+    pulp_add_test_suite(pulp-test-rust-dsp-ffi
+        SOURCES test_rust_dsp_ffi.cpp native_components/rt_intercept_test_support.cpp
+        LIBRARIES pulp::native-components pulp::runtime pulp-noop-rust-core)
+endif()
+
 # #334: AudioFocusRegistry — cross-platform observer for OS audio-focus
 # signals (Android AudioManager.OnAudioFocusChangeListener,
 # AVAudioSession interruptions). Pure C++ unit tests — no platform deps.
