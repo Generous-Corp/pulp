@@ -273,8 +273,17 @@ TEST_CASE("GpuCompute magnitude hot loop reuses pool buffers",
     // spike (a concurrent build, another VM's GPU work), which previously made
     // this assertion flake on busy hosts. The median across batches resists a
     // one-off spike without masking a real, sustained regression.
+    // Total synchronous submits = kBatches * kItersPerBatch. Each submit is a
+    // blocking GPU round-trip, so this count is bounded by the ctest wall-clock
+    // timeout (--timeout 120): the per-call ceiling is 120s / total_submits.
+    // The 100 ms/call runaway sentinel below is only *reachable* if that ceiling
+    // sits well above 100 ms — otherwise a real leak times the test out at the
+    // ceiling instead of tripping the sentinel, and the flake window widens on a
+    // slow/virtualized overflow runner. 5 * 100 = 500 submits → ~240 ms/call
+    // ceiling, comfortably above the 100 ms sentinel. (Was 5 * 1000 = 5000 →
+    // ~24 ms ceiling, below the sentinel — see #3411 review r3352262249.)
     constexpr int kBatches = 5;
-    constexpr int kItersPerBatch = 1000;
+    constexpr int kItersPerBatch = 100;
     std::vector<double> per_call_us_samples;
     per_call_us_samples.reserve(kBatches);
     for (int b = 0; b < kBatches; ++b) {
