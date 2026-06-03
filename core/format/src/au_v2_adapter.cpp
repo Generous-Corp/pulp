@@ -14,6 +14,7 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <cstring>
 #include <limits>
@@ -473,7 +474,17 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
 
     pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
 
-    processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    // Phase 3 — uniform param-events contract + RT-safety guard. AU v2 has no
+    // scheduled-parameter event source, so the queue is empty (host params flow
+    // via store_ as before); set it anyway so a Processor always sees a non-null
+    // queue. Wrap ONLY the process call in ScopedNoAlloc — the preamble above
+    // (param snapshot, pointer-vector resizes) legitimately allocates.
+    param_events_.clear();
+    processor_->set_param_events(&param_events_);
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    }
 
     // Plugin → host: diff params against the pre-process snapshot and push
     // any plugin-side changes back to the host's parameter system. Without

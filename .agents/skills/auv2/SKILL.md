@@ -82,6 +82,20 @@ The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same `p
 
 ## Recent changes
 
+### Param-events sidecar + RT-safety guard (native-components Phase 3)
+
+`ProcessBufferLists()` now `set_param_events(&param_events_)` before
+`processor_->process(...)` and wraps ONLY the process call in
+`pulp::runtime::ScopedNoAlloc` (the preamble — param snapshot, pointer-vector
+resizes — legitimately allocates, so don't widen the guard). This makes the
+param-events contract uniform across formats (VST3/CLAP/AUv3 already had it).
+AU v2's `AUEffectBase` has no scheduled/ramped parameter event source, so
+`param_events_` is **empty** — host params still reach the Processor through
+`store_` (StateStore) exactly as before. A native-component (`NativeCoreProcessor`)
+plugin therefore won't receive sample-accurate params on AU v2 yet; that needs
+the AUv3 `AURenderEventParameter` model and is a follow-up. Do not synthesise an
+AU v2 param-event mapping by guessing.
+
 ### Latency / tail change notifications (PR #2934, item 3.11)
 
 A Processor flags a mid-render latency or tail change via

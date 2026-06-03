@@ -12,6 +12,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/lv2_adapter.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <lv2/core/lv2.h>
 #include <lv2/atom/atom.h>
@@ -233,7 +234,15 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     proc_ctx.sample_rate = inst->sample_rate;
     proc_ctx.num_samples = static_cast<int>(n_samples);
 
-    inst->processor->process(output, input, midi_in, midi_out, proc_ctx);
+    // Phase 3 — uniform param-events contract + RT-safety guard (mirrors VST3).
+    // The queue carries no atom-sourced events yet; control-port params still
+    // flow via store. Wrap only the process call in ScopedNoAlloc.
+    inst->param_events.clear();
+    inst->processor->set_param_events(&inst->param_events);
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        inst->processor->process(output, input, midi_in, midi_out, proc_ctx);
+    }
 
     // #491: serialize outgoing MIDI back to the LV2 atom output port.
     // Prior to this, any Processor that populated midi_out (arpeggiator,

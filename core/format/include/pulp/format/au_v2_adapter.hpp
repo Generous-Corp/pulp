@@ -7,6 +7,7 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 #include <memory>
 #include <mutex>
@@ -138,6 +139,16 @@ protected:
 private:
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
+
+    // Sample-accurate parameter-event sidecar, set on the Processor each block
+    // so the param-events contract is uniform across formats (VST3/CLAP/AUv3
+    // already provide it). AU v2's AUEffectBase has no scheduled/ramped
+    // parameter event source today, so this queue is empty: host parameter
+    // changes still reach the Processor through `store_` (StateStore) exactly as
+    // before — this adds the uniform API + the RT-safety guard without changing
+    // existing behaviour. Sample-accurate AU v2 param sourcing is a follow-up
+    // (AUv3 has the AURenderEventParameter model).
+    state::ParameterEventQueue param_events_;
 
     // Host accommodations, resolved once in the constructor via the
     // runtime policy (host-quirks plan, P3).

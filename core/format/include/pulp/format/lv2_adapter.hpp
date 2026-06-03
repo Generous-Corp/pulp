@@ -10,6 +10,7 @@
 // - TTL manifest files for discovery
 
 #include <pulp/format/processor.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 #include <lv2/core/lv2.h>
 #include <lv2/urid/urid.h>
@@ -24,6 +25,12 @@ static constexpr int kMaxChannels = 8;
 struct PulpLv2Instance {
     std::unique_ptr<Processor> processor;
     state::StateStore store;
+    // Phase 3 — param-events sidecar, set on the Processor each run() so the
+    // contract is uniform across formats. LV2 control-port values are applied
+    // through `store` as before; this queue carries no events yet (atom-based
+    // sample-accurate param events are a follow-up), but it gives the Processor
+    // a non-null queue and pairs with the RT-safety guard around process().
+    state::ParameterEventQueue param_events;
     ProcessorFactory factory;
 
     // Audio working state

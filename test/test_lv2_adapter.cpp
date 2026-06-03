@@ -203,6 +203,9 @@ struct Lv2ProbeCapture {
     std::size_t last_midi_count = 0;
     uint8_t first_status = 0;
     uint8_t first_note = 0;
+    // Phase 3 — true if the LV2 run path set a (non-null) param-events queue on
+    // the Processor before calling process(), proving the uniform sidecar.
+    bool param_events_non_null = false;
 
     void reset() { *this = {}; }
 };
@@ -250,6 +253,7 @@ public:
         g_lv2_probe.last_num_samples = context.num_samples;
         g_lv2_probe.last_sample_rate = context.sample_rate;
         g_lv2_probe.last_midi_count = midi_in.size();
+        g_lv2_probe.param_events_non_null = (param_events() != nullptr);
         for (const auto& ev : midi_in) {
             g_lv2_probe.first_status = ev.data()[0];
             g_lv2_probe.first_note = ev.size() > 1 ? ev.data()[1] : 0;
@@ -411,6 +415,9 @@ TEST_CASE("LV2 generic entry wires ports, audio, control values, and MIDI",
 
     REQUIRE(inst->store.get_value(kLv2ProbeGainParam) == 0.5f);
     REQUIRE(g_lv2_probe.process_calls == 1);
+    // Phase 3 — the LV2 run path provides a uniform (non-null) param-events
+    // queue to the Processor, matching VST3/CLAP/AUv3.
+    REQUIRE(g_lv2_probe.param_events_non_null);
     REQUIRE(g_lv2_probe.last_num_samples == 4);
     REQUIRE(g_lv2_probe.last_sample_rate == 44100.0);
     REQUIRE(g_lv2_probe.last_midi_count == 1);
