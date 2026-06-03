@@ -2445,11 +2445,22 @@ The `resolve-provider` job in `build.yml` decides per-run where each
 - **Local first.** While the local self-hosted Mac has spare capacity
   the macOS leg routes to it (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
 - **Overflow to free GitHub-hosted `macos-15`.** When the local Mac is
-  saturated — `_count_busy_local_mac_runners()` returns
-  `>= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default 2) Build-and-Test runs
-  already targeting local — the leg routes to `macos-15` instead. The
-  repo is public, so GitHub-hosted macOS is **free**; overflow costs
-  nothing, it just runs slower than the M1 Max.
+  saturated the leg routes to `macos-15` instead. The repo is public, so
+  GitHub-hosted macOS is **free**; overflow costs nothing, it just runs
+  slower than the M1 Max.
+- **Capacity-aware (`#3299`).** "Saturated" is decided by real SUPPLY
+  first, not just DEMAND. `_count_idle_local_runners()` queries
+  `actions/runners` for self-hosted macOS runners that are `online` AND
+  `busy == false` carrying `LOCAL_MAC_RUNNER_LABEL`. If **any** idle
+  local runner exists, the leg stays local — never overflow while a
+  Studio or the M5 sits idle. Only when there is no known idle local
+  supply does it fall back to the older demand heuristic
+  (`_count_busy_local_mac_runners() >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD`,
+  default 2). The idle probe's failure mode is *unknown* (`-1`), which
+  falls through to the demand heuristic — a probe blip never silently
+  force-overflows. Before `#3299` the fixed threshold of 2 overflowed a
+  3rd leg to the (saturated, ARM-incompatible) hosted pool while the 3rd
+  Studio + the M5 were idle — the saturation-timeout failure below.
 - **Operator override.** A `workflow_dispatch` `macos_runner_selector_json`
   input always wins.
 
@@ -2487,6 +2498,48 @@ capacity, not a queue waiting on the Mac. Namespace is no longer a
 routing target (cut for cost, 2026-05-20). The matrix leg name's
 `[<provider>]` suffix reflects the real route (`local` / `github-hosted`
 / `operator`).
+
+### Recover a saturated/wedged macOS gate (don't debug it)
+
+The required `macos` check failing at **~28–32 min with no test output**
+is almost never a test failure — it is a **saturation timeout**: the leg
+overflowed to a contended pool (or queued behind busy local runners) and
+never actually ran. Recover; do not go spelunking in logs for a bug that
+isn't there. Confirm by opening the failed job — a saturation timeout has
+no compile/ctest lines, just a runner-acquisition gap.
+
+The recovery rules, learned the hard way:
+
+1. **The required `macos` check is satisfied ONLY by the `pull_request`
+   run's macОС job.** A `workflow_dispatch` run (e.g. an
+   `macos_runner_selector_json` operator-override that you route to an
+   idle runner) will go green, but its success does **NOT** supersede or
+   satisfy the PR's required check. Branch protection keys off the
+   `pull_request`-triggered run specifically.
+2. **Re-run the PR run, don't dispatch a new one.**
+   `gh run rerun <pr-run-id> --failed` re-runs the failed macОС leg
+   *within the pull_request run* → satisfies the gate. `gh workflow run`
+   creates a `workflow_dispatch` run, which (per #1) does not. Find the
+   PR run with `gh run list --branch <branch> --workflow build.yml`.
+3. **NEVER `gh run cancel` the auto `pull_request` run.** A cancelled
+   run leaves a sticky `macos = CANCELLED/FAILURE` check on the PR that a
+   later dispatch run cannot overwrite; you then *must* `gh run rerun`
+   the cancelled run to clear it. Let it finish or rerun it — don't
+   cancel it.
+4. **Check real idle capacity before assuming "stuck."**
+   `gh api repos/<owner>/<repo>/actions/runners --jq '[.runners[] |
+   select(.status=="online" and .busy==false) | .name]'` lists idle
+   self-hosted runners (`pulp-build-studio` Studios + the `pulp-build-m5`
+   blackbook M5 are the usual idle ones; `pulp-m1-*` are often offline).
+   If a leg failed on saturation while these sit idle, the
+   `gh run rerun` will now claim them (capacity-aware routing, #3299).
+5. **Batch stuck PRs into one.** When several PRs are wedged on the gate,
+   combining them into a single PR (cherry-pick onto one branch) cuts N
+   macОС runs to 1 — landed `#3411` (four PRs) this way on one local run.
+6. **The durable fix is `#3299`** (capacity-aware routing above) — it
+   stops the overflow-to-saturated-pool-while-idle root cause, so this
+   recovery dance should become rare. If you still hit it often, the
+   idle probe or the `LOCAL_MAC_RUNNER_LABEL` is likely misconfigured.
 
 ## Host-quirks staleness check (host-quirks P4)
 

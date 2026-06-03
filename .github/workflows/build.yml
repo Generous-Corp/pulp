@@ -272,6 +272,51 @@ jobs:
                   )
                   return 0
 
+          def _count_idle_local_runners() -> int:
+              # Capacity-aware routing (#3299). The busy-run-count heuristic
+              # above estimates DEMAND (how many other runs are using a local
+              # macOS leg). This measures SUPPLY: how many self-hosted macOS
+              # runners carrying the local label are online AND not busy RIGHT
+              # NOW. The two are not interchangeable — the demand heuristic
+              # with a fixed threshold of 2 overflowed a 3rd leg to the
+              # github-hosted pool (saturated / ARM-incompatible — it cannot
+              # pass the gate) even while a 3rd Studio and the M5 sat idle.
+              # When real idle local supply exists we must never overflow.
+              #
+              # Failure mode is deliberately "unknown" (-1), NOT 0: a probe
+              # blip must fall back to the demand heuristic, never silently
+              # force-overflow OR force-local on bad data.
+              if not REPOSITORY:
+                  return -1
+              local_label = (os.environ.get("LOCAL_MAC_RUNNER_LABEL") or "self-hosted").strip()
+              try:
+                  result = subprocess.run(
+                      [
+                          "gh", "api",
+                          f"repos/{REPOSITORY}/actions/runners?per_page=100",
+                          "--jq",
+                          (
+                              f'[.runners[] '
+                              f'| select(.status == "online") '
+                              f'| select(.busy == false) '
+                              f'| select(([.labels[].name] // []) '
+                              f'| index({json.dumps(local_label)}))] | length'
+                          ),
+                      ],
+                      check=True,
+                      capture_output=True,
+                      text=True,
+                      timeout=15,
+                  )
+                  text = (result.stdout or "").strip()
+                  return int(text) if text else 0
+              except (subprocess.SubprocessError, ValueError) as exc:
+                  sys.stderr.write(
+                      f"resolve-provider: idle-local-runner probe failed; "
+                      f"falling back to the busy-count heuristic. ({exc})\n"
+                  )
+                  return -1
+
           workflow_dispatch_selector = (
               os.environ.get("WORKFLOW_DISPATCH_MACOS_SELECTOR") or ""
           ).strip()
@@ -304,13 +349,29 @@ jobs:
               # the same routing — otherwise ship cycles always pin local.
               # The explicit-override path above still wins; this branch
               # only fires when the operator didn't supply a selector.
-              busy = _count_busy_local_mac_runners()
-              if busy >= overflow_threshold:
-                  macos_route = f"overflow (BUSY={busy} >= {overflow_threshold})"
-                  chosen_macos_selector = overflow_macos_selector
-              else:
-                  macos_route = f"local (BUSY={busy} < {overflow_threshold})"
+              idle_local = _count_idle_local_runners()
+              if idle_local > 0:
+                  # Capacity-aware (#3299): genuine idle local supply exists,
+                  # so never overflow to the github-hosted pool — claim it.
+                  macos_route = f"local (IDLE_LOCAL={idle_local} > 0)"
                   chosen_macos_selector = local_macos_selector
+              else:
+                  # No known idle local supply (all busy, or the probe came
+                  # back unknown=-1). Fall back to the demand heuristic for
+                  # the overflow decision, preserving prior behavior exactly.
+                  busy = _count_busy_local_mac_runners()
+                  if busy >= overflow_threshold:
+                      macos_route = (
+                          f"overflow (IDLE_LOCAL={idle_local}, "
+                          f"BUSY={busy} >= {overflow_threshold})"
+                      )
+                      chosen_macos_selector = overflow_macos_selector
+                  else:
+                      macos_route = (
+                          f"local (IDLE_LOCAL={idle_local}, "
+                          f"BUSY={busy} < {overflow_threshold})"
+                      )
+                      chosen_macos_selector = local_macos_selector
           else:
               # No overflow target configured. Stay local.
               macos_route = "local (default)"
