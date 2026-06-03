@@ -259,6 +259,11 @@ std::string trim_copy(const std::string& s) {
 
 bool looks_like_serialized_design_ir(const std::string& content) {
     const auto trimmed = trim_copy(content);
+    if (trimmed.find("figma-plugin-v1") != std::string::npos
+        || trimmed.find("\"adapter\": \"figma-plugin\"") != std::string::npos
+        || trimmed.find("\"adapter\":\"figma-plugin\"") != std::string::npos) {
+        return false;
+    }
     return !trimmed.empty()
         && trimmed.front() == '{'
         && trimmed.find("\"version\"") != std::string::npos
@@ -805,7 +810,8 @@ static void print_usage() {
     std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
     std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n";
     std::cout << "  designmd Google DESIGN.md design-system spec (tokens only)\n";
-    std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
+    std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n";
+    std::cout << "  figma-plugin  Pulp Figma plugin / headless REST .pulp.json or .pulp.zip envelope\n\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source (required)\n";
     std::cout << "  --file <path>     Input file path\n";
@@ -1662,6 +1668,7 @@ int main(int argc, char* argv[]) {
     // Parse based on source
     DesignIR ir;
     bool parsed_serialized_design_ir = false;
+    const bool parsed_figma_plugin_envelope = looks_like_figma_plugin_export(content);
     std::string runtime_error;  // captures --execute-bundle fallback reason
     try {
         if (runtime_mode == RuntimeMode::baked &&
@@ -1677,7 +1684,7 @@ int main(int argc, char* argv[]) {
                     // to parse_figma_json, which finds none of its structure and
                     // silently yields an empty root-only import. Auto-route to
                     // the plugin parser and tell the user once.
-                    if (looks_like_figma_plugin_export(content)) {
+                    if (parsed_figma_plugin_envelope) {
                         std::cerr << "note: input is a Figma-plugin export envelope; "
                                      "using the figma-plugin parser. Pass "
                                      "--from figma-plugin to silence this notice.\n";
@@ -1835,7 +1842,8 @@ int main(int argc, char* argv[]) {
                                                       asset_timeout_ms,
                                                       asset_cache_dir,
                                                       expected_asset_hashes);
-        refresh_design_ir_asset_manifest(ir, asset_options);
+        if (!(parsed_figma_plugin_envelope && !ir.asset_manifest.assets.empty()))
+            refresh_design_ir_asset_manifest(ir, asset_options);
         print_asset_manifest_diagnostics(ir.asset_manifest);
         if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
 
@@ -1859,7 +1867,8 @@ int main(int argc, char* argv[]) {
                                                       asset_timeout_ms,
                                                       asset_cache_dir,
                                                       expected_asset_hashes);
-        refresh_design_ir_asset_manifest(ir, asset_options);
+        if (!(parsed_figma_plugin_envelope && !ir.asset_manifest.assets.empty()))
+            refresh_design_ir_asset_manifest(ir, asset_options);
         print_asset_manifest_diagnostics(ir.asset_manifest);
         if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
 

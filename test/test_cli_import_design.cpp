@@ -475,6 +475,46 @@ TEST_CASE("pulp import-design --from figma auto-routes a figma-plugin envelope",
     REQUIRE(read_text(js_out).find("Hello world") != std::string::npos);
 }
 
+TEST_CASE("pulp import-design baked C++ routes figma-plugin envelopes through plugin parser",
+          "[cli][import-design][figma-plugin][cpp][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-import-figma-plugin-cpp-routing");
+    auto scene = tmp / "scene.pulp.json";
+    {
+        std::ofstream f(scene);
+        f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "parser_version": "0.1.0",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "asset_manifest": {"version": 1, "assets": [
+    {"asset_id": "logo", "original_uri": "figma://x/1:3",
+     "local_path": "assets/logo.png", "content_hash": "logo", "mime": "image/png"}]},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+           "style": {"width": 240, "height": 120},
+           "children": [{"type": "text", "name": "Hello", "figma_node_id": "1:2",
+                         "content": "Hello baked C++"},
+                        {"type": "image", "name": "Logo", "figma_node_id": "1:3",
+                         "asset_ref": "logo",
+                         "style": {"width": 24, "height": 24}}]}
+})";
+    }
+    auto cpp_out = tmp / "imported_ui.cpp";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", scene.string(),
+                       "--mode", "baked", "--emit", "cpp",
+                       "--output", cpp_out.string(),
+                       "--no-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(cpp_out));
+    REQUIRE(fs::exists(tmp / "imported_ui.hpp"));
+    const auto cpp = read_text(cpp_out);
+    REQUIRE(cpp.find("Hello baked C++") != std::string::npos);
+    REQUIRE(cpp.find("set_image_source(\"assets/logo.png\")") != std::string::npos);
+}
+
 // ── Interactive sprite knobs (task #22) ──────────────────────────────────
 // A recognized knob whose body art lives in a CHILD image (the ELYSIUM shape:
 // captured disc + a separate pointer) used to be DEMOTED to a plain image in

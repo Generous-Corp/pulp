@@ -245,6 +245,10 @@ bool attr_bool(const IRNode& node, std::string_view key) {
 }
 
 std::optional<std::string> first_asset_id(const IRNode& node) {
+    if (auto value = attr(node, "asset_ref"); value && !value->empty())
+        return value;
+    if (auto value = attr(node, "assetRef"); value && !value->empty())
+        return value;
     for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId"}) {
         auto value = attr(node, key);
         if (value && !value->empty())
@@ -265,8 +269,11 @@ std::string asset_uri(const IRAssetManifest& manifest, std::string_view asset_id
     const auto* asset = manifest.resolve(asset_id);
     if (asset == nullptr)
         return {};
-    if (asset->local_path && !asset->local_path->empty())
-        return "file://" + *asset->local_path;
+    if (asset->local_path && !asset->local_path->empty()) {
+        if (!asset->local_path->empty() && asset->local_path->front() == '/')
+            return "file://" + *asset->local_path;
+        return *asset->local_path;
+    }
     if (!asset->original_uri.empty() &&
         (asset->original_uri.rfind("data:", 0) == 0 ||
          asset->original_uri.rfind("resource:", 0) == 0 ||

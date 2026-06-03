@@ -180,6 +180,14 @@ attribute, while `set_default_value(...)` must come from normalized
 and emit non-hex semantic color tokens as strings rather than trying to parse
 them as colors.
 
+For figma-plugin `.pulp.json` / `.pulp.zip` envelopes, baked `ir-json` and
+`cpp` export must preserve the envelope's local `asset_manifest` instead of
+calling `refresh_design_ir_asset_manifest()` and wiping it. Image nodes may
+carry `asset_ref` / `assetRef`; resolve those through `IRAssetManifest` the
+same way as `srcAssetId`. If `local_path` is relative, emit it as a relative
+resource path such as `assets/logo.png`; only absolute `local_path` values
+should become `file:///...` URIs.
+
 #### figma-plugin `binding` → canonical `pulp*` binding contract
 
 The figma-plugin extractor (`tools/figma-plugin/`) exports a recognized Pulp
