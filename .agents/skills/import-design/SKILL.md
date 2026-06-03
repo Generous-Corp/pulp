@@ -1489,12 +1489,20 @@ brings the SwiftUI binding manifest to parity with the C++ manifest — it emits
 the same `NativeBindingMetadata` field set per entry (a cross-check test asserts
 the field/value pairs match `generate_pulp_cpp`'s manifest), adds a
 `conventions` block (gesture grouping / normalized range / poll), and the
-generated controls round-trip through a mock store (`PulpParameterTests`). The
-grid/assets/host scaffold (B5) follows. The
+generated controls round-trip through a mock store (`PulpParameterTests`). B5
+adds CSS grid → `LazyVGrid` (column COUNT from `grid-template-columns`, mapped
+to equal `.flexible()` `GridItem`s; exact fr/px/minmax sizing + explicit
+placement approximated → informational `swiftui-grid-tracks`, no longer a hard
+divergence), image assets → `Image("<asset_id>")` (bundled, referenced by id in
+the app's asset catalog) or `AsyncImage(url:)` (remote http(s)), and a host
+scaffold under `templates/swiftui-design-host/` that mounts the generated root
+view against a `PulpParameterStore`. The
 visualizers (waveform/spectrum) have no audio buffer in a baked import and
 xy_pad's second axis has no IR source, so they bind the one available parameter
-and emit an informational fidelity note; image/svg/canvas leaves still degrade
-to a sized `Color.clear` (assets are B5). The test gate is golden strings
+and emit an informational fidelity note; svg/canvas vector leaves still degrade
+to a sized `Color.clear` (rasterization not modelled), and an `xcassets` color
+catalog for dark mode is deferred (the theme's dynamic colors already cover it).
+The test gate is golden strings
 **plus** a `swiftc -typecheck` of the generated Swift against the real PulpSwift
 module (golden C++-string asserts alone can ship non-compiling Swift).
 

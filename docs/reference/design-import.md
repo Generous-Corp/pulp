@@ -119,14 +119,19 @@ silently binding the wrong parameter. The full visual style set is emitted
 mix-blend-mode, and mixed-style text), and `rgb()`/`rgba()` colours are
 supported alongside hex. Because SwiftUI stacks are not Yoga, flex layout is
 approximate: cross-axis alignment maps to the stack's `alignment:`, and
-space-between/around is approximated with `Spacer()`s. Anything a SwiftUI stack
-cannot reproduce — flex-wrap, justify distribution, `align:stretch`,
-`position:absolute` (approximated with `.offset`), CSS grid, skew/matrix
-transforms, per-side borders, and multi-/inset shadows — is reported as a
-`fidelity:` warning; the ones that genuinely render wrong fail the import under
-`--strict-fidelity` (exit 4). The audio meter/xy_pad/waveform/spectrum widgets
-map to native `PulpMeter`/`PulpXYPad`/`PulpWaveform`/`PulpSpectrum` views and
-text buttons to a SwiftUI `Button`; image/svg/canvas assets remain deferred.
+space-between/around is approximated with `Spacer()`s. CSS grid lowers to a
+`LazyVGrid` (column count from `grid-template-columns`; exact track sizing
+approximated). Anything a SwiftUI stack cannot reproduce — flex-wrap, justify
+distribution, `align:stretch`, `position:absolute` (approximated with
+`.offset`), skew/matrix transforms, per-side borders, and multi-/inset shadows —
+is reported as a `fidelity:` warning; the ones that genuinely render wrong fail
+the import under `--strict-fidelity` (exit 4). The audio
+meter/xy_pad/waveform/spectrum widgets map to native
+`PulpMeter`/`PulpXYPad`/`PulpWaveform`/`PulpSpectrum` views, text buttons to a
+SwiftUI `Button`, and images to `Image("<asset_id>")` (bundled, by asset-catalog
+id) or `AsyncImage` (remote); svg/canvas vectors remain deferred. A
+`templates/swiftui-design-host/` scaffold mounts the generated root view in a
+standalone app for Simulator/macOS preview.
 
 For `--from jsx --mode live --emit js`, Pulp writes the precompiled bundle
 verbatim for runtime import. That pass-through path does not parse or render

@@ -617,13 +617,12 @@ TEST_CASE("generate_pulp_swift maps cross-axis alignment and approximates justif
     REQUIRE(count_strict_fidelity_failures(out.issues) == 0);  // Spacer approx is advisory
 }
 
-TEST_CASE("generate_pulp_swift flags absolute/grid/wrap/skew as hard divergences",
+TEST_CASE("generate_pulp_swift flags absolute/wrap/skew as hard divergences",
           "[view][import][swiftui]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "R", 200.0f, 200.0f, LayoutDirection::column);
-    ir.root.layout.display = "grid";
-    ir.root.layout.wrap = true;
+    ir.root.layout.wrap = true;                  // flex container (not grid)
     ir.root.style.transform = "skewX(10deg)";
 
     auto abs_child = frame_node("a", "Abs", 40.0f, 40.0f, LayoutDirection::column);
@@ -636,12 +635,140 @@ TEST_CASE("generate_pulp_swift flags absolute/grid/wrap/skew as hard divergences
     auto out = generate_with_fidelity(ir);
     INFO(out.view);
     REQUIRE(contains(out.view, ".offset(x: 10, y: 20)"));
-    REQUIRE(has_kind(out.issues, "swiftui-grid"));
     REQUIRE(has_kind(out.issues, "swiftui-flex-wrap"));
     REQUIRE(has_kind(out.issues, "swiftui-transform"));
     REQUIRE(has_kind(out.issues, "swiftui-absolute-position"));
     // These genuinely render wrong, so --strict-fidelity must be able to gate.
-    REQUIRE(count_strict_fidelity_failures(out.issues) >= 4);
+    REQUIRE(count_strict_fidelity_failures(out.issues) >= 3);
+}
+
+TEST_CASE("generate_pulp_swift lowers a CSS grid to LazyVGrid (B5)",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "Grid", 300.0f, 200.0f, LayoutDirection::row);
+    ir.root.layout.display = "grid";
+    ir.root.layout.grid_template_columns = "1fr 1fr 1fr";  // 3 columns
+    ir.root.layout.column_gap = 8.0f;
+    ir.root.layout.row_gap = 12.0f;
+    for (int i = 0; i < 5; ++i)
+        ir.root.children.push_back(text_node("c" + std::to_string(i),
+                                             "cell" + std::to_string(i), 12.0f, "#fff"));
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    // 3 flexible columns, row spacing from row_gap, column spacing from column_gap.
+    REQUIRE(contains(out.view, "LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), "
+                               "GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], "
+                               "spacing: 12) {"));
+    // Track sizing is approximated, but it RENDERS — informational, not gating.
+    REQUIRE(has_kind(out.issues, "swiftui-grid-tracks"));
+    REQUIRE_FALSE(has_kind(out.issues, "swiftui-grid"));  // no longer a hard "lost" divergence
+    REQUIRE(count_strict_fidelity_failures(out.issues) == 0);
+}
+
+TEST_CASE("generate_pulp_swift counts grid columns from repeat() and mixed tracks",
+          "[view][import][swiftui]") {
+    auto grid_with = [](const std::string& tracks) {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root = frame_node("r", "G", 200.0f, 200.0f, LayoutDirection::column);
+        ir.root.layout.grid_template_columns = tracks;
+        ir.root.children.push_back(text_node("c", "x", 10.0f, "#fff"));
+        return generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    };
+    auto count_items = [](const std::string& view) {
+        std::size_t n = 0, pos = 0;
+        while ((pos = view.find("GridItem(.flexible", pos)) != std::string::npos) { ++n; pos += 4; }
+        return n;
+    };
+    REQUIRE(count_items(grid_with("repeat(4, 1fr)")) == 4);
+    REQUIRE(count_items(grid_with("minmax(100px, 1fr) 2fr")) == 2);
+    REQUIRE(count_items(grid_with("100px auto 1fr")) == 3);
+    // repeat() followed by more tracks must SUM, not stop at the repeat count
+    // (Codex review): repeat(2,1fr) 2fr → 2 + 1 = 3.
+    REQUIRE(count_items(grid_with("repeat(2, 1fr) 2fr")) == 3);
+    REQUIRE(count_items(grid_with("repeat(2, 1fr 2fr)")) == 4);        // pattern has 2 tracks
+    REQUIRE(count_items(grid_with("repeat(auto-fill, 120px)")) == 1);  // unknowable → pattern count
+}
+
+TEST_CASE("generate_pulp_swift flags dropped grid item placement as a hard divergence",
+          "[view][import][swiftui]") {
+    // grid-column/grid-row item placement is lost in a LazyVGrid auto-flow, so
+    // it must be a hard (gating) fidelity issue, not the advisory track note
+    // (Codex review).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("r", "Grid", 300.0f, 200.0f, LayoutDirection::row);
+    ir.root.layout.grid_template_columns = "1fr 1fr";
+    auto cell = text_node("c", "spanning", 12.0f, "#fff");
+    cell.layout.grid_column = "1 / 3";   // explicit placement
+    ir.root.children.push_back(std::move(cell));
+    ir.root.children.push_back(text_node("c2", "plain", 12.0f, "#fff"));
+    auto out = generate_with_fidelity(ir);
+    INFO(out.view);
+    REQUIRE(contains(out.view, "LazyVGrid(columns: ["));
+    REQUIRE(has_kind(out.issues, "swiftui-grid-placement"));
+    REQUIRE(count_strict_fidelity_failures(out.issues) >= 1);  // gates --strict-fidelity
+}
+
+TEST_CASE("generate_pulp_swift flags an inline/data-URI image as a hard divergence",
+          "[view][import][swiftui]") {
+    // A data: URI has no catalog name and isn't remote, so Image("id") renders
+    // nothing — a hard divergence, not the advisory bundled-asset note (Codex).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "R", 100.0f, 100.0f, LayoutDirection::column);
+    auto img = frame_node("inline", "Inline", 32.0f, 32.0f, LayoutDirection::column);
+    img.type = "image";
+    img.attributes["srcAssetId"] = "inline_icon";
+    ir.root.children.push_back(std::move(img));
+    IRAssetManifest manifest;
+    IRAssetRef a; a.asset_id = "inline_icon";
+    a.original_uri = "data:image/png;base64,iVBORw0KGgo=";
+    manifest.assets = {a};
+    ir.asset_manifest = manifest;
+
+    std::vector<FidelityIssue> issues;
+    SwiftExportOptions opts; opts.fidelity_report = &issues;
+    const auto view = generate_pulp_swift(ir, manifest, opts).view_source;
+    INFO(view);
+    REQUIRE(contains(view, "Image(\"inline_icon\")"));
+    REQUIRE(has_kind(issues, "swiftui-inline-asset"));
+    REQUIRE(count_strict_fidelity_failures(issues) >= 1);
+}
+
+TEST_CASE("generate_pulp_swift maps image assets to Image / AsyncImage (B5)",
+          "[view][import][swiftui]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "R", 200.0f, 200.0f, LayoutDirection::column);
+
+    // Bundled/local asset → Image("<asset_id>") referencing the asset catalog.
+    auto logo = frame_node("logo", "Logo", 48.0f, 48.0f, LayoutDirection::column);
+    logo.type = "image";
+    logo.attributes["srcAssetId"] = "brand_logo";
+    ir.root.children.push_back(std::move(logo));
+
+    // Remote http(s) asset → AsyncImage(url:).
+    auto remote = frame_node("hero", "Hero", 200.0f, 100.0f, LayoutDirection::column);
+    remote.type = "image";
+    remote.attributes["srcAssetId"] = "hero_img";
+    ir.root.children.push_back(std::move(remote));
+
+    IRAssetManifest manifest;
+    IRAssetRef a; a.asset_id = "brand_logo"; a.local_path = "/tmp/logo.png"; a.original_uri = "logo.png";
+    IRAssetRef b; b.asset_id = "hero_img"; b.original_uri = "https://cdn.example.com/hero.png";
+    manifest.assets = {a, b};
+    ir.asset_manifest = manifest;
+
+    std::vector<FidelityIssue> issues;
+    SwiftExportOptions opts; opts.fidelity_report = &issues;
+    const auto view = generate_pulp_swift(ir, manifest, opts).view_source;
+    INFO(view);
+    REQUIRE(contains(view, "Image(\"brand_logo\")"));
+    REQUIRE(contains(view, ".resizable()"));
+    REQUIRE(contains(view, "AsyncImage(url: URL(string: \"https://cdn.example.com/hero.png\"))"));
+    REQUIRE(has_kind(issues, "swiftui-bundled-asset"));  // advises bundling brand_logo
 }
 
 TEST_CASE("generated SwiftUI with full B2 style + text-runs type-checks",
@@ -766,6 +893,35 @@ TEST_CASE("generated SwiftUI with the B3 widget set type-checks",
     // Compile-gate every new widget view (PulpMeter/PulpXYPad/PulpWaveform/
     // PulpSpectrum) + the Button path against the real PulpSwift module.
     require_generated_swift_compiles(build_b3_widget_fixture(), "b3-widgets");
+}
+
+TEST_CASE("generated SwiftUI with a grid + bundled/remote images type-checks (B5)",
+          "[view][import][swiftui][swiftc]") {
+    // Compile-gate LazyVGrid(columns:[GridItem…]) + Image("name") + AsyncImage.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("root", "Grid", 300.0f, 200.0f, LayoutDirection::row);
+    ir.root.layout.display = "grid";
+    ir.root.layout.grid_template_columns = "repeat(2, 1fr)";
+    ir.root.layout.column_gap = 6.0f;
+
+    auto logo = frame_node("logo", "Logo", 48.0f, 48.0f, LayoutDirection::column);
+    logo.type = "image";
+    logo.attributes["srcAssetId"] = "brand_logo";
+    ir.root.children.push_back(std::move(logo));
+
+    auto hero = frame_node("hero", "Hero", 120.0f, 80.0f, LayoutDirection::column);
+    hero.type = "image";
+    hero.attributes["srcAssetId"] = "hero_img";
+    ir.root.children.push_back(std::move(hero));
+
+    IRAssetManifest manifest;
+    IRAssetRef a; a.asset_id = "brand_logo"; a.original_uri = "logo.png"; a.local_path = "/tmp/logo.png";
+    IRAssetRef b; b.asset_id = "hero_img"; b.original_uri = "https://cdn.example.com/hero.png";
+    manifest.assets = {a, b};
+    ir.asset_manifest = manifest;
+
+    require_generated_swift_compiles(ir, "b5-grid-assets");
 }
 
 TEST_CASE("generate_pulp_swift handles the not-yet-supported B1 branches and compiles",

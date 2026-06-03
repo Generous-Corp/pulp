@@ -1145,6 +1145,66 @@ std::string stack_alignment_token(bool row, LayoutAlign align, bool* stretch) {
     return ".center";
 }
 
+// Count grid columns from a CSS `grid-template-columns` track list. Splits into
+// top-level tracks (paren-aware, so `minmax(…)` is one track) and sums them; a
+// `repeat(N, <pattern>)` track contributes N × the pattern's track count
+// (recursively), so `repeat(2, 1fr) 2fr` is 3, not 2. A non-integer repeat
+// count (`auto-fill`/`auto-fit`, viewport-dependent and unknowable at codegen)
+// falls back to the pattern's own count. Clamped to ≥1. Exact track SIZING is
+// not modelled — B5 maps only the column COUNT onto equal flexible GridItems.
+int grid_column_count(const std::string& tracks) {
+    std::vector<std::string> toks;
+    std::string cur;
+    int depth = 0;
+    for (char c : tracks) {
+        if (c == '(') { depth++; cur += c; }
+        else if (c == ')') { if (depth > 0) depth--; cur += c; }
+        else if ((c == ' ' || c == '\t' || c == '\n') && depth == 0) {
+            if (!cur.empty()) { toks.push_back(cur); cur.clear(); }
+        } else cur += c;
+    }
+    if (!cur.empty()) toks.push_back(cur);
+
+    int total = 0;
+    for (const auto& t : toks) {
+        std::string lt;
+        for (char c : t) lt += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lt.rfind("repeat(", 0) == 0) {
+            const std::size_t comma = t.find(',');
+            const std::size_t close = t.rfind(')');
+            int n = 1;
+            std::string pattern;
+            if (comma != std::string::npos) {
+                try { n = std::stoi(t.substr(7, comma - 7)); if (n < 1) n = 1; }
+                catch (...) { n = 1; }  // auto-fill / auto-fit → unknowable count
+                if (close != std::string::npos && close > comma)
+                    pattern = t.substr(comma + 1, close - comma - 1);
+            }
+            total += n * grid_column_count(pattern);  // recurse on the pattern
+        } else {
+            total += 1;
+        }
+    }
+    return std::max(1, total);
+}
+
+// The asset id an image node references. Mirrors design_cpp_codegen's
+// first_asset_id: the explicit src/background/href keys first, then any
+// `*AssetId` attribute (deterministic by sorted key).
+std::optional<std::string> swift_first_asset_id(const IRNode& node) {
+    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId"}) {
+        auto it = node.attributes.find(std::string(key));
+        if (it != node.attributes.end() && !it->second.empty()) return it->second;
+    }
+    std::vector<std::pair<std::string, std::string>> cands;
+    for (const auto& [k, v] : node.attributes)
+        if (k.size() >= 7 && k.compare(k.size() - 7, 7, "AssetId") == 0 && !v.empty())
+            cands.emplace_back(k, v);
+    std::sort(cands.begin(), cands.end());
+    if (!cands.empty()) return cands.front().second;
+    return std::nullopt;
+}
+
 void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
                const IRNode& node, const ResolvedNativeNode& resolved, int depth);
 
@@ -1226,6 +1286,50 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         return;
     }
 
+    // Image leaf with a resolved asset → Image / AsyncImage (B5). A remote
+    // http(s) source streams via AsyncImage; everything else references the
+    // asset by id in the app's asset catalog (xcassets generation deferred per
+    // the B5 plan). A bare image with no resolvable asset falls through to the
+    // Color.clear placeholder below. (svg/canvas vectors stay deferred.)
+    if (kind == NativeWidgetKind::image_view &&
+        std::min(node.children.size(), resolved.children.size()) == 0) {
+        if (auto asset_id = swift_first_asset_id(node)) {
+            const auto* asset = ctx.manifest.resolve(*asset_id);
+            const std::string uri = asset ? asset->original_uri : std::string();
+            const bool remote = uri.rfind("http://", 0) == 0 || uri.rfind("https://", 0) == 0;
+            // Inline / non-bundle schemes can't be referenced by a catalog name
+            // and aren't a remote URL, so Image("id") would silently render
+            // nothing — a hard divergence the developer must resolve manually.
+            const bool inline_uri = uri.rfind("data:", 0) == 0 || uri.rfind("blob:", 0) == 0 ||
+                                    uri.rfind("memory:", 0) == 0 || uri.rfind("resource:", 0) == 0;
+            if (remote) {
+                emit_line(out, depth, s,
+                          "AsyncImage(url: URL(string: " + swift_string_literal(uri) + ")) { image in");
+                emit_line(out, depth + 1, s, "image.resizable().scaledToFit()");
+                emit_line(out, depth, s, "} placeholder: {");
+                emit_line(out, depth + 1, s, "Color.gray.opacity(0.1)");
+                emit_line(out, depth, s, "}");
+            } else {
+                emit_line(out, depth, s, "Image(" + swift_string_literal(*asset_id) + ")");
+                emit_line(out, depth + 1, s, ".resizable()");
+                emit_line(out, depth + 1, s, ".scaledToFit()");
+                if (inline_uri)
+                    push_fidelity(ctx, node, "swiftui-inline-asset",
+                                  "image asset '" + *asset_id + "' is an inline/data URI with no "
+                                  "catalog name; Image(\"" + *asset_id + "\") will not resolve "
+                                  "until the bytes are extracted into the asset catalog",
+                                  /*informational=*/false);
+                else
+                    push_fidelity(ctx, node, "swiftui-bundled-asset",
+                                  "image references asset '" + *asset_id + "'; add it to the app's "
+                                  "asset catalog under that name (xcassets generation is deferred)",
+                                  /*informational=*/true);
+            }
+            emit_modifiers(out, ctx, node, depth);
+            return;
+        }
+    }
+
     // Containers (view) and — for B1 — any not-yet-supported widget that has
     // children is lowered as a stack so its subtree still renders. Leaf
     // unsupported widgets degrade to a sized clear rectangle with a comment;
@@ -1241,16 +1345,58 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         const auto& ly = node.layout;
         const bool row = ly.direction == LayoutDirection::row;
 
-        // Flex/grid divergences SwiftUI stacks cannot reproduce. Grid is B5; a
-        // grid container still lowers to a stack here so its subtree renders.
-        if (ly.display && *ly.display == "grid")
-            push_fidelity(ctx, node, "swiftui-grid",
-                          "CSS grid container lowered to a SwiftUI stack (grid is B5); "
-                          "track placement is lost", /*informational=*/false);
-        else if (ly.grid_template_columns || ly.grid_template_rows)
-            push_fidelity(ctx, node, "swiftui-grid",
-                          "grid template present; lowered to a SwiftUI stack (grid is B5)",
-                          /*informational=*/false);
+        // CSS grid → SwiftUI LazyVGrid (B5). Map the column COUNT onto equal
+        // flexible GridItems; exact fr/px/minmax track sizing and explicit
+        // row/column placement are approximated (informational, not a hard
+        // divergence — the grid renders). iOS16+/macOS13+ floor (LazyVGrid is
+        // actually 14+/11+, well within it).
+        const bool is_grid = (ly.display && *ly.display == "grid") ||
+                             ly.grid_template_columns || ly.grid_template_rows;
+        if (is_grid) {
+            const int cols = ly.grid_template_columns
+                                 ? grid_column_count(*ly.grid_template_columns) : 1;
+            const float col_gap = ly.column_gap.value_or(ly.gap);
+            const float row_gap = ly.row_gap.value_or(ly.gap);
+            std::string cols_expr;
+            for (int c = 0; c < cols; ++c) {
+                cols_expr += (c ? ", " : "") + std::string("GridItem(.flexible()");
+                if (col_gap > 0.0f) cols_expr += ", spacing: " + format_float(col_gap);
+                cols_expr += ")";
+            }
+            emit_line(out, depth, s, "LazyVGrid(columns: [" + cols_expr +
+                                     "], spacing: " + format_float(row_gap) + ") {");
+            if (child_count == 0) emit_line(out, depth + 1, s, "EmptyView()");
+            else emit_children(out, ctx, node, resolved, depth + 1);
+            emit_line(out, depth, s, "}");
+            emit_modifiers(out, ctx, node, depth);
+            if (node.style.position && *node.style.position == "absolute") {
+                emit_line(out, depth + 1, s,
+                          ".offset(x: " + format_float(node.style.left.value_or(0.0f)) +
+                          ", y: " + format_float(node.style.top.value_or(0.0f)) + ")");
+                push_fidelity(ctx, node, "swiftui-absolute-position",
+                              "position:absolute approximated with .offset from natural position",
+                              /*informational=*/false);
+            }
+            push_fidelity(ctx, node, "swiftui-grid-tracks",
+                          "grid mapped to " + std::to_string(cols) + " equal flexible column(s); "
+                          "exact fr/px/minmax track sizing approximated",
+                          /*informational=*/true);
+            // Explicit per-item placement (grid-column/grid-row) is genuinely
+            // lost — LazyVGrid auto-flows children in source order — so it is a
+            // HARD divergence, not the advisory track-sizing note above.
+            bool has_placement = false;
+            for (std::size_t i = 0; i < child_count; ++i) {
+                const auto& cl = node.children[i].layout;
+                if ((cl.grid_column && !cl.grid_column->empty()) ||
+                    (cl.grid_row && !cl.grid_row->empty())) { has_placement = true; break; }
+            }
+            if (has_placement)
+                push_fidelity(ctx, node, "swiftui-grid-placement",
+                              "explicit grid item placement (grid-column/grid-row) is dropped; "
+                              "LazyVGrid auto-flows children in source order",
+                              /*informational=*/false);
+            return;
+        }
         if (ly.wrap)
             push_fidelity(ctx, node, "swiftui-flex-wrap",
                           "flex-wrap has no SwiftUI HStack/VStack equivalent; children "
