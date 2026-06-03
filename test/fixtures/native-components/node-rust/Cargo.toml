@@ -1,0 +1,20 @@
+# A Rust custom node implementing the public pulp_node_v1 ABI, for the
+# cross-language conformance proof (a C node and a Rust node load through the
+# same contract). TEST FIXTURE — built only under
+# PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS (default OFF).
+[package]
+name = "pulp-node-rust"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "pulp_node_rust"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
