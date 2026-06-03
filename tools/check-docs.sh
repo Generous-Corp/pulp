@@ -90,8 +90,12 @@ while IFS= read -r line; do
         # Find the module's CMakeLists.txt
         cmake_file="$ROOT/core/$mod_name/CMakeLists.txt"
         if [ -f "$cmake_file" ]; then
-            # Extract pulp- prefixed link deps, strip the prefix
-            cmake_deps=$(grep -oE 'pulp-[a-z]+' "$cmake_file" 2>/dev/null | sed "s/pulp-//" | grep -v "^$mod_name$" | sort -u)
+            # Extract pulp- prefixed link deps, strip the prefix. This regex
+            # truncates a hyphenated target at its first segment (e.g.
+            # pulp-native-components -> "native"), so exclude both the full
+            # module name AND that first segment to avoid a module flagging its
+            # own target as a dependency.
+            cmake_deps=$(grep -oE 'pulp-[a-z]+' "$cmake_file" 2>/dev/null | sed "s/pulp-//" | grep -v "^$mod_name$" | grep -v "^${mod_name%%-*}$" | sort -u)
 
             # Compare: warn if CMake has deps not in manifest
             for dep in $cmake_deps; do

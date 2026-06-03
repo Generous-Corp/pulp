@@ -64,6 +64,15 @@ else()
 endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+# Opt-in lane for the native-component Rust contract proof: builds a Cargo
+# `staticlib` reference core (with an RT-checking global allocator) and links
+# the test/test_rust_dsp_ffi.cpp round-trip + RT-safety self-test. OFF by
+# default so default builds NEVER require a Rust toolchain (cargo/rustc). The
+# C ABI surface itself (core/native-components) always builds without Rust.
+option(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS
+       "Build the opt-in Rust staticlib reference core + FFI/RT-safety tests \
+        (requires a Rust toolchain). OFF by default; no Rust for default builds."
+       OFF)
 # SDK-release safety net for pulp #1817. When ON, configure FAILS if
 # PULP_ENABLE_GPU is set but Skia binaries weren't located. The release
 # workflow flips this ON so an SDK tarball can never ship with the GPU
@@ -185,6 +194,7 @@ if(PULP_ENABLE_GPU)
 endif()
 add_subdirectory(core/view)
 add_subdirectory(core/osc)
+add_subdirectory(core/native-components)
 # pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen
 # of arbitrary third-party plugins, so iOS builds don't ship hosting at all.
 # Skipping the subdirectory also dodges a libc++ availability error on the

@@ -896,6 +896,33 @@ Supports bundles with timetags and address pattern matching (`*`, `?`, `[...]`, 
 
 ---
 
+## native-components
+
+The language-neutral C ABI for opt-in native-language audio components (Rust
+first, also C / Zig / generated DSP). A C++ `Processor` adapter owns a
+source-built native DSP core through this private, C-shaped FFI.
+
+**Link:** `pulp::native-components` · **Include prefix:** `<pulp/native_components/...>`
+
+```cpp
+#include <pulp/native_components/native_core.h>   // the canonical C contract
+#include <pulp/native_components/native_core.hpp>  // optional C++ sugar (hash, asserts)
+```
+
+The header carries POD structs with leading `size`/`abi_version`, opaque
+instance handles, status codes, host-owned borrowed buffers, a sorted
+parameter-event view, an opaque versioned state span, and explicit
+suspend/resume/reset lifecycle — embodying the twelve forward-compatibility
+decisions in [native-components reference](native-components.md). It has **no
+Rust dependency**: the module builds on every platform, and the opt-in Rust
+staticlib lane lives behind the `PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS` CMake
+option (OFF by default).
+
+This is the *Processor-level* FFI, deliberately independent of `SignalGraph`.
+See [node-abi](node-abi.md) for the deferred public `pulp_node_v1` node ABI.
+
+---
+
 ## render
 
 GPU surface management — you rarely use this directly. Canvas and View handle it.

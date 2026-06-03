@@ -140,3 +140,9 @@ modules:
     status: experimental
     dependencies: [runtime]
     docs: reference/modules.md#osc
+
+  - name: native-components
+    summary: Language-neutral C ABI for opt-in native-language (Rust-first) audio components
+    status: experimental
+    dependencies: []
+    docs: reference/modules.md#native-components

@@ -99,6 +99,37 @@ node-interface generation and the deferred `pulp_node_v1` C ABI is
    readiness gates ensure no public ABI is frozen before the source-built shape has
    proven itself.
 
+## The C ABI contract
+
+The canonical, hand-written contract lives in
+`core/native-components/include/pulp/native_components/native_core.h` (module
+`pulp::native-components`). It is the *Processor-level* FFI — deliberately
+independent of `SignalGraph` — and is shaped *like* a binary ABI so the future
+public freeze is a relabel, not a rewrite:
+
+- POD structs with a leading `size` + `abi_version`; opaque instance handles;
+  status-code returns; no STL, exceptions, references, or unwind across the
+  boundary.
+- **Host-owned, borrowed planar `float32` audio** for the call; in-place
+  legal; sidechain read-only; the core never retains or frees host buffers.
+- A **sorted parameter-event view** mirroring Pulp's `ParameterEventQueue`:
+  plain-domain values, sample offsets, linear ramps, fixed 1024 capacity with
+  an overflow flag, and a *NULL vs present-but-empty* distinction.
+- **Stable parameter identity**: a UTF-8 string id plus its FNV-1a/64 hash
+  (one definition, in `native_core.hpp`, shared by host and binding generators).
+- **Opaque, versioned state** spans, validate-before-commit, never unwinding on
+  malformed bytes; empty span == defaults.
+- **Explicit lifecycle** (suspended ⇄ active, plus reset); any sample-rate or
+  block-size change is a fresh `prepare()`; per-instance opaque handles with no
+  process-wide mutable globals; **modulation and automation as distinct**
+  events; and **paired allocator ownership** (every core-owned pointer names its
+  free function).
+
+Additive evolution only: new fields/behaviour are negotiated by `size`/version
+checks and capability flags, never by widening a required field. The contract
+tests in `test/test_native_core_ffi.cpp` pin one case per decision so the shape
+cannot silently drift.
+
 ## What this means for Rust DSP
 
 - **You bring the DSP; Pulp brings the contract.** "Write DSP however you want;

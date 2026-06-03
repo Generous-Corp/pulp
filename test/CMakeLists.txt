@@ -870,6 +870,14 @@ pulp_add_test_suite(pulp-test-progress-parser LIBRARIES pulp::platform)
 # Stream tests (unified I/O interface)
 pulp_add_test_suite(pulp-test-stream LIBRARIES pulp::runtime)
 
+# Native-component core ABI contract tests. Always built (no Rust toolchain
+# needed) — one case per forward-compatibility decision (1-12) so the C ABI
+# shape can't silently drift. The Rust round-trip + RT-safety self-test is the
+# separate opt-in lane below (PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS).
+pulp_add_test_suite(pulp-test-native-core-ffi
+    SOURCES test_native_core_ffi.cpp
+    LIBRARIES pulp::native-components)
+
 # #334: AudioFocusRegistry — cross-platform observer for OS audio-focus
 # signals (Android AudioManager.OnAudioFocusChangeListener,
 # AVAudioSession interruptions). Pure C++ unit tests — no platform deps.
