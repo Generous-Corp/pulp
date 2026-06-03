@@ -315,6 +315,7 @@ target_sources(pulp-view-core PRIVATE
     src/design_import_v0_tsx.cpp
     src/design_import_native_common.cpp
     src/design_cpp_codegen.cpp
+    src/design_swift_codegen.cpp
     src/design_tokens.cpp
     src/design_codegen.cpp
     src/design_fidelity.cpp

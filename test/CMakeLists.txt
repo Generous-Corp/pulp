@@ -3455,6 +3455,21 @@ target_compile_definitions(pulp-test-design-import-w3c-tokens PRIVATE PULP_REPO_
 catch_discover_tests(pulp-test-design-import-w3c-tokens
     PROPERTIES LABELS "parser-import")
 
+# Workstream B1 — baked SwiftUI emitter. Golden-string asserts plus a swiftc
+# type-check gate (find_program; the test skips when swiftc / the SwiftUI SDK
+# is unavailable, e.g. the Linux lane). Registered here, outside the
+# planning-artifact-guarded cpp block above, since it needs no generated
+# artifacts.
+find_program(PULP_SWIFTC swiftc)
+add_executable(pulp-test-design-swift-codegen test_design_swift_codegen.cpp)
+target_link_libraries(pulp-test-design-swift-codegen
+    PRIVATE pulp::view-core pulp::platform Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-swift-codegen PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
+    PULP_TEST_SWIFTC="${PULP_SWIFTC}")
+catch_discover_tests(pulp-test-design-swift-codegen
+    PROPERTIES LABELS "parser-import")
+
 # P5-3 follow-up — React-runtime parser cluster extracted from
 # test_design_import.cpp. Covers TSX/runtime React parsers for every
 # supported design-tool source: parse_v0_tsx / parse_v0_dev_react,

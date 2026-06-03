@@ -1412,3 +1412,62 @@ TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
     REQUIRE(r.exit_code == 2);
     REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
 }
+
+// Workstream B1 — `--emit swiftui` per-view theme naming (Codex review). The
+// theme artifact/type derive from the view name (<RootView>Theme[.swift]) so
+// the view and theme are always distinct files (no clobber, even for
+// --output PulpTheme.swift) and two imports never collide on a shared theme.
+namespace {
+const char* kMiniSwiftScene =
+    R"({"format_version":"2026.05-figma-plugin-v1",)"
+    R"("provenance":{"adapter":"figma-plugin","version":"t","source_uri":"figma://x/1:1"},)"
+    R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})";
+}
+
+TEST_CASE("pulp-import-design --emit swiftui PulpTheme.swift output does not clobber the view",
+          "[cli][import-design][tool][swiftui]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-swiftui-collision");
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, kMiniSwiftScene);
+    auto view_out = tmp.path / "PulpTheme.swift";
+    auto r = run_import_design({"--from", "figma-plugin", "--file", scene.string(),
+                                "--mode", "baked", "--emit", "swiftui",
+                                "--output", view_out.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+
+    // PulpTheme.swift holds the VIEW (struct), not the theme enum; the theme
+    // landed at the distinct PulpThemeTheme.swift.
+    REQUIRE(fs::exists(view_out));
+    const auto view = read_text(view_out);
+    REQUIRE(view.find("struct PulpTheme") != std::string::npos);   // the view, not clobbered
+    REQUIRE(view.find("enum") == std::string::npos);
+    REQUIRE(fs::exists(tmp.path / "PulpThemeTheme.swift"));
+}
+
+TEST_CASE("pulp-import-design --emit swiftui gives each view a distinct theme (no clobber)",
+          "[cli][import-design][tool][swiftui]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-swiftui-multiview");
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, kMiniSwiftScene);
+    std::vector<std::string> base = {"--from", "figma-plugin", "--file", scene.string(),
+                                     "--mode", "baked", "--emit", "swiftui"};
+    auto foo = base; foo.push_back("--output"); foo.push_back((tmp.path / "FooView.swift").string());
+    auto bar = base; bar.push_back("--output"); bar.push_back((tmp.path / "BarView.swift").string());
+    REQUIRE(run_import_design(foo).exit_code == 0);
+    REQUIRE(run_import_design(bar).exit_code == 0);
+
+    // Two imports into one dir produce distinct view + theme files — the second
+    // does not overwrite the first's theme.
+    REQUIRE(fs::exists(tmp.path / "FooView.swift"));
+    REQUIRE(fs::exists(tmp.path / "FooViewTheme.swift"));
+    REQUIRE(fs::exists(tmp.path / "BarView.swift"));
+    REQUIRE(fs::exists(tmp.path / "BarViewTheme.swift"));
+    // Distinct theme enum names → no duplicate-symbol clash in one Swift target.
+    REQUIRE(read_text(tmp.path / "FooViewTheme.swift").find("enum FooViewTheme") != std::string::npos);
+    REQUIRE(read_text(tmp.path / "BarViewTheme.swift").find("enum BarViewTheme") != std::string::npos);
+}

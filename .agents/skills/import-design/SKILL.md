@@ -1467,10 +1467,28 @@ pulp import-design --from claude --file design.html --no-emit-classnames
 ```
 
 Import artifact flag vocabulary:
-- `--output <path>` is the destination for the primary artifact. JS defaults to `ui.js`; `--emit cpp` defaults to `imported_ui.cpp` and writes the sibling header.
-- `--emit js`, `--emit ir-json`, and `--emit cpp` are implemented. `cpp` requires `--mode baked`. Legacy `--emit classnames` remains accepted for the Claude classnames sidecar.
-- Built-in default is live runtime import: `--mode live --emit js`. Static sources emit generated JS in live mode; `--from jsx --mode live --emit js` writes the precompiled JSX bundle verbatim for runtime import and rejects `--validate`, `--reference`, `--diff`, and `--debug`. `--mode baked` emits canonical IR or baked C++ via `--emit ir-json|cpp`.
-- Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"` and `import_design.default_emit = "js|ir-json|cpp"`, set through `pulp config set import_design.default_mode ...` and `pulp config set import_design.default_emit ...`. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and `PULP_IMPORT_DESIGN_DEFAULT_EMIT` override config for one environment/session, and direct CLI flags override the matching preference. If only `default_mode=baked` is set, `ir-json` is implied.
+- `--output <path>` is the destination for the primary artifact. JS defaults to `ui.js`; `--emit cpp` defaults to `imported_ui.cpp` and writes the sibling header; `--emit swiftui` defaults to `ImportedPulpView.swift` (with a per-view sibling `<RootView>Theme.swift` + `.bindings.json`).
+- `--emit js`, `--emit ir-json`, `--emit cpp`, and `--emit swiftui` are implemented. `cpp` and `swiftui` require `--mode baked`. Legacy `--emit classnames` remains accepted for the Claude classnames sidecar.
+- Built-in default is live runtime import: `--mode live --emit js`. Static sources emit generated JS in live mode; `--from jsx --mode live --emit js` writes the precompiled JSX bundle verbatim for runtime import and rejects `--validate`, `--reference`, `--diff`, and `--debug`. `--mode baked` emits canonical IR, baked C++, or baked SwiftUI via `--emit ir-json|cpp|swiftui`.
+
+`--emit swiftui` (baked SwiftUI, Workstream B1) is a fourth DesignIR lowering in
+`core/view/src/design_swift_codegen.cpp` (`generate_pulp_swift`), parallel to the
+baked-C++ baker. It mirrors the C++ emit loop (`resolve_design_ir_native` + node
+walk) but emits declarative SwiftUI: frame→VStack/HStack, text→Text, fixed
+frame/padding/background, and knob/slider/toggle→`PulpKnob`/`PulpSlider`/
+`PulpToggle`. Tokens lower to a code-first per-view `<RootView>Theme.swift` (enum
+named per-view so two imports don't collide in one Swift target) reusing the same
+base/`.dark` partition *algorithm* as `export_css_variables` (color.bg + color.bg.dark
+→ a nested-private dynamic light/dark Color helper). Generated views are generic over
+`PulpParameterResolving` and resolve a binding key by **exact `PulpParameter.name`
+match** (there is no stable string param key; `missing`/`duplicate` are surfaced,
+never silently mis-bound — see `apple/Sources/PulpSwift/PulpParameter.swift`). B1 is
+an MVP skeleton: full style/text-runs/flex-fidelity (B2), the remaining widgets
+(B3), binding-manifest parity (B4), and grid/assets/host scaffold (B5) follow. B1's
+test gate is golden strings **plus** a `swiftc -typecheck` of the generated Swift
+against the real PulpSwift module (golden C++-string asserts alone can ship
+non-compiling Swift).
+- Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"` and `import_design.default_emit = "js|ir-json|cpp|swiftui"`, set through `pulp config set import_design.default_mode ...` and `pulp config set import_design.default_emit ...`. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and `PULP_IMPORT_DESIGN_DEFAULT_EMIT` override config for one environment/session, and direct CLI flags override the matching preference. If only `default_mode=baked` is set, `ir-json` is implied.
 - The standalone import helper and MCP status helper each have a small config reader for these defaults; keep them compatible with TOML single-quoted and double-quoted strings, matching the main CLI config reader.
 - Mental model: live/runtime import means "run the original app"; baked DesignIR means "save the materialized UI tree"; baked C++ means "compile that saved tree into native code". You can move live iteration -> baked IR -> baked C++; you cannot reconstruct live React from baked IR because hooks, closures, loops, and arbitrary JS logic were not preserved.
 - JSX baked snapshots accept both DOM-walked bundles and live/native bundles. Native bundles freeze through the `WidgetBridge` tree and record `snapshotSource=native-view`; generated baked C++ still constructs direct `View`/`Label` trees and should only require `pulp::view-core`.

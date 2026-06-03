@@ -163,6 +163,52 @@ final class PulpParameterTests: XCTestCase {
         _ = PulpEditorView(pluginName: "Test") { Text("Hello") }.body
     }
 
+    // ── Generated-view name resolver (Workstream B1) ──────────────────────
+
+    func testResolveParameterByExactNameResolvesAndReportsMissing() {
+        installBridge(parameters: [
+            .init(id: 1, name: "Gain", unit: "dB", minValue: -24, maxValue: 24, defaultValue: 0, step: 0.1),
+            .init(id: 2, name: "Bypass", unit: "", minValue: 0, maxValue: 1, defaultValue: 0, step: 1),
+        ])
+        let store = PulpParameterStore()
+
+        switch store.resolveParameter(named: "Gain") {
+        case .resolved(let p): XCTAssertEqual(p.id, 1)
+        default: XCTFail("expected .resolved for Gain")
+        }
+        // Case-sensitive, no normalization: "gain" must not match "Gain".
+        switch store.resolveParameter(named: "gain") {
+        case .missing(let name): XCTAssertEqual(name, "gain")
+        default: XCTFail("expected .missing for gain")
+        }
+        switch store.resolveParameter(named: "Nope") {
+        case .missing(let name): XCTAssertEqual(name, "Nope")
+        default: XCTFail("expected .missing for Nope")
+        }
+    }
+
+    func testResolveParameterReportsDuplicateRatherThanGuessing() {
+        installBridge(parameters: [
+            .init(id: 1, name: "Drive", unit: "", minValue: 0, maxValue: 1, defaultValue: 0, step: 0.1),
+            .init(id: 2, name: "Drive", unit: "", minValue: 0, maxValue: 1, defaultValue: 0, step: 0.1),
+        ])
+        let store = PulpParameterStore()
+
+        switch store.resolveParameter(named: "Drive") {
+        case .duplicate(let name, let count):
+            XCTAssertEqual(name, "Drive")
+            XCTAssertEqual(count, 2)
+        default:
+            XCTFail("expected .duplicate for an ambiguous name — never the first match")
+        }
+    }
+
+    func testPureNameClassifier() {
+        XCTAssertEqual(pulpClassifyParameterName("Gain", in: ["Gain", "Mix"]), .resolved)
+        XCTAssertEqual(pulpClassifyParameterName("Pan", in: ["Gain", "Mix"]), .missing)
+        XCTAssertEqual(pulpClassifyParameterName("Gain", in: ["Gain", "Gain"]), .duplicate(2))
+    }
+
     private func installBridge(parameters: [PulpBridgeParameterInfo]) {
         bridge = MockBridge(parameters: parameters)
         PulpBridgeRuntime.installTestBackend(bridge.backend)

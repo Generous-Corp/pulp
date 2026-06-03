@@ -27,7 +27,7 @@ pulp import-design --from <source> [options]
 | `--frame <name>` | Frame/artboard to import (Figma) | first frame |
 | `--screen <name>` | Screen to import (Stitch) | first screen |
 | `--output <path>` | Destination file for the primary artifact | `ui.js` |
-| `--emit {js\|ir-json\|cpp}` | Primary artifact kind. `js`, `ir-json`, and `cpp` are implemented; `cpp` requires `--mode baked`. | `js` built-in, or `import_design.default_emit` |
+| `--emit {js\|ir-json\|cpp\|swiftui}` | Primary artifact kind. `js`, `ir-json`, `cpp`, and `swiftui` are implemented; `cpp` and `swiftui` require `--mode baked`. `swiftui` emits a baked native SwiftUI view (`ImportedPulpView.swift` + a per-view `<RootView>Theme.swift` + binding manifest). | `js` built-in, or `import_design.default_emit` |
 | `--mode {live\|baked}` | Runtime model. `live` is the built-in default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. | `live` built-in, or `import_design.default_mode` |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
@@ -81,6 +81,7 @@ Mental model:
 | Live/runtime import | The generated JS or precompiled React bundle | Runs the app at launch through the JS/React/runtime bridge |
 | Baked DesignIR | A serialized snapshot of the materialized UI tree | No React program remains; the IR is an inspectable UI blueprint |
 | Baked C++ | Native C++ generated from DesignIR | Constructs native views directly without a JS engine |
+| Baked SwiftUI | Native SwiftUI generated from DesignIR | A compiled declarative Apple view; no Pulp JS runtime |
 
 Live/runtime import means "run the original app." Baked DesignIR means "run
 the app once and save the resulting UI structure." Baked C++ means "compile
@@ -101,6 +102,21 @@ The IR envelope also records document-level provenance (`capture_method`,
 `imported_at`) plus structured diagnostics. All source adapters return the
 shared normalized form: interactive `frame` nodes are promoted through the
 library normalization pass before code generation or IR serialization.
+
+`--emit swiftui` (baked-only, macOS 13 / iOS 16 floor) lowers the same DesignIR
+to native SwiftUI — a fourth target alongside DOM/native-JS/baked-C++. It writes
+`ImportedPulpView.swift` (a `View` generic over the `PulpParameterResolving`
+protocol from `PulpSwift`), a sibling per-view theme file `<RootView>Theme.swift`,
+and a `.bindings.json` manifest. Frames lower to `VStack`/`HStack`, text to
+`Text`, fixed frame/padding/background modifiers apply, and knob/slider/toggle
+bind to `PulpKnob`/`PulpSlider`/`PulpToggle`. Tokens lower to a code-first
+`<RootView>Theme` enum (named per-view so two imports don't collide in one Swift
+target) whose `.dark`-suffixed entries become light/dark dynamic colors. Binding resolves
+a generated key by exact `PulpParameter.name` match (Pulp has no stable string
+param key); missing or duplicate names render a visible placeholder rather than
+silently binding the wrong parameter. This is an MVP — flex fidelity is
+approximate (SwiftUI stacks are not Yoga), and the meter/xy_pad/waveform/
+spectrum/image/svg widgets are not yet mapped.
 
 For `--from jsx --mode live --emit js`, Pulp writes the precompiled bundle
 verbatim for runtime import. That pass-through path does not parse or render
