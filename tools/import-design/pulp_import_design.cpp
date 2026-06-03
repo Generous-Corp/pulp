@@ -219,7 +219,8 @@ static bool compute_opaque_core(const std::string& path, OpaqueCore& out,
 enum class ArtifactEmit {
     js,
     ir_json,
-    cpp
+    cpp,
+    swiftui
 };
 
 enum class RuntimeMode {
@@ -238,6 +239,7 @@ const char* artifact_emit_name(ArtifactEmit emit) {
         case ArtifactEmit::js:      return "js";
         case ArtifactEmit::ir_json: return "ir-json";
         case ArtifactEmit::cpp:     return "cpp";
+        case ArtifactEmit::swiftui: return "swiftui";
     }
     return "js";
 }
@@ -298,6 +300,7 @@ std::optional<ArtifactEmit> parse_artifact_emit_pref(const std::string& raw) {
     if (value == "js") return ArtifactEmit::js;
     if (value == "ir-json") return ArtifactEmit::ir_json;
     if (value == "cpp") return ArtifactEmit::cpp;
+    if (value == "swiftui") return ArtifactEmit::swiftui;
     return std::nullopt;
 }
 
@@ -461,7 +464,8 @@ DefaultSelection resolve_import_design_defaults(ArtifactEmit cli_emit,
     }
     if (!mode_explicit && out.mode_source == "built-in"
         && !emit_explicit
-        && (out.emit == ArtifactEmit::ir_json || out.emit == ArtifactEmit::cpp)) {
+        && (out.emit == ArtifactEmit::ir_json || out.emit == ArtifactEmit::cpp
+            || out.emit == ArtifactEmit::swiftui)) {
         out.mode = RuntimeMode::baked;
         out.mode_source = "implied by " + out.emit_source;
     }
@@ -812,6 +816,43 @@ std::string export_theme_tokens(const std::string& format,
     return pulp::view::export_w3c_tokens(theme);
 }
 
+struct SwiftOutputPaths {
+    fs::path view;             // <RootView>.swift
+    fs::path theme;            // <RootView>Theme.swift (sibling)
+    fs::path binding_manifest; // <RootView>.bindings.json
+    std::string root_view_name;
+    std::string theme_type_name;  // <RootView>Theme
+};
+
+// Mirror resolve_cpp_output_paths for `--emit swiftui`. A directory or
+// extensionless --output yields ImportedPulpView.swift inside it; a .swift
+// file path is the view itself, with <RootView>Theme.swift as a sibling and the
+// binding manifest beside the view.
+SwiftOutputPaths resolve_swift_output_paths(const std::string& output_file) {
+    fs::path requested(output_file.empty() ? "ImportedPulpView.swift" : output_file);
+    std::error_code ec;
+    const bool existing_dir = fs::is_directory(requested, ec);
+    const auto ext = requested.extension().string();
+    SwiftOutputPaths paths;
+    if (existing_dir || ext.empty()) {
+        paths.view = requested / "ImportedPulpView.swift";
+    } else {
+        paths.view = requested;
+    }
+    paths.root_view_name = paths.view.stem().string();
+    if (paths.root_view_name.empty()) paths.root_view_name = "ImportedPulpView";
+    // Theme artifact + type are derived per-view (`<RootView>Theme`) so two
+    // SwiftUI imports never clobber a shared PulpTheme.swift on disk nor emit a
+    // duplicate `enum PulpTheme` / dynamic-color symbol when compiled into one
+    // Swift target (Codex review). The theme file (<RootView>Theme.swift) is
+    // always distinct from the view (<RootView>.swift), so no path collision.
+    paths.theme_type_name = paths.root_view_name + "Theme";
+    paths.theme = paths.view.parent_path() / (paths.root_view_name + "Theme.swift");
+    paths.binding_manifest = paths.view;
+    paths.binding_manifest.replace_extension(".bindings.json");
+    return paths;
+}
+
 } // namespace
 
 static void print_usage() {
@@ -833,8 +874,10 @@ static void print_usage() {
     std::cout << "  --frame <name>    Frame/artboard to import (Figma)\n";
     std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
-    std::cout << "  --emit {js|ir-json|cpp}\n";
-    std::cout << "                    Primary artifact kind (built-in default: js)\n";
+    std::cout << "  --emit {js|ir-json|cpp|swiftui}\n";
+    std::cout << "                    Primary artifact kind (built-in default: js). cpp and\n";
+    std::cout << "                    swiftui are baked-only; swiftui emits native SwiftUI\n";
+    std::cout << "                    (a View + PulpTheme.swift + binding manifest)\n";
     std::cout << "  --mode {live|baked}\n";
     std::cout << "                    Runtime model (built-in default: live; baked emits IR or C++ artifacts)\n";
     std::cout << "  --snapshot-semantics {fail|warn|accept}\n";
@@ -910,6 +953,7 @@ static void print_usage() {
     std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp\n";
+    std::cout << "  pulp import-design --from figma --file design.json --mode baked --emit swiftui --output ImportedPulpView.swift\n";
 }
 
 // Bridge-handler scaffold body lives in core/view/src/design_import.cpp
@@ -1353,7 +1397,7 @@ int main(int argc, char* argv[]) {
             classnames_output_explicit = true;
         } else if (std::strcmp(argv[i], "--emit") == 0) {
             if (i + 1 >= argc) {
-                std::cerr << "Error: --emit requires a value: js, ir-json, cpp, or classnames\n";
+                std::cerr << "Error: --emit requires a value: js, ir-json, cpp, swiftui, or classnames\n";
                 return 2;
             }
             std::string what = argv[++i];
@@ -1366,11 +1410,14 @@ int main(int argc, char* argv[]) {
             } else if (what == "cpp") {
                 artifact_emit = ArtifactEmit::cpp;
                 artifact_emit_explicit = true;
+            } else if (what == "swiftui") {
+                artifact_emit = ArtifactEmit::swiftui;
+                artifact_emit_explicit = true;
             } else if (what == "classnames") {
                 emit_classnames = true;
             } else {
                 std::cerr << "Error: unsupported --emit value '" << what
-                          << "' (expected js, ir-json, cpp, or classnames)\n";
+                          << "' (expected js, ir-json, cpp, swiftui, or classnames)\n";
                 return 2;
             }
         } else if (std::strcmp(argv[i], "--mode") == 0) {
@@ -1466,6 +1513,8 @@ int main(int argc, char* argv[]) {
 
     if (artifact_emit == ArtifactEmit::cpp && !output_explicit)
         output_file = "imported_ui.cpp";
+    if (artifact_emit == ArtifactEmit::swiftui && !output_explicit)
+        output_file = "ImportedPulpView.swift";
 
     // --format css-variables emits a CSS file, so its sidecar defaults to
     // theme.css rather than tokens.json (the W3C default). The leaf name also
@@ -1667,15 +1716,16 @@ int main(int argc, char* argv[]) {
 
     if (runtime_mode == RuntimeMode::baked) {
         if (artifact_emit == ArtifactEmit::js) {
-            std::cerr << "Error: --mode baked requires --emit ir-json or --emit cpp\n";
+            std::cerr << "Error: --mode baked requires --emit ir-json, --emit cpp, or --emit swiftui\n";
             std::cerr << "       effective defaults: --mode " << runtime_mode_name(runtime_mode)
                       << " (" << default_selection.mode_source << "), --emit "
                       << artifact_emit_name(artifact_emit) << " ("
                       << default_selection.emit_source << ")\n";
             return 2;
         }
-    } else if (artifact_emit == ArtifactEmit::cpp) {
-        std::cerr << "Error: --emit cpp requires --mode baked\n";
+    } else if (artifact_emit == ArtifactEmit::cpp || artifact_emit == ArtifactEmit::swiftui) {
+        std::cerr << "Error: --emit " << artifact_emit_name(artifact_emit)
+                  << " requires --mode baked\n";
         std::cerr << "       effective defaults: --mode " << runtime_mode_name(runtime_mode)
                   << " (" << default_selection.mode_source << "), --emit "
                   << artifact_emit_name(artifact_emit) << " ("
@@ -1683,8 +1733,11 @@ int main(int argc, char* argv[]) {
         return 2;
     }
     if (runtime_mode == RuntimeMode::baked) {
-        if (*source == DesignSource::designmd && artifact_emit == ArtifactEmit::cpp) {
-            std::cerr << "Error: DESIGN.md is a token spec and cannot emit a baked C++ view\n";
+        if (*source == DesignSource::designmd
+            && (artifact_emit == ArtifactEmit::cpp || artifact_emit == ArtifactEmit::swiftui)) {
+            std::cerr << "Error: DESIGN.md is a token spec and cannot emit a baked "
+                      << (artifact_emit == ArtifactEmit::swiftui ? "SwiftUI view" : "C++ view")
+                      << "\n";
             return 2;
         }
     }
@@ -1755,7 +1808,8 @@ int main(int argc, char* argv[]) {
     std::string runtime_error;  // captures --execute-bundle fallback reason
     try {
         if (runtime_mode == RuntimeMode::baked &&
-            (artifact_emit == ArtifactEmit::ir_json || artifact_emit == ArtifactEmit::cpp) &&
+            (artifact_emit == ArtifactEmit::ir_json || artifact_emit == ArtifactEmit::cpp ||
+             artifact_emit == ArtifactEmit::swiftui) &&
             looks_like_serialized_design_ir(content)) {
             ir = parse_design_ir_json(content);
             parsed_serialized_design_ir = true;
@@ -1815,9 +1869,11 @@ int main(int argc, char* argv[]) {
                 }
                 case DesignSource::jsx:
                     if (runtime_mode != RuntimeMode::baked ||
-                        (artifact_emit != ArtifactEmit::ir_json && artifact_emit != ArtifactEmit::cpp)) {
+                        (artifact_emit != ArtifactEmit::ir_json &&
+                         artifact_emit != ArtifactEmit::cpp &&
+                         artifact_emit != ArtifactEmit::swiftui)) {
                         std::cerr << "Error: --from jsx is currently wired only for"
-                                     " --mode baked --emit ir-json or --emit cpp\n";
+                                     " --mode baked --emit ir-json, --emit cpp, or --emit swiftui\n";
                         return 2;
                     } else {
                         const auto dynamic_scan = detect_jsx_snapshot_dynamic_apis(content);
@@ -1983,6 +2039,53 @@ int main(int argc, char* argv[]) {
                   << counts.containers << " containers, " << counts.widgets << " widgets, "
                   << counts.text << " labels, " << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s") << ")\n";
+        return 0;
+    }
+
+    if (artifact_emit == ArtifactEmit::swiftui) {
+        const auto asset_options = make_asset_options(input_file,
+                                                      input_url,
+                                                      allow_network_fetch,
+                                                      asset_timeout_ms,
+                                                      asset_cache_dir,
+                                                      expected_asset_hashes);
+        refresh_design_ir_asset_manifest(ir, asset_options);
+        print_asset_manifest_diagnostics(ir.asset_manifest);
+        if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+
+        const auto paths = resolve_swift_output_paths(output_file);
+        SwiftExportOptions swift_opts;
+        swift_opts.root_view_name = paths.root_view_name;
+        swift_opts.theme_type_name = paths.theme_type_name;
+        swift_opts.include_comments = include_comments;
+        swift_opts.emit_theme = include_tokens;
+        swift_opts.emit_binding_manifest = true;
+
+        const auto swift = generate_pulp_swift(ir, ir.asset_manifest, swift_opts);
+        if (dry_run) {
+            std::cout << "=== Generated SwiftUI view (" << paths.view.string() << ") ===\n\n";
+            std::cout << swift.view_source;
+            if (!swift.theme_source.empty()) {
+                std::cout << "\n=== Generated PulpTheme (" << paths.theme.string() << ") ===\n\n";
+                std::cout << swift.theme_source;
+            }
+            std::cout << "\n=== SwiftUI binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
+            std::cout << swift.binding_manifest;
+            return 0;
+        }
+
+        if (!write_file(paths.view.string(), swift.view_source)) return 1;
+        if (!swift.theme_source.empty() &&
+            !write_file(paths.theme.string(), swift.theme_source)) return 1;
+        if (!write_file(paths.binding_manifest.string(), swift.binding_manifest)) return 1;
+
+        const auto counts = count_design_ir_elements(ir.root);
+        std::cout << "Wrote " << paths.view.string();
+        if (!swift.theme_source.empty()) std::cout << ", " << paths.theme.string();
+        std::cout << ", and " << paths.binding_manifest.string()
+                  << " (" << counts.nodes << " elements: "
+                  << counts.containers << " containers, " << counts.widgets << " widgets, "
+                  << counts.text << " labels)\n";
         return 0;
     }
 

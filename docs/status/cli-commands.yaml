@@ -672,7 +672,7 @@ commands:
         description: "Destination file for the primary artifact (default: ui.js)"
       - name: --emit
         kind: option
-        description: "Primary artifact kind: js, ir-json, cpp, or legacy classnames sidecar; built-in default js; persistent default import_design.default_emit; cpp requires --mode baked"
+        description: "Primary artifact kind: js, ir-json, cpp, swiftui, or legacy classnames sidecar; built-in default js; persistent default import_design.default_emit; cpp and swiftui require --mode baked (swiftui emits a baked native SwiftUI view + PulpTheme.swift + binding manifest)"
       - name: --mode
         kind: option
         description: "Runtime model: live (built-in default) or baked for canonical IR / baked C++ artifacts; persistent default import_design.default_mode"

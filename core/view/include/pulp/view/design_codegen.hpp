@@ -100,6 +100,45 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
                                   const IRAssetManifest& manifest,
                                   const CppExportOptions& opts = {});
 
+// ── Baked SwiftUI (Workstream B1) ───────────────────────────────────────
+//
+// `--emit swiftui` lowers the same baked DesignIR to native SwiftUI — a
+// fourth lowering alongside DOM/native-JS/baked-C++. Baked-only: SwiftUI is a
+// compiled declarative target with no Pulp JS-runtime story. B1 is an MVP
+// skeleton (stacks / Text / fixed frame-padding-background / knob+slider+
+// toggle + a code-first PulpTheme partition + a minimal name-keyed binding).
+
+struct SwiftExportOptions {
+    /// Generated root `View` struct name. Sanitized to a Swift type name; an
+    /// empty/invalid value falls back to "ImportedPulpView".
+    std::string root_view_name = "ImportedPulpView";
+    /// Generated theme enum/type name (code-first PulpTheme).
+    std::string theme_type_name = "PulpTheme";
+    bool include_comments = true;
+    bool emit_theme = true;            ///< emit the PulpTheme.swift partition
+    bool emit_binding_manifest = true; ///< emit the minimal SwiftUI binding manifest
+    int indent_spaces = 4;
+    /// Optional fidelity sink (parity with CodeGenOptions). B1 does not yet
+    /// populate SwiftUI-specific layout issues — that is B2.
+    std::vector<FidelityIssue>* fidelity_report = nullptr;
+};
+
+struct SwiftExportResult {
+    std::string view_source;       ///< the generated SwiftUI View
+    std::string theme_source;      ///< code-first PulpTheme (empty if !emit_theme)
+    std::string binding_manifest;  ///< minimal SwiftUI binding manifest JSON
+};
+
+/// Generate a baked SwiftUI artifact from a DesignIR. Mirrors the C++ baker's
+/// core emit loop: resolves native widget kinds, walks the node tree, and emits
+/// a `<root_view_name>` View plus a `<theme_type_name>` token partition. The
+/// generated View binds knob/slider/toggle controls to `PulpParameter`s via the
+/// `PulpParameterResolving` protocol (exact `PulpParameter.name` match — there
+/// is no stable string param key today; see the B1 plan).
+SwiftExportResult generate_pulp_swift(const DesignIR& ir,
+                                      const IRAssetManifest& manifest,
+                                      const SwiftExportOptions& opts = {});
+
 // ── Shortcut helpers (V2 — used by both the generator and any test/
 //    runtime caller that needs to map DetectedShortcut → registerShortcut
 //    args). String forms come from `extract_keyboard_shortcuts`; integer

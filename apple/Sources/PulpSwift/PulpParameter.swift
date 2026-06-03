@@ -108,3 +108,57 @@ public final class PulpParameterStore: ObservableObject {
         parameters.first { $0.id == id }
     }
 }
+
+// MARK: - Generated-view parameter resolution (Workstream B1)
+
+/// How an exact-name parameter lookup resolves. There is no stable string
+/// param key in Pulp's state model today (StateStore indexes by numeric ID,
+/// `ParamInfo` carries only a display `name`), so imported SwiftUI views
+/// resolve a generated binding key by exact `PulpParameter.name` match. The
+/// `missing` / `duplicate` cases are surfaced (never silently bound to the
+/// first match) so a renamed or ambiguous parameter is visible, not wrong.
+public enum PulpParameterResolution {
+    case resolved(PulpParameter)
+    case missing(name: String)
+    case duplicate(name: String, count: Int)
+}
+
+/// The match outcome independent of any concrete `PulpParameter`. Split out so
+/// the exact-name rule is unit-testable without the C bridge that backs
+/// `PulpParameter` construction.
+public enum PulpParameterMatch: Equatable {
+    case resolved
+    case missing
+    case duplicate(Int)
+}
+
+/// Pure exact-name classifier: how a lookup of `name` resolves over
+/// `candidateNames`. Case-sensitive, no trimming, no normalization.
+public func pulpClassifyParameterName(_ name: String,
+                                      in candidateNames: [String]) -> PulpParameterMatch {
+    let count = candidateNames.reduce(0) { $0 + ($1 == name ? 1 : 0) }
+    switch count {
+    case 0:  return .missing
+    case 1:  return .resolved
+    default: return .duplicate(count)
+    }
+}
+
+/// The small shared protocol imported SwiftUI views depend on for binding, so
+/// generated code and `PulpViews.swift` don't drift on resolution semantics.
+public protocol PulpParameterResolving: AnyObject {
+    func resolveParameter(named name: String) -> PulpParameterResolution
+}
+
+extension PulpParameterStore: PulpParameterResolving {
+    /// Resolve by exact `PulpParameter.name`. 0 matches → `.missing`,
+    /// exactly 1 → `.resolved`, more than 1 → `.duplicate` (never the first).
+    public func resolveParameter(named name: String) -> PulpParameterResolution {
+        let matches = parameters.filter { $0.name == name }
+        switch matches.count {
+        case 0:  return .missing(name: name)
+        case 1:  return .resolved(matches[0])
+        default: return .duplicate(name: name, count: matches.count)
+        }
+    }
+}

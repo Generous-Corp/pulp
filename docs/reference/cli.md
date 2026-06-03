@@ -1083,7 +1083,7 @@ exit codes, diagnostics, and the staged rollout split).
 | Flag | Description |
 |------|-------------|
 | `--output <path>` | Destination for the primary generated artifact. The built-in default primary artifact is live JS at `ui.js`; sidecars remain anchored beside this path when not explicitly overridden. |
-| `--emit {js\|ir-json\|cpp}` | Select the primary artifact kind. `js`, `ir-json`, and `cpp` are implemented; `cpp` requires `--mode baked`. Built-in default: `js`; persistent default: `import_design.default_emit`. |
+| `--emit {js\|ir-json\|cpp\|swiftui}` | Select the primary artifact kind. `js`, `ir-json`, `cpp`, and `swiftui` are implemented; `cpp` and `swiftui` require `--mode baked`. `swiftui` emits a baked native SwiftUI view (`ImportedPulpView.swift` + a per-view `<RootView>Theme.swift` + binding manifest). Built-in default: `js`; persistent default: `import_design.default_emit`. |
 | `--mode {live\|baked}` | Select the import runtime model. Built-in default: `live`; persistent default: `import_design.default_mode`. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |

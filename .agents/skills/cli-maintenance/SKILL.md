@@ -177,11 +177,19 @@ for boundary spelling when changing these parsers.
 
 `pulp import-design --output <path>` is the destination for the primary
 artifact, not an artifact-kind selector. Keep sidecar anchoring tied to
-`--output` while using `--emit {js|ir-json|cpp}` for the primary artifact
+`--output` while using `--emit {js|ir-json|cpp|swiftui}` for the primary artifact
 vocabulary. Accepted import-design artifact or runtime values must stay aligned
 across `pulp_import_design.cpp`, `docs/reference/cli.md`,
 `docs/reference/design-import.md`, `docs/status/cli-commands.yaml`, and the
 import-design skill.
+
+`--emit swiftui` (baked SwiftUI, Workstream B1) is a fourth lowering parallel to
+`cpp` — baked-only, mirroring cpp's enum/parse/validation/dispatch in
+`pulp_import_design.cpp` (`generate_pulp_swift`). Its sidecars are per-view —
+`<RootView>.swift` + a `<RootView>Theme.swift` + `<RootView>.bindings.json` — so
+two imports never collide on a shared theme. `--screenshot-backend {skia|coregraphics}`
+selects the `--validate` render backend (default skia, the faithful path that
+composites file-backed images; see the `screenshot` skill).
 
 `--format` is a separate axis from `--emit`: it picks the **token file** format,
 not the primary artifact kind. Values are `w3c` (default, DTCG JSON),
