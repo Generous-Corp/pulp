@@ -81,6 +81,45 @@ Flip a lane mid-flight with `shipyard cloud retarget --target mac --provider <p>
 PATH — `eval "$(brew shellenv)"` in `~/.zshenv`, not just `~/.zprofile` — or
 `ssh host cmd` won't find cmake.)
 
+## Diagnosing a red macOS leg (read the runner's LOCAL logs — `gh` is opaque)
+
+On a self-hosted macOS runner, `gh run view --log` / `--job` returns **nothing
+useful** for the build/test step — only "Process completed with exit code N"
+(exit 8 = ctest had test failures), and check-run annotations are empty too. You
+**cannot** tell which test failed from GitHub's API. But the runner persists
+everything locally, so **if you're on the runner host** (true for Pulp's Mac
+Studio — the deps here are the self-hosted Tart/Shipyard pool), read it directly:
+
+1. **Find the work dir** from the runner config — it is NOT `~/actions-runner-*/_work`:
+   ```bash
+   # workFolder is custom on Pulp's runners:
+   grep workFolder ~/actions-runner-pulp-studio-01/.runner
+   #   → "/Volumes/Workshop/ci/pulp/work/pulp-studio-01"
+   ```
+2. **Read ctest's own result logs** in the persisted build dir (`clean:false` on
+   self-hosted keeps `build-<key>` warm across runs; `build-macos` is the macOS
+   leg). These are the authoritative source for *which* test failed and *why*:
+   ```bash
+   WS=/Volumes/Workshop/ci/pulp/work/pulp-studio-01/pulp/pulp   # <workFolder>/<repo>/<repo>
+   cat "$WS/build-macos/Testing/Temporary/LastTestsFailed.log"  # failed test names (+ ctest index)
+   grep -aA25 '<test name>' "$WS/build-macos/Testing/Temporary/LastTest.log"  # the failing REQUIRE + expansion
+   ```
+   `LastTestsFailed.log` lines look like `7675:pulp-import-design reports help…`;
+   `LastTest.log` has the full Catch2 output (`file:line: FAILED:` + `with
+   expansion:`). Check all three runners (`pulp-studio-01/02/03`) — the leg runs
+   on whichever was free; the freshest `LastTestsFailed.log` mtime is the run.
+3. The **step command/env** (not its output) lives in
+   `~/actions-runner-<name>/_diag/Worker_*.log` (most-recent file = most-recent
+   job; match by the commit SHA, which the checkout echoes). Read step *output*
+   from the ctest logs in (2), not from the Worker log.
+
+A "red macOS leg with exit code 8" on a change that can't plausibly affect macOS
+is usually a **pre-existing failure on `main`** that the (flaky/overflowing) gate
+let slip — e.g. a stale exact-match CLI assertion. Read the ctest log, fix the
+real failing test, don't chase your own diff. (Found 2026-06-03: #3386's
+`--emit swiftui` broke two `test_import_design_tool.cpp` exact-match asserts on
+main, reddening every PR's macOS gate.)
+
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tart-runner.sh --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Graduate:** add the runner to the required `pulp-build` pool (or stage replacing bare-metal), distributed across hosts. Never point a required check at an empty label; preflight that the label has online runners.
