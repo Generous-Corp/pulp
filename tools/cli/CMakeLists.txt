@@ -47,6 +47,7 @@ add_executable(pulp-cli
     cmd_coverage.cpp
     cmd_create.cpp
     cmd_macos.cpp
+    cmd_ci_host.cpp
     cmd_overflow.cpp
     cmd_design.cpp
     cmd_doctor.cpp
