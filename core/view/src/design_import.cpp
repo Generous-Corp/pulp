@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <limits>
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
@@ -2164,13 +2165,66 @@ void hoist_captured_art_knobs(DesignIR& ir) {
                 }
                 if (substantial == 0) {
                     // One body disc (+ only pointer hairlines): hoist the disc so
-                    // the materializer skins the knob and overlays the native
-                    // rotating notch. The knob stays interactive AND faithful.
+                    // the materializer skins the knob and draws the design's own
+                    // pointer over it. The knob stays interactive AND faithful.
                     n.attributes["asset_ref"] = body->attributes.at("asset_ref");
                     if (body->style.render_bounds && !n.style.render_bounds)
                         n.style.render_bounds = body->style.render_bounds;
                     if (!n.attributes.count("sprite_strip_frame_count"))
                         n.attributes["sprite_strip_frame_count"] = "1";
+
+                    // Capture the design's OWN pointer geometry (the hairline
+                    // vector — Figma "Vector 7") before erasing it, so the
+                    // renderer reproduces it pivoting at the disc center on the
+                    // value arc instead of drawing a guessed synthetic notch.
+                    // The hairline = the smallest-area non-body captured layer.
+                    // Geometry is recorded as fractions of the disc's half-extent
+                    // so it survives the importer's core-fit rescale.
+                    const float bx = body->style.left.value_or(0.0f);
+                    const float by = body->style.top.value_or(0.0f);
+                    const float bw = body->style.width.value_or(0.0f);
+                    const float bh = body->style.height.value_or(0.0f);
+                    const float dcx = bx + bw * 0.5f;
+                    const float dcy = by + bh * 0.5f;
+                    const float half = std::min(bw, bh) * 0.5f;
+                    IRNode* pointer = nullptr;
+                    float pointer_area = std::numeric_limits<float>::max();
+                    for (auto* layer : captured) {
+                        if (layer == body) continue;
+                        const float a = layer->style.width.value_or(0.0f) *
+                                        layer->style.height.value_or(0.0f);
+                        if (a < pointer_area) { pointer_area = a; pointer = layer; }
+                    }
+                    if (pointer != nullptr && half > 0.0f) {
+                        const float px = pointer->style.left.value_or(0.0f);
+                        const float py = pointer->style.top.value_or(0.0f);
+                        const float pw = pointer->style.width.value_or(0.0f);
+                        const float pyh = pointer->style.height.value_or(0.0f);
+                        // The hairline runs along its long axis; its two ends are
+                        // the extremes of its box. Measure each end's radius from
+                        // the disc center, keep the near/far pair.
+                        const float pcx = px + pw * 0.5f;
+                        auto rad = [&](float ex, float ey) {
+                            const float dx = ex - dcx, dy = ey - dcy;
+                            return std::sqrt(dx * dx + dy * dy);
+                        };
+                        const float r_a = rad(pcx, py);
+                        const float r_b = rad(pcx, py + pyh);
+                        const float r_out = std::max(r_a, r_b) / half;
+                        const float r_in = std::min(r_a, r_b) / half;
+                        const float w_frac =
+                            pointer->style.border_width.value_or(1.5f) / half;
+                        if (r_out > r_in) {
+                            n.attributes["knob_ind_r_in"] = std::to_string(r_in);
+                            n.attributes["knob_ind_r_out"] = std::to_string(r_out);
+                            n.attributes["knob_ind_w"] = std::to_string(w_frac);
+                            if (pointer->style.border_color)
+                                n.attributes["knob_ind_color"] =
+                                    *pointer->style.border_color;
+                            else if (pointer->style.color)
+                                n.attributes["knob_ind_color"] = *pointer->style.color;
+                        }
+                    }
                     n.children.erase(
                         std::remove_if(n.children.begin(), n.children.end(),
                             [](const IRNode& c) {

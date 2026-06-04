@@ -630,17 +630,72 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   (area 0) → not substantial →
   the knob HOISTS the disc and stays interactive. Two comparable layers (body +
   highlight) → demote to a static container.
+- **Capture the design's OWN pointer, don't synthesize one.** The disc body PNG
+  (ELYSIUM `Group 130`) is a CLEAN face with the min/center/max REFERENCE ticks
+  baked in; the moving pointer is a SEPARATE node (`Vector 7`, a ~4×16 hairline).
+  Before erasing the hairline, the hoist stamps its geometry onto the knob as
+  fractions of the disc half-extent: `knob_ind_r_in` / `knob_ind_r_out` (the
+  radii the line runs between, derived from the hairline's endpoints vs the disc
+  center), `knob_ind_w` (stroke width frac, from `border_width`), `knob_ind_color`
+  (from `border_color`). The materializer forwards these via
+  `Knob::set_captured_indicator`, and `Knob::paint` draws THAT pointer — pivoted
+  at the disc CORE center on the same `[-135°,+135°]` arc — instead of the generic
+  `draw_knob_indicator_notch`. Two bugs this fixes: (1) double line (the synthetic
+  notch + the disc's baked center tick); (2) misalignment (the synthetic notch
+  pivoted at the layout-BOX center with a guessed radius drifted off the baked
+  ticks). Pivot at the disc center + the design's own line ⇒ it rides the ticks by
+  construction. **The synthetic notch is still the fallback** for knobs with no
+  captured indicator metadata.
 - **Materializer skin** (`make_widget` knob branch): when the knob node carries
   an enrich-stamped `asset_path` (+ `png_natural_*`), it builds a single-frame
-  `SpriteStrip` + `set_sprite_core` from `art_core_*`. The engine overlays the
-  native rotating notch, so the knob is design-faithful AND turnable — Phase-D
-  drag still passes (`pulp-test-mac-platform-harness` knob_drag_probe).
+  `SpriteStrip` + `set_sprite_core` from `art_core_*`, then applies the captured
+  indicator above. The knob is design-faithful AND turnable — Phase-D drag still
+  passes (`pulp-test-mac-platform-harness` knob_drag_probe).
 - **Gotcha:** the harness pins `count_ir_nodes(ir.root)` on the *parsed* scene —
   assert structural counts BEFORE calling the hoist, since it removes the
   captured layers.
 - Tests: `[knob][sprite]` in `pulp-test-design-import-native-materializer`
-  (hoist promote + demote, pure, no I/O) + the GPU harness (end-to-end skin +
-  interactivity).
+  (hoist promote + demote + indicator-geometry capture + materializer forwarding,
+  pure, no I/O) + the GPU harness (end-to-end skin + interactivity).
+
+### Rasterized-vector image: suppress its baked stroke as a CSS border
+
+A Figma vector exported as a PNG (the FILTER & EQ curve `Vector 3`, every grid
+`Line`, dividers) carries its stroke as `border_color` + `border_width` in the
+IR — but **the stroke is already in the raster**. `apply_visual_style` draws a
+CSS border from those fields, which paints a spurious box outline around the
+image (the visible bug was a bright purple rectangle around the EQ curve). The
+materializer passes `skip_border=true` for `image_view` nodes so the border is
+not redrawn. If you add a code path that materializes images, keep that guard.
+Test: `[image][fidelity]` in `pulp-test-design-import-native-materializer`.
+
+### KNOWN GAP — imported text vertical centering must fix BOTH render paths
+
+The figma-plugin IR drops `textAlignVertical`, so a single-line label in a slot
+taller than its text rides the TOP of its box (visible bug: ELYSIUM "SEARCH" sits
+high; the `1·2·3·4` tab digits look off). It is tempting to fix this in the native
+materializer alone (`apply_label_style` → `set_vertical_align(center)` when
+`height > font_size*1.15`), **but that breaks the live↔baked parity invariant**:
+`pulp-test-design-import-screenshot-parity` pins `build_native_view_tree` ==
+web-compat `generate_pulp_js`, and the web-compat LIVE render does NOT center
+these labels even though `design_codegen.cpp` emits `setVerticalAlign('center')`
+and the bridge has a `setVerticalAlign` handler that maps to `Label`. So a
+native-only centering change diverged the `control-strip` fixture to similarity
+0.95 (< 0.97). The correct fix centers BOTH paths together (find why the live
+web-compat Label stays top despite the emitted call) and refreshes the parity
+baseline — do not land a native-only version.
+
+### KNOWN GAP — degenerate stroke-line images don't paint (EQ background grid)
+
+The FILTER & EQ background grid is 8 hairline `Line` images whose IR box has ONE
+dimension at ~0 (an exact 0 or a sub-pixel epsilon like `2.7e-06`). They resolve
+to valid PNGs (no missing-asset diagnostic) but paint NOTHING: flooring the thin
+flex dim (1px → 6px) changes zero pixels, so an absolute-positioned 0-area image
+is dropped at paint BEFORE the flex-dim path the materializer can reach. The
+reference shows them faint-but-present (10%-grey verticals at ~100/1K). Not yet
+fixed — it needs the layout/paint stage to honor a 1px floor for absolute
+0-area image rects (or to re-draw these as native 1px lines from their stroke).
+Parked as lower-impact than the spurious purple box, which IS fixed (see above).
 
 ### `IRStyle::box_shadow` is parsed layers, not a string (pulp #41)
 

@@ -429,12 +429,36 @@ public:
     }
     bool has_sprite_core() const { return sprite_core_w_ > 0.0f && sprite_core_h_ > 0.0f; }
 
+    /// Geometry of the design's OWN pointer (e.g. the Figma "Vector 7" hairline)
+    /// captured by hoist_captured_art_knobs, expressed relative to the disc core
+    /// so the renderer can reproduce the design's indicator instead of the
+    /// generic synthetic notch. `r_in`/`r_out` are fractions of the core's half
+    /// extent (the radius the line runs between); `width_px` is the logical
+    /// stroke width; `color` is the line color. When set on a single-frame
+    /// captured-art knob, Knob::paint draws THIS pointer — pivoted at the disc
+    /// core center on the [-135°,+135°] arc — and skips the synthetic notch, so
+    /// the moving line rides the disc's baked min/center/max reference ticks.
+    void set_captured_indicator(float r_in, float r_out, float width_px,
+                                canvas::Color color) {
+        ind_r_in_ = r_in; ind_r_out_ = r_out;
+        ind_width_ = width_px; ind_color_ = color;
+        has_captured_indicator_ = true;
+    }
+    bool has_captured_indicator() const { return has_captured_indicator_; }
+    float captured_indicator_r_in() const { return ind_r_in_; }
+    float captured_indicator_r_out() const { return ind_r_out_; }
+
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
     float sprite_core_x_ = 0.0f;
     float sprite_core_y_ = 0.0f;
     float sprite_core_w_ = 0.0f;
     float sprite_core_h_ = 0.0f;
+    bool has_captured_indicator_ = false;
+    float ind_r_in_ = 0.0f;
+    float ind_r_out_ = 0.0f;
+    float ind_width_ = 0.0f;
+    canvas::Color ind_color_ = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────

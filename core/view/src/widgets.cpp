@@ -366,6 +366,29 @@ static void draw_knob_indicator_notch(canvas::Canvas& canvas,
     canvas.stroke_line(inner_x, inner_y, outer_x, outer_y);
 }
 
+// Pointer reproduced from the design's OWN indicator node (set_captured_indicator).
+// Same [-135°,+135°] value→angle arc as the synthetic notch, but the radii, width
+// and color come from the imported art, and it pivots at the disc core center
+// (cx, cy) — so the line rides the disc's baked min/center/max reference ticks
+// instead of a guessed sweep. A faint dark backing keeps a hairline legible on a
+// bright metallic face without reading as a second line.
+static void draw_knob_captured_pointer(canvas::Canvas& canvas,
+                                       float cx, float cy,
+                                       float r_in, float r_out, float width,
+                                       canvas::Color color, float value) {
+    float angle = -1.5707963f + (value - 0.5f) * 4.7123890f;
+    float ox = cx + r_out * std::cos(angle);
+    float oy = cy + r_out * std::sin(angle);
+    float ix = cx + r_in  * std::cos(angle);
+    float iy = cy + r_in  * std::sin(angle);
+    canvas.set_stroke_color(canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.45f));
+    canvas.set_line_width(width + 1.25f);
+    canvas.stroke_line(ix, iy, ox, oy);
+    canvas.set_stroke_color(color);
+    canvas.set_line_width(width);
+    canvas.stroke_line(ix, iy, ox, oy);
+}
+
 void Knob::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float cx = b.width * 0.5f;
@@ -457,7 +480,16 @@ void Knob::paint(canvas::Canvas& canvas) {
         // the frames themselves (frame_for_value picks the angle), so they
         // get no overlay.
         if (sprite_strip_->frame_count() == 1) {
-            draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, value_);
+            if (has_captured_indicator_) {
+                // Reproduce the design's own pointer over the static disc.
+                float r_out = ind_r_out_ * notch_r;
+                float r_in  = ind_r_in_  * notch_r;
+                float w = std::max(1.5f, ind_width_ * notch_r);
+                draw_knob_captured_pointer(canvas, cx, cy, r_in, r_out, w,
+                                           ind_color_, value_);
+            } else {
+                draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, value_);
+            }
         }
         // Fall through to draw labels on top
     }

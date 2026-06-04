@@ -1078,7 +1078,8 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_height = {0.0f, DimensionUnit::auto_};
 }
 
-void apply_visual_style(View& view, const IRStyle& style) {
+void apply_visual_style(View& view, const IRStyle& style,
+                        bool skip_border = false) {
     if (style.background_color) {
         if (auto color = parse_hex_color(*style.background_color))
             view.set_background_color(*color);
@@ -1099,31 +1100,38 @@ void apply_visual_style(View& view, const IRStyle& style) {
         view.set_opacity(*style.opacity);
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
-    if (style.border_width)
-        view.set_border_width(*style.border_width);
-    if (style.border_color) {
-        if (auto color = parse_hex_color(*style.border_color))
-            view.set_border_color(*color);
-    }
-    if (style.border_top_width) view.set_border_top_width(*style.border_top_width);
-    if (style.border_right_width) view.set_border_right_width(*style.border_right_width);
-    if (style.border_bottom_width) view.set_border_bottom_width(*style.border_bottom_width);
-    if (style.border_left_width) view.set_border_left_width(*style.border_left_width);
-    if (style.border_top_color) {
-        if (auto color = parse_hex_color(*style.border_top_color))
-            view.set_border_top_color(*color);
-    }
-    if (style.border_right_color) {
-        if (auto color = parse_hex_color(*style.border_right_color))
-            view.set_border_right_color(*color);
-    }
-    if (style.border_bottom_color) {
-        if (auto color = parse_hex_color(*style.border_bottom_color))
-            view.set_border_bottom_color(*color);
-    }
-    if (style.border_left_color) {
-        if (auto color = parse_hex_color(*style.border_left_color))
-            view.set_border_left_color(*color);
+    // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
+    // the source stroke as border_color/border_width, but the stroke is already
+    // baked into the raster. Drawing it again paints a spurious box outline —
+    // the visible bug was a bright purple rectangle around the FILTER & EQ curve
+    // (Vector 3, stroke #7e6aff). Skip the border for those nodes.
+    if (!skip_border) {
+        if (style.border_width)
+            view.set_border_width(*style.border_width);
+        if (style.border_color) {
+            if (auto color = parse_hex_color(*style.border_color))
+                view.set_border_color(*color);
+        }
+        if (style.border_top_width) view.set_border_top_width(*style.border_top_width);
+        if (style.border_right_width) view.set_border_right_width(*style.border_right_width);
+        if (style.border_bottom_width) view.set_border_bottom_width(*style.border_bottom_width);
+        if (style.border_left_width) view.set_border_left_width(*style.border_left_width);
+        if (style.border_top_color) {
+            if (auto color = parse_hex_color(*style.border_top_color))
+                view.set_border_top_color(*color);
+        }
+        if (style.border_right_color) {
+            if (auto color = parse_hex_color(*style.border_right_color))
+                view.set_border_right_color(*color);
+        }
+        if (style.border_bottom_color) {
+            if (auto color = parse_hex_color(*style.border_bottom_color))
+                view.set_border_bottom_color(*color);
+        }
+        if (style.border_left_color) {
+            if (auto color = parse_hex_color(*style.border_left_color))
+                view.set_border_left_color(*color);
+        }
     }
     if (style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);
     if (style.border_top_right_radius) view.set_corner_radius_tr(*style.border_top_right_radius);
@@ -1232,6 +1240,19 @@ void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
     if (cw > 0.0f && ch > 0.0f)
         knob.set_sprite_core(attr_float(node, "art_core_x").value_or(0.0f),
                              attr_float(node, "art_core_y").value_or(0.0f), cw, ch);
+    // Design's own pointer geometry (Figma "Vector 7"), captured by
+    // hoist_captured_art_knobs as fractions of the disc half-extent. When
+    // present, Knob::paint draws THIS pointer over the static disc — pivoting at
+    // the disc core center on the value arc — instead of the synthetic notch, so
+    // it rides the disc's baked min/center/max reference ticks.
+    if (auto r_out = attr_float(node, "knob_ind_r_out")) {
+        const float r_in = attr_float(node, "knob_ind_r_in").value_or(0.0f);
+        const float w = attr_float(node, "knob_ind_w").value_or(0.0f);
+        Color color = Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
+        if (auto hex = attr(node, "knob_ind_color"))
+            if (auto parsed = parse_hex_color(*hex)) color = *parsed;
+        knob.set_captured_indicator(r_in, *r_out, w, color);
+    }
 }
 
 std::unique_ptr<View> make_widget(const IRNode& node,
@@ -1416,7 +1437,8 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     auto view = make_widget(node, resolved, manifest, options, path, diagnostics);
     apply_identity(*view, node, resolved);
     apply_layout(*view, node, parent_direction);
-    apply_visual_style(*view, node.style);
+    apply_visual_style(*view, node.style,
+                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view);
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
 

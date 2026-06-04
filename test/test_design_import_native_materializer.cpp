@@ -701,6 +701,75 @@ TEST_CASE("baked native materializer applies a CSS background gradient",
     REQUIRE(root->background_gradient_type() == 1);  // 1 = linear
 }
 
+TEST_CASE("baked native materializer reproduces the design's captured knob pointer",
+          "[view][import][native-materializer][knob][sprite]") {
+    // hoist_captured_art_knobs stamps the design's own pointer geometry; the
+    // materializer must forward it to the Knob (set_captured_indicator) so the
+    // renderer draws THAT pointer over the disc instead of a synthetic notch —
+    // killing the double line and aligning to the disc's baked reference ticks.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 100.0f;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.stable_anchor_id = "knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 30.0f;
+    knob.style.height = 32.0f;
+    // Post-hoist + post-enrich attribute contract for a captured-art knob.
+    knob.attributes["asset_ref"] = "disc";
+    knob.attributes["asset_path"] = "/resolved/disc.png";
+    knob.attributes["png_natural_w"] = "420";
+    knob.attributes["png_natural_h"] = "484";
+    knob.attributes["knob_ind_r_in"] = "0.604";
+    knob.attributes["knob_ind_r_out"] = "0.936";
+    knob.attributes["knob_ind_w"] = "0.05";
+    knob.attributes["knob_ind_color"] = "#ffffff";
+    ir.root.children.push_back(std::move(knob));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    auto* k = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(k != nullptr);
+    REQUIRE(k->has_captured_indicator());
+    CHECK(k->captured_indicator_r_out() == Catch::Approx(0.936f));
+    CHECK(k->captured_indicator_r_in() == Catch::Approx(0.604f));
+}
+
+TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box border",
+          "[view][import][native-materializer][image][fidelity]") {
+    // A Figma vector exported as a PNG carries its stroke as border_color /
+    // border_width, but the stroke is already in the raster. Drawing it again
+    // paints a spurious outline — the visible bug was a purple rectangle around
+    // the FILTER & EQ curve. Image views must suppress the CSS border.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "image";
+    ir.root.stable_anchor_id = "curve";
+    ir.root.attributes["asset_ref"] = "3:188";
+    ir.root.style.width = 177.0f;
+    ir.root.style.height = 26.0f;
+    ir.root.style.border_color = "#7e6aff";
+    ir.root.style.border_width = 1.0f;
+
+    IRAssetRef asset;
+    asset.asset_id = "3:188";
+    asset.original_uri = "figma://fixture/3:188";
+    asset.local_path = "/resolved/assets/3_188.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {});
+    REQUIRE(root != nullptr);
+    auto* image = dynamic_cast<ImageView*>(root.get());
+    REQUIRE(image != nullptr);
+    CHECK(image->border_width() == Catch::Approx(0.0f));
+}
+
 TEST_CASE("hoist_captured_art_knobs promotes a body disc + pointer to an interactive skin",
           "[view][import][native-materializer][knob][sprite]") {
     // A captured-art knob ships a body disc image + a ~0-area pointer hairline
@@ -714,18 +783,24 @@ TEST_CASE("hoist_captured_art_knobs promotes a body disc + pointer to an interac
     knob.type = "frame";
     knob.stable_anchor_id = "knob";
     knob.audio_widget = AudioWidgetType::knob;
-    IRNode body;       // the disc
+    IRNode body;       // the disc, at (0,0), 30x32 → center (15,16), half-extent 15
     body.type = "image";
     body.stable_anchor_id = "body";
     body.attributes["asset_ref"] = "disc-asset";
+    body.style.left = 0.0f;
+    body.style.top = 0.0f;
     body.style.width = 30.0f;
     body.style.height = 32.0f;
-    IRNode pointer;    // a 0-area stroked pointer hairline
+    IRNode pointer;    // a ~0-width stroked pointer hairline near top-center
     pointer.type = "image";
     pointer.stable_anchor_id = "ptr";
     pointer.attributes["asset_ref"] = "ptr-asset";
+    pointer.style.left = 14.0f;   // ~centered on the 30-wide disc
+    pointer.style.top = 2.0f;
     pointer.style.width = 0.0f;
-    pointer.style.height = 5.0f;
+    pointer.style.height = 5.0f;  // spans y 2..7
+    pointer.style.border_width = 1.5f;
+    pointer.style.border_color = "#ffffff";
     knob.children.push_back(body);
     knob.children.push_back(pointer);
     ir.root.children.push_back(std::move(knob));
@@ -736,8 +811,18 @@ TEST_CASE("hoist_captured_art_knobs promotes a body disc + pointer to an interac
     REQUIRE(k.audio_widget == AudioWidgetType::knob);          // stays interactive
     REQUIRE(k.attributes.at("asset_ref") == "disc-asset");     // disc hoisted
     REQUIRE(k.attributes.at("sprite_strip_frame_count") == "1");
-    // Captured layers (disc + pointer) are gone; the native notch draws the indicator.
+    // Captured layers (disc + pointer) are gone — the design's pointer geometry
+    // is stamped instead, so the renderer reproduces the real indicator.
     REQUIRE(k.children.empty());
+    // pointer ends (14,2)/(14,7) from disc center (15,16): far ≈ 14.04, near ≈ 9.06;
+    // half-extent 15 → r_out ≈ 0.936, r_in ≈ 0.604.
+    REQUIRE(k.attributes.count("knob_ind_r_out") == 1);
+    const float r_out = std::stof(k.attributes.at("knob_ind_r_out"));
+    const float r_in = std::stof(k.attributes.at("knob_ind_r_in"));
+    CHECK(r_out == Catch::Approx(0.936f).margin(0.02f));
+    CHECK(r_in == Catch::Approx(0.604f).margin(0.02f));
+    CHECK(r_out > r_in);
+    REQUIRE(k.attributes.at("knob_ind_color") == "#ffffff");
 }
 
 TEST_CASE("hoist_captured_art_knobs demotes a multi-layer knob to a static container",
