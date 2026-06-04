@@ -503,6 +503,21 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
+### Linux/Windows self-hosted routing (opt-in)
+
+`build.yml`'s `resolve-provider` feeds the Linux/Windows leg selectors from
+(in precedence): the `linux_runner_selector_json` / `windows_runner_selector_json`
+workflow_dispatch input → the `PULP_LOCAL_LINUX_RUNS_ON_JSON` /
+`PULP_LOCAL_WINDOWS_RUNS_ON_JSON` repo var → `''` (github-hosted, the default).
+Set the repo var (e.g. `["self-hosted","Linux","ARM64","pulp-build-linux"]`) to
+route that leg to the self-hosted blackbook pool, served by
+`tools/ci/tart-runner-linux.sh` / `qemu-runner-windows.sh` (see the `tart-ci`
+skill) and toggled per-platform in the Shipyard macOS GUI. The explicit selector
+has NO capacity fallback, so only set it when blackbook reliably serves that
+lane — else legs route to a label with no online runner and queue. The pilot
+labels (`pulp-build-{linux,windows}`) are non-required, so a stuck pilot can't
+block PRs.
+
 ### macOS runner routing (current)
 
 As of 2026-05-20, Namespace macOS routing is disabled for cost control.

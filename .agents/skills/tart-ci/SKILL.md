@@ -57,6 +57,41 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
 - **Capacity-aware cloud→local queue draining is implemented and VM-slot-aware.** Two cooperating pieces share one rule — a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host, Linux/Windows guests don't count): (1) `tart-runner.sh --loop` boots a VM only when there's queued `Build and Test` work AND a free slot (`PULP_VM_CAP`, default 2; `--cap N` to override); (2) `tools/scripts/macos_reroute_watcher.py`'s `free_macos_slots(hosts)` sums free slots across hosts (`--hosts-config` JSON, `tart list` locally or over SSH) and reclaims a still-queued cloud job into a freed slot. Default (no hosts-config) = a single local bare-metal slot, i.e. the pre-#3299 single-runner behavior — safe to run before the cutover. The two never double-book a host because they evaluate the same `running_macos_vms < cap` predicate.
 
+## Linux + Windows pool runners (join the Actions pool like macOS)
+
+Each platform serves the GitHub Actions pool via its own ephemeral per-job
+runner supervisor — the analog of `tart-runner.sh` for macOS:
+
+| Supervisor | VM | Golden | Labels (pilot) | LaunchAgent |
+|---|---|---|---|---|
+| `tools/ci/tart-runner.sh` | Tart macOS | `pulp-build-runner` | `…,pulp-build` | `com.danielraffel.pulp.tart-runner` |
+| `tools/ci/tart-runner-linux.sh` | Tart Linux | `pulp-linux-build` | `…,Linux,ARM64,pulp-build-linux` | `com.danielraffel.pulp.tart-runner-linux` |
+| `tools/ci/qemu-runner-windows.sh` | QEMU Windows | `pulp-windows-build-*.qcow2` | `…,Windows,ARM64,pulp-build-windows` | `com.danielraffel.pulp.qemu-runner-windows` |
+
+All three: mint a JIT (single-job) runner config → boot a throwaway clone
+(Tart CoW for Linux, qcow2 overlay on a dynamic SSH port for Windows) → run the
+baked `~/actions-runner` agent once → discard. The goldens carry the
+`actions-runner-{linux-arm64,win-arm64}` agent (Windows install-if-missing if a
+golden predates the bake). `--loop` only boots when there's queued
+`Build and Test` work.
+
+**Per-platform opt-in/out** is the Shipyard macOS GUI's "Serve CI builds from
+this Mac" switch: each lane is a `CIServingLane` toggled by `launchctl
+load/unload` of its LaunchAgent (the labels above). Install a lane on a host by
+sed-templating its `tools/launchd/*.plist.template` into `~/Library/LaunchAgents`
+(replace `$PULP_REPO`, `$HOME`, and `$TART_HOME`/`$TARTCI_GOLDENS` — launchd
+doesn't expand shell vars). Pulp CI routes to these via `build.yml`'s opt-in
+`PULP_LOCAL_{LINUX,WINDOWS}_RUNS_ON_JSON` repo vars (default off → github-hosted).
+
+**Hard-won Windows-runner gotchas:**
+- The multi-KB JIT blob must NEVER ride a command line — through the
+  ssh→cmd.exe→powershell chain it blows cmd's 8191-char limit ("The command line
+  is too long"), whether passed as a `run.cmd --jitconfig` arg OR embedded in a
+  `powershell -EncodedCommand`. Stream it into a file via **ssh stdin**, then run
+  `Runner.Listener.exe run --jitconfig (Get-Content jit.cfg)`.
+- `git reset --hard` (+ `core.autocrlf false`) for checkout — the golden's tree
+  carries autocrlf churn that aborts a plain `git checkout`.
+
 ## Shipping FROM a VM-only runner host
 A VM-only host (no host-side cmake/Xcode/Skia — builds only ever run *inside*
 the VMs) can serve the pool fine, but `shipyard pr` initiated **on** it needs

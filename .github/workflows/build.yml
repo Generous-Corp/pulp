@@ -57,8 +57,19 @@ jobs:
       - id: resolve
         env:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
-          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
-          EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
+          # Linux/Windows runner selection (highest precedence in the resolver):
+          #   1. workflow_dispatch input (per-run override), else
+          #   2. PULP_LOCAL_{LINUX,WINDOWS}_RUNS_ON_JSON repo var — OPT-IN routing
+          #      to the self-hosted blackbook pool (e.g. ["self-hosted","Linux",
+          #      "ARM64","pulp-build-linux"]); served by tools/ci/tart-runner-linux.sh
+          #      / qemu-runner-windows.sh, toggled per-platform in the Shipyard GUI.
+          #   3. unset → '' → resolver falls through to github-hosted (default).
+          # Only set the repo var when blackbook is reliably serving that lane, or
+          # legs route to a label with no online runner and queue. The pilot labels
+          # (pulp-build-{linux,windows}) are non-required, so a stuck pilot can't
+          # block PRs.
+          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || vars.PULP_LOCAL_WINDOWS_RUNS_ON_JSON || '' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
           # `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON` from these inputs so the
