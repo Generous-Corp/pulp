@@ -250,7 +250,9 @@ class MacosRerouteWatcherTests(unittest.TestCase):
                 0,
             )
 
-        watch.assert_called_once_with(interval=5, flap_window=6)
+        watch.assert_called_once_with(
+            interval=5, flap_window=6, hosts=watcher.DEFAULT_HOSTS
+        )
 
     def test_script_entrypoint_exits_with_main_status(self) -> None:
         argv = [str(SCRIPT), "--interval", "1"]
@@ -260,6 +262,121 @@ class MacosRerouteWatcherTests(unittest.TestCase):
                 runpy.run_path(str(SCRIPT), run_name="__main__")
 
         self.assertEqual(cm.exception.code, 0)
+
+
+class CapacityModelTests(unittest.TestCase):
+    """#3299 — VM-slot-aware free-capacity model."""
+
+    def _tart_json(self, vms: list[dict]) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(["tart"], 0, stdout=json.dumps(vms))
+
+    def test_count_running_macos_vms_counts_only_running_macos(self) -> None:
+        vms = [
+            {"Name": "a", "State": "running", "OS": "darwin"},
+            {"Name": "b", "State": "running", "OS": "linux"},   # uncapped → skip
+            {"Name": "c", "State": "stopped", "OS": "darwin"},  # not running → skip
+            {"Name": "d", "State": "running"},                  # unknown OS → counts
+        ]
+        with mock.patch.object(watcher.subprocess, "run",
+                               return_value=self._tart_json(vms)) as run:
+            self.assertEqual(watcher.count_running_macos_vms(), 2)
+        # local invocation: no ssh wrapper
+        self.assertEqual(run.call_args.args[0][:2], ["tart", "list"])
+
+    def test_count_running_macos_vms_uses_ssh_for_remote_host(self) -> None:
+        with mock.patch.object(watcher.subprocess, "run",
+                               return_value=self._tart_json([])) as run:
+            self.assertEqual(watcher.count_running_macos_vms(ssh="admin@m5"), 0)
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[0], "ssh")
+        self.assertIn("admin@m5", argv)
+        self.assertEqual(argv[-1], "tart list --format json")
+
+    def test_count_running_macos_vms_returns_none_on_failure(self) -> None:
+        with mock.patch.object(watcher.subprocess, "run",
+                               side_effect=subprocess.SubprocessError("boom")):
+            self.assertIsNone(watcher.count_running_macos_vms())
+        with mock.patch.object(
+            watcher.subprocess, "run",
+            return_value=subprocess.CompletedProcess(["tart"], 0, stdout="not json"),
+        ):
+            self.assertIsNone(watcher.count_running_macos_vms())
+
+    def test_baremetal_host_free_slots_tracks_busy_probe(self) -> None:
+        host = {"name": "local", "mode": "baremetal", "cap": 1}
+        with mock.patch.object(watcher, "local_is_busy", return_value=False):
+            self.assertEqual(watcher._host_free_slots(host), 1)
+        with mock.patch.object(watcher, "local_is_busy", return_value=True):
+            self.assertEqual(watcher._host_free_slots(host), 0)
+        with mock.patch.object(watcher, "local_is_busy", return_value=None):
+            self.assertIsNone(watcher._host_free_slots(host))
+
+    def test_tart_host_free_slots_is_cap_minus_running(self) -> None:
+        host = {"name": "studio", "mode": "tart", "cap": 2}
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=0):
+            self.assertEqual(watcher._host_free_slots(host), 2)
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=2):
+            self.assertEqual(watcher._host_free_slots(host), 0)
+        # never negative even if a host somehow exceeds its cap
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=5):
+            self.assertEqual(watcher._host_free_slots(host), 0)
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=None):
+            self.assertIsNone(watcher._host_free_slots(host))
+
+    def test_free_macos_slots_sums_hosts_and_tolerates_partial_failure(self) -> None:
+        hosts = [
+            {"name": "local", "mode": "baremetal", "cap": 1},
+            {"name": "studio", "mode": "tart", "cap": 2},
+            {"name": "m5", "mode": "tart", "cap": 2, "ssh": "admin@m5"},
+        ]
+        with mock.patch.object(watcher, "local_is_busy", return_value=False), \
+             mock.patch.object(watcher, "count_running_macos_vms",
+                               side_effect=[1, None]):  # studio: 1 free; m5: probe fails
+            # 1 (baremetal idle) + 1 (studio 2-1) + skip(m5) = 2
+            self.assertEqual(watcher.free_macos_slots(hosts), 2)
+
+    def test_free_macos_slots_none_only_when_all_probes_fail(self) -> None:
+        hosts = [{"name": "a", "mode": "tart", "cap": 2},
+                 {"name": "b", "mode": "tart", "cap": 2}]
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=None):
+            self.assertIsNone(watcher.free_macos_slots(hosts))
+
+    def test_load_hosts_config_default_is_single_baremetal_slot(self) -> None:
+        self.assertEqual(watcher.load_hosts_config(None), watcher.DEFAULT_HOSTS)
+        with mock.patch.object(watcher, "local_is_busy", return_value=False):
+            # Default config preserves the exact pre-#3299 behavior: 1 free iff idle.
+            self.assertEqual(watcher.free_macos_slots(watcher.DEFAULT_HOSTS), 1)
+
+    def test_load_hosts_config_reads_file_and_rejects_empty(self) -> None:
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump({"hosts": [{"name": "x", "mode": "tart", "cap": 2}]}, fh)
+            good = fh.name
+        self.assertEqual(watcher.load_hosts_config(good)[0]["name"], "x")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump({"hosts": []}, fh)
+            empty = fh.name
+        with self.assertRaises(ValueError):
+            watcher.load_hosts_config(empty)
+
+    def test_tick_reroutes_when_tart_slot_free(self) -> None:
+        guard = watcher.FlapGuard(window_seconds=300)
+        hosts = [{"name": "studio", "mode": "tart", "cap": 2}]
+        # 1 running VM, cap 2 → 1 free slot → should reroute a queued cloud job.
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=1), \
+             mock.patch.object(watcher, "list_queued_cloud_bat_runs",
+                               return_value=[(42, 400)]), \
+             mock.patch.object(watcher, "reroute_to_local", return_value=True) as reroute:
+            watcher.tick(guard, hosts)
+        reroute.assert_called_once_with(42)
+
+    def test_tick_skips_when_tart_host_at_cap(self) -> None:
+        guard = watcher.FlapGuard(window_seconds=300)
+        hosts = [{"name": "studio", "mode": "tart", "cap": 2}]
+        with mock.patch.object(watcher, "count_running_macos_vms", return_value=2), \
+             mock.patch.object(watcher, "list_queued_cloud_bat_runs") as queued:
+            watcher.tick(guard, hosts)
+        queued.assert_not_called()
 
 
 if __name__ == "__main__":

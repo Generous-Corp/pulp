@@ -227,6 +227,31 @@ or `manual`, but agents should not choose those workflows unless the user
 explicitly asks for a manual/emergency bypass. `pulp status` reports the
 effective workflow and whether its required local tool is installed.
 
+### Gotcha: `Closes #N` (issue auto-close) vs `Closes: #N` (trailer parser)
+
+These two needs pull in opposite directions on the colon, and getting it
+wrong silently fails — no error, the thing just doesn't happen:
+
+- **GitHub issue auto-close** keys off `Closes #N` / `Fixes #N` (no colon)
+  in the PR body or a commit message on the default-branch merge. `Closes:
+  #N` (**with** a colon) is read as a trailer, **not** a closing keyword, so
+  the issue stays open after merge. (Burned us on #3299: the `Closes: #3299`
+  trailer merged green but left the issue open — had to `gh issue close` by
+  hand.)
+- **Git trailer bypasses** (`Skill-Update:`, `Version-Bump:`,
+  `Release-Supersede:`) are parsed by `git interpret-trailers --parse`,
+  which requires the trailer paragraph to be **all** `Key: value` lines — a
+  colon-less `Closes #N` mixed into that paragraph breaks the parse and
+  silently voids every bypass trailer in it.
+
+The rule that satisfies both: to **auto-close** an issue, put `Closes #N`
+(no colon) in the **PR body prose** (or the commit body prose), and keep the
+trailer paragraph at the very end **all-colons** (`Skill-Update: …`,
+`Co-Authored-By: …`). Don't mix a closing keyword into the trailer block.
+When you must reference an issue inside the trailer block, `Refs: #N` is
+inert and safe. After authoring, dry-run `git log -1 --format='%(trailers)'`
+to confirm the bypass trailers still parse.
+
 Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
 diagnostics, experimental branches, existing Shipyard-managed PRs, or when
 `shipyard pr` itself is being debugged. Do not use them as the primary ship
@@ -620,18 +645,35 @@ GH Actions runner; the launchd template at
 `tools/launchd/pulp-macos-reroute-watcher.plist.template` documents
 the setup steps.
 
-Polling cadence: 30s. Detection: `ps` for Runner.Worker children
-under the actions-runner workspace (no admin token required). When
-local is idle AND a BAT run's macOS job has cloud labels (`macos-15`
-or `nscloud-*` / `namespace-profile-*`) AND hasn't started yet, the
-watcher invokes `pulp macos retarget --pr N --to local`.
+Polling cadence: 30s. When there is **free macOS capacity** AND a BAT
+run's macOS job has cloud labels (`macos-15` or `nscloud-*` /
+`namespace-profile-*`) AND hasn't started yet, the watcher invokes
+`pulp macos retarget --pr N --to local`.
+
+**Capacity is VM-slot-aware (#3299).** "Free capacity" is no longer a
+single runner's busy/idle — it's `free_macos_slots(hosts)`, the sum of
+free slots across configured hosts. Each host is either **bare-metal**
+(one slot, gated by the `ps` Runner.Worker probe — `local_is_busy()`,
+local-only, no admin token) or runs **ephemeral Tart VMs** (`cap` slots
+— macOS caps 2 running macOS VMs/host, Appendix D — minus the running
+macOS VM count from `tart list`, counted locally or over SSH). The
+default (`--hosts-config` absent) is a single local bare-metal slot,
+i.e. **exactly the pre-#3299 behavior**, so the watcher is safe to run
+before the Tart-VM cutover and grows into it. Supply a hosts JSON
+(`{"hosts": [{name, mode, cap, ssh}, ...]}`) to make it multi-host /
+VM-slot aware. A host whose probe fails is skipped (its capacity is
+unknown, not zero); the tick is skipped only if **every** host probe
+fails — never act on unknown capacity.
 
 Flap-guard: a PR rerouted in the last 5 min is suppressed (avoids
 thrashing). One reroute per tick; the next tick reassesses.
 
-Cooperates with the overflow probe in `build.yml` — they're
-complementary: the probe makes the initial dispatch decision; the
-watcher catches near-misses after the fact.
+Cooperates with two siblings: the overflow probe in `build.yml` (makes
+the initial dispatch decision; the watcher catches near-misses after
+the fact), and `tools/ci/tart-runner.sh --loop`, whose capacity+queue
+gate uses the **same** VM-slot rule (boot a VM only when queued BAT work
+exists AND `running_macos_vms < cap`) so the two never double-book a
+host.
 
 ### Path-scoped validation profile: `parser`
 

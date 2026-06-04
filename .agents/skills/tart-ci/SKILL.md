@@ -21,7 +21,7 @@ Run every macOS build/validation in a **throwaway VM cloned from a versioned gol
 |---|---|
 | `setup-ci-host.sh` | **One-command host onboarding** (opinionated): install tart/sshpass, set `~/VMs` (no FDA), acquire the golden (`--copy-from` or bake), install the launchd runner agent with a `--class` label. Mirrors `docs/guides/mac-ci-host-setup.md`. |
 | `tart-provision.sh` | Build/refresh layered golden images; `verify`/`tag`/`resize`/`manifest` helpers. Subcommands: `base` → `apple-xcode` → `pulp` → `runner`. |
-| `tart-runner.sh` | **Ephemeral per-job GitHub Actions runner.** Mints a JIT (single-job) runner config, clones the runner golden, boots with host ccache mounted, runs one job, destroys the VM. `--loop` keeps a fresh one ready; `--once` for a pilot. |
+| `tart-runner.sh` | **Ephemeral per-job GitHub Actions runner.** Mints a JIT (single-job) runner config, clones the runner golden, boots with host ccache mounted, runs one job, destroys the VM. `--loop` boots a fresh VM only when there's queued work AND a free VM slot (`running_macos_vms < cap`); `--once` for a pilot; `--cap N` overrides the per-host cap. |
 | `tart-run-job.sh` | **Direct** ephemeral build (no GitHub runner): clone golden → virtio-fs mount host caches → build+ctest in-guest → discard. Useful for Shipyard `backend` / manual builds. |
 | `pulp-worktree.sh` | Per-branch worktrees + shared ccache (host-side dev isolation; complements the VM lane). |
 | `.shipyard/vm-image.toml` | **The per-repo reuse unit** (see below). |
@@ -55,7 +55,7 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 ## Concurrency & hosts
 - **macOS caps 2 concurrent running VMs PER HOST** (kernel quota; booting a 3rd throws "number of VMs exceeds the system limit"). For ≥3 concurrent, **distribute runners across multiple Macs** (e.g. Mac Studio + MacBook Pro M5 → 2+2 = 4) — each runs `tart-runner.sh`; new hosts inherit the host-class label (`*-studio`, `*-m1`, `*-m5`) and cap=2. A dedicated Studio *can* raise the cap via the kernel-quota override (plan Appendix D; SIP off + dev kernel — last resort).
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
-- Capacity-aware cloud→local queue draining belongs in Shipyard's multi-Mac controller: its "local idle" signal must become "free VM slot" (`running_macos_vms < cap`, summed across hosts) so a freed slot drains a still-queued job instead of leaving it on cloud. (Track the cross-cutting work in `planning/`, not here.)
+- **Capacity-aware cloud→local queue draining is implemented and VM-slot-aware.** Two cooperating pieces share one rule — a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host, Linux/Windows guests don't count): (1) `tart-runner.sh --loop` boots a VM only when there's queued `Build and Test` work AND a free slot (`PULP_VM_CAP`, default 2; `--cap N` to override); (2) `tools/scripts/macos_reroute_watcher.py`'s `free_macos_slots(hosts)` sums free slots across hosts (`--hosts-config` JSON, `tart list` locally or over SSH) and reclaims a still-queued cloud job into a freed slot. Default (no hosts-config) = a single local bare-metal slot, i.e. the pre-#3299 single-runner behavior — safe to run before the cutover. The two never double-book a host because they evaluate the same `running_macos_vms < cap` predicate.
 
 ## Shipping FROM a VM-only runner host
 A VM-only host (no host-side cmake/Xcode/Skia — builds only ever run *inside*

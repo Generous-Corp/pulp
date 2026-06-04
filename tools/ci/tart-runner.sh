@@ -16,11 +16,13 @@
 # free on that host. To exceed 2 concurrent, run this supervisor on multiple
 # Macs (the same hosts that run the bare-metal runners today) or enable the
 # Appendix-D quota override on the dedicated Studio.
-# TODO (capacity+queue-aware --loop): only boot a VM when there is queued work
-# AND running_macos_vms < cap, cooperating with tools/scripts/macos_reroute_watcher.py
-# (task #22), whose "local idle" check should evolve to "free VM slot". That
-# closes the loop the operator described: when the host frees up later, drain
-# still-queued GitHub macOS jobs locally instead of leaving them on cloud.
+# CAPACITY+QUEUE-AWARE --loop (#3299): the loop boots a VM only when there is
+# queued "Build and Test" work AND running_macos_vms < cap (PULP_VM_CAP,
+# default 2). It cooperates with tools/scripts/macos_reroute_watcher.py (task
+# #22), whose capacity check is likewise VM-slot-aware ("free VM slot", not
+# single-runner busy/idle). Together they close the loop the operator described:
+# when the host frees up later, drain still-queued GitHub macOS jobs locally
+# instead of leaving them on cloud — without overbooking the 2-VM kernel cap.
 #
 # Pilot-safe by default: the label is `pulp-build-vm` (NOT the required
 # `pulp-build`), so jobs only land here when explicitly routed
@@ -43,6 +45,8 @@ REPO="${PULP_RUNNER_REPO:-danielraffel/pulp}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build-vm}"
 RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 LOOP=0
+CAP="${PULP_VM_CAP:-2}"          # macOS 2-VM kernel cap per host (plan Appendix D)
+POLL="${PULP_VM_POLL:-20}"       # seconds to wait when there's no work or no free slot
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes)
 
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
@@ -56,8 +60,39 @@ while [ $# -gt 0 ]; do case "$1" in
   --golden) GOLDEN="$2"; shift 2;;
   --labels) LABELS="$2"; shift 2;;
   --repo) REPO="$2"; shift 2;;
+  --cap) CAP="$2"; shift 2;;
   *) die "unknown arg: $1";;
 esac; done
+
+# Count running macOS Tart VMs on THIS host. Linux/Windows guests are uncapped
+# (they don't count against the 2-macOS kernel cap), so they're excluded — same
+# rule as macos_reroute_watcher.count_running_macos_vms. Any parse/tool failure
+# yields 0 so the loop fails safe toward "there may be room" rather than wedging.
+running_macos_vms(){
+  tart list --format json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    vms = json.load(sys.stdin)
+except Exception:
+    print(0); raise SystemExit
+n = 0
+for v in vms if isinstance(vms, list) else []:
+    if not str(v.get("State", v.get("state", ""))).lower().startswith("run"):
+        continue
+    if str(v.get("OS", v.get("os", "darwin"))).lower() in ("", "darwin", "macos"):
+        n += 1
+print(n)
+' 2>/dev/null || echo 0
+}
+
+# Coarse "is there macOS work waiting?" gate: count queued Build-and-Test runs.
+# Precise cloud-leg targeting is the watcher's job; here we only avoid booting a
+# VM when the queue is plainly empty. 0 on any gh failure (treat as "no work").
+queued_bat_work(){
+  gh api "repos/$REPO/actions/runs?status=queued&per_page=30" \
+    --jq '[.workflow_runs[] | select(.name == "Build and Test")] | length' \
+    2>/dev/null || echo 0
+}
 
 run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
   local i="$1" vm="ephr-$$-$1" jit
@@ -111,8 +146,17 @@ run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
 
 i=0
 if [ "$LOOP" = 1 ]; then
-  note "ephemeral runner LOOP (Ctrl-C to stop); golden=$GOLDEN labels=$LABELS"
-  while true; do i=$((i+1)); run_one "$i" || true; done
+  note "ephemeral runner LOOP (Ctrl-C to stop); golden=$GOLDEN labels=$LABELS cap=$CAP"
+  while true; do
+    q="$(queued_bat_work)"; r="$(running_macos_vms)"
+    if [ "${q:-0}" -gt 0 ] && [ "${r:-0}" -lt "$CAP" ]; then
+      i=$((i+1)); note "[$i] queued=$q running_vms=$r/$CAP → booting ephemeral VM"
+      run_one "$i" || true
+    else
+      note "waiting ${POLL}s (queued=$q running_vms=$r/$CAP — no work or no free slot)"
+      sleep "$POLL"
+    fi
+  done
 else
   note "ephemeral runner ONCE; golden=$GOLDEN labels=$LABELS"
   run_one 1
