@@ -1784,12 +1784,19 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 
 # Standalone editor chrome helpers
-pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone)
-pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone)
-pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone)
+# These construct a StandaloneApp, which opens the real audio device on init
+# (standalone.cpp create_device/open/start) — same RT-thread-starved teardown
+# hazard as pulp-test-audio above, so they get the same PROCESSORS reservation.
+pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
+    PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
+    PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
+    PROPERTIES PROCESSORS 8)
 
 # Headless screenshot capture state machine (pulp #468)
-pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone)
+pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
+    PROPERTIES PROCESSORS 8)
 
 # STFT and audio visualization signal tests
 pulp_add_test_suite(pulp-test-stft LIBRARIES pulp::signal)
@@ -1875,7 +1882,16 @@ pulp_add_test_suite(pulp-test-offline-processor-edges LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-ogg-reader LIBRARIES pulp::audio)
 
 # Audio tests
-pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio)
+# PROCESSORS reservation for suites that open the REAL CoreAudio output device.
+# CoreAudioDevice::stop()/close() call AudioOutputUnitStop / AudioUnitUninitialize
+# (coreaudio_device.mm), which block until the real-time I/O thread observes the
+# request. Under `ctest -j8` heavy load that RT thread is CPU-starved and never
+# observes it, so teardown hangs to the 120s timeout — the full-suite-only flake
+# that wedged the macOS self-hosted runner. Reserving PROCESSORS == the CI -j
+# makes ctest schedule these alone, so the RT thread gets the machine and
+# teardown returns promptly. (Root-cause fix replacing the build.yml exclude.)
+pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio
+    PROPERTIES PROCESSORS 8)
 
 pulp_add_test_suite(pulp-test-system-volume LIBRARIES pulp::audio)
 

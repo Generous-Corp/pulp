@@ -566,6 +566,20 @@ with a macOS-only `ctest --exclude-regex` in `build.yml`, keep Linux/Windows
 coverage intact, and open/follow a targeted fix. Do not hide failures that
 reproduce cross-platform or that are caused by the branch being shipped.
 
+**Real-time-thread teardown hangs need a `PROCESSORS` reservation, not an
+exclude.** A test that opens the real CoreAudio device (anything constructing a
+`StandaloneApp` or calling `AudioSystem::create_device()` + `start()`) tears it
+down via `AudioOutputUnitStop` / `AudioUnitUninitialize`, which **block until
+the real-time I/O thread observes the request**. Under `ctest -j8` full-suite
+load that RT thread is CPU-starved, so teardown hangs to the 120s timeout — a
+flake that reproduces **only** in the full run on a saturated runner, never in
+isolation or any concurrent subset (so don't waste time bisecting subsets). Fix
+it at the scheduler: `pulp_add_test_suite(... PROPERTIES PROCESSORS 8)` (== the
+CI `-j`) makes ctest run the suite alone so the RT thread gets the machine.
+Prefer this over an exclude — it keeps the test enabled everywhere. (Adding a
+shared `RESOURCE_LOCK` does NOT fix it: serializing the audio tests among
+themselves still leaves the other ~8 `-j8` tests starving the RT thread.)
+
 The required `macos` alias should not `need` the whole cross-platform build
 matrix. It should depend only on cheap setup/classification jobs and poll the
 macOS matrix leg by name, then exit as soon as that leg reports. Otherwise

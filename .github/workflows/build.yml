@@ -808,14 +808,12 @@ jobs:
             exclude="${exclude}|mac harness scroll event carries non-zero deltas through PulpView"
             exclude="${exclude}|mac harness right-click reaches PulpView::rightMouseDown"
             exclude="${exclude}|pulp-mcp-launcher"
-            # 2026-06-04: these two open the real CoreAudio default-output device
-            # and hang (120s timeout) only in the full -j8 suite on the local
-            # runner image — they pass on main, in isolation, and in every
-            # concurrent subset reproduced locally. They block unrelated PRs
-            # behind the serialized macOS queue. Keep them on Linux/Windows;
-            # dedicated audio-device-isolation fix to follow.
-            exclude="${exclude}|CoreAudio render sine wave"
-            exclude="${exclude}|StandaloneApp::apply_config preserves the processor instance"
+            # NOTE: "CoreAudio render sine wave" + "StandaloneApp::apply_config"
+            # were temporarily excluded here on 2026-06-04 (full-suite-only 120s
+            # hang on the local runner). Root cause: CoreAudio teardown blocks on
+            # the RT I/O thread, which was CPU-starved under -j8. Fixed properly
+            # via a PROCESSORS reservation on the device-opening suites in
+            # test/CMakeLists.txt, so they are re-enabled here.
           fi
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
 
