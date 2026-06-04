@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03370"></a>
+## [0.337.0] - 2026-06-04
+
+- fix(design-import): native knob + EQ image fidelity polish ([#3444](https://github.com/danielraffel/pulp/pull/3444))
+- feat(examples): launchable ELYSIUM standalone — native import with sprite knobs ([#3442](https://github.com/danielraffel/pulp/pull/3442))
+- test(harness): repoint planning submodule to rasterized ELYSIUM fixture (defect-2) ([#3441](https://github.com/danielraffel/pulp/pull/3441))
+- fix(ci): tear down the in-flight VM when the macOS runner is stopped ([#3438](https://github.com/danielraffel/pulp/pull/3438))
+- test(import): Phase D — imported fader/button/text-input interaction probes ([#3440](https://github.com/danielraffel/pulp/pull/3440))
+- ci(macos): re-enable 2 audio tests via PROCESSORS reservation (RT-thread teardown fix) ([#3437](https://github.com/danielraffel/pulp/pull/3437))
+
 <a id="v03360"></a>
 ## [0.336.0] - 2026-06-04
 
@@ -3605,6 +3615,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.337.0]: https://github.com/danielraffel/pulp/releases/tag/v0.337.0
 [0.336.0]: https://github.com/danielraffel/pulp/releases/tag/v0.336.0
 [0.335.0]: https://github.com/danielraffel/pulp/releases/tag/v0.335.0
 [0.334.0]: https://github.com/danielraffel/pulp/releases/tag/v0.334.0
