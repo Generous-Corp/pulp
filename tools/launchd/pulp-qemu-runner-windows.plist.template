@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the QEMU ephemeral GitHub Actions runner supervisor on
+  WINDOWS (tools/ci/qemu-runner-windows.sh). One CoW overlay off the Windows
+  golden qcow2 per job, on a dynamic SSH port, then discarded. The Windows analog
+  of pulp-tart-runner.plist.template; see the `tart-ci` skill.
+
+  This is the lane the Shipyard macOS GUI's "Serve CI builds from this Mac"
+  switch toggles via launchctl load/unload (the Windows row → this agent label).
+
+  Install (per Mac that hosts the Windows golden — e.g. the M5/blackbook):
+
+    1. Copy the Windows golden qcow2 into this host's $TARTCI_GOLDENS
+       (default $HOME/VMs/goldens/). The supervisor install-if-missing the
+       win-arm64 runner agent into the clone, so the golden need not pre-bake it.
+    2. Copy this file to ~/Library/LaunchAgents/, replacing $PULP_REPO, $HOME, and
+       $TARTCI_GOLDENS with absolute paths (launchd does NOT expand shell vars):
+
+         sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+             -e "s|\$TARTCI_GOLDENS|$HOME/VMs/goldens|g" \
+           tools/launchd/pulp-qemu-runner-windows.plist.template \
+           > ~/Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist
+
+    3. Load:   launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist
+       Verify: launchctl list | grep qemu-runner-windows ; tail -F ~/Library/Logs/pulp/qemu-runner-windows.log
+    Stop:      launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist
+               (or flip the Windows toggle off in the Shipyard macOS GUI)
+
+  PILOT: the default label is the non-required `pulp-build-windows`. Windows VMs
+  are QEMU (not Tart) and uncapped; each job gets a throwaway qcow2 overlay.
+
+  Requires on this host: qemu (brew install qemu) + the Windows golden qcow2,
+  gh authenticated for danielraffel/pulp (repo admin, to mint JIT configs), and
+  ~/.ssh/id_ed25519 accepted by the golden.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.qemu-runner-windows</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$PULP_REPO/tools/ci/qemu-runner-windows.sh</string>
+        <string>--loop</string>
+        <string>--labels</string>
+        <string>self-hosted,Windows,ARM64,pulp-build-windows</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PULP_REPO</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp/qemu-runner-windows.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp/qemu-runner-windows.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
+        <key>TARTCI_GOLDENS</key>
+        <string>$TARTCI_GOLDENS</string>
+    </dict>
+</dict>
+</plist>

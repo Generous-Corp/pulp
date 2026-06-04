@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the Tart ephemeral GitHub Actions runner supervisor on
+  LINUX (tools/ci/tart-runner-linux.sh). One throwaway clone of the
+  pulp-linux-build golden per job, then discarded. The Linux analog of
+  pulp-tart-runner.plist.template; see the `tart-ci` skill.
+
+  This is the lane the Shipyard macOS GUI's "Serve CI builds from this Mac"
+  switch toggles via launchctl load/unload (the Linux row → this agent label).
+
+  Install (per Mac that hosts the Linux Tart golden — e.g. the M5/blackbook):
+
+    1. Bake the golden: it must carry the actions-runner agent at ~/actions-runner
+       (actions-runner-linux-arm64). Copy pulp-linux-build into this host's TART_HOME.
+    2. Copy this file to ~/Library/LaunchAgents/, replacing $PULP_REPO, $HOME, and
+       $TART_HOME with absolute paths — launchd does NOT expand shell variables:
+
+         sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+             -e "s|\$TART_HOME|$HOME/VMs|g" \
+           tools/launchd/pulp-tart-runner-linux.plist.template \
+           > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-linux.plist
+
+       (On the blackbook/M5, TART_HOME is /Users/danielraffel/VMs, not the Mac
+       Studio's /Volumes/Workshop/VMs — set it to wherever the golden lives.)
+    3. Grant Full Disk Access if TART_HOME is on /Volumes (TCC; exit 126 without).
+    4. Load:   launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-linux.plist
+       Verify: launchctl list | grep tart-runner-linux ; tail -F ~/Library/Logs/pulp/tart-runner-linux.log
+    Stop:      launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-linux.plist
+               (or flip the Linux toggle off in the Shipyard macOS GUI)
+
+  PILOT vs GRADUATE: the default label below is the non-required pilot
+  `pulp-build-linux`. Route a workflow at it to pilot; promote toward a pooled
+  label only after a clean run. Linux guests are uncapped, so concurrency is not
+  bounded by the macOS 2-VM kernel quota.
+
+  Requires on this host: tart + the pulp-linux-build golden in TART_HOME,
+  gh authenticated for danielraffel/pulp (repo admin, to mint JIT configs), and
+  ~/.ssh/id_ed25519 accepted by the golden.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.tart-runner-linux</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$PULP_REPO/tools/ci/tart-runner-linux.sh</string>
+        <string>--loop</string>
+        <string>--labels</string>
+        <string>self-hosted,Linux,ARM64,pulp-build-linux</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PULP_REPO</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp/tart-runner-linux.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp/tart-runner-linux.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
+        <key>TART_HOME</key>
+        <string>$TART_HOME</string>
+    </dict>
+</dict>
+</plist>
