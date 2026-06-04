@@ -227,30 +227,36 @@ or `manual`, but agents should not choose those workflows unless the user
 explicitly asks for a manual/emergency bypass. `pulp status` reports the
 effective workflow and whether its required local tool is installed.
 
-### Gotcha: `Closes #N` (issue auto-close) vs `Closes: #N` (trailer parser)
+### Gotcha: shipyard-merged PRs don't reliably auto-close linked issues
 
-These two needs pull in opposite directions on the colon, and getting it
-wrong silently fails — no error, the thing just doesn't happen:
+**Always verify an issue actually closed after a shipyard merge; close it
+with `gh issue close` if it didn't.** Don't trust closing-keyword auto-close
+to do it for you here.
 
-- **GitHub issue auto-close** keys off `Closes #N` / `Fixes #N` (no colon)
-  in the PR body or a commit message on the default-branch merge. `Closes:
-  #N` (**with** a colon) is read as a trailer, **not** a closing keyword, so
-  the issue stays open after merge. (Burned us on #3299: the `Closes: #3299`
-  trailer merged green but left the issue open — had to `gh issue close` by
-  hand.)
-- **Git trailer bypasses** (`Skill-Update:`, `Version-Bump:`,
-  `Release-Supersede:`) are parsed by `git interpret-trailers --parse`,
-  which requires the trailer paragraph to be **all** `Key: value` lines — a
-  colon-less `Closes #N` mixed into that paragraph breaks the parse and
-  silently voids every bypass trailer in it.
+What was actually observed (#3299, twice): both `Closes #3299` (no colon,
+PR #3420) and `Closes: #3299` (with colon, PR #3413) were correctly
+recognized as closing keywords — GitHub registered the closing reference in
+**both** cases (`gh api graphql … closingIssuesReferences` returned
+`[{number:3299}]` for each). Yet **neither** `shipyard-local[bot]` merge
+auto-closed the issue. So:
 
-The rule that satisfies both: to **auto-close** an issue, put `Closes #N`
-(no colon) in the **PR body prose** (or the commit body prose), and keep the
-trailer paragraph at the very end **all-colons** (`Skill-Update: …`,
-`Co-Authored-By: …`). Don't mix a closing keyword into the trailer block.
-When you must reference an issue inside the trailer block, `Refs: #N` is
-inert and safe. After authoring, dry-run `git log -1 --format='%(trailers)'`
-to confirm the bypass trailers still parse.
+- The **colon is a red herring** for auto-close. `Closes #N` and `Closes: #N`
+  both register a closing reference; GitHub accepts either after the keyword.
+  (An earlier version of this note wrongly blamed the colon — corrected here.)
+- The real failure is that the **app-performed merge didn't trigger GitHub's
+  issue-closing automation**. Verify with `gh issue view <N> --json state`
+  after merge and `gh issue close <N> -r completed` if still open.
+
+Separately — and this **is** a real colon rule, but for a *different* system
+— git trailer bypasses (`Skill-Update:`, `Version-Bump:`,
+`Release-Supersede:`) are parsed by `git interpret-trailers --parse`, which
+requires the trailer paragraph to be **all** `Key: value` lines. A
+colon-less `Closes #N` dropped into that paragraph breaks the parse and
+silently voids every bypass trailer in it. So keep issue references like
+`Closes #N` in the **body prose**, above an all-colon trailer block
+(`Skill-Update: …`, `Co-Authored-By: …`); inside the trailer block, only
+`Refs: #N` (colon) is safe. Dry-run `git log -1 --format='%(trailers)'` to
+confirm the bypass trailers still parse — that part is unchanged and true.
 
 Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
 diagnostics, experimental branches, existing Shipyard-managed PRs, or when
