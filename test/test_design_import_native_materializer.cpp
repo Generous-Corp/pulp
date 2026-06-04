@@ -1120,6 +1120,80 @@ TEST_CASE("binding-backed imported knob drag updates from the visible body",
     REQUIRE(binding.gesture_end_count == 1);
 }
 
+TEST_CASE("imported fader, button, and text input respond to interaction (Phase D)",
+          "[view][import][native-materializer][interaction][phase-d]") {
+    // Phase D — prove non-knob imported widgets are interactive, not just
+    // rendered. The GRAINS knob already has a GPU-harness hit+drag proof; ELYSIUM
+    // itself is knob-only (its "Search" is a static text label), so this covers
+    // the remaining interactive widget classes — fader (drag), toggle button
+    // (click), text input (type) — on a synthetic imported fixture through the
+    // real materialize → hit-test → event path.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 200.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.layout.gap = 8.0f;
+
+    auto fader = frame("mix", 160.0f, 24.0f, LayoutDirection::column);
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.audio_label = "Mix";
+    fader.attributes["value"] = "0.1";
+    fader.attributes["orientation"] = "horizontal";
+
+    auto toggle = frame("sel", 160.0f, 24.0f, LayoutDirection::column);
+    toggle.type = "toggle_button";
+    toggle.text_content = "ON";
+    toggle.attributes["checked"] = "false";
+
+    auto input = frame("name", 160.0f, 24.0f, LayoutDirection::column);
+    input.type = "input";
+    input.attributes["type"] = "text";
+    input.attributes["pulpInitialValue"] = "ab";
+
+    ir.root.children.push_back(std::move(fader));
+    ir.root.children.push_back(std::move(toggle));
+    ir.root.children.push_back(std::move(input));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 3);
+    root->set_bounds({0.0f, 0.0f, 200.0f, 200.0f});
+    root->layout_children();
+
+    auto* f = dynamic_cast<Fader*>(root->child_at(0));
+    auto* t = dynamic_cast<ToggleButton*>(root->child_at(1));
+    auto* e = dynamic_cast<TextEditor*>(root->child_at(2));
+    REQUIRE(f != nullptr);
+    REQUIRE(t != nullptr);
+    REQUIRE(e != nullptr);
+
+    // Fader: dragging along its axis raises the value (routed through hit-test).
+    const Rect fb = f->bounds();
+    const float fader_before = f->value();
+    root->simulate_drag({fb.x + fb.width * 0.15f, fb.y + fb.height * 0.5f},
+                        {fb.x + fb.width * 0.85f, fb.y + fb.height * 0.5f}, 6);
+    INFO("fader before=" << fader_before << " after=" << f->value());
+    REQUIRE(f->value() > fader_before);
+
+    // Toggle button: a click flips its state — it is a target, not a picture.
+    const Rect tb = t->bounds();
+    const bool toggle_before = t->is_on();
+    root->simulate_click({tb.x + tb.width * 0.5f, tb.y + tb.height * 0.5f});
+    INFO("toggle before=" << toggle_before << " after=" << t->is_on());
+    REQUIRE(t->is_on() != toggle_before);
+
+    // Text input: focusing and typing changes the committed text.
+    const std::string text_before = e->text();
+    e->on_focus_changed(true);
+    TextInputEvent typed;
+    typed.text = "c";
+    e->on_text_input(typed);
+    INFO("text before='" << text_before << "' after='" << e->text() << "'");
+    REQUIRE(e->text() != text_before);
+}
+
 TEST_CASE("native materializer binding helper requires anchors and routes",
           "[view][import][native-materializer][binding]") {
     DesignIR ir;
