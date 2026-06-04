@@ -89,8 +89,8 @@ run_one(){ # $1=iteration index
     wsh 'echo ok' >/dev/null 2>&1 && { up=1; break; }; sleep 4
   done
   if [ "$up" != 1 ]; then
-    # qemu-death already logged the accurate cause+elapsed above; only emit the
-    # generic "waited the full window" message when QEMU stayed up but no SSH.
+    # qemu-death already logged the accurate cause above; only emit the generic
+    # "waited the full window" message when QEMU stayed up but no SSH.
     [ "$qemu_died" = 1 ] || note "[$i] no SSH after ~10min (qemu alive but unreachable; see $jobdir/qemu.log)"
     kill "$qpid" 2>/dev/null || true; rm -rf "$jobdir"; return 1
   fi
@@ -119,8 +119,12 @@ if (-not (Test-Path "$dir\bin\Runner.Listener.exe")) { Write-Error "Runner.Liste
   wsh "powershell -NoProfile -EncodedCommand $enc_install" \
     || { note "[$i] runner install failed"; kill "$qpid" 2>/dev/null||true; rm -rf "$jobdir"; return 1; }
 
-  # (2) stream the JIT config in via stdin → file (no command-line length limit)
-  printf '%s' "$jit" | wsh "powershell -NoProfile -Command \"[Console]::In.ReadToEnd() | Out-File -FilePath C:\\actions-runner\\jit.cfg -Encoding ascii -NoNewline\""
+  # (2) stream the JIT config in via stdin → file (no command-line length limit).
+  # Guard the pipeline: under `set -euo pipefail` a dropped SSH / PowerShell error
+  # here would otherwise exit the whole supervisor BEFORE the cleanup below,
+  # leaking the QEMU process + overlay for a launchd --loop runner to trip over.
+  printf '%s' "$jit" | wsh "powershell -NoProfile -Command \"[Console]::In.ReadToEnd() | Out-File -FilePath C:\\actions-runner\\jit.cfg -Encoding ascii -NoNewline\"" \
+    || { note "[$i] JIT config upload failed — discarding overlay"; kill "$qpid" 2>/dev/null||true; rm -rf "$jobdir"; return 1; }
 
   # (3) run the agent reading the jit FILE — small PS, no blob on the wire
   enc_run="$(printf '%s' 'Set-Location C:\actions-runner
