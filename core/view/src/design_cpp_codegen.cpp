@@ -244,8 +244,71 @@ bool attr_bool(const IRNode& node, std::string_view key) {
     return lower == "true" || lower == "1" || lower == "yes" || lower == "on";
 }
 
+struct ImportedImageSizing {
+    float width = 0.0f;
+    float height = 0.0f;
+    std::optional<float> left;
+    std::optional<float> top;
+};
+
+std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node) {
+    const float box_w = node.style.width.value_or(0.0f);
+    const float box_h = node.style.height.value_or(0.0f);
+    if (box_w <= 0.0f || box_h <= 0.0f) return std::nullopt;
+
+    const float png_w = attr_float(node, "png_natural_w").value_or(0.0f);
+    const float png_h = attr_float(node, "png_natural_h").value_or(0.0f);
+    const float core_w = attr_float(node, "art_core_w").value_or(0.0f);
+    const float core_h = attr_float(node, "art_core_h").value_or(0.0f);
+    const float core_x = attr_float(node, "art_core_x").value_or(0.0f);
+    const float core_y = attr_float(node, "art_core_y").value_or(0.0f);
+
+    const bool have_core =
+        png_w > 0.0f && png_h > 0.0f &&
+        core_w > 0.0f && core_h > 0.0f;
+    const bool is_bleed_sprite =
+        node.style.render_bounds.has_value() ||
+        (node.attributes.count("asset_bleed") && node.attributes.at("asset_bleed") == "1");
+    const bool absolute =
+        node.style.position && lower_copy(*node.style.position) == "absolute";
+
+    ImportedImageSizing out;
+    if (have_core) {
+        const float scale = std::min(box_w / core_w, box_h / core_h);
+        out.width = png_w * scale;
+        out.height = png_h * scale;
+        const float core_box_w = core_w * scale;
+        const float core_box_h = core_h * scale;
+        const float pad_x = (box_w - core_box_w) * 0.5f;
+        const float pad_y = (box_h - core_box_h) * 0.5f;
+        if (absolute && node.style.left)
+            out.left = *node.style.left - core_x * scale + pad_x;
+        if (absolute && node.style.top)
+            out.top = *node.style.top - core_y * scale + pad_y;
+        return out;
+    }
+
+    if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f) {
+        const float png_aspect = png_w / png_h;
+        if (box_w / box_h > png_aspect) {
+            out.height = box_h;
+            out.width = box_h * png_aspect;
+        } else {
+            out.width = box_w;
+            out.height = box_w / png_aspect;
+        }
+        if (absolute && node.style.left)
+            out.left = *node.style.left + (box_w - out.width) * 0.5f;
+        if (absolute && node.style.top)
+            out.top = *node.style.top + (box_h - out.height) * 0.5f;
+        return out;
+    }
+
+    return std::nullopt;
+}
+
 std::optional<std::string> first_asset_id(const IRNode& node) {
-    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId"}) {
+    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId", "asset_ref"}) {
         auto value = attr(node, key);
         if (value && !value->empty())
             return value;
@@ -662,6 +725,10 @@ void emit_visual_style(std::ostringstream& out,
                       std::string(var) + "->" + std::string(method) + "(" + expr + ");");
     };
     emit_color("set_background_color", style.background_color);
+    if (style.background_gradient && !style.background_gradient->empty())
+        emit_line(out, depth, opts.indent_spaces,
+                  "pulp::view::apply_css_background_gradient(*" + std::string(var) + ", " +
+                  cpp_string_literal(*style.background_gradient) + ");");
     if (style.background_repeat)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_repeat(" + cpp_string_literal(*style.background_repeat) + ");");
     emit_color("set_inheritable_text_color", style.color);
@@ -978,6 +1045,25 @@ void emit_widget_specific(std::ostringstream& out,
                 if (!uri.empty())
                     emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_image_source(" + cpp_string_literal(uri) + ");");
             }
+            if (auto sizing = imported_image_sizing_override(node)) {
+                const auto flex_var = std::string(var) + "_image_flex";
+                emit_line(out, depth, opts.indent_spaces,
+                          "auto& " + flex_var + " = " + std::string(var) + "->flex();");
+                emit_line(out, depth, opts.indent_spaces,
+                          flex_var + ".preferred_width = " + float_expr(ctx, sizing->width) + ";");
+                emit_line(out, depth, opts.indent_spaces,
+                          flex_var + ".preferred_height = " + float_expr(ctx, sizing->height) + ";");
+                emit_line(out, depth, opts.indent_spaces,
+                          flex_var + ".dim_width = {" + float_expr(ctx, sizing->width) + ", pulp::view::DimensionUnit::px};");
+                emit_line(out, depth, opts.indent_spaces,
+                          flex_var + ".dim_height = {" + float_expr(ctx, sizing->height) + ", pulp::view::DimensionUnit::px};");
+                if (sizing->left)
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) + "->set_left(" + float_expr(ctx, *sizing->left) + ");");
+                if (sizing->top)
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) + "->set_top(" + float_expr(ctx, *sizing->top) + ");");
+            }
             break;
         case NativeWidgetKind::svg_path:
             if (auto path_data = attr(node, "d"))
@@ -1016,6 +1102,90 @@ void emit_widget_specific(std::ostringstream& out,
     }
 }
 
+bool is_interactive_native_kind(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::xy_pad:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::xy_pad:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool subtree_contains_interactive_hit_target(const IRNode& node,
+                                             const ResolvedNativeNode& resolved) {
+    if (auto hit_testable = attr(node, "pulpHitTestable"))
+        return attr_bool(node, "pulpHitTestable");
+    if (is_interactive_native_kind(resolved.kind))
+        return true;
+
+    const auto count = std::min(node.children.size(), resolved.children.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (subtree_contains_interactive_hit_target(node.children[i], resolved.children[i]))
+            return true;
+    }
+    return false;
+}
+
+enum class PromotedChildHitPolicy {
+    unchanged,
+    disabled,
+    pass_through_self,
+};
+
+PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
+                                                        const ResolvedNativeNode& resolved_child) {
+    if (auto hit_testable = attr(child, "pulpHitTestable"))
+        return attr_bool(child, "pulpHitTestable")
+            ? PromotedChildHitPolicy::unchanged
+            : PromotedChildHitPolicy::disabled;
+    if (is_interactive_native_kind(resolved_child.kind))
+        return PromotedChildHitPolicy::unchanged;
+    if (subtree_contains_interactive_hit_target(child, resolved_child))
+        return PromotedChildHitPolicy::pass_through_self;
+    return PromotedChildHitPolicy::disabled;
+}
+
 void emit_node(std::ostringstream& out,
                EmitContext& ctx,
                const IRNode& node,
@@ -1023,7 +1193,8 @@ void emit_node(std::ostringstream& out,
                std::string_view parent_var,
                int depth,
                std::optional<LayoutDirection> parent_direction,
-               int& counter) {
+               int& counter,
+               PromotedChildHitPolicy self_hit_policy = PromotedChildHitPolicy::unchanged) {
     emit_line(out, depth, ctx.opts.indent_spaces, "{");
     ++depth;
 
@@ -1044,8 +1215,13 @@ void emit_node(std::ostringstream& out,
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
         emit_line(out, depth, ctx.opts.indent_spaces,
                   var + "->set_anchor_id(" + cpp_string_literal(*node.stable_anchor_id) + ");");
-    if (auto hit_testable = attr(node, "pulpHitTestable"); hit_testable && !attr_bool(node, "pulpHitTestable"))
+    const bool explicit_hit_test_disabled =
+        attr(node, "pulpHitTestable") && !attr_bool(node, "pulpHitTestable");
+    if (self_hit_policy == PromotedChildHitPolicy::disabled || explicit_hit_test_disabled)
         emit_line(out, depth, ctx.opts.indent_spaces, var + "->set_hit_testable(false);");
+    if (self_hit_policy == PromotedChildHitPolicy::pass_through_self)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  var + "->set_pointer_events(pulp::view::View::PointerEvents::box_none);");
     if (auto label = resolved.text; label && !label->empty())
         emit_line(out, depth, ctx.opts.indent_spaces,
                   var + "->set_access_label(" + cpp_string_literal(*label) + ");");
@@ -1055,14 +1231,44 @@ void emit_node(std::ostringstream& out,
     emit_widget_specific(out, depth, ctx, var, node, resolved, ctx.manifest);
 
     const auto count = std::min(node.children.size(), resolved.children.size());
+    const bool parent_owns_imported_child_hits =
+        native_kind_owns_imported_child_hits(resolved.kind);
     for (std::size_t i = 0; i < count; ++i) {
         const auto& child = node.children[i];
+        const auto child_hit_policy = parent_owns_imported_child_hits
+            ? promoted_widget_child_hit_policy(child, resolved.children[i])
+            : PromotedChildHitPolicy::unchanged;
         auto found = ctx.extracted.find(&child);
         if (found != ctx.extracted.end()) {
-            emit_line(out, depth, ctx.opts.indent_spaces,
-                      var + "->add_child(" + found->second + "());");
+            if (child_hit_policy != PromotedChildHitPolicy::unchanged) {
+                const std::string child_var = "child_" + std::to_string(counter++);
+                emit_line(out, depth, ctx.opts.indent_spaces, "{");
+                emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                          "auto " + child_var + " = " + found->second + "();");
+                if (child_hit_policy == PromotedChildHitPolicy::disabled) {
+                    emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                              child_var + "->set_hit_testable(false);");
+                } else if (child_hit_policy == PromotedChildHitPolicy::pass_through_self) {
+                    emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                              child_var + "->set_pointer_events(pulp::view::View::PointerEvents::box_none);");
+                }
+                emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                          var + "->add_child(std::move(" + child_var + "));");
+                emit_line(out, depth, ctx.opts.indent_spaces, "}");
+            } else {
+                emit_line(out, depth, ctx.opts.indent_spaces,
+                          var + "->add_child(" + found->second + "());");
+            }
         } else {
-            emit_node(out, ctx, child, resolved.children[i], var, depth, node.layout.direction, counter);
+            emit_node(out,
+                      ctx,
+                      child,
+                      resolved.children[i],
+                      var,
+                      depth,
+                      node.layout.direction,
+                      counter,
+                      child_hit_policy);
         }
     }
 
@@ -1341,6 +1547,7 @@ void collect_resolved_binding_plan(ResolvedBindingPlan& plan,
     const bool has_scalar_param_control =
         (resolved.kind == NativeWidgetKind::knob ||
          resolved.kind == NativeWidgetKind::fader ||
+         resolved.kind == NativeWidgetKind::checkbox ||
          resolved.kind == NativeWidgetKind::toggle_button) &&
         has_single_param;
     const bool has_choice_param = resolved.kind == NativeWidgetKind::toggle_button &&
@@ -1509,12 +1716,13 @@ void emit_binding_context_helpers(std::ostringstream& out,
                                   const CppExportOptions& opts,
                                   const std::vector<BindingHelperRoute>& routes) {
     out << "namespace {\n"
-        << "pulp::view::View* find_imported_view_by_anchor(pulp::view::View& root, std::string_view anchor) {\n"
-        << "    if (root.anchor_id() == anchor) return &root;\n"
+        << "pulp::view::View* find_imported_view_by_anchor(pulp::view::View& root, std::string_view anchor, int& matches) {\n"
+        << "    pulp::view::View* first = nullptr;\n"
+        << "    if (root.anchor_id() == anchor) { first = &root; ++matches; }\n"
         << "    for (std::size_t i = 0; i < root.child_count(); ++i) {\n"
-        << "        if (auto* found = find_imported_view_by_anchor(*root.child_at(i), anchor)) return found;\n"
+        << "        if (auto* found = find_imported_view_by_anchor(*root.child_at(i), anchor, matches); first == nullptr) first = found;\n"
         << "    }\n"
-        << "    return nullptr;\n"
+        << "    return first;\n"
         << "}\n"
         << "}  // namespace\n\n";
 
@@ -1604,25 +1812,43 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    std::size_t route_index = 0;
     for (const auto& route : routes) {
         if (route.kind != NativeWidgetKind::knob &&
             route.kind != NativeWidgetKind::fader &&
             route.kind != NativeWidgetKind::meter &&
+            route.kind != NativeWidgetKind::checkbox &&
             route.kind != NativeWidgetKind::toggle_button &&
             route.kind != NativeWidgetKind::xy_pad &&
             route.kind != NativeWidgetKind::waveform &&
             route.kind != NativeWidgetKind::text_editor &&
-            route.kind != NativeWidgetKind::text_button)
+            route.kind != NativeWidgetKind::text_button) {
+            ++route_index;
             continue;
+        }
+        const std::string route_var = "route_" + std::to_string(route_index++);
+        emit_line(out, 1, opts.indent_spaces, "int " + route_var + "_match_count = 0;");
         emit_line(out, 1, opts.indent_spaces,
                   "if (auto* view = find_imported_view_by_anchor(root, " +
-                      cpp_string_literal(route.anchor_id) + ")) {");
+                      cpp_string_literal(route.anchor_id) + ", " + route_var +
+                      "_match_count); view != nullptr && " + route_var +
+                      "_match_count == 1 && ctx.claim_import_binding(*view, " +
+                      cpp_string_literal(route.route_id) + ")) {");
         if (route.kind == NativeWidgetKind::knob) {
             emit_line(out, 2, opts.indent_spaces,
                       "if (auto* knob = dynamic_cast<pulp::view::Knob*>(view)) {");
             emit_line(out, 3, opts.indent_spaces, "ctx.bind_knob(*knob,");
             emit_descriptor(route, 3);
         } else {
+            if (route.kind == NativeWidgetKind::checkbox) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* checkbox = dynamic_cast<pulp::view::Checkbox*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_checkbox(*checkbox,");
+                emit_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
             if (route.kind == NativeWidgetKind::xy_pad) {
                 emit_line(out, 2, opts.indent_spaces,
                           "if (auto* pad = dynamic_cast<pulp::view::XYPad*>(view)) {");
@@ -1759,6 +1985,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
            << "#include <utility>\n"
            << "#include <pulp/view/buttons.hpp>\n"
            << "#include <pulp/view/canvas_widget.hpp>\n"
+           << "#include <pulp/view/css_gradient.hpp>\n"
            << "#include <pulp/view/svg_path_widget.hpp>\n"
            << "#include <pulp/view/text_editor.hpp>\n"
            << "#include <pulp/view/widgets.hpp>\n"

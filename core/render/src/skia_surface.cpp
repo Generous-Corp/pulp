@@ -24,7 +24,11 @@
 #include "include/core/SkSurface.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImageInfo.h"
+#include <atomic>
+#include <chrono>
 #include <cstring>
+#include <memory>
+#include <thread>
 
 namespace pulp::render {
 
@@ -201,6 +205,23 @@ public:
         auto* source = frame_surface_ ? frame_surface_.get() : offscreen_surface_.get();
         if (!source) return false;
 
+        // Callers such as MacGpuWindowHost::capture_back_buffer_png() read
+        // during the current frame, before SkiaSurface::end_frame(). Graphite
+        // has not submitted the recording yet in that state, so an async
+        // readback can see a valid but cleared texture. Submit pending canvas
+        // work first while keeping frame_surface_ alive for the readback; the
+        // later end_frame() call will simply find no additional recording.
+        if (canvas_ && recorder_ && context_) {
+            canvas_.reset();
+            auto recording = recorder_->snap();
+            if (recording) {
+                skgpu::graphite::InsertRecordingInfo info;
+                info.fRecording = recording.get();
+                context_->insertRecording(info);
+                context_->submit({});
+            }
+        }
+
         pixel_width = static_cast<uint32_t>(std::max(1, static_cast<int>(width_ * scale_)));
         pixel_height = static_cast<uint32_t>(std::max(1, static_cast<int>(height_ * scale_)));
 
@@ -209,37 +230,48 @@ public:
                                       kRGBA_8888_SkColorType,
                                       kPremul_SkAlphaType,
                                       SkColorSpace::MakeSRGB());
-        pixels.resize(static_cast<size_t>(pixel_width) * static_cast<size_t>(pixel_height) * 4u);
         const auto row_bytes = static_cast<size_t>(pixel_width) * 4u;
 
         struct ReadbackState {
-            std::vector<uint8_t>* pixels = nullptr;
             size_t row_bytes = 0;
             uint32_t height = 0;
-            bool finished = false;
+            std::vector<uint8_t> pixels;
+            std::atomic_bool finished{false};
             bool ok = false;
-        } state{&pixels, row_bytes, pixel_height, false, false};
+        };
+        auto state = std::make_shared<ReadbackState>();
+        state->row_bytes = row_bytes;
+        state->height = pixel_height;
 
         auto callback = [](SkImage::ReadPixelsContext ctx,
                            std::unique_ptr<const SkImage::AsyncReadResult> result) {
-            auto* state = static_cast<ReadbackState*>(ctx);
+            std::unique_ptr<std::shared_ptr<ReadbackState>> owned(
+                static_cast<std::shared_ptr<ReadbackState>*>(ctx));
+            auto state = owned ? *owned : nullptr;
             if (!state) return;
-            state->finished = true;
-            if (!result || result->count() < 1 || result->data(0) == nullptr) {
+            if (!result || result->count() < 1 || result->data(0) == nullptr ||
+                result->rowBytes(0) < state->row_bytes) {
+                state->finished.store(true, std::memory_order_release);
                 return;
             }
 
             const auto* src = static_cast<const uint8_t*>(result->data(0));
             const auto src_row_bytes = result->rowBytes(0);
+            state->pixels.resize(static_cast<size_t>(state->height) * state->row_bytes);
             for (uint32_t y = 0; y < state->height; ++y) {
-                std::memcpy(state->pixels->data() + static_cast<size_t>(y) * state->row_bytes,
+                std::memcpy(state->pixels.data() + static_cast<size_t>(y) * state->row_bytes,
                             src + static_cast<size_t>(y) * src_row_bytes,
                             state->row_bytes);
             }
             state->ok = true;
+            state->finished.store(true, std::memory_order_release);
         };
 
         if (context_) {
+            // The callback owns this heap context. On a timeout, do not free it:
+            // Graphite may still deliver a late callback, and a tiny leaked
+            // shared_ptr is safer than reintroducing a callback use-after-free.
+            auto* callback_state = new std::shared_ptr<ReadbackState>(state);
             context_->asyncRescaleAndReadPixels(source,
                                                 info,
                                                 SkIRect::MakeWH(static_cast<int>(pixel_width),
@@ -247,15 +279,26 @@ public:
                                                 SkImage::RescaleGamma::kSrc,
                                                 SkImage::RescaleMode::kNearest,
                                                 callback,
-                                                &state);
-            if (context_->submit(skgpu::graphite::SyncToCpu::kYes)) {
+                                                callback_state);
+            context_->submit(skgpu::graphite::SyncToCpu::kYes);
+
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!state->finished.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < deadline) {
                 context_->checkAsyncWorkCompletion();
-                if (state.finished && state.ok) {
-                    return true;
-                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (state->finished.load(std::memory_order_acquire) && state->ok) {
+                pixels = std::move(state->pixels);
+                return true;
+            }
+            if (!state->finished.load(std::memory_order_acquire)) {
+                runtime::log_warn(
+                    "SkiaSurface: GPU readback timed out; falling back to synchronous readPixels");
             }
         }
 
+        pixels.resize(static_cast<size_t>(pixel_width) * static_cast<size_t>(pixel_height) * 4u);
         SkPixmap pixmap(info, pixels.data(), row_bytes);
         auto image = source->makeImageSnapshot();
         if (image && image->readPixels(pixmap, 0, 0)) {

@@ -16,6 +16,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -907,6 +908,229 @@ static std::vector<uint8_t> read_binary_file(const fs::path& path) {
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
+static uint32_t png_be32(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
+static std::pair<int, int> png_dimensions_from_bytes(const std::vector<uint8_t>& bytes) {
+    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    if (bytes.size() < 24 || std::memcmp(bytes.data(), sig, sizeof(sig)) != 0) return {0, 0};
+    const int w = static_cast<int>(png_be32(bytes.data() + 16));
+    const int h = static_cast<int>(png_be32(bytes.data() + 20));
+    if (w <= 0 || h <= 0) return {0, 0};
+    return {w, h};
+}
+
+struct ImportDecodedPng {
+    std::vector<uint8_t> rgba;
+    int width = 0;
+    int height = 0;
+    bool valid() const { return !rgba.empty() && width > 0 && height > 0; }
+};
+
+static std::optional<ImportDecodedPng> decode_png_rgba_for_import(const std::vector<uint8_t>& bytes) {
+    ImportDecodedPng out;
+    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    if (bytes.size() < 33 || std::memcmp(bytes.data(), sig, sizeof(sig)) != 0) return std::nullopt;
+
+    const int width = static_cast<int>(png_be32(bytes.data() + 16));
+    const int height = static_cast<int>(png_be32(bytes.data() + 20));
+    const int bit_depth = bytes[24];
+    const int color_type = bytes[25];
+    const int interlace = bytes[28];
+    if (width <= 0 || height <= 0 || bit_depth != 8 || interlace != 0) return std::nullopt;
+    const auto pixels = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
+    if (pixels > 50'000'000ull) return std::nullopt;
+
+    int channels = 0;
+    switch (color_type) {
+        case 0: channels = 1; break;  // gray
+        case 2: channels = 3; break;  // RGB
+        case 4: channels = 2; break;  // gray + alpha
+        case 6: channels = 4; break;  // RGBA
+        default: return std::nullopt;
+    }
+
+    std::vector<uint8_t> idat;
+    size_t pos = 8;
+    while (pos + 8 <= bytes.size()) {
+        const uint32_t clen = png_be32(bytes.data() + pos);
+        const uint8_t* ctype = bytes.data() + pos + 4;
+        const size_t body = pos + 8;
+        if (body + clen + 4 > bytes.size()) break;
+        if (std::memcmp(ctype, "IDAT", 4) == 0) {
+            idat.insert(idat.end(), bytes.data() + body, bytes.data() + body + clen);
+        } else if (std::memcmp(ctype, "IEND", 4) == 0) {
+            break;
+        }
+        pos = body + clen + 4;
+    }
+    if (idat.empty()) return std::nullopt;
+
+    const size_t stride = static_cast<size_t>(width) * static_cast<size_t>(channels);
+    const size_t expected = static_cast<size_t>(height) * (stride + 1);
+    auto raw = pulp::runtime::gzip_decompress(idat.data(), idat.size());
+    if (!raw || raw->size() < expected) return std::nullopt;
+
+    std::vector<uint8_t> img(static_cast<size_t>(height) * stride);
+    auto paeth = [](int a, int b, int c) {
+        const int p = a + b - c;
+        const int pa = std::abs(p - a);
+        const int pb = std::abs(p - b);
+        const int pc = std::abs(p - c);
+        if (pa <= pb && pa <= pc) return a;
+        return pb <= pc ? b : c;
+    };
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* src = raw->data() + static_cast<size_t>(y) * (stride + 1);
+        uint8_t* row = img.data() + static_cast<size_t>(y) * stride;
+        const uint8_t* prev = y > 0 ? img.data() + static_cast<size_t>(y - 1) * stride : nullptr;
+        const uint8_t filter = src[0];
+        for (size_t x = 0; x < stride; ++x) {
+            const int a = x >= static_cast<size_t>(channels) ? row[x - channels] : 0;
+            const int b = prev ? prev[x] : 0;
+            const int c = (prev && x >= static_cast<size_t>(channels)) ? prev[x - channels] : 0;
+            int v = src[1 + x];
+            switch (filter) {
+                case 0: break;
+                case 1: v += a; break;
+                case 2: v += b; break;
+                case 3: v += (a + b) / 2; break;
+                case 4: v += paeth(a, b, c); break;
+                default: return std::nullopt;
+            }
+            row[x] = static_cast<uint8_t>(v & 0xff);
+        }
+    }
+
+    out.rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+    for (int i = 0; i < width * height; ++i) {
+        const uint8_t* s = img.data() + static_cast<size_t>(i) * static_cast<size_t>(channels);
+        uint8_t* d = out.rgba.data() + static_cast<size_t>(i) * 4;
+        if (channels == 4) {
+            d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+        } else if (channels == 3) {
+            d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255;
+        } else if (channels == 2) {
+            d[0] = d[1] = d[2] = s[0]; d[3] = s[1];
+        } else {
+            d[0] = d[1] = d[2] = s[0]; d[3] = 255;
+        }
+    }
+    out.width = width;
+    out.height = height;
+    return out;
+}
+
+struct ImportOpaqueCore {
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    int png_w = 0;
+    int png_h = 0;
+};
+
+static std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vector<uint8_t>& bytes,
+                                                                  float min_alpha = 0.5f) {
+    auto img = decode_png_rgba_for_import(bytes);
+    if (!img || !img->valid()) return std::nullopt;
+    const uint8_t threshold = static_cast<uint8_t>(
+        std::clamp(min_alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+    int min_x = img->width;
+    int min_y = img->height;
+    int max_x = -1;
+    int max_y = -1;
+    for (int y = 0; y < img->height; ++y) {
+        const uint8_t* row = img->rgba.data() + static_cast<size_t>(y) * img->width * 4;
+        for (int x = 0; x < img->width; ++x) {
+            if (row[x * 4 + 3] < threshold) continue;
+            min_x = std::min(min_x, x);
+            min_y = std::min(min_y, y);
+            max_x = std::max(max_x, x);
+            max_y = std::max(max_y, y);
+        }
+    }
+    if (max_x < min_x || max_y < min_y) return std::nullopt;
+    return ImportOpaqueCore{
+        min_x,
+        min_y,
+        max_x - min_x + 1,
+        max_y - min_y + 1,
+        img->width,
+        img->height,
+    };
+}
+
+void enrich_imported_image_asset_metadata(DesignIR& ir,
+                                          const IRAssetManifest& manifest,
+                                          std::string_view base_directory) {
+    if (manifest.assets.empty()) return;
+    const fs::path base_dir{std::string(base_directory)};
+
+    std::function<void(IRNode&)> visit = [&](IRNode& node) {
+        auto asset_ref = node.attributes.find("asset_ref");
+        if (asset_ref != node.attributes.end() && !asset_ref->second.empty()) {
+            if (const auto* ref = manifest.resolve(asset_ref->second)) {
+                std::vector<uint8_t> bytes;
+                std::pair<int, int> dims{ref->width.value_or(0), ref->height.value_or(0)};
+                if (ref->local_path && !ref->local_path->empty()) {
+                    fs::path path(*ref->local_path);
+                    if (path.is_relative() && !base_dir.empty())
+                        path = base_dir / path;
+                    path = path.lexically_normal();
+                    node.attributes["asset_path"] = path.string();
+                    bytes = read_binary_file(path);
+                    if (!bytes.empty()) {
+                        if (auto file_dims = png_dimensions_from_bytes(bytes);
+                            file_dims.first > 0 && file_dims.second > 0) {
+                            dims = file_dims;
+                            node.attributes["png_natural_w"] = std::to_string(file_dims.first);
+                            node.attributes["png_natural_h"] = std::to_string(file_dims.second);
+                        }
+                        if (node.style.render_bounds) {
+                            if (auto core = compute_import_opaque_core(bytes)) {
+                                node.attributes["art_core_x"] = std::to_string(core->x);
+                                node.attributes["art_core_y"] = std::to_string(core->y);
+                                node.attributes["art_core_w"] = std::to_string(core->w);
+                                node.attributes["art_core_h"] = std::to_string(core->h);
+                                node.attributes["png_natural_w"] = std::to_string(core->png_w);
+                                node.attributes["png_natural_h"] = std::to_string(core->png_h);
+                                dims = {core->png_w, core->png_h};
+                            }
+                        }
+                    }
+                } else if (dims.first > 0 && dims.second > 0) {
+                    node.attributes["png_natural_w"] = std::to_string(dims.first);
+                    node.attributes["png_natural_h"] = std::to_string(dims.second);
+                }
+
+                // Figma-plugin bundled-image exports are currently 2x PNGs while
+                // the IR layout box is in logical design pixels. This only stamps
+                // a best-effort bleed hint; render_bounds plus opaque-core metadata
+                // remains the stronger placement signal when available.
+                constexpr float kExportScale = 2.0f;
+                const float layout_w = node.style.width.value_or(0.0f);
+                const float layout_h = node.style.height.value_or(0.0f);
+                if (dims.first > 0 && dims.second > 0 && layout_w > 0.0f && layout_h > 0.0f) {
+                    const float natural_w = static_cast<float>(dims.first) / kExportScale;
+                    const float natural_h = static_cast<float>(dims.second) / kExportScale;
+                    const float rw = natural_w / layout_w;
+                    const float rh = natural_h / layout_h;
+                    if (std::max(rw, rh) >= 1.5f)
+                        node.attributes["asset_bleed"] = "1";
+                }
+            }
+        }
+        for (auto& child : node.children)
+            visit(child);
+    };
+    visit(ir.root);
+}
+
 static bool write_binary_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
@@ -1416,7 +1640,71 @@ static void clear_asset_id_annotations(IRNode& node) {
 
 void refresh_design_ir_asset_manifest(DesignIR& ir,
                                       const DesignIrAssetOptions& options) {
-    ir.asset_manifest = collect_design_ir_assets(ir, options);
+    auto embedded_manifest = ir.asset_manifest;
+    auto refreshed_manifest = collect_design_ir_assets(ir, options);
+    const bool preserve_all_embedded_assets =
+        ir.source == DesignSource::figma_plugin || ir.source_adapter == "figma-plugin";
+    std::unordered_map<std::string, bool> explicitly_referenced_asset_ids;
+    std::function<void(const IRNode&)> collect_explicit_asset_ids = [&](const IRNode& node) {
+        if (auto it = node.attributes.find("asset_ref");
+            it != node.attributes.end() && !it->second.empty()) {
+            explicitly_referenced_asset_ids.emplace(it->second, true);
+        }
+        for (const auto& child : node.children)
+            collect_explicit_asset_ids(child);
+    };
+    collect_explicit_asset_ids(ir.root);
+    for (const auto& font : ir.font_family_assets) {
+        if (!font.asset_id.empty())
+            explicitly_referenced_asset_ids.emplace(font.asset_id, true);
+    }
+
+    if (!embedded_manifest.assets.empty()) {
+        std::unordered_map<std::string, size_t> refreshed_by_id;
+        for (size_t i = 0; i < refreshed_manifest.assets.size(); ++i) {
+            if (!refreshed_manifest.assets[i].asset_id.empty())
+                refreshed_by_id.emplace(refreshed_manifest.assets[i].asset_id, i);
+        }
+        for (auto& asset : embedded_manifest.assets) {
+            if (!asset.asset_id.empty()
+                && refreshed_by_id.find(asset.asset_id) != refreshed_by_id.end()) {
+                auto& refreshed = refreshed_manifest.assets[refreshed_by_id[asset.asset_id]];
+                if (refreshed.original_uri.empty()) refreshed.original_uri = asset.original_uri;
+                for (const auto& alias : asset.original_uri_aliases)
+                    append_unique_asset_alias(refreshed, alias);
+                if (!refreshed.local_path && asset.local_path)
+                    refreshed.local_path = asset.local_path;
+                if (refreshed.content_hash.empty())
+                    refreshed.content_hash = asset.content_hash;
+                if (refreshed.mime.empty())
+                    refreshed.mime = asset.mime;
+                if (!refreshed.width && asset.width)
+                    refreshed.width = asset.width;
+                if (!refreshed.height && asset.height)
+                    refreshed.height = asset.height;
+                if (!refreshed.font_family && asset.font_family)
+                    refreshed.font_family = asset.font_family;
+                if (!refreshed.license && asset.license)
+                    refreshed.license = asset.license;
+                if (!refreshed.source_url && asset.source_url)
+                    refreshed.source_url = asset.source_url;
+                refreshed.diagnostics.insert(refreshed.diagnostics.end(),
+                                             asset.diagnostics.begin(),
+                                             asset.diagnostics.end());
+            } else if (preserve_all_embedded_assets
+                       || (!asset.asset_id.empty()
+                           && explicitly_referenced_asset_ids.find(asset.asset_id)
+                                != explicitly_referenced_asset_ids.end())) {
+                refreshed_manifest.assets.push_back(std::move(asset));
+            }
+        }
+        std::sort(refreshed_manifest.assets.begin(), refreshed_manifest.assets.end(),
+                  [](const auto& a, const auto& b) {
+                      return a.asset_id < b.asset_id;
+                  });
+    }
+
+    ir.asset_manifest = std::move(refreshed_manifest);
     std::unordered_map<std::string, std::string> asset_id_by_uri;
     for (const auto& asset : ir.asset_manifest.assets) {
         if (!asset.original_uri.empty())
@@ -1842,6 +2130,67 @@ void synthesize_node(IRNode& n) {
 }
 
 }  // namespace
+
+void hoist_captured_art_knobs(DesignIR& ir) {
+    // Pre-materialization IR normalization: co-located with the other importer
+    // passes (enrich_imported_image_asset_metadata, synthesize_primitive_paths)
+    // rather than in the materializer TU. See the header for the full contract.
+    std::function<void(IRNode&)> visit = [&](IRNode& n) {
+        if (n.audio_widget == AudioWidgetType::knob) {
+            // Captured layers = asset-backed image children. Area is the layer's
+            // own box; a captured disc/body is a substantial box while a pointer
+            // hairline is ~0-area (a stroked vector the native notch replaces).
+            std::vector<IRNode*> captured;
+            IRNode* body = nullptr;
+            float body_area = 0.0f;
+            for (auto& c : n.children) {
+                if (c.type == "image" && c.attributes.count("asset_ref")) {
+                    captured.push_back(&c);
+                    const float area = c.style.width.value_or(0.0f) *
+                                       c.style.height.value_or(0.0f);
+                    if (area > body_area) { body_area = area; body = &c; }
+                }
+            }
+            if (body != nullptr) {
+                // A secondary layer is SUBSTANTIAL (a real captured layer, not a
+                // pointer the notch replaces) when its area is a meaningful
+                // fraction of the body disc.
+                int substantial = 0;
+                for (auto* layer : captured) {
+                    if (layer == body) continue;
+                    const float area = layer->style.width.value_or(0.0f) *
+                                       layer->style.height.value_or(0.0f);
+                    if (body_area > 0.0f && area >= 0.4f * body_area) ++substantial;
+                }
+                if (substantial == 0) {
+                    // One body disc (+ only pointer hairlines): hoist the disc so
+                    // the materializer skins the knob and overlays the native
+                    // rotating notch. The knob stays interactive AND faithful.
+                    n.attributes["asset_ref"] = body->attributes.at("asset_ref");
+                    if (body->style.render_bounds && !n.style.render_bounds)
+                        n.style.render_bounds = body->style.render_bounds;
+                    if (!n.attributes.count("sprite_strip_frame_count"))
+                        n.attributes["sprite_strip_frame_count"] = "1";
+                    n.children.erase(
+                        std::remove_if(n.children.begin(), n.children.end(),
+                            [](const IRNode& c) {
+                                return c.type == "image" &&
+                                       c.attributes.count("asset_ref") != 0;
+                            }),
+                        n.children.end());
+                } else {
+                    // Multiple substantial captured layers (body + highlight +
+                    // logo …): a single-frame sprite skin can hold only one, so
+                    // demote to a plain container — every layer renders as an
+                    // image (faithful but not turnable). No silent layer loss.
+                    n.audio_widget = AudioWidgetType::none;
+                }
+            }
+        }
+        for (auto& c : n.children) visit(c);
+    };
+    visit(ir.root);
+}
 
 void synthesize_primitive_paths(IRNode& root) {
     synthesize_node(root);

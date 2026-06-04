@@ -23,13 +23,21 @@ This runs as a post-export pass over a `*.pulp.json` scene that still carries
 Figma personal access token (``--token-file`` or ``$FIGMA_TOKEN``) and network
 access, so it is a developer-time export helper — never part of CI.
 
+`--scale` defaults to 2.0 to match the native materializer's `kExportScale`
+(``core/view/src/design_import.cpp``): bundled-image exports are treated as 2x
+PNGs against a logical-pixel layout box. A higher scale produces a PNG whose
+``dims / kExportScale`` exceeds the layout box, tripping the materializer's
+`asset_bleed` heuristic on a frame that is actually rendered to its own bounds.
+Keep producer and consumer scale aligned unless you also adjust that heuristic.
+
 Usage:
   figma_rasterize_vector_frames.py --scene scene.pulp.json \
-      --assets-dir scene_assets/ --out scene.rasterized.pulp.json [--scale 3]
+      --assets-dir scene_assets/ --out scene.rasterized.pulp.json [--scale 2]
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -145,6 +153,69 @@ def collect_targets(root: dict) -> list[dict]:
     return targets
 
 
+def _json_relpath(path: str, base_file: str) -> str:
+    base_dir = os.path.dirname(os.path.abspath(base_file)) or os.getcwd()
+    rel = os.path.relpath(os.path.abspath(path), base_dir)
+    return rel.replace(os.sep, "/")
+
+
+def upsert_asset_manifest_entry(scene: dict, *, asset_id: str, local_path: str,
+                                file_key: str, content_hash: str,
+                                mime: str = "image/png") -> dict:
+    """Insert/update the asset_manifest entry a native materializer needs."""
+    manifest = scene.get("asset_manifest")
+    if not isinstance(manifest, dict):
+        manifest = {"version": 1, "assets": []}
+        scene["asset_manifest"] = manifest
+    manifest.setdefault("version", 1)
+    assets = manifest.get("assets")
+    if not isinstance(assets, list):
+        assets = []
+        manifest["assets"] = assets
+
+    for entry in assets:
+        if isinstance(entry, dict) and entry.get("asset_id") == asset_id:
+            break
+    else:
+        entry = {"asset_id": asset_id}
+        assets.append(entry)
+
+    entry["original_uri"] = f"figma://{file_key}/{asset_id}"
+    entry.setdefault("original_uri_aliases", [])
+    entry["local_path"] = local_path
+    entry["content_hash"] = content_hash
+    entry["mime"] = mime
+    return entry
+
+
+def mark_node_as_flattened_image(node: dict, *, asset_id: str) -> None:
+    """Replace a vector illustration container with an image node.
+
+    The manifest remains authoritative for the file path; leaving an absolute
+    asset_path in DesignIR would make the developer-time output non-portable.
+    """
+    node["type"] = "image"
+    node["asset_ref"] = asset_id
+    node["children"] = []
+    attrs = node.get("attributes")
+    if isinstance(attrs, dict):
+        attrs.pop("asset_path", None)
+
+
+def apply_flattened_asset(scene: dict, node: dict, *, file_key: str,
+                          asset_path: str, output_scene_path: str) -> dict:
+    asset_id = node["figma_node_id"]
+    with open(asset_path, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    local_path = _json_relpath(asset_path, output_scene_path)
+    mark_node_as_flattened_image(node, asset_id=asset_id)
+    return upsert_asset_manifest_entry(scene,
+                                       asset_id=asset_id,
+                                       local_path=local_path,
+                                       file_key=file_key,
+                                       content_hash=digest)
+
+
 def fetch_image_urls(file_key: str, ids: list[str], token: str,
                      scale: float) -> dict:
     q = ",".join(ids)
@@ -158,17 +229,24 @@ def fetch_image_urls(file_key: str, ids: list[str], token: str,
     return data.get("images", {})
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scene", required=True)
     ap.add_argument("--assets-dir", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--scale", type=float, default=3.0)
+    # Match the native materializer's kExportScale (design_import.cpp). A larger
+    # scale trips the materializer's asset_bleed heuristic on a tightly-cropped
+    # full-box raster; keep producer/consumer scale aligned.
+    ap.add_argument("--scale", type=float, default=2.0)
     ap.add_argument("--token-file",
                     default=os.path.expanduser("~/.config/pulp/figma-token"))
     ap.add_argument("--dry-run", action="store_true",
                     help="List the frames that would be flattened, don't fetch.")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     scene = json.load(open(args.scene))
     root = scene.get("root", scene)
@@ -210,13 +288,12 @@ def main() -> int:
         path = os.path.join(args.assets_dir, fname)
         urllib.request.urlretrieve(url, path)
         # Replace the frame with an image node covering the whole frame box.
-        # Keep position/size; drop the degraded children. asset_ref + asset_path
-        # so the importer treats it exactly like the cylinder (Torus) node.
-        t["type"] = "image"
-        t["asset_ref"] = nid
-        t["children"] = []
-        attrs = t.setdefault("attributes", {})
-        attrs["asset_path"] = path
+        # Keep position/size; drop the degraded children. asset_ref plus the
+        # asset_manifest entry makes this match the normal exported image path.
+        apply_flattened_asset(scene, t,
+                              file_key=file_key,
+                              asset_path=path,
+                              output_scene_path=args.out)
         print(f"  flattened {nid} -> {fname}")
 
     json.dump(scene, open(args.out, "w"), indent=1)

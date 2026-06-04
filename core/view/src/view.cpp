@@ -4,6 +4,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -15,6 +16,11 @@
 namespace pulp::view {
 
 namespace {
+
+std::uint64_t next_import_binding_instance_id() {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
 
 // Build a per-corner rounded-rect path on the canvas (issue-1026). When any
 // of setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight has been
@@ -142,6 +148,11 @@ void build_continuous_corner_rounded_rect_path(
 }
 
 } // namespace
+
+View::View()
+    : import_binding_instance_id_(next_import_binding_instance_id()),
+      import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
+          import_binding_instance_id_)) {}
 
 // View destructor, moved out of <pulp/view/view.hpp> in the Phase 4 R2-2
 // header-diet first cut. Stays virtual + public so vtable layout + SDK

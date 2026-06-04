@@ -89,3 +89,12 @@ size — the result fills the canvas and matches the design's own proportions.
   `import-design` skill's GPU-host gotcha).
 - Never show the user a CoreGraphics render of an asset-rich design and call it
   the import result — re-render with Skia first.
+- **A non-empty PNG is not a passing render.** `ScreenshotStats::passes_content_floor`
+  (`core/view/include/pulp/view/screenshot_compare.hpp`) is the oracle that catches
+  the blank/near-blank-frame bug a raw "file written" check misses: it gates on a
+  unique-color floor, a luminance-stddev floor, and non-background + opaque coverage
+  floors. Assert it (not just `!png.empty()`) when validating a GPU capture, and
+  pump enough settled frames first — a single unsettled frame can under-count
+  content. The design-import screenshot-parity test asserts
+  `REQUIRE_FALSE(passes_content_floor())` on a stable flat capture to prove the
+  oracle actually rejects empties.

@@ -3072,6 +3072,37 @@ bool compile_generated_source(const fs::path& source_path,
 
 }  // namespace
 
+TEST_CASE("baked C++ codegen emits a CSS background gradient call",
+          "[view][import][cpp-codegen][gradient]") {
+    // A node with style.background_gradient must emit a runtime
+    // apply_css_background_gradient call (with the verbatim CSS string) and pull
+    // in the helper header, so baked output paints the same gradients the live
+    // materializer does. Dropping it silently was the ELYSIUM dark/light gap.
+    DesignIR ir;
+    ir.source = DesignSource::stitch;
+    ir.capture_method = "gradient-codegen-test";
+    ir.source_adapter = "gradient-codegen-test";
+    ir.source_version = "1";
+    ir.root = frame_node("panel", "Panel", 320.0f, 200.0f, LayoutDirection::column);
+    ir.root.style.background_color = "#1c1d1d";
+    ir.root.style.background_gradient = "linear-gradient(to bottom, #e4edf6, #b7c8db)";
+
+    CppExportOptions opts;
+    opts.header_filename = "gradient_panel.hpp";
+    opts.namespace_name = "pulp::test::gradient";
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    REQUIRE(result.source.find(
+        "pulp::view::apply_css_background_gradient(*") != std::string::npos);
+    REQUIRE(result.source.find(
+        "linear-gradient(to bottom, #e4edf6, #b7c8db)") != std::string::npos);
+    REQUIRE(result.source.find("#include <pulp/view/css_gradient.hpp>")
+            != std::string::npos);
+    // The solid base color is still emitted (gradient paints over it).
+    REQUIRE(result.source.find("set_background_color") != std::string::npos);
+}
+
 TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
           "[view][import][cpp-codegen][native-cpp-phase-a]") {
     const auto ir = build_phase_a_typed_control_ir();
@@ -3233,6 +3264,53 @@ TEST_CASE("Chainer route overlay can lower one knob to typed C++ with binding si
     const auto header = tmp.path / "phase_c_chainer_one_knob.hpp";
     const auto source = tmp.path / "phase_c_chainer_one_knob.cpp";
     const auto object = tmp.path / "phase_c_chainer_one_knob.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("generated C++ binding helper refuses ambiguous duplicate anchors",
+          "[view][import][cpp-codegen][native-cpp][binding]") {
+    DesignIR ir;
+    ir.root = frame_node("root", "Root", 220.0f, 120.0f, LayoutDirection::row);
+
+    auto first = frame_node("figma:duplicate-knob", "First duplicate", 80.0f, 80.0f,
+                            LayoutDirection::column);
+    first.audio_widget = AudioWidgetType::knob;
+    first.attributes["value"] = "0.25";
+    first.attributes["pulpRouteId"] = "figma-plugin:first-duplicate";
+    first.attributes["pulpParamKey"] = "filter.first";
+
+    auto second = frame_node("figma:duplicate-knob", "Second duplicate", 80.0f, 80.0f,
+                             LayoutDirection::column);
+    second.audio_widget = AudioWidgetType::knob;
+    second.attributes["value"] = "0.75";
+    second.attributes["pulpRouteId"] = "figma-plugin:second-duplicate";
+    second.attributes["pulpParamKey"] = "filter.second";
+
+    ir.root.children.push_back(std::move(first));
+    ir.root.children.push_back(std::move(second));
+
+    CppExportOptions opts;
+    opts.header_filename = "duplicate_anchor_binding.hpp";
+    opts.namespace_name = "pulp::test::duplicate_anchor_binding";
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    REQUIRE(result.source.find(
+        "find_imported_view_by_anchor(pulp::view::View& root, std::string_view anchor, int& matches)") !=
+        std::string::npos);
+    REQUIRE(count_occurrences(result.source, "_match_count == 1") == 2);
+    REQUIRE(count_occurrences(result.source, "ctx.bind_knob(") == 2);
+
+    TempDir tmp("pulp-duplicate-anchor-binding-cpp-codegen");
+    const auto header = tmp.path / "duplicate_anchor_binding.hpp";
+    const auto source = tmp.path / "duplicate_anchor_binding.cpp";
+    const auto object = tmp.path / "duplicate_anchor_binding.o";
     write_text(header, result.header);
     write_text(source, result.source);
 
@@ -7222,6 +7300,75 @@ TEST_CASE("baked C++ exporter emits ownable C++ source artifacts",
     REQUIRE(result.source.find("serialize_design_ir") == std::string::npos);
 
     TempDir tmp("pulp-design-import-cpp-codegen");
+    const auto header = tmp.path / "generated_design.hpp";
+    const auto source = tmp.path / "generated_design.cpp";
+    const auto object = tmp.path / "generated_design.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("baked C++ exporter resolves figma-plugin asset_ref image sources",
+          "[view][import][cpp-codegen][figma-plugin][asset-ref]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "image";
+    ir.root.name = "Imported Figma Image";
+    ir.root.attributes["asset_ref"] = "3:43";
+    ir.root.style.width = 64.0f;
+    ir.root.style.height = 32.0f;
+
+    IRAssetRef asset;
+    asset.asset_id = "3:43";
+    asset.original_uri = "figma://KCKIyZoWXjde6qVNCm4qPa/3:43";
+    asset.local_path = "/resolved/import/assets/3_43.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("set_image_source(\"file:///resolved/import/assets/3_43.png\")") != std::string::npos);
+}
+
+TEST_CASE("baked C++ exporter preserves figma-plugin bleed sprite geometry",
+          "[view][import][cpp-codegen][figma-plugin][fidelity]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "image";
+    ir.root.name = "Imported Bleed Sprite";
+    ir.root.attributes["asset_ref"] = "sprite";
+    ir.root.attributes["png_natural_w"] = "420";
+    ir.root.attributes["png_natural_h"] = "484";
+    ir.root.attributes["art_core_x"] = "148";
+    ir.root.attributes["art_core_y"] = "0";
+    ir.root.attributes["art_core_w"] = "115";
+    ir.root.attributes["art_core_h"] = "129";
+    ir.root.style.width = 62.0f;
+    ir.root.style.height = 68.0f;
+    ir.root.style.position = "absolute";
+    ir.root.style.left = 20.0f;
+    ir.root.style.top = 30.0f;
+    ir.root.style.render_bounds = IRStyle::RenderBounds{210.0f, 116.0f, -74.0f, 0.0f};
+
+    IRAssetRef asset;
+    asset.asset_id = "sprite";
+    asset.original_uri = "figma://fixture/sprite";
+    asset.local_path = "/resolved/import/assets/sprite.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("set_image_source(\"file:///resolved/import/assets/sprite.png\")") != std::string::npos);
+    REQUIRE(result.source.find("_image_flex.preferred_width") != std::string::npos);
+    REQUIRE(result.source.find("_image_flex.dim_width") != std::string::npos);
+    REQUIRE(result.source.find("->set_left(") != std::string::npos);
+
+    TempDir tmp("pulp-design-import-cpp-bleed-sprite");
     const auto header = tmp.path / "generated_design.hpp";
     const auto source = tmp.path / "generated_design.cpp";
     const auto object = tmp.path / "generated_design.o";

@@ -341,7 +341,58 @@ std::vector<uint8_t> render_probe_png(uint32_t width, uint32_t height) {
     return render_to_png(probe, width, height, 1.0f);
 }
 
+void require_meaningful_content(const std::string& label,
+                                const std::vector<uint8_t>& png,
+                                uint32_t min_unique_colors = 16,
+                                double min_luminance_stddev = 1.0,
+                                double min_non_background_coverage = 0.05,
+                                double min_opaque_coverage = 0.95) {
+    auto stats = analyze_screenshot_content(png);
+    INFO(label
+         << " content: valid=" << stats.valid
+         << " size=" << stats.width << "x" << stats.height
+         << " total_pixels=" << stats.total_pixels
+         << " unique_colors=" << stats.unique_colors
+         << " unique_colors_capped=" << stats.unique_colors_capped
+         << " luminance_mean=" << stats.luminance_mean
+         << " luminance_stddev=" << stats.luminance_stddev
+         << " alpha_mean=" << stats.alpha_mean
+         << " opaque_coverage=" << stats.opaque_coverage
+         << " non_background_coverage=" << stats.non_background_coverage
+         << " error=" << stats.error);
+
+    REQUIRE(stats.valid);
+    REQUIRE(stats.unique_colors >= min_unique_colors);
+    REQUIRE(stats.luminance_stddev >= min_luminance_stddev);
+    REQUIRE(stats.non_background_coverage >= min_non_background_coverage);
+    REQUIRE(stats.opaque_coverage >= min_opaque_coverage);
+}
+
 } // namespace
+
+TEST_CASE("design import screenshot parity content oracle rejects stable empty captures",
+          "[view][import][screenshot-parity][content-oracle]") {
+    if (!screenshot_parity_supported()) {
+        const char* reason =
+            "screenshot content oracle unavailable on this platform: Apple PNG decode backend is not available";
+        std::cout << reason << '\n';
+        SKIP(reason);
+    }
+
+    auto flat_png = render_probe_png(64, 64);
+    REQUIRE_FALSE(flat_png.empty());
+
+    auto stats = analyze_screenshot_content(flat_png);
+    INFO("flat content: valid=" << stats.valid
+                                << " unique_colors=" << stats.unique_colors
+                                << " unique_colors_capped=" << stats.unique_colors_capped
+                                << " luminance_stddev=" << stats.luminance_stddev
+                                << " opaque_coverage=" << stats.opaque_coverage
+                                << " non_background_coverage=" << stats.non_background_coverage
+                                << " error=" << stats.error);
+    REQUIRE(stats.valid);
+    REQUIRE_FALSE(stats.passes_content_floor());
+}
 
 TEST_CASE("design import screenshot parity compares live and baked native fixtures",
           "[view][import][screenshot-parity][phase-6]") {
@@ -370,6 +421,9 @@ TEST_CASE("design import screenshot parity compares live and baked native fixtur
         REQUIRE_FALSE(live_png.empty());
         REQUIRE_FALSE(baked_png.empty());
 
+        require_meaningful_content(fixture.name + " live", live_png);
+        require_meaningful_content(fixture.name + " baked", baked_png);
+
         auto probe_png = render_probe_png(fixture.width, fixture.height);
         REQUIRE_FALSE(probe_png.empty());
         auto probe_result = compare_screenshots(probe_png, live_png, 8);
@@ -379,6 +433,14 @@ TEST_CASE("design import screenshot parity compares live and baked native fixtur
                                   << " error=" << probe_result.error);
         REQUIRE(probe_result.valid);
         REQUIRE(probe_result.similarity < 0.99f);
+
+        auto baked_probe_result = compare_screenshots(probe_png, baked_png, 8);
+        INFO("baked probe similarity=" << baked_probe_result.similarity
+                                       << " diff_pixels=" << baked_probe_result.diff_pixels
+                                       << " total_pixels=" << baked_probe_result.total_pixels
+                                       << " error=" << baked_probe_result.error);
+        REQUIRE(baked_probe_result.valid);
+        REQUIRE(baked_probe_result.similarity < 0.99f);
 
         auto result = compare_screenshots(live_png, baked_png, 16);
         INFO("similarity=" << result.similarity

@@ -34,6 +34,38 @@ struct DiffBounds {
     uint32_t diff_pixels = 0;
 };
 
+/// Basic content statistics for a decoded PNG. This is intentionally separate
+/// from visual similarity: two screenshots can be byte-identical and still be
+/// useless if they are stable empty frames.
+struct ScreenshotContentStats {
+    bool valid = false;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t total_pixels = 0;
+    uint32_t unique_colors = 0;  ///< Exact count unless unique_colors_capped is true.
+    bool unique_colors_capped = false;
+    double luminance_mean = 0.0;
+    double luminance_stddev = 0.0;
+    double alpha_mean = 0.0;
+    double opaque_coverage = 0.0;
+    /// Fraction of pixels that differ from the dominant background color. This
+    /// is exact unless unique_colors_capped is true, where it is still useful
+    /// as an empty-frame floor but not a precise coverage metric.
+    double non_background_coverage = 0.0;
+    std::string error;
+
+    bool passes_content_floor(uint32_t min_unique_colors = 16,
+                              double min_luminance_stddev = 1.0,
+                              double min_non_background_coverage = 0.05,
+                              double min_opaque_coverage = 0.95) const {
+        return valid &&
+               unique_colors >= min_unique_colors &&
+               luminance_stddev >= min_luminance_stddev &&
+               non_background_coverage >= min_non_background_coverage &&
+               opaque_coverage >= min_opaque_coverage;
+    }
+};
+
 /// Compare two PNG images for visual similarity.
 /// @param reference_png  Raw PNG bytes of the reference (source design) image
 /// @param rendered_png   Raw PNG bytes of the rendered Pulp output
@@ -81,5 +113,9 @@ DiffBounds diff_bounds(
     const std::vector<uint8_t>& rendered_png,
     uint8_t tolerance = 32
 );
+
+/// Decode a PNG and compute content statistics suitable for catching empty or
+/// stable single-color captures before any parity claim is accepted.
+ScreenshotContentStats analyze_screenshot_content(const std::vector<uint8_t>& png);
 
 } // namespace pulp::view

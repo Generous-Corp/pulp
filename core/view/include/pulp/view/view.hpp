@@ -24,7 +24,7 @@ class FrameClock;
 // Views form a tree: each view has zero or more children and one optional parent
 class View {
 public:
-    View() = default;
+    View();
     // Defined out-of-line in view.cpp to slim the preprocessed-byte size
     // of <pulp/view/view.hpp> (Phase 4 R2-2 header-diet first cut).
     // Stays virtual + public — the vtable slot, calling convention, and
@@ -383,6 +383,14 @@ public:
     /// views that aren't part of an imported tree leave it empty.
     void set_anchor_id(std::string anchor) { anchor_id_ = std::move(anchor); }
     const std::string& anchor_id() const { return anchor_id_; }
+
+    /// Stable for this View object's lifetime. Used by import-binding claim
+    /// guards so a rebuilt tree can bind even if the allocator reuses an old
+    /// View address.
+    std::uint64_t import_binding_instance_id() const { return import_binding_instance_id_; }
+    std::weak_ptr<const std::uint64_t> import_binding_lifetime_token() const {
+        return import_binding_lifetime_token_;
+    }
 
     /// Phase 5.1 (inspector source-jump): authored-source location for
     /// this view. Populated from React's `__source` prop (file name +
@@ -1431,6 +1439,8 @@ private:
     // Phase 0b: design-import anchor identity. Empty for views not
     // constructed from an imported tree. See set_anchor_id().
     std::string anchor_id_;
+    std::uint64_t import_binding_instance_id_ = 0;
+    std::shared_ptr<const std::uint64_t> import_binding_lifetime_token_;
     // Phase 5.1: authored-source location (JSX file:line:col) from the
     // React reconciler's `__source` prop. Unset for non-imported views.
     std::optional<SourceLocation> source_loc_;

@@ -22,18 +22,38 @@
 #import <pulp/view/view.hpp>
 #import <pulp/view/window_host.hpp>
 
+#include <chrono>
+
 namespace {
 
 // Drain the main run loop so any pending dispatch_async work (notably
 // PulpView's deferred click handler) settles before the caller asserts.
 // Spins the run loop briefly with a near-zero deadline rather than
 // sleeping; this is the lightest-weight reliable settle on AppKit.
+bool is_main_thread() {
+    return [NSThread isMainThread];
+}
+
 void drain_main_queue_once() {
     @autoreleasepool {
         [[NSRunLoop currentRunLoop]
             runMode:NSDefaultRunLoopMode
             beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.0]];
     }
+}
+
+NSPoint cg_screen_point_for_window_location(NSWindow* window, NSPoint location) {
+    NSPoint screen_pt = [window convertPointToScreen:location];
+    NSScreen* screen = [window screen];
+    if (!screen) screen = [[NSScreen screens] firstObject];
+    if (!screen) return screen_pt;
+
+    // Cocoa screen coordinates are bottom-left in the screen's frame; CGEvent
+    // locations are top-left. Flip in the window's actual screen frame so
+    // hidden-host tests do not depend on the primary display.
+    const NSRect frame = [screen frame];
+    screen_pt.y = NSMinY(frame) + NSHeight(frame) - (screen_pt.y - NSMinY(frame));
+    return screen_pt;
 }
 
 // Build an NSEvent for the given simulated mouse event. Coordinates are
@@ -91,19 +111,48 @@ NSEvent* build_event(NSWindow* window,
         // PulpView::scrollWheel: hit-tests from locationInWindow, so
         // without this, scroll tests targeted at a specific subview
         // are dropped or routed wherever the cursor happened to be.
-        // CGEvent uses screen-space; convert via window/screen frames.
-        NSPoint screen_pt = [window convertPointToScreen:location];
-        // Cocoa screen origin = bottom-left of primary screen, but
-        // CoreGraphics uses top-left. Flip via primary screen height.
-        NSScreen* primary = [[NSScreen screens] firstObject];
-        if (primary) {
-            CGFloat screen_h = NSHeight([primary frame]);
-            CGEventSetLocation(cge,
-                CGPointMake(screen_pt.x, screen_h - screen_pt.y));
-        }
+        // CGEvent uses screen-space; convert via the window's screen frame.
+        NSPoint screen_pt = cg_screen_point_for_window_location(window, location);
+        CGEventSetLocation(cge, CGPointMake(screen_pt.x, screen_pt.y));
         NSEvent* event = [NSEvent eventWithCGEvent:cge];
         CFRelease(cge);
         return event;
+    }
+
+    if (ev.mouse_delta_x != 0.0f || ev.mouse_delta_y != 0.0f) {
+        CGEventType cg_type = kCGEventMouseMoved;
+        CGMouseButton cg_button = kCGMouseButtonLeft;
+        switch (type) {
+            case NSEventTypeLeftMouseDown:    cg_type = kCGEventLeftMouseDown;    break;
+            case NSEventTypeLeftMouseUp:      cg_type = kCGEventLeftMouseUp;      break;
+            case NSEventTypeLeftMouseDragged: cg_type = kCGEventLeftMouseDragged; break;
+            case NSEventTypeRightMouseDown:   cg_type = kCGEventRightMouseDown;   cg_button = kCGMouseButtonRight; break;
+            case NSEventTypeRightMouseUp:     cg_type = kCGEventRightMouseUp;     cg_button = kCGMouseButtonRight; break;
+            case NSEventTypeRightMouseDragged: cg_type = kCGEventRightMouseDragged; cg_button = kCGMouseButtonRight; break;
+            case NSEventTypeOtherMouseDown:   cg_type = kCGEventOtherMouseDown;   cg_button = kCGMouseButtonCenter; break;
+            case NSEventTypeOtherMouseUp:     cg_type = kCGEventOtherMouseUp;     cg_button = kCGMouseButtonCenter; break;
+            case NSEventTypeOtherMouseDragged: cg_type = kCGEventOtherMouseDragged; cg_button = kCGMouseButtonCenter; break;
+            case NSEventTypeMouseMoved:       cg_type = kCGEventMouseMoved;       break;
+            default: break;
+        }
+
+        NSPoint screen_pt = cg_screen_point_for_window_location(window, location);
+
+        CGEventRef cge = CGEventCreateMouseEvent(
+            /* source */ NULL,
+            cg_type,
+            CGPointMake(screen_pt.x, screen_pt.y),
+            cg_button);
+        if (!cge) return nil;
+        CGEventSetIntegerValueField(cge,
+                                    kCGMouseEventDeltaX,
+                                    static_cast<int64_t>(ev.mouse_delta_x));
+        CGEventSetIntegerValueField(cge,
+                                    kCGMouseEventDeltaY,
+                                    static_cast<int64_t>(ev.mouse_delta_y));
+        NSEvent* event = [NSEvent eventWithCGEvent:cge];
+        CFRelease(cge);
+        if (event) return event;
     }
 
     return [NSEvent
@@ -124,6 +173,8 @@ namespace pulp::test::mac {
 
 std::unique_ptr<pulp::view::WindowHost>
 make_test_window(pulp::view::View& root, pulp::view::WindowOptions options) {
+    if (!is_main_thread()) return nullptr;
+
     @autoreleasepool {
         // Ensure NSApplication exists so NSWindow construction has a
         // running app to attach to. Safe to call repeatedly.
@@ -156,6 +207,8 @@ make_test_window(pulp::view::View& root, pulp::view::WindowOptions options) {
 }
 
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
+    if (!is_main_thread()) return false;
+
     @autoreleasepool {
         NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
         NSView*   view   = (__bridge NSView*)host.native_content_view_handle();
@@ -217,8 +270,32 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
 }
 
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {
+    if (!is_main_thread()) return {};
+
     drain_main_queue_once();
     return host.capture_back_buffer_png();
+}
+
+std::vector<BackBufferFrameCapture>
+capture_settled_back_buffer_png(pulp::view::WindowHost& host,
+                                uint32_t frame_count) {
+    if (!is_main_thread()) return {};
+
+    std::vector<BackBufferFrameCapture> frames;
+    frames.reserve(frame_count);
+
+    const auto start = std::chrono::steady_clock::now();
+    for (uint32_t i = 0; i < frame_count; ++i) {
+        drain_main_queue_once();
+        BackBufferFrameCapture frame;
+        frame.frame_index = i;
+        frame.png = host.capture_back_buffer_png();
+        frame.elapsed_ms = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count());
+        frames.push_back(std::move(frame));
+    }
+    return frames;
 }
 
 } // namespace pulp::test::mac

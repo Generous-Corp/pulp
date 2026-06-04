@@ -44,6 +44,8 @@ struct SimulatedMouse {
     Phase phase = Phase::move;
     float x = 0.0f;
     float y = 0.0f;
+    float mouse_delta_x = 0.0f;
+    float mouse_delta_y = 0.0f;
     pulp::view::MouseButton button = pulp::view::MouseButton::left;
     uint16_t modifiers = 0;
     int click_count = 1;
@@ -51,8 +53,15 @@ struct SimulatedMouse {
     float scroll_delta_y = 0.0f;
 };
 
+struct BackBufferFrameCapture {
+    uint32_t frame_index = 0;
+    uint64_t elapsed_ms = 0;
+    std::vector<uint8_t> png;
+};
+
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
-/// unit tests. Forces `options.use_gpu = true` and
+/// unit tests. Must be called on the main thread. Forces
+/// `options.use_gpu = true` and
 /// `options.initially_hidden = true` so callers cannot accidentally pop a
 /// real window during a test run.
 ///
@@ -65,10 +74,10 @@ std::unique_ptr<pulp::view::WindowHost>
 make_test_window(pulp::view::View& root,
                  pulp::view::WindowOptions options = {});
 
-/// Synthesize a single AppKit mouse event against the host's content view
-/// and drain the main run-loop once so deferred click handlers (which
+/// Synthesize a single AppKit mouse event against the host's content view and
+/// drain the main run-loop once so deferred click handlers (which
 /// `PulpView::mouseUp:` posts via `dispatch_async`) settle before the
-/// caller asserts or captures.
+/// caller asserts or captures. Must be called on the main thread.
 ///
 /// Returns false on null handles, zero content size, or unsupported
 /// phase. Never throws.
@@ -76,8 +85,18 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 
 /// Wrapper over `WindowHost::capture_back_buffer_png` that drains the
 /// main queue once first so any pending render / deferred state mutations
-/// are ordered before the readback. Returns the host's PNG bytes (may be
+/// are ordered before the readback. Must be called on the main thread.
+/// Returns the host's PNG bytes (may be
 /// empty on capture failure — the harness does not raise).
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
+
+/// Capture several host-managed frames through the same production
+/// `WindowHost::capture_back_buffer_png` path. Each frame drains the main queue
+/// first and records elapsed milliseconds from the start of the settled capture
+/// so tests can report how many frames were pumped before judging a screenshot.
+/// Must be called on the main thread.
+std::vector<BackBufferFrameCapture>
+capture_settled_back_buffer_png(pulp::view::WindowHost& host,
+                                uint32_t frame_count = 3);
 
 } // namespace pulp::test::mac

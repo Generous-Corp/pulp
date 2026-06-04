@@ -5,7 +5,13 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 
+#ifdef __APPLE__
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
+#endif
+
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -42,6 +48,69 @@ void write_png_file(const std::filesystem::path& path, const std::vector<uint8_t
     out.write(reinterpret_cast<const char*>(png.data()),
               static_cast<std::streamsize>(png.size()));
 }
+
+std::vector<uint8_t> render_flat_png(Color color, int width = 80, int height = 40) {
+    View root;
+    root.set_background_color(color);
+    return render_to_png(root, static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1.0f);
+}
+
+#ifdef __APPLE__
+std::vector<uint8_t> encode_raw_rgba_png(const std::vector<uint8_t>& pixels,
+                                         uint32_t width,
+                                         uint32_t height) {
+    if (pixels.size() != static_cast<size_t>(width) * static_cast<size_t>(height) * 4u) {
+        return {};
+    }
+
+    const CGBitmapInfo bitmap_info =
+        static_cast<CGBitmapInfo>(static_cast<uint32_t>(kCGBitmapByteOrder32Big) |
+                                  static_cast<uint32_t>(kCGImageAlphaPremultipliedLast));
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(
+        const_cast<uint8_t*>(pixels.data()),
+        width,
+        height,
+        8,
+        static_cast<size_t>(width) * 4u,
+        cs,
+        bitmap_info);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return {};
+
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    if (!img) return {};
+
+    CFMutableDataRef cf_data = CFDataCreateMutable(nullptr, 0);
+    if (!cf_data) {
+        CGImageRelease(img);
+        return {};
+    }
+
+    CGImageDestinationRef dest =
+        CGImageDestinationCreateWithData(cf_data, CFSTR("public.png"), 1, nullptr);
+    if (!dest) {
+        CGImageRelease(img);
+        CFRelease(cf_data);
+        return {};
+    }
+
+    CGImageDestinationAddImage(dest, img, nullptr);
+    const bool ok = CGImageDestinationFinalize(dest);
+    CFRelease(dest);
+    CGImageRelease(img);
+    if (!ok) {
+        CFRelease(cf_data);
+        return {};
+    }
+
+    std::vector<uint8_t> result(static_cast<size_t>(CFDataGetLength(cf_data)));
+    std::memcpy(result.data(), CFDataGetBytePtr(cf_data), result.size());
+    CFRelease(cf_data);
+    return result;
+}
+#endif
 
 }  // namespace
 
@@ -125,6 +194,102 @@ TEST_CASE("compare_screenshots handles empty input", "[view][compare]") {
     REQUIRE_FALSE(r2.valid);
 }
 
+TEST_CASE("analyze_screenshot_content rejects stable one-color captures",
+          "[view][compare][content-oracle]") {
+    auto png = render_flat_png(Color::rgba8(0, 0, 0, 255));
+    REQUIRE_FALSE(png.empty());
+
+    auto stats = analyze_screenshot_content(png);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.total_pixels == 80u * 40u);
+    REQUIRE(stats.unique_colors < 16);
+    REQUIRE(stats.luminance_stddev < 1.0);
+    REQUIRE(stats.non_background_coverage < 0.05);
+    REQUIRE(stats.opaque_coverage >= 0.95);
+    REQUIRE_FALSE(stats.passes_content_floor());
+}
+
+TEST_CASE("analyze_screenshot_content rejects invalid captures",
+          "[view][compare][content-oracle]") {
+    auto stats = analyze_screenshot_content({1, 2, 3});
+
+    REQUIRE_FALSE(stats.valid);
+    REQUIRE_FALSE(stats.error.empty());
+    REQUIRE_FALSE(stats.passes_content_floor());
+}
+
+TEST_CASE("analyze_screenshot_content rejects transparent captures",
+          "[view][compare][content-oracle]") {
+#ifdef __APPLE__
+    const std::vector<uint8_t> pixels(80u * 40u * 4u, 0);
+    auto png = encode_raw_rgba_png(pixels, 80, 40);
+    REQUIRE_FALSE(png.empty());
+
+    auto stats = analyze_screenshot_content(png);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.opaque_coverage < 0.95);
+    REQUIRE_FALSE(stats.passes_content_floor());
+#else
+    SKIP("transparent PNG fixture requires CoreGraphics encoder");
+#endif
+}
+
+TEST_CASE("analyze_screenshot_content reports capped unique-color tracking",
+          "[view][compare][content-oracle]") {
+#ifdef __APPLE__
+    constexpr uint32_t width = 257;
+    constexpr uint32_t height = 257;
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4u);
+    for (uint32_t i = 0; i < width * height; ++i) {
+        const size_t idx = static_cast<size_t>(i) * 4u;
+        pixels[idx] = static_cast<uint8_t>(i & 0xffu);
+        pixels[idx + 1] = static_cast<uint8_t>((i >> 8u) & 0xffu);
+        pixels[idx + 2] = static_cast<uint8_t>((i >> 16u) & 0xffu);
+        pixels[idx + 3] = 255;
+    }
+    auto png = encode_raw_rgba_png(pixels, width, height);
+    REQUIRE_FALSE(png.empty());
+
+    auto stats = analyze_screenshot_content(png);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.unique_colors == 65536u);
+    REQUIRE(stats.unique_colors_capped);
+#else
+    SKIP("high-entropy PNG fixture requires CoreGraphics encoder");
+#endif
+}
+
+TEST_CASE("analyze_screenshot_content accepts non-empty UI captures",
+          "[view][compare][content-oracle]") {
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.flex().padding = 8;
+    root.flex().gap = 6;
+
+    auto header = std::make_unique<Label>("Cloud Chorus");
+    header->flex().preferred_height = 24;
+    root.add_child(std::move(header));
+
+    auto panel = std::make_unique<View>();
+    panel->set_background_color(Color::rgba8(74, 126, 255, 255));
+    panel->flex().preferred_height = 34;
+    root.add_child(std::move(panel));
+
+    auto png = render_to_png(root, 160, 90, 1.0f);
+    REQUIRE_FALSE(png.empty());
+
+    auto stats = analyze_screenshot_content(png);
+    INFO("unique_colors=" << stats.unique_colors
+                          << " unique_colors_capped=" << stats.unique_colors_capped
+                          << " luminance_stddev=" << stats.luminance_stddev
+                          << " opaque_coverage=" << stats.opaque_coverage
+                          << " non_background_coverage=" << stats.non_background_coverage
+                          << " error=" << stats.error);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.passes_content_floor());
+}
+
 TEST_CASE("compare_screenshots reports rendered decode failure",
           "[view][compare][coverage][phase3]") {
     auto png = render_label_png("Reference", Theme::dark());
@@ -198,6 +363,23 @@ TEST_CASE("generate_diff_image produces output", "[view][compare]") {
     REQUIRE(diff[1] == 'P');
     REQUIRE(diff[2] == 'N');
     REQUIRE(diff[3] == 'G');
+}
+
+TEST_CASE("generate_diff_image rejects oversized combined canvas",
+          "[view][compare][content-oracle]") {
+#ifdef __APPLE__
+    const std::vector<uint8_t> wide_pixels(10000u * 4u, 255);
+    const std::vector<uint8_t> tall_pixels(10000u * 4u, 255);
+    auto wide = encode_raw_rgba_png(wide_pixels, 10000, 1);
+    auto tall = encode_raw_rgba_png(tall_pixels, 1, 10000);
+    REQUIRE_FALSE(wide.empty());
+    REQUIRE_FALSE(tall.empty());
+
+    auto diff = generate_diff_image(wide, tall);
+    REQUIRE(diff.empty());
+#else
+    SKIP("oversized combined-canvas PNG fixture requires CoreGraphics encoder");
+#endif
 }
 
 TEST_CASE("generate_diff_image handles invalid changed and size mismatch inputs",

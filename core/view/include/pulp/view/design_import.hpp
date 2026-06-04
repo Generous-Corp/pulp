@@ -31,6 +31,7 @@
 namespace pulp::view {
 
 class View;
+class Checkbox;
 class Knob;
 class Fader;
 class Meter;
@@ -43,6 +44,10 @@ class WaveformView;
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;
+    std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
+};
+
+struct NativeImportBindingOptions {
     std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
 };
 
@@ -111,7 +116,21 @@ struct NativeImportHostActionDescriptor {
 
 class NativeImportBindingContext {
 public:
-    virtual ~NativeImportBindingContext() = default;
+    /// Descriptor string_view fields passed to bind_* callbacks are borrowed
+    /// and valid only for the duration of the callback. Binding contexts must
+    /// copy any descriptor fields they retain.
+    virtual ~NativeImportBindingContext();
+
+    /// Claim a materialized view/route pair before installing callbacks.
+    /// Returns false if this context already claimed the same view/route,
+    /// allowing repeated binder calls on the same tree/context to fail closed.
+    /// Rebuilt view trees can be bound with the same context because claims are
+    /// keyed by a per-View lifetime id in addition to the View address. Call
+    /// reset_import_binding_claims() before deliberately rebinding the same
+    /// materialized tree.
+    bool claim_import_binding(View& view, std::string_view route_id);
+    void reset_import_binding_claims();
+
     virtual void bind_knob(Knob& knob, const NativeImportBindingDescriptor& descriptor) {
         (void)knob;
         (void)descriptor;
@@ -149,12 +168,53 @@ public:
         (void)button;
         (void)descriptor;
     }
+    virtual void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) {
+        (void)checkbox;
+        (void)descriptor;
+    }
 };
 
 std::unique_ptr<View> build_native_view_tree(
     const DesignIR& ir,
     const IRAssetManifest& manifest,
     const NativeMaterializeOptions& options = {});
+
+/// Apply explicit `pulp*` binding metadata from `ir` to an already materialized
+/// native view tree. This is opt-in: building the tree does not install
+/// callbacks or touch host/parameter state unless a caller invokes this helper
+/// with a binding context.
+void bind_native_view_tree(View& root,
+                           const DesignIR& ir,
+                           NativeImportBindingContext& ctx,
+                           const NativeImportBindingOptions& options = {});
+
+/// Resolve imported image `asset_ref` nodes against an asset manifest and stamp
+/// source-derived metadata onto the nodes: absolute `asset_path`, PNG natural
+/// dimensions, opaque-core bounds for render-bounds sprites, and `asset_bleed`
+/// when the PNG is much larger than the logical box. This is a preprocessing
+/// step for baked native/codegen paths; it does not modify the manifest.
+void enrich_imported_image_asset_metadata(DesignIR& ir,
+                                          const IRAssetManifest& manifest,
+                                          std::string_view base_directory = {});
+
+/// Captured-art knob promotion. The figma-plugin "Export to Pulp" envelope
+/// captures a skeuomorphic knob's body as an asset-backed image child (a disc
+/// PNG) plus, often, a small separate indicator/pointer layer. Without this
+/// pass the native materializer synthesizes a default Knob and discards the
+/// captured art (the knob looks wrong — a generic value-arc instead of the
+/// design's disc). For each name/metadata-detected knob node:
+///   - exactly one substantial captured layer (+ only small pointer layers the
+///     native rotating notch replaces): HOIST the body disc's `asset_ref` +
+///     `render_bounds` onto the knob node and drop the captured children. The
+///     materializer then skins the knob with the disc and overlays the native
+///     notch — the knob stays INTERACTIVE and looks like the design.
+///   - two or more SUBSTANTIAL captured layers (body + highlight + logo …):
+///     demote to a plain container (`audio_widget = none`) so every layer
+///     renders as an image — faithful but not turnable; no silent layer loss.
+///   - zero captured layers: left as a default synthesized knob.
+/// Run this BEFORE enrich_imported_image_asset_metadata so the hoisted
+/// `asset_ref` receives its absolute `asset_path` + opaque-core metadata.
+void hoist_captured_art_knobs(DesignIR& ir);
 
 /// Source-agnostic IR normalization for vector SHAPE PRIMITIVES. Walks the tree
 /// and, for each rect/rectangle/line/ellipse/circle/polygon/star node that

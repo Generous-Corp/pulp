@@ -4762,8 +4762,14 @@ target_link_libraries(pulp-test-design-import-native-common PRIVATE pulp::view C
 catch_discover_tests(pulp-test-design-import-native-common
     PROPERTIES LABELS "parser-import")
 
-add_executable(pulp-test-design-import-native-materializer test_design_import_native_materializer.cpp)
-target_link_libraries(pulp-test-design-import-native-materializer PRIVATE pulp::view Catch2::Catch2WithMain)
+add_executable(pulp-test-design-import-native-materializer
+    test_design_import_native_materializer.cpp
+    fixtures/design_import_generated_binding_runtime_fixture.cpp)
+target_link_libraries(pulp-test-design-import-native-materializer
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-native-materializer PRIVATE
+    PULP_TEST_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 
@@ -5750,6 +5756,10 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         "-framework Metal"
         "-framework QuartzCore"
     )
+    target_include_directories(pulp-test-mac-platform-harness PRIVATE
+        ${CMAKE_SOURCE_DIR}/external/miniz)
+    target_compile_definitions(pulp-test-mac-platform-harness PRIVATE
+        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     catch_discover_tests(pulp-test-mac-platform-harness)
 
     # pulp #2088 — pin the invariant -[PulpView liveFocusedView] depends on:
