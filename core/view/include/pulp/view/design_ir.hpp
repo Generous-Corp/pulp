@@ -449,7 +449,8 @@ DesignIR parse_design_ir_json(const std::string& json);
 IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
                                          const DesignIrAssetOptions& options = {});
 
-/// Rebuild and store ir.asset_manifest from the current tree.
+/// Refresh ir.asset_manifest from the current tree while preserving embedded
+/// manifest entries whose stable asset_id may already be referenced by nodes.
 void refresh_design_ir_asset_manifest(DesignIR& ir,
                                       const DesignIrAssetOptions& options = {});
 

@@ -3,6 +3,7 @@
 #include <miniz.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace pulp::platform;
@@ -462,6 +464,52 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(missing_mode.stderr_output.find("--emit cpp requires --mode baked") != std::string::npos);
     }
 
+    SECTION("cpp emit lowers a CSS background gradient to a runtime call") {
+        // A style.backgroundGradient (the light hero panels + illustration fills
+        // in real Figma imports) must lower to an apply_css_background_gradient
+        // runtime call plus the helper include. Dropping it was the dominant
+        // ELYSIUM dark/light parity gap. This lives in the always-built tool
+        // test so the codegen path is covered even when the planning-gated
+        // pulp-test-design-import-cpp-codegen target is skipped.
+        const auto grad_input = tmp.path / "gradient-envelope.json";
+        const auto cpp_output = tmp.path / "generated" / "gradient_ui.cpp";
+        write_text(grad_input, R"json({
+            "version": 1,
+            "source": "stitch",
+            "capture_method": "gradient-emit-test",
+            "source_adapter": "gradient-emit-test",
+            "source_version": "1",
+            "root": {
+                "type": "frame",
+                "name": "Hero",
+                "stable_anchor_id": "hero",
+                "style": {
+                    "width": 320, "height": 200,
+                    "backgroundColor": "#1c1d1d",
+                    "backgroundGradient": "linear-gradient(to bottom, #e4edf6, #b7c8db)"
+                }
+            },
+            "tokens": { "colors": {}, "dimensions": {}, "strings": {} },
+            "assetManifest": { "version": 1, "assets": [] }
+        })json");
+
+        auto cpp = run_import_design({"--from", "stitch",
+                                      "--file", grad_input.string(),
+                                      "--mode", "baked",
+                                      "--emit", "cpp",
+                                      "--output", cpp_output.string()});
+        REQUIRE_FALSE(cpp.timed_out);
+        REQUIRE(cpp.exit_code == 0);
+        REQUIRE(fs::exists(cpp_output));
+        const auto source = read_text(cpp_output);
+        REQUIRE(source.find("pulp::view::apply_css_background_gradient(*")
+                != std::string::npos);
+        REQUIRE(source.find("linear-gradient(to bottom, #e4edf6, #b7c8db)")
+                != std::string::npos);
+        REQUIRE(source.find("#include <pulp/view/css_gradient.hpp>")
+                != std::string::npos);
+    }
+
     SECTION("cpp emit accepts serialized DesignIR envelopes with typed widget metadata") {
         const auto ir_input = tmp.path / "typed-envelope.json";
         const auto cpp_output = tmp.path / "generated" / "typed_ui.cpp";
@@ -537,6 +585,37 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(binding_manifest.find("\"param_key\": \"osc_freq\"") != std::string::npos);
         REQUIRE(binding_manifest.find("\"style_tokens\": \"C.orange\"") != std::string::npos);
         REQUIRE(binding_manifest.find("\"default_value_source\": \"phase_c_initial_value_fallback\"") != std::string::npos);
+    }
+
+    SECTION("baked emit accepts source-less canonical DesignIR envelopes") {
+        const auto ir_input = tmp.path / "source-less-envelope.json";
+        const auto ir_output = tmp.path / "generated" / "source_less.ir.json";
+        write_text(ir_input, R"json({
+            "version": 1,
+            "root": {
+                "type": "frame",
+                "name": "Source Less Root",
+                "style": { "width": 80, "height": 90 },
+                "children": [
+                    { "type": "text", "name": "Label", "content": "Hello" }
+                ]
+            },
+            "assetManifest": { "version": 1, "assets": [] }
+        })json");
+
+        auto ir_json = run_import_design({"--from", "stitch",
+                                          "--file", ir_input.string(),
+                                          "--mode", "baked",
+                                          "--emit", "ir-json",
+                                          "--output", ir_output.string()});
+        REQUIRE_FALSE(ir_json.timed_out);
+        INFO("stderr: " << ir_json.stderr_output);
+        INFO("stdout: " << ir_json.stdout_output);
+        REQUIRE(ir_json.exit_code == 0);
+        REQUIRE(fs::exists(ir_output));
+        const auto emitted = read_text(ir_output);
+        REQUIRE(emitted.find("Source Less Root") != std::string::npos);
+        REQUIRE(emitted.find("\"assetManifest\"") != std::string::npos);
     }
 
     SECTION("mode and snapshot vocabulary reject unsupported values") {
@@ -988,10 +1067,13 @@ TEST_CASE("pulp-import-design debug report names the default bridge-native mode"
 
 namespace {
 
-bool make_pulp_zip(const fs::path& zip_path, const std::string& scene_json) {
+bool make_pulp_zip(
+    const fs::path& zip_path,
+    const std::string& scene_json,
+    const std::vector<std::pair<std::string, std::vector<std::uint8_t>>>& extra_entries = {}) {
     mz_zip_archive zip{};
     if (!mz_zip_writer_init_file(&zip, zip_path.string().c_str(), 0)) return false;
-    const auto ok = mz_zip_writer_add_mem(
+    bool ok = mz_zip_writer_add_mem(
         &zip,
         "scene.pulp.json",
         scene_json.data(),
@@ -1001,12 +1083,96 @@ bool make_pulp_zip(const fs::path& zip_path, const std::string& scene_json) {
         mz_zip_writer_end(&zip);
         return false;
     }
+    for (const auto& [name, bytes] : extra_entries) {
+        ok = mz_zip_writer_add_mem(
+            &zip,
+            name.c_str(),
+            bytes.data(),
+            bytes.size(),
+            MZ_DEFAULT_COMPRESSION);
+        if (!ok) {
+            mz_zip_writer_end(&zip);
+            return false;
+        }
+    }
     if (!mz_zip_writer_finalize_archive(&zip)) {
         mz_zip_writer_end(&zip);
         return false;
     }
     mz_zip_writer_end(&zip);
     return true;
+}
+
+std::vector<std::uint8_t> tiny_png_bytes() {
+    return {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+        0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0x9c, 0x63, 0xf8, 0x0f, 0x04, 0x00,
+        0x09, 0xfb, 0x03, 0xfd, 0xa7, 0xe9, 0x81, 0x86,
+        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+        0xae, 0x42, 0x60, 0x82,
+    };
+}
+
+void append_be32(std::vector<std::uint8_t>& out, std::uint32_t value) {
+    out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xff));
+    out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xff));
+    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xff));
+    out.push_back(static_cast<std::uint8_t>(value & 0xff));
+}
+
+void append_png_chunk(std::vector<std::uint8_t>& out,
+                      const char type[4],
+                      const std::vector<std::uint8_t>& data) {
+    append_be32(out, static_cast<std::uint32_t>(data.size()));
+    const size_t crc_start = out.size();
+    out.insert(out.end(), type, type + 4);
+    out.insert(out.end(), data.begin(), data.end());
+    const auto crc = mz_crc32(MZ_CRC32_INIT,
+                              out.data() + crc_start,
+                              out.size() - crc_start);
+    append_be32(out, static_cast<std::uint32_t>(crc));
+}
+
+std::vector<std::uint8_t> transparent_bleed_png_bytes() {
+    constexpr std::uint32_t width = 6;
+    constexpr std::uint32_t height = 4;
+    std::vector<std::uint8_t> raw;
+    raw.reserve(height * (1 + width * 4));
+    for (std::uint32_t y = 0; y < height; ++y) {
+        raw.push_back(0); // PNG filter type 0.
+        for (std::uint32_t x = 0; x < width; ++x) {
+            const bool opaque_core = x >= 2 && x <= 4 && y >= 1 && y <= 2;
+            raw.push_back(opaque_core ? 0x20 : 0x00);
+            raw.push_back(opaque_core ? 0x80 : 0x00);
+            raw.push_back(opaque_core ? 0xff : 0x00);
+            raw.push_back(opaque_core ? 0xff : 0x00);
+        }
+    }
+
+    mz_ulong compressed_size = compressBound(static_cast<mz_ulong>(raw.size()));
+    std::vector<std::uint8_t> compressed(compressed_size);
+    REQUIRE(mz_compress(compressed.data(), &compressed_size, raw.data(), raw.size()) == MZ_OK);
+    compressed.resize(compressed_size);
+
+    std::vector<std::uint8_t> png = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    };
+    std::vector<std::uint8_t> ihdr;
+    append_be32(ihdr, width);
+    append_be32(ihdr, height);
+    ihdr.push_back(8); // bit depth
+    ihdr.push_back(6); // RGBA
+    ihdr.push_back(0); // compression
+    ihdr.push_back(0); // filter
+    ihdr.push_back(0); // interlace
+    append_png_chunk(png, "IHDR", ihdr);
+    append_png_chunk(png, "IDAT", compressed);
+    append_png_chunk(png, "IEND", {});
+    return png;
 }
 
 }  // namespace
@@ -1093,6 +1259,365 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     REQUIRE(js.find("880") != std::string::npos);
 }
 
+TEST_CASE("pulp-import-design persists .pulp.zip assets beside generated output",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-assets");
+    const auto zip = tmp.path / "with-asset.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": {
+            "adapter": "figma-plugin",
+            "version": "0.1.0",
+            "source_uri": "test://issue-47-asset-fixture"
+        },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": [
+                {
+                    "type": "image",
+                    "name": "Hero",
+                    "figma_node_id": "1:2",
+                    "asset_ref": "hero",
+                    "style": { "width": 32, "height": 32 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/tiny.png", tiny_png_bytes()}}));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(output));
+    REQUIRE(fs::exists(sidecar / "scene.pulp.json"));
+    REQUIRE(fs::exists(sidecar / "assets" / "tiny.png"));
+    REQUIRE(fs::exists(sidecar / ".pulp-import-design-sidecar-v1"));
+    REQUIRE(r.stdout_output.find("assets staged for generated output") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Persisted ZIP assets") != std::string::npos);
+
+    const auto js = read_text(output);
+    REQUIRE(js.find("setImageSource('Hero") != std::string::npos);
+    REQUIRE(js.find("ui.js.assets") != std::string::npos);
+    REQUIRE(js.find("assets/tiny.png") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design replaces only marked .pulp.zip asset sidecars on success",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-assets-replace");
+    const auto zip = tmp.path / "with-asset.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+    write_text(sidecar / ".pulp-import-design-sidecar-v1", "managed-by=pulp-import-design\n");
+    write_text(sidecar / "sentinel.txt", "old marked sidecar");
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": [
+                {
+                    "type": "image",
+                    "name": "Hero",
+                    "figma_node_id": "1:2",
+                    "asset_ref": "hero",
+                    "style": { "width": 32, "height": 32 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/tiny.png", tiny_png_bytes()}}));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(output));
+    REQUIRE(fs::exists(sidecar / ".pulp-import-design-sidecar-v1"));
+    REQUIRE(fs::exists(sidecar / "scene.pulp.json"));
+    REQUIRE(fs::exists(sidecar / "assets" / "tiny.png"));
+    REQUIRE_FALSE(fs::exists(sidecar / "sentinel.txt"));
+
+    for (const auto& entry : fs::directory_iterator(tmp.path)) {
+        REQUIRE(entry.path().filename().string().find(".backup") == std::string::npos);
+    }
+}
+
+TEST_CASE("pulp-import-design dry-run .pulp.zip extraction stays temporary",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-dry-run");
+    const auto zip = tmp.path / "with-asset.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": []
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/tiny.png", tiny_png_bytes()}}));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string(),
+                                "--dry-run"});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Unpacked ") != std::string::npos);
+    REQUIRE(r.stdout_output.find("assets staged for generated output") == std::string::npos);
+    REQUIRE(r.stdout_output.find("createCol('root'") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(output));
+    REQUIRE_FALSE(fs::exists(sidecar));
+}
+
+TEST_CASE("pulp-import-design baked ir-json .pulp.zip uses the figma-plugin parser",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets][baked]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-baked-ir");
+    const auto zip = tmp.path / "with-asset.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.ir.json";
+    const fs::path sidecar(output.string() + ".assets");
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": [
+                {
+                    "type": "frame",
+                    "name": "Cutoff Knob",
+                    "figma_node_id": "1:2",
+                    "audio_widget": "knob",
+                    "asset_ref": "hero",
+                    "label": "Cutoff",
+                    "min": 20,
+                    "max": 20000,
+                    "default": 880,
+                    "attributes": { "binding": "filter.cutoff_hz" },
+                    "style": { "width": 56, "height": 56 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/tiny.png", tiny_png_bytes()}}));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string(),
+                                "--mode", "baked",
+                                "--emit", "ir-json"});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(output));
+    REQUIRE(fs::exists(sidecar / ".pulp-import-design-sidecar-v1"));
+    REQUIRE(fs::exists(sidecar / "assets" / "tiny.png"));
+
+    const auto ir = read_text(output);
+    REQUIRE(ir.find("\"source\":\"figma-plugin\"") != std::string::npos);
+    REQUIRE(ir.find("Cutoff Knob") != std::string::npos);
+    REQUIRE(ir.find("\"assetManifest\"") != std::string::npos);
+    REQUIRE(ir.find("assets/tiny.png") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design keeps .pulp.zip assets beside resolved C++ source output",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets][baked]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-cpp-sidecar");
+    const auto zip = tmp.path / "valid.pulp.zip";
+    const auto output_root = tmp.path / "cpp-out";
+    const auto source = output_root / "imported_ui.cpp";
+    const auto header = output_root / "imported_ui.hpp";
+    const auto binding_manifest = output_root / "imported_ui.bindings.json";
+    const fs::path sidecar(source.string() + ".assets");
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": [
+                {
+                    "type": "image",
+                    "name": "Hero",
+                    "figma_node_id": "1:2",
+                    "asset_ref": "hero",
+                    "style": { "width": 32, "height": 32 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/tiny.png", tiny_png_bytes()}}));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output_root.string(),
+                                "--mode", "baked",
+                                "--emit", "cpp"});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(source));
+    REQUIRE(fs::exists(header));
+    REQUIRE(fs::exists(binding_manifest));
+    REQUIRE(fs::exists(sidecar / ".pulp-import-design-sidecar-v1"));
+    REQUIRE(fs::exists(sidecar / "assets" / "tiny.png"));
+    REQUIRE_FALSE(fs::exists(fs::path(output_root.string() + ".assets")));
+}
+
+TEST_CASE("pulp-import-design enriches .pulp.zip image metadata before baked C++ emit",
+          "[cli][import-design][tool][figma-plugin][assets][baked][fidelity]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-cpp-image-metadata");
+    const auto zip = tmp.path / "metadata.pulp.zip";
+    const auto output_root = tmp.path / "cpp-out";
+    const auto source = output_root / "imported_ui.cpp";
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": [
+                {
+                    "type": "image",
+                    "name": "Bleed Sprite",
+                    "figma_node_id": "1:2",
+                    "asset_ref": "hero",
+                    "style": {
+                        "position": "absolute",
+                        "left": 5,
+                        "top": 7,
+                        "width": 10,
+                        "height": 20,
+                        "render_bounds": { "w": 20, "h": 20, "dx": -5, "dy": 0 }
+                    },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+
+    REQUIRE(make_pulp_zip(zip, envelope, {{"assets/tiny.png", transparent_bleed_png_bytes()}}));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output_root.string(),
+                                "--mode", "baked",
+                                "--emit", "cpp"});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(source));
+
+    const auto cpp = read_text(source);
+    REQUIRE(cpp.find("->set_image_source(") != std::string::npos);
+    REQUIRE(cpp.find("_image_flex.preferred_width = 20.0f;") != std::string::npos);
+    REQUIRE(cpp.find("_image_flex.preferred_height = 13.33333f;") != std::string::npos);
+    REQUIRE(cpp.find("_image_flex.dim_height = {13.33333f, pulp::view::DimensionUnit::px};")
+            != std::string::npos);
+    REQUIRE(cpp.find("->set_left(-1.666667f);") != std::string::npos);
+    REQUIRE(cpp.find("->set_top(10.33333f);")
+            != std::string::npos);
+}
+
 TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
           "[cli][import-design][tool][figma-plugin][issue-47]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
@@ -1120,6 +1645,196 @@ TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
     REQUIRE(r.exit_code != 0);
     REQUIRE(r.stderr_output.find("scene.pulp.json") != std::string::npos);
     REQUIRE_FALSE(fs::exists(output));
+}
+
+TEST_CASE("pulp-import-design keeps existing .pulp.zip asset sidecar on extraction failure",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-asset-fail");
+    const auto zip = tmp.path / "empty.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+    const auto sentinel = sidecar / "sentinel.txt";
+    write_text(sentinel, "old sidecar");
+
+    {
+        mz_zip_archive z{};
+        REQUIRE(mz_zip_writer_init_file(&z, zip.string().c_str(), 0));
+        REQUIRE(mz_zip_writer_add_mem(&z, "note.txt", "hi", 2, MZ_DEFAULT_COMPRESSION));
+        REQUIRE(mz_zip_writer_finalize_archive(&z));
+        mz_zip_writer_end(&z);
+    }
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("scene.pulp.json") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(output));
+    REQUIRE(fs::exists(sentinel));
+    REQUIRE(read_text(sentinel) == "old sidecar");
+}
+
+TEST_CASE("pulp-import-design preserves existing output and sidecar when staged .pulp.zip parse fails",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-parse-fail");
+    const auto zip = tmp.path / "malformed.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+    const auto sentinel = sidecar / "sentinel.txt";
+    write_text(output, "old ui");
+    write_text(sentinel, "old sidecar");
+
+    REQUIRE(make_pulp_zip(zip, "{ not valid json"));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(read_text(output) == "old ui");
+    REQUIRE(fs::exists(sentinel));
+    REQUIRE(read_text(sentinel) == "old sidecar");
+}
+
+TEST_CASE("pulp-import-design refuses to replace an unmarked .pulp.zip asset sidecar",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-unmarked-sidecar");
+    const auto zip = tmp.path / "with-asset.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+    const auto sentinel = sidecar / "sentinel.txt";
+    write_text(sentinel, "user sidecar");
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": []
+        }
+    })JSON";
+    REQUIRE(make_pulp_zip(zip, envelope));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("unmarked asset sidecar") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(output));
+    REQUIRE(read_text(sentinel) == "user sidecar");
+}
+
+TEST_CASE("pulp-import-design restores marked .pulp.zip sidecar when output write fails",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-write-fail");
+    const auto zip = tmp.path / "valid.pulp.zip";
+    const auto output = tmp.path / "nested" / "ui.js";
+    const fs::path sidecar(output.string() + ".assets");
+    const auto sentinel = sidecar / "sentinel.txt";
+    write_text(sidecar / ".pulp-import-design-sidecar-v1", "managed-by=pulp-import-design\n");
+    write_text(sentinel, "old marked sidecar");
+    fs::create_directories(output);
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": []
+        }
+    })JSON";
+    REQUIRE(make_pulp_zip(zip, envelope));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string()});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("cannot write file over directory") != std::string::npos);
+    REQUIRE(fs::is_directory(output));
+    REQUIRE(fs::exists(sidecar / ".pulp-import-design-sidecar-v1"));
+    REQUIRE(read_text(sentinel) == "old marked sidecar");
+}
+
+TEST_CASE("pulp-import-design rolls back .pulp.zip sidecar and C++ files as one transaction",
+          "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-zip-cpp-write-fail");
+    const auto zip = tmp.path / "valid.pulp.zip";
+    const auto output = tmp.path / "nested" / "imported_ui.hpp";
+    const auto source = tmp.path / "nested" / "imported_ui.cpp";
+    const auto header = output;
+    const auto binding_manifest = tmp.path / "nested" / "imported_ui.bindings.json";
+    const fs::path sidecar(source.string() + ".assets");
+    const auto sentinel = sidecar / "sentinel.txt";
+    write_text(header, "old header");
+    write_text(binding_manifest, "old binding manifest");
+    write_text(sidecar / ".pulp-import-design-sidecar-v1", "managed-by=pulp-import-design\n");
+    write_text(sentinel, "old marked sidecar");
+    fs::create_directories(source);
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": []
+        }
+    })JSON";
+    REQUIRE(make_pulp_zip(zip, envelope));
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", zip.string(),
+                                "--output", output.string(),
+                                "--mode", "baked",
+                                "--emit", "cpp"});
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    INFO("stdout: " << r.stdout_output);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("cannot write file over directory") != std::string::npos);
+    REQUIRE(fs::is_directory(source));
+    REQUIRE(read_text(header) == "old header");
+    REQUIRE(read_text(binding_manifest) == "old binding manifest");
+    REQUIRE(fs::exists(sidecar / ".pulp-import-design-sidecar-v1"));
+    REQUIRE(read_text(sentinel) == "old marked sidecar");
 }
 
 // ──────────────────────────────────────────────────────────────────────────

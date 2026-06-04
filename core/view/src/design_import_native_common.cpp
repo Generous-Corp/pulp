@@ -4,6 +4,7 @@
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <exception>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -71,6 +73,298 @@ ImportDiagnostic diagnostic(ImportDiagnosticSeverity severity,
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
         out.anchor_id = *node.stable_anchor_id;
     return out;
+}
+
+bool has_text(const std::optional<std::string>& value) {
+    return value && !value->empty();
+}
+
+std::string_view text_or_empty(const std::optional<std::string>& value) {
+    return value ? std::string_view(*value) : std::string_view{};
+}
+
+struct AnchorLookupResult {
+    View* first = nullptr;
+    std::size_t matches = 0;
+};
+
+struct BindingClaim {
+    const View* view = nullptr;
+    std::uint64_t view_instance_id = 0;
+    std::weak_ptr<const std::uint64_t> view_lifetime;
+    std::string route_id;
+};
+
+std::mutex& binding_claims_mutex() {
+    static auto* mutex = new std::mutex();
+    return *mutex;
+}
+
+std::unordered_map<const NativeImportBindingContext*, std::vector<BindingClaim>>& binding_claims_by_context() {
+    // Process-lifetime storage keeps NativeImportBindingContext destruction
+    // safe for static/global contexts during process shutdown.
+    static auto* claims = new std::unordered_map<const NativeImportBindingContext*, std::vector<BindingClaim>>();
+    return *claims;
+}
+
+void collect_imported_views_by_anchor(View& root,
+                                      std::string_view anchor,
+                                      AnchorLookupResult& result) {
+    if (root.anchor_id() == anchor) {
+        if (result.first == nullptr)
+            result.first = &root;
+        ++result.matches;
+    }
+    for (std::size_t i = 0; i < root.child_count(); ++i) {
+        collect_imported_views_by_anchor(*root.child_at(i), anchor, result);
+    }
+}
+
+AnchorLookupResult find_imported_views_by_anchor(View& root, std::string_view anchor) {
+    AnchorLookupResult result;
+    collect_imported_views_by_anchor(root, anchor, result);
+    return result;
+}
+
+NativeImportBindingDescriptor scalar_descriptor(const NativeBindingMetadata& md) {
+    return NativeImportBindingDescriptor{
+        .route_id = text_or_empty(md.route_id),
+        .param_key = text_or_empty(md.param_key),
+        .binding_module = text_or_empty(md.binding_module),
+        .binding_param = text_or_empty(md.binding_param),
+        .event_contract = text_or_empty(md.event_contract),
+        .gesture_contract = text_or_empty(md.gesture_contract)};
+}
+
+bool has_route_required_binding_payload(const NativeBindingMetadata& md) {
+    return has_text(md.param_key) ||
+           has_text(md.x_param_key) ||
+           has_text(md.y_param_key) ||
+           has_text(md.meter_source) ||
+           has_text(md.meter_channel) ||
+           has_text(md.meter_value_key) ||
+           has_text(md.waveform_shape) ||
+           has_text(md.value_key) ||
+           has_text(md.host_action);
+}
+
+bool has_binding_payload(const NativeBindingMetadata& md) {
+    return has_route_required_binding_payload(md) || has_text(md.initial_value);
+}
+
+void append_binding_diagnostic(std::vector<ImportDiagnostic>* diagnostics,
+                               const IRNode& node,
+                               std::string_view path,
+                               std::string code,
+                               std::string message,
+                               std::optional<std::string> property = std::nullopt) {
+    if (diagnostics == nullptr) return;
+    diagnostics->push_back(diagnostic(
+        ImportDiagnosticSeverity::warning,
+        ImportDiagnosticKind::unsupported_property,
+        std::move(code),
+        std::string(path),
+        std::move(message),
+        node,
+        std::move(property)));
+}
+
+bool bind_imported_view(View& view,
+                        const NativeBindingMetadata& md,
+                        NativeImportBindingContext& ctx) {
+    if (auto* knob = dynamic_cast<Knob*>(&view); knob && has_text(md.param_key)) {
+        ctx.bind_knob(*knob, scalar_descriptor(md));
+        return true;
+    }
+    if (auto* fader = dynamic_cast<Fader*>(&view); fader && has_text(md.param_key)) {
+        ctx.bind_fader(*fader, scalar_descriptor(md));
+        return true;
+    }
+    if (auto* checkbox = dynamic_cast<Checkbox*>(&view); checkbox && has_text(md.param_key)) {
+        ctx.bind_checkbox(*checkbox, scalar_descriptor(md));
+        return true;
+    }
+    if (auto* pad = dynamic_cast<XYPad*>(&view);
+        pad && has_text(md.x_param_key) && has_text(md.y_param_key)) {
+        ctx.bind_xy_pad(*pad,
+                        NativeImportXYPadBindingDescriptor{
+                            .route_id = text_or_empty(md.route_id),
+                            .x_param_key = text_or_empty(md.x_param_key),
+                            .y_param_key = text_or_empty(md.y_param_key),
+                            .x_binding_module = text_or_empty(md.x_binding_module),
+                            .x_binding_param = text_or_empty(md.x_binding_param),
+                            .y_binding_module = text_or_empty(md.y_binding_module),
+                            .y_binding_param = text_or_empty(md.y_binding_param),
+                            .event_contract = text_or_empty(md.event_contract),
+                            .gesture_contract = text_or_empty(md.gesture_contract)});
+        return true;
+    }
+    if (auto* meter = dynamic_cast<Meter*>(&view);
+        meter && has_text(md.meter_source) && has_text(md.meter_channel)) {
+        ctx.bind_meter(*meter,
+                       NativeImportMeterBindingDescriptor{
+                           .route_id = text_or_empty(md.route_id),
+                           .meter_source = text_or_empty(md.meter_source),
+                           .channel = text_or_empty(md.meter_channel),
+                           .value_key = text_or_empty(md.meter_value_key),
+                           .event_contract = text_or_empty(md.event_contract)});
+        return true;
+    }
+    if (auto* waveform = dynamic_cast<WaveformView*>(&view);
+        waveform && has_text(md.param_key) && has_text(md.waveform_shape)) {
+        ctx.bind_waveform_display(*waveform,
+                                  NativeImportWaveformBindingDescriptor{
+                                      .route_id = text_or_empty(md.route_id),
+                                      .param_key = text_or_empty(md.param_key),
+                                      .shape = text_or_empty(md.waveform_shape),
+                                      .event_contract = text_or_empty(md.event_contract)});
+        return true;
+    }
+    if (auto* editor = dynamic_cast<TextEditor*>(&view);
+        editor && (has_text(md.value_key) || has_text(md.initial_value))) {
+        ctx.bind_text_editor(*editor,
+                             NativeImportTextBindingDescriptor{
+                                 .route_id = text_or_empty(md.route_id),
+                                 .value_key = text_or_empty(md.value_key),
+                                 .initial_value = text_or_empty(md.initial_value),
+                                 .placeholder = text_or_empty(md.placeholder),
+                                 .event_contract = text_or_empty(md.event_contract),
+                                 .focus_contract = text_or_empty(md.focus_contract)});
+        return true;
+    }
+    if (auto* text_button = dynamic_cast<TextButton*>(&view);
+        text_button && has_text(md.host_action)) {
+        ctx.bind_host_action(*text_button,
+                             NativeImportHostActionDescriptor{
+                                 .route_id = text_or_empty(md.route_id),
+                                 .action = text_or_empty(md.host_action),
+                                 .label = text_or_empty(md.host_action_label),
+                                 .payload_contract = text_or_empty(md.payload_contract),
+                                 .event_contract = text_or_empty(md.event_contract),
+                                 .gesture_contract = text_or_empty(md.gesture_contract)});
+        return true;
+    }
+    if (auto* toggle = dynamic_cast<ToggleButton*>(&view);
+        toggle && has_text(md.param_key)) {
+        if (has_text(md.choice_value)) {
+            ctx.bind_choice_button(*toggle,
+                                   NativeImportChoiceBindingDescriptor{
+                                       .route_id = text_or_empty(md.route_id),
+                                       .param_key = text_or_empty(md.param_key),
+                                       .choice_value = text_or_empty(md.choice_value),
+                                       .choice_label = text_or_empty(md.choice_label),
+                                       .event_contract = text_or_empty(md.event_contract),
+                                       .gesture_contract = text_or_empty(md.gesture_contract)});
+        } else {
+            ctx.bind_toggle_button(*toggle, scalar_descriptor(md));
+        }
+        return true;
+    }
+    return false;
+}
+
+bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
+    if (dynamic_cast<Knob*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<Checkbox*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
+        return true;
+    if (dynamic_cast<Meter*>(&view) && has_text(md.meter_source) && has_text(md.meter_channel))
+        return true;
+    if (dynamic_cast<WaveformView*>(&view) && has_text(md.param_key) && has_text(md.waveform_shape))
+        return true;
+    if (dynamic_cast<TextEditor*>(&view) && (has_text(md.value_key) || has_text(md.initial_value)))
+        return true;
+    if (dynamic_cast<TextButton*>(&view) && has_text(md.host_action))
+        return true;
+    if (dynamic_cast<ToggleButton*>(&view) && has_text(md.param_key))
+        return true;
+    return false;
+}
+
+void bind_imported_node_by_anchor(View& root,
+                                  const IRNode& node,
+                                  NativeImportBindingContext& ctx,
+                                  std::string_view path,
+                                  std::vector<ImportDiagnostic>* diagnostics) {
+    const auto md = NativeBindingMetadata::parse(node);
+    if (has_binding_payload(md)) {
+        if (!has_text(md.route_id)) {
+            if (has_route_required_binding_payload(md)) {
+                append_binding_diagnostic(
+                    diagnostics,
+                    node,
+                    path,
+                    "native-binding-missing-route",
+                    "binding metadata has no pulpRouteId, so no binding callback was installed",
+                    "pulpRouteId");
+            }
+        } else if (!node.stable_anchor_id || node.stable_anchor_id->empty()) {
+            append_binding_diagnostic(
+                diagnostics,
+                node,
+                path,
+                "native-binding-missing-anchor",
+                "binding metadata cannot bind without a stable anchor",
+                "stable_anchor_id");
+        } else {
+            const auto matches = find_imported_views_by_anchor(root, *node.stable_anchor_id);
+            if (matches.matches > 1) {
+                append_binding_diagnostic(
+                    diagnostics,
+                    node,
+                    path,
+                    "native-binding-duplicate-anchor",
+                    "binding anchor '" + *node.stable_anchor_id +
+                        "' matched multiple materialized native views, so no binding callback was installed",
+                    "stable_anchor_id");
+            } else if (matches.first != nullptr) {
+                if (!can_bind_imported_view(*matches.first, md)) {
+                    append_binding_diagnostic(
+                        diagnostics,
+                        node,
+                        path,
+                        "native-binding-not-applied",
+                        "binding metadata did not match the materialized widget type or required fields");
+                } else if (!ctx.claim_import_binding(*matches.first, *md.route_id)) {
+                    // claim_import_binding() happens before callback installation;
+                    // keep can_bind_imported_view() in sync with bind_imported_view().
+                    append_binding_diagnostic(
+                        diagnostics,
+                        node,
+                        path,
+                        "native-binding-already-applied",
+                        "binding metadata for route '" + *md.route_id +
+                            "' was already applied to this materialized native view",
+                        "pulpRouteId");
+                } else if (!bind_imported_view(*matches.first, md, ctx)) {
+                    append_binding_diagnostic(
+                        diagnostics,
+                        node,
+                        path,
+                        "native-binding-not-applied",
+                        "binding metadata did not match the materialized widget type or required fields");
+                }
+            } else {
+                append_binding_diagnostic(
+                    diagnostics,
+                    node,
+                    path,
+                    "native-binding-anchor-not-found",
+                    "no materialized native view found for binding anchor '" +
+                        *node.stable_anchor_id + "'");
+            }
+        }
+    }
+
+    for (std::size_t i = 0; i < node.children.size(); ++i) {
+        std::ostringstream child_path;
+        child_path << path << "/children[" << i << "]";
+        bind_imported_node_by_anchor(root, node.children[i], ctx, child_path.str(), diagnostics);
+    }
 }
 
 std::optional<NativeWidgetKind> kind_from_audio(AudioWidgetType audio_widget) {
@@ -317,6 +611,85 @@ bool attr_bool(const IRNode& node, std::string_view key, bool fallback = false) 
     return fallback;
 }
 
+struct ImportedImageSizing {
+    float width = 0.0f;
+    float height = 0.0f;
+    std::optional<float> left;
+    std::optional<float> top;
+};
+
+std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node) {
+    const float box_w = node.style.width.value_or(0.0f);
+    const float box_h = node.style.height.value_or(0.0f);
+    if (box_w <= 0.0f || box_h <= 0.0f) return std::nullopt;
+
+    const float png_w = attr_float(node, "png_natural_w").value_or(0.0f);
+    const float png_h = attr_float(node, "png_natural_h").value_or(0.0f);
+    const float core_w = attr_float(node, "art_core_w").value_or(0.0f);
+    const float core_h = attr_float(node, "art_core_h").value_or(0.0f);
+    const float core_x = attr_float(node, "art_core_x").value_or(0.0f);
+    const float core_y = attr_float(node, "art_core_y").value_or(0.0f);
+
+    const bool have_core =
+        png_w > 0.0f && png_h > 0.0f &&
+        core_w > 0.0f && core_h > 0.0f;
+    const bool is_bleed_sprite =
+        node.style.render_bounds.has_value() ||
+        (node.attributes.count("asset_bleed") && node.attributes.at("asset_bleed") == "1");
+
+    ImportedImageSizing out;
+    const bool absolute =
+        node.style.position && lower_copy(*node.style.position) == "absolute";
+
+    if (have_core) {
+        const float scale = std::min(box_w / core_w, box_h / core_h);
+        out.width = png_w * scale;
+        out.height = png_h * scale;
+
+        const float core_box_w = core_w * scale;
+        const float core_box_h = core_h * scale;
+        const float pad_x = (box_w - core_box_w) * 0.5f;
+        const float pad_y = (box_h - core_box_h) * 0.5f;
+        if (absolute && node.style.left)
+            out.left = *node.style.left - core_x * scale + pad_x;
+        if (absolute && node.style.top)
+            out.top = *node.style.top - core_y * scale + pad_y;
+        return out;
+    }
+
+    if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f) {
+        const float png_aspect = png_w / png_h;
+        if (box_w / box_h > png_aspect) {
+            out.height = box_h;
+            out.width = box_h * png_aspect;
+        } else {
+            out.width = box_w;
+            out.height = box_w / png_aspect;
+        }
+
+        if (absolute && node.style.left)
+            out.left = *node.style.left + (box_w - out.width) * 0.5f;
+        if (absolute && node.style.top)
+            out.top = *node.style.top + (box_h - out.height) * 0.5f;
+        return out;
+    }
+
+    return std::nullopt;
+}
+
+void apply_imported_image_sizing(View& view, const IRNode& node) {
+    const auto sizing = imported_image_sizing_override(node);
+    if (!sizing) return;
+
+    auto& flex = view.flex();
+    flex.preferred_width = sizing->width;
+    flex.preferred_height = sizing->height;
+    flex.dim_width = {sizing->width, DimensionUnit::px};
+    flex.dim_height = {sizing->height, DimensionUnit::px};
+    if (sizing->left) view.set_left(*sizing->left);
+    if (sizing->top) view.set_top(*sizing->top);
+}
+
 int hex_digit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -445,7 +818,7 @@ void append_resolved_diagnostics(const ResolvedNativeNode& node,
 }
 
 std::optional<std::string> first_asset_id(const IRNode& node) {
-    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId"}) {
+    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId", "asset_ref"}) {
         auto value = attr(node, key);
         if (value && !value->empty()) return value;
     }
@@ -510,8 +883,96 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
     view.set_id(resolved.id);
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
         view.set_anchor_id(*node.stable_anchor_id);
+    if (auto hit_testable = attr(node, "pulpHitTestable");
+        hit_testable && !attr_bool(node, "pulpHitTestable")) {
+        view.set_hit_testable(false);
+    }
     if (auto label = resolved.text; label && !label->empty())
         view.set_access_label(*label);
+}
+
+bool is_interactive_native_kind(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::xy_pad:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::xy_pad:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool subtree_contains_interactive_hit_target(const IRNode& node,
+                                             const ResolvedNativeNode& resolved) {
+    if (auto hit_testable = attr(node, "pulpHitTestable"))
+        return attr_bool(node, "pulpHitTestable");
+    if (is_interactive_native_kind(resolved.kind))
+        return true;
+
+    const auto count = std::min(node.children.size(), resolved.children.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (subtree_contains_interactive_hit_target(node.children[i], resolved.children[i]))
+            return true;
+    }
+    return false;
+}
+
+enum class PromotedChildHitPolicy {
+    unchanged,
+    disabled,
+    pass_through_self,
+};
+
+PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
+                                                        const ResolvedNativeNode& resolved_child) {
+    if (auto hit_testable = attr(child, "pulpHitTestable"))
+        return attr_bool(child, "pulpHitTestable")
+            ? PromotedChildHitPolicy::unchanged
+            : PromotedChildHitPolicy::disabled;
+    if (is_interactive_native_kind(resolved_child.kind))
+        return PromotedChildHitPolicy::unchanged;
+    if (subtree_contains_interactive_hit_target(child, resolved_child))
+        return PromotedChildHitPolicy::pass_through_self;
+    return PromotedChildHitPolicy::disabled;
 }
 
 void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection> parent_direction) {
@@ -622,6 +1083,12 @@ void apply_visual_style(View& view, const IRStyle& style) {
         if (auto color = parse_hex_color(*style.background_color))
             view.set_background_color(*color);
     }
+    // A CSS background-gradient (the light "hero" panels and the cube/prism/
+    // cylinder illustration fills in real Figma imports) paints over the solid
+    // background_color. Dropping it was the dominant ELYSIUM dark/light parity
+    // gap — see core/view/src/css_gradient.cpp for the shared parser.
+    if (style.background_gradient && !style.background_gradient->empty())
+        apply_css_background_gradient(view, *style.background_gradient);
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
     if (style.color) {
@@ -745,6 +1212,28 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
         line.set_stroke_width(*stroke_width);
 }
 
+// Skin a knob with its captured body disc when hoist_captured_art_knobs +
+// enrich have stamped an absolute asset_path (+ png_natural + opaque-core rect).
+// A single-frame sprite renders the design's disc and core-fits it to the box;
+// the engine overlays the native rotating notch, so the knob stays interactive.
+// No-op when the knob carries no captured-art metadata (a default synth knob).
+void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
+    auto skin = attr(node, "asset_path");
+    if (!skin || skin->empty()) return;
+    const float pw = attr_float(node, "png_natural_w").value_or(0.0f);
+    const float ph = attr_float(node, "png_natural_h").value_or(0.0f);
+    if (pw <= 0.0f || ph <= 0.0f) return;
+    auto strip = std::make_shared<SpriteStrip>();
+    strip->load_from_file(*skin, static_cast<int>(pw), static_cast<int>(ph), 1,
+                          SpriteStrip::Orientation::vertical);
+    knob.set_sprite_strip(std::move(strip));
+    const float cw = attr_float(node, "art_core_w").value_or(0.0f);
+    const float ch = attr_float(node, "art_core_h").value_or(0.0f);
+    if (cw > 0.0f && ch > 0.0f)
+        knob.set_sprite_core(attr_float(node, "art_core_x").value_or(0.0f),
+                             attr_float(node, "art_core_y").value_or(0.0f), cw, ch);
+}
+
 std::unique_ptr<View> make_widget(const IRNode& node,
                                   const ResolvedNativeNode& resolved,
                                   const IRAssetManifest& manifest,
@@ -812,6 +1301,9 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (!semantics.show_internal_label)
                 knob->set_show_label(false);
             if (options.preview_mode) knob->set_render_style(WidgetRenderStyle::minimal);
+            // Captured-art skin (design's disc + native notch overlay): keeps the
+            // knob design-faithful AND interactive. See hoist_captured_art_knobs.
+            apply_captured_art_knob_skin(*knob, node);
             return knob;
         }
         case NativeWidgetKind::fader: {
@@ -925,18 +1417,33 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     apply_identity(*view, node, resolved);
     apply_layout(*view, node, parent_direction);
     apply_visual_style(*view, node.style);
+    if (resolved.kind == NativeWidgetKind::image_view)
+        apply_imported_image_sizing(*view, node);
 
     const auto count = std::min(node.children.size(), resolved.children.size());
     for (std::size_t i = 0; i < count; ++i) {
         std::ostringstream child_path;
         child_path << path << "/children[" << i << "]";
-        view->add_child(materialize_node(node.children[i],
-                                         resolved.children[i],
-                                         manifest,
-                                         options,
-                                         child_path.str(),
-                                         node.layout.direction,
-                                         diagnostics));
+        auto child = materialize_node(node.children[i],
+                                      resolved.children[i],
+                                      manifest,
+                                      options,
+                                      child_path.str(),
+                                      node.layout.direction,
+                                      diagnostics);
+        if (native_kind_owns_imported_child_hits(resolved.kind)) {
+            switch (promoted_widget_child_hit_policy(node.children[i], resolved.children[i])) {
+                case PromotedChildHitPolicy::disabled:
+                    child->set_hit_testable(false);
+                    break;
+                case PromotedChildHitPolicy::pass_through_self:
+                    child->set_pointer_events(View::PointerEvents::box_none);
+                    break;
+                case PromotedChildHitPolicy::unchanged:
+                    break;
+            }
+        }
+        view->add_child(std::move(child));
     }
     return view;
 }
@@ -1087,6 +1594,39 @@ ResolvedNativeNode resolve_design_ir_native_json(std::string_view frozen_design_
     return resolve_design_ir_native(ir, manifest);
 }
 
+NativeImportBindingContext::~NativeImportBindingContext() {
+    reset_import_binding_claims();
+}
+
+bool NativeImportBindingContext::claim_import_binding(View& view, std::string_view route_id) {
+    std::lock_guard<std::mutex> lock(binding_claims_mutex());
+    auto& claims = binding_claims_by_context()[this];
+    claims.erase(std::remove_if(claims.begin(),
+                                claims.end(),
+                                [](const BindingClaim& claim) {
+                                    return claim.view_lifetime.expired();
+                                }),
+                 claims.end());
+    for (const auto& claim : claims) {
+        if (claim.view == &view &&
+            claim.view_instance_id == view.import_binding_instance_id() &&
+            claim.route_id == route_id) {
+            return false;
+        }
+    }
+    claims.push_back(BindingClaim{
+        .view = &view,
+        .view_instance_id = view.import_binding_instance_id(),
+        .view_lifetime = view.import_binding_lifetime_token(),
+        .route_id = std::string(route_id)});
+    return true;
+}
+
+void NativeImportBindingContext::reset_import_binding_claims() {
+    std::lock_guard<std::mutex> lock(binding_claims_mutex());
+    binding_claims_by_context().erase(this);
+}
+
 std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const IRAssetManifest& manifest,
                                              const NativeMaterializeOptions& options) {
@@ -1117,6 +1657,13 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
         return materialize_error_view("unknown native materialization failure",
                                       options.diagnostics_out);
     }
+}
+
+void bind_native_view_tree(View& root,
+                           const DesignIR& ir,
+                           NativeImportBindingContext& ctx,
+                           const NativeImportBindingOptions& options) {
+    bind_imported_node_by_anchor(root, ir.root, ctx, "$", options.diagnostics_out);
 }
 
 } // namespace pulp::view

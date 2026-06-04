@@ -452,6 +452,43 @@ only the CSS parser, the View paint dispatch, and the Figma exporter:
   `compat.json features.radial-angular-diamond-gradient`: parsed handled,
   codegen partial.
 
+### Background gradients: the JS lane and the native/baked-C++ lane are SEPARATE
+
+The section above is the **JS / scripted-UI lane** (`setBackgroundGradient`,
+emitted by `generate_pulp_js`). There is a second, independent lane — the
+**native materializer + baked C++ codegen** — and until 2026-06 it dropped
+`background_gradient` *entirely* (linear included), even though `IRStyle`
+carried it and `View` could paint it. Fixing one lane does NOT fix the other;
+they share no code unless you make them.
+
+- **Shared parser** (`core/view/src/css_gradient.cpp`,
+  `apply_css_background_gradient`): the CSS linear/radial/conic parser was
+  lifted out of `widget_bridge.cpp` into this free function. All three lanes now
+  route through it — the JS bridge (`setBackgroundGradient` delegates), the
+  native materializer, and baked C++ codegen — so gradients resolve identically.
+- **Native materializer** (`design_import_native_common.cpp`,
+  `apply_visual_style`): now calls `apply_css_background_gradient(view, …)` right
+  after `set_background_color`. The gradient paints over the solid base color.
+- **Baked C++ codegen** (`design_cpp_codegen.cpp`, `emit_visual_style`): emits a
+  verbatim `pulp::view::apply_css_background_gradient(*var, "linear-gradient(…)")`
+  runtime call plus `#include <pulp/view/css_gradient.hpp>` in the generated
+  source prologue.
+- **Why it mattered:** this was the dominant ELYSIUM dark/light parity gap. The
+  light "hero" panel (`Rectangle 5`, a `linear-gradient(to bottom,#e4edf6,
+  #b7c8db)`) and the cube/prism/tuning illustration fills are all CSS gradients.
+  With them dropped, the panel rendered dark `#1c1d1d` and the `position_cylinder`
+  GPU-ROI similarity was 0.055; after wiring it jumped to 0.979 (`range_prism`
+  0.029→0.78, `grains_knob_cap` 0.15→0.79). Verify with
+  `pulp-test-mac-platform-harness` (`PULP_ELYSIUM_GPU_DUMP_DIR=… ` dumps ROIs).
+- **Gotcha — stale CLI binary:** after touching `emit_visual_style`, rebuild
+  `pulp-import-design` before re-emitting `--emit cpp`; the tool links
+  `pulp-view-core` statically and a stale binary silently emits the old output
+  (no gradient call), which reads as a codegen bug that isn't there.
+- Tests: `[view][import][native-materializer][gradient]` (materializer applies
+  it), `[gradient]` cpp-emit section in the always-built `pulp-test-import-design-tool`
+  (so the codegen path is covered even when the planning-gated cpp-codegen target
+  is skipped), plus the gated `pulp-test-design-import-cpp-codegen`.
+
 ### Per-range text styles → nested `<span>`s
 
 A text node used to take the FIRST-CHAR dominant style only (one run); mixed
@@ -570,6 +607,40 @@ Gotchas:
   the CLI tests (`pulp-test-cli-import-design [sprite]`) pin the hoist
   end-to-end with a synthetic envelope + synthetic PNG (no proprietary
   export).
+
+#### The LIBRARY/materializer path has its own hoist (`hoist_captured_art_knobs`)
+
+The sprite hoist above lives in the **CLI** (`pulp_import_design.cpp`, gated on
+`--knob-style sprite`). The **library/runtime path** — `build_native_view_tree`,
+used by the GPU harness, standalone/plugin editors, and any embedder — does NOT
+go through the CLI, so without its own pass it synthesized a default `Knob` and
+discarded the captured disc (a generic blue value-arc instead of the design's
+skeuomorphic disc — this was the ELYSIUM `grains_knob_cap` residual).
+
+`hoist_captured_art_knobs(DesignIR&)` (declared in `design_import.hpp`, defined
+in `design_import.cpp` beside the sibling importer passes `enrich_*` /
+`synthesize_primitive_paths`) is the library-side promotion. Contract:
+- **Run it BEFORE `enrich_imported_image_asset_metadata`** so the hoisted
+  `asset_ref` receives its absolute `asset_path` + opaque-core metadata. Order is
+  `parse → absolutize → hoist_captured_art_knobs → enrich → build_native_view_tree`.
+- **Layer disposition by captured-image area** (not just count, unlike the CLU's
+  count-only rule): the largest asset-image child is the body disc; a secondary
+  layer counts as SUBSTANTIAL only if its area ≥ 40% of the body (the CLI rule
+  is count-only). ELYSIUM's `Vector 7` pointer is a 0-width stroke hairline
+  (area 0) → not substantial →
+  the knob HOISTS the disc and stays interactive. Two comparable layers (body +
+  highlight) → demote to a static container.
+- **Materializer skin** (`make_widget` knob branch): when the knob node carries
+  an enrich-stamped `asset_path` (+ `png_natural_*`), it builds a single-frame
+  `SpriteStrip` + `set_sprite_core` from `art_core_*`. The engine overlays the
+  native rotating notch, so the knob is design-faithful AND turnable — Phase-D
+  drag still passes (`pulp-test-mac-platform-harness` knob_drag_probe).
+- **Gotcha:** the harness pins `count_ir_nodes(ir.root)` on the *parsed* scene —
+  assert structural counts BEFORE calling the hoist, since it removes the
+  captured layers.
+- Tests: `[knob][sprite]` in `pulp-test-design-import-native-materializer`
+  (hoist promote + demote, pure, no I/O) + the GPU harness (end-to-end skin +
+  interactivity).
 
 ### `IRStyle::box_shadow` is parsed layers, not a string (pulp #41)
 

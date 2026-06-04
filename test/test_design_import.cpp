@@ -59,6 +59,16 @@ std::string read_fixture(const std::string& rel_path) {
     return {};
 }
 
+std::size_t count_occurrences(std::string_view haystack, std::string_view needle) {
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string_view::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
 std::string asset_text(const ClaudeBundleAsset& asset) {
     return std::string(asset.data.begin(), asset.data.end());
 }
@@ -1121,6 +1131,233 @@ TEST_CASE("parse_v0_tsx preserves inline-style host controls for baked C++",
     REQUIRE(result.source.find("std::make_unique<pulp::view::Fader>") != std::string::npos);
     REQUIRE(result.source.find("std::make_unique<pulp::view::Label>") != std::string::npos);
     REQUIRE(result.source.find("std::make_unique<pulp::view::SvgPathWidget>") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp resolves figma-plugin asset_ref image sources",
+          "[view][import][cpp-codegen][figma-plugin][asset-ref]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "image";
+    ir.root.name = "Imported Figma Image";
+    ir.root.attributes["asset_ref"] = "3:43";
+    ir.root.style.width = 64.0f;
+    ir.root.style.height = 32.0f;
+
+    IRAssetRef asset;
+    asset.asset_id = "3:43";
+    asset.original_uri = "figma://KCKIyZoWXjde6qVNCm4qPa/3:43";
+    asset.local_path = "/resolved/import/assets/3_43.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("set_image_source(\"file:///resolved/import/assets/3_43.png\")") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp preserves figma-plugin bleed sprite geometry",
+          "[view][import][cpp-codegen][figma-plugin][fidelity]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "image";
+    ir.root.name = "Imported Bleed Sprite";
+    ir.root.attributes["asset_ref"] = "sprite";
+    ir.root.attributes["png_natural_w"] = "420";
+    ir.root.attributes["png_natural_h"] = "484";
+    ir.root.attributes["art_core_x"] = "148";
+    ir.root.attributes["art_core_y"] = "0";
+    ir.root.attributes["art_core_w"] = "115";
+    ir.root.attributes["art_core_h"] = "129";
+    ir.root.style.width = 62.0f;
+    ir.root.style.height = 68.0f;
+    ir.root.style.position = "absolute";
+    ir.root.style.left = 20.0f;
+    ir.root.style.top = 30.0f;
+    ir.root.style.render_bounds = IRStyle::RenderBounds{210.0f, 116.0f, -74.0f, 0.0f};
+
+    IRAssetRef asset;
+    asset.asset_id = "sprite";
+    asset.original_uri = "figma://fixture/sprite";
+    asset.local_path = "/resolved/import/assets/sprite.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("set_image_source(\"file:///resolved/import/assets/sprite.png\")") != std::string::npos);
+    REQUIRE(result.source.find("_image_flex.preferred_width") != std::string::npos);
+    REQUIRE(result.source.find("_image_flex.dim_width") != std::string::npos);
+    REQUIRE(result.source.find("->set_left(") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp suppresses decorative child hits under promoted native widgets",
+          "[view][import][cpp-codegen][hit-test]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 120.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Gain Knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.style.width = 80.0f;
+    knob.style.height = 80.0f;
+    knob.layout.direction = LayoutDirection::column;
+
+    IRNode decorative;
+    decorative.type = "frame";
+    decorative.name = "Imported Knob Art";
+    decorative.style.width = 80.0f;
+    decorative.style.height = 40.0f;
+
+    IRNode nested_button;
+    nested_button.type = "button";
+    nested_button.name = "Nested Fine Button";
+    nested_button.text_content = "Fine";
+    nested_button.style.width = 60.0f;
+    nested_button.style.height = 20.0f;
+
+    knob.children.push_back(std::move(decorative));
+    knob.children.push_back(std::move(nested_button));
+    ir.root.children.push_back(std::move(knob));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("std::make_unique<pulp::view::Knob>") != std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::TextButton>") != std::string::npos);
+    REQUIRE(count_occurrences(result.source, "->set_hit_testable(false);") == 1);
+}
+
+TEST_CASE("generate_pulp_cpp suppresses extracted decorative child helpers under promoted native widgets",
+          "[view][import][cpp-codegen][hit-test]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 120.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Gain Knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.style.width = 80.0f;
+    knob.style.height = 80.0f;
+    knob.layout.direction = LayoutDirection::column;
+
+    IRNode decorative;
+    decorative.type = "frame";
+    decorative.name = "DecorativeLayer";
+    decorative.style.width = 80.0f;
+    decorative.style.height = 40.0f;
+
+    knob.children.push_back(std::move(decorative));
+    ir.root.children.push_back(std::move(knob));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    const auto helper_pos = result.source.find("auto child_");
+    REQUIRE(helper_pos != std::string::npos);
+    const auto disable_pos = result.source.find("->set_hit_testable(false);", helper_pos);
+    REQUIRE(disable_pos != std::string::npos);
+    const auto add_pos = result.source.find("->add_child(std::move(child_", disable_pos);
+    REQUIRE(add_pos != std::string::npos);
+    REQUIRE(count_occurrences(result.source, "->set_hit_testable(false);") == 1);
+}
+
+TEST_CASE("generate_pulp_cpp preserves interactive descendants under promoted native widgets",
+          "[view][import][cpp-codegen][hit-test]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 120.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Gain Knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.style.width = 80.0f;
+    knob.style.height = 80.0f;
+    knob.layout.direction = LayoutDirection::column;
+
+    IRNode container;
+    container.type = "frame";
+    container.name = "Imported Knob Controls";
+    container.style.width = 80.0f;
+    container.style.height = 40.0f;
+    container.layout.direction = LayoutDirection::column;
+
+    IRNode nested_button;
+    nested_button.type = "button";
+    nested_button.name = "Nested Fine Button";
+    nested_button.text_content = "Fine";
+    nested_button.style.width = 60.0f;
+    nested_button.style.height = 20.0f;
+
+    container.children.push_back(std::move(nested_button));
+    knob.children.push_back(std::move(container));
+    ir.root.children.push_back(std::move(knob));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("std::make_unique<pulp::view::Knob>") != std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::TextButton>") != std::string::npos);
+    REQUIRE(count_occurrences(result.source, "->set_hit_testable(false);") == 0);
+    REQUIRE(count_occurrences(result.source, "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
+}
+
+TEST_CASE("generate_pulp_cpp preserves extracted interactive-descendant wrappers under promoted native widgets",
+          "[view][import][cpp-codegen][hit-test]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 120.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Gain Knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.style.width = 80.0f;
+    knob.style.height = 80.0f;
+    knob.layout.direction = LayoutDirection::column;
+
+    IRNode container;
+    container.type = "frame";
+    container.name = "InteractiveLayer";
+    container.style.width = 80.0f;
+    container.style.height = 40.0f;
+    container.layout.direction = LayoutDirection::column;
+
+    IRNode nested_button;
+    nested_button.type = "button";
+    nested_button.name = "Nested Fine Button";
+    nested_button.text_content = "Fine";
+    nested_button.style.width = 60.0f;
+    nested_button.style.height = 20.0f;
+
+    container.children.push_back(std::move(nested_button));
+    knob.children.push_back(std::move(container));
+    ir.root.children.push_back(std::move(knob));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    const auto helper_pos = result.source.find("auto child_");
+    REQUIRE(helper_pos != std::string::npos);
+    const auto pointer_pos = result.source.find(
+        "->set_pointer_events(pulp::view::View::PointerEvents::box_none);",
+        helper_pos);
+    REQUIRE(pointer_pos != std::string::npos);
+    const auto add_pos = result.source.find("->add_child(std::move(child_", pointer_pos);
+    REQUIRE(add_pos != std::string::npos);
+    REQUIRE(count_occurrences(result.source, "->set_hit_testable(false);") == 0);
+    REQUIRE(count_occurrences(result.source, "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
 }
 
 TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ manifest",

@@ -53,7 +53,10 @@ public:
     /// Resize the surface
     virtual void resize(uint32_t width, uint32_t height, float scale = 1.0f) = 0;
 
-    /// Read the current rendered frame into an RGBA buffer.
+    /// Read the current rendered frame into an RGBA buffer. If a frame is
+    /// currently open, this finalizes and submits pending canvas work before
+    /// readback; callers should treat readback as a capture/end-of-frame
+    /// operation and not continue drawing into the same frame afterward.
     virtual bool read_current_rgba(std::vector<uint8_t>& pixels,
                                    uint32_t& pixel_width,
                                    uint32_t& pixel_height) = 0;

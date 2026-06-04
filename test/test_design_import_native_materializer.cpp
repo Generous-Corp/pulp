@@ -1,5 +1,7 @@
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -8,17 +10,115 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
+namespace fs = std::filesystem;
+
+namespace pulp::test::generated_binding_runtime {
+std::unique_ptr<pulp::view::View> build_generated_binding_runtime_ui();
+void bind_generated_binding_runtime_ui(pulp::view::View& root,
+                                       pulp::view::NativeImportBindingContext& ctx);
+} // namespace pulp::test::generated_binding_runtime
+
+#ifndef PULP_TEST_CXX_COMPILER
+#define PULP_TEST_CXX_COMPILER ""
+#endif
+
+#ifndef PULP_REPO_ROOT
+#define PULP_REPO_ROOT ""
+#endif
 
 namespace {
+
+class TempDir {
+public:
+    explicit TempDir(const std::string& prefix) {
+        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
+        fs::create_directories(path);
+    }
+
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+
+    fs::path path;
+};
+
+void write_text(const fs::path& path, const std::string& text) {
+    fs::create_directories(path.parent_path());
+    std::ofstream out(path);
+    REQUIRE(out.is_open());
+    out << text;
+    REQUIRE(out.good());
+}
+
+bool compile_generated_source(const fs::path& source_path,
+                              const fs::path& output_path,
+                              std::string* diagnostics) {
+    const fs::path compiler(PULP_TEST_CXX_COMPILER);
+    if (compiler.empty() || !fs::exists(compiler)) {
+        if (diagnostics != nullptr) *diagnostics = "C++ compiler path is unavailable";
+        return false;
+    }
+
+    const fs::path root(PULP_REPO_ROOT);
+    std::vector<std::string> include_dirs = {
+        root.string(),
+        (root / "core" / "view" / "include").string(),
+        (root / "core" / "canvas" / "include").string(),
+        (root / "core" / "runtime" / "include").string(),
+        (root / "core" / "platform" / "include").string(),
+        (root / "core" / "events" / "include").string(),
+        (root / "core" / "state" / "include").string(),
+        (root / "core" / "audio" / "include").string(),
+        (root / "core" / "midi" / "include").string(),
+        (root / "core" / "signal" / "include").string(),
+        (root / "core" / "host" / "include").string(),
+    };
+
+    std::vector<std::string> args;
+#if defined(_WIN32)
+    const auto filename = compiler.filename().string();
+    const bool msvc_style = filename.find("cl") != std::string::npos;
+    if (msvc_style) {
+        args = {"/nologo", "/std:c++20", "/EHsc"};
+        for (const auto& dir : include_dirs) args.push_back("/I" + dir);
+        args.push_back("/c");
+        args.push_back(source_path.string());
+        args.push_back("/Fo" + output_path.string());
+    } else
+#endif
+    {
+        args = {"-std=c++20"};
+        for (const auto& dir : include_dirs) {
+            args.push_back("-I");
+            args.push_back(dir);
+        }
+        args.push_back("-c");
+        args.push_back(source_path.string());
+        args.push_back("-o");
+        args.push_back(output_path.string());
+    }
+
+    auto result = pulp::platform::exec(compiler.string(), args, 30000);
+    if (diagnostics != nullptr)
+        *diagnostics = result.stdout_output + result.stderr_output;
+    return !result.timed_out && result.exit_code == 0 && fs::exists(output_path);
+}
 
 const pulp::canvas::DrawCommand* first_meter_fill_rect(const pulp::canvas::RecordingCanvas& canvas) {
     for (const auto& command : canvas.commands()) {
@@ -299,6 +399,116 @@ std::size_t diagnostics_count(const std::vector<ImportDiagnostic>& diagnostics,
     return count;
 }
 
+struct BoundKnobDescriptor {
+    std::string route_id;
+    std::string param_key;
+    std::string binding_module;
+    std::string binding_param;
+    std::string event_contract;
+    std::string gesture_contract;
+};
+
+struct BoundCheckboxDescriptor {
+    std::string route_id;
+    std::string param_key;
+    std::string binding_module;
+    std::string binding_param;
+    std::string event_contract;
+    std::string gesture_contract;
+};
+
+struct BoundTextDescriptor {
+    std::string route_id;
+    std::string value_key;
+    std::string initial_value;
+    std::string placeholder;
+    std::string event_contract;
+    std::string focus_contract;
+};
+
+class BindingBackedKnobContext final : public NativeImportBindingContext {
+public:
+    BindingBackedKnobContext() {
+        store_.set_gesture_callbacks(
+            [this](pulp::state::ParamID) { ++gesture_begin_count; },
+            [this](pulp::state::ParamID) { ++gesture_end_count; });
+    }
+
+    void bind_knob(Knob& knob, const NativeImportBindingDescriptor& descriptor) override {
+        bound_knobs.push_back(BoundKnobDescriptor{
+            .route_id = std::string(descriptor.route_id),
+            .param_key = std::string(descriptor.param_key),
+            .binding_module = std::string(descriptor.binding_module),
+            .binding_param = std::string(descriptor.binding_param),
+            .event_contract = std::string(descriptor.event_contract),
+            .gesture_contract = std::string(descriptor.gesture_contract)});
+
+        pulp::state::ParamInfo info;
+        info.id = param_id_;
+        info.name = std::string(descriptor.param_key);
+        info.range = {0.0f, 1.0f, knob.value()};
+        store_.add_parameter(info);
+        store_.set_normalized(param_id_, knob.value());
+
+        knob.on_gesture_begin = [this] {
+            store_.begin_gesture(param_id_);
+        };
+        knob.on_change = [this](float normalized) {
+            store_.set_normalized(param_id_, normalized);
+            changes.push_back(normalized);
+        };
+        knob.on_gesture_end = [this] {
+            store_.end_gesture(param_id_);
+        };
+    }
+
+    void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) override {
+        bound_checkboxes.push_back(BoundCheckboxDescriptor{
+            .route_id = std::string(descriptor.route_id),
+            .param_key = std::string(descriptor.param_key),
+            .binding_module = std::string(descriptor.binding_module),
+            .binding_param = std::string(descriptor.binding_param),
+            .event_contract = std::string(descriptor.event_contract),
+            .gesture_contract = std::string(descriptor.gesture_contract)});
+
+        const auto param_key = std::string(descriptor.param_key);
+        checkbox.on_change = [this, param_key](bool checked) {
+            checkbox_changes.push_back({param_key, checked ? 1.0f : 0.0f});
+        };
+    }
+
+    void bind_text_editor(TextEditor& editor, const NativeImportTextBindingDescriptor& descriptor) override {
+        bound_text_editors.push_back(BoundTextDescriptor{
+            .route_id = std::string(descriptor.route_id),
+            .value_key = std::string(descriptor.value_key),
+            .initial_value = std::string(descriptor.initial_value),
+            .placeholder = std::string(descriptor.placeholder),
+            .event_contract = std::string(descriptor.event_contract),
+            .focus_contract = std::string(descriptor.focus_contract)});
+
+        editor.on_change = [this](const std::string& text) {
+            text_changes.push_back(text);
+        };
+    }
+
+    float normalized_value() const {
+        return store_.get_normalized(param_id_);
+    }
+
+    std::vector<BoundKnobDescriptor> bound_knobs;
+    std::vector<BoundCheckboxDescriptor> bound_checkboxes;
+    std::vector<BoundTextDescriptor> bound_text_editors;
+    std::vector<float> changes;
+    std::vector<std::pair<std::string, float>> checkbox_changes;
+    std::vector<std::string> text_changes;
+    int gesture_begin_count = 0;
+    int gesture_end_count = 0;
+
+private:
+    pulp::state::StateStore store_;
+    pulp::state::ParamID param_id_ = 1;
+};
+
 } // namespace
 
 TEST_CASE("baked native materializer matches live React layout parity for a plugin panel",
@@ -360,6 +570,81 @@ TEST_CASE("baked native materializer resolves image sources through the asset ma
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
+TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sources",
+          "[view][import][native-materializer][figma-plugin][asset-ref]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "image";
+    ir.root.name = "Imported Figma Image";
+    ir.root.attributes["asset_ref"] = "3:43";
+    ir.root.style.width = 64.0f;
+    ir.root.style.height = 32.0f;
+
+    IRAssetRef asset;
+    asset.asset_id = "3:43";
+    asset.original_uri = "figma://KCKIyZoWXjde6qVNCm4qPa/3:43";
+    asset.local_path = "/resolved/import/assets/3_43.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* image = dynamic_cast<ImageView*>(root.get());
+    REQUIRE(image != nullptr);
+    REQUIRE(image->image_source() == "file:///resolved/import/assets/3_43.png");
+    REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
+}
+
+TEST_CASE("baked native materializer preserves figma-plugin bleed sprite geometry",
+          "[view][import][native-materializer][figma-plugin][fidelity]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "image";
+    ir.root.name = "Imported Bleed Sprite";
+    ir.root.attributes["asset_ref"] = "sprite";
+    ir.root.attributes["png_natural_w"] = "420";
+    ir.root.attributes["png_natural_h"] = "484";
+    ir.root.attributes["art_core_x"] = "148";
+    ir.root.attributes["art_core_y"] = "0";
+    ir.root.attributes["art_core_w"] = "115";
+    ir.root.attributes["art_core_h"] = "129";
+    ir.root.style.width = 62.0f;
+    ir.root.style.height = 68.0f;
+    ir.root.style.position = "absolute";
+    ir.root.style.left = 20.0f;
+    ir.root.style.top = 30.0f;
+    ir.root.style.render_bounds = IRStyle::RenderBounds{210.0f, 116.0f, -74.0f, 0.0f};
+
+    IRAssetRef asset;
+    asset.asset_id = "sprite";
+    asset.original_uri = "figma://fixture/sprite";
+    asset.local_path = "/resolved/import/assets/sprite.png";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* image = dynamic_cast<ImageView*>(root.get());
+    REQUIRE(image != nullptr);
+
+    const float scale = 68.0f / 129.0f;
+    const float expected_w = 420.0f * scale;
+    const float expected_h = 484.0f * scale;
+    const float expected_left =
+        20.0f - 148.0f * scale + (62.0f - 115.0f * scale) * 0.5f;
+    CHECK(image->flex().preferred_width == Catch::Approx(expected_w));
+    CHECK(image->flex().preferred_height == Catch::Approx(expected_h));
+    CHECK(image->flex().dim_width.value == Catch::Approx(expected_w));
+    CHECK(image->flex().dim_height.value == Catch::Approx(expected_h));
+    CHECK(image->left() == Catch::Approx(expected_left));
+    CHECK(image->top() == Catch::Approx(30.0f));
+    REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
+}
+
 TEST_CASE("baked native materializer returns an unresolved asset placeholder with diagnostics",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;
@@ -393,6 +678,112 @@ TEST_CASE("baked native materializer applies token theme only to the detached ro
     REQUIRE(root->theme().colors.count("accent.primary") == 1);
     REQUIRE(root->child_count() == 1);
     REQUIRE(root->child_at(0)->theme().colors.empty());
+}
+
+TEST_CASE("baked native materializer applies a CSS background gradient",
+          "[view][import][native-materializer][gradient]") {
+    // Real Figma imports paint their light "hero" panels and illustration fills
+    // as CSS gradients (e.g. ELYSIUM's Rectangle 5). Dropping background_gradient
+    // was the dominant dark/light parity gap; the materializer must route it
+    // through the shared css_gradient helper. See css_gradient.cpp.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 320.0f;
+    ir.root.style.height = 200.0f;
+    ir.root.style.background_color = "#1c1d1d";  // solid base, painted under
+    ir.root.style.background_gradient =
+        "linear-gradient(to bottom, #e4edf6, #b7c8db)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->has_background_gradient());
+    REQUIRE(root->background_gradient_type() == 1);  // 1 = linear
+}
+
+TEST_CASE("hoist_captured_art_knobs promotes a body disc + pointer to an interactive skin",
+          "[view][import][native-materializer][knob][sprite]") {
+    // A captured-art knob ships a body disc image + a ~0-area pointer hairline
+    // (the native notch replaces the pointer). Hoist the disc's asset_ref onto
+    // the knob, drop the captured children, keep it a knob (interactive).
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.stable_anchor_id = "knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    IRNode body;       // the disc
+    body.type = "image";
+    body.stable_anchor_id = "body";
+    body.attributes["asset_ref"] = "disc-asset";
+    body.style.width = 30.0f;
+    body.style.height = 32.0f;
+    IRNode pointer;    // a 0-area stroked pointer hairline
+    pointer.type = "image";
+    pointer.stable_anchor_id = "ptr";
+    pointer.attributes["asset_ref"] = "ptr-asset";
+    pointer.style.width = 0.0f;
+    pointer.style.height = 5.0f;
+    knob.children.push_back(body);
+    knob.children.push_back(pointer);
+    ir.root.children.push_back(std::move(knob));
+
+    hoist_captured_art_knobs(ir);
+
+    const auto& k = ir.root.children.at(0);
+    REQUIRE(k.audio_widget == AudioWidgetType::knob);          // stays interactive
+    REQUIRE(k.attributes.at("asset_ref") == "disc-asset");     // disc hoisted
+    REQUIRE(k.attributes.at("sprite_strip_frame_count") == "1");
+    // Captured layers (disc + pointer) are gone; the native notch draws the indicator.
+    REQUIRE(k.children.empty());
+}
+
+TEST_CASE("hoist_captured_art_knobs demotes a multi-layer knob to a static container",
+          "[view][import][native-materializer][knob][sprite]") {
+    // Two SUBSTANTIAL captured layers (e.g. body + highlight) can't fit one
+    // single-frame skin, so the knob demotes to a plain container — every layer
+    // renders as an image (faithful but not turnable), no silent layer loss.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.stable_anchor_id = "knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    for (const char* id : {"body", "highlight"}) {
+        IRNode layer;
+        layer.type = "image";
+        layer.stable_anchor_id = id;
+        layer.attributes["asset_ref"] = std::string(id) + "-asset";
+        layer.style.width = 40.0f;
+        layer.style.height = 40.0f;
+        knob.children.push_back(std::move(layer));
+    }
+    ir.root.children.push_back(std::move(knob));
+
+    hoist_captured_art_knobs(ir);
+
+    const auto& k = ir.root.children.at(0);
+    REQUIRE(k.audio_widget == AudioWidgetType::none);   // demoted to container
+    REQUIRE(k.children.size() == 2);                    // both layers preserved
+    REQUIRE(k.attributes.count("asset_ref") == 0);
+}
+
+TEST_CASE("baked native materializer leaves background gradient unset without one",
+          "[view][import][native-materializer][gradient]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 100.0f;
+    ir.root.style.background_color = "#202020";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE_FALSE(root->has_background_gradient());
 }
 
 TEST_CASE("standard meter snaps fill edge and suppresses duplicate peak line",
@@ -626,6 +1017,592 @@ TEST_CASE("baked native materializer preserves audio widget attributes",
     REQUIRE(editor != nullptr);
     REQUIRE(editor->placeholder == "Preset");
     REQUIRE(editor->text() == "Init");
+}
+
+TEST_CASE("baked native materializer routes promoted widget hits over decorative descendants",
+          "[view][import][native-materializer][hit-test]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 120.0f, LayoutDirection::column);
+
+    auto knob_node = frame("gain-knob", 80.0f, 80.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.audio_label = "Gain";
+    knob_node.attributes["value"] = "0.5";
+
+    auto decorative_art = frame("gain-knob-imported-art", 80.0f, 80.0f, LayoutDirection::column);
+    decorative_art.style.background_color = "#ff00ff";
+    knob_node.children.push_back(std::move(decorative_art));
+
+    auto nested_button = frame("gain-knob-nested-button", 60.0f, 20.0f, LayoutDirection::column);
+    nested_button.type = "button";
+    nested_button.text_content = "Fine";
+    knob_node.children.push_back(std::move(nested_button));
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    root->set_bounds({0, 0, 120.0f, 120.0f});
+    root->layout_children();
+
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->child_count() == 2);
+    REQUIRE_FALSE(knob->child_at(0)->hit_testable());
+    REQUIRE(knob->child_at(1)->hit_testable());
+
+    auto* hit = root->hit_test({40.0f, 40.0f});
+    REQUIRE(hit == knob);
+}
+
+TEST_CASE("binding-backed imported knob drag updates from the visible body",
+          "[view][import][native-materializer][hit-test][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 160.0f, 120.0f, LayoutDirection::column);
+
+    auto knob_node = frame("bound-gain-knob", 80.0f, 80.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.audio_label = "Gain";
+    knob_node.stable_anchor_id = "figma:bound-gain-knob";
+    knob_node.attributes["value"] = "0.4";
+    knob_node.attributes["pulpParamKey"] = "filter.gain";
+    knob_node.attributes["pulpRouteId"] = "figma-plugin:filter.gain";
+    knob_node.attributes["pulpBindingModule"] = "filter";
+    knob_node.attributes["pulpBindingParam"] = "gain";
+    knob_node.attributes["pulpEventContract"] = "onChange:set_param:filter.gain";
+    knob_node.attributes["pulpGestureContract"] = "rotary_drag:begin/update/end";
+
+    auto decorative_art = frame("imported-knob-art", 80.0f, 80.0f, LayoutDirection::column);
+    decorative_art.style.background_color = "#ff00ff";
+    auto value_label = label("imported-value-label", "80%", 80.0f, 20.0f);
+    knob_node.children.push_back(std::move(decorative_art));
+    knob_node.children.push_back(std::move(value_label));
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    root->set_bounds({0, 0, 160.0f, 120.0f});
+    root->layout_children();
+
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->child_count() == 2);
+    REQUIRE_FALSE(knob->child_at(0)->hit_testable());
+    REQUIRE_FALSE(knob->child_at(1)->hit_testable());
+
+    auto* body_hit = root->hit_test({40.0f, 40.0f});
+    REQUIRE(body_hit == knob);
+
+    BindingBackedKnobContext binding;
+    bind_native_view_tree(*root, ir, binding);
+    REQUIRE(binding.bound_knobs.size() == 1);
+    REQUIRE(binding.bound_knobs[0].route_id == "figma-plugin:filter.gain");
+    REQUIRE(binding.bound_knobs[0].param_key == "filter.gain");
+    REQUIRE(binding.bound_knobs[0].binding_module == "filter");
+    REQUIRE(binding.bound_knobs[0].binding_param == "gain");
+    REQUIRE(binding.bound_knobs[0].event_contract == "onChange:set_param:filter.gain");
+    REQUIRE(binding.bound_knobs[0].gesture_contract == "rotary_drag:begin/update/end");
+
+    const float before = knob->value();
+    REQUIRE(before == 0.4f);
+    REQUIRE(binding.normalized_value() == before);
+
+    root->simulate_drag({40.0f, 40.0f}, {40.0f, 10.0f}, 3);
+
+    REQUIRE(knob->value() > before);
+    REQUIRE(binding.normalized_value() == knob->value());
+    REQUIRE_FALSE(binding.changes.empty());
+    REQUIRE(binding.changes.back() == knob->value());
+    REQUIRE(binding.gesture_begin_count == 1);
+    REQUIRE(binding.gesture_end_count == 1);
+}
+
+TEST_CASE("native materializer binding helper requires anchors and routes",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 320.0f, 260.0f, LayoutDirection::column);
+
+    auto eligible = frame("eligible-knob", 80.0f, 80.0f, LayoutDirection::column);
+    eligible.audio_widget = AudioWidgetType::knob;
+    eligible.stable_anchor_id = "figma:eligible-knob";
+    eligible.attributes["value"] = "0.25";
+    eligible.attributes["pulpRouteId"] = "figma-plugin:eligible";
+    eligible.attributes["pulpParamKey"] = "filter.eligible";
+    eligible.attributes["pulpBindingModule"] = "filter";
+    eligible.attributes["pulpBindingParam"] = "eligible";
+
+    auto missing_anchor = frame("missing-anchor-knob", 80.0f, 80.0f, LayoutDirection::column);
+    missing_anchor.audio_widget = AudioWidgetType::knob;
+    missing_anchor.stable_anchor_id.reset();
+    missing_anchor.attributes["value"] = "0.5";
+    missing_anchor.attributes["pulpRouteId"] = "figma-plugin:missing-anchor";
+    missing_anchor.attributes["pulpParamKey"] = "filter.missing_anchor";
+
+    auto missing_route = frame("missing-route-knob", 80.0f, 80.0f, LayoutDirection::column);
+    missing_route.audio_widget = AudioWidgetType::knob;
+    missing_route.stable_anchor_id = "figma:missing-route-knob";
+    missing_route.attributes["value"] = "0.75";
+    missing_route.attributes["pulpParamKey"] = "filter.missing_route";
+
+    auto wrong_type = label("wrong-type-label", "Wrong", 80.0f, 24.0f);
+    wrong_type.attributes["pulpRouteId"] = "figma-plugin:wrong-type";
+    wrong_type.attributes["pulpParamKey"] = "filter.wrong_type";
+
+    ir.root.children.push_back(std::move(eligible));
+    ir.root.children.push_back(std::move(missing_anchor));
+    ir.root.children.push_back(std::move(missing_route));
+    ir.root.children.push_back(std::move(wrong_type));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+
+    REQUIRE(binding.bound_knobs.size() == 1);
+    REQUIRE(binding.bound_knobs[0].route_id == "figma-plugin:eligible");
+    REQUIRE(binding.bound_knobs[0].param_key == "filter.eligible");
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-missing-anchor") == 1);
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-missing-route") == 1);
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-not-applied") == 1);
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-anchor-not-found") == 0);
+}
+
+TEST_CASE("native materializer binding helper reports anchors missing from the view tree",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 120.0f, LayoutDirection::column);
+
+    auto knob_node = frame("orphaned-knob", 80.0f, 80.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.stable_anchor_id = "figma:orphaned-knob";
+    knob_node.attributes["value"] = "0.5";
+    knob_node.attributes["pulpRouteId"] = "figma-plugin:orphaned";
+    knob_node.attributes["pulpParamKey"] = "filter.orphaned";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    root->child_at(0)->set_anchor_id("figma:different-view");
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+
+    REQUIRE(binding.bound_knobs.empty());
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-anchor-not-found") == 1);
+    REQUIRE(diagnostics[0].anchor_id == "figma:orphaned-knob");
+}
+
+TEST_CASE("native materializer binding helper refuses duplicate materialized anchors",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 220.0f, 120.0f, LayoutDirection::row);
+
+    auto first = frame("first-duplicate-knob", 80.0f, 80.0f, LayoutDirection::column);
+    first.audio_widget = AudioWidgetType::knob;
+    first.stable_anchor_id = "figma:duplicate-knob";
+    first.attributes["value"] = "0.25";
+    first.attributes["pulpRouteId"] = "figma-plugin:first-duplicate";
+    first.attributes["pulpParamKey"] = "filter.first";
+
+    auto second = frame("second-duplicate-knob", 80.0f, 80.0f, LayoutDirection::column);
+    second.audio_widget = AudioWidgetType::knob;
+    second.stable_anchor_id = "figma:duplicate-knob";
+    second.attributes["value"] = "0.75";
+    second.attributes["pulpRouteId"] = "figma-plugin:second-duplicate";
+    second.attributes["pulpParamKey"] = "filter.second";
+
+    ir.root.children.push_back(std::move(first));
+    ir.root.children.push_back(std::move(second));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+
+    REQUIRE(binding.bound_knobs.empty());
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-duplicate-anchor") == 2);
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-not-applied") == 0);
+    REQUIRE(diagnostics_count(diagnostics, "native-binding-anchor-not-found") == 0);
+}
+
+TEST_CASE("generated C++ binding helper requires a unique materialized anchor",
+          "[view][import][native-materializer][binding][cpp-codegen]") {
+    DesignIR ir;
+    ir.root = frame("root", 220.0f, 120.0f, LayoutDirection::row);
+
+    auto first = frame("figma:duplicate-knob", 80.0f, 80.0f, LayoutDirection::column);
+    first.audio_widget = AudioWidgetType::knob;
+    first.attributes["value"] = "0.25";
+    first.attributes["pulpRouteId"] = "figma-plugin:first-duplicate";
+    first.attributes["pulpParamKey"] = "filter.first";
+
+    auto second = frame("figma:duplicate-knob", 80.0f, 80.0f, LayoutDirection::column);
+    second.audio_widget = AudioWidgetType::knob;
+    second.attributes["value"] = "0.75";
+    second.attributes["pulpRouteId"] = "figma-plugin:second-duplicate";
+    second.attributes["pulpParamKey"] = "filter.second";
+
+    ir.root.children.push_back(std::move(first));
+    ir.root.children.push_back(std::move(second));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+
+    REQUIRE(result.source.find(
+        "find_imported_view_by_anchor(pulp::view::View& root, std::string_view anchor, int& matches)") !=
+        std::string::npos);
+    REQUIRE(result.source.find("route_0_match_count == 1") != std::string::npos);
+    REQUIRE(result.source.find("route_1_match_count == 1") != std::string::npos);
+
+    TempDir tmp("pulp-native-materializer-duplicate-anchor-codegen");
+    const auto header = tmp.path / "imported_ui.hpp";
+    const auto source = tmp.path / "imported_ui.cpp";
+    const auto object = tmp.path / "imported_ui.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("native materializer binding helper binds routed checkbox metadata",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 80.0f, LayoutDirection::column);
+
+    auto checkbox_node = frame("bypass-checkbox", 32.0f, 32.0f, LayoutDirection::column);
+    checkbox_node.type = "input";
+    checkbox_node.stable_anchor_id = "figma:bypass-checkbox";
+    checkbox_node.attributes["type"] = "checkbox";
+    checkbox_node.attributes["checked"] = "true";
+    checkbox_node.attributes["pulpRouteId"] = "figma-plugin:bypass";
+    checkbox_node.attributes["pulpParamKey"] = "filter.bypass";
+    checkbox_node.attributes["pulpBindingModule"] = "filter";
+    checkbox_node.attributes["pulpBindingParam"] = "bypass";
+    checkbox_node.attributes["pulpEventContract"] = "onChange:set_param:filter.bypass";
+    checkbox_node.attributes["pulpGestureContract"] = "click:toggle";
+    ir.root.children.push_back(std::move(checkbox_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    auto* checkbox = dynamic_cast<Checkbox*>(root->child_at(0));
+    REQUIRE(checkbox != nullptr);
+    REQUIRE(checkbox->is_checked());
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+
+    REQUIRE(binding.bound_checkboxes.size() == 1);
+    REQUIRE(binding.bound_checkboxes[0].route_id == "figma-plugin:bypass");
+    REQUIRE(binding.bound_checkboxes[0].param_key == "filter.bypass");
+    REQUIRE(binding.bound_checkboxes[0].binding_module == "filter");
+    REQUIRE(binding.bound_checkboxes[0].binding_param == "bypass");
+    REQUIRE(binding.bound_checkboxes[0].event_contract == "onChange:set_param:filter.bypass");
+    REQUIRE(binding.bound_checkboxes[0].gesture_contract == "click:toggle");
+    REQUIRE(diagnostics.empty());
+
+    checkbox->on_mouse_down({16.0f, 16.0f});
+    REQUIRE_FALSE(checkbox->is_checked());
+    REQUIRE(binding.checkbox_changes.size() == 1);
+    REQUIRE(binding.checkbox_changes[0].first == "filter.bypass");
+    REQUIRE(binding.checkbox_changes[0].second == 0.0f);
+}
+
+TEST_CASE("native materializer binding helper skips repeated calls for the same context and view",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 160.0f, 80.0f, LayoutDirection::column);
+
+    auto checkbox_node = frame("bypass-checkbox", 32.0f, 32.0f, LayoutDirection::column);
+    checkbox_node.type = "input";
+    checkbox_node.stable_anchor_id = "figma:bypass-checkbox";
+    checkbox_node.attributes["type"] = "checkbox";
+    checkbox_node.attributes["pulpRouteId"] = "figma-plugin:bypass";
+    checkbox_node.attributes["pulpParamKey"] = "filter.bypass";
+    ir.root.children.push_back(std::move(checkbox_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> first_diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &first_diagnostics});
+    REQUIRE(binding.bound_checkboxes.size() == 1);
+    REQUIRE(first_diagnostics.empty());
+
+    std::vector<ImportDiagnostic> second_diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &second_diagnostics});
+    REQUIRE(binding.bound_checkboxes.size() == 1);
+    REQUIRE(diagnostics_count(second_diagnostics, "native-binding-already-applied") == 1);
+
+    const auto first_checkbox_id = root->child_at(0)->import_binding_instance_id();
+    root.reset();
+
+    auto rebuilt_root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(rebuilt_root != nullptr);
+    REQUIRE(rebuilt_root->child_at(0)->import_binding_instance_id() != first_checkbox_id);
+
+    std::vector<ImportDiagnostic> rebuilt_diagnostics;
+    bind_native_view_tree(*rebuilt_root, ir, binding, {.diagnostics_out = &rebuilt_diagnostics});
+    REQUIRE(binding.bound_checkboxes.size() == 2);
+    REQUIRE(rebuilt_diagnostics.empty());
+
+    BindingBackedKnobContext fresh_binding;
+    std::vector<ImportDiagnostic> fresh_diagnostics;
+    bind_native_view_tree(*rebuilt_root, ir, fresh_binding, {.diagnostics_out = &fresh_diagnostics});
+    REQUIRE(fresh_binding.bound_checkboxes.size() == 1);
+    REQUIRE(fresh_diagnostics.empty());
+}
+
+TEST_CASE("generated C++ binding helper emits routed checkbox bindings",
+          "[view][import][native-materializer][binding][cpp-codegen]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 80.0f, LayoutDirection::column);
+
+    auto checkbox_node = frame("figma:bypass-checkbox", 32.0f, 32.0f, LayoutDirection::column);
+    checkbox_node.type = "input";
+    checkbox_node.attributes["type"] = "checkbox";
+    checkbox_node.attributes["checked"] = "false";
+    checkbox_node.attributes["pulpRouteId"] = "figma-plugin:bypass";
+    checkbox_node.attributes["pulpParamKey"] = "filter.bypass";
+    checkbox_node.attributes["pulpBindingModule"] = "filter";
+    checkbox_node.attributes["pulpBindingParam"] = "bypass";
+    ir.root.children.push_back(std::move(checkbox_node));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+
+    REQUIRE(result.source.find("std::make_unique<pulp::view::Checkbox>()") != std::string::npos);
+    REQUIRE(result.source.find("ctx.bind_checkbox(*checkbox,") != std::string::npos);
+    REQUIRE(result.source.find("ctx.claim_import_binding(*view, \"figma-plugin:bypass\")") !=
+            std::string::npos);
+    REQUIRE(result.source.find("route_0_match_count == 1") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"native_primitive\": \"checkbox\"") != std::string::npos);
+    REQUIRE(result.binding_manifest.find("\"param_key\": \"filter.bypass\"") != std::string::npos);
+
+    TempDir tmp("pulp-native-materializer-checkbox-codegen");
+    const auto header = tmp.path / "imported_ui.hpp";
+    const auto source = tmp.path / "imported_ui.cpp";
+    const auto object = tmp.path / "imported_ui.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+}
+
+TEST_CASE("compiled generated C++ binding helper binds and fails closed at runtime",
+          "[view][import][native-materializer][binding][cpp-codegen]") {
+    auto root = pulp::test::generated_binding_runtime::build_generated_binding_runtime_ui();
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    auto* checkbox = dynamic_cast<Checkbox*>(root->child_at(0));
+    REQUIRE(checkbox != nullptr);
+    REQUIRE_FALSE(checkbox->is_checked());
+
+    BindingBackedKnobContext binding;
+    pulp::test::generated_binding_runtime::bind_generated_binding_runtime_ui(*root, binding);
+    REQUIRE(binding.bound_checkboxes.size() == 1);
+    REQUIRE(binding.bound_checkboxes[0].route_id == "figma-plugin:bypass");
+    REQUIRE(binding.bound_checkboxes[0].param_key == "filter.bypass");
+    REQUIRE(binding.bound_checkboxes[0].binding_module == "filter");
+    REQUIRE(binding.bound_checkboxes[0].binding_param == "bypass");
+    REQUIRE(binding.bound_checkboxes[0].event_contract == "onChange:set_param:filter.bypass");
+    REQUIRE(binding.bound_checkboxes[0].gesture_contract == "click:toggle");
+
+    checkbox->on_mouse_down({16.0f, 16.0f});
+    REQUIRE(checkbox->is_checked());
+    REQUIRE(binding.checkbox_changes.size() == 1);
+    REQUIRE(binding.checkbox_changes[0].first == "filter.bypass");
+    REQUIRE(binding.checkbox_changes[0].second == 1.0f);
+
+    pulp::test::generated_binding_runtime::bind_generated_binding_runtime_ui(*root, binding);
+    REQUIRE(binding.bound_checkboxes.size() == 1);
+
+    BindingBackedKnobContext fresh_binding;
+    pulp::test::generated_binding_runtime::bind_generated_binding_runtime_ui(*root, fresh_binding);
+    REQUIRE(fresh_binding.bound_checkboxes.size() == 1);
+}
+
+TEST_CASE("native materializer binding helper ignores non-binding metadata",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 220.0f, 140.0f, LayoutDirection::column);
+
+    auto route_only = frame("route-only", 80.0f, 40.0f, LayoutDirection::column);
+    route_only.stable_anchor_id = "figma:route-only";
+    route_only.attributes["pulpRouteId"] = "figma-plugin:route-only";
+    route_only.attributes["pulpSourceFamily"] = "static-frame";
+
+    auto initial_value_only = frame("initial-only-editor", 120.0f, 24.0f, LayoutDirection::column);
+    initial_value_only.type = "input";
+    initial_value_only.attributes["type"] = "text";
+    initial_value_only.attributes["pulpInitialValue"] = "Init";
+
+    ir.root.children.push_back(std::move(route_only));
+    ir.root.children.push_back(std::move(initial_value_only));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+
+    REQUIRE(binding.bound_knobs.empty());
+    REQUIRE(diagnostics.empty());
+}
+
+TEST_CASE("native materializer binding helper binds routed initial-value text editors",
+          "[view][import][native-materializer][binding]") {
+    DesignIR ir;
+    ir.root = frame("root", 160.0f, 80.0f, LayoutDirection::column);
+
+    auto editor_node = frame("preset-name", 140.0f, 24.0f, LayoutDirection::column);
+    editor_node.type = "input";
+    editor_node.stable_anchor_id = "figma:preset-name";
+    editor_node.attributes["type"] = "text";
+    editor_node.attributes["pulpRouteId"] = "figma-plugin:preset-name";
+    editor_node.attributes["pulpInitialValue"] = "Init";
+    editor_node.attributes["pulpPlaceholder"] = "Preset";
+    editor_node.attributes["pulpEventContract"] = "input:onChange:setState";
+    editor_node.attributes["pulpFocusContract"] = "input:focus";
+    ir.root.children.push_back(std::move(editor_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    auto* editor = dynamic_cast<TextEditor*>(root->child_at(0));
+    REQUIRE(editor != nullptr);
+    REQUIRE(editor->text() == "Init");
+
+    BindingBackedKnobContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+
+    REQUIRE(binding.bound_text_editors.size() == 1);
+    REQUIRE(binding.bound_text_editors[0].route_id == "figma-plugin:preset-name");
+    REQUIRE(binding.bound_text_editors[0].value_key.empty());
+    REQUIRE(binding.bound_text_editors[0].initial_value == "Init");
+    REQUIRE(binding.bound_text_editors[0].placeholder == "Preset");
+    REQUIRE(binding.bound_text_editors[0].event_contract == "input:onChange:setState");
+    REQUIRE(binding.bound_text_editors[0].focus_contract == "input:focus");
+    REQUIRE(diagnostics.empty());
+
+    editor->set_text("Edited");
+    REQUIRE(binding.text_changes.size() == 1);
+    REQUIRE(binding.text_changes[0] == "Edited");
+}
+
+TEST_CASE("baked native materializer lets explicit hit-test metadata override promoted widget defaults",
+          "[view][import][native-materializer][hit-test]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 120.0f, LayoutDirection::column);
+
+    auto knob_node = frame("gain-knob", 80.0f, 80.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.audio_label = "Gain";
+
+    auto child = frame("explicit-child", 80.0f, 80.0f, LayoutDirection::column);
+    child.attributes["pulpHitTestable"] = "true";
+    knob_node.children.push_back(std::move(child));
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+
+    root->set_bounds({0, 0, 120.0f, 120.0f});
+    root->layout_children();
+
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->child_count() == 1);
+    REQUIRE(knob->child_at(0)->hit_testable());
+
+    auto* hit = root->hit_test({40.0f, 40.0f});
+    REQUIRE(hit == knob->child_at(0));
+}
+
+TEST_CASE("baked native materializer preserves interactive descendants under promoted widgets",
+          "[view][import][native-materializer][hit-test]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 120.0f, LayoutDirection::column);
+
+    auto knob_node = frame("gain-knob", 80.0f, 80.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.audio_label = "Gain";
+
+    auto container = frame("interactive-container", 80.0f, 40.0f, LayoutDirection::column);
+    auto button_node = frame("nested-fine-button", 60.0f, 20.0f, LayoutDirection::column);
+    button_node.type = "button";
+    button_node.text_content = "Fine";
+    container.children.push_back(std::move(button_node));
+    knob_node.children.push_back(std::move(container));
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+
+    root->set_bounds({0, 0, 120.0f, 120.0f});
+    root->layout_children();
+
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->child_count() == 1);
+    auto* container_view = knob->child_at(0);
+    REQUIRE(container_view != nullptr);
+    REQUIRE(container_view->hit_testable());
+    REQUIRE(container_view->pointer_events() == View::PointerEvents::box_none);
+    REQUIRE(container_view->child_count() == 1);
+    auto* button_view = dynamic_cast<TextButton*>(container_view->child_at(0));
+    REQUIRE(button_view != nullptr);
+    REQUIRE(button_view->hit_testable());
+
+    auto* button_hit = root->hit_test({30.0f, 10.0f});
+    REQUIRE(button_hit == button_view);
+
+    auto* body_hit = root->hit_test({70.0f, 30.0f});
+    REQUIRE(body_hit == knob);
+}
+
+TEST_CASE("baked native materializer honors explicit hit-test metadata",
+          "[view][import][native-materializer][hit-test]") {
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 120.0f, LayoutDirection::column);
+
+    auto decorative = frame("decorative-layer", 80.0f, 80.0f, LayoutDirection::column);
+    decorative.attributes["pulpHitTestable"] = "false";
+    ir.root.children.push_back(std::move(decorative));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+
+    root->set_bounds({0, 0, 120.0f, 120.0f});
+    root->layout_children();
+
+    auto* child = root->child_at(0);
+    REQUIRE(child != nullptr);
+    REQUIRE_FALSE(child->hit_testable());
+
+    auto* hit = root->hit_test({40.0f, 40.0f});
+    REQUIRE(hit == root.get());
 }
 
 TEST_CASE("baked native materializer only treats display text as editor value for textarea (PR #3128 review)",

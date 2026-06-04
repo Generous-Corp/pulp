@@ -3,6 +3,8 @@
 #include <cmath>
 #include <algorithm>
 #include <cstring>
+#include <limits>
+#include <unordered_map>
 
 #ifdef __APPLE__
 #include <CoreGraphics/CoreGraphics.h>
@@ -19,7 +21,14 @@ struct RawImage {
     uint32_t height = 0;
 };
 
+static constexpr uint64_t kMaxDecodedPixels = 8192ull * 8192ull;
+static constexpr uint32_t kMaxTrackedContentColors = 65536u;
+
 #ifdef __APPLE__
+static constexpr CGBitmapInfo kRgbaBitmapInfo =
+    static_cast<CGBitmapInfo>(static_cast<uint32_t>(kCGBitmapByteOrder32Big) |
+                              static_cast<uint32_t>(kCGImageAlphaPremultipliedLast));
+
 static RawImage decode_png(const std::vector<uint8_t>& png_data) {
     RawImage img;
     if (png_data.empty()) return img;
@@ -36,19 +45,30 @@ static RawImage decode_png(const std::vector<uint8_t>& png_data) {
     CFRelease(source);
     if (!cgImage) return img;
 
-    img.width = static_cast<uint32_t>(CGImageGetWidth(cgImage));
-    img.height = static_cast<uint32_t>(CGImageGetHeight(cgImage));
-    img.pixels.resize(img.width * img.height * 4);
+    const auto width = static_cast<uint32_t>(CGImageGetWidth(cgImage));
+    const auto height = static_cast<uint32_t>(CGImageGetHeight(cgImage));
+    const auto pixel_count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
+    if (width == 0 || height == 0 || pixel_count > kMaxDecodedPixels ||
+        pixel_count > (std::numeric_limits<size_t>::max() / 4u)) {
+        CGImageRelease(cgImage);
+        return img;
+    }
+
+    img.width = width;
+    img.height = height;
+    img.pixels.resize(static_cast<size_t>(pixel_count) * 4u);
 
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(
-        img.pixels.data(), img.width, img.height, 8, img.width * 4,
-        cs, kCGImageAlphaPremultipliedLast);
+        img.pixels.data(), img.width, img.height, 8, static_cast<size_t>(img.width) * 4u,
+        cs, kRgbaBitmapInfo);
     CGColorSpaceRelease(cs);
 
     if (ctx) {
         CGContextDrawImage(ctx, CGRectMake(0, 0, img.width, img.height), cgImage);
         CGContextRelease(ctx);
+    } else {
+        img = {};
     }
 
     CGImageRelease(cgImage);
@@ -66,8 +86,8 @@ static std::vector<uint8_t> encode_png_rgba(const uint8_t* pixels, uint32_t widt
 
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(
-        const_cast<uint8_t*>(pixels), width, height, 8, width * 4,
-        cs, kCGImageAlphaPremultipliedLast);
+        const_cast<uint8_t*>(pixels), width, height, 8, static_cast<size_t>(width) * 4u,
+        cs, kRgbaBitmapInfo);
     CGColorSpaceRelease(cs);
     if (!ctx) return {};
 
@@ -210,11 +230,18 @@ std::vector<uint8_t> generate_diff_image(
     uint32_t cmp_h = std::min(ref.height, ren.height);
 
     // Build diff RGBA buffer
-    std::vector<uint8_t> diff(out_w * out_h * 4, 0);
+    const auto out_pixels = static_cast<uint64_t>(out_w) * static_cast<uint64_t>(out_h);
+    if (out_pixels == 0 || out_pixels > kMaxDecodedPixels ||
+        out_pixels > (std::numeric_limits<size_t>::max() / 4u)) {
+        return {};
+    }
+    std::vector<uint8_t> diff(static_cast<size_t>(out_pixels) * 4u, 0);
 
     for (uint32_t y = 0; y < out_h; ++y) {
         for (uint32_t x = 0; x < out_w; ++x) {
-            size_t out_idx = (y * out_w + x) * 4;
+            const size_t out_idx =
+                (static_cast<size_t>(y) * static_cast<size_t>(out_w) +
+                 static_cast<size_t>(x)) * 4u;
 
             if (x >= cmp_w || y >= cmp_h) {
                 // Outside overlap: magenta = size mismatch
@@ -223,8 +250,12 @@ std::vector<uint8_t> generate_diff_image(
                 continue;
             }
 
-            size_t ref_idx = (y * ref.width + x) * 4;
-            size_t ren_idx = (y * ren.width + x) * 4;
+            const size_t ref_idx =
+                (static_cast<size_t>(y) * static_cast<size_t>(ref.width) +
+                 static_cast<size_t>(x)) * 4u;
+            const size_t ren_idx =
+                (static_cast<size_t>(y) * static_cast<size_t>(ren.width) +
+                 static_cast<size_t>(x)) * 4u;
 
             int dr = std::abs(static_cast<int>(ref.pixels[ref_idx])     - static_cast<int>(ren.pixels[ren_idx]));
             int dg = std::abs(static_cast<int>(ref.pixels[ref_idx + 1]) - static_cast<int>(ren.pixels[ren_idx + 1]));
@@ -331,6 +362,105 @@ DiffBounds diff_bounds(
     bounds.width = max_x - min_x + 1;
     bounds.height = max_y - min_y + 1;
     return bounds;
+}
+
+ScreenshotContentStats analyze_screenshot_content(const std::vector<uint8_t>& png) {
+    ScreenshotContentStats stats;
+
+    auto img = decode_png(png);
+    if (img.pixels.empty()) {
+        stats.error = "Failed to decode screenshot image";
+        return stats;
+    }
+
+    stats.width = img.width;
+    stats.height = img.height;
+    const auto total_pixels =
+        static_cast<uint64_t>(img.width) * static_cast<uint64_t>(img.height);
+    if (total_pixels > std::numeric_limits<uint32_t>::max()) {
+        stats.error = "Screenshot image exceeds content-stat pixel limit";
+        return stats;
+    }
+    stats.total_pixels = static_cast<uint32_t>(total_pixels);
+    if (stats.total_pixels == 0) {
+        stats.error = "Zero-size screenshot image";
+        return stats;
+    }
+
+    std::unordered_map<uint32_t, uint32_t> color_counts;
+    color_counts.reserve(std::min<uint32_t>(stats.total_pixels, kMaxTrackedContentColors));
+
+    double luminance_sum = 0.0;
+    double luminance_sq_sum = 0.0;
+    double alpha_sum = 0.0;
+    uint32_t opaque_pixels = 0;
+    uint32_t dominant_count = 0;
+    uint32_t majority_candidate = 0;
+    uint32_t majority_votes = 0;
+
+    for (uint32_t i = 0; i < stats.total_pixels; ++i) {
+        const size_t idx = static_cast<size_t>(i) * 4u;
+        const auto r = img.pixels[idx];
+        const auto g = img.pixels[idx + 1];
+        const auto b = img.pixels[idx + 2];
+        const auto a = img.pixels[idx + 3];
+        const uint32_t key =
+            (static_cast<uint32_t>(r) << 24u) |
+            (static_cast<uint32_t>(g) << 16u) |
+            (static_cast<uint32_t>(b) << 8u) |
+            static_cast<uint32_t>(a);
+        if (majority_votes == 0) {
+            majority_candidate = key;
+            majority_votes = 1;
+        } else if (majority_candidate == key) {
+            ++majority_votes;
+        } else {
+            --majority_votes;
+        }
+        auto it = color_counts.find(key);
+        if (it != color_counts.end()) {
+            const auto count = ++it->second;
+            dominant_count = std::max(dominant_count, count);
+        } else if (color_counts.size() < kMaxTrackedContentColors) {
+            color_counts.emplace(key, 1u);
+            dominant_count = std::max(dominant_count, 1u);
+        } else {
+            stats.unique_colors_capped = true;
+        }
+
+        const double luminance = 0.2126 * static_cast<double>(r) +
+                                 0.7152 * static_cast<double>(g) +
+                                 0.0722 * static_cast<double>(b);
+        luminance_sum += luminance;
+        luminance_sq_sum += luminance * luminance;
+        alpha_sum += static_cast<double>(a);
+        if (a >= 250) ++opaque_pixels;
+    }
+
+    uint32_t majority_count = 0;
+    for (uint32_t i = 0; i < stats.total_pixels; ++i) {
+        const size_t idx = static_cast<size_t>(i) * 4u;
+        const uint32_t key =
+            (static_cast<uint32_t>(img.pixels[idx]) << 24u) |
+            (static_cast<uint32_t>(img.pixels[idx + 1]) << 16u) |
+            (static_cast<uint32_t>(img.pixels[idx + 2]) << 8u) |
+            static_cast<uint32_t>(img.pixels[idx + 3]);
+        if (key == majority_candidate) ++majority_count;
+    }
+    dominant_count = std::max(dominant_count, majority_count);
+
+    stats.unique_colors = static_cast<uint32_t>(color_counts.size());
+    stats.luminance_mean = luminance_sum / static_cast<double>(stats.total_pixels);
+    const double mean_sq = luminance_sq_sum / static_cast<double>(stats.total_pixels);
+    const double variance = std::max(0.0, mean_sq - stats.luminance_mean * stats.luminance_mean);
+    stats.luminance_stddev = std::sqrt(variance);
+    stats.alpha_mean = alpha_sum / static_cast<double>(stats.total_pixels);
+    stats.opaque_coverage =
+        static_cast<double>(opaque_pixels) / static_cast<double>(stats.total_pixels);
+    stats.non_background_coverage =
+        1.0 - (static_cast<double>(dominant_count) / static_cast<double>(stats.total_pixels));
+    stats.valid = true;
+    return stats;
 }
 
 } // namespace pulp::view

@@ -984,29 +984,90 @@ static std::string read_file(const std::string& path) {
 // contains scene.pulp.json + assets/*.png. Asking users to manually unzip
 // before running `pulp import-design --from figma-plugin` is a UX wart;
 // detect a ZIP magic header (PK\x03\x04) or `.zip` extension on the input
-// file, unpack it to a temp directory, and swap input_file for the path
-// to scene.pulp.json inside.
+// file, unpack it, and swap input_file for the path to scene.pulp.json
+// inside.
 //
 // Asset paths in the envelope are relative (`assets/...`), and the rest
 // of the import pipeline resolves them against
-// `fs::path(input_file).parent_path()`. Unpacking the whole archive
-// preserves that layout: the temp dir becomes the new asset base
-// directory automatically.
+// `fs::path(input_file).parent_path()`. For real output artifacts we
+// therefore extract to a durable sidecar directory next to the output
+// file. Dry-run paths still use a scoped temp dir.
 
 struct PulpZipExtraction {
     fs::path temp_dir;          // root of the extracted archive
     fs::path scene_json_path;   // resolved location of scene.pulp.json
+    fs::path scene_rel_path;    // scene path relative to temp_dir/final_dir
+    fs::path final_dir;         // durable sidecar target for real outputs
+    fs::path backup_dir;        // previous marked sidecar during replacement
+    bool cleanup_on_destroy = true;
+    bool committed = false;
+    bool finalized = false;
 
     PulpZipExtraction() = default;
     PulpZipExtraction(const PulpZipExtraction&) = delete;
     PulpZipExtraction& operator=(const PulpZipExtraction&) = delete;
-    PulpZipExtraction(PulpZipExtraction&&) = default;
-    PulpZipExtraction& operator=(PulpZipExtraction&&) = default;
+    PulpZipExtraction(PulpZipExtraction&& other) noexcept {
+        *this = std::move(other);
+    }
+    PulpZipExtraction& operator=(PulpZipExtraction&& other) noexcept {
+        if (this == &other) return *this;
+        cleanup_owned();
+        temp_dir = std::move(other.temp_dir);
+        scene_json_path = std::move(other.scene_json_path);
+        scene_rel_path = std::move(other.scene_rel_path);
+        final_dir = std::move(other.final_dir);
+        backup_dir = std::move(other.backup_dir);
+        cleanup_on_destroy = other.cleanup_on_destroy;
+        committed = other.committed;
+        finalized = other.finalized;
+
+        other.cleanup_on_destroy = false;
+        other.committed = false;
+        other.finalized = true;
+        other.temp_dir.clear();
+        other.final_dir.clear();
+        other.backup_dir.clear();
+        return *this;
+    }
 
     ~PulpZipExtraction() {
-        if (!temp_dir.empty()) {
+        cleanup_owned();
+    }
+
+    void cleanup_owned() noexcept {
+        if (committed && !finalized && !final_dir.empty()) {
             std::error_code ec;
-            fs::remove_all(temp_dir, ec);   // best-effort
+            fs::remove_all(final_dir, ec);
+            if (ec) {
+                std::cerr << "Warning: could not remove incomplete asset sidecar "
+                          << final_dir << ": " << ec.message() << "\n";
+            }
+            if (!backup_dir.empty()) {
+                ec.clear();
+                fs::rename(backup_dir, final_dir, ec);
+                if (ec) {
+                    std::cerr << "Warning: could not restore previous asset sidecar "
+                              << backup_dir << " → " << final_dir << ": "
+                              << ec.message() << "\n";
+                }
+            }
+            return;
+        }
+        if (cleanup_on_destroy && !temp_dir.empty()) {
+            std::error_code ec;
+            fs::remove_all(temp_dir, ec);
+            if (ec) {
+                std::cerr << "Warning: could not remove temporary import assets "
+                          << temp_dir << ": " << ec.message() << "\n";
+            }
+        }
+        if (finalized && !backup_dir.empty()) {
+            std::error_code ec;
+            fs::remove_all(backup_dir, ec);
+            if (ec) {
+                std::cerr << "Warning: could not remove previous asset sidecar backup "
+                          << backup_dir << ": " << ec.message() << "\n";
+            }
         }
     }
 };
@@ -1041,21 +1102,375 @@ static fs::path make_temp_dir() {
     return dir;
 }
 
+static fs::path make_unique_dir_near(const fs::path& target) {
+    auto parent = target.parent_path();
+    if (parent.empty()) parent = fs::current_path();
+
+    std::error_code ec;
+    fs::create_directories(parent, ec);
+    if (ec) return {};
+
+    auto leaf = target.filename().string();
+    if (leaf.empty() || leaf == "." || leaf == "..")
+        leaf = "pulp-import-design-assets";
+
+    std::random_device rd;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        auto candidate = parent / (leaf + ".tmp-" +
+                                   std::to_string(static_cast<unsigned long>(::pulp_getpid())) +
+                                   "-" +
+                                   std::to_string(static_cast<uint32_t>(rd())));
+        fs::create_directory(candidate, ec);
+        if (!ec) return candidate;
+        if (!fs::exists(candidate)) return {};
+        ec.clear();
+    }
+    return {};
+}
+
+static fs::path make_unique_sibling_path(const fs::path& target,
+                                         const std::string& suffix) {
+    auto parent = target.parent_path();
+    if (parent.empty()) parent = fs::current_path();
+
+    std::error_code ec;
+    fs::create_directories(parent, ec);
+    if (ec) return {};
+
+    auto leaf = target.filename().string();
+    if (leaf.empty() || leaf == "." || leaf == "..")
+        leaf = "pulp-import-design-assets";
+
+    std::random_device rd;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        auto candidate = parent / (leaf + suffix + "-" +
+                                   std::to_string(static_cast<unsigned long>(::pulp_getpid())) +
+                                   "-" +
+                                   std::to_string(static_cast<uint32_t>(rd())));
+        const bool exists = fs::exists(candidate, ec);
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        if (!exists) return candidate;
+        ec.clear();
+    }
+    return {};
+}
+
+static fs::path zip_asset_sidecar_dir_for_output(const std::string& output_file) {
+    fs::path output(output_file.empty() ? "ui.js" : output_file);
+    auto parent = output.parent_path();
+    if (parent.empty()) parent = fs::current_path();
+
+    auto leaf = output.filename().string();
+    if (leaf.empty() || leaf == "." || leaf == "..") leaf = "ui.js";
+    return parent / (leaf + ".assets");
+}
+
+static fs::path zip_asset_sidecar_dir_for_import_output(const std::string& output_file,
+                                                        ArtifactEmit emit) {
+    if (emit == ArtifactEmit::cpp)
+        return zip_asset_sidecar_dir_for_output(resolve_cpp_output_paths(output_file).source.string());
+    return zip_asset_sidecar_dir_for_output(output_file);
+}
+
+static constexpr const char* kZipSidecarMarker = ".pulp-import-design-sidecar-v1";
+
+static bool write_zip_sidecar_marker(const fs::path& dir) {
+    std::ofstream f(dir / kZipSidecarMarker);
+    if (!f.is_open()) return false;
+    f << "managed-by=pulp-import-design\n";
+    f.close();
+    return static_cast<bool>(f);
+}
+
+static bool is_marked_zip_sidecar(const fs::path& dir) {
+    std::error_code ec;
+    return fs::is_directory(dir, ec)
+        && fs::is_regular_file(dir / kZipSidecarMarker, ec);
+}
+
+static bool commit_pulp_zip_sidecar(PulpZipExtraction& extraction) {
+    if (extraction.final_dir.empty() || extraction.committed)
+        return true;
+    if (extraction.scene_rel_path.empty()) {
+        std::cerr << "Error: cannot persist ZIP assets without a scene path\n";
+        return false;
+    }
+    if (!write_zip_sidecar_marker(extraction.temp_dir)) {
+        std::cerr << "Error: could not mark asset sidecar "
+                  << extraction.temp_dir << "\n";
+        return false;
+    }
+
+    std::error_code ec;
+    if (fs::exists(extraction.final_dir, ec)) {
+        if (!is_marked_zip_sidecar(extraction.final_dir)) {
+            std::cerr << "Error: refusing to replace unmarked asset sidecar "
+                      << extraction.final_dir
+                      << ". Remove or rename that directory, or rerun with a different "
+                         "--output path.\n";
+            return false;
+        }
+        extraction.backup_dir = make_unique_sibling_path(extraction.final_dir, ".backup");
+        if (extraction.backup_dir.empty()) {
+            std::cerr << "Error: could not allocate backup path for "
+                      << extraction.final_dir << "\n";
+            return false;
+        }
+        fs::rename(extraction.final_dir, extraction.backup_dir, ec);
+        if (ec) {
+            std::cerr << "Error: could not backup asset sidecar "
+                      << extraction.final_dir << ": " << ec.message() << "\n";
+            extraction.backup_dir.clear();
+            return false;
+        }
+    }
+
+    fs::rename(extraction.temp_dir, extraction.final_dir, ec);
+    if (ec) {
+        std::cerr << "Error: could not move extracted assets to "
+                  << extraction.final_dir << ": " << ec.message() << "\n";
+        if (!extraction.backup_dir.empty()) {
+            std::error_code restore_ec;
+            fs::rename(extraction.backup_dir, extraction.final_dir, restore_ec);
+            if (restore_ec) {
+                std::cerr << "Error: could not restore previous asset sidecar "
+                          << extraction.backup_dir << " → "
+                          << extraction.final_dir << ": "
+                          << restore_ec.message() << "\n";
+            }
+            extraction.backup_dir.clear();
+        }
+        return false;
+    }
+
+    extraction.temp_dir = extraction.final_dir;
+    extraction.scene_json_path = extraction.final_dir / extraction.scene_rel_path;
+    extraction.cleanup_on_destroy = false;
+    extraction.committed = true;
+    return true;
+}
+
+static void finalize_pulp_zip_sidecar(PulpZipExtraction& extraction) {
+    if (extraction.final_dir.empty())
+        return;
+    if (!extraction.backup_dir.empty()) {
+        std::error_code ec;
+        fs::remove_all(extraction.backup_dir, ec);
+        extraction.backup_dir.clear();
+    }
+    extraction.finalized = true;
+    extraction.committed = false;
+    extraction.cleanup_on_destroy = false;
+}
+
+struct StagedTextFile {
+    fs::path final_path;
+    fs::path temp_path;
+    fs::path backup_path;
+    bool installed = false;
+};
+
+static void cleanup_staged_text_file(StagedTextFile& staged) {
+    std::error_code ec;
+    if (!staged.temp_path.empty()) {
+        fs::remove(staged.temp_path, ec);
+        if (ec) {
+            std::cerr << "Warning: could not remove staged output "
+                      << staged.temp_path << ": " << ec.message() << "\n";
+        }
+    }
+}
+
+static void rollback_staged_text_files(std::vector<StagedTextFile>& staged) {
+    for (auto it = staged.rbegin(); it != staged.rend(); ++it) {
+        std::error_code ec;
+        if (it->installed) {
+            fs::remove(it->final_path, ec);
+            if (ec) {
+                std::cerr << "Warning: could not remove incomplete output "
+                          << it->final_path << ": " << ec.message() << "\n";
+            }
+            it->installed = false;
+        }
+        if (!it->backup_path.empty()) {
+            ec.clear();
+            fs::rename(it->backup_path, it->final_path, ec);
+            if (ec) {
+                std::cerr << "Warning: could not restore previous output "
+                          << it->backup_path << " → " << it->final_path
+                          << ": " << ec.message() << "\n";
+            }
+            it->backup_path.clear();
+        }
+        cleanup_staged_text_file(*it);
+    }
+}
+
+static bool stage_text_file(const std::string& path,
+                            const std::string& content,
+                            StagedTextFile& staged) {
+    staged = {};
+    staged.final_path = fs::path(path);
+    if (staged.final_path.empty()) {
+        std::cerr << "Error: cannot write file: empty output path\n";
+        return false;
+    }
+
+    auto parent = staged.final_path.parent_path();
+    if (parent.empty()) parent = fs::current_path();
+
+    std::error_code ec;
+    fs::create_directories(parent, ec);
+    if (ec) {
+        std::cerr << "Error: cannot create parent directory for "
+                  << staged.final_path << ": " << ec.message() << "\n";
+        return false;
+    }
+
+    if (fs::is_directory(staged.final_path, ec)) {
+        std::cerr << "Error: cannot write file over directory: "
+                  << staged.final_path << "\n";
+        return false;
+    }
+    ec.clear();
+
+    staged.temp_path = make_unique_sibling_path(staged.final_path, ".tmp-write");
+    if (staged.temp_path.empty()) {
+        std::cerr << "Error: cannot allocate staged output path for "
+                  << staged.final_path << "\n";
+        return false;
+    }
+
+    std::ofstream f(staged.temp_path, std::ios::binary);
+    if (!f.is_open()) {
+        std::cerr << "Error: cannot write file: " << staged.final_path << "\n";
+        cleanup_staged_text_file(staged);
+        return false;
+    }
+    f << content;
+    f.close();
+    if (!f) {
+        std::cerr << "Error: failed to write file completely: "
+                  << staged.final_path << "\n";
+        cleanup_staged_text_file(staged);
+        return false;
+    }
+    return true;
+}
+
+static bool commit_staged_text_files(std::vector<StagedTextFile>& staged) {
+    std::error_code ec;
+
+    for (auto& file : staged) {
+        if (fs::is_directory(file.final_path, ec)) {
+            std::cerr << "Error: cannot write file over directory: "
+                      << file.final_path << "\n";
+            rollback_staged_text_files(staged);
+            return false;
+        }
+        ec.clear();
+
+        if (fs::exists(file.final_path, ec)) {
+            file.backup_path = make_unique_sibling_path(file.final_path, ".backup-write");
+            if (file.backup_path.empty()) {
+                std::cerr << "Error: cannot allocate backup path for "
+                          << file.final_path << "\n";
+                rollback_staged_text_files(staged);
+                return false;
+            }
+            fs::rename(file.final_path, file.backup_path, ec);
+            if (ec) {
+                std::cerr << "Error: could not backup existing output "
+                          << file.final_path << ": " << ec.message() << "\n";
+                file.backup_path.clear();
+                rollback_staged_text_files(staged);
+                return false;
+            }
+        } else if (ec) {
+            std::cerr << "Error: cannot inspect output path "
+                      << file.final_path << ": " << ec.message() << "\n";
+            rollback_staged_text_files(staged);
+            return false;
+        }
+        ec.clear();
+    }
+
+    for (auto& file : staged) {
+        fs::rename(file.temp_path, file.final_path, ec);
+        if (ec) {
+            std::cerr << "Error: could not install staged output "
+                      << file.final_path << ": " << ec.message() << "\n";
+            rollback_staged_text_files(staged);
+            return false;
+        }
+        file.temp_path.clear();
+        file.installed = true;
+        ec.clear();
+    }
+
+    for (auto& file : staged) {
+        if (!file.backup_path.empty()) {
+            fs::remove(file.backup_path, ec);
+            if (ec) {
+                std::cerr << "Warning: could not remove previous output backup "
+                          << file.backup_path << ": " << ec.message() << "\n";
+            }
+            file.backup_path.clear();
+            ec.clear();
+        }
+    }
+
+    return true;
+}
+
+static bool write_files_atomically(
+    const std::vector<std::pair<std::string, std::string>>& files) {
+    std::vector<StagedTextFile> staged;
+    staged.reserve(files.size());
+    for (const auto& [path, content] : files) {
+        StagedTextFile file;
+        if (!stage_text_file(path, content, file)) {
+            cleanup_staged_text_file(file);
+            rollback_staged_text_files(staged);
+            return false;
+        }
+        staged.push_back(std::move(file));
+    }
+    return commit_staged_text_files(staged);
+}
+
 /// If `input_file` points at a Pulp-flavoured ZIP, extract it to a fresh
-/// temp dir and return the path information. Otherwise return std::nullopt.
+/// temp dir or durable output sidecar and return the path information.
+/// Otherwise return std::nullopt.
 /// On extraction failure the returned PulpZipExtraction.temp_dir is empty
 /// and the caller should fall back to treating input_file as raw JSON
 /// (with a useful error already printed to stderr).
 static std::optional<PulpZipExtraction>
-extract_pulp_zip_if_present(const std::string& input_file) {
+extract_pulp_zip_if_present(const std::string& input_file,
+                            const fs::path& durable_extract_dir = {}) {
     if (!looks_like_pulp_zip(input_file)) return std::nullopt;
 
     PulpZipExtraction out;
-    out.temp_dir = make_temp_dir();
-    if (out.temp_dir.empty()) {
-        std::cerr << "Error: could not create temp directory for "
-                  << input_file << "\n";
-        return out;  // empty temp_dir signals "tried but failed"
+    const bool persist_extraction = !durable_extract_dir.empty();
+    fs::path final_extract_dir;
+    if (persist_extraction) {
+        final_extract_dir = durable_extract_dir;
+        out.temp_dir = make_unique_dir_near(final_extract_dir);
+        if (out.temp_dir.empty()) {
+            std::cerr << "Error: could not create temporary asset sidecar near "
+                      << final_extract_dir << "\n";
+            return out;
+        }
+    } else {
+        out.temp_dir = make_temp_dir();
+        if (out.temp_dir.empty()) {
+            std::cerr << "Error: could not create temp directory for "
+                      << input_file << "\n";
+            return out;  // empty temp_dir signals "tried but failed"
+        }
     }
 
     mz_zip_archive zip{};
@@ -1203,22 +1618,27 @@ extract_pulp_zip_if_present(const std::string& input_file) {
                   << " contains no scene.pulp.json / scene.json / design.json\n";
         return out;
     }
-    out.scene_json_path = scene_candidate;
+
+    if (persist_extraction) {
+        std::error_code ec;
+        const auto rel_scene = fs::relative(scene_candidate, out.temp_dir, ec);
+        if (ec || rel_scene.empty()) {
+            std::cerr << "Error: could not resolve ZIP scene path for "
+                      << scene_candidate << "\n";
+            out.scene_json_path.clear();
+            return out;
+        }
+        out.final_dir = final_extract_dir;
+        out.scene_rel_path = rel_scene;
+        out.scene_json_path = fs::path(scene_candidate);
+    } else {
+        out.scene_json_path = fs::path(scene_candidate);
+    }
     return out;
 }
 
 static bool write_file(const std::string& path, const std::string& content) {
-    // Create parent directories if needed
-    auto parent = fs::path(path).parent_path();
-    if (!parent.empty()) fs::create_directories(parent);
-
-    std::ofstream f(path);
-    if (!f.is_open()) {
-        std::cerr << "Error: cannot write file: " << path << "\n";
-        return false;
-    }
-    f << content;
-    return true;
+    return write_files_atomically({{path, content}});
 }
 
 int main(int argc, char* argv[]) {
@@ -1763,11 +2183,12 @@ int main(int argc, char* argv[]) {
     // If the user passed a .pulp.zip (or any ZIP with a Pulp envelope
     // inside), unpack it transparently so `--file` always behaves the
     // same regardless of whether the plugin shipped a JSON or a bundle.
-    // The PulpZipExtraction RAII guard cleans up the temp dir at scope
-    // exit; we keep it alive for the rest of `main` so asset paths
-    // continue to resolve.
+    // Real output artifacts need durable asset paths, so extract beside
+    // the output file. Dry-run keeps using an RAII temp dir.
     std::optional<PulpZipExtraction> pulp_zip_keepalive;
-    if (auto extracted = extract_pulp_zip_if_present(input_file)) {
+    const fs::path durable_zip_extract_dir =
+        dry_run ? fs::path{} : zip_asset_sidecar_dir_for_import_output(output_file, artifact_emit);
+    if (auto extracted = extract_pulp_zip_if_present(input_file, durable_zip_extract_dir)) {
         if (extracted->scene_json_path.empty()) {
             // Tried to extract but failed; the helper already wrote a
             // useful stderr line and we should not silently fall back to
@@ -1775,7 +2196,10 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cout << "Unpacked " << input_file << " → "
-                  << extracted->temp_dir << "\n";
+                  << extracted->temp_dir;
+        if (!extracted->final_dir.empty())
+            std::cout << " (assets staged for generated output)";
+        std::cout << "\n";
         input_file = extracted->scene_json_path.string();
         pulp_zip_keepalive = std::move(*extracted);
     }
@@ -1810,6 +2234,7 @@ int main(int argc, char* argv[]) {
         if (runtime_mode == RuntimeMode::baked &&
             (artifact_emit == ArtifactEmit::ir_json || artifact_emit == ArtifactEmit::cpp ||
              artifact_emit == ArtifactEmit::swiftui) &&
+            !looks_like_figma_plugin_export(content) &&
             looks_like_serialized_design_ir(content)) {
             ir = parse_design_ir_json(content);
             parsed_serialized_design_ir = true;
@@ -1950,6 +2375,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (pulp_zip_keepalive && !pulp_zip_keepalive->final_dir.empty()) {
+        if (!commit_pulp_zip_sidecar(*pulp_zip_keepalive)) return 1;
+        input_file = pulp_zip_keepalive->scene_json_path.string();
+        std::cout << "Persisted ZIP assets → " << pulp_zip_keepalive->final_dir << "\n";
+    }
+
     if (execute_bundle && !runtime_error.empty()) {
         // Surface the harness-fallback reason so users can tell when the
         // bundle eval lane bailed out vs. produced a real materialized IR.
@@ -1991,6 +2422,7 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         if (!write_file(output_file, ir_json)) return 1;
+        if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
         std::cout << "Wrote " << output_file << " (DesignIR v1, "
                   << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s")
@@ -2008,6 +2440,10 @@ int main(int argc, char* argv[]) {
         refresh_design_ir_asset_manifest(ir, asset_options);
         print_asset_manifest_diagnostics(ir.asset_manifest);
         if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+        enrich_imported_image_asset_metadata(
+            ir,
+            ir.asset_manifest,
+            asset_options.base_directory.string());
 
         const auto paths = resolve_cpp_output_paths(output_file);
         CppExportOptions cpp_opts;
@@ -2027,9 +2463,14 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        if (!write_file(paths.header.string(), cpp.header)) return 1;
-        if (!write_file(paths.source.string(), cpp.source)) return 1;
-        if (!write_file(paths.binding_manifest.string(), cpp.binding_manifest)) return 1;
+        if (!write_files_atomically({
+                {paths.header.string(), cpp.header},
+                {paths.source.string(), cpp.source},
+                {paths.binding_manifest.string(), cpp.binding_manifest},
+            })) {
+            return 1;
+        }
+        if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
 
         const auto counts = count_design_ir_elements(ir.root);
 
@@ -2517,6 +2958,7 @@ int main(int argc, char* argv[]) {
                  << "}\n";
             (void)write_file(meta_path.string(), meta.str());
         }
+        if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     }
 
     // Count elements by type
@@ -2814,6 +3256,7 @@ int main(int argc, char* argv[]) {
 
     // --strict-fidelity: a self-check finding fails the import (distinct exit
     // code so callers/harness can tell it apart from a parse/IO error).
+    if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     if (fidelity_failed) return 4;
     return 0;
 }
