@@ -171,6 +171,32 @@ function __installNativeGpuCommandAugmentation() {
                     continue;
                 }
 
+                if (resource && resource._objectName === "GPUTextureView" &&
+                    resource.texture && resource.texture._bytes) {
+                    serializedEntries.push({
+                        binding: binding,
+                        visibility: visibility,
+                        resourceType: "textureView",
+                        format: resource.format || (resource.texture && resource.texture.format) || null,
+                        dimension: resource.dimension || "2d",
+                        aspect: resource.aspect || "all",
+                        baseMipLevel: resource.baseMipLevel == null ? 0 : resource.baseMipLevel,
+                        mipLevelCount: resource.mipLevelCount == null ? 1 : resource.mipLevelCount,
+                        baseArrayLayer: resource.baseArrayLayer == null ? 0 : resource.baseArrayLayer,
+                        arrayLayerCount: resource.arrayLayerCount == null ? 1 : resource.arrayLayerCount,
+                        width: resource.texture.width || 1,
+                        height: resource.texture.height || 1,
+                        depthOrArrayLayers: resource.texture.depthOrArrayLayers || 1,
+                        usage: resource.texture.usage || 0,
+                        sampleCount: resource.texture.sampleCount || 1,
+                        textureMipLevelCount: resource.texture.mipLevelCount || 1,
+                        bytesPerRow: resource.texture._bytesPerRow || 0,
+                        rowsPerImage: resource.texture._rowsPerImage || resource.texture.height || 1,
+                        data: Array.from(resource.texture._bytes)
+                    });
+                    continue;
+                }
+
                 return null;
             }
 

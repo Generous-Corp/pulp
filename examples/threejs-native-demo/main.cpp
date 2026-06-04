@@ -1,4 +1,6 @@
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/headless_surface.hpp>
+#include <pulp/render/skia_surface.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -9,6 +11,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/window_host.hpp>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +23,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 #if defined(_WIN32)
 #include <winsock2.h>
 #else
@@ -40,7 +44,8 @@ enum class DemoMode {
     spectrum,
     particles,
     ribbon,
-    reverb
+    reverb,
+    gltf_box
 };
 
 std::string read_text_file(const std::filesystem::path& path) {
@@ -64,6 +69,15 @@ std::optional<std::string> resolve_threejs_module(std::string_view path) {
     }
     if (path == "three/addons/controls/OrbitControls.js") {
         return read_text_file(root / "examples" / "jsm" / "controls" / "OrbitControls.js");
+    }
+    if (path == "three/addons/loaders/GLTFLoader.js") {
+        return read_text_file(root / "examples" / "jsm" / "loaders" / "GLTFLoader.js");
+    }
+    if (path == "../utils/BufferGeometryUtils.js" || path == "three/addons/utils/BufferGeometryUtils.js") {
+        return read_text_file(root / "examples" / "jsm" / "utils" / "BufferGeometryUtils.js");
+    }
+    if (path == "../utils/SkeletonUtils.js" || path == "three/addons/utils/SkeletonUtils.js") {
+        return read_text_file(root / "examples" / "jsm" / "utils" / "SkeletonUtils.js");
     }
     return std::nullopt;
 }
@@ -91,8 +105,136 @@ std::string demo_mode_name(DemoMode mode) {
         case DemoMode::particles: return "particles";
         case DemoMode::ribbon: return "ribbon";
         case DemoMode::reverb: return "reverb";
+        case DemoMode::gltf_box: return "gltf-box";
     }
     return "cube";
+}
+
+std::string js_single_quoted_string(std::string value) {
+    std::string out;
+    out.reserve(value.size() + 2);
+    for (char c : value) {
+        if (c == '\\' || c == '\'') {
+            out.push_back('\\');
+            out.push_back(c);
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\r') {
+            out += "\\r";
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+std::vector<uint8_t> make_textured_box_glb() {
+    struct Vertex {
+        float px, py, pz;
+        float nx, ny, nz;
+        float u, v;
+    };
+
+    const std::array<Vertex, 24> vertices = {{
+        {-0.5f, -0.5f,  0.5f,  0,  0,  1, 0, 0}, { 0.5f, -0.5f,  0.5f,  0,  0,  1, 1, 0}, { 0.5f,  0.5f,  0.5f,  0,  0,  1, 1, 1}, {-0.5f,  0.5f,  0.5f,  0,  0,  1, 0, 1},
+        { 0.5f, -0.5f, -0.5f,  0,  0, -1, 0, 0}, {-0.5f, -0.5f, -0.5f,  0,  0, -1, 1, 0}, {-0.5f,  0.5f, -0.5f,  0,  0, -1, 1, 1}, { 0.5f,  0.5f, -0.5f,  0,  0, -1, 0, 1},
+        {-0.5f, -0.5f, -0.5f, -1,  0,  0, 0, 0}, {-0.5f, -0.5f,  0.5f, -1,  0,  0, 1, 0}, {-0.5f,  0.5f,  0.5f, -1,  0,  0, 1, 1}, {-0.5f,  0.5f, -0.5f, -1,  0,  0, 0, 1},
+        { 0.5f, -0.5f,  0.5f,  1,  0,  0, 0, 0}, { 0.5f, -0.5f, -0.5f,  1,  0,  0, 1, 0}, { 0.5f,  0.5f, -0.5f,  1,  0,  0, 1, 1}, { 0.5f,  0.5f,  0.5f,  1,  0,  0, 0, 1},
+        {-0.5f,  0.5f,  0.5f,  0,  1,  0, 0, 0}, { 0.5f,  0.5f,  0.5f,  0,  1,  0, 1, 0}, { 0.5f,  0.5f, -0.5f,  0,  1,  0, 1, 1}, {-0.5f,  0.5f, -0.5f,  0,  1,  0, 0, 1},
+        {-0.5f, -0.5f, -0.5f,  0, -1,  0, 0, 0}, { 0.5f, -0.5f, -0.5f,  0, -1,  0, 1, 0}, { 0.5f, -0.5f,  0.5f,  0, -1,  0, 1, 1}, {-0.5f, -0.5f,  0.5f,  0, -1,  0, 0, 1}
+    }};
+    const std::array<uint16_t, 36> indices = {{
+        0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11,
+        12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23
+    }};
+
+    std::vector<uint8_t> bin;
+    auto append_float = [&](float value) {
+        uint32_t bits = 0;
+        static_assert(sizeof(bits) == sizeof(value));
+        std::memcpy(&bits, &value, sizeof(value));
+        bin.push_back(static_cast<uint8_t>(bits & 0xff));
+        bin.push_back(static_cast<uint8_t>((bits >> 8) & 0xff));
+        bin.push_back(static_cast<uint8_t>((bits >> 16) & 0xff));
+        bin.push_back(static_cast<uint8_t>((bits >> 24) & 0xff));
+    };
+    auto append_u16 = [&](uint16_t value) {
+        bin.push_back(static_cast<uint8_t>(value & 0xff));
+        bin.push_back(static_cast<uint8_t>((value >> 8) & 0xff));
+    };
+
+    const uint32_t position_offset = static_cast<uint32_t>(bin.size());
+    for (const auto& v : vertices) {
+        append_float(v.px); append_float(v.py); append_float(v.pz);
+    }
+    const uint32_t normal_offset = static_cast<uint32_t>(bin.size());
+    for (const auto& v : vertices) {
+        append_float(v.nx); append_float(v.ny); append_float(v.nz);
+    }
+    const uint32_t uv_offset = static_cast<uint32_t>(bin.size());
+    for (const auto& v : vertices) {
+        append_float(v.u); append_float(v.v);
+    }
+    const uint32_t index_offset = static_cast<uint32_t>(bin.size());
+    for (auto index : indices) {
+        append_u16(index);
+    }
+
+    const char* texture_png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR42mP4Yh/33+TyzP8MIALEAQBa+Qpfg6yfXgAAAABJRU5ErkJggg==";
+    std::ostringstream json;
+    json
+        << "{\"asset\":{\"version\":\"2.0\",\"generator\":\"pulp-threejs-native-demo\"},"
+        << "\"scene\":0,\"scenes\":[{\"nodes\":[0]}],"
+        << "\"nodes\":[{\"mesh\":0,\"name\":\"BoxTextured\"}],"
+        << "\"meshes\":[{\"name\":\"BoxTextured\",\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":3,\"material\":0}]}],"
+        << "\"materials\":[{\"name\":\"PulpTextureMaterial\",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0},\"metallicFactor\":0,\"roughnessFactor\":0.7}}],"
+        << "\"textures\":[{\"sampler\":0,\"source\":0}],\"samplers\":[{\"magFilter\":9728,\"minFilter\":9728,\"wrapS\":10497,\"wrapT\":10497}],"
+        << "\"images\":[{\"mimeType\":\"image/png\",\"uri\":\"data:image/png;base64," << texture_png << "\"}],"
+        << "\"buffers\":[{\"byteLength\":" << bin.size() << "}],"
+        << "\"bufferViews\":["
+        << "{\"buffer\":0,\"byteOffset\":" << position_offset << ",\"byteLength\":" << (vertices.size() * 3 * sizeof(float)) << ",\"target\":34962},"
+        << "{\"buffer\":0,\"byteOffset\":" << normal_offset << ",\"byteLength\":" << (vertices.size() * 3 * sizeof(float)) << ",\"target\":34962},"
+        << "{\"buffer\":0,\"byteOffset\":" << uv_offset << ",\"byteLength\":" << (vertices.size() * 2 * sizeof(float)) << ",\"target\":34962},"
+        << "{\"buffer\":0,\"byteOffset\":" << index_offset << ",\"byteLength\":" << (indices.size() * sizeof(uint16_t)) << ",\"target\":34963}],"
+        << "\"accessors\":["
+        << "{\"bufferView\":0,\"componentType\":5126,\"count\":24,\"type\":\"VEC3\",\"min\":[-0.5,-0.5,-0.5],\"max\":[0.5,0.5,0.5]},"
+        << "{\"bufferView\":1,\"componentType\":5126,\"count\":24,\"type\":\"VEC3\"},"
+        << "{\"bufferView\":2,\"componentType\":5126,\"count\":24,\"type\":\"VEC2\"},"
+        << "{\"bufferView\":3,\"componentType\":5123,\"count\":36,\"type\":\"SCALAR\"}]}";
+
+    std::string json_text = json.str();
+    while ((json_text.size() % 4) != 0) json_text.push_back(' ');
+    while ((bin.size() % 4) != 0) bin.push_back(0);
+
+    const uint32_t total_length = static_cast<uint32_t>(12 + 8 + json_text.size() + 8 + bin.size());
+    std::vector<uint8_t> out;
+    out.reserve(total_length);
+    auto append_u32 = [&](uint32_t value) {
+        out.push_back(static_cast<uint8_t>(value & 0xff));
+        out.push_back(static_cast<uint8_t>((value >> 8) & 0xff));
+        out.push_back(static_cast<uint8_t>((value >> 16) & 0xff));
+        out.push_back(static_cast<uint8_t>((value >> 24) & 0xff));
+    };
+    append_u32(0x46546c67);
+    append_u32(2);
+    append_u32(total_length);
+    append_u32(static_cast<uint32_t>(json_text.size()));
+    append_u32(0x4e4f534a);
+    out.insert(out.end(), json_text.begin(), json_text.end());
+    append_u32(static_cast<uint32_t>(bin.size()));
+    append_u32(0x004e4942);
+    out.insert(out.end(), bin.begin(), bin.end());
+    return out;
+}
+
+std::string ensure_gltf_box_asset_url() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pulp-threejs-native-demo" / "BoxTextured.glb";
+    std::filesystem::create_directories(path.parent_path());
+    write_binary_file(path, make_textured_box_glb());
+    const auto generic = path.generic_string();
+    return std::string("file://") + (generic.empty() || generic.front() == '/' ? "" : "/") + generic;
 }
 
 struct SyntheticSpectrumSource {
@@ -284,7 +426,8 @@ struct DemoEnvironment {
 };
 
 std::string make_threejs_demo_module(int width, int height, DemoMode mode,
-                                      int particle_count = 480) {
+                                      int particle_count = 480,
+                                      const std::string& gltf_box_url = "") {
     // Load JS module from template file to avoid MSVC 16KB string literal limit
     namespace fs = std::filesystem;
     fs::path template_path = fs::path(__FILE__).parent_path() / "demo.js.template";
@@ -308,6 +451,7 @@ std::string make_threejs_demo_module(int width, int height, DemoMode mode,
     replace_all("__HEIGHT__", std::to_string(height));
     replace_all("__MODE__", demo_mode_name(mode));
     replace_all("__PARTICLE_COUNT__", std::to_string(std::max(1, particle_count)));
+    replace_all("__GLTF_BOX_URL__", js_single_quoted_string(gltf_box_url));
 
     return js;
 }
@@ -1321,6 +1465,69 @@ void prime_demo_frames(DemoEnvironment& env, int frames) {
     }
 }
 
+std::vector<uint8_t> capture_demo_offscreen_png(DemoEnvironment& env,
+                                                int width,
+                                                int height,
+                                                std::string& error_out) {
+    if (!env.gpu_surface) {
+        error_out = "Offscreen capture has no GPU surface";
+        return {};
+    }
+
+    auto skia = pulp::render::SkiaSurface::create(*env.gpu_surface, {
+        .width = static_cast<uint32_t>(std::max(1, width)),
+        .height = static_cast<uint32_t>(std::max(1, height)),
+        .scale_factor = 2.0f
+    });
+    if (!skia || !skia->is_available()) {
+        error_out = "Offscreen capture Skia surface unavailable";
+        return {};
+    }
+
+    if (!env.gpu_surface->begin_frame()) {
+        error_out = "Offscreen capture GpuSurface::begin_frame failed";
+        return {};
+    }
+
+    auto* canvas = skia->begin_frame();
+    if (!canvas) {
+        env.gpu_surface->end_frame();
+        error_out = "Offscreen capture SkiaSurface::begin_frame failed";
+        return {};
+    }
+
+    env.root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+    env.root.layout_children();
+    canvas->set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
+    canvas->fill_rect(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
+    env.root.paint_all(*canvas);
+    pulp::view::View::paint_overlays(*canvas, &env.root);
+
+    skia->end_frame();
+
+    std::vector<uint8_t> pixels;
+    uint32_t pixel_width = 0;
+    uint32_t pixel_height = 0;
+    const bool read = skia->read_current_rgba(pixels, pixel_width, pixel_height);
+    env.gpu_surface->end_frame();
+
+    if (!read) {
+        error_out = "Offscreen capture read_current_rgba failed";
+        return {};
+    }
+
+    pulp::render::HeadlessSurface::Rgba rgba;
+    rgba.pixels = std::move(pixels);
+    rgba.width = pixel_width;
+    rgba.height = pixel_height;
+    std::string encode_error;
+    auto png = pulp::render::HeadlessSurface::encode_png(rgba, &encode_error);
+    if (png.empty()) {
+        error_out = encode_error.empty() ? "Offscreen capture PNG encode failed" : encode_error;
+    }
+    return png;
+}
+
 #ifdef PULP_BENCHMARK
 
 // ── Zero-copy benchmark mode (Slice 0.5 of #516) ────────────────────────────
@@ -1576,6 +1783,42 @@ int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
 
     const int width = 820;
     const int height = 560;
+    const auto gltf_box_url = mode == DemoMode::gltf_box ? ensure_gltf_box_asset_url() : std::string();
+
+    if (capture_path) {
+        DemoEnvironment env(static_cast<float>(width), static_cast<float>(height));
+        env.initialize_offscreen_gpu(static_cast<float>(width), static_cast<float>(height));
+        if (!env.has_native_gpu()) {
+            std::cerr << "Native Dawn adapter unavailable on this host/backend\n";
+            return 1;
+        }
+
+        if (mode != DemoMode::cube && mode != DemoMode::gltf_box) {
+            env.enable_audio_source(mode == DemoMode::reverb);
+        }
+
+        std::string error;
+        if (!load_demo(env, width, height, mode, error, particle_count, gltf_box_url)) {
+            std::cerr << error << "\n";
+            return 1;
+        }
+
+        prime_demo_frames(env, mode == DemoMode::cube ? 4 : 10);
+        env.root.layout_children();
+        std::cout << "Three.js native demo ready (" << demo_mode_name(mode) << "): "
+                  << eval_string(env.engine, "JSON.stringify(globalThis.__pulpThreeDemoState)") << "\n";
+
+        std::string capture_error;
+        const auto png = capture_demo_offscreen_png(env, width, height, capture_error);
+        if (png.empty()) {
+            std::cerr << (capture_error.empty() ? "Demo capture failed" : capture_error) << "\n";
+            return 1;
+        }
+        write_binary_file(*capture_path, png);
+        std::cout << "Captured demo frame: " << capture_path->string() << "\n";
+        return 0;
+    }
+
     DemoEnvironment env(static_cast<float>(width), static_cast<float>(height));
     env.initialize_offscreen_gpu(static_cast<float>(width), static_cast<float>(height));
     if (!env.has_native_gpu()) {
@@ -1739,13 +1982,14 @@ int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
 #endif  // PULP_BENCHMARK
 
 bool load_demo(DemoEnvironment& env, int width, int height, DemoMode mode,
-               std::string& error_out, int particle_count) {
+               std::string& error_out, int particle_count,
+               const std::string& gltf_box_url) {
     env.bridge->load_script("");
 
     bool module_completed = false;
     std::string module_error;
     env.engine.run_module(
-        make_threejs_demo_module(width, height, mode, particle_count),
+        make_threejs_demo_module(width, height, mode, particle_count, gltf_box_url),
         resolve_threejs_module,
         [&](const std::string& error, const choc::value::Value&) {
             module_completed = true;
@@ -1843,6 +2087,8 @@ int main(int argc, char* argv[]) {
                 mode = DemoMode::ribbon;
             } else if (value == "reverb") {
                 mode = DemoMode::reverb;
+            } else if (value == "gltf-box") {
+                mode = DemoMode::gltf_box;
             } else {
                 std::cerr << "Unknown demo mode: " << value << "\n";
                 return 1;
@@ -1888,6 +2134,42 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    const auto gltf_box_url = mode == DemoMode::gltf_box ? ensure_gltf_box_asset_url() : std::string();
+
+    if (capture_path) {
+        DemoEnvironment capture_env(static_cast<float>(width), static_cast<float>(height));
+        capture_env.initialize_offscreen_gpu(static_cast<float>(width), static_cast<float>(height));
+        if (!capture_env.has_native_gpu()) {
+            std::cerr << "Native Dawn adapter unavailable on this host/backend\n";
+            return 1;
+        }
+
+        if (mode != DemoMode::cube && mode != DemoMode::gltf_box) {
+            capture_env.enable_audio_source(mode == DemoMode::reverb);
+        }
+
+        std::string error;
+        if (!load_demo(capture_env, width, height, mode, error, particle_count, gltf_box_url)) {
+            std::cerr << error << "\n";
+            return 1;
+        }
+
+        prime_demo_frames(capture_env, mode == DemoMode::cube ? 4 : 10);
+        capture_env.root.layout_children();
+        std::cout << "Three.js native demo ready (" << demo_mode_name(mode) << "): "
+                  << eval_string(capture_env.engine, "JSON.stringify(globalThis.__pulpThreeDemoState)") << "\n";
+
+        std::string capture_error;
+        const auto png = capture_demo_offscreen_png(capture_env, width, height, capture_error);
+        if (png.empty()) {
+            std::cerr << (capture_error.empty() ? "Demo capture failed" : capture_error) << "\n";
+            return 1;
+        }
+        write_binary_file(*capture_path, png);
+        std::cout << "Captured demo frame: " << capture_path->string() << "\n";
+        return 0;
+    }
+
     DemoEnvironment env(static_cast<float>(width), static_cast<float>(height));
 
     WindowOptions opts;
@@ -1912,7 +2194,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (mode != DemoMode::cube) {
+    if (mode != DemoMode::cube && mode != DemoMode::gltf_box) {
         env.enable_audio_source(mode == DemoMode::reverb);
     }
 
@@ -1929,7 +2211,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::string error;
-    if (!load_demo(env, width, height, mode, error, particle_count)) {
+    if (!load_demo(env, width, height, mode, error, particle_count, gltf_box_url)) {
         std::cerr << error << "\n";
         return 1;
     }

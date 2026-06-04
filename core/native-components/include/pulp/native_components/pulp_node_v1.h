@@ -44,6 +44,10 @@
 extern "C" {
 #endif
 
+#ifndef PULP_NODE_V1_EXPORT
+#define PULP_NODE_V1_EXPORT
+#endif
+
 /* ───────────────────────── ABI version ───────────────────────── */
 
 #define PULP_NODE_V1_ABI_MAJOR 1u
@@ -197,7 +201,7 @@ typedef struct pulp_node_entry_v1 {
  * The ONE exported symbol. A node binary defines it; the host resolves it,
  * checks abi_major + size, and refuses on mismatch. Referencing the symbol
  * directly lets a static node link without --whole-archive. */
-const pulp_node_entry_v1* pulp_node_v1_entry(void);
+PULP_NODE_V1_EXPORT const pulp_node_entry_v1* pulp_node_v1_entry(void);
 
 /* Convenience: the ABI major the host was built against. A node can compare
  * against the entry it returns; the host compares against the node's. */

@@ -230,6 +230,31 @@ translation unit with any Skia/Dawn header.
 
 ## Gotchas
 
+### Three.js V8 builds must pin a compatible Node/V8 dylib
+
+The native Three.js bridge needs V8, but the exact Node/V8 ABI matters. On
+macOS, prefer Homebrew `node@24` and pass all three CMake paths explicitly:
+
+```bash
+cmake -S . -B build-threejs-runtime-node24 -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_JS_ENGINE=v8 \
+  -DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/include/node \
+  -DV8_LIB_DIR=/opt/homebrew/opt/node@24/lib \
+  -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib \
+  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+```
+
+Do not trust an old build directory just because CMake says V8 is enabled.
+Check the linked dylib with:
+
+```bash
+otool -L build-threejs-runtime-node24/test/web-compat/pulp-test-threejs-bridge | grep libnode
+```
+
+If it reports unversioned Homebrew `node` / `libnode.147.dylib`, Three.js
+tests can compile but abort inside embedded V8 during runtime evaluation.
+Reconfigure a clean Release build against `node@24` before debugging source.
+
 ### Web-API global registration is hybrid native+JS by design (#915)
 
 CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).

@@ -97,6 +97,9 @@ of axes and the mechanism that populates them lives in `codecov.yml`
 at the repo root; the dashboard is the source of truth for the current
 set of names. Subsystem / platform / surface slicing happens via the
 `component_management` block (path-globbed from a single upload).
+Every top-level `core/*` subsystem must also have a matching Codecov
+component and carry-forward flag so the dashboard axes stay aligned
+with the live source tree.
 Per-OS slicing happens via upload flags — one upload per operating
 system in the matrix. First-party non-core surfaces are represented as
 their own components too; for example, `inspect/**` appears under the

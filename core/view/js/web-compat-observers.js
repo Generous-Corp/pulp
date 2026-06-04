@@ -16,10 +16,12 @@
         // Constructor accepts (callback) per spec; we ignore it because we
         // never actually trigger observation events.
     }
-    NoOpObserver.prototype.observe = function () {};
-    NoOpObserver.prototype.unobserve = function () {};
-    NoOpObserver.prototype.disconnect = function () {};
-    NoOpObserver.prototype.takeRecords = function () { return []; };
+    Object.defineProperties(NoOpObserver.prototype, {
+        observe: { value: function () {}, configurable: true, writable: true },
+        unobserve: { value: function () {}, configurable: true, writable: true },
+        disconnect: { value: function () {}, configurable: true, writable: true },
+        takeRecords: { value: function () { return []; }, configurable: true, writable: true }
+    });
 
     function defineGlobalIfMissing(name, value) {
         if (typeof globalThis[name] === "undefined") {
@@ -32,10 +34,12 @@
     // checks don't cross-pollute.
     function makeObserverCtor() {
         function Ctor(cb) { this._cb = cb; }
-        Ctor.prototype.observe = NoOpObserver.prototype.observe;
-        Ctor.prototype.unobserve = NoOpObserver.prototype.unobserve;
-        Ctor.prototype.disconnect = NoOpObserver.prototype.disconnect;
-        Ctor.prototype.takeRecords = NoOpObserver.prototype.takeRecords;
+        Object.defineProperties(Ctor.prototype, {
+            observe: { value: NoOpObserver.prototype.observe, configurable: true, writable: true },
+            unobserve: { value: NoOpObserver.prototype.unobserve, configurable: true, writable: true },
+            disconnect: { value: NoOpObserver.prototype.disconnect, configurable: true, writable: true },
+            takeRecords: { value: NoOpObserver.prototype.takeRecords, configurable: true, writable: true }
+        });
         return Ctor;
     }
 
@@ -43,6 +47,102 @@
     defineGlobalIfMissing("IntersectionObserver", makeObserverCtor());
     defineGlobalIfMissing("ResizeObserver", makeObserverCtor());
     defineGlobalIfMissing("PerformanceObserver", makeObserverCtor());
+
+    if (typeof globalThis.AbortController === "undefined" || typeof globalThis.AbortSignal === "undefined") {
+        function AbortSignal() {
+            this.aborted = false;
+            this.reason = undefined;
+            this.onabort = null;
+            this._listeners = [];
+        }
+
+        Object.defineProperties(AbortSignal.prototype, {
+            addEventListener: {
+                value: function (type, listener) {
+                    if (type === "abort" && typeof listener === "function") {
+                        this._listeners.push(listener);
+                    }
+                },
+                configurable: true,
+                writable: true
+            },
+            removeEventListener: {
+                value: function (type, listener) {
+                    if (type !== "abort") return;
+                    this._listeners = this._listeners.filter(function (fn) { return fn !== listener; });
+                },
+                configurable: true,
+                writable: true
+            },
+            dispatchEvent: {
+                value: function (event) {
+                    var type = event && event.type ? event.type : "";
+                    if (type !== "abort") return true;
+                    var listeners = this._listeners.slice();
+                    for (var i = 0; i < listeners.length; ++i) {
+                        listeners[i].call(this, event);
+                    }
+                    if (typeof this.onabort === "function") {
+                        this.onabort.call(this, event);
+                    }
+                    return true;
+                },
+                configurable: true,
+                writable: true
+            },
+            throwIfAborted: {
+                value: function () {
+                    if (this.aborted) {
+                        throw (this.reason || new Error("The operation was aborted"));
+                    }
+                },
+                configurable: true,
+                writable: true
+            }
+        });
+
+        AbortSignal.abort = function (reason) {
+            var signal = new AbortSignal();
+            signal.aborted = true;
+            signal.reason = reason || new Error("The operation was aborted");
+            return signal;
+        };
+        AbortSignal.any = function (signals) {
+            var controller = new AbortController();
+            for (var i = 0; signals && i < signals.length; ++i) {
+                var signal = signals[i];
+                if (!signal) continue;
+                if (signal.aborted) {
+                    controller.abort(signal.reason);
+                    break;
+                }
+                signal.addEventListener("abort", function (event) {
+                    controller.abort(event && event.target ? event.target.reason : undefined);
+                });
+            }
+            return controller.signal;
+        };
+
+        function AbortController() {
+            this.signal = new AbortSignal();
+        }
+
+        Object.defineProperties(AbortController.prototype, {
+            abort: {
+                value: function (reason) {
+                    if (this.signal.aborted) return;
+                    this.signal.aborted = true;
+                    this.signal.reason = reason || new Error("The operation was aborted");
+                    this.signal.dispatchEvent({ type: "abort", target: this.signal });
+                },
+                configurable: true,
+                writable: true
+            }
+        });
+
+        defineGlobalIfMissing("AbortSignal", AbortSignal);
+        defineGlobalIfMissing("AbortController", AbortController);
+    }
 
     // ── XMLHttpRequest stub ──────────────────────────────────────────────
     // React dev mode reads `typeof XMLHttpRequest === 'function'` while
@@ -61,14 +161,16 @@
         XMLHttpRequest.HEADERS_RECEIVED = 2;
         XMLHttpRequest.LOADING = 3;
         XMLHttpRequest.DONE = 4;
-        XMLHttpRequest.prototype.open = function () {};
-        XMLHttpRequest.prototype.send = function () {};
-        XMLHttpRequest.prototype.abort = function () {};
-        XMLHttpRequest.prototype.setRequestHeader = function () {};
-        XMLHttpRequest.prototype.getResponseHeader = function () { return null; };
-        XMLHttpRequest.prototype.getAllResponseHeaders = function () { return ""; };
-        XMLHttpRequest.prototype.addEventListener = function () {};
-        XMLHttpRequest.prototype.removeEventListener = function () {};
+        Object.defineProperties(XMLHttpRequest.prototype, {
+            open: { value: function () {}, configurable: true, writable: true },
+            send: { value: function () {}, configurable: true, writable: true },
+            abort: { value: function () {}, configurable: true, writable: true },
+            setRequestHeader: { value: function () {}, configurable: true, writable: true },
+            getResponseHeader: { value: function () { return null; }, configurable: true, writable: true },
+            getAllResponseHeaders: { value: function () { return ""; }, configurable: true, writable: true },
+            addEventListener: { value: function () {}, configurable: true, writable: true },
+            removeEventListener: { value: function () {}, configurable: true, writable: true }
+        });
         globalThis.XMLHttpRequest = XMLHttpRequest;
     }
 
@@ -103,10 +205,18 @@
             });
         }
         if (typeof Element.prototype.scrollTo !== "function") {
-            Element.prototype.scrollTo = function () {};
+            Object.defineProperty(Element.prototype, "scrollTo", {
+                value: function () {},
+                configurable: true,
+                writable: true
+            });
         }
         if (typeof Element.prototype.scrollIntoView !== "function") {
-            Element.prototype.scrollIntoView = function () {};
+            Object.defineProperty(Element.prototype, "scrollIntoView", {
+                value: function () {},
+                configurable: true,
+                writable: true
+            });
         }
     }
 })();

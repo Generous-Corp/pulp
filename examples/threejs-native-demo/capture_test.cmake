@@ -1,9 +1,10 @@
-# CTest helper for #542: run pulp-threejs-native-demo --demo cube --capture
+# CTest helper for #542: run pulp-threejs-native-demo --demo <mode> --capture
 # and verify the process exits bounded (not hanging at status: 'starting').
 #
 # Inputs (set via -D):
 #   DEMO_BIN      : path to the built pulp-threejs-native-demo binary
 #   CAPTURE_PATH  : path where the demo should write the PNG
+#   DEMO_MODE     : optional demo mode, defaults to cube
 #
 # Pass criteria:
 #   - Binary exits within the test TIMEOUT (CTest enforces 30s externally).
@@ -20,6 +21,9 @@ endif()
 if(NOT DEFINED CAPTURE_PATH)
     message(FATAL_ERROR "capture_test.cmake: CAPTURE_PATH not set")
 endif()
+if(NOT DEFINED DEMO_MODE)
+    set(DEMO_MODE "cube")
+endif()
 
 # Clean stale capture from previous runs so a success/failure signal is real.
 if(EXISTS "${CAPTURE_PATH}")
@@ -29,7 +33,7 @@ endif()
 # Run the demo. TIMEOUT here is a belt-and-braces guard; the outer
 # set_tests_properties TIMEOUT is the authoritative hang detector.
 execute_process(
-    COMMAND "${DEMO_BIN}" --demo cube --capture "${CAPTURE_PATH}"
+    COMMAND "${DEMO_BIN}" --demo "${DEMO_MODE}" --capture "${CAPTURE_PATH}"
     TIMEOUT 20
     RESULT_VARIABLE demo_result
     OUTPUT_VARIABLE demo_stdout
@@ -44,7 +48,7 @@ endif()
 # A string/integer RESULT_VARIABLE means timeout or signal — that IS the hang.
 if(NOT demo_result MATCHES "^-?[0-9]+$")
     message(FATAL_ERROR
-        "#542 regression: pulp-threejs-native-demo --demo cube --capture "
+        "#542 regression: pulp-threejs-native-demo --demo ${DEMO_MODE} --capture "
         "did not exit within the bounded timeout (result='${demo_result}').")
 endif()
 
@@ -75,4 +79,4 @@ if(capture_size LESS 64)
         "Capture PNG is suspiciously small (${capture_size} bytes): ${CAPTURE_PATH}")
 endif()
 
-message(STATUS "threejs_native_demo_capture_no_hang: OK (${capture_size} bytes)")
+message(STATUS "threejs_native_demo_capture_no_hang (${DEMO_MODE}): OK (${capture_size} bytes)")

@@ -100,6 +100,7 @@ public:
         if (!recorder_ || !context_) return nullptr;
 
         SkCanvas* sk_canvas = nullptr;
+        frame_surface_.reset();
 
         if (gpu_.has_surface()) {
             // On-screen path: wrap the current presentable texture from GpuSurface.
@@ -156,7 +157,6 @@ public:
 
     void end_frame() override {
         canvas_.reset();
-        frame_surface_.reset();  // release per-frame wrapped surface
 
         if (!recorder_ || !context_) return;
 
@@ -183,6 +183,9 @@ public:
         }
 
         // GpuSurface::end_frame() handles the actual present call.
+        // Keep frame_surface_ alive until the next begin_frame() so callers
+        // can perform deterministic post-submit readback of the presentable
+        // texture before it is presented/replaced.
     }
 
     void resize(uint32_t width, uint32_t height, float scale) override {

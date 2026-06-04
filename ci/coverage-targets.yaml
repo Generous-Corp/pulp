@@ -52,6 +52,7 @@ tiers:
       - core/format/**
       - core/host/**
       - core/midi/**
+      - core/native-components/**
       - core/signal/**
       - core/platform/**
 

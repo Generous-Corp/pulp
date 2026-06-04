@@ -21,6 +21,7 @@ Supported now:
 
 - native demo modes in `examples/threejs-native-demo/main.cpp`
   - `cube`
+  - `gltf-box`
   - `spectrum`
   - `particles`
   - `ribbon`
@@ -40,13 +41,17 @@ Not supported by this skill:
 
 ## Critical Build Requirements
 
-1. **V8 engine required** — Three.js needs typed arrays, promises, and full ES module support. Configure with:
+1. **V8 engine required** — Three.js needs typed arrays, promises, and full ES module support. Use Homebrew `node@24` on macOS for this lane. The unversioned `node` formula may point at a newer V8 ABI; `libnode.147.dylib` has compiled but aborted during embedded V8 / Three.js evaluation. Configure with:
    ```bash
    cmake -S . -B build -DPULP_JS_ENGINE=v8 \
-     -DV8_INCLUDE_DIR=/opt/homebrew/opt/node/include/node \
-     -DV8_LIB_DIR=/opt/homebrew/opt/node/lib \
-     -DV8_LIBRARY_PATH=/opt/homebrew/opt/node/lib/libnode.141.dylib \
+     -DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/include/node \
+     -DV8_LIB_DIR=/opt/homebrew/opt/node@24/lib \
+     -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib \
      -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+   ```
+   Verify the linked dylib before trusting a local Three.js failure:
+   ```bash
+   otool -L build/test/web-compat/pulp-test-threejs-bridge | grep libnode
    ```
 
 2. **gpu_surface MUST be passed to WidgetBridge** — The native GPU bridge only initializes when WidgetBridge receives a non-null GpuSurface pointer. Without it, Three.js gets no WebGPU device and the 3D canvas renders black. This is the `attach_gpu_surface()` call in the demo.
@@ -144,6 +149,14 @@ Examples:
 ./build/test/pulp-test-threejs-bridge "[threejs][gpu][phase13][particles]"
 ./build/test/pulp-test-threejs-bridge "[threejs][gpu][phase13][ribbon]"
 ./build/test/pulp-test-threejs-bridge "[threejs][gpu][phase13][reverb]"
+```
+
+For the full focused CTest slice, build the resource-test target first so
+Catch2 does not leave a `NOT_BUILT` placeholder in the selected test set:
+
+```bash
+cmake --build build --target pulp-test-threejs-resources pulp-test-threejs-bridge pulp-threejs-native-demo -j8
+ctest --test-dir build -R "threejs|Three.js|pulp_bundle_threejs_for_jsc_smoke" --output-on-failure
 ```
 
 Do not rerun broad unrelated suites when a focused bridge/demo tag is enough.

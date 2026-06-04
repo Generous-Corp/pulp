@@ -125,44 +125,46 @@
             this._started = false;
             this._queue = [];
         }
-        MessagePort.prototype.postMessage = function (data) {
-            var other = this._otherPort;
-            if (!other) return;
-            // Always defer delivery to a microtask so MessageChannel
-            // semantics match the platform: fire-and-forget, never sync.
-            globalThis.queueMicrotask(function () {
-                var event = { data: data, source: null, ports: [] };
-                if (other._onmessage) {
-                    try { other._onmessage(event); } catch (e) {
-                        if (typeof console !== "undefined" && console.error) {
-                            console.error("MessagePort.onmessage:", e);
+        Object.defineProperties(MessagePort.prototype, {
+            postMessage: { value: function (data) {
+                var other = this._otherPort;
+                if (!other) return;
+                // Always defer delivery to a microtask so MessageChannel
+                // semantics match the platform: fire-and-forget, never sync.
+                globalThis.queueMicrotask(function () {
+                    var event = { data: data, source: null, ports: [] };
+                    if (other._onmessage) {
+                        try { other._onmessage(event); } catch (e) {
+                            if (typeof console !== "undefined" && console.error) {
+                                console.error("MessagePort.onmessage:", e);
+                            }
                         }
                     }
-                }
-                for (var i = 0; i < other._listeners.length; i++) {
-                    try { other._listeners[i](event); } catch (e2) {
-                        if (typeof console !== "undefined" && console.error) {
-                            console.error("MessagePort listener:", e2);
+                    for (var i = 0; i < other._listeners.length; i++) {
+                        try { other._listeners[i](event); } catch (e2) {
+                            if (typeof console !== "undefined" && console.error) {
+                                console.error("MessagePort listener:", e2);
+                            }
                         }
                     }
-                }
-            });
-        };
-        MessagePort.prototype.addEventListener = function (type, fn) {
-            if (type !== "message" || typeof fn !== "function") return;
-            this._listeners.push(fn);
-        };
-        MessagePort.prototype.removeEventListener = function (type, fn) {
-            if (type !== "message") return;
-            var idx = this._listeners.indexOf(fn);
-            if (idx >= 0) this._listeners.splice(idx, 1);
-        };
-        MessagePort.prototype.start = function () { this._started = true; };
-        MessagePort.prototype.close = function () {
-            this._listeners.length = 0;
-            this._onmessage = null;
-            this._otherPort = null;
-        };
+                });
+            }, configurable: true, writable: true },
+            addEventListener: { value: function (type, fn) {
+                if (type !== "message" || typeof fn !== "function") return;
+                this._listeners.push(fn);
+            }, configurable: true, writable: true },
+            removeEventListener: { value: function (type, fn) {
+                if (type !== "message") return;
+                var idx = this._listeners.indexOf(fn);
+                if (idx >= 0) this._listeners.splice(idx, 1);
+            }, configurable: true, writable: true },
+            start: { value: function () { this._started = true; }, configurable: true, writable: true },
+            close: { value: function () {
+                this._listeners.length = 0;
+                this._onmessage = null;
+                this._otherPort = null;
+            }, configurable: true, writable: true }
+        });
         Object.defineProperty(MessagePort.prototype, "onmessage", {
             get: function () { return this._onmessage; },
             set: function (fn) { this._onmessage = fn; this._started = true; },
@@ -268,64 +270,66 @@
                 }
             }
         }
-        URLSearchParams.prototype.append = function (name, value) {
-            this._pairs.push([String(name), String(value)]);
-        };
-        URLSearchParams.prototype["delete"] = function (name) {
-            for (var i = this._pairs.length - 1; i >= 0; i--) {
-                if (this._pairs[i][0] === String(name)) this._pairs.splice(i, 1);
-            }
-        };
-        URLSearchParams.prototype.get = function (name) {
-            for (var i = 0; i < this._pairs.length; i++) {
-                if (this._pairs[i][0] === String(name)) return this._pairs[i][1];
-            }
-            return null;
-        };
-        URLSearchParams.prototype.getAll = function (name) {
-            var out = [];
-            for (var i = 0; i < this._pairs.length; i++) {
-                if (this._pairs[i][0] === String(name)) out.push(this._pairs[i][1]);
-            }
-            return out;
-        };
-        URLSearchParams.prototype.has = function (name) {
-            for (var i = 0; i < this._pairs.length; i++) {
-                if (this._pairs[i][0] === String(name)) return true;
-            }
-            return false;
-        };
-        URLSearchParams.prototype.set = function (name, value) {
-            // Spec: if the name exists, the first match keeps its position
-            // and gets the new value; later duplicates are removed. If it
-            // doesn't exist, append.
-            var key = String(name);
-            var firstIndex = -1;
-            for (var i = 0; i < this._pairs.length; i++) {
-                if (this._pairs[i][0] === key) { firstIndex = i; break; }
-            }
-            if (firstIndex < 0) {
-                this._pairs.push([key, String(value)]);
-                return;
-            }
-            this._pairs[firstIndex][1] = String(value);
-            for (var j = this._pairs.length - 1; j > firstIndex; j--) {
-                if (this._pairs[j][0] === key) this._pairs.splice(j, 1);
-            }
-        };
-        URLSearchParams.prototype.toString = function () {
-            var out = "";
-            for (var i = 0; i < this._pairs.length; i++) {
-                if (i > 0) out += "&";
-                out += encode(this._pairs[i][0]) + "=" + encode(this._pairs[i][1]);
-            }
-            return out;
-        };
-        URLSearchParams.prototype.forEach = function (fn, thisArg) {
-            for (var i = 0; i < this._pairs.length; i++) {
-                fn.call(thisArg, this._pairs[i][1], this._pairs[i][0], this);
-            }
-        };
+        Object.defineProperties(URLSearchParams.prototype, {
+            append: { value: function (name, value) {
+                this._pairs.push([String(name), String(value)]);
+            }, configurable: true, writable: true },
+            "delete": { value: function (name) {
+                for (var i = this._pairs.length - 1; i >= 0; i--) {
+                    if (this._pairs[i][0] === String(name)) this._pairs.splice(i, 1);
+                }
+            }, configurable: true, writable: true },
+            get: { value: function (name) {
+                for (var i = 0; i < this._pairs.length; i++) {
+                    if (this._pairs[i][0] === String(name)) return this._pairs[i][1];
+                }
+                return null;
+            }, configurable: true, writable: true },
+            getAll: { value: function (name) {
+                var out = [];
+                for (var i = 0; i < this._pairs.length; i++) {
+                    if (this._pairs[i][0] === String(name)) out.push(this._pairs[i][1]);
+                }
+                return out;
+            }, configurable: true, writable: true },
+            has: { value: function (name) {
+                for (var i = 0; i < this._pairs.length; i++) {
+                    if (this._pairs[i][0] === String(name)) return true;
+                }
+                return false;
+            }, configurable: true, writable: true },
+            set: { value: function (name, value) {
+                // Spec: if the name exists, the first match keeps its position
+                // and gets the new value; later duplicates are removed. If it
+                // doesn't exist, append.
+                var key = String(name);
+                var firstIndex = -1;
+                for (var i = 0; i < this._pairs.length; i++) {
+                    if (this._pairs[i][0] === key) { firstIndex = i; break; }
+                }
+                if (firstIndex < 0) {
+                    this._pairs.push([key, String(value)]);
+                    return;
+                }
+                this._pairs[firstIndex][1] = String(value);
+                for (var j = this._pairs.length - 1; j > firstIndex; j--) {
+                    if (this._pairs[j][0] === key) this._pairs.splice(j, 1);
+                }
+            }, configurable: true, writable: true },
+            toString: { value: function () {
+                var out = "";
+                for (var i = 0; i < this._pairs.length; i++) {
+                    if (i > 0) out += "&";
+                    out += encode(this._pairs[i][0]) + "=" + encode(this._pairs[i][1]);
+                }
+                return out;
+            }, configurable: true, writable: true },
+            forEach: { value: function (fn, thisArg) {
+                for (var i = 0; i < this._pairs.length; i++) {
+                    fn.call(thisArg, this._pairs[i][1], this._pairs[i][0], this);
+                }
+            }, configurable: true, writable: true }
+        });
 
         globalThis.URLSearchParams = URLSearchParams;
     }

@@ -8811,6 +8811,9 @@ void WidgetBridge::register_api() {
         if ((texture_desc.usage & wgpu::TextureUsage::TextureBinding) == wgpu::TextureUsage::None) {
             texture_desc.usage |= wgpu::TextureUsage::TextureBinding;
         }
+        if ((texture_desc.usage & wgpu::TextureUsage::CopyDst) == wgpu::TextureUsage::None) {
+            texture_desc.usage |= wgpu::TextureUsage::CopyDst;
+        }
         if ((texture_desc.usage & wgpu::TextureUsage::RenderAttachment) == wgpu::TextureUsage::None) {
             texture_desc.usage |= wgpu::TextureUsage::RenderAttachment;
         }
@@ -8832,6 +8835,96 @@ void WidgetBridge::register_api() {
         state.texture = texture;
         state.configured = true;
         return choc::value::createString(texture_id);
+#endif
+    });
+
+    engine_.register_function("__gpuQueueWriteTextureImpl", [this](choc::javascript::ArgumentList args) {
+        auto payload_json = args.get<std::string>(0, "");
+        if (payload_json.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+            return choc::value::createBool(false);
+        }
+
+#ifndef PULP_HAS_SKIA
+        return choc::value::createBool(false);
+#else
+        choc::value::Value payload;
+        try {
+            payload = choc::json::parse(payload_json);
+        } catch (...) {
+            return choc::value::createBool(false);
+        }
+
+        auto texture_id = payload.hasObjectMember("textureId")
+            ? payload["textureId"].getWithDefault<std::string>("")
+            : "";
+        auto texture_it = native_gpu_bridge_state_->textures.find(texture_id);
+        if (texture_id.empty() || texture_it == native_gpu_bridge_state_->textures.end() ||
+            !texture_it->second.configured || !texture_it->second.texture) {
+            return choc::value::createBool(false);
+        }
+
+        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        if (queue_ptr == nullptr || !(*queue_ptr)) {
+            return choc::value::createBool(false);
+        }
+
+        auto texture_bytes = payload.hasObjectMember("data")
+            ? json_bytes_to_vector(payload["data"])
+            : std::vector<uint8_t>{};
+        if (texture_bytes.empty()) {
+            return choc::value::createBool(false);
+        }
+
+        auto width = static_cast<uint32_t>(std::max(1, payload.hasObjectMember("width")
+            ? payload["width"].getWithDefault<int32_t>(static_cast<int32_t>(texture_it->second.width))
+            : static_cast<int32_t>(texture_it->second.width)));
+        auto height = static_cast<uint32_t>(std::max(1, payload.hasObjectMember("height")
+            ? payload["height"].getWithDefault<int32_t>(static_cast<int32_t>(texture_it->second.height))
+            : static_cast<int32_t>(texture_it->second.height)));
+        auto depth_or_array_layers = static_cast<uint32_t>(std::max(1, payload.hasObjectMember("depthOrArrayLayers")
+            ? payload["depthOrArrayLayers"].getWithDefault<int32_t>(1)
+            : 1));
+        auto bytes_per_row = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("bytesPerRow")
+            ? payload["bytesPerRow"].getWithDefault<int32_t>(0)
+            : 0));
+        auto rows_per_image = static_cast<uint32_t>(std::max<int32_t>(1, payload.hasObjectMember("rowsPerImage")
+            ? payload["rowsPerImage"].getWithDefault<int32_t>(static_cast<int32_t>(height))
+            : static_cast<int32_t>(height)));
+        if (bytes_per_row == 0) {
+            bytes_per_row = width * texture_bytes_per_pixel_from_format(texture_it->second.format);
+        }
+
+        auto mip_level = static_cast<uint32_t>(std::max(0, payload.hasObjectMember("mipLevel")
+            ? payload["mipLevel"].getWithDefault<int32_t>(0)
+            : 0));
+
+        uint32_t origin_x = 0;
+        uint32_t origin_y = 0;
+        uint32_t origin_z = 0;
+        if (payload.hasObjectMember("origin") && payload["origin"].isObject()) {
+            auto origin = payload["origin"];
+            origin_x = static_cast<uint32_t>(std::max(0, origin.hasObjectMember("x") ? origin["x"].getWithDefault<int32_t>(0) : 0));
+            origin_y = static_cast<uint32_t>(std::max(0, origin.hasObjectMember("y") ? origin["y"].getWithDefault<int32_t>(0) : 0));
+            origin_z = static_cast<uint32_t>(std::max(0, origin.hasObjectMember("z") ? origin["z"].getWithDefault<int32_t>(0) : 0));
+        }
+
+        wgpu::TexelCopyTextureInfo destination{};
+        destination.texture = texture_it->second.texture;
+        destination.mipLevel = mip_level;
+        destination.origin = { origin_x, origin_y, origin_z };
+        destination.aspect = wgpu::TextureAspect::All;
+
+        wgpu::TexelCopyBufferLayout data_layout{};
+        data_layout.offset = 0;
+        data_layout.bytesPerRow = bytes_per_row;
+        data_layout.rowsPerImage = rows_per_image;
+
+        wgpu::Extent3D write_size{};
+        write_size.width = width;
+        write_size.height = height;
+        write_size.depthOrArrayLayers = depth_or_array_layers;
+        queue_ptr->WriteTexture(&destination, texture_bytes.data(), texture_bytes.size(), &data_layout, &write_size);
+        return choc::value::createBool(true);
 #endif
     });
 
@@ -9036,6 +9129,7 @@ void WidgetBridge::register_api() {
         std::vector<uint32_t> bind_group_indices;
         std::vector<wgpu::Buffer> bind_group_buffers;
         std::vector<wgpu::Sampler> bind_group_samplers;
+        std::vector<wgpu::Texture> bind_group_textures;
         std::vector<wgpu::TextureView> bind_group_texture_views;
         std::vector<wgpu::BindGroup> bind_groups;
         if (!bind_groups_json.empty()) {
@@ -9175,15 +9269,12 @@ void WidgetBridge::register_api() {
                         auto source_canvas_id = entry_view.hasObjectMember("sourceCanvasId")
                             ? entry_view["sourceCanvasId"].getWithDefault<std::string>("")
                             : "";
-                        auto source_it = native_gpu_bridge_state_->canvases.find(source_canvas_id);
-                        if (source_canvas_id.empty() || source_it == native_gpu_bridge_state_->canvases.end() ||
-                            !source_it->second.configured || !source_it->second.texture) {
-                            return choc::value::createBool(false);
-                        }
+                        wgpu::TextureView texture_view;
 
+                        auto default_view_format = source_canvas_id.empty() ? format : "bgra8unorm";
                         auto view_format = entry_view.hasObjectMember("format")
-                            ? entry_view["format"].getWithDefault<std::string>(source_it->second.format)
-                            : source_it->second.format;
+                            ? entry_view["format"].getWithDefault<std::string>(default_view_format)
+                            : default_view_format;
                         auto view_dimension = entry_view.hasObjectMember("dimension")
                             ? entry_view["dimension"].getWithDefault<std::string>("2d")
                             : "2d";
@@ -9203,28 +9294,118 @@ void WidgetBridge::register_api() {
                             ? entry_view["arrayLayerCount"].getWithDefault<int32_t>(1)
                             : 1));
 
-                        const bool use_default_view =
-                            view_format == source_it->second.format &&
-                            view_dimension == "2d" &&
-                            view_aspect == "all" &&
-                            base_mip_level == 0 &&
-                            mip_level_count == 1 &&
-                            base_array_layer == 0 &&
-                            array_layer_count == 1;
+                        if (!source_canvas_id.empty()) {
+                            auto source_it = native_gpu_bridge_state_->canvases.find(source_canvas_id);
+                            if (source_it == native_gpu_bridge_state_->canvases.end() ||
+                                !source_it->second.configured || !source_it->second.texture) {
+                                return choc::value::createBool(false);
+                            }
 
-                        auto texture_view = use_default_view
-                            ? source_it->second.texture.CreateView()
-                            : [&]() {
-                                wgpu::TextureViewDescriptor texture_view_desc{};
-                                texture_view_desc.format = texture_format_from_string(view_format);
-                                texture_view_desc.dimension = texture_view_dimension_from_string(view_dimension);
-                                texture_view_desc.aspect = texture_aspect_from_string(view_aspect);
-                                texture_view_desc.baseMipLevel = base_mip_level;
-                                texture_view_desc.mipLevelCount = mip_level_count;
-                                texture_view_desc.baseArrayLayer = base_array_layer;
-                                texture_view_desc.arrayLayerCount = array_layer_count;
-                                return source_it->second.texture.CreateView(&texture_view_desc);
-                            }();
+                            const bool use_default_view =
+                                view_format == source_it->second.format &&
+                                view_dimension == "2d" &&
+                                view_aspect == "all" &&
+                                base_mip_level == 0 &&
+                                mip_level_count == 1 &&
+                                base_array_layer == 0 &&
+                                array_layer_count == 1;
+
+                            texture_view = use_default_view
+                                ? source_it->second.texture.CreateView()
+                                : [&]() {
+                                    wgpu::TextureViewDescriptor texture_view_desc{};
+                                    texture_view_desc.format = texture_format_from_string(view_format);
+                                    texture_view_desc.dimension = texture_view_dimension_from_string(view_dimension);
+                                    texture_view_desc.aspect = texture_aspect_from_string(view_aspect);
+                                    texture_view_desc.baseMipLevel = base_mip_level;
+                                    texture_view_desc.mipLevelCount = mip_level_count;
+                                    texture_view_desc.baseArrayLayer = base_array_layer;
+                                    texture_view_desc.arrayLayerCount = array_layer_count;
+                                    return source_it->second.texture.CreateView(&texture_view_desc);
+                                }();
+                        } else {
+                            auto texture_width = static_cast<uint32_t>(std::max(1, entry_view.hasObjectMember("width")
+                                ? entry_view["width"].getWithDefault<int32_t>(1)
+                                : 1));
+                            auto texture_height = static_cast<uint32_t>(std::max(1, entry_view.hasObjectMember("height")
+                                ? entry_view["height"].getWithDefault<int32_t>(1)
+                                : 1));
+                            auto texture_depth = static_cast<uint32_t>(std::max(1, entry_view.hasObjectMember("depthOrArrayLayers")
+                                ? entry_view["depthOrArrayLayers"].getWithDefault<int32_t>(1)
+                                : 1));
+                            auto texture_usage_mask = static_cast<uint32_t>(std::max(0, entry_view.hasObjectMember("usage")
+                                ? entry_view["usage"].getWithDefault<int32_t>(0)
+                                : 0));
+                            auto texture_sample_count = static_cast<uint32_t>(std::max(1, entry_view.hasObjectMember("sampleCount")
+                                ? entry_view["sampleCount"].getWithDefault<int32_t>(1)
+                                : 1));
+                            auto texture_mip_level_count = static_cast<uint32_t>(std::max(1, entry_view.hasObjectMember("textureMipLevelCount")
+                                ? entry_view["textureMipLevelCount"].getWithDefault<int32_t>(1)
+                                : 1));
+                            auto bytes_per_row = static_cast<uint32_t>(std::max(0, entry_view.hasObjectMember("bytesPerRow")
+                                ? entry_view["bytesPerRow"].getWithDefault<int32_t>(0)
+                                : 0));
+                            auto rows_per_image = static_cast<uint32_t>(std::max<int32_t>(1, entry_view.hasObjectMember("rowsPerImage")
+                                ? entry_view["rowsPerImage"].getWithDefault<int32_t>(static_cast<int32_t>(texture_height))
+                                : static_cast<int32_t>(texture_height)));
+                            auto texture_bytes = entry_view.hasObjectMember("data")
+                                ? json_bytes_to_vector(entry_view["data"])
+                                : std::vector<uint8_t>{};
+                            if (texture_bytes.empty()) {
+                                return choc::value::createBool(false);
+                            }
+
+                            auto required_bytes_per_row = texture_width * texture_bytes_per_pixel_from_format(view_format);
+                            if (bytes_per_row == 0) {
+                                bytes_per_row = required_bytes_per_row;
+                            }
+
+                            wgpu::TextureDescriptor texture_desc{};
+                            texture_desc.dimension = wgpu::TextureDimension::e2D;
+                            texture_desc.size.width = texture_width;
+                            texture_desc.size.height = texture_height;
+                            texture_desc.size.depthOrArrayLayers = texture_depth;
+                            texture_desc.format = texture_format_from_string(view_format);
+                            texture_desc.usage = texture_usage_from_mask(texture_usage_mask);
+                            texture_desc.mipLevelCount = texture_mip_level_count;
+                            texture_desc.sampleCount = texture_sample_count;
+                            if ((texture_desc.usage & wgpu::TextureUsage::TextureBinding) == wgpu::TextureUsage::None) {
+                                texture_desc.usage |= wgpu::TextureUsage::TextureBinding;
+                            }
+                            if ((texture_desc.usage & wgpu::TextureUsage::CopyDst) == wgpu::TextureUsage::None) {
+                                texture_desc.usage |= wgpu::TextureUsage::CopyDst;
+                            }
+
+                            auto uploaded_texture = device_ptr->CreateTexture(&texture_desc);
+                            if (!uploaded_texture) {
+                                return choc::value::createBool(false);
+                            }
+
+                            wgpu::TexelCopyTextureInfo destination{};
+                            destination.texture = uploaded_texture;
+                            destination.aspect = wgpu::TextureAspect::All;
+                            wgpu::TexelCopyBufferLayout data_layout{};
+                            data_layout.offset = 0;
+                            data_layout.bytesPerRow = bytes_per_row;
+                            data_layout.rowsPerImage = rows_per_image;
+                            wgpu::Extent3D write_size{};
+                            write_size.width = texture_width;
+                            write_size.height = texture_height;
+                            write_size.depthOrArrayLayers = texture_depth;
+                            queue_ptr->WriteTexture(&destination, texture_bytes.data(), texture_bytes.size(), &data_layout, &write_size);
+
+                            wgpu::TextureViewDescriptor texture_view_desc{};
+                            texture_view_desc.format = texture_format_from_string(view_format);
+                            texture_view_desc.dimension = texture_view_dimension_from_string(view_dimension);
+                            texture_view_desc.aspect = texture_aspect_from_string(view_aspect);
+                            texture_view_desc.baseMipLevel = base_mip_level;
+                            texture_view_desc.mipLevelCount = mip_level_count;
+                            texture_view_desc.baseArrayLayer = base_array_layer;
+                            texture_view_desc.arrayLayerCount = array_layer_count;
+                            texture_view = uploaded_texture.CreateView(&texture_view_desc);
+                            bind_group_textures.push_back(uploaded_texture);
+                        }
+
                         if (!texture_view) {
                             return choc::value::createBool(false);
                         }
@@ -9440,6 +9621,7 @@ void WidgetBridge::register_api() {
         std::vector<uint32_t> bind_group_indices;
         std::vector<wgpu::Buffer> bind_group_buffers;
         std::vector<wgpu::Sampler> bind_group_samplers;
+        std::vector<wgpu::Texture> bind_group_textures;
         std::vector<wgpu::TextureView> bind_group_texture_views;
         std::vector<wgpu::BindGroup> bind_groups;
         // iOS-D.3c (#3217): (group_index, entries) captured during serialization
@@ -9760,6 +9942,7 @@ void WidgetBridge::register_api() {
                             texture_view_desc.baseArrayLayer = base_array_layer;
                             texture_view_desc.arrayLayerCount = array_layer_count;
                             texture_view = uploaded_texture.CreateView(&texture_view_desc);
+                            bind_group_textures.push_back(uploaded_texture);
                         }
 
                         if (!texture_view) {

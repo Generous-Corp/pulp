@@ -458,20 +458,51 @@ function __createMockGPUQueue(init) {
         if (!destination || !destination.texture) return;
         var texture = destination.texture;
         var source = __toUint8Array(data);
-        texture._bytes = source;
-        texture._bytesPerRow = dataLayout && dataLayout.bytesPerRow ? dataLayout.bytesPerRow : 0;
-        texture._rowsPerImage = dataLayout && dataLayout.rowsPerImage ? dataLayout.rowsPerImage : (size && size[1] ? size[1] : texture.height || 1);
+        dataLayout = dataLayout || {};
+        var copySize = __textureExtent(size);
+        var sourceOffset = dataLayout.offset || 0;
+        var bytes = sourceOffset > 0 ? source.slice(sourceOffset) : source;
+        texture._bytes = bytes;
+        texture._bytesPerRow = dataLayout.bytesPerRow || 0;
+        texture._rowsPerImage = dataLayout.rowsPerImage || copySize.height || texture.height || 1;
+        if (texture._nativeBridge && texture._nativeTextureId && typeof __gpuQueueWriteTextureImpl === "function") {
+            __gpuQueueWriteTextureImpl(JSON.stringify({
+                textureId: texture._nativeTextureId,
+                data: Array.from(bytes),
+                bytesPerRow: texture._bytesPerRow,
+                rowsPerImage: texture._rowsPerImage,
+                width: copySize.width,
+                height: copySize.height,
+                depthOrArrayLayers: copySize.depthOrArrayLayers,
+                mipLevel: destination.mipLevel || 0,
+                origin: destination.origin || {}
+            }));
+        }
     };
     queue.copyExternalImageToTexture = function(source, destination, copySize) {
         if (!source || !destination || !destination.texture) return;
         var imageBitmap = source.source;
         if (!imageBitmap || !imageBitmap._decodedPixels) return;
         var texture = destination.texture;
+        var extent = __textureExtent(copySize);
         texture._bytes = imageBitmap._decodedPixels;
         texture._bytesPerRow = imageBitmap.width * 4;
         texture._rowsPerImage = imageBitmap.height;
         texture.width = imageBitmap.width;
         texture.height = imageBitmap.height;
+        if (texture._nativeBridge && texture._nativeTextureId && typeof __gpuQueueWriteTextureImpl === "function") {
+            __gpuQueueWriteTextureImpl(JSON.stringify({
+                textureId: texture._nativeTextureId,
+                data: Array.from(texture._bytes),
+                bytesPerRow: texture._bytesPerRow,
+                rowsPerImage: texture._rowsPerImage,
+                width: extent.width,
+                height: extent.height,
+                depthOrArrayLayers: extent.depthOrArrayLayers,
+                mipLevel: destination.mipLevel || 0,
+                origin: destination.origin || {}
+            }));
+        }
     };
     queue.onSubmittedWorkDone = function() {
         return Promise.resolve(undefined);
@@ -526,6 +557,8 @@ function __createMockGPUDevice(adapter, descriptor, init) {
                 size: textureDescriptor.size || {},
                 format: textureDescriptor.format || null,
                 usage: textureDescriptor.usage || 0,
+                mipLevelCount: textureDescriptor.mipLevelCount || 1,
+                sampleCount: textureDescriptor.sampleCount || 1,
                 label: textureDescriptor.label || ""
             })) || "");
         }

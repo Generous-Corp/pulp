@@ -1,5 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include "test_helpers.hpp"
+#if defined(__APPLE__)
+#include "../mac_window_harness.hpp"
+#include <TargetConditionals.h>
+#endif
+#include "include/core/SkData.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkImageInfo.h"
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/canvas_widget.hpp>
@@ -11,6 +18,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -35,6 +43,15 @@ std::optional<std::string> resolve_threejs_module(std::string_view path) {
     }
     if (path == "three/addons/controls/OrbitControls.js") {
         return read_text_file(root / "examples" / "jsm" / "controls" / "OrbitControls.js");
+    }
+    if (path == "three/addons/loaders/GLTFLoader.js") {
+        return read_text_file(root / "examples" / "jsm" / "loaders" / "GLTFLoader.js");
+    }
+    if (path == "../utils/BufferGeometryUtils.js" || path == "three/addons/utils/BufferGeometryUtils.js") {
+        return read_text_file(root / "examples" / "jsm" / "utils" / "BufferGeometryUtils.js");
+    }
+    if (path == "../utils/SkeletonUtils.js" || path == "three/addons/utils/SkeletonUtils.js") {
+        return read_text_file(root / "examples" / "jsm" / "utils" / "SkeletonUtils.js");
     }
     return std::nullopt;
 }
@@ -74,6 +91,80 @@ std::string eval_string(ScriptEngine& engine, const std::string& code) {
 
 int32_t eval_i32(ScriptEngine& engine, const std::string& code) {
     return engine.evaluate(code).getWithDefault<int32_t>(0);
+}
+
+std::vector<uint8_t> make_minimal_glb() {
+    std::string json = R"({"asset":{"version":"2.0","generator":"pulp-test"},"scene":0,"scenes":[{"nodes":[]}],"nodes":[]})";
+    while ((json.size() % 4) != 0) {
+        json.push_back(' ');
+    }
+
+    const uint32_t total_length = static_cast<uint32_t>(12 + 8 + json.size());
+    std::vector<uint8_t> bytes;
+    bytes.reserve(total_length);
+
+    auto append_u32 = [&](uint32_t value) {
+        bytes.push_back(static_cast<uint8_t>(value & 0xff));
+        bytes.push_back(static_cast<uint8_t>((value >> 8) & 0xff));
+        bytes.push_back(static_cast<uint8_t>((value >> 16) & 0xff));
+        bytes.push_back(static_cast<uint8_t>((value >> 24) & 0xff));
+    };
+
+    append_u32(0x46546c67); // glTF
+    append_u32(2);
+    append_u32(total_length);
+    append_u32(static_cast<uint32_t>(json.size()));
+    append_u32(0x4e4f534a); // JSON
+    bytes.insert(bytes.end(), json.begin(), json.end());
+    return bytes;
+}
+
+void write_binary_file(const std::filesystem::path& path, const std::vector<uint8_t>& bytes) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    REQUIRE(out.good());
+    out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    REQUIRE(out.good());
+}
+
+struct PngColorStats {
+    int width = 0;
+    int height = 0;
+    int red_pixels = 0;
+    int bright_pixels = 0;
+};
+
+PngColorStats sample_png_colors(const std::vector<uint8_t>& png) {
+    PngColorStats stats;
+    auto data = SkData::MakeWithCopy(png.data(), png.size());
+    auto image = SkImages::DeferredFromEncodedData(data);
+    REQUIRE(image != nullptr);
+
+    stats.width = image->width();
+    stats.height = image->height();
+    REQUIRE(stats.width > 0);
+    REQUIRE(stats.height > 0);
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(stats.width) * static_cast<size_t>(stats.height) * 4u);
+    const auto info = SkImageInfo::Make(stats.width,
+                                        stats.height,
+                                        kRGBA_8888_SkColorType,
+                                        kPremul_SkAlphaType);
+    REQUIRE(image->readPixels(info, pixels.data(), static_cast<size_t>(stats.width) * 4u, 0, 0));
+
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        const auto r = static_cast<int>(pixels[i + 0]);
+        const auto g = static_cast<int>(pixels[i + 1]);
+        const auto b = static_cast<int>(pixels[i + 2]);
+        const auto a = static_cast<int>(pixels[i + 3]);
+        if (a > 128 && r > 140 && g < 120 && b < 120) {
+            ++stats.red_pixels;
+        }
+        if (a > 128 && (r > 80 || g > 80 || b > 80)) {
+            ++stats.bright_pixels;
+        }
+    }
+    return stats;
 }
 
 } // namespace
@@ -123,6 +214,701 @@ TEST_CASE("WebGPU mock writeBuffer: TypedArray dataOffset/size are in elements n
     )JS");
     INFO("writeBuffer element dataOffset/size => " << sliced);
     REQUIRE(sliced == "30,40");  // bug reads bytes 2..4 -> garbage
+}
+
+TEST_CASE("Three.js bridge resolves the real GLTFLoader addon module", "[threejs][gpu][gltf][loader]") {
+    if (!is_engine_available(JsEngineType::v8)) {
+        SKIP("V8 is required for native Three.js module smoke");
+    }
+
+    NativeV8Environment env(64, 64);
+    env.bridge->load_script("");
+
+    bool resolved_loader = false;
+    bool resolved_buffer_utils = false;
+    bool resolved_skeleton_utils = false;
+    bool module_completed = false;
+    std::string module_error;
+
+    env.engine.run_module(R"JS(
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        const loader = new GLTFLoader();
+        globalThis.__pulpGltfLoaderProbe = {
+            loaderType: typeof GLTFLoader,
+            loaderName: GLTFLoader.name,
+            parseType: typeof GLTFLoader.prototype.parse,
+            loadType: typeof GLTFLoader.prototype.load,
+            setPathType: typeof loader.setPath,
+            setResourcePathType: typeof loader.setResourcePath,
+            hasLoadingManager: !!loader.manager
+        };
+
+        export default globalThis.__pulpGltfLoaderProbe;
+    )JS",
+    [&](std::string_view path) -> std::optional<std::string> {
+        if (path == "three/addons/loaders/GLTFLoader.js") {
+            resolved_loader = true;
+        } else if (path == "../utils/BufferGeometryUtils.js" || path == "three/addons/utils/BufferGeometryUtils.js") {
+            resolved_buffer_utils = true;
+        } else if (path == "../utils/SkeletonUtils.js" || path == "three/addons/utils/SkeletonUtils.js") {
+            resolved_skeleton_utils = true;
+        }
+        return resolve_threejs_module(path);
+    },
+    [&](const std::string& error, const choc::value::Value&) {
+        module_completed = true;
+        module_error = error;
+    });
+
+    for (int i = 0; i < 64; ++i) {
+        env.engine.pump_message_loop();
+        if (module_completed) {
+            break;
+        }
+    }
+
+    INFO(module_error);
+    REQUIRE(module_completed);
+    REQUIRE(module_error.empty());
+    REQUIRE(resolved_loader);
+    REQUIRE(resolved_buffer_utils);
+    REQUIRE(resolved_skeleton_utils);
+
+    const auto probe = eval_string(env.engine, "JSON.stringify(globalThis.__pulpGltfLoaderProbe || {})");
+    INFO(probe);
+    REQUIRE(probe.find("\"loaderType\":\"function\"") != std::string::npos);
+    REQUIRE(probe.find("\"loaderName\":\"GLTFLoader\"") != std::string::npos);
+    REQUIRE(probe.find("\"parseType\":\"function\"") != std::string::npos);
+    REQUIRE(probe.find("\"loadType\":\"function\"") != std::string::npos);
+    REQUIRE(probe.find("\"setPathType\":\"function\"") != std::string::npos);
+    REQUIRE(probe.find("\"setResourcePathType\":\"function\"") != std::string::npos);
+    REQUIRE(probe.find("\"hasLoadingManager\":true") != std::string::npos);
+}
+
+TEST_CASE("Three.js GLB fetch contract reads local bytes before GLTF parse", "[threejs][gpu][gltf][fetch]") {
+    if (!is_engine_available(JsEngineType::v8)) {
+        SKIP("V8 is required for native Three.js GLB fetch smoke");
+    }
+
+    const auto glb_path = std::filesystem::temp_directory_path()
+        / "pulp-threejs-gltf-fetch" / "BoxTextured.glb";
+    const auto glb_bytes = make_minimal_glb();
+    write_binary_file(glb_path, glb_bytes);
+
+    NativeV8Environment env(64, 64);
+    env.bridge->load_script("");
+
+    const auto generic_path = glb_path.generic_string();
+    const std::string file_url = std::string("file://")
+        + (generic_path.empty() || generic_path.front() == '/' ? "" : "/")
+        + generic_path;
+
+    bool module_completed = false;
+    std::string module_error;
+    std::string script = R"JS(
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        globalThis.__pulpGltfFetchState = {
+            status: 'start',
+            url: '__PULP_GLB_URL__',
+            expectedByteLength: __PULP_GLB_BYTE_LENGTH__
+        };
+
+        globalThis.__pulpGltfFetchTask = (async () => {
+            const state = globalThis.__pulpGltfFetchState;
+            state.status = 'fetch-start';
+            if (typeof fetch !== 'function') {
+                throw new Error('fetch unavailable');
+            }
+            if (typeof XMLHttpRequest === 'function') {
+                state.xhrAvailable = true;
+            }
+
+            const response = await fetch(state.url);
+            state.status = 'fetch-response';
+            state.fetchOk = !!response.ok;
+            state.statusCode = response.status;
+            state.contentType = response.headers && response.headers.get
+                ? String(response.headers.get('content-type') || '')
+                : '';
+            if (!response.ok) {
+                throw new Error('fetch failed status=' + response.status);
+            }
+
+            const buffer = await response.arrayBuffer();
+            state.status = 'bytes-ready';
+            state.byteLength = buffer ? buffer.byteLength : 0;
+            if (state.byteLength !== state.expectedByteLength) {
+                throw new Error('GLB byte length mismatch via fetch: expected '
+                    + state.expectedByteLength + ', got ' + state.byteLength);
+            }
+
+            await new Promise((resolve, reject) => {
+                const loader = new GLTFLoader();
+                loader.parse(buffer, '', (gltf) => {
+                    state.status = 'parsed';
+                    state.sceneCount = gltf && gltf.scenes ? gltf.scenes.length : -1;
+                    state.defaultSceneType = gltf && gltf.scene ? gltf.scene.type : '';
+                    resolve();
+                }, (error) => {
+                    state.status = 'parse-error';
+                    reject(new Error('GLTFLoader.parse blocked after fetch: '
+                        + (error && error.message ? error.message : String(error))));
+                });
+            });
+
+            return state;
+        })().catch((error) => {
+            const state = globalThis.__pulpGltfFetchState || {};
+            state.status = 'error';
+            state.message = error && error.message ? String(error.message) : String(error);
+            state.stack = error && error.stack ? String(error.stack) : '';
+            globalThis.__pulpGltfFetchState = state;
+        });
+
+        export default globalThis.__pulpGltfFetchState;
+    )JS";
+
+    const auto url_pos = script.find("__PULP_GLB_URL__");
+    REQUIRE(url_pos != std::string::npos);
+    script.replace(url_pos, std::string("__PULP_GLB_URL__").size(), file_url);
+
+    const auto length_pos = script.find("__PULP_GLB_BYTE_LENGTH__");
+    REQUIRE(length_pos != std::string::npos);
+    script.replace(length_pos,
+                   std::string("__PULP_GLB_BYTE_LENGTH__").size(),
+                   std::to_string(glb_bytes.size()));
+
+    env.engine.run_module(script,
+    resolve_threejs_module,
+    [&](const std::string& error, const choc::value::Value&) {
+        module_completed = true;
+        module_error = error;
+    });
+
+    for (int i = 0; i < 256; ++i) {
+        env.engine.pump_message_loop();
+        const auto status = eval_string(env.engine, "globalThis.__pulpGltfFetchState && globalThis.__pulpGltfFetchState.status || ''");
+        if (status == "parsed" || status == "error") {
+            break;
+        }
+    }
+
+    INFO(module_error);
+    REQUIRE(module_completed);
+    REQUIRE(module_error.empty());
+
+    const auto state = eval_string(env.engine, "JSON.stringify(globalThis.__pulpGltfFetchState || {})");
+    INFO(state);
+    REQUIRE(state.find("\"status\":\"parsed\"") != std::string::npos);
+    REQUIRE(state.find("\"url\":\"" + file_url + "\"") != std::string::npos);
+    REQUIRE(state.find("\"fetchOk\":true") != std::string::npos);
+    REQUIRE(state.find("\"contentType\":\"application/octet-stream\"") != std::string::npos);
+    REQUIRE(state.find("\"byteLength\":" + std::to_string(glb_bytes.size())) != std::string::npos);
+    REQUIRE(state.find("\"sceneCount\":1") != std::string::npos);
+    REQUIRE(state.find("\"defaultSceneType\":\"Group\"") != std::string::npos);
+
+    std::filesystem::remove(glb_path);
+}
+
+TEST_CASE("Three.js DataTexture material samples uploaded texture bytes on native WebGPU", "[threejs][gpu][texture][datatexture]") {
+    if (!is_engine_available(JsEngineType::v8)) {
+        SKIP("V8 is required for native Three.js texture smoke");
+    }
+
+    NativeV8Environment env(128, 128);
+    if (!env.has_native_gpu()) {
+        SKIP("Native Dawn adapter unavailable on this host/backend");
+    }
+
+    env.bridge->load_script("");
+
+    bool module_completed = false;
+    std::string module_error;
+    env.engine.run_module(R"JS(
+        import * as THREE from 'three/webgpu';
+
+        const canvas = document.createElement('canvas');
+        canvas.id = 'threejs-datatexture-canvas';
+        canvas.width = 96;
+        canvas.height = 96;
+        document.body.appendChild(canvas);
+
+        const context = canvas.getContext('webgpu');
+        const renderer = new THREE.WebGPURenderer({ canvas, context, antialias: false });
+        await renderer.init();
+        renderer.setSize(96, 96, false);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020617);
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+        camera.position.z = 2;
+
+        const texture = new THREE.DataTexture(
+            new Uint8Array([255, 32, 16, 255]),
+            1,
+            1,
+            THREE.RGBAFormat
+        );
+        texture.colorSpace = THREE.NoColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestFilter;
+        texture.needsUpdate = true;
+
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.4, 1.4),
+            new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide })
+        );
+        scene.add(mesh);
+
+        renderer.render(scene, camera);
+        if (typeof context.present === 'function') context.present();
+        renderer.render(scene, camera);
+        if (typeof context.present === 'function') context.present();
+
+        globalThis.__pulpDataTextureState = {
+            status: 'ready',
+            backend: renderer.backend && renderer.backend.constructor ? renderer.backend.constructor.name : '',
+            contextType: renderer.getContext() && renderer.getContext()._objectName ? renderer.getContext()._objectName : '',
+            textureBytes: texture.image && texture.image.data ? texture.image.data.length : 0
+        };
+
+        export default true;
+    )JS", resolve_threejs_module,
+    [&](const std::string& error, const choc::value::Value&) {
+        module_completed = true;
+        module_error = error;
+    });
+
+    for (int i = 0; i < 256; ++i) {
+        env.engine.pump_message_loop();
+        if (eval_string(env.engine, "globalThis.__pulpDataTextureState.status") == "ready") {
+            break;
+        }
+    }
+
+    REQUIRE(module_completed);
+    REQUIRE(module_error.empty());
+    INFO(eval_string(env.engine, "JSON.stringify(globalThis.__pulpDataTextureState || {})"));
+    REQUIRE(eval_string(env.engine, "globalThis.__pulpDataTextureState.status") == "ready");
+    REQUIRE(eval_string(env.engine, "globalThis.__pulpDataTextureState.contextType") == "GPUCanvasContext");
+    REQUIRE(eval_i32(env.engine, "globalThis.__pulpDataTextureState.textureBytes") == 4);
+
+    env.root.layout_children();
+
+    const auto native_id = eval_string(env.engine, "document.getElementById('threejs-datatexture-canvas')._id");
+    auto* widget = dynamic_cast<CanvasWidget*>(env.bridge->widget(native_id));
+    REQUIRE(widget != nullptr);
+
+    auto skia = pulp::render::SkiaSurface::create(*env.gpu_surface, {.width = 96, .height = 96});
+    REQUIRE(skia != nullptr);
+    REQUIRE(skia->is_available());
+    REQUIRE(env.gpu_surface->begin_frame());
+
+    auto* canvas = skia->begin_frame();
+    REQUIRE(canvas != nullptr);
+    widget->paint(*canvas);
+    REQUIRE(widget->last_native_gpu_texture_draw_succeeded());
+    skia->end_frame();
+
+    std::vector<uint8_t> pixels;
+    uint32_t pixel_width = 0;
+    uint32_t pixel_height = 0;
+    REQUIRE(skia->read_current_rgba(pixels, pixel_width, pixel_height));
+    env.gpu_surface->end_frame();
+
+    REQUIRE(pixel_width == 96);
+    REQUIRE(pixel_height == 96);
+    const auto center = ((pixel_height / 2u) * pixel_width + (pixel_width / 2u)) * 4u;
+    REQUIRE(center + 3 < pixels.size());
+    const auto r = static_cast<int>(pixels[center + 0]);
+    const auto g = static_cast<int>(pixels[center + 1]);
+    const auto b = static_cast<int>(pixels[center + 2]);
+    INFO("datatexture-center-r=" << r);
+    INFO("datatexture-center-g=" << g);
+    INFO("datatexture-center-b=" << b);
+    REQUIRE(r > 160);
+    REQUIRE(g < 100);
+    REQUIRE(b < 80);
+}
+
+#if defined(__APPLE__) && TARGET_OS_OSX
+TEST_CASE("Three.js bridge canvas is captured by hidden macOS WindowHost back buffer",
+          "[threejs][gpu][host][mac][capture]") {
+    if (!is_engine_available(JsEngineType::v8)) {
+        SKIP("V8 is required for native Three.js host capture smoke");
+    }
+
+    View root;
+    root.set_bounds({0, 0, 180, 140});
+    root.set_theme(Theme::dark());
+
+    WindowOptions opts;
+    opts.title = "Three.js host capture smoke";
+    opts.width = 180;
+    opts.height = 140;
+    opts.use_gpu = true;
+    opts.initially_hidden = true;
+
+    auto host = pulp::test::mac::make_test_window(root, opts);
+    if (!host) {
+        SKIP("Hidden macOS GPU WindowHost unavailable on this host/backend");
+    }
+    REQUIRE(host->gpu_surface() != nullptr);
+
+    ScriptEngine engine(JsEngineType::v8);
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store, host->gpu_surface());
+    bridge.set_repaint_callback([host_ptr = host.get()] {
+        if (host_ptr) host_ptr->repaint();
+    });
+    bridge.load_script("");
+
+    bool module_completed = false;
+    std::string module_error;
+    engine.run_module(R"JS(
+        import * as THREE from 'three/webgpu';
+
+        class PulpCanvas {
+            constructor(canvas) {
+                this._canvas = canvas;
+                this.style = canvas.style || {};
+            }
+
+            get width() { return this._canvas.width; }
+            set width(value) { this._canvas.width = value; }
+
+            get height() { return this._canvas.height; }
+            set height(value) { this._canvas.height = value; }
+
+            get clientWidth() { return this._canvas.width; }
+            get clientHeight() { return this._canvas.height; }
+
+            addEventListener(type, fn, opts) { return this._canvas.addEventListener(type, fn, opts); }
+            removeEventListener(type, fn, opts) { return this._canvas.removeEventListener(type, fn, opts); }
+            dispatchEvent(event) { return this._canvas.dispatchEvent(event); }
+            setPointerCapture(pointerId) { return this._canvas.setPointerCapture(pointerId); }
+            releasePointerCapture(pointerId) { return this._canvas.releasePointerCapture(pointerId); }
+        }
+
+        document.body.style.backgroundColor = '#020617';
+        document.body.style.width = '180px';
+        document.body.style.height = '140px';
+        document.body.style.padding = '12px';
+
+        const canvas = document.createElement('canvas');
+        canvas.id = 'threejs-host-capture-canvas';
+        canvas.width = 96;
+        canvas.height = 96;
+        canvas.style.width = '96px';
+        canvas.style.height = '96px';
+        document.body.appendChild(canvas);
+
+        const context = canvas.getContext('webgpu');
+        const renderer = new THREE.WebGPURenderer({
+            canvas: new PulpCanvas(canvas),
+            context,
+            antialias: false
+        });
+        await renderer.init();
+        renderer.setSize(96, 96, false);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(1, 0, 0);
+        const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 10);
+        camera.position.z = 2;
+
+        const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.75, 0.75, 0.75),
+            new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+        );
+        mesh.rotation.x = 0.4;
+        mesh.rotation.y = 0.6;
+        scene.add(mesh);
+
+        renderer.render(scene, camera);
+        if (typeof context.present === 'function') context.present();
+        renderer.render(scene, camera);
+        if (typeof context.present === 'function') context.present();
+
+        globalThis.__pulpHostCaptureState = {
+            status: 'ready',
+            backend: renderer.backend && renderer.backend.constructor ? renderer.backend.constructor.name : '',
+            contextType: renderer.getContext() && renderer.getContext()._objectName ? renderer.getContext()._objectName : '',
+            bufferedSkipCount: (globalThis.__phase13BufferedSkips || []).length
+        };
+
+        export default true;
+    )JS", resolve_threejs_module,
+    [&](const std::string& error, const choc::value::Value&) {
+        module_completed = true;
+        module_error = error;
+    });
+
+    for (int i = 0; i < 256; ++i) {
+        engine.pump_message_loop();
+        if (eval_string(engine, "globalThis.__pulpHostCaptureState.status") == "ready") {
+            break;
+        }
+    }
+
+    REQUIRE(module_completed);
+    REQUIRE(module_error.empty());
+    INFO(eval_string(engine, "JSON.stringify(globalThis.__pulpHostCaptureState || {})"));
+    REQUIRE(eval_string(engine, "globalThis.__pulpHostCaptureState.status") == "ready");
+    REQUIRE(eval_string(engine, "globalThis.__pulpHostCaptureState.contextType") == "GPUCanvasContext");
+    REQUIRE(eval_i32(engine, "globalThis.__pulpHostCaptureState.bufferedSkipCount") == 0);
+
+    root.layout_children();
+    const auto native_id = eval_string(engine, "document.getElementById('threejs-host-capture-canvas')._id");
+    auto* widget = dynamic_cast<CanvasWidget*>(bridge.widget(native_id));
+    REQUIRE(widget != nullptr);
+    REQUIRE(widget->bounds().width > 0.0f);
+    REQUIRE(widget->bounds().height > 0.0f);
+
+    const auto png = pulp::test::mac::capture_back_buffer_png(*host);
+    INFO("host capture png bytes=" << png.size());
+    REQUIRE(png.size() > 8);
+    REQUIRE(png[0] == 0x89);
+    REQUIRE(png[1] == 0x50);
+    REQUIRE(png[2] == 0x4e);
+    REQUIRE(png[3] == 0x47);
+    REQUIRE(widget->last_native_gpu_texture_draw_succeeded());
+
+    const auto stats = sample_png_colors(png);
+    INFO("host capture png " << stats.width << "x" << stats.height
+         << " red_pixels=" << stats.red_pixels
+         << " bright_pixels=" << stats.bright_pixels);
+    REQUIRE(stats.width >= 180);
+    REQUIRE(stats.height >= 140);
+    REQUIRE(stats.red_pixels > 100);
+    REQUIRE(stats.bright_pixels > 100);
+}
+#endif
+
+TEST_CASE("Three.js GLTF scene keeps resize, pointer drag, and wheel input live", "[threejs][gpu][gltf][input]") {
+    if (!is_engine_available(JsEngineType::v8)) {
+        SKIP("V8 is required for native Three.js GLTF input smoke");
+    }
+
+    NativeV8Environment env(180, 140);
+    if (!env.has_native_gpu()) {
+        SKIP("Native Dawn adapter unavailable on this host/backend");
+    }
+
+    const auto glb_path = std::filesystem::temp_directory_path()
+        / "pulp-threejs-gltf-input" / "BoxTextured.glb";
+    const auto glb_bytes = make_minimal_glb();
+    write_binary_file(glb_path, glb_bytes);
+
+    const auto generic_path = glb_path.generic_string();
+    const std::string file_url = std::string("file://")
+        + (generic_path.empty() || generic_path.front() == '/' ? "" : "/")
+        + generic_path;
+
+    env.bridge->load_script("");
+
+    bool module_completed = false;
+    std::string module_error;
+    std::string script = R"JS(
+        import * as THREE from 'three/webgpu';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        class PulpCanvas {
+            constructor(canvas) {
+                this._canvas = canvas;
+                this.style = canvas.style || {};
+            }
+            get width() { return this._canvas.width; }
+            set width(value) { this._canvas.width = value; }
+            get height() { return this._canvas.height; }
+            set height(value) { this._canvas.height = value; }
+            get clientWidth() { return this._canvas.width; }
+            get clientHeight() { return this._canvas.height; }
+            addEventListener(type, fn, opts) { return this._canvas.addEventListener(type, fn, opts); }
+            removeEventListener(type, fn, opts) { return this._canvas.removeEventListener(type, fn, opts); }
+            dispatchEvent(event) { return this._canvas.dispatchEvent(event); }
+            setPointerCapture(pointerId) {
+                if (typeof this._canvas.setPointerCapture === 'function') {
+                    return this._canvas.setPointerCapture(pointerId);
+                }
+            }
+            releasePointerCapture(pointerId) {
+                if (typeof this._canvas.releasePointerCapture === 'function') {
+                    return this._canvas.releasePointerCapture(pointerId);
+                }
+            }
+        }
+
+        function dispatch(target, event) {
+            event.bubbles = event.bubbles !== false;
+            event.cancelable = true;
+            event.preventDefault = event.preventDefault || function() { this.defaultPrevented = true; };
+            event.stopPropagation = event.stopPropagation || function() {};
+            return target.dispatchEvent(event);
+        }
+
+        globalThis.__pulpGltfInputState = { status: 'start', url: '__PULP_GLB_URL__' };
+        globalThis.__phase13BufferedSkips = [];
+
+        globalThis.__pulpGltfInputTask = (async () => {
+            const state = globalThis.__pulpGltfInputState;
+            state.status = 'fetch-start';
+            const response = await fetch(state.url);
+            if (!response.ok) throw new Error('fetch failed status=' + response.status);
+            const buffer = await response.arrayBuffer();
+            state.byteLength = buffer.byteLength;
+
+            const gltf = await new Promise((resolve, reject) => {
+                new GLTFLoader().parse(buffer, '', resolve, (error) => {
+                    reject(new Error('GLTFLoader.parse failed: '
+                        + (error && error.message ? error.message : String(error))));
+                });
+            });
+            state.status = 'gltf-ready';
+
+            const canvas = document.createElement('canvas');
+            canvas.id = 'pulp-gltf-input-canvas';
+            canvas.width = 96;
+            canvas.height = 96;
+            document.body.appendChild(canvas);
+            const wrappedCanvas = new PulpCanvas(canvas);
+            const context = canvas.getContext('webgpu');
+            const renderer = new THREE.WebGPURenderer({ canvas: wrappedCanvas, context, antialias: false });
+            await renderer.init();
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+            const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 10);
+            camera.position.z = 2.25;
+            const controls = new OrbitControls(camera, canvas);
+            controls.enableDamping = true;
+            controls.enablePan = false;
+
+            const object = gltf.scene || new THREE.Group();
+            object.name = 'PulpGltfInputObject';
+            object.rotation.x = 0.25;
+            object.rotation.y = 0.4;
+            scene.add(object);
+            controls.target.set(0, 0, 0);
+            controls.update();
+
+            let dragging = false;
+            let lastX = 0;
+            let lastY = 0;
+            let dragEvents = 0;
+            let wheelEvents = 0;
+            canvas.addEventListener('pointerdown', (event) => {
+                dragging = true;
+                lastX = event.clientX || event.offsetX || 0;
+                lastY = event.clientY || event.offsetY || 0;
+                if (typeof canvas.setPointerCapture === 'function') {
+                    canvas.setPointerCapture(event.pointerId || 1);
+                }
+            });
+            canvas.addEventListener('pointermove', (event) => {
+                if (!dragging) return;
+                const nextX = event.clientX || event.offsetX || 0;
+                const nextY = event.clientY || event.offsetY || 0;
+                object.rotation.y += (nextX - lastX) * 0.01;
+                object.rotation.x += (nextY - lastY) * 0.01;
+                lastX = nextX;
+                lastY = nextY;
+                dragEvents += 1;
+            });
+            canvas.addEventListener('pointerup', (event) => {
+                dragging = false;
+                if (typeof canvas.releasePointerCapture === 'function') {
+                    canvas.releasePointerCapture(event.pointerId || 1);
+                }
+            });
+            canvas.addEventListener('wheel', (event) => {
+                camera.position.z = Math.max(1.1, Math.min(6.2, camera.position.z + (event.deltaY || 0) * 0.0025));
+                wheelEvents += 1;
+                if (typeof event.preventDefault === 'function') event.preventDefault();
+            });
+
+            renderer.setSize(128, 112, false);
+            camera.aspect = 128 / 112;
+            camera.updateProjectionMatrix();
+            state.resizedWidth = renderer.domElement.width || 0;
+            state.resizedHeight = renderer.domElement.height || 0;
+            state.cameraAspectAfterResize = camera.aspect;
+
+            const rotationBefore = object.rotation.y;
+            const cameraZBefore = camera.position.z;
+            dispatch(canvas, { type: 'pointerdown', pointerId: 1, clientX: 12, clientY: 18, offsetX: 12, offsetY: 18 });
+            dispatch(canvas, { type: 'pointermove', pointerId: 1, clientX: 58, clientY: 34, offsetX: 58, offsetY: 34 });
+            dispatch(canvas, { type: 'pointerup', pointerId: 1, clientX: 58, clientY: 34, offsetX: 58, offsetY: 34 });
+            dispatch(canvas, { type: 'wheel', deltaY: -120 });
+
+            controls.update();
+            renderer.render(scene, camera);
+            if (typeof context.present === 'function') context.present();
+
+            state.status = 'ready';
+            state.dragEvents = dragEvents;
+            state.wheelEvents = wheelEvents;
+            state.rotationBefore = rotationBefore;
+            state.rotationAfter = object.rotation.y;
+            state.cameraZBefore = cameraZBefore;
+            state.cameraZAfter = camera.position.z;
+            state.bufferedSkipCount = (globalThis.__phase13BufferedSkips || []).length;
+            state.rendererWidth = renderer.domElement.width || 0;
+            state.rendererHeight = renderer.domElement.height || 0;
+            return state;
+        })().catch((error) => {
+            const state = globalThis.__pulpGltfInputState || {};
+            state.status = 'error';
+            state.message = error && error.message ? String(error.message) : String(error);
+            state.stack = error && error.stack ? String(error.stack) : '';
+            globalThis.__pulpGltfInputState = state;
+        });
+
+        export default globalThis.__pulpGltfInputState;
+    )JS";
+
+    const auto url_pos = script.find("__PULP_GLB_URL__");
+    REQUIRE(url_pos != std::string::npos);
+    script.replace(url_pos, std::string("__PULP_GLB_URL__").size(), file_url);
+
+    env.engine.run_module(script,
+    resolve_threejs_module,
+    [&](const std::string& error, const choc::value::Value&) {
+        module_completed = true;
+        module_error = error;
+    });
+
+    for (int i = 0; i < 512; ++i) {
+        env.engine.pump_message_loop();
+        env.bridge->service_frame_callbacks();
+        const auto status = eval_string(env.engine, "globalThis.__pulpGltfInputState && globalThis.__pulpGltfInputState.status || ''");
+        if (status == "ready" || status == "error") {
+            break;
+        }
+    }
+
+    INFO(module_error);
+    REQUIRE(module_completed);
+    REQUIRE(module_error.empty());
+
+    const auto state = eval_string(env.engine, "JSON.stringify(globalThis.__pulpGltfInputState || {})");
+    INFO(state);
+    REQUIRE(state.find("\"status\":\"ready\"") != std::string::npos);
+    REQUIRE(state.find("\"byteLength\":" + std::to_string(glb_bytes.size())) != std::string::npos);
+    REQUIRE(state.find("\"resizedWidth\":128") != std::string::npos);
+    REQUIRE(state.find("\"resizedHeight\":112") != std::string::npos);
+    REQUIRE(state.find("\"rendererWidth\":128") != std::string::npos);
+    REQUIRE(state.find("\"rendererHeight\":112") != std::string::npos);
+    REQUIRE(state.find("\"dragEvents\":1") != std::string::npos);
+    REQUIRE(state.find("\"wheelEvents\":1") != std::string::npos);
+    REQUIRE(state.find("\"bufferedSkipCount\":0") != std::string::npos);
+    REQUIRE(eval_i32(env.engine, "globalThis.__pulpGltfInputState.rotationAfter !== globalThis.__pulpGltfInputState.rotationBefore ? 1 : 0") == 1);
+    REQUIRE(eval_i32(env.engine, "globalThis.__pulpGltfInputState.cameraZAfter !== globalThis.__pulpGltfInputState.cameraZBefore ? 1 : 0") == 1);
+    REQUIRE(eval_i32(env.engine, "Math.abs(globalThis.__pulpGltfInputState.cameraAspectAfterResize - (128/112)) < 0.0001 ? 1 : 0") == 1);
+
+    std::filesystem::remove(glb_path);
 }
 
 TEST_CASE("Three.js native smoke initializes and renders through the Dawn-backed bridge", "[threejs][gpu][phase13]") {

@@ -2,16 +2,16 @@
 // the Phase 7 node-pack loader test. Exports pulp_node_v1_entry with default
 // visibility so dlsym/GetProcAddress can resolve it.
 
+#if defined(_WIN32)
+#define PULP_NODE_V1_EXPORT __declspec(dllexport)
+#else
+#define PULP_NODE_V1_EXPORT __attribute__((visibility("default")))
+#endif
+
 #include <pulp/native_components/pulp_node_v1.h>
 
 #include <cstdint>
 #include <cstring>
-
-#if defined(_WIN32)
-#define PULP_NODE_PACK_EXPORT __declspec(dllexport)
-#else
-#define PULP_NODE_PACK_EXPORT __attribute__((visibility("default")))
-#endif
 
 namespace {
 
@@ -96,6 +96,6 @@ pulp_node_entry_v1 g_entry = [] {
 
 }  // namespace
 
-extern "C" PULP_NODE_PACK_EXPORT const pulp_node_entry_v1* pulp_node_v1_entry(void) {
+extern "C" PULP_NODE_V1_EXPORT const pulp_node_entry_v1* pulp_node_v1_entry(void) {
     return &g_entry;
 }

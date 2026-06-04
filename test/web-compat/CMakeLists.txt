@@ -131,6 +131,39 @@ if(PULP_HAS_SKIA AND PULP_ENABLE_GPU)
     catch_discover_tests(pulp-test-webgpu-native-draw)
 endif()
 
+# Native Three.js bridge smoke. This intentionally lives behind the real
+# GPU+Skia+three.js gate: the test imports three.webgpu.js, creates a Dawn-
+# backed canvas, and inspects the native buffered draw path.
+if(PULP_HAS_SKIA AND PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
+    add_executable(pulp-test-threejs-bridge
+        test_threejs_bridge.cpp
+    )
+    target_link_libraries(pulp-test-threejs-bridge PRIVATE
+        pulp::view pulp::state pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-threejs-bridge PRIVATE
+        PULP_HAS_SKIA=1
+        PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+        PULP_THREEJS_SOURCE_DIR="${threejs_SOURCE_DIR}")
+    target_include_directories(pulp-test-threejs-bridge PRIVATE
+        ${WEBCOMPAT_INCLUDE_DIR} ${SKIA_INCLUDE_DIRS})
+    if(APPLE)
+        if(NOT PULP_IOS)
+            target_sources(pulp-test-threejs-bridge PRIVATE
+                ../mac_window_harness.mm
+            )
+            target_link_libraries(pulp-test-threejs-bridge PRIVATE
+                "-framework AppKit"
+                "-framework Metal"
+                "-framework QuartzCore"
+            )
+        endif()
+        target_link_options(pulp-test-threejs-bridge PRIVATE -Wl,-stack_size,0x2000000)
+    elseif(UNIX)
+        target_link_options(pulp-test-threejs-bridge PRIVATE -Wl,-z,stacksize=16777216)
+    endif()
+    catch_discover_tests(pulp-test-threejs-bridge)
+endif()
+
 # Visual reftest runner (screenshot comparison against baselines)
 if(APPLE)
     add_executable(pulp-test-web-compat-reftest

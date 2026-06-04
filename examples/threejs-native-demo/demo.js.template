@@ -1,6 +1,7 @@
 
         import * as THREE from 'three/webgpu';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
         class PulpCanvas {
             constructor(canvas) {
@@ -39,6 +40,8 @@
         const isParticles = demoMode === 'particles';
         const isRibbon = demoMode === 'ribbon';
         const isReverb = demoMode === 'reverb';
+        const isGltfBox = demoMode === 'gltf-box';
+        const gltfBoxUrl = '__GLTF_BOX_URL__';
         const hudWidth = 220;
         const sceneWidth = Math.max(260, rootWidth - hudWidth - 72);
         const sceneHeight = Math.max(240, rootHeight - 112);
@@ -49,6 +52,7 @@
             message: '',
             layout: 'hybrid-2d-3d'
         };
+        globalThis.__phase13BufferedSkips = [];
 
         document.body.style.backgroundColor = '#050816';
         document.body.style.padding = '18px';
@@ -85,7 +89,9 @@
                 ? 'Pulp Native Particle Visualizer'
                 : (isRibbon
                     ? 'Pulp Native Waveform Ribbon'
-                    : (isReverb ? 'Pulp Native Room Reverb Visualizer' : 'Pulp Native Three.js')));
+                    : (isReverb
+                        ? 'Pulp Native Room Reverb Visualizer'
+                        : (isGltfBox ? 'Pulp Native GLTF Box' : 'Pulp Native Three.js'))));
         title.style.color = '#f8fafc';
         title.style.fontSize = '28px';
         title.style.fontWeight = '700';
@@ -101,7 +107,9 @@
                     ? 'Waveform data from Pulp\'s VisualizationBridge drives a 3D ribbon surface through real three.webgpu.js on the native Dawn canvas.'
                     : (isReverb
                         ? 'Waveform and room data from Pulp\'s VisualizationBridge drive a room shell, reflection lines, and a diffuse late-reverb cloud through real three.webgpu.js on the native Dawn canvas.'
-                        : 'Hybrid 2D+3D layout: native HUD plus real three.webgpu.js on a Dawn-backed canvas.')));
+                        : (isGltfBox
+                            ? 'A local GLB is loaded through GLTFLoader, textured, and rendered by real three.webgpu.js on the native Dawn canvas.'
+                            : 'Hybrid 2D+3D layout: native HUD plus real three.webgpu.js on a Dawn-backed canvas.'))));
         subtitle.style.color = '#cbd5e1';
         subtitle.style.fontSize = '14px';
         sceneColumn.appendChild(subtitle);
@@ -169,7 +177,7 @@
         const backendValue = addMetric('Backend', 'booting...', 'pulp-threejs-hud-backend');
         const frameValue = addMetric('Frame', '0', 'pulp-threejs-hud-frame');
         const cameraValue = addMetric('Camera Z', '2.00', 'pulp-threejs-hud-camera');
-        const modeValue = addMetric('Demo', isSpectrum ? 'spectrum-analyzer' : (isParticles ? 'particle-visualizer' : (isRibbon ? 'waveform-ribbon' : (isReverb ? 'room-reverb' : 'cube-smoke'))), 'pulp-threejs-hud-mode');
+        const modeValue = addMetric('Demo', isSpectrum ? 'spectrum-analyzer' : (isParticles ? 'particle-visualizer' : (isRibbon ? 'waveform-ribbon' : (isReverb ? 'room-reverb' : (isGltfBox ? 'gltf-box' : 'cube-smoke')))), 'pulp-threejs-hud-mode');
         const interactionValue = addMetric(
             isSpectrum ? 'Signal Peak' : ((isParticles || isRibbon) ? 'RMS / Beat' : (isReverb ? 'Waveform / Abs' : 'Interaction')),
             (isSpectrum || isParticles || isRibbon) ? '0.00' : (isReverb ? '0.00 / 0.00' : 'drag / pinch'),
@@ -188,11 +196,17 @@
         await renderer.init();
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(isSpectrum ? 0x08111f : (isParticles ? 0x050816 : (isRibbon ? 0x040814 : (isReverb ? 0x050713 : 0xff0000))));
+        scene.background = new THREE.Color(isSpectrum ? 0x08111f : (isParticles ? 0x050816 : (isRibbon ? 0x040814 : (isReverb ? 0x050713 : (isGltfBox ? 0x111827 : 0xff0000)))));
+        if (isGltfBox) {
+            scene.add(new THREE.AmbientLight(0xffffff, 1.8));
+            const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+            keyLight.position.set(2.5, 3.0, 4.0);
+            scene.add(keyLight);
+        }
 
         const camera = new THREE.PerspectiveCamera(70, sceneWidth / sceneHeight, 0.1, 10);
-        camera.position.z = isSpectrum ? 5.4 : (isParticles ? 6.0 : (isRibbon ? 4.15 : (isReverb ? 5.3 : 2)));
-        camera.position.y = isSpectrum ? 1.35 : (isParticles ? 0.8 : (isRibbon ? 0.42 : (isReverb ? 1.15 : 0)));
+        camera.position.z = isSpectrum ? 5.4 : (isParticles ? 6.0 : (isRibbon ? 4.15 : (isReverb ? 5.3 : (isGltfBox ? 2.35 : 2))));
+        camera.position.y = isSpectrum ? 1.35 : (isParticles ? 0.8 : (isRibbon ? 0.42 : (isReverb ? 1.15 : (isGltfBox ? 0.1 : 0))));
 
         const controls = new OrbitControls(camera, canvas);
         controls.enableDamping = true;
@@ -240,6 +254,9 @@
         let reverbRoomWidth = 0;
         let reverbRoomDepth = 0;
         let reverbRoomHeight = 0;
+        let gltfMeshCount = 0;
+        let gltfTextureCount = 0;
+        let gltfFirstFrameSubmit = false;
         const particleColor = new THREE.Color();
 
         if (isSpectrum) {
@@ -561,6 +578,59 @@
             reverbWaveformPeak = waveform.reduce((peak, value) => Math.max(peak, Math.abs(Number(value || 0.0))), 0.0);
             interactionTarget = reverbRoomGroup;
             controls.target.set(0, 0.55, 0);
+        } else if (isGltfBox) {
+            if (!gltfBoxUrl) {
+                throw new Error('gltf-box asset URL missing');
+            }
+            globalThis.__pulpThreeDemoState.step = 'gltf-load-start';
+            const loader = new GLTFLoader();
+            const response = await fetch(gltfBoxUrl);
+            if (!response || !response.ok) {
+                throw new Error('fetch failed for ' + gltfBoxUrl + ': status=' + (response ? response.status : 'none'));
+            }
+            const gltfBytes = await response.arrayBuffer();
+            if (!gltfBytes || gltfBytes.byteLength <= 0) {
+                throw new Error('fetch returned empty GLB for ' + gltfBoxUrl);
+            }
+            const gltf = await new Promise((resolve, reject) => {
+                loader.parse(gltfBytes, '', resolve, (error) => {
+                    reject(new Error('GLTFLoader.parse failed for ' + gltfBoxUrl + ': '
+                        + (error && error.message ? error.message : String(error))));
+                });
+            });
+            mesh = gltf.scene;
+            mesh.name = 'BoxTextured';
+            mesh.rotation.x = 0.35;
+            mesh.rotation.y = 0.55;
+            mesh.traverse((node) => {
+                if (node && node.isMesh) {
+                    gltfMeshCount += 1;
+                    const materials = Array.isArray(node.material) ? node.material : [node.material];
+                    for (const material of materials) {
+                        if (material && material.map) {
+                            gltfTextureCount += 1;
+                        }
+                    }
+                    const textureMap = materials.find((material) => material && material.map)?.map || null;
+                    if (textureMap) {
+                        textureMap.needsUpdate = true;
+                    }
+                    node.material = new THREE.MeshBasicMaterial({
+                        map: textureMap,
+                        color: textureMap ? 0xffffff : 0x34d399
+                    });
+                }
+            });
+            scene.add(mesh);
+            interactionTarget = mesh;
+            globalThis.__pulpThreeDemoMesh = mesh;
+            globalThis.__pulpThreeDemoGltfStats = {
+                url: gltfBoxUrl,
+                byteLength: gltfBytes.byteLength,
+                meshCount: gltfMeshCount,
+                textureCount: gltfTextureCount
+            };
+            controls.target.set(0, 0, 0);
         } else {
             const geometry = new THREE.BoxGeometry(0.75, 0.75, 0.75);
             const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
@@ -587,14 +657,14 @@
                 renderer.backend && renderer.backend.constructor ? renderer.backend.constructor.name : 'unknown';
             frameValue.textContent = String(frameValueNumber);
             cameraValue.textContent = camera.position.z.toFixed(2);
-            modeValue.textContent = isSpectrum ? 'spectrum-analyzer' : (isParticles ? 'particle-visualizer' : (isRibbon ? 'waveform-ribbon' : (isReverb ? 'room-reverb' : 'cube-smoke')));
+            modeValue.textContent = isSpectrum ? 'spectrum-analyzer' : (isParticles ? 'particle-visualizer' : (isRibbon ? 'waveform-ribbon' : (isReverb ? 'room-reverb' : (isGltfBox ? 'gltf-box' : 'cube-smoke'))));
             interactionValue.textContent = isSpectrum
                 ? spectrumPeak.toFixed(2)
                 : ((isParticles || isRibbon)
                     ? `${signalRms.toFixed(2)} / ${signalBeat.toFixed(2)}`
                     : (isReverb
                         ? `${reverbWaveformPeak.toFixed(2)} / ${reverbAbsorption.toFixed(2)}`
-                        : (dragging ? 'dragging cube' : 'drag / pinch / wheel')));
+                        : (dragging ? (isGltfBox ? 'dragging glb' : 'dragging cube') : 'drag / pinch / wheel')));
         }
         function applyZoomDelta(delta) {
             const nextZ = camera.position.z + delta;
@@ -938,6 +1008,10 @@
                 if (typeof context.present === 'function') {
                     context.present();
                 }
+                if (isGltfBox) {
+                    gltfFirstFrameSubmit = true;
+                    globalThis.__pulpThreeDemoState.gltfFirstFrameSubmit = true;
+                }
                 lastRenderMs = now;
                 globalThis.__pulpThreeDemoState.frame = frame;
                 syncHud(frame);
@@ -958,6 +1032,9 @@
         renderer.render(scene, camera);
         if (typeof context.present === 'function') {
             context.present();
+        }
+        if (isGltfBox) {
+            gltfFirstFrameSubmit = true;
         }
         requestAnimationFrame(tick);
 
@@ -984,9 +1061,14 @@
             roomDepth: reverbRoomDepth,
             roomHeight: reverbRoomHeight,
             absorption: reverbAbsorption,
+            gltfUrl: gltfBoxUrl,
+            gltfByteLength: isGltfBox && globalThis.__pulpThreeDemoGltfStats ? globalThis.__pulpThreeDemoGltfStats.byteLength : 0,
+            gltfMeshCount: gltfMeshCount,
+            gltfTextureCount: gltfTextureCount,
+            gltfFirstFrameSubmit: gltfFirstFrameSubmit,
+            bufferedSkipCount: (globalThis.__phase13BufferedSkips || []).length,
             titleText: title.textContent
         };
         syncHud(0);
 
         export default true;
-    

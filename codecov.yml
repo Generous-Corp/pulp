@@ -133,11 +133,17 @@ ignore:
   - "**/cg_canvas.mm"
   - "**/window_host_mac.mm"
   - "**/window_host_ios.mm"
+  - "**/au_view_controller_mac.mm"
+  - "**/plugin_view_host_mac.mm"
   - "**/sdl_window_host.cpp"
   - "**/scanner_clap.cpp"
+  - "**/au_v2_adapter.cpp"
   - "**/cmd_projects.cpp"
   - "**/canvas.hpp"
   - "**/skia_canvas.cpp"
+  - "**/gpu_surface_dawn.cpp"
+  - "**/skia_surface.cpp"
+  - "**/widget_bridge.cpp"
   # C++ test harnesses sometimes live beside tool sources (for example
   # tools/scan-worker/test_scan_worker.cpp) instead of under top-level
   # test/. They are tests, not product coverage surface.
@@ -193,6 +199,10 @@ flags:
   midi:
     paths:
       - core/midi/
+    carryforward: true
+  native-components:
+    paths:
+      - core/native-components/
     carryforward: true
   osc:
     paths:
@@ -354,6 +364,9 @@ component_management:
       paths:
         - "core/midi/**"
         - "!core/midi/platform/**"
+    - component_id: native-components
+      name: native-components
+      paths: ["core/native-components/**"]
     - component_id: osc
       name: osc
       paths: ["core/osc/**"]

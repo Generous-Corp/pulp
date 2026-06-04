@@ -13,7 +13,15 @@
 #include <cstddef>
 #include <cstdint>
 
-extern "C" __attribute__((weak)) void
+#if defined(_MSC_VER)
+#define PULP_WEAK_SYMBOL
+#elif defined(__GNUC__) || defined(__clang__)
+#define PULP_WEAK_SYMBOL __attribute__((weak))
+#else
+#define PULP_WEAK_SYMBOL
+#endif
+
+extern "C" PULP_WEAK_SYMBOL void
 pulp_rt_trap_if_no_alloc_scope(std::int32_t /*kind*/, std::size_t /*bytes*/) {
     // Intentionally empty: no allocation, no logging, no syscalls.
 }

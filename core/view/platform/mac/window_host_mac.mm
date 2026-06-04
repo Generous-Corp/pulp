@@ -2656,12 +2656,13 @@ private:
             view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
+        skia_surface_->end_frame();   // submit Graphite recording
+
         bool captured = true;
         if (capture_pixels && capture_width && capture_height) {
             captured = skia_surface_->read_current_rgba(*capture_pixels, *capture_width, *capture_height);
         }
 
-        skia_surface_->end_frame();   // submit Graphite recording
         gpu_surface_->end_frame();    // present to Metal surface
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),

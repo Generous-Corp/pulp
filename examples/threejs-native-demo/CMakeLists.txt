@@ -30,12 +30,26 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
             NAME threejs_native_demo_capture_no_hang
             COMMAND ${CMAKE_COMMAND}
                 -DDEMO_BIN=$<TARGET_FILE:pulp-threejs-native-demo>
+                -DDEMO_MODE=cube
                 -DCAPTURE_PATH=${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-demo-capture-test.png
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/capture_test.cmake
         )
         set_tests_properties(threejs_native_demo_capture_no_hang PROPERTIES
             TIMEOUT 30
             LABELS "threejs;gpu;headless"
+        )
+
+        add_test(
+            NAME threejs_native_demo_gltf_box_capture_no_hang
+            COMMAND ${CMAKE_COMMAND}
+                -DDEMO_BIN=$<TARGET_FILE:pulp-threejs-native-demo>
+                -DDEMO_MODE=gltf-box
+                -DCAPTURE_PATH=${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-gltf-box-capture-test.png
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/capture_test.cmake
+        )
+        set_tests_properties(threejs_native_demo_gltf_box_capture_no_hang PROPERTIES
+            TIMEOUT 30
+            LABELS "threejs;gpu;headless;gltf;texture"
         )
     endif()
 endif()
