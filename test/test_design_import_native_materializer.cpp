@@ -5,7 +5,9 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
@@ -817,6 +819,71 @@ TEST_CASE("baked native materializer resolves an rgba() background color",
     const auto c = root->background_color();
     CHECK(c.r == Catch::Approx(171.0f / 255.0f).margin(0.01f));
     CHECK(c.a == Catch::Approx(0.1f).margin(0.01f));
+}
+
+TEST_CASE("baked native materializer maps a Dropdown frame to an interactive ComboBox",
+          "[view][import][native-materializer][combo-box]") {
+    // ELYSIUM's FX RACK ships explicit "Dropdown" frames (a selected-value text
+    // + a chevron image). Recognized by layer name → a functional ComboBox whose
+    // first item is the captured selection; the source has no option list, so
+    // stub options demonstrate the popup. The text/chevron children are
+    // suppressed (the ComboBox paints its own display).
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+
+    IRNode dropdown;
+    dropdown.type = "frame";
+    dropdown.name = "Dropdown";
+    dropdown.stable_anchor_id = "fx-delay";
+    IRNode value;
+    value.type = "text";
+    value.text_content = "1/4 Delay";
+    value.stable_anchor_id = "fx-delay-text";
+    IRNode chevron;
+    chevron.type = "image";
+    chevron.name = "Dropdown";
+    chevron.attributes["asset_ref"] = "chevron";
+    chevron.stable_anchor_id = "fx-delay-chevron";
+    dropdown.children.push_back(value);
+    dropdown.children.push_back(chevron);
+    ir.root.children.push_back(std::move(dropdown));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    auto* combo = dynamic_cast<ComboBox*>(root->child_at(0));
+    REQUIRE(combo != nullptr);
+    REQUIRE_FALSE(combo->items().empty());
+    CHECK(combo->items().front() == "1/4 Delay");
+    CHECK(combo->selected_text() == "1/4 Delay");
+    CHECK(combo->items().size() >= 2);           // stub options for the popup
+    CHECK(combo->child_count() == 0);            // text + chevron suppressed
+}
+
+TEST_CASE("baked native materializer maps a Search text node to an editable field",
+          "[view][import][native-materializer][text-editor]") {
+    // ELYSIUM's "Search" field should be a TAPPABLE input: the visible "SEARCH"
+    // becomes the placeholder (replaced by a caret on focus), and typing enters
+    // text — instead of a static Label.
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.name = "Search";
+    ir.root.text_content = "SEARCH";
+    ir.root.stable_anchor_id = "search";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* editor = dynamic_cast<TextEditor*>(root.get());
+    REQUIRE(editor != nullptr);
+    CHECK(editor->placeholder == "SEARCH");
+
+    // Tappable + editable: focus then type enters text over the placeholder.
+    editor->on_focus_changed(true);
+    TextInputEvent te;
+    te.text = "drums";
+    editor->on_text_input(te);
+    CHECK(editor->text() == "drums");
 }
 
 TEST_CASE("hoist_captured_art_knobs promotes a body disc + pointer to an interactive skin",

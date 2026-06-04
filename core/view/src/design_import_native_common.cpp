@@ -9,6 +9,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 
@@ -551,12 +552,42 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     }
 }
 
+// The first non-empty text content anywhere under `node` (a dropdown's selected
+// value, a search field's placeholder).
+std::optional<std::string> first_text_descendant(const IRNode& node) {
+    for (const auto& c : node.children)
+        if (lower_copy(c.type) == "text" && !c.text_content.empty())
+            return c.text_content;
+    for (const auto& c : node.children)
+        if (auto t = first_text_descendant(c)) return t;
+    return std::nullopt;
+}
+
+// Design-import widget recognition by Figma layer name. Designers label these
+// containers explicitly (ELYSIUM's FX RACK "Dropdown" frames, the "Search"
+// field), so the name is a reliable, source-honest signal — no content
+// guessing. Returns nullopt when the node is not one of these.
+std::optional<NativeWidgetKind> kind_from_name(const IRNode& node) {
+    const auto name = lower_copy(node.name);
+    const auto type = lower_copy(node.type);
+    // A "Dropdown" frame that actually carries a text value → ComboBox.
+    if (type == "frame" && name == "dropdown" && first_text_descendant(node))
+        return NativeWidgetKind::combo_box;
+    // A "Search" text field → an editable TextEditor (tappable, caret, keyboard).
+    if (type == "text" &&
+        (name == "search" || name == "searchbox" || name == "search field"))
+        return NativeWidgetKind::text_editor;
+    return std::nullopt;
+}
+
 ResolvedNativeNode resolve_node(const IRNode& node,
                                 std::string_view path,
                                 const AssetIndex& assets) {
     ResolvedNativeNode out;
     if (auto audio_kind = kind_from_audio(node.audio_widget)) {
         out.kind = *audio_kind;
+    } else if (auto name_kind = kind_from_name(node)) {
+        out.kind = *name_kind;
     } else if (auto type_kind = kind_from_type(node, path, out.diagnostics)) {
         out.kind = *type_kind;
     } else {
@@ -897,6 +928,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
         case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
         case NativeWidgetKind::fader:
         case NativeWidgetKind::xy_pad:
@@ -922,6 +954,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
         case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
         case NativeWidgetKind::fader:
         case NativeWidgetKind::meter:
@@ -1295,9 +1328,27 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto editor = std::make_unique<TextEditor>();
             if (semantics.text_placeholder)
                 editor->placeholder = *semantics.text_placeholder;
+            else if (!node.text_content.empty())
+                // A search field imported from a Figma text node: its visible
+                // text ("SEARCH") is the placeholder, replaced by a caret on tap.
+                editor->placeholder = node.text_content;
             if (semantics.text_value)
                 editor->set_text(*semantics.text_value);
             return editor;
+        }
+        case NativeWidgetKind::combo_box: {
+            // A captured "Dropdown" frame → an interactive ComboBox. Its text
+            // child is the selected value; stub options demonstrate the popup
+            // (the figma source carries no option list).
+            auto combo = std::make_unique<ComboBox>();
+            std::string selected = first_text_descendant(node).value_or(text);
+            std::vector<std::string> items;
+            if (!selected.empty()) items.push_back(selected);
+            items.push_back("Option 2");
+            items.push_back("Option 3");
+            combo->set_items(std::move(items));
+            combo->set_selected_silent(0);
+            return combo;
         }
         case NativeWidgetKind::checkbox: {
             auto checkbox = std::make_unique<Checkbox>();
@@ -1462,6 +1513,12 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
 
+    // A ComboBox paints its own box + selected text + chevron, so the captured
+    // "Dropdown" frame's text/chevron children must NOT be materialized on top
+    // (they would double-render). Treat it as a leaf.
+    if (resolved.kind == NativeWidgetKind::combo_box)
+        return view;
+
     const auto count = std::min(node.children.size(), resolved.children.size());
     for (std::size_t i = 0; i < count; ++i) {
         std::ostringstream child_path;
@@ -1516,6 +1573,7 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor: return "text_editor";
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::toggle_button: return "toggle_button";
+        case NativeWidgetKind::combo_box: return "combo_box";
         case NativeWidgetKind::knob: return "knob";
         case NativeWidgetKind::fader: return "fader";
         case NativeWidgetKind::meter: return "meter";

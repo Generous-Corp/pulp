@@ -669,6 +669,30 @@ materializer passes `skip_border=true` for `image_view` nodes so the border is
 not redrawn. If you add a code path that materializes images, keep that guard.
 Test: `[image][fidelity]` in `pulp-test-design-import-native-materializer`.
 
+### Widget recognition by Figma layer NAME (dropdowns, search field)
+
+Some interactive widgets are recognized by the designer's layer **name**, not the
+node type — designers label these containers explicitly, so the name is a
+source-honest signal (no content guessing). `kind_from_name` in
+`design_import_native_common.cpp` runs in `resolve_node` AFTER audio-widget
+detection and BEFORE `kind_from_type`:
+- A `frame` named `Dropdown` that carries a text descendant → `combo_box` (a
+  `ComboBox`). The text child is the selected value; the figma source has no
+  option list, so stub options are added to demonstrate the popup. `combo_box`
+  is a **leaf** in `materialize_node` (the captured text + chevron children are
+  NOT materialized — the ComboBox paints its own display) and owns its hits.
+- A `text` node named `Search` / `SearchBox` → `text_editor` (editable, tappable,
+  caret on focus, keyboard on mobile). The visible text becomes the placeholder
+  (`make_widget` text_editor falls back to `node.text_content` when no explicit
+  placeholder). Replaces the static Label it would otherwise be.
+
+**Web-compat parity caveat:** this recognition is NATIVE-only — the web-compat
+codegen does not detect these names. The screenshot-parity fixtures contain no
+`Dropdown`/`Search` nodes, so the invariant holds today; if you add one to a
+parity fixture, mirror the detection in the codegen (same lesson as the text
+vertical-centering split). Tests: `[combo-box]`, `[text-editor]` in
+`pulp-test-design-import-native-materializer`.
+
 ### Value-driven silhouette fill (illustration shapes — item 3)
 
 A captured illustration PNG (ELYSIUM's prism / cylinder / pentagon / cube) can
