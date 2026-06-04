@@ -31,6 +31,28 @@ namespace pulp::view {
 void ImageView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
+    // Value-driven silhouette fill: overlay fill_color_ from the bottom up to
+    // fill_value_ of the height, masked to this image's own alpha via the canvas
+    // url() mask, so the illustration "fills" as its bound value rises. Call
+    // after a successful image draw so the fill sits over the art.
+    auto emit_silhouette_fill = [&](const std::string& fs) {
+        if (fill_value_ < 0.0f || fs.empty()) return;
+        const float frac = std::clamp(fill_value_, 0.0f, 1.0f);
+        const float fh = b.height * frac;
+        if (fh <= 0.0f) return;
+        canvas.save_layer_with_mask(0, 0, b.width, b.height, 1.0f,
+                                    "url(" + fs + ")", "100% 100%");
+        canvas.set_fill_color(fill_color_);
+        canvas.fill_rect(0, b.height - fh, b.width, fh);
+        canvas.restore();
+    };
+    auto strip_scheme = [](std::string p) {
+        constexpr std::string_view kFile = "file://";
+        if (p.size() >= kFile.size() && p.compare(0, kFile.size(), kFile) == 0)
+            p = p.substr(kFile.size());
+        return p;
+    };
+
     if (path_.empty()) {
         // Placeholder: gray rect with "IMG" text
         canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
@@ -55,6 +77,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
             // Skia → SkImage*) blit it; others no-op and we fall through
             // to the filename placeholder. Workstream 07 slice B4/#255.
             canvas.draw_image(decoded->native_handle, 0, 0, b.width, b.height);
+            emit_silhouette_fill(strip_scheme(path_));
             return;
         }
     }
@@ -249,10 +272,15 @@ void ImageView::paint(canvas::Canvas& canvas) {
             drawn = canvas.draw_image_from_file(
                 fs_path, dst.x, dst.y, dst.width, dst.height);
         }
-        if (drawn) { loaded_ = true; return; }
+        if (drawn) {
+            loaded_ = true;
+            emit_silhouette_fill(fs_path);
+            return;
+        }
     } else if (!fs_path.empty() &&
                canvas.draw_image_from_file(fs_path, 0, 0, b.width, b.height)) {
         loaded_ = true;
+        emit_silhouette_fill(fs_path);
         return;
     }
 

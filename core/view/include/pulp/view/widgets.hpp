@@ -920,6 +920,23 @@ public:
     void set_image_cache(ImageCache* cache) { cache_ = cache; }
     ImageCache* image_cache() const { return cache_; }
 
+    /// Value-driven silhouette fill (design-import shape-fill, e.g. ELYSIUM's
+    /// prism / cube / cylinder illustrations). When `value` is in [0,1], paint()
+    /// overlays `fill_color` from the bottom up to `value` of the height, masked
+    /// to this image's own alpha silhouette via the canvas url() mask — so the
+    /// shape "fills" with color as the bound value rises. A negative value (the
+    /// default) disables the overlay and the image renders plainly.
+    void set_fill_value(float value) {
+        fill_value_ = value;
+        request_repaint();
+    }
+    float fill_value() const { return fill_value_; }
+    void set_fill_color(canvas::Color color) {
+        fill_color_ = color;
+        request_repaint();
+    }
+    bool has_fill() const { return fill_value_ >= 0.0f; }
+
     void paint(canvas::Canvas& canvas) override;
 
 private:
@@ -927,6 +944,8 @@ private:
     bool loaded_ = false;
     std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
     ImageCache* cache_ = nullptr;       // optional; owned externally
+    float fill_value_ = -1.0f;          // <0 disables the silhouette fill overlay
+    canvas::Color fill_color_ = canvas::Color::rgba(0.49f, 0.42f, 1.0f, 0.55f);
 };
 
 // ── Meter ────────────────────────────────────────────────────────────────────

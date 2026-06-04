@@ -5038,6 +5038,16 @@ target_link_libraries(pulp-test-design-import-screenshot-parity
 catch_discover_tests(pulp-test-design-import-screenshot-parity
     PROPERTIES LABELS "parser-import")
 
+# Value-driven silhouette fill (design-import shape-fill — item 3): exercises
+# ImageView::set_fill_value + the canvas url() image mask on the Skia raster
+# backend (no GPU window).
+add_executable(pulp-test-image-view-fill
+    test_image_view_fill.cpp)
+target_link_libraries(pulp-test-image-view-fill
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-image-view-fill
+    PROPERTIES LABELS "view")
+
 # P5-3 follow-up — W3C Design Tokens cluster extracted from
 # test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math

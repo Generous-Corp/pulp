@@ -14,7 +14,12 @@
 //   pulp-elysium-standalone --screenshot=out.png  # headless capture
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
+
+#include <algorithm>
+#include <functional>
+#include <tuple>
 
 #include <miniz.h>
 
@@ -169,17 +174,65 @@ int main(int argc, char** argv) {
     window->set_fixed_aspect_ratio(design_w / design_h);
     window->set_close_callback([] {});
 
-    if (!screenshot_path.empty()) {
-        int frame_count = 0;
-        window->set_idle_callback([&] {
-            if (++frame_count < 6) return;  // let the GPU surface settle
-            auto png = window->capture_back_buffer_png();
-            std::ofstream out(screenshot_path, std::ios::binary);
-            out.write(reinterpret_cast<const char*>(png.data()),
-                      static_cast<std::streamsize>(png.size()));
-            window->request_close();
-        });
-    }
+    // Item 3 demo wiring: pair each upper illustration shape with its column
+    // knob, then drive the shape's value-driven silhouette fill from the knob.
+    // Turning a knob fills/empties its shape (the prism / cylinder / pentagon /
+    // cube) through the new ImageView::set_fill_value + canvas url() alpha mask.
+    // The pairing runs lazily once layout has produced real bounds.
+    struct FillPair { pulp::view::ImageView* shape; pulp::view::Knob* knob; };
+    auto fill_pairs = std::make_shared<std::vector<FillPair>>();
+    auto wired = std::make_shared<bool>(false);
+    auto wire_fills = [root = root.get(), design_h, fill_pairs]() -> bool {
+        std::vector<std::pair<float, pulp::view::Knob*>> knobs;
+        std::vector<std::pair<float, pulp::view::ImageView*>> shapes;
+        std::function<void(pulp::view::View*, float, float)> walk =
+            [&](pulp::view::View* v, float ox, float oy) {
+                const auto bn = v->bounds();
+                const float gx = ox + bn.x, gy = oy + bn.y;
+                if (auto* k = dynamic_cast<pulp::view::Knob*>(v)) {
+                    if (bn.width > 45.0f)  // the big column knobs, not the VALUE minis
+                        knobs.emplace_back(gx + bn.width * 0.5f, k);
+                } else if (auto* img = dynamic_cast<pulp::view::ImageView*>(v)) {
+                    if (bn.width > 50.0f && bn.height > 50.0f &&
+                        gy < design_h * 0.45f)  // the upper illustration band
+                        shapes.emplace_back(gx + bn.width * 0.5f, img);
+                }
+                for (std::size_t i = 0; i < v->child_count(); ++i)
+                    walk(v->child_at(i), gx, gy);
+            };
+        walk(root, 0.0f, 0.0f);
+        if (knobs.empty() || shapes.empty()) return false;  // layout not ready yet
+        std::sort(knobs.begin(), knobs.end(),
+                  [](auto& a, auto& b) { return a.first < b.first; });
+        std::sort(shapes.begin(), shapes.end(),
+                  [](auto& a, auto& b) { return a.first < b.first; });
+        const std::size_t n = std::min(knobs.size(), shapes.size());
+        for (std::size_t i = 0; i < n; ++i)
+            fill_pairs->push_back({shapes[i].second, knobs[i].second});
+        return !fill_pairs->empty();
+    };
+
+    int frame_count = 0;
+    const bool capture = !screenshot_path.empty();
+    window->set_idle_callback([&, fill_pairs, wired] {
+        if (!*wired) *wired = wire_fills();
+        // In headless capture mode, stagger the knob values once wired so the
+        // single shot shows clearly different fill levels; the live window
+        // instead reflects whatever the user turns the knobs to.
+        if (capture && *wired)
+            for (std::size_t i = 0; i < fill_pairs->size(); ++i)
+                (*fill_pairs)[i].knob->set_value(
+                    0.2f + 0.25f * static_cast<float>(i));
+        for (const auto& p : *fill_pairs)
+            p.shape->set_fill_value(p.knob->value());
+        if (!capture) return;
+        if (++frame_count < 6) return;  // let the GPU surface settle
+        auto png = window->capture_back_buffer_png();
+        std::ofstream out(screenshot_path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(png.data()),
+                  static_cast<std::streamsize>(png.size()));
+        window->request_close();
+    });
 
     window->run_event_loop();
     return 0;

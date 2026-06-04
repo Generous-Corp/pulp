@@ -669,6 +669,30 @@ materializer passes `skip_border=true` for `image_view` nodes so the border is
 not redrawn. If you add a code path that materializes images, keep that guard.
 Test: `[image][fidelity]` in `pulp-test-design-import-native-materializer`.
 
+### Value-driven silhouette fill (illustration shapes — item 3)
+
+A captured illustration PNG (ELYSIUM's prism / cylinder / pentagon / cube) can
+be "filled" to a bound value via `ImageView::set_fill_value(0..1)` +
+`set_fill_color`. `ImageView::paint` overlays the color from the bottom up to
+`value` of the height, masked to the image's OWN alpha through the canvas
+`save_layer_with_mask` url() path — so the fill clips to the shape silhouette.
+
+The alpha-mask primitive: `SkiaCanvas::save_layer_with_mask` Phase 1 only
+shipped gradient masks; `url(<file>)` image masks were future work. They are now
+implemented (`skia_canvas_mask.cpp` `parse_url_image_mask` — decode the file to
+an `SkImage`, build a kDecal shader scaled to the mask box; kDstIn keeps painted
+content only where the image alpha is non-zero). Works on Skia raster AND
+Graphite/GPU.
+
+Binding which knob drives which shape is NOT in the figma source (no Figma
+binding), so the import does not auto-wire it. The `elysium-standalone` example
+demonstrates the capability by pairing each upper illustration with its column
+knob and driving `set_fill_value` from the knob each frame. Verify headlessly on
+the **Skia raster** backend, not a GPU window: `render_to_png(view, ...,
+ScreenshotBackend::skia)` exercises the url() mask without Dawn/Metal. Test:
+`[view][image][fill]` in `pulp-test-image-view-fill` (renders fill 0.5 / 1.0 via
+raster, asserts the overlay scales with value).
+
 ### Imported text vertical centering — fix BOTH render paths together
 
 The figma-plugin IR drops `textAlignVertical`, so a single-line label in a slot

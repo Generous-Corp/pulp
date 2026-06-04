@@ -25,6 +25,7 @@
 #include <cmath>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 
 #ifdef PULP_HAS_SKIA
@@ -33,6 +34,9 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkTileMode.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
@@ -315,6 +319,43 @@ std::pair<float, float> parse_mask_size(const std::string& s, float w, float h) 
     return {*wf, *hf};
 }
 
+// url(<file>) mask: decode the image and build a shader scaled to the mask box
+// so the kDstIn composite keeps painted content ONLY where the image's alpha is
+// non-zero — an arbitrary-silhouette clip (the design-import shape-fill path
+// masks a value-height gradient by an illustration PNG). Mirrors
+// decode_pattern_image() in skia_canvas_gradients.cpp. kDecal tiling makes
+// everything outside the image box fully transparent (= masked away).
+sk_sp<SkShader> parse_url_image_mask(const std::string& value,
+                                     float x, float y, float w, float h) {
+    const auto open = value.find("url(");
+    if (open == std::string::npos) return nullptr;
+    const auto close = value.find(')', open);
+    if (close == std::string::npos) return nullptr;
+    std::string path = value.substr(open + 4, close - (open + 4));
+    auto trim = [](std::string& s) {
+        while (!s.empty() &&
+               (s.front() == ' ' || s.front() == '"' || s.front() == '\''))
+            s.erase(s.begin());
+        while (!s.empty() &&
+               (s.back() == ' ' || s.back() == '"' || s.back() == '\''))
+            s.pop_back();
+    };
+    trim(path);
+    constexpr std::string_view kFile = "file://";
+    if (path.size() >= kFile.size() && path.compare(0, kFile.size(), kFile) == 0)
+        path = path.substr(kFile.size());
+    if (path.empty()) return nullptr;
+    auto data = SkData::MakeFromFileName(path.c_str());
+    if (!data) return nullptr;
+    auto image = SkImages::DeferredFromEncodedData(data);
+    if (!image || image->width() <= 0 || image->height() <= 0) return nullptr;
+    SkMatrix m = SkMatrix::Translate(x, y);
+    m.preScale(w / static_cast<float>(image->width()),
+               h / static_cast<float>(image->height()));
+    return image->makeShader(SkTileMode::kDecal, SkTileMode::kDecal,
+                             SkSamplingOptions(SkFilterMode::kLinear), &m);
+}
+
 }  // namespace
 
 void SkiaCanvas::save_layer_with_mask(float x, float y, float w, float h,
@@ -335,11 +376,13 @@ void SkiaCanvas::save_layer_with_mask(float x, float y, float w, float h,
     sk_sp<SkShader> mask_shader;
     if (mask_image.find("linear-gradient(") != std::string::npos) {
         mask_shader = parse_linear_gradient_mask(mask_image, x, y, scaled_w, scaled_h);
+    } else if (mask_image.find("url(") != std::string::npos) {
+        mask_shader = parse_url_image_mask(mask_image, x, y, scaled_w, scaled_h);
     }
-    // Other forms (radial-gradient / url / none / unparseable) drop to
-    // the no-mask path: the layer opens with content opacity, restore()
-    // sees no pending mask shader and just closes plainly. Net behavior
-    // = pre-#1737 (no mask applied) — safe regression-free fallback.
+    // Other forms (radial-gradient / none / unparseable) drop to the
+    // no-mask path: the layer opens with content opacity, restore() sees
+    // no pending mask shader and just closes plainly. Net behavior =
+    // pre-#1737 (no mask applied) — safe regression-free fallback.
 
     SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
     SkPaint outer_paint;
