@@ -33,6 +33,10 @@ claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
 > the plugin before running `install.sh`, `/mcp` will report `pulp-mcp:
 > cannot locate binary`. Run `pulp doctor` to confirm `pulp-mcp` is found
 > and matches your CLI version.
+>
+> (Building from a source checkout instead? The repo's project-local MCP
+> server uses the binary from your build tree — see
+> [Build from source](#build-from-source). No CLI install needed.)
 
 See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each agent path.
 
@@ -185,12 +189,40 @@ Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent
 
 ## Contributing
 
+Pulp is early and actively evolving — contributions and plugin-author
+feedback are very welcome. Most people working on Pulp clone the repo (to
+extend the framework, or to build a plugin against source); see
+[Build from source](#build-from-source) to get set up.
+
 ### Help wanted (no Pulp internals required)
 
 Two high-impact ways to contribute that don't require digging into the framework:
 
 - **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts: Logic, Reaper (CLAP), Live, Bitwig.
 - **[#3042 — AAX support: Avid SDK access](https://github.com/danielraffel/pulp/issues/3042)** — Pulp's AAX/ProTools lane is blocked on Avid Developer Program approval. If you have access (or are willing to apply), comment so we can coordinate adapter validation.
+
+### Build from source
+
+Contributing to Pulp itself — or building a plugin against the source tree
+rather than the released CLI — starts with building the repo:
+
+```bash
+git clone https://github.com/danielraffel/pulp && cd pulp
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(sysctl -n hw.ncpu)
+```
+
+Build Release unless you're actively debugging — a Debug GPU/UI build is
+dramatically slower. The CLI lands at `build/pulp`.
+
+**Claude Code users:** this checkout ships a project-local `.mcp.json` that
+exposes a `pulp` MCP server (build/test/inspect tools) backed by the source
+build. The build above produces `build/tools/mcp/pulp-mcp`, which the server
+auto-detects — so when Claude Code asks whether to enable the `pulp` MCP
+server, say yes **after** your first build. Before that first build there's
+no binary to run and `/mcp` reports `pulp: failed to connect`. You don't
+need the released CLI or the Claude plugin for the source-tree MCP server —
+just build the repo. Run `pulp doctor` to confirm.
 
 ### Workflow
 
