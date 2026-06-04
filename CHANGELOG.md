@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03340"></a>
+## [0.334.0] - 2026-06-04
+
+- feat(cli): add `pulp ci-host` wrapping setup-ci-host.sh (+ /ci-host) ([#3423](https://github.com/danielraffel/pulp/pull/3423))
+
 <a id="v03330"></a>
 ## [0.333.0] - 2026-06-03
 
@@ -3585,6 +3590,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.334.0]: https://github.com/danielraffel/pulp/releases/tag/v0.334.0
 [0.333.0]: https://github.com/danielraffel/pulp/releases/tag/v0.333.0
 [0.332.1]: https://github.com/danielraffel/pulp/releases/tag/v0.332.1
 [0.332.0]: https://github.com/danielraffel/pulp/releases/tag/v0.332.0
