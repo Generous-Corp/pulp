@@ -81,7 +81,13 @@ run_one(){ # $1=iteration index (unique VM name without Date.now/rand)
     rm -f "$boot_log"; die "[$i] no IP (see \`tart run\` output above)"
   fi
   rm -f "$boot_log"
-  for _ in $(seq 1 90); do ssh "${SSH_OPTS[@]}" -i "$SSH_KEY_PRIV" "$VM_USER@$ip" true 2>/dev/null && break; sleep 2; done
+  local sshok=0
+  for _ in $(seq 1 90); do ssh "${SSH_OPTS[@]}" -i "$SSH_KEY_PRIV" "$VM_USER@$ip" true 2>/dev/null && { sshok=1; break; }; sleep 2; done
+  if [ "$sshok" != 1 ]; then
+    note "[$i] no SSH on $vm after 180s — discarding (won't run a job on an unreachable VM)"
+    tart stop "$vm" >/dev/null 2>&1 || true; kill "$rpid" 2>/dev/null || true; tart delete "$vm" >/dev/null 2>&1 || true
+    return 1
+  fi
   note "[$i] vm $vm up at $ip — mounting ccache + launching JIT runner (one job)"
 
   # Best-effort host ccache via virtio-fs (named "ccache" subdir is the rw one).

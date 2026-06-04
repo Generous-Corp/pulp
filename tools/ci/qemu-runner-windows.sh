@@ -79,7 +79,15 @@ run_one(){ # $1=iteration index
     -display none >"$jobdir/qemu.log" 2>&1 & qpid=$!
 
   wsh(){ ssh "${SSH_OPTS[@]}" -i "$KEY" -p "$port" "$WUSER@127.0.0.1" "$@"; }
-  local up=0; local _; for _ in $(seq 1 150); do wsh 'echo ok' >/dev/null 2>&1 && { up=1; break; }; sleep 4; done
+  # Wait for SSH, but bail the moment QEMU dies — that's how a free-port TOCTOU
+  # (another process grabbed $port between the probe close and QEMU's bind)
+  # surfaces: qemu exits instantly. Without this check the wait would burn the
+  # full ~10min before failing. Caller (--loop) retries with a fresh port.
+  local up=0; local _
+  for _ in $(seq 1 150); do
+    kill -0 "$qpid" 2>/dev/null || { note "[$i] qemu exited early — port $port likely grabbed (TOCTOU); see $jobdir/qemu.log"; break; }
+    wsh 'echo ok' >/dev/null 2>&1 && { up=1; break; }; sleep 4
+  done
   if [ "$up" != 1 ]; then
     note "[$i] no SSH after ~10min (see $jobdir/qemu.log)"; kill "$qpid" 2>/dev/null||true; rm -rf "$jobdir"; return 1
   fi
@@ -100,7 +108,11 @@ if (-not (Test-Path "$dir\bin\Runner.Listener.exe")) {
   Invoke-WebRequest -Uri $url -OutFile "$dir\r.zip"
   Expand-Archive -Path "$dir\r.zip" -DestinationPath $dir -Force
   Remove-Item "$dir\r.zip"
-}' | iconv -t UTF-16LE | base64)"
+}
+# Integrity gate: the agent binary must exist after install. The download is
+# over authenticated HTTPS and Expand-Archive rejects a corrupt/truncated zip,
+# but this catches a partial extract loudly rather than failing opaquely at run.
+if (-not (Test-Path "$dir\bin\Runner.Listener.exe")) { Write-Error "Runner.Listener.exe missing after install (corrupt/truncated download?)"; exit 1 }' | iconv -t UTF-16LE | base64)"
   wsh "powershell -NoProfile -EncodedCommand $enc_install" \
     || { note "[$i] runner install failed"; kill "$qpid" 2>/dev/null||true; rm -rf "$jobdir"; return 1; }
 
