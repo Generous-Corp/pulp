@@ -546,6 +546,35 @@ tool" vs "upgrade the tool and bump this project's SDK pin".
 | auto | off; default prompt) controls whether `pulp upgrade` prints
 a `pulp project bump --all` hint after a successful CLI upgrade.
 
+### ci-host
+
+**Status**: experimental
+
+Optional, discoverable wrapper around `tools/ci/setup-ci-host.sh` for onboarding a
+Mac as a Tart-VM CI host (install prereqs, create the local VM stores, register the
+host-class runner label, optionally copy a golden in and run a one-shot validation
+build). This is an **advanced/contributor path — never required**, and Shipyard
+stays encouraged-not-mandated. The real work lives in the script; the command just
+makes it discoverable and forwards flags.
+
+```bash
+pulp ci-host setup --class m5                       # minimum: register the m5 host-class label
+pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
+pulp ci-host setup --class m5 --validate            # also run a one-shot VM build to prove it
+pulp ci-host setup --help                           # full flag list (delegated to the script)
+```
+
+Common flags (forwarded verbatim to `setup-ci-host.sh`):
+
+- `--class <name>` — **required** host class for the runner label (`m5`, `studio`, `macbook`, …)
+- `--copy-from <ssh:path | path>` — rsync a golden in from another host/drive (sparse-safe)
+- `--validate` — after setup, run one ephemeral VM build on the host-only label
+- `--no-agent` — do everything except install/load the launchd agent
+
+Runs from inside a Pulp checkout (it resolves `tools/ci/setup-ci-host.sh`). For the
+from-scratch host recipe and gotchas, see
+[mac-ci-host-setup.md](../guides/mac-ci-host-setup.md) and the `tart-ci` skill.
+
 ### ci-local
 
 **Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))

@@ -762,6 +762,26 @@ commands:
         description: Print to stdout
     docs: guides/importing-designs.md#design-tokens
 
+  - name: ci-host
+    status: experimental
+    summary: Optional onboarding of a Mac as a Tart-VM CI host. Wraps tools/ci/setup-ci-host.sh; advanced/contributor path, never required.
+    subcommands:
+      - name: setup
+        summary: Install prereqs, create VM stores, register the host-class runner label, optionally copy a golden in and run a one-shot validation build
+    args:
+      - name: --class
+        kind: option
+        description: REQUIRED host class for the runner label (m5|studio|macbook|...)
+      - name: --copy-from
+        kind: option
+        description: rsync a golden in from another host/drive (ssh:path | path)
+      - name: --validate
+        kind: flag
+        description: After setup, run one ephemeral VM build to prove the host
+      - name: --no-agent
+        kind: flag
+        description: Do everything except install/load the launchd agent
+
   - name: ci-local
     status: experimental
     summary: Local CI runner and desktop automation control plane for Mac, Ubuntu, and Windows validation.

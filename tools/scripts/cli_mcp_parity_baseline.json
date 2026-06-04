@@ -7,6 +7,7 @@
     "audio": "Parent command — actual MCP surface is pulp_audio_model_* and pulp_audio_excerpt_find sub-tools",
     "audit": "License audit — agents shell out; output not RPC-shaped",
     "cache": "Trivial via Bash on ~/.pulp/cache; no MCP gain",
+    "ci-host": "Interactive host onboarding (brew/tart/launchd); delegates to setup-ci-host.sh, no RPC-shaped output",
     "ci-local": "Long-running orchestrator; agents drive `shipyard pr` instead",
     "clean": "Trivial via Bash (rm -rf build/); no MCP gain",
     "config": "Trivial via Bash on ~/.pulp/config.toml",

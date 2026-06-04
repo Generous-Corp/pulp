@@ -2453,3 +2453,34 @@ TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --for
     REQUIRE(r.exit_code == 2);
     REQUIRE(r.stderr_output.find("unsupported --format") != std::string::npos);
 }
+
+// `pulp ci-host` is the optional Tart-VM host-onboarding wrapper around
+// tools/ci/setup-ci-host.sh (#3305). These assertions cover the command's own
+// dispatch surface — usage, help, and unknown-subcommand — WITHOUT delegating
+// into the script (which would brew-install + create VM stores). The delegation
+// path itself is the same require_project_root + run() shell-out the other
+// script-backed commands use.
+TEST_CASE("pulp ci-host usage, help, and unknown-subcommand are deterministic",
+          "[cli][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // --help and bare invocation print the usage banner and exit 0.
+    auto help = run_pulp({"ci-host", "--help"});
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_output.find("ci-host") != std::string::npos);
+    REQUIRE(help.stdout_output.find("setup") != std::string::npos);
+
+    auto bare = run_pulp({"ci-host"});
+    REQUIRE_FALSE(bare.timed_out);
+    REQUIRE(bare.exit_code == 0);
+    REQUIRE(bare.stdout_output.find("ci-host") != std::string::npos);
+
+    // An unknown subcommand is a usage error (exit non-zero) that names the bad
+    // subcommand and reprints usage.
+    auto bad = run_pulp({"ci-host", "definitely-not-a-subcommand"});
+    REQUIRE_FALSE(bad.timed_out);
+    REQUIRE(bad.exit_code != 0);
+    auto combined = bad.stdout_output + bad.stderr_output;
+    REQUIRE(combined.find("unknown subcommand") != std::string::npos);
+}

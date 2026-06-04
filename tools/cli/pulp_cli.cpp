@@ -63,6 +63,7 @@ static const Command commands[] = {
     {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
     {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
+    {"ci-host",  "Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)", cmd_ci_host},
     {"overflow", "Configure macOS-runner overflow routing (status/enable/disable/threshold)", cmd_overflow},
     {"tweaks",   "Inspect the pulp-tweaks.json sidecar (diff against a design)", cmd_tweaks},
 };
