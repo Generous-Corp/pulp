@@ -83,13 +83,16 @@ run_one(){ # $1=iteration index
   # (another process grabbed $port between the probe close and QEMU's bind)
   # surfaces: qemu exits instantly. Without this check the wait would burn the
   # full ~10min before failing. Caller (--loop) retries with a fresh port.
-  local up=0; local _
+  local up=0 qemu_died=0; local _
   for _ in $(seq 1 150); do
-    kill -0 "$qpid" 2>/dev/null || { note "[$i] qemu exited early — port $port likely grabbed (TOCTOU); see $jobdir/qemu.log"; break; }
+    kill -0 "$qpid" 2>/dev/null || { qemu_died=1; note "[$i] qemu exited early (well before the SSH window) — port $port likely grabbed (TOCTOU); see $jobdir/qemu.log"; break; }
     wsh 'echo ok' >/dev/null 2>&1 && { up=1; break; }; sleep 4
   done
   if [ "$up" != 1 ]; then
-    note "[$i] no SSH after ~10min (see $jobdir/qemu.log)"; kill "$qpid" 2>/dev/null||true; rm -rf "$jobdir"; return 1
+    # qemu-death already logged the accurate cause+elapsed above; only emit the
+    # generic "waited the full window" message when QEMU stayed up but no SSH.
+    [ "$qemu_died" = 1 ] || note "[$i] no SSH after ~10min (qemu alive but unreachable; see $jobdir/qemu.log)"
+    kill "$qpid" 2>/dev/null || true; rm -rf "$jobdir"; return 1
   fi
   note "[$i] vm $job up — install-if-missing runner + run JIT agent (one job)"
 
