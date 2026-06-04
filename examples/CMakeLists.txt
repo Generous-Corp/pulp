@@ -81,6 +81,10 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
     add_subdirectory(design-tool)
 endif()
 
+# ELYSIUM standalone: imports the committed figma-plugin .pulp.zip natively
+# (sprite-knob hoist) and renders it in a GPU window — launchable demo.
+add_subdirectory(elysium-standalone)
+
 # TextEditor keyboard input test (Phase 21.1)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)
     add_subdirectory(text-input-test)
