@@ -14,12 +14,11 @@
 // UI does. See core/view/src/widget_bridge.cpp (setBackgroundGradient), which
 // now delegates here.
 namespace pulp::view {
-namespace {
 
 // Built-in CSS color parser: #RGB / #RRGGBB / #RRGGBBAA, rgb(), rgba(),
 // `transparent`. Mirrors WidgetBridge's parseColor minus named colors (the
-// bridge passes its own parser to cover those).
-canvas::Color default_parse_color(const std::string& str) {
+// bridge passes its own parser to cover those). Exported via css_gradient.hpp.
+canvas::Color parse_css_color(const std::string& str) {
     canvas::Color c = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
     if (str.empty()) return c;
     if (str == "transparent") return canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
@@ -61,6 +60,8 @@ canvas::Color default_parse_color(const std::string& str) {
     }
     return c;
 }
+
+namespace {
 
 // Paren-aware comma split (so rgba(...) stays intact) + trailing position peel
 // (Npx / N%). Fills colors/positions in parallel.
@@ -164,7 +165,7 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
     if (gradient.empty()) return false;
     const CssColorParser color_of = parse_color
         ? parse_color
-        : CssColorParser(&default_parse_color);
+        : CssColorParser(&parse_css_color);
 
     // Simple parser for "linear-gradient(to right, color1, color2, ...)"
     if (gradient.substr(0, 16) == "linear-gradient(") {

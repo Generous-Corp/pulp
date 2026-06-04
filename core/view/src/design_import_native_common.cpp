@@ -1081,8 +1081,18 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 void apply_visual_style(View& view, const IRStyle& style,
                         bool skip_border = false) {
     if (style.background_color) {
-        if (auto color = parse_hex_color(*style.background_color))
-            view.set_background_color(*color);
+        // Prefer the hex fast path; fall back to the shared CSS parser for
+        // rgb()/rgba()/transparent. Figma demotes a hairline stroke (the
+        // FILTER & EQ grid `Line`s) to a 1px frame whose fill is the stroke
+        // color — often rgba(171,171,171,0.1) — which parse_hex_color drops,
+        // leaving the grid invisible. parse_css_color resolves it.
+        auto color = parse_hex_color(*style.background_color);
+        if (!color) {
+            const std::string& bc = *style.background_color;
+            if (bc.rfind("rgb", 0) == 0 || bc == "transparent")
+                color = parse_css_color(bc);
+        }
+        if (color) view.set_background_color(*color);
     }
     // A CSS background-gradient (the light "hero" panels and the cube/prism/
     // cylinder illustration fills in real Figma imports) paints over the solid
@@ -1183,6 +1193,16 @@ void apply_label_style(Label& label, const IRStyle& style) {
     }
     if (style.white_space && lower_copy(*style.white_space) != "nowrap")
         label.set_multi_line(true);
+    // Vertically center a single-line label whose design slot is taller than its
+    // font (e.g. an 8px "SEARCH" in a 17px box, tab digits in a 20px button).
+    // Figma centers text in a fixed-height frame but the IR drops
+    // textAlignVertical, so derive it from slot-vs-font. The web-compat codegen
+    // emits the SAME rule as `verticalAlign:middle` (design_codegen.cpp), so
+    // both render paths converge on Label::set_vertical_align(center) and the
+    // screenshot-parity invariant holds. The Label default is top.
+    if (style.height && style.font_size &&
+        *style.height > *style.font_size * 1.15f)
+        label.set_vertical_align(canvas::TextVerticalAlign::center);
 }
 
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {

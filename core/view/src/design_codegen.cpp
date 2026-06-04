@@ -340,6 +340,18 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_px("maxWidth", s.max_width);
     emit_px("maxHeight", s.max_height);
 
+    // Vertically center single-line text in a slot taller than its font, so the
+    // web-compat LIVE render matches the native materializer (which applies
+    // Label::set_vertical_align(center) under the SAME rule). The shim maps
+    // style.verticalAlign → setVerticalAlign → Label, so both render paths
+    // converge on one mechanism and the screenshot-parity invariant holds.
+    // Figma reserves a tall text slot for centered text, but the IR drops
+    // textAlignVertical, so derive it from slot-vs-font. Without this the
+    // <span> top-aligns and parity diverges (control-strip fixture).
+    if (node.type == "text" && s.height && s.font_size &&
+        *s.height > *s.font_size * 1.15f)
+        ss << ind << var << ".style.verticalAlign = 'middle';\n";
+
     // Reference-free image-sizing fidelity self-check on the web-compat path
     // too (mirrors generate_native_node). The web-compat <img> emits the style
     // box directly, so the emitted geometry is exactly s.width/s.height. The

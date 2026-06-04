@@ -740,6 +740,33 @@ TEST_CASE("baked native materializer reproduces the design's captured knob point
     CHECK(k->captured_indicator_r_in() == Catch::Approx(0.604f));
 }
 
+TEST_CASE("imported text vertically centers in a slot taller than its line",
+          "[view][import][native-materializer][text]") {
+    // Figma centers text in a fixed-height frame, but the IR carries no
+    // textAlignVertical. A single-line label given a slot taller than its font
+    // (e.g. an 8px "SEARCH" in a 17px box) must center; a tight box stays top.
+    // The web-compat codegen emits verticalAlign:middle under the SAME rule, so
+    // the two render paths agree (screenshot-parity invariant). Label default top.
+    SECTION("tall slot → center") {
+        DesignIR ir;
+        ir.root = label("search", "SEARCH", 80.0f, 17.0f);
+        ir.root.style.font_size = 8.0f;
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* lbl = dynamic_cast<Label*>(root.get());
+        REQUIRE(lbl != nullptr);
+        REQUIRE(lbl->vertical_align() == pulp::canvas::TextVerticalAlign::center);
+    }
+    SECTION("tight slot → top (unchanged)") {
+        DesignIR ir;
+        ir.root = label("tight", "Hz", 40.0f, 9.0f);
+        ir.root.style.font_size = 8.0f;  // 9 <= 8 * 1.15 → not centered
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* lbl = dynamic_cast<Label*>(root.get());
+        REQUIRE(lbl != nullptr);
+        REQUIRE(lbl->vertical_align() == pulp::canvas::TextVerticalAlign::top);
+    }
+}
+
 TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box border",
           "[view][import][native-materializer][image][fidelity]") {
     // A Figma vector exported as a PNG carries its stroke as border_color /
@@ -768,6 +795,28 @@ TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box bor
     auto* image = dynamic_cast<ImageView*>(root.get());
     REQUIRE(image != nullptr);
     CHECK(image->border_width() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("baked native materializer resolves an rgba() background color",
+          "[view][import][native-materializer][color]") {
+    // Figma demotes a hairline stroke (the FILTER & EQ grid Line images) to a
+    // 1px frame whose fill is the stroke color — typically rgba(171,171,171,0.1).
+    // parse_hex_color drops rgba(), so the grid painted nothing; apply_visual_style
+    // now falls back to the shared CSS color parser. Without this the EQ grid
+    // (and any rgba fill) is invisible.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "grid-line";
+    ir.root.style.width = 177.0f;
+    ir.root.style.height = 1.0f;
+    ir.root.style.background_color = "rgba(171, 171, 171, 0.1)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->has_background_color());
+    const auto c = root->background_color();
+    CHECK(c.r == Catch::Approx(171.0f / 255.0f).margin(0.01f));
+    CHECK(c.a == Catch::Approx(0.1f).margin(0.01f));
 }
 
 TEST_CASE("hoist_captured_art_knobs promotes a body disc + pointer to an interactive skin",
