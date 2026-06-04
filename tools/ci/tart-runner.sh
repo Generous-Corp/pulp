@@ -85,6 +85,25 @@ print(n)
 ' 2>/dev/null || echo 0
 }
 
+# Tear down the VM this supervisor is currently running, so STOPPING the agent
+# reliably reclaims it — RAM, the CoW clone, and the runner registration. This
+# fires on `launchctl unload` (the Shipyard GUI "Serve CI builds from this Mac"
+# toggle OFF sends SIGTERM) and on Ctrl-C. Without it, a SIGTERM while a VM was
+# up (running a job, or a warm JIT runner waiting for one) left a stopped clone
+# orphaned on disk and the runner registered-but-offline on GitHub.
+CURRENT_VM=""; CURRENT_RPID=""
+discard_current_vm(){
+  [ -n "$CURRENT_VM" ] || return 0
+  note "stopping — tearing down in-flight VM $CURRENT_VM"
+  tart stop "$CURRENT_VM" >/dev/null 2>&1 || true
+  [ -n "$CURRENT_RPID" ] && kill "$CURRENT_RPID" 2>/dev/null || true
+  sleep 1
+  tart delete "$CURRENT_VM" >/dev/null 2>&1 || true
+  CURRENT_VM=""; CURRENT_RPID=""
+}
+trap 'discard_current_vm; trap - EXIT; exit 143' INT TERM
+trap discard_current_vm EXIT
+
 # Coarse "is there macOS work waiting?" gate: count queued Build-and-Test runs.
 # Precise cloud-leg targeting is the watcher's job; here we only avoid booting a
 # VM when the queue is plainly empty. 0 on any gh failure (treat as "no work").
@@ -106,6 +125,7 @@ run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
 
   note "[$i] clone $GOLDEN → $vm (CoW) + boot with host ccache mounted"
   tart clone "$GOLDEN" "$vm"
+  CURRENT_VM="$vm"   # from here on, a stop/SIGTERM must tear this VM down
   # The --dir mount target MUST exist on the host. If it doesn't, `tart run`
   # exits instantly with "directory sharing device configuration is invalid"
   # (VZErrorDomain Code=2) and the VM never boots — which then surfaces only as
@@ -113,6 +133,7 @@ run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
   mkdir -p "$CACHE_ROOT/ccache"
   local boot_log; boot_log="$(mktemp -t "tart-run-$vm")"
   local rpid; tart run --no-graphics --dir="ccache:$CACHE_ROOT/ccache" "$vm" >"$boot_log" 2>&1 & rpid=$!
+  CURRENT_RPID="$rpid"
 
   local ip=""; local k
   for k in $(seq 1 60); do ip="$(tart ip "$vm" 2>/dev/null || true)"; [ -n "$ip" ] && break; sleep 2; done
@@ -121,6 +142,7 @@ run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
     # names it (bad --dir mount, vmnet/Local-Network permission, slow boot).
     note "[$i] no IP after 120s — last lines of \`tart run\` ($boot_log):"; tail -3 "$boot_log" >&2 2>/dev/null || true
     tart stop "$vm" >/dev/null 2>&1||true; kill "$rpid" 2>/dev/null||true; tart delete "$vm" >/dev/null 2>&1||true
+    CURRENT_VM=""; CURRENT_RPID=""
     rm -f "$boot_log"; die "[$i] no IP (see \`tart run\` output above)"
   fi
   rm -f "$boot_log"
@@ -142,6 +164,7 @@ run_one(){ # $1=iteration index (keeps VM name unique without Date.now/rand)
   note "[$i] discarding ephemeral VM $vm"
   tart stop "$vm" >/dev/null 2>&1 || true; kill "$rpid" 2>/dev/null || true; sleep 2
   tart delete "$vm" >/dev/null 2>&1 || true
+  CURRENT_VM=""; CURRENT_RPID=""
 }
 
 i=0
