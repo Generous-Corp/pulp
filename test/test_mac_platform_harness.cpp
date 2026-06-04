@@ -249,8 +249,8 @@ std::unique_ptr<View> load_elysium_default_cpp_view(const fs::path& fixture_zip,
     ir = pulp::view::parse_figma_plugin_json(scene_json);
     absolutize_asset_paths(ir.asset_manifest, extracted.path);
     REQUIRE(ir.root.name == "VST Style");
-    REQUIRE(count_ir_nodes(ir.root) == 213);
-    REQUIRE(ir.asset_manifest.assets.size() == 72);
+    REQUIRE(count_ir_nodes(ir.root) == 187);  // rasterized: 3 vector frames -> image leaves
+    REQUIRE(ir.asset_manifest.assets.size() == 75);  // +3 rasterized illustration PNGs
 
     // Promote captured-art knobs (hoist body disc + drop pointer hairlines)
     // BEFORE enrich so the hoisted asset_ref receives its absolute asset_path +
@@ -599,8 +599,8 @@ TEST_CASE("mac harness captures ELYSIUM default C++ import through GPU path",
     auto ir = pulp::view::parse_figma_plugin_json(scene_json);
     absolutize_asset_paths(ir.asset_manifest, extracted.path);
     REQUIRE(ir.root.name == "VST Style");
-    REQUIRE(count_ir_nodes(ir.root) == 213);
-    REQUIRE(ir.asset_manifest.assets.size() == 72);
+    REQUIRE(count_ir_nodes(ir.root) == 187);  // rasterized: 3 vector frames -> image leaves
+    REQUIRE(ir.asset_manifest.assets.size() == 75);  // +3 rasterized illustration PNGs
 
     // Promote captured-art knobs (hoist body disc + drop pointer hairlines)
     // BEFORE enrich so the hoisted asset_ref receives its absolute asset_path +
