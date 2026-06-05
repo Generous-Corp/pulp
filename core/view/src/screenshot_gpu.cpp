@@ -36,6 +36,18 @@ bool subtree_any(const View& v, Pred pred) {
     return false;
 }
 
+// First view in the tree that owns a native overlay (non-const, so we can call
+// its capture_native_overlay_png hook).
+View* find_native_overlay(View& v) {
+    if (v.contains_native_overlay()) return &v;
+    for (std::size_t i = 0; i < v.child_count(); ++i) {
+        if (View* c = v.child_at(i)) {
+            if (View* found = find_native_overlay(*c)) return found;
+        }
+    }
+    return nullptr;
+}
+
 #ifdef PULP_VIEW_HAS_GPU_CAPTURE
 // The standard headless paint sequence (mirrors render_to_png_skia): opaque
 // background, then layout + paint the tree + overlays.
@@ -85,12 +97,27 @@ CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float sc
                            ScreenshotBackend backend) {
     CaptureResult r;
 
-    // 1. Native overlay (WebView / native NSView) → not headlessly capturable.
-    if (subtree_any(root, [](const View& v) { return v.contains_native_overlay(); })) {
+    // 1. Native overlay (WebView / native NSView). It isn't painted into the Pulp
+    //    canvas, so ask the owning view for an in-process snapshot (e.g. WKWebView
+    //    takeSnapshot). If one comes back non-blank we're done; only if there's no
+    //    in-process snapshot do we refuse (rather than return a silent blank).
+    if (View* overlay = find_native_overlay(root)) {
+        std::vector<uint8_t> png = overlay->capture_native_overlay_png(width, height);
+        if (!png.empty()) {
+            const ScreenshotContentStats st = analyze_screenshot_content(png);
+            r.png = std::move(png);
+            r.used = ScreenshotBackend::default_backend;  // native-overlay snapshot
+            if (st.passes_content_floor(/*colors=*/3, /*non_bg=*/0.001, /*opaque=*/0.0)) {
+                r.ok = true;
+            } else {
+                r.reason = "native-overlay (WebView) snapshot came back essentially blank";
+            }
+            return r;
+        }
         r.reason =
-            "view contains a native overlay (WebView / native child view) composited by "
-            "the OS window server, not painted into the Pulp canvas — headless capture "
-            "cannot see it; use a real window or an OS screencapture";
+            "view contains a native overlay (WebView / native child view) with no "
+            "in-process snapshot available — it's OS-composited, not on the Pulp canvas; "
+            "use a real window or an OS screencapture";
         return r;  // ok=false
     }
 

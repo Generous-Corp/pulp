@@ -410,6 +410,9 @@ if(PULP_BUILD_WEBVIEW)
     # detector TU was compiled with.
     target_compile_definitions(pulp-view-core PUBLIC PULP_BUILD_WEBVIEW=1)
     if(APPLE AND NOT PULP_IOS)
+        # In-process WKWebView snapshot → PNG so native WebView overlays are
+        # headlessly capturable (WebViewPanel::snapshot_png()).
+        target_sources(pulp-view-core PRIVATE platform/mac/web_view_snapshot_mac.mm)
         target_link_libraries(pulp-view-core PRIVATE "-framework WebKit")
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig REQUIRED)

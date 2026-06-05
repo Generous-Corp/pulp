@@ -172,6 +172,13 @@ public:
     // whose native child-view attach contract returns true.
     virtual NativeViewHandle native_handle() = 0;
 
+    // In-process PNG snapshot of the rendered web content (macOS: WKWebView
+    // takeSnapshot — no screen-recording permission needed). This is how a native
+    // WebView overlay becomes headlessly capturable even though it isn't painted
+    // into the Pulp Skia canvas. Returns empty bytes when unsupported / not ready.
+    // Must be called on the main thread.
+    virtual std::vector<uint8_t> snapshot_png() { return {}; }
+
     // Navigate to a URL
     virtual void navigate(const std::string& url) = 0;
 

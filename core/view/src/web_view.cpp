@@ -17,6 +17,14 @@
 #include <unordered_map>
 
 namespace pulp::view {
+
+#if defined(__APPLE__)
+// Implemented in platform/mac/web_view_snapshot_mac.mm (WKWebView takeSnapshot).
+namespace detail {
+std::vector<uint8_t> web_view_snapshot_png(void* ns_view_ptr);
+}  // namespace detail
+#endif
+
 namespace {
 
 constexpr const char* kPostMessageBinding = "__pulpPostMessage";
@@ -515,6 +523,16 @@ public:
     NativeViewHandle native_handle() override {
         if (!webview_ || !webview_->loadedOK()) return nullptr;
         return webview_->getViewHandle();
+    }
+
+    std::vector<uint8_t> snapshot_png() override {
+#if defined(__APPLE__)
+        NativeViewHandle nh = native_handle();
+        if (!nh) return {};
+        return detail::web_view_snapshot_png(nh);
+#else
+        return {};
+#endif
     }
 
     void navigate(const std::string& url) override {

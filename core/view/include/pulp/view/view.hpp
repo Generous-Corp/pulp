@@ -322,6 +322,16 @@ public:
     bool contains_native_overlay() const { return contains_native_overlay_; }
     void set_contains_native_overlay(bool v) { contains_native_overlay_ = v; }
 
+    /// When this view owns a native overlay (a WebView pane), it overrides this to
+    /// return an in-process PNG snapshot of that overlay (e.g. WKWebView
+    /// takeSnapshot). `capture_view` calls it for `contains_native_overlay()`
+    /// subtrees so even native overlays are headlessly capturable instead of
+    /// refused. Default empty = "no in-process snapshot available". Main-thread.
+    virtual std::vector<uint8_t> capture_native_overlay_png(uint32_t /*width*/,
+                                                            uint32_t /*height*/) {
+        return {};
+    }
+
     /// Mark layout as needing recalculation (auto-invalidation)
     void invalidate_layout() { layout_dirty_ = true; }
     bool layout_dirty() const { return layout_dirty_; }
