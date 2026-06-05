@@ -1,5 +1,6 @@
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
@@ -446,7 +447,20 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         cap.delay = effective_config.screenshot_frame_delay > 0
             ? effective_config.screenshot_frame_delay : 30;
         cap.path = effective_config.screenshot_path;
-        cap.capture_fn = [host] { return host->capture_back_buffer_png(); };
+        auto* editor_view = bridge->view();
+        cap.capture_fn = [host, editor_view, w, h] {
+            // If the editor hosts a native overlay (a WebView), use its in-process
+            // snapshot (WKWebView takeSnapshot) — capture_back_buffer_png() reads the
+            // Skia back buffer and can't see an OS-composited native overlay. For a
+            // normal Skia UI, capture_view rasters via `skia`, so we fall through to
+            // the live back-buffer capture below.
+            if (editor_view) {
+                auto r = pulp::view::capture_view(*editor_view, w, h);
+                if (r.ok && r.used == pulp::view::ScreenshotBackend::default_backend)
+                    return r.png;
+            }
+            return host->capture_back_buffer_png();
+        };
         cap.close_fn   = [host] { host->request_close(); };
         cap.on_error   = [out_path = effective_config.screenshot_path](const std::string& msg) {
             runtime::log_error("Standalone: screenshot {} ({})", msg, out_path);
