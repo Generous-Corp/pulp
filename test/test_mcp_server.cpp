@@ -617,6 +617,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_inspect_params",
         "pulp_inspect_performance",
         "pulp_inspect_screenshot",
+        "pulp_inspect_set_param",
         // pulp #2153: pulp_motion_* wrappers expose the Motion.*
         // inspector protocol as first-class MCP tools so an LLM can
         // discover motion observability from tools/list without
@@ -660,6 +661,19 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         auto response = handle_request(tool_call(std::to_string(id++), tool));
         require_contains(response, error);
     }
+}
+
+TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools][mcp-set-param]") {
+    // Exercise the dispatch branch: from a project root it resolves the CLI
+    // and shells `pulp inspect --command State.setParameter --params {...}`.
+    // No inspector is running here, so the shellout returns an error string,
+    // but the response is still a well-formed JSON-RPC result wrapping the
+    // tool's text content — which is all we assert (and covers the branch).
+    ScopedCurrentPath cwd(repo_root());
+    auto response = handle_request(
+        tool_call("60", "pulp_inspect_set_param", R"({"id":0,"value":1.0,"normalized":true})"));
+    require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
+    require_contains(response, R"JSON("content")JSON");
 }
 
 TEST_CASE("MCP project-root dependent tools reject non-project directories", "[mcp][tools]") {
