@@ -646,6 +646,15 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   ticks). Pivot at the disc center + the design's own line ⇒ it rides the ticks by
   construction. **The synthetic notch is still the fallback** for knobs with no
   captured indicator metadata.
+- **Baked-indicator cover** (`Knob::paint`): many captured discs (ELYSIUM's
+  included) BAKE an indicator groove into the disc PNG at the rest/up position.
+  Our pointer rotates with value, so that baked groove lingers at 12 o'clock as a
+  second line. `Knob::paint` covers the groove's ON-FACE portion by copying a
+  clean face strip from beside it (same radius ⇒ matching gradient) before
+  drawing the pointer. **Limitation:** a baked indicator that extends ABOVE the
+  ring (onto the PNG's transparent background) can't be covered by compositing —
+  the cleanest result is an indicator-FREE disc (remove the groove in the design
+  art; our pointer already draws at the right place).
 - **Materializer skin** (`make_widget` knob branch): when the knob node carries
   an enrich-stamped `asset_path` (+ `png_natural_*`), it builds a single-frame
   `SpriteStrip` + `set_sprite_core` from `art_core_*`, then applies the captured
@@ -676,15 +685,24 @@ node type — designers label these containers explicitly, so the name is a
 source-honest signal (no content guessing). `kind_from_name` in
 `design_import_native_common.cpp` runs in `resolve_node` AFTER audio-widget
 detection and BEFORE `kind_from_type`:
-- A `frame` named `Dropdown` that carries a text descendant → `combo_box` (a
-  `ComboBox`). The text child is the selected value; the figma source has no
-  option list, so stub options are added to demonstrate the popup. `combo_box`
-  is a **leaf** in `materialize_node` (the captured text + chevron children are
-  NOT materialized — the ComboBox paints its own display) and owns its hits.
-- A `text` node named `Search` / `SearchBox` → `text_editor` (editable, tappable,
-  caret on focus, keyboard on mobile). The visible text becomes the placeholder
-  (`make_widget` text_editor falls back to `node.text_content` when no explicit
-  placeholder). Replaces the static Label it would otherwise be.
+- A `frame` named `Dropdown` → `combo_box` (a `ComboBox`) ONLY when
+  `looks_like_real_dropdown`: it carries a real selected value AND a SINGLE
+  square-ish down-chevron (aspect ≤ 1.8). The name alone over-matches — ELYSIUM
+  reuses "Dropdown" for two non-dropdowns that must stay plain frames:
+  - a prev/next preset **cycler** whose icon is a WIDE `< >` pair (e.g. the 42×16
+    "Frame 41" on the ENVELOPE/FILTER/FX-RACK headers) — leave static (faithful)
+    until a real cycler interaction exists;
+  - an unconfigured design-system **template** whose value is the literal word
+    "Dropdown" (the stray "VST Style" placeholder).
+  `combo_box` is a **leaf** in `materialize_node` (text + chevron children are NOT
+  re-materialized — the ComboBox paints its own display) and owns its hits.
+- A search field is a `frame` CONTAINER (`is_search_container`: it wraps a text
+  child named `Search`/`SearchBox`) → `text_editor` sized to the WHOLE box (not
+  the inner text cell, so the field spans the box and the placeholder isn't
+  truncated). The inner text becomes the placeholder; the editor inherits its
+  font size and a `content_inset_left` so the caret clears the leading magnifier.
+  In `materialize_node` a promoted text_editor keeps only IMAGE children (the
+  icon) and drops the placeholder text + bg-pill chrome.
 
 **Web-compat parity caveat:** this recognition is NATIVE-only — the web-compat
 codegen does not detect these names. The screenshot-parity fixtures contain no

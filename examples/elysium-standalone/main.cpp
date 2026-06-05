@@ -13,6 +13,7 @@
 //   pulp-elysium-standalone /path/to/scene.pulp.zip
 //   pulp-elysium-standalone --screenshot=out.png  # headless capture
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
@@ -100,16 +101,53 @@ std::string read_text_file(const fs::path& p) {
                        std::istreambuf_iterator<char>());
 }
 
+// Generic post-import wiring (NOT baked into the importer): pair each upper
+// illustration shape with its column knob by laid-out x-position, then drive the
+// shape's value-driven silhouette fill from the knob's value. This is exactly
+// the kind of customization an "after-import" step would do — the import only
+// provides the generic ImageView::set_fill_value primitive. Requires layout to
+// have run (real bounds).
+void apply_shape_knob_fills(pulp::view::View* root, float design_h) {
+    using namespace pulp::view;
+    std::vector<std::pair<float, Knob*>> knobs;
+    std::vector<std::pair<float, ImageView*>> shapes;
+    std::function<void(View*, float, float)> walk =
+        [&](View* v, float ox, float oy) {
+            const auto bn = v->bounds();
+            const float gx = ox + bn.x, gy = oy + bn.y;
+            if (auto* k = dynamic_cast<Knob*>(v)) {
+                if (bn.width > 45.0f) knobs.emplace_back(gx + bn.width * 0.5f, k);
+            } else if (auto* img = dynamic_cast<ImageView*>(v)) {
+                if (bn.width > 50.0f && bn.height > 50.0f && gy < design_h * 0.45f)
+                    shapes.emplace_back(gx + bn.width * 0.5f, img);
+            }
+            for (std::size_t i = 0; i < v->child_count(); ++i)
+                walk(v->child_at(i), gx, gy);
+        };
+    walk(root, 0.0f, 0.0f);
+    std::sort(knobs.begin(), knobs.end(),
+              [](auto& a, auto& b) { return a.first < b.first; });
+    std::sort(shapes.begin(), shapes.end(),
+              [](auto& a, auto& b) { return a.first < b.first; });
+    const std::size_t n = std::min(knobs.size(), shapes.size());
+    for (std::size_t i = 0; i < n; ++i)
+        shapes[i].second->set_fill_value(knobs[i].second->value());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     std::string screenshot_path;
+    std::string raster_path;  // headless Skia-raster preview (no GPU window)
     fs::path zip_path = PULP_ELYSIUM_DEFAULT_ZIP;  // committed fixture (CMake)
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
-        constexpr std::string_view prefix = "--screenshot=";
-        if (arg.rfind(prefix, 0) == 0)
-            screenshot_path = arg.substr(prefix.size());
+        constexpr std::string_view shot = "--screenshot=";
+        constexpr std::string_view raster = "--raster=";
+        if (arg.rfind(shot, 0) == 0)
+            screenshot_path = arg.substr(shot.size());
+        else if (arg.rfind(raster, 0) == 0)
+            raster_path = arg.substr(raster.size());
         else if (!arg.empty() && arg[0] != '-')
             zip_path = arg;
     }
@@ -151,9 +189,44 @@ int main(int argc, char** argv) {
     }
     root->set_requires_gpu_host(true);
 
-    // 3) Open a GPU window (or capture a screenshot headlessly).
     const float design_w = ir.root.style.width.value_or(1000.0f);
     const float design_h = ir.root.style.height.value_or(600.0f);
+
+    // Headless Skia-RASTER preview: renders the imported tree (sprite knobs,
+    // gradients, shapes — same SkiaCanvas paint as the GPU host) to a PNG with
+    // no GPU window. Useful when no GPU surface is available; the sprite knobs
+    // still come up as the design's captured disc art.
+    if (!raster_path.empty()) {
+        // Optional --knob-value=0..1 sets every Knob (preview off-center states,
+        // e.g. to check the sprite-knob indicator at non-default angles).
+        if (const char* kv = std::getenv("PULP_KNOB_VALUE")) {
+            const float v = std::strtof(kv, nullptr);
+            std::function<void(pulp::view::View*)> set_knobs =
+                [&](pulp::view::View* n) {
+                    if (auto* k = dynamic_cast<pulp::view::Knob*>(n)) k->set_value(v);
+                    for (std::size_t i = 0; i < n->child_count(); ++i)
+                        set_knobs(n->child_at(i));
+                };
+            set_knobs(root.get());
+        }
+        // Lay out so bounds exist, then wire the shape fills to the knobs (the
+        // generic post-import customization) before rendering.
+        root->set_bounds({0, 0, design_w, design_h});
+        root->layout_children();
+        apply_shape_knob_fills(root.get(), design_h);
+        if (pulp::view::render_to_file(
+                *root, static_cast<uint32_t>(design_w),
+                static_cast<uint32_t>(design_h), raster_path, 2.0f,
+                pulp::view::ScreenshotBackend::skia)) {
+            std::cout << "wrote raster preview: " << raster_path << "\n";
+            return 0;
+        }
+        std::cerr << "raster render failed (is the Skia screenshot backend "
+                     "available?)\n";
+        return 1;
+    }
+
+    // 3) Open a GPU window (or capture a screenshot headlessly).
 
     pulp::view::WindowOptions options;
     options.title = "ELYSIUM — imported native (turn the knobs)";
@@ -174,57 +247,13 @@ int main(int argc, char** argv) {
     window->set_fixed_aspect_ratio(design_w / design_h);
     window->set_close_callback([] {});
 
-    // Item 3 demo wiring: pair each upper illustration shape with its column
-    // knob, then drive the shape's value-driven silhouette fill from the knob.
-    // Turning a knob fills/empties its shape (the prism / cylinder / pentagon /
-    // cube) through the new ImageView::set_fill_value + canvas url() alpha mask.
-    // The pairing runs lazily once layout has produced real bounds.
-    struct FillPair { pulp::view::ImageView* shape; pulp::view::Knob* knob; };
-    auto fill_pairs = std::make_shared<std::vector<FillPair>>();
-    auto wired = std::make_shared<bool>(false);
-    auto wire_fills = [root = root.get(), design_h, fill_pairs]() -> bool {
-        std::vector<std::pair<float, pulp::view::Knob*>> knobs;
-        std::vector<std::pair<float, pulp::view::ImageView*>> shapes;
-        std::function<void(pulp::view::View*, float, float)> walk =
-            [&](pulp::view::View* v, float ox, float oy) {
-                const auto bn = v->bounds();
-                const float gx = ox + bn.x, gy = oy + bn.y;
-                if (auto* k = dynamic_cast<pulp::view::Knob*>(v)) {
-                    if (bn.width > 45.0f)  // the big column knobs, not the VALUE minis
-                        knobs.emplace_back(gx + bn.width * 0.5f, k);
-                } else if (auto* img = dynamic_cast<pulp::view::ImageView*>(v)) {
-                    if (bn.width > 50.0f && bn.height > 50.0f &&
-                        gy < design_h * 0.45f)  // the upper illustration band
-                        shapes.emplace_back(gx + bn.width * 0.5f, img);
-                }
-                for (std::size_t i = 0; i < v->child_count(); ++i)
-                    walk(v->child_at(i), gx, gy);
-            };
-        walk(root, 0.0f, 0.0f);
-        if (knobs.empty() || shapes.empty()) return false;  // layout not ready yet
-        std::sort(knobs.begin(), knobs.end(),
-                  [](auto& a, auto& b) { return a.first < b.first; });
-        std::sort(shapes.begin(), shapes.end(),
-                  [](auto& a, auto& b) { return a.first < b.first; });
-        const std::size_t n = std::min(knobs.size(), shapes.size());
-        for (std::size_t i = 0; i < n; ++i)
-            fill_pairs->push_back({shapes[i].second, knobs[i].second});
-        return !fill_pairs->empty();
-    };
-
+    // Item 3 demo: each frame, drive the upper illustration shapes' value-driven
+    // silhouette fills from their column knobs (the generic post-import wiring),
+    // so turning a knob fills/empties its shape through ImageView::set_fill_value.
     int frame_count = 0;
     const bool capture = !screenshot_path.empty();
-    window->set_idle_callback([&, fill_pairs, wired] {
-        if (!*wired) *wired = wire_fills();
-        // In headless capture mode, stagger the knob values once wired so the
-        // single shot shows clearly different fill levels; the live window
-        // instead reflects whatever the user turns the knobs to.
-        if (capture && *wired)
-            for (std::size_t i = 0; i < fill_pairs->size(); ++i)
-                (*fill_pairs)[i].knob->set_value(
-                    0.2f + 0.25f * static_cast<float>(i));
-        for (const auto& p : *fill_pairs)
-            p.shape->set_fill_value(p.knob->value());
+    window->set_idle_callback([&] {
+        apply_shape_knob_fills(root.get(), design_h);
         if (!capture) return;
         if (++frame_count < 6) return;  // let the GPU surface settle
         auto png = window->capture_back_buffer_png();

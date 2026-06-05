@@ -61,6 +61,8 @@ public:
     void on_text_input(const TextInputEvent& event) override;
 
     bool is_open() const { return open_; }
+    /// Index of the row painted with the hover/keyboard highlight (-1 = none).
+    int hovered_index() const { return hover_index_; }
     float dropdown_width_hint() const;
 
     /// Close any currently open ComboBox (call before opening a new one).

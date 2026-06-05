@@ -180,6 +180,8 @@ void ComboBox::open_dropdown() {
     close_active_popup();  // close any other open dropdown first
     set_overflow(Overflow::visible);
     open_ = true;
+    hover_index_ = selected_;  // highlight the current selection on open so
+                               // keyboard navigation has a visible starting row
     active_popup_ = this;
 }
 
@@ -230,10 +232,15 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
     if (!event.is_down) return false;
     if (event.key == KeyCode::up && selected_ > 0) {
         set_selected(selected_ - 1);
+        // Keyboard navigation should move the row HIGHLIGHT too (not just the
+        // check glyph), matching mouse hover — otherwise arrowing through an
+        // open dropdown shows no highlighted row until the mouse moves over it.
+        if (open_) hover_index_ = selected_;
         return true;
     }
     if (event.key == KeyCode::down && selected_ < static_cast<int>(items_.size()) - 1) {
         set_selected(selected_ + 1);
+        if (open_) hover_index_ = selected_;
         return true;
     }
     if (event.key == KeyCode::escape && open_) {

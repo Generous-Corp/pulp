@@ -114,6 +114,11 @@ public:
     void set_font_size(float size) { font_size_ = size; }
     float font_size() const { return font_size_; }
 
+    /// Extra left inset (px) for the text / placeholder / caret — used to clear a
+    /// leading icon (an imported search field's magnifier). 0 = default padding.
+    void set_content_inset_left(float px) { content_inset_left_ = px; }
+    float content_inset_left() const { return content_inset_left_; }
+
     // ── IME composition (marked text) ────────────────────────────────────
 
     /// Set composition text from input method. Replaces any existing marked text.
@@ -151,6 +156,7 @@ private:
     int selection_start_ = 0;    ///< Selection anchor
     int selection_end_ = 0;      ///< Selection active end (= caret)
     float font_size_ = 13.0f;
+    float content_inset_left_ = 0.0f; ///< Extra left inset to clear a leading icon
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
     float caret_blink_time_ = 0.0f; ///< Accumulated time for caret blinking
 

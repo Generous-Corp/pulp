@@ -840,10 +840,12 @@ TEST_CASE("baked native materializer maps a Dropdown frame to an interactive Com
     value.type = "text";
     value.text_content = "1/4 Delay";
     value.stable_anchor_id = "fx-delay-text";
-    IRNode chevron;
+    IRNode chevron;                  // a SQUARE down-chevron marks a real dropdown
     chevron.type = "image";
-    chevron.name = "Dropdown";
+    chevron.name = "expand_more";
     chevron.attributes["asset_ref"] = "chevron";
+    chevron.style.width = 16.0f;
+    chevron.style.height = 16.0f;
     chevron.stable_anchor_id = "fx-delay-chevron";
     dropdown.children.push_back(value);
     dropdown.children.push_back(chevron);
@@ -861,22 +863,89 @@ TEST_CASE("baked native materializer maps a Dropdown frame to an interactive Com
     CHECK(combo->child_count() == 0);            // text + chevron suppressed
 }
 
-TEST_CASE("baked native materializer maps a Search text node to an editable field",
+TEST_CASE("baked native materializer leaves prev/next cyclers and templates alone",
+          "[view][import][native-materializer][combo-box]") {
+    // Not every "Dropdown"-named frame is a dropdown. A prev/next preset CYCLER
+    // (ELYSIUM's ENVELOPE/FILTER/FX-RACK headers) uses a WIDE "< >" icon, and an
+    // unconfigured design-system TEMPLATE shows the literal word "Dropdown".
+    // Neither must become a ComboBox — they stay plain frames.
+    auto make_dropdown = [](const std::string& value_text, float icon_w,
+                            float icon_h) {
+        IRNode dd;
+        dd.type = "frame";
+        dd.name = "Dropdown";
+        dd.stable_anchor_id = "dd";
+        IRNode v;
+        v.type = "text";
+        v.text_content = value_text;
+        v.stable_anchor_id = "dd-text";
+        IRNode icon;
+        icon.type = "image";
+        icon.attributes["asset_ref"] = "icon";
+        icon.style.width = icon_w;
+        icon.style.height = icon_h;
+        icon.stable_anchor_id = "dd-icon";
+        dd.children.push_back(v);
+        dd.children.push_back(icon);
+        return dd;
+    };
+
+    SECTION("prev/next cycler (wide < > icon) stays a frame") {
+        DesignIR ir;
+        ir.root = make_dropdown("Short Plucks", 42.0f, 16.0f);  // aspect 2.6
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(dynamic_cast<ComboBox*>(root.get()) == nullptr);
+    }
+    SECTION("unconfigured template ('Dropdown' value) stays a frame") {
+        DesignIR ir;
+        ir.root = make_dropdown("Dropdown", 16.0f, 16.0f);  // square but template
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(dynamic_cast<ComboBox*>(root.get()) == nullptr);
+    }
+}
+
+TEST_CASE("baked native materializer maps a Search container to a full-box field",
           "[view][import][native-materializer][text-editor]") {
-    // ELYSIUM's "Search" field should be a TAPPABLE input: the visible "SEARCH"
-    // becomes the placeholder (replaced by a caret on focus), and typing enters
-    // text — instead of a static Label.
+    // ELYSIUM's "Search" field is a CONTAINER (a background pill + a "Search"
+    // placeholder text + a magnifier icon). The WHOLE box becomes a TAPPABLE
+    // input (not just the tiny text cell): the placeholder is "SEARCH", the icon
+    // is kept as an overlay, and the placeholder text + bg chrome are dropped.
     DesignIR ir;
-    ir.root.type = "text";
-    ir.root.name = "Search";
-    ir.root.text_content = "SEARCH";
-    ir.root.stable_anchor_id = "search";
+    ir.root.type = "frame";          // the search container (e.g. "Group 59")
+    ir.root.stable_anchor_id = "search-box";
+    ir.root.style.width = 184.0f;
+    ir.root.style.height = 26.0f;
+
+    IRNode bg;                        // background pill — dropped
+    bg.type = "frame";
+    bg.name = "Rectangle 66";
+    bg.stable_anchor_id = "search-bg";
+    IRNode placeholder;              // the placeholder text — becomes the editor's
+    placeholder.type = "text";
+    placeholder.name = "Search";
+    placeholder.text_content = "SEARCH";
+    placeholder.style.font_size = 8.0f;
+    placeholder.stable_anchor_id = "search-text";
+    IRNode icon;                     // magnifier — kept as an overlay child
+    icon.type = "image";
+    icon.name = "ic:round-search";
+    icon.attributes["asset_ref"] = "search-icon";
+    icon.style.left = 6.0f;
+    icon.style.width = 15.0f;
+    icon.stable_anchor_id = "search-icon";
+    ir.root.children.push_back(bg);
+    ir.root.children.push_back(placeholder);
+    ir.root.children.push_back(icon);
 
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     auto* editor = dynamic_cast<TextEditor*>(root.get());
     REQUIRE(editor != nullptr);
     CHECK(editor->placeholder == "SEARCH");
+    CHECK(editor->content_inset_left() > 15.0f);   // text cleared past the icon
+    CHECK(root->child_count() == 1);               // only the icon kept (no text/bg)
 
     // Tappable + editable: focus then type enters text over the placeholder.
     editor->on_focus_changed(true);

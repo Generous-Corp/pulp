@@ -612,8 +612,9 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
 
     const float text_pad_x = std::max(9.0f, border_width() + 7.0f);
-    const float text_inner_x = b.x + text_pad_x;
-    const float text_inner_w = std::max(0.0f, b.width - text_pad_x * 2.0f);
+    const float left_pad = std::max(text_pad_x, content_inset_left_);
+    const float text_inner_x = b.x + left_pad;
+    const float text_inner_w = std::max(0.0f, b.width - left_pad - text_pad_x);
     const auto metrics = canvas.measure_text_full(display.empty() ? std::string("Ag") : display);
     const float text_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f) + metrics.ascent;
 
@@ -754,7 +755,8 @@ void TextEditor::paint(canvas::Canvas& canvas) {
 
 int TextEditor::char_index_at_x(float x) const {
     float char_w = font_size_ * 0.6f;
-    float text_x = std::max(9.0f, border_width() + 7.0f) - scroll_offset_;
+    float text_x = std::max(std::max(9.0f, border_width() + 7.0f),
+                            content_inset_left_) - scroll_offset_;
     int index = static_cast<int>((x - text_x) / char_w + 0.5f);
     return std::clamp(index, 0, static_cast<int>(text_.size()));
 }

@@ -87,6 +87,39 @@ TEST_CASE("ComboBox: keyboard up/down changes selection", "[combo]") {
     REQUIRE(combo.selected_text() == "B");
 }
 
+TEST_CASE("ComboBox: keyboard navigation moves the row highlight while open",
+          "[combo]") {
+    ComboBox combo;
+    combo.set_bounds({0, 0, 120, 24});
+    combo.set_items({"A", "B", "C"});
+    combo.set_selected(0);
+
+    // Open the dropdown → the current selection is highlighted from the start.
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+    combo.on_key_event(enter);
+    REQUIRE(combo.is_open());
+    REQUIRE(combo.hovered_index() == 0);
+
+    // Arrowing down moves BOTH the selection (check glyph) and the highlight.
+    KeyEvent down;
+    down.key = KeyCode::down;
+    down.is_down = true;
+    combo.on_key_event(down);
+    REQUIRE(combo.selected_text() == "B");
+    REQUIRE(combo.hovered_index() == 1);
+
+    combo.on_key_event(down);
+    REQUIRE(combo.hovered_index() == 2);
+
+    KeyEvent up;
+    up.key = KeyCode::up;
+    up.is_down = true;
+    combo.on_key_event(up);
+    REQUIRE(combo.hovered_index() == 1);
+}
+
 // ── Regression: dropdown overlay click routing ───────────────────────────
 //
 // The ComboBox dropdown is a paint-only overlay (queued via

@@ -552,15 +552,55 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     }
 }
 
-// The first non-empty text content anywhere under `node` (a dropdown's selected
-// value, a search field's placeholder).
-std::optional<std::string> first_text_descendant(const IRNode& node) {
+// The first text node anywhere under `node` with non-empty content (a dropdown's
+// selected value, a search field's placeholder) — returns the node for its style.
+const IRNode* first_text_descendant_node(const IRNode& node) {
     for (const auto& c : node.children)
         if (lower_copy(c.type) == "text" && !c.text_content.empty())
-            return c.text_content;
+            return &c;
     for (const auto& c : node.children)
-        if (auto t = first_text_descendant(c)) return t;
+        if (auto* t = first_text_descendant_node(c)) return t;
+    return nullptr;
+}
+
+std::optional<std::string> first_text_descendant(const IRNode& node) {
+    if (auto* t = first_text_descendant_node(node)) return t->text_content;
     return std::nullopt;
+}
+
+// True when this frame is a search field: it wraps a "Search" text (the
+// placeholder), typically with a magnifier icon and a background pill. The WHOLE
+// box becomes the input, not just the inner text cell.
+bool is_search_container(const IRNode& node) {
+    if (lower_copy(node.type) != "frame") return false;
+    for (const auto& c : node.children) {
+        const auto cn = lower_copy(c.name);
+        if (lower_copy(c.type) == "text" &&
+            (cn == "search" || cn == "searchbox" || cn == "search field"))
+            return true;
+    }
+    return false;
+}
+
+// A "Dropdown"-named frame is a REAL dropdown only when it carries a selected
+// value AND a single down-chevron. ELYSIUM reuses the "Dropdown" name for two
+// other things that must NOT become ComboBoxes:
+//   - an unconfigured design-system TEMPLATE whose value is the literal word
+//     "Dropdown" (the stray "VST Style" placeholder);
+//   - a prev/next preset CYCLER, whose icon is a WIDE "< >" pair (e.g. the
+//     42×16 "Frame 41" on the ENVELOPE/FILTER/FX-RACK headers) rather than a
+//     square down-chevron. Those stay static (faithful to the design) until a
+//     real cycler interaction exists.
+bool looks_like_real_dropdown(const IRNode& node) {
+    const auto value = first_text_descendant(node);
+    if (!value || lower_copy(*value) == "dropdown") return false;
+    for (const auto& c : node.children) {
+        if (lower_copy(c.type) != "image") continue;
+        const float w = c.style.width.value_or(0.0f);
+        const float h = c.style.height.value_or(0.0f);
+        if (w > 0.0f && h > 0.0f && w / h <= 1.8f) return true;  // square chevron
+    }
+    return false;
 }
 
 // Design-import widget recognition by Figma layer name. Designers label these
@@ -570,12 +610,12 @@ std::optional<std::string> first_text_descendant(const IRNode& node) {
 std::optional<NativeWidgetKind> kind_from_name(const IRNode& node) {
     const auto name = lower_copy(node.name);
     const auto type = lower_copy(node.type);
-    // A "Dropdown" frame that actually carries a text value → ComboBox.
-    if (type == "frame" && name == "dropdown" && first_text_descendant(node))
+    if (type == "frame" && name == "dropdown" && looks_like_real_dropdown(node))
         return NativeWidgetKind::combo_box;
-    // A "Search" text field → an editable TextEditor (tappable, caret, keyboard).
-    if (type == "text" &&
-        (name == "search" || name == "searchbox" || name == "search field"))
+    // A search field → an editable TextEditor sized to the whole box. Promote
+    // the CONTAINER (not the inner text cell) so the field spans the box and the
+    // placeholder isn't truncated.
+    if (is_search_container(node))
         return NativeWidgetKind::text_editor;
     return std::nullopt;
 }
@@ -1326,12 +1366,25 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return std::make_unique<TextButton>(text);
         case NativeWidgetKind::text_editor: {
             auto editor = std::make_unique<TextEditor>();
-            if (semantics.text_placeholder)
+            if (semantics.text_placeholder) {
                 editor->placeholder = *semantics.text_placeholder;
-            else if (!node.text_content.empty())
-                // A search field imported from a Figma text node: its visible
-                // text ("SEARCH") is the placeholder, replaced by a caret on tap.
+            } else if (!node.text_content.empty()) {
                 editor->placeholder = node.text_content;
+            } else if (const auto* t = first_text_descendant_node(node)) {
+                // A promoted search CONTAINER: the inner "SEARCH" text is the
+                // placeholder (replaced by a caret on tap); inherit its font size.
+                editor->placeholder = t->text_content;
+                if (t->style.font_size) editor->set_font_size(*t->style.font_size);
+                // Inset the text past the leading magnifier icon (the kept image
+                // child) so the placeholder/caret don't overlap it.
+                for (const auto& c : node.children) {
+                    if (lower_copy(c.type) != "image") continue;
+                    const float right = c.style.left.value_or(0.0f) +
+                                        c.style.width.value_or(0.0f);
+                    editor->set_content_inset_left(right + 6.0f);
+                    break;
+                }
+            }
             if (semantics.text_value)
                 editor->set_text(*semantics.text_value);
             return editor;
@@ -1519,8 +1572,17 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     if (resolved.kind == NativeWidgetKind::combo_box)
         return view;
 
+    // A promoted search CONTAINER → a TextEditor that paints its own box +
+    // placeholder. Keep only IMAGE children (the magnifier icon, an overlay);
+    // drop the placeholder text + background-pill chrome the editor replaces.
+    const bool editor_keeps_images_only =
+        resolved.kind == NativeWidgetKind::text_editor && !node.children.empty();
+
     const auto count = std::min(node.children.size(), resolved.children.size());
     for (std::size_t i = 0; i < count; ++i) {
+        if (editor_keeps_images_only &&
+            resolved.children[i].kind != NativeWidgetKind::image_view)
+            continue;
         std::ostringstream child_path;
         child_path << path << "/children[" << i << "]";
         auto child = materialize_node(node.children[i],
