@@ -937,15 +937,35 @@ public:
     }
     bool has_fill() const { return fill_value_ >= 0.0f; }
 
+    /// Per-shape gradient fill (design-import shape-fill enhancement). When ≥2
+    /// stops are set, the value-driven silhouette fill paints THIS gradient
+    /// (stop[0] at the shape bottom → stop[last] at the top) revealed up to
+    /// `fill_value`, instead of the flat `fill_color`. The importer samples
+    /// each shape's OWN colors from its art and stamps them here so the fill
+    /// reproduces the original look — only adjustable. Storing stops is inert
+    /// until `fill_value >= 0`, so it never changes a plainly-rendered image
+    /// (keeps the capability opt-in). Fewer than 2 stops clears the gradient
+    /// and the flat-color path is used.
+    void set_fill_gradient(std::vector<canvas::Color> stops) {
+        fill_gradient_ = std::move(stops);
+        request_repaint();
+    }
+    const std::vector<canvas::Color>& fill_gradient() const { return fill_gradient_; }
+    bool has_fill_gradient() const { return fill_gradient_.size() >= 2; }
+
     void paint(canvas::Canvas& canvas) override;
 
 private:
+    /// Sample the fill gradient at t∈[0,1] (0 = bottom stop, 1 = top stop).
+    canvas::Color fill_gradient_color_at(float t) const;
+
     std::string path_;
     bool loaded_ = false;
     std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
     ImageCache* cache_ = nullptr;       // optional; owned externally
     float fill_value_ = -1.0f;          // <0 disables the silhouette fill overlay
     canvas::Color fill_color_ = canvas::Color::rgba(0.49f, 0.42f, 1.0f, 0.55f);
+    std::vector<canvas::Color> fill_gradient_;  // ≥2 stops ⇒ gradient fill
 };
 
 // ── Meter ────────────────────────────────────────────────────────────────────

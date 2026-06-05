@@ -80,3 +80,39 @@ TEST_CASE("ImageView value-driven silhouette fill scales with value",
     // (the overlay covers a larger fraction of the box as the value rises).
     CHECK(base_vs_full.similarity < base_vs_half.similarity);
 }
+
+TEST_CASE("ImageView per-shape gradient fill differs from a flat fill",
+          "[view][image][fill]") {
+    // The design-import shape-fill enhancement: each shape fills with ITS OWN
+    // sampled gradient (ELYSIUM's cylinder purple, prism magenta, …) instead of
+    // one generic color. set_fill_gradient(stops) ⇒ the silhouette fill paints a
+    // bottom→top gradient revealed up to fill_value; <2 stops clears it.
+    const std::string img = make_source_image();
+    auto base = render_fill(img, -1.0f);  // fill disabled
+    if (base.empty()) SKIP("Skia raster screenshot backend unavailable");
+
+    auto flat = render_fill(img, 1.0f);   // single-color fill (the legacy path)
+    REQUIRE_FALSE(flat.empty());
+    // If fill compositing is a no-op in this build (a partial-Skia runner where
+    // the mask url() path can't composite), flat == base — skip rather than
+    // assert a fill that physically can't render here.
+    if (compare_screenshots(base, flat).similarity >= 0.999f)
+        SKIP("Skia fill compositing unavailable in this build");
+
+    auto grad = std::make_unique<ImageView>();
+    grad->set_image_path(img);
+    grad->set_fill_value(1.0f);
+    REQUIRE_FALSE(grad->has_fill_gradient());
+    grad->set_fill_gradient({Color::rgba8(230, 40, 40),    // bottom
+                             Color::rgba8(40, 40, 230)});   // top
+    REQUIRE(grad->has_fill_gradient());
+    auto grad_png = render_to_png(*grad, 48, 48, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(grad_png.empty());
+
+    // A two-color gradient fill must differ from the flat single-color fill.
+    CHECK(compare_screenshots(flat, grad_png).similarity < 0.99f);
+
+    // Fewer than two stops clears the gradient (back to the flat-color path).
+    grad->set_fill_gradient({Color::rgba8(230, 40, 40)});
+    CHECK_FALSE(grad->has_fill_gradient());
+}

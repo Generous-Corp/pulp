@@ -746,6 +746,32 @@ be "filled" to a bound value via `ImageView::set_fill_value(0..1)` +
 `value` of the height, masked to the image's OWN alpha through the canvas
 `save_layer_with_mask` url() path — so the fill clips to the shape silhouette.
 
+**Per-shape gradient — each shape fills with ITS OWN colors, not one generic
+color.** ELYSIUM's shapes are uniquely colored (DEPTH purple, POSITION magenta,
+OFFSET green, SHIMMER amber). A single `set_fill_color` made all of them fill the
+same purple — visually wrong. So the importer SAMPLES each shape's own vertical
+gradient from its art and stamps `shape_fill_gradient` (`sample_shape_fill_gradient`
+in `design_import.cpp`: average the opaque pixels in N bands bottom→top, emit
+`#rrggbb` stops). `ImageView::set_fill_gradient(stops)` then paints that gradient
+revealed to `fill_value` instead of the flat color, so the shape fills with its
+real colors — "mapped to the original", only adjustable. **This is independent of
+`render_bounds`** (the shapes carry none; only knobs/EQ-curve do), so sampling runs
+for any non-knob colorful image. A near-grey image (logo/icon) is BELOW the
+saturation gate (`max_sat < 0.18`) and gets no gradient — the capability won't
+latch onto things that shouldn't fill.
+
+**Opt-in is preserved.** The importer stamping `shape_fill_gradient`, and the
+materializer forwarding it to `set_fill_gradient`, are BOTH inert until a fill
+value is driven (`fill_value` stays −1 ⇒ `emit_silhouette_fill` early-returns).
+So a plainly-imported design renders unchanged; only a deliberate post-import
+step that drives `set_fill_value` turns a shape into a fillable control. That
+post-import wiring is the opt-in. Example phrasings a user can ask for after an
+import: *"for the shapes, use their own gradients as the fill color"*, *"wire the
+DEPTH knob to fill the cylinder"*, *"make the prism fill adjustable with its own
+gradient"*. What you should NOT do: auto-drive fills on every image (a logo with a
+gradient would start filling) or hardcode per-shape colors in the importer — the
+gradient must be SAMPLED from each shape so it stays faithful to any design.
+
 The alpha-mask primitive: `SkiaCanvas::save_layer_with_mask` Phase 1 only
 shipped gradient masks; `url(<file>)` image masks were future work. They are now
 implemented (`skia_canvas_mask.cpp` `parse_url_image_mask` — decode the file to
@@ -755,12 +781,21 @@ Graphite/GPU.
 
 Binding which knob drives which shape is NOT in the figma source (no Figma
 binding), so the import does not auto-wire it. The `elysium-standalone` example
-demonstrates the capability by pairing each upper illustration with its column
-knob and driving `set_fill_value` from the knob each frame. Verify headlessly on
-the **Skia raster** backend, not a GPU window: `render_to_png(view, ...,
-ScreenshotBackend::skia)` exercises the url() mask without Dawn/Metal. Test:
-`[view][image][fill]` in `pulp-test-image-view-fill` (renders fill 0.5 / 1.0 via
-raster, asserts the overlay scales with value).
+demonstrates the opt-in by pairing each upper illustration with its column knob
+(`apply_shape_knob_fills`, by laid-out x) and driving `set_fill_value` from the
+knob each frame; the per-shape gradient flows through automatically because the
+materializer already set it. Verify headlessly on the **Skia raster** backend,
+not a GPU window: `render_to_png(view, ..., ScreenshotBackend::skia)` exercises
+the url() mask without Dawn/Metal. `PULP_KNOB_VALUE=<0..1>` on the example sets
+every knob, so a raster at 0.25 vs 0.9 shows the fill level rise with each shape's
+own color (a quick visual check that the gradient is value-driven, not base art).
+
+Tests: `[view][image][fill]` in `pulp-test-image-view-fill` (flat fill scales with
+value; a 2-stop gradient fill differs from the flat fill; <2 stops clears it).
+`[native-materializer][fill]` asserts the materializer forwards `shape_fill_gradient`
+to `set_fill_gradient` WITHOUT driving the fill (opt-in intact). The mac harness
+(`pulp-test-mac-platform-harness`) pins end-to-end sampling: ≥4 ELYSIUM shapes get
+a sampled gradient while the grey chrome does not.
 
 ### Imported text vertical centering — fix BOTH render paths together
 

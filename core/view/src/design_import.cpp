@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <cctype>
 #include <cstring>
@@ -1136,6 +1137,55 @@ void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& c
     }
 }
 
+// Sample a shape illustration's OWN vertical color gradient from its art, so a
+// value-driven fill reproduces the shape's real colors (ELYSIUM: the cylinder's
+// purple, the prism's magenta, the cube's green, the tuning shape's amber) —
+// each shape filling with ITS gradient, not one generic color. Returns up to
+// `n` comma-joined "#rrggbb" stops bottom→top, or "" when the shape isn't
+// colorful enough to be a gradient fill (a near-grey logo/icon yields nothing,
+// which keeps the capability from latching onto things that shouldn't fill).
+std::string sample_shape_fill_gradient(const ImportDecodedPng& img,
+                                       const ImportOpaqueCore& core, int n = 5) {
+    if (!img.valid() || core.w <= 1 || core.h <= 1 || n < 2) return {};
+    auto at = [&](int x, int y) -> const uint8_t* {
+        return &img.rgba[(static_cast<size_t>(y) * img.width + x) * 4];
+    };
+    std::vector<std::array<int, 3>> stops;   // averaged RGB per band
+    float max_sat = 0.0f;
+    for (int k = 0; k < n; ++k) {
+        // Stop k: band centered up the shape — k=0 bottom, k=n-1 top.
+        const float fy = 1.0f - (static_cast<float>(k) + 0.5f) / static_cast<float>(n);
+        const int band_c = core.y + static_cast<int>(fy * core.h);
+        const int band_h = std::max(1, core.h / (n * 2));
+        long sr = 0, sg = 0, sb = 0, cnt = 0;
+        for (int y = band_c - band_h; y <= band_c + band_h; ++y) {
+            if (y < 0 || y >= img.height) continue;
+            for (int x = core.x; x < core.x + core.w && x < img.width; ++x) {
+                const uint8_t* p = at(x, y);
+                if (p[3] < 96) continue;          // skip transparent / soft edges
+                sr += p[0]; sg += p[1]; sb += p[2]; ++cnt;
+            }
+        }
+        if (cnt == 0) return {};                  // a gappy band ⇒ not a solid shape
+        const int r = static_cast<int>(sr / cnt);
+        const int g = static_cast<int>(sg / cnt);
+        const int bl = static_cast<int>(sb / cnt);
+        stops.push_back({r, g, bl});
+        const int mx = std::max({r, g, bl}), mn = std::min({r, g, bl});
+        if (mx > 0) max_sat = std::max(max_sat, static_cast<float>(mx - mn) / mx);
+    }
+    if (max_sat < 0.18f) return {};               // ~grey ⇒ logo/icon, not a fill
+    std::string out;
+    char buf[8];
+    for (size_t i = 0; i < stops.size(); ++i) {
+        std::snprintf(buf, sizeof(buf), "#%02x%02x%02x",
+                      stops[i][0], stops[i][1], stops[i][2]);
+        if (i) out += ',';
+        out += buf;
+    }
+    return out;
+}
+
 static std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vector<uint8_t>& bytes,
                                                                   float min_alpha = 0.5f) {
     auto img = decode_png_rgba_for_import(bytes);
@@ -1226,6 +1276,22 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                                     cleaned.string();
                                         }
                                     }
+                                }
+                            }
+                        }
+                        // Shape illustration: sample its OWN gradient so a later
+                        // opt-in value-driven fill shows the shape's real colors.
+                        // Independent of render_bounds — ELYSIUM's Torus / Triangle
+                        // / Pentagon / Cube carry no render_bounds yet are the
+                        // colorful fillable shapes. Metadata only (inert until a
+                        // fill value is driven), and skipped for captured knobs
+                        // (which skin separately and must not fill).
+                        if (!node.attributes.count("knob_ind_r_out")) {
+                            if (auto core = compute_import_opaque_core(bytes)) {
+                                if (auto img = decode_png_rgba_for_import(bytes)) {
+                                    auto grad = sample_shape_fill_gradient(*img, *core);
+                                    if (!grad.empty())
+                                        node.attributes["shape_fill_gradient"] = grad;
                                 }
                             }
                         }

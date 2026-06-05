@@ -599,6 +599,45 @@ TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sourc
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
+TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
+          "[view][import][native-materializer][figma-plugin][fill]") {
+    // The importer samples a shape illustration's OWN gradient and stamps
+    // shape_fill_gradient; the materializer forwards it to ImageView so a later
+    // opt-in fill reveals the shape's real colors. Storing it is inert (no fill
+    // value), so the image still renders plainly — the capability stays opt-in.
+    auto make = [](const char* grad) {
+        DesignIR ir;
+        ir.source = DesignSource::figma_plugin;
+        ir.root.type = "image";
+        ir.root.attributes["asset_ref"] = "shape";
+        ir.root.style.width = 80.0f;
+        ir.root.style.height = 96.0f;
+        if (grad) ir.root.attributes["shape_fill_gradient"] = grad;
+        IRAssetRef asset;
+        asset.asset_id = "shape";
+        asset.local_path = "/resolved/shape.png";
+        asset.mime = "image/png";
+        ir.asset_manifest.assets.push_back(asset);
+        std::vector<ImportDiagnostic> diag;
+        return build_native_view_tree(ir, {}, {.diagnostics_out = &diag});
+    };
+
+    // A node carrying ≥2 stops materializes an ImageView with the gradient set,
+    // but with NO fill value driven — so has_fill() stays false (opt-in intact).
+    auto with_grad = make("#7a4cff,#c84cff,#b0d0ff");
+    auto* img = dynamic_cast<ImageView*>(with_grad.get());
+    REQUIRE(img != nullptr);
+    REQUIRE(img->has_fill_gradient());
+    REQUIRE(img->fill_gradient().size() == 3);
+    REQUIRE_FALSE(img->has_fill());
+
+    // A node without the attribute gets no gradient (logos/icons stay plain).
+    auto plain = make(nullptr);
+    auto* img2 = dynamic_cast<ImageView*>(plain.get());
+    REQUIRE(img2 != nullptr);
+    REQUIRE_FALSE(img2->has_fill_gradient());
+}
+
 TEST_CASE("baked native materializer preserves figma-plugin bleed sprite geometry",
           "[view][import][native-materializer][figma-plugin][fidelity]") {
     DesignIR ir;

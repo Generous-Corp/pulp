@@ -42,8 +42,27 @@ void ImageView::paint(canvas::Canvas& canvas) {
         if (fh <= 0.0f) return;
         canvas.save_layer_with_mask(0, 0, b.width, b.height, 1.0f,
                                     "url(" + fs + ")", "100% 100%");
-        canvas.set_fill_color(fill_color_);
-        canvas.fill_rect(0, b.height - fh, b.width, fh);
+        const float fill_top = b.height - fh;
+        if (has_fill_gradient()) {
+            // Per-shape gradient: stop[0] at the shape bottom → stop[last] at
+            // the top. Draw row-by-row across the FULL shape height (so the
+            // colors land where the art has them) but only paint the revealed
+            // [fill_top, height) band — the same reveal model as the Meter's
+            // skinned gradient. The mask clips each row to the silhouette.
+            const int y0 = static_cast<int>(std::floor(fill_top));
+            const int y1 = static_cast<int>(std::ceil(b.height));
+            for (int y = y0; y < y1; ++y) {
+                // position up the shape: 0 at the bottom, 1 at the top.
+                const float t = b.height > 1.0f
+                    ? 1.0f - (static_cast<float>(y) + 0.5f) / b.height
+                    : 0.0f;
+                canvas.set_fill_color(fill_gradient_color_at(t));
+                canvas.fill_rect(0, static_cast<float>(y), b.width, 1.0f);
+            }
+        } else {
+            canvas.set_fill_color(fill_color_);
+            canvas.fill_rect(0, fill_top, b.width, fh);
+        }
         canvas.restore();
     };
     auto strip_scheme = [](std::string p) {
@@ -313,6 +332,18 @@ void Meter::set_level(float rms, float peak) {
 void Meter::update(float raw_peak, float raw_rms, float dt) {
     ballistics_.update(raw_peak, raw_rms, dt);
     request_repaint();
+}
+
+canvas::Color ImageView::fill_gradient_color_at(float t) const {
+    if (fill_gradient_.empty()) return fill_color_;
+    if (fill_gradient_.size() == 1) return fill_gradient_.front();
+    t = std::clamp(t, 0.0f, 1.0f);
+    const float scaled = t * static_cast<float>(fill_gradient_.size() - 1);
+    int i = static_cast<int>(scaled);
+    if (i >= static_cast<int>(fill_gradient_.size()) - 1)
+        return fill_gradient_.back();
+    const float frac = scaled - static_cast<float>(i);
+    return fill_gradient_[i].interpolate(fill_gradient_[i + 1], frac);
 }
 
 canvas::Color Meter::gradient_color_at(float t) const {

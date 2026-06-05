@@ -105,8 +105,10 @@ std::string read_text_file(const fs::path& p) {
 // illustration shape with its column knob by laid-out x-position, then drive the
 // shape's value-driven silhouette fill from the knob's value. This is exactly
 // the kind of customization an "after-import" step would do — the import only
-// provides the generic ImageView::set_fill_value primitive. Requires layout to
-// have run (real bounds).
+// provides the generic ImageView::set_fill_value primitive, and the per-shape
+// gradient (each shape's OWN colors) flows through automatically because the
+// materializer already called set_fill_gradient from the importer-sampled
+// shape_fill_gradient. Requires layout to have run (real bounds).
 void apply_shape_knob_fills(pulp::view::View* root, float design_h) {
     using namespace pulp::view;
     std::vector<std::pair<float, Knob*>> knobs;

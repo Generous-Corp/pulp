@@ -1521,6 +1521,19 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
             auto image = std::make_unique<ImageView>();
             image->set_image_source(uri);
+            // Forward the importer-sampled per-shape gradient. Storing it is
+            // inert until a fill value is driven (set_fill_value), so it never
+            // alters a plainly-rendered image — the shape-fill stays opt-in.
+            // When post-import wiring DOES drive the fill, each shape reveals
+            // ITS own colors instead of one generic fill color.
+            if (auto grad = attr(node, "shape_fill_gradient")) {
+                std::vector<Color> stops;
+                std::stringstream gs(*grad);
+                std::string tok;
+                while (std::getline(gs, tok, ','))
+                    if (auto c = parse_hex_color(tok)) stops.push_back(*c);
+                if (stops.size() >= 2) image->set_fill_gradient(std::move(stops));
+            }
             return image;
         }
         case NativeWidgetKind::canvas:

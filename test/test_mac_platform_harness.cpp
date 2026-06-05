@@ -230,6 +230,13 @@ uint32_t count_ir_nodes(const pulp::view::IRNode& node) {
     return count;
 }
 
+uint32_t count_nodes_with_attr(const pulp::view::IRNode& node, const char* key) {
+    uint32_t count = node.attributes.count(key) ? 1u : 0u;
+    for (const auto& child : node.children)
+        count += count_nodes_with_attr(child, key);
+    return count;
+}
+
 std::unique_ptr<View> load_elysium_default_cpp_view(const fs::path& fixture_zip,
                                                     ScopedTempDir& extracted,
                                                     pulp::view::DesignIR& ir,
@@ -259,6 +266,14 @@ std::unique_ptr<View> load_elysium_default_cpp_view(const fs::path& fixture_zip,
     // assertions above, which pin the raw parsed scene.
     pulp::view::hoist_captured_art_knobs(ir);
     pulp::view::enrich_imported_image_asset_metadata(ir, ir.asset_manifest);
+
+    // Per-shape gradient sampling: the four illustration shapes (DEPTH /
+    // POSITION / OFFSET / SHIMMER) are colorful, so enrich samples each one's
+    // OWN gradient into shape_fill_gradient; the grey chrome/logos stay below
+    // the saturation gate and get none. Pins the sampling end-to-end (the
+    // materializer forwards these to ImageView::set_fill_gradient so an opt-in
+    // fill reveals the shape's real colors).
+    REQUIRE(count_nodes_with_attr(ir.root, "shape_fill_gradient") >= 4);
 
     auto view = pulp::view::build_native_view_tree(
         ir,
