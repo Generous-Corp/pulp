@@ -168,6 +168,17 @@ set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
 # is selected, the provider is the pinned sealed libv8, nothing else.
 set(V8_LIBRARY_PATH "" CACHE FILEPATH "Advanced: full path to a V8 runtime library (local experiments)")
 
+# ── V8 provider-identity reporting (additive) ────────────────────────────────
+# The pinned V8 provider is resolved by FindV8.cmake (external/v8-build/<platform>/,
+# fetched by tools/scripts/fetch_v8_for_release.py). The V8 backend block below
+# fills in the provider-identity vars from the resolved sealed artifact and emits
+# them as compile definitions. Defaults describe an unknown/unselected provider.
+option(PULP_VALIDATE_V8_PROVIDER_STRICT
+    "Run the strict (no skip-pass) V8 provider-identity + cube-coexistence CTest" OFF)
+set(PULP_V8_PROVIDER_KIND "")
+set(PULP_V8_PROVIDER_PATH "")
+set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
+
 # QuickJS backend is always compiled (portable fallback)
 set(PULP_JS_ENGINE_SOURCES
     src/js_quickjs_engine.cpp
@@ -214,6 +225,31 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     endif()
     target_link_libraries(pulp-view-script PRIVATE v8::v8)
     set(PULP_HAS_V8_ACTUAL ON)
+
+    # Provider identity — the pinned provider IS the sealed v8-builder libv8
+    # (FindV8 resolves external/v8-build/<platform>/). Surface its kind, path,
+    # and the manifest-pinned runtime version so the runtime can report and
+    # cross-check the provider. The js_v8_engine.cpp accessors that read these
+    # defines are additive and degrade gracefully when a define is empty.
+    set(PULP_V8_PROVIDER_KIND "v8builder")
+    set(PULP_V8_PROVIDER_PATH "${V8_RUNTIME_LIBRARY}")
+    set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/tools/deps/manifest.json")
+        file(READ "${CMAKE_SOURCE_DIR}/tools/deps/manifest.json" _pulp_v8_manifest_text)
+        # Match the V8 dependency's pinned tag (e.g. "v8-15.1.27") and reduce it
+        # to the bare runtime version (15.1.27) the runtime reports at startup.
+        if(_pulp_v8_manifest_text MATCHES "\"name\"[ \t]*:[ \t]*\"V8\"[^}]*\"version\"[ \t]*:[ \t]*\"v8-([0-9][^\"]*)\"")
+            set(PULP_V8_EXPECTED_RUNTIME_VERSION "${CMAKE_MATCH_1}")
+        endif()
+        unset(_pulp_v8_manifest_text)
+    endif()
+
+    # Publish the identity to the global cache so sibling subdirectories added
+    # after core/view (examples/threejs-native-demo's strict provider-identity
+    # CTest) can read the resolved kind + pinned version without re-deriving it.
+    set(PULP_V8_PROVIDER_KIND "${PULP_V8_PROVIDER_KIND}" CACHE INTERNAL "Resolved V8 provider kind")
+    set(PULP_V8_PROVIDER_PATH "${PULP_V8_PROVIDER_PATH}" CACHE INTERNAL "Resolved V8 provider library path")
+    set(PULP_V8_EXPECTED_RUNTIME_VERSION "${PULP_V8_EXPECTED_RUNTIME_VERSION}" CACHE INTERNAL "Manifest-pinned V8 runtime version")
 endif()
 
 # JSC backend (Apple platforms only)
@@ -231,6 +267,15 @@ endif()
 # Set compile definitions for engine availability / defaults
 if(PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_HAS_V8=1)
+
+    # Provider identity, consumed by V8Engine::provider_kind()/provider_path()/
+    # expected_runtime_version(). These describe WHERE the V8 runtime came from
+    # (sealed v8-builder seal vs Homebrew libnode vs a self-built monolith),
+    # independent of the runtime version V8 reports at startup.
+    target_compile_definitions(pulp-view-script PRIVATE
+        PULP_V8_PROVIDER_KIND="${PULP_V8_PROVIDER_KIND}"
+        PULP_V8_PROVIDER_PATH="${PULP_V8_PROVIDER_PATH}"
+        PULP_V8_EXPECTED_RUNTIME_VERSION="${PULP_V8_EXPECTED_RUNTIME_VERSION}")
 endif()
 
 # Only set non-QuickJS default when explicitly requested (not auto)
