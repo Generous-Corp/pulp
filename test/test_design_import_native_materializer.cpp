@@ -897,12 +897,16 @@ TEST_CASE("baked native materializer leaves prev/next cyclers and templates alon
         REQUIRE(root != nullptr);
         REQUIRE(dynamic_cast<ComboBox*>(root.get()) == nullptr);
     }
-    SECTION("unconfigured template ('Dropdown' value) stays a frame") {
+    SECTION("unconfigured template ('Dropdown' value) renders nothing") {
         DesignIR ir;
         ir.root = make_dropdown("Dropdown", 16.0f, 16.0f);  // square but template
         auto root = build_native_view_tree(ir, {}, {});
         REQUIRE(root != nullptr);
+        // Not a ComboBox, and inert: a hidden placeholder with no children, so it
+        // can't surface as a stray dropdown between panels.
         REQUIRE(dynamic_cast<ComboBox*>(root.get()) == nullptr);
+        CHECK(root->child_count() == 0);
+        CHECK_FALSE(root->hit_testable());
     }
 }
 

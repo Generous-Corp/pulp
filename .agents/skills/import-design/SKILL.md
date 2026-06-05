@@ -693,7 +693,10 @@ detection and BEFORE `kind_from_type`:
     "Frame 41" on the ENVELOPE/FILTER/FX-RACK headers) — leave static (faithful)
     until a real cycler interaction exists;
   - an unconfigured design-system **template** whose value is the literal word
-    "Dropdown" (the stray "VST Style" placeholder).
+    "Dropdown" (the stray "VST Style" placeholder). `materialize_node` renders it
+    as a hidden, zero-size, inert view (`is_unconfigured_dropdown_template`) so it
+    can't surface between panels — excluding it from `combo_box` alone left it
+    rendering as a static "Dropdown" frame.
   `combo_box` is a **leaf** in `materialize_node` (text + chevron children are NOT
   re-materialized — the ComboBox paints its own display) and owns its hits.
 - A search field is a `frame` CONTAINER (`is_search_container`: it wraps a text

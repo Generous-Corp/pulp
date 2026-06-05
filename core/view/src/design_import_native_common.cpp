@@ -591,6 +591,17 @@ bool is_search_container(const IRNode& node) {
 //     42×16 "Frame 41" on the ENVELOPE/FILTER/FX-RACK headers) rather than a
 //     square down-chevron. Those stay static (faithful to the design) until a
 //     real cycler interaction exists.
+// An unconfigured design-system "Dropdown" template: a frame named "Dropdown"
+// whose value is the literal word "Dropdown" (ELYSIUM's "VST Style" placeholder).
+// The design never shows it; render NOTHING so it can't surface as a stray
+// element between panels.
+bool is_unconfigured_dropdown_template(const IRNode& node) {
+    if (lower_copy(node.type) != "frame" || lower_copy(node.name) != "dropdown")
+        return false;
+    const auto value = first_text_descendant(node);
+    return value && lower_copy(*value) == "dropdown";
+}
+
 bool looks_like_real_dropdown(const IRNode& node) {
     const auto value = first_text_descendant(node);
     if (!value || lower_copy(*value) == "dropdown") return false;
@@ -1558,6 +1569,13 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
                                        std::string_view path,
                                        std::optional<LayoutDirection> parent_direction,
                                        std::vector<ImportDiagnostic>& diagnostics) {
+    // An unconfigured "Dropdown" template renders nothing (a zero-size, inert
+    // view) — it's a design-system placeholder the design never shows.
+    if (is_unconfigured_dropdown_template(node)) {
+        auto hidden = std::make_unique<View>();
+        hidden->set_hit_testable(false);
+        return hidden;
+    }
     auto view = make_widget(node, resolved, manifest, options, path, diagnostics);
     apply_identity(*view, node, resolved);
     apply_layout(*view, node, parent_direction);
