@@ -1929,6 +1929,9 @@ pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 
+# .pulpset render/replay harness (G4)
+pulp_add_test_suite(pulp-test-pulpset-replay SOURCES test_pulpset_replay.cpp LIBRARIES pulp::format)
+
 # Diagnostic reporter tests
 pulp_add_test_suite(pulp-test-diagnostic SOURCES test_diagnostic_reporter.cpp LIBRARIES pulp::format)
 
