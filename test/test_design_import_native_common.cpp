@@ -1,10 +1,13 @@
 #include "../core/view/src/design_import_native_common.hpp"
+#include "../core/view/src/design_import_internal.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -220,4 +223,57 @@ TEST_CASE("native resolver keeps asset diagnostics deterministic across JSON ord
     REQUIRE(background_pos != std::string::npos);
     REQUIRE(src_pos != std::string::npos);
     REQUIRE(background_pos < src_pos);
+}
+
+TEST_CASE("clear_baked_knob_antenna removes the antenna without notching the disc",
+          "[view][import][knob][antenna]") {
+    // Synthetic 40x50 RGBA8: a thin vertical "antenna" (x 18..21) standing above
+    // a solid "disc body" block (x 8..31, y 20..44). This mirrors ELYSIUM's disc:
+    // a baked indicator stem above the disc. The clear must erase the antenna and
+    // leave the disc body byte-for-byte intact (an earlier version cut a notch).
+    const int W = 40, H = 50;
+    std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4, 0);
+    auto set = [&](int x, int y, uint8_t a) {
+        px[(static_cast<size_t>(y) * W + x) * 4 + 0] = 180;
+        px[(static_cast<size_t>(y) * W + x) * 4 + 1] = 180;
+        px[(static_cast<size_t>(y) * W + x) * 4 + 2] = 180;
+        px[(static_cast<size_t>(y) * W + x) * 4 + 3] = a;
+    };
+    auto alpha = [&](int x, int y) {
+        return px[(static_cast<size_t>(y) * W + x) * 4 + 3];
+    };
+    for (int y = 5; y < 20; ++y)            // antenna: thin column above the disc
+        for (int x = 18; x <= 21; ++x) set(x, y, 255);
+    for (int y = 20; y < 45; ++y)           // disc body: wide solid block
+        for (int x = 8; x <= 31; ++x) set(x, y, 255);
+
+    // Opaque bbox covers antenna + disc: x 8..31 (w=24), y 5..44 (h=40).
+    clear_baked_knob_antenna(px, W, H, /*core_x=*/8, /*core_y=*/5,
+                             /*core_w=*/24, /*core_h=*/40);
+
+    // Antenna is gone (every antenna pixel cleared)...
+    for (int y = 5; y < 20; ++y)
+        for (int x = 18; x <= 21; ++x)
+            REQUIRE(alpha(x, y) == 0);
+    // ...and the disc body is untouched — no notch at its top edge or anywhere.
+    for (int y = 20; y < 45; ++y)
+        for (int x = 8; x <= 31; ++x)
+            REQUIRE(alpha(x, y) == 255);
+}
+
+TEST_CASE("clear_baked_knob_antenna is a no-op when there is no antenna",
+          "[view][import][knob][antenna]") {
+    // A disc with no baked antenna (just the body) must be left fully intact —
+    // the scan hits the wide disc row immediately and stops.
+    const int W = 40, H = 40;
+    std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4, 0);
+    auto a = [&](int x, int y) { return px[(static_cast<size_t>(y) * W + x) * 4 + 3]; };
+    for (int y = 8; y < 32; ++y)
+        for (int x = 8; x <= 31; ++x) px[(static_cast<size_t>(y) * W + x) * 4 + 3] = 255;
+
+    clear_baked_knob_antenna(px, W, H, 8, 8, 24, 24);
+
+    for (int y = 8; y < 32; ++y)
+        for (int x = 8; x <= 31; ++x)
+            REQUIRE(a(x, y) == 255);
 }

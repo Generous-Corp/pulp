@@ -661,24 +661,33 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   color from `border_color` → else `background_color` (demoted) → else `color`,
   and the erase predicate removes `__knob_pointer` nodes too. Test:
   `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
-- **Import-time disc clean** (`clean_baked_knob_indicator`, `design_import.cpp`),
-  NOT a render-time cover. Many captured discs (ELYSIUM's included) BAKE an
-  indicator into the disc PNG at the rest/up position — and ELYSIUM's extends an
-  antenna ABOVE the ring onto the PNG's transparent background, which a
-  render-time face-strip composite physically cannot reach. Since we draw our own
-  rotating pointer, the baked one is a stuck second line. So when a knob carries
-  `knob_ind_*`, `enrich_imported_image_asset_metadata` decodes the disc PNG, walks
-  the up-column from disc center: on the opaque face/ring it copies a clean strip
-  from beside the groove (same radius ⇒ matching gradient); where the surround is
-  transparent (the antenna) it alphas the pixels out. It re-encodes the cleaned
-  RGBA via a minimal in-file PNG encoder (`encode_rgba_png_for_import`, filter-0
-  scanlines + runtime `zlib_compress` + IHDR/IDAT/IEND with hand-rolled CRC32),
-  writes it to `$TMPDIR/pulp-import-assets/knobclean_<hash>.png`, and repoints
-  `asset_path`. The decode→encode round-trip is lossless, so only the cleaned
-  pixels change. Result: a single moving pointer at every value, no antenna, the
-  min/center/max reference ticks intact. **This requires no edit to the Figma
-  source** — it's the right answer when the designer baked the indicator in and
-  can't re-export a clean disc.
+- **Import-time disc clean** (`clean_baked_knob_indicator` →
+  `clear_baked_knob_antenna`, `design_import.cpp`), NOT a render-time cover. Many
+  captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
+  it's a thin vertical ANTENNA standing straight up ABOVE the disc at 12 o'clock.
+  Since we draw our own rotating pointer, the baked one is a stuck second line. So
+  when a knob carries `knob_ind_*`, `enrich_imported_image_asset_metadata` decodes
+  the disc PNG and removes the antenna, re-encodes via a minimal in-file PNG
+  encoder (`encode_rgba_png_for_import`, filter-0 scanlines + runtime
+  `zlib_compress` + IHDR/IDAT/IEND with hand-rolled CRC32), writes
+  `$TMPDIR/pulp-import-assets/knobclean_<hash>.png`, and repoints `asset_path`.
+  **The removal MUST be non-destructive to the disc** — two earlier attempts cut a
+  visible notch/gap into the ring's top:
+    - *Copy-from-beside + alpha-punch* (v1): copying a face strip horizontally
+      across the CURVED ring mismatched the rim, and `p[3]=0` punched holes in the
+      ring. Wrong: never alpha-punch the disc, never copy across curvature.
+    - *Clear a fixed column at the bbox center* (v2): the antenna is NOT at the
+      opaque-bbox center — the bottom min/max ticks skew the bbox, so on the big
+      knob the center column had no antenna and nothing was removed.
+  The correct algorithm (`clear_baked_knob_antenna`, a pure RGBA8 function so it's
+  unit-testable): scan the disc bbox from the TOP down; each row, measure the
+  ACTUAL opaque span. A NARROW span (≤ ~18% of the disc width) is the antenna →
+  clear exactly that span (wherever it sits). The FIRST WIDE span is the disc body
+  → STOP. So the ring, face, and bottom ticks are never touched. Result: a single
+  moving pointer at every value, antenna gone, no notch, min/max ticks intact.
+  Test: `[knob][antenna]` in `pulp-test-design-import-native-common` (antenna
+  cleared, disc body byte-for-byte intact; no-op when there's no antenna).
+  **Requires no edit to the Figma source.**
 - **Materializer skin** (`make_widget` knob branch): when the knob node carries
   an enrich-stamped `asset_path` (+ `png_natural_*`), it builds a single-frame
   `SpriteStrip` + `set_sprite_core` from `art_core_*`, then applies the captured

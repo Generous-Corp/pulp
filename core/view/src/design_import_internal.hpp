@@ -14,14 +14,28 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <choc/text/choc_JSON.h>
 
 #include <pulp/view/design_import.hpp>
 
 namespace pulp::view {
+
+// Clears the baked indicator "antenna" that ELYSIUM-style captured knob discs
+// paint standing straight up ABOVE the disc body at 12 o'clock (we draw our own
+// rotating pointer, so the baked one is a stuck second line). Operates on a raw
+// RGBA8 buffer: from the TOP of the [core_x, core_y, core_w, core_h] disc bbox,
+// it clears the narrow opaque antenna span row-by-row and STOPS at the first
+// wide (disc-body) row — so the ring outline, face, and bottom min/max ticks are
+// never touched (no notch/gap). The antenna is found by its actual opaque span
+// per row, NOT assumed centered (the min/max ticks skew the bbox center).
+// Pure + testable; defined in design_import.cpp. `[knob][antenna]`.
+void clear_baked_knob_antenna(std::vector<uint8_t>& rgba, int img_w, int img_h,
+                              int core_x, int core_y, int core_w, int core_h);
 
 // Phase 9 motion-provenance vendor key — lowercased, slash-friendly
 // token matching the import CLI's `source` argument. Stable across

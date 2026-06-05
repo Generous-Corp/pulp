@@ -1104,37 +1104,48 @@ std::optional<std::vector<uint8_t>> encode_rgba_png_for_import(
     return out;
 }
 
-// Erase the indicator the design BAKED into a captured knob disc at the rest
-// (12 o'clock) position. We draw our own rotating pointer, so the baked one is a
-// stuck second line. Along the up-column from the disc center: on the opaque
-// face/ring copy a clean strip from beside the groove; where the surround is
-// transparent (the antenna above the ring) alpha it out. Mutates `img`.
-void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& core) {
-    if (!img.valid() || core.w <= 0 || core.h <= 0) return;
-    const int cx = core.x + core.w / 2;             // disc center column
-    const int cy = core.y + core.h / 2;
-    const int gw = std::max(3, core.w / 16);        // groove half-width
-    const int src_off = gw * 3;                     // sample beside the groove
-    // Start well above the disc: the indicator's antenna is semi-transparent so
-    // the opaque-core bbox excludes it, and it can stick up ~⅓ of the disc.
-    const int top = std::max(0, core.y - core.h / 2);
-    auto at = [&](int x, int y) -> uint8_t* {
-        return &img.rgba[(static_cast<size_t>(y) * img.width + x) * 4];
+// Erase the indicator the design BAKED into a captured knob disc — ELYSIUM's is
+// a thin vertical ANTENNA standing straight up ABOVE the disc at 12 o'clock. We
+// draw our own rotating pointer, so the baked one is a stuck second line.
+//
+// The erase MUST be non-destructive to the disc: it ONLY clears the narrow
+// antenna column sitting above the disc body, and STOPS the instant a scan row
+// widens into the disc itself — so the ring outline and face are never touched
+// (an earlier copy-from-beside + alpha-punch version cut a notch into the ring's
+// top, which read as a gap). It never copies pixels and never modifies the disc.
+// Mutates `img`.
+// Pure pixel logic (declared in design_import_internal.hpp so it's unit-testable
+// without the internal Import* structs). Scans the disc bbox from the top down:
+// a NARROW opaque span is the antenna → cleared; the first WIDE span is the disc
+// body → stop. The antenna is located by its actual span per row, NOT assumed at
+// the bbox center (the min/max ticks skew the bbox).
+void clear_baked_knob_antenna(std::vector<uint8_t>& rgba, int img_w, int img_h,
+                              int core_x, int core_y, int core_w, int core_h) {
+    if (img_w <= 0 || img_h <= 0 || core_w <= 0 || core_h <= 0) return;
+    if (rgba.size() < static_cast<size_t>(img_w) * img_h * 4) return;
+    const int x_lo = std::max(0, core_x);
+    const int x_hi = std::min(img_w, core_x + core_w);
+    const int y_hi = std::min(img_h, core_y + core_h);
+    // Antenna width ceiling: the disc body's span is ~core_w; the antenna is a
+    // thin line. A row whose opaque span exceeds this is the disc, not antenna.
+    const int narrow = std::max(6, core_w * 18 / 100);
+    auto alpha = [&](int x, int y) -> uint8_t& {
+        return rgba[(static_cast<size_t>(y) * img_w + x) * 4 + 3];
     };
-    for (int y = top; y < cy; ++y) {
-        for (int dx = -gw; dx <= gw; ++dx) {
-            const int x = cx + dx;
-            const int sx = cx + src_off + dx;
-            if (x < 0 || x >= img.width || sx < 0 || sx >= img.width) continue;
-            uint8_t* p = at(x, y);
-            const uint8_t* s = at(sx, y);
-            if (s[3] < 16) {
-                p[3] = 0;                            // antenna: clear it
-            } else {
-                p[0] = s[0]; p[1] = s[1]; p[2] = s[2]; p[3] = s[3];  // face: copy beside
-            }
-        }
+    for (int y = std::max(0, core_y); y < y_hi; ++y) {
+        int xmin = -1, xmax = -1;
+        for (int x = x_lo; x < x_hi; ++x)
+            if (alpha(x, y) >= 24) { if (xmin < 0) xmin = x; xmax = x; }
+        if (xmin < 0) continue;                       // empty row above the antenna
+        if (xmax - xmin + 1 > narrow) break;          // reached the disc — stop
+        for (int x = xmin; x <= xmax; ++x) alpha(x, y) = 0;  // clear the antenna
     }
+}
+
+void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& core) {
+    if (!img.valid()) return;
+    clear_baked_knob_antenna(img.rgba, img.width, img.height,
+                             core.x, core.y, core.w, core.h);
 }
 
 // Sample a shape illustration's OWN vertical color gradient from its art, so a
