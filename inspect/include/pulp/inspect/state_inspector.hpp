@@ -53,8 +53,17 @@ public:
     /// Get recent parameter changes (ring buffer, last 100)
     std::vector<ParamChange> recent_changes() const;
 
-    /// Set a parameter value (for live editing from inspector)
-    void set_param(ParamID id, float value);
+    /// Set a parameter value (for live editing from inspector / agents).
+    ///
+    /// Validates that @p id refers to a registered parameter, wraps the write
+    /// in a host gesture (begin/end) so DAW undo grouping and automation
+    /// recording behave as if a user moved the control, and supports either a
+    /// raw value or a 0..1 normalized value.
+    ///
+    /// @param normalized when true, @p value is treated as a normalized 0..1
+    ///        position; otherwise it is a raw parameter value.
+    /// @returns false if @p id is not a registered parameter (no write performed).
+    bool set_param(ParamID id, float value, bool normalized = false);
 
 private:
     StateStore& store_;

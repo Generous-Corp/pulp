@@ -93,7 +93,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
-| Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_screenshot`, `pulp_inspect_evaluate` (JS expr), `pulp_inspect_performance`, `pulp_inspect_audio` |
+| Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot`, `pulp_inspect_evaluate` (JS expr), `pulp_inspect_performance`, `pulp_inspect_audio` |
 | Audio model / WAV-first excerpt-find | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle` |
 
 #### Setup

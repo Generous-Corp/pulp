@@ -81,6 +81,7 @@ static std::string tools_list_json() {
 {"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}},
 {"name":"pulp_inspect_dom","description":"Get the view tree of a running plugin's UI via the inspector protocol","inputSchema":{"type":"object","properties":{}}},
 {"name":"pulp_inspect_params","description":"Get all parameter info and current values from a running plugin","inputSchema":{"type":"object","properties":{}}},
+{"name":"pulp_inspect_set_param","description":"Set a parameter value on a running plugin (standalone host) via the inspector. Wraps the write in a host gesture so DAW undo/automation grouping behaves like a user edit. Numeric parameters only; errors on an unknown parameter id. Note: the inspector is wired into the standalone host, not plugin formats loaded in a third-party DAW.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"}}}},
 {"name":"pulp_inspect_screenshot","description":"Capture a screenshot from a running plugin via the inspector","inputSchema":{"type":"object","properties":{}}},
 {"name":"pulp_inspect_evaluate","description":"Evaluate a JS expression in a running plugin's script engine","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"}}}},
 {"name":"pulp_inspect_performance","description":"Get render performance metrics from a running plugin","inputSchema":{"type":"object","properties":{}}},
@@ -338,6 +339,28 @@ static std::string handle_request_raw(const std::string& json) {
             } else {
                 auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
                 auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
+                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+            }
+        }
+        // Inspector parameter mutation — delegate to `pulp inspect` with a
+        // typed `--params` payload. Kept separate from the read-only inspector
+        // tools below because those pass no arguments; this one carries id/value.
+        else if (name == "pulp_inspect_set_param") {
+            auto root = find_project_root();
+            if (root.empty()) {
+                result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+            } else {
+                int pid = extract_int(args_json, "id", -1);
+                double value = extract_double(args_json, "value", 0.0);
+                bool normalized = extract_bool(args_json, "normalized", false);
+                std::string params_json = std::string("{\"id\":") + std::to_string(pid) +
+                    ",\"value\":" + std::to_string(value) +
+                    ",\"normalized\":" + (normalized ? "true" : "false") + "}";
+                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
+                // Single-quote the JSON payload: it contains only digits,
+                // braces, colons, commas and bare true/false — no single quotes.
+                auto output = exec(cli + " inspect --command State.setParameter --params '"
+                                   + params_json + "' 2>&1");
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }

@@ -722,7 +722,12 @@ InspectorMessage DomainHandler::handle_state(const InspectorMessage& req) {
             auto params = choc::json::parse(req.params_json);
             auto pid = static_cast<uint32_t>(params["id"].getInt64());
             auto value = static_cast<float>(params["value"].getFloat64());
-            state_->set_param(pid, value);
+            // Optional: interpret value as a 0..1 normalized position.
+            bool normalized = params.isObject() && params.hasObjectMember("normalized")
+                                  ? params["normalized"].getWithDefault(false)
+                                  : false;
+            if (!state_->set_param(pid, value, normalized))
+                return make_error(req.id, "Unknown parameter id: " + std::to_string(pid));
             return make_response(req.id, R"({"ok":true})");
         } catch (...) {
             return make_error(req.id, "Invalid params for State.setParameter");

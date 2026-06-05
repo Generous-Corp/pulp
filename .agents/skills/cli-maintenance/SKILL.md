@@ -103,6 +103,24 @@ When promoting an entry off the `cli_only` list, add the matching
 `pulp_<command>` tool to `tools/mcp/pulp_mcp.cpp` and the parity check
 will auto-detect the new coverage; remove the baseline entry in the same PR.
 
+### Adding an inspector sub-tool (e.g. `pulp_inspect_set_param`)
+
+Inspector tools are MCP sub-tools of `pulp inspect`, so they live in the
+`mcp_only` baseline (no top-level CLI command of their own) — add the new
+`pulp_inspect_*` name there or the parity check hard-fails. Two gotchas when
+the tool takes arguments:
+
+- **Pass arguments via `pulp inspect --params '<json>'`, not by concatenating
+  the JSON after `--command METHOD`.** The CLI parses `--command` and `--params`
+  as separate flags; a bare `{...}` token is ignored. Read-only tools that take
+  no args sidestep this, so don't copy their dispatch shape for a tool that
+  carries a payload.
+- **Mutating tools must go through a typed inspector method** (e.g.
+  `State.setParameter`) with validation + gesture wrapping in
+  `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
+  happy path, the unknown-id error, and any normalized/raw mode in
+  `test_inspector_domains.cpp`.
+
 ## Modifying a CLI Command
 
 Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:

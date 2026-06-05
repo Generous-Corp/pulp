@@ -219,6 +219,42 @@ TEST_CASE("DomainHandler: State.getParameters") {
     REQUIRE(resp.params_json.find("Volume") != std::string::npos);
 }
 
+TEST_CASE("StateInspector::set_param validates, gestures, and supports normalized", "[inspect][state][mcp-set-param]") {
+    StateStore store;
+    store.add_parameter({7, "Cutoff", "Hz", {20.0f, 20000.0f, 1000.0f}});
+
+    int begin_count = 0, end_count = 0;
+    ParamID begun = 0, ended = 0;
+    store.set_gesture_callbacks(
+        [&](ParamID id) { ++begin_count; begun = id; },
+        [&](ParamID id) { ++end_count; ended = id; });
+
+    StateInspector inspector(store);
+
+    SECTION("known id sets value and brackets the write in one gesture") {
+        REQUIRE(inspector.set_param(7, 5000.0f));
+        REQUIRE(store.get_value(7) == Catch::Approx(5000.0f));
+        REQUIRE(begin_count == 1);
+        REQUIRE(end_count == 1);
+        REQUIRE(begun == 7);
+        REQUIRE(ended == 7);
+    }
+
+    SECTION("unknown id returns false and performs no write or gesture") {
+        REQUIRE_FALSE(inspector.set_param(999, 5000.0f));
+        REQUIRE(store.get_value(7) == Catch::Approx(1000.0f)); // unchanged default
+        REQUIRE(begin_count == 0);
+        REQUIRE(end_count == 0);
+    }
+
+    SECTION("normalized maps a 0..1 position onto the range") {
+        REQUIRE(inspector.set_param(7, 0.0f, /*normalized=*/true));
+        REQUIRE(store.get_value(7) == Catch::Approx(20.0f));
+        REQUIRE(inspector.set_param(7, 1.0f, /*normalized=*/true));
+        REQUIRE(store.get_value(7) == Catch::Approx(20000.0f));
+    }
+}
+
 TEST_CASE("DomainHandler: Audio domain exposes config and MIDI log") {
     AudioInspector audio;
     AudioConfig cfg;
@@ -405,6 +441,19 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
 
     auto bad_set_param = handler.handle(make_request(22, methods::kStateSetParameter, "not json"));
     REQUIRE(bad_set_param.is_error);
+
+    // G1 (#mcp-set-param): an unknown parameter id is a clean error, not a
+    // silent no-op buried in StateStore.
+    auto unknown_id = handler.handle(make_request(51, methods::kStateSetParameter,
+                                                  R"({"id":4242,"value":1.0})"));
+    REQUIRE(unknown_id.is_error);
+    REQUIRE(unknown_id.params_json.find("Unknown parameter id") != std::string::npos);
+
+    // G1: normalized=true maps a 0..1 position onto the param range (-60..12).
+    auto norm_set = handler.handle(make_request(52, methods::kStateSetParameter,
+                                                R"({"id":9,"value":0.5,"normalized":true})"));
+    REQUIRE_FALSE(norm_set.is_error);
+    REQUIRE(store.get_normalized(9) == Catch::Approx(0.5f).margin(0.01f));
 
     auto unknown_state = handler.handle(make_request(23, "State.nope"));
     REQUIRE(unknown_state.is_error);

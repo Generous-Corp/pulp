@@ -52,6 +52,7 @@
     "pulp_inspect_dom": "Sub-tool of `pulp inspect` — DOM.getDocument over inspector socket",
     "pulp_inspect_evaluate": "Sub-tool of `pulp inspect` — Runtime.evaluate over inspector socket",
     "pulp_inspect_params": "Sub-tool of `pulp inspect` — State.getParameters over inspector socket",
+    "pulp_inspect_set_param": "Sub-tool of `pulp inspect` — State.setParameter over inspector socket (gesture-wrapped numeric param write)",
     "pulp_inspect_performance": "Sub-tool of `pulp inspect` — Performance.getMetrics over inspector socket",
     "pulp_inspect_screenshot": "Sub-tool of `pulp inspect` — Capture.screenshot over inspector socket",
     "pulp_screenshot": "Headless render via pulp-screenshot binary; not a top-level CLI command",

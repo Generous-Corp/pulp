@@ -60,8 +60,25 @@ std::vector<StateInspector::ParamChange> StateInspector::recent_changes() const 
     return changes_;
 }
 
-void StateInspector::set_param(ParamID id, float value) {
-    store_.set_value(id, value);
+bool StateInspector::set_param(ParamID id, float value, bool normalized) {
+    // Validate the id against registered parameters before writing — an
+    // unknown id from an external agent must be a clean error, not a silent
+    // no-op buried inside StateStore.
+    bool known = false;
+    for (const auto& info : store_.all_params()) {
+        if (info.id == id) { known = true; break; }
+    }
+    if (!known) return false;
+
+    // Wrap in a gesture so the host treats this like a user-driven edit
+    // (undo grouping, automation write). Each call is one discrete set.
+    store_.begin_gesture(id);
+    if (normalized)
+        store_.set_normalized(id, value);
+    else
+        store_.set_value(id, value);
+    store_.end_gesture(id);
+    return true;
 }
 
 } // namespace pulp::inspect
