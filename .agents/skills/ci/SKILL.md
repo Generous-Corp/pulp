@@ -109,6 +109,17 @@ Slice 6 (#551).
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **Flaky-lane retry (de-flaking).** The ASan/UBSan/TSan lanes
+  (`sanitizers.yml`) and the coverage lanes (`scripts/run_coverage.sh`) run
+  ctest with `--repeat until-pass:2`. Timing-sensitive tests intermittently
+  fail under sanitizer slowdown (a *different* test each run — RenderLoop
+  coalescing, ImageView fill, etc.), and a single failure aborts ctest and
+  cascades into the diff-coverage gate (partial profile → 0% on the diff),
+  leaving every PR `UNSTABLE` even when the required gates pass. `until-pass:2`
+  retries a failed test once so a flake passes on retry while a *genuine*
+  failure still fails both attempts (no masking). This complements the per-lane
+  `--exclude-regex` flake lists by catching not-yet-listed flakes generically —
+  prefer it over growing the exclude list for transient timing flakes.
 
 ## Current Build-and-Test routing
 

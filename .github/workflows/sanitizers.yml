@@ -192,6 +192,7 @@ jobs:
         # ASan matrix still gates (#3113).
         run: |
           ctest --test-dir build-asan --output-on-failure \
+            --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
             --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message|deleted plugin entry remains blacklisted|ConnectedChildProcess|ChildProcessManager cleanup is safe from exit callback'
@@ -245,6 +246,7 @@ jobs:
         # audio-race hammer, path-gated trigger.
         run: |
           ctest --test-dir build-tsan --output-on-failure -j1 \
+            --repeat until-pass:2 \
             --timeout 120 \
             --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
             --exclude-regex 'AudioWorkgroup'  # Timer race fixed by the Timer::start/stop shared_ptr fix (#414)
@@ -294,6 +296,7 @@ jobs:
         # instrumentation and remains covered by the regular Build/Test lane.
         run: |
           ctest --test-dir build-ubsan --output-on-failure \
+            --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
             --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'

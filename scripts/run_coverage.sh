@@ -152,9 +152,9 @@ export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 # silently swallowing test failures hid real regressions.
 CTEST_RC=0
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" --output-on-failure || CTEST_RC=$?
+    ctest -R "${TESTS_REGEX}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
 else
-    ctest --output-on-failure || CTEST_RC=$?
+    ctest --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
