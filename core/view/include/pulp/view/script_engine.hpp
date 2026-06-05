@@ -71,6 +71,12 @@ public:
     // Query which engine backend is active
     JsEngineType engine_type() const;
 
+    // Runtime / provider identity (forwarded to the active backend).
+    std::string runtime_version() const;
+    std::string provider_kind() const;
+    std::string provider_path() const;
+    std::string expected_runtime_version() const;
+
     // Access the underlying engine (for advanced use / testing)
     JsEngine& engine();
     const JsEngine& engine() const;

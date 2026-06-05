@@ -43,6 +43,40 @@ public:
     }
 
     JsEngineType type() const override { return JsEngineType::v8; }
+
+    std::string runtime_version() const override {
+        // The version V8 itself reports at runtime — the ground truth that the
+        // sealed provider claim (PULP_V8_EXPECTED_RUNTIME_VERSION) is checked
+        // against. v8::V8::GetVersion() is declared in v8-initialization.h,
+        // transitively included via choc_javascript_V8.h.
+        const char* version = v8::V8::GetVersion();
+        return version ? std::string(version) : std::string{};
+    }
+
+    std::string provider_kind() const override {
+#ifdef PULP_V8_PROVIDER_KIND
+        return PULP_V8_PROVIDER_KIND;
+#else
+        return {};
+#endif
+    }
+
+    std::string provider_path() const override {
+#ifdef PULP_V8_PROVIDER_PATH
+        return PULP_V8_PROVIDER_PATH;
+#else
+        return {};
+#endif
+    }
+
+    std::string expected_runtime_version() const override {
+#ifdef PULP_V8_EXPECTED_RUNTIME_VERSION
+        return PULP_V8_EXPECTED_RUNTIME_VERSION;
+#else
+        return {};
+#endif
+    }
+
     bool is_valid() const override { return static_cast<bool>(context_); }
 
     choc::value::Value evaluate(const std::string& code) override {

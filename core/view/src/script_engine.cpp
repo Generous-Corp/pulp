@@ -75,6 +75,22 @@ JsEngineType ScriptEngine::engine_type() const {
     return engine_ ? engine_->type() : JsEngineType::quickjs;
 }
 
+std::string ScriptEngine::runtime_version() const {
+    return engine_ ? engine_->runtime_version() : std::string{};
+}
+
+std::string ScriptEngine::provider_kind() const {
+    return engine_ ? engine_->provider_kind() : std::string{};
+}
+
+std::string ScriptEngine::provider_path() const {
+    return engine_ ? engine_->provider_path() : std::string{};
+}
+
+std::string ScriptEngine::expected_runtime_version() const {
+    return engine_ ? engine_->expected_runtime_version() : std::string{};
+}
+
 JsEngine& ScriptEngine::engine() {
     return *engine_;
 }

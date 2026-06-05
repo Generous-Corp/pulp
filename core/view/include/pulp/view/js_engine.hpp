@@ -79,6 +79,29 @@ public:
     // Which engine type this is
     virtual JsEngineType type() const = 0;
 
+    // ── Runtime / provider identity ─────────────────────────────────────────
+    // Truthful identity of the JS runtime actually linked into this build.
+    // Backends that can report a concrete runtime version (e.g. V8) override
+    // these; the defaults return empty strings so non-reporting backends
+    // (QuickJS, JSC) and forward-compatibility callers degrade cleanly.
+
+    // The engine's own reported runtime version string (e.g. V8's
+    // "15.1.27.0"). Empty when the backend does not report one.
+    virtual std::string runtime_version() const { return {}; }
+
+    // Where the runtime came from, as wired at build time: "v8builder" for the
+    // sealed v8-builder seal, "libnode"/"v8_monolith"/"external" for the A/B
+    // baselines, empty when not applicable.
+    virtual std::string provider_kind() const { return {}; }
+
+    // Absolute path to the provider library that was linked, when known.
+    virtual std::string provider_path() const { return {}; }
+
+    // The version the build expected from the provider (parsed from the pinned
+    // V8 tag in tools/deps/manifest.json), for cross-checking against
+    // runtime_version(). Empty when no expectation was pinned.
+    virtual std::string expected_runtime_version() const { return {}; }
+
     // Check if the engine is in a valid state
     virtual bool is_valid() const = 0;
 
