@@ -888,3 +888,14 @@ while still giving one unified Settings panel. The standalone chrome
 - `make_standalone_editor_chrome` accesses `StandaloneEditorChrome`'s private members via a
   `friend` declaration — if you change its signature, update the friend decl to match or it
   silently loses friendship and fails to compile on the private-member access.
+
+## Headless screenshot captures native overlays
+
+`StandaloneApp::run_with_editor`'s `--screenshot` path normally reads the host's
+Skia back buffer (`capture_back_buffer_png`), which can't see an OS-composited
+**native overlay** (a WebView child view). When the editor view hosts a native
+overlay (`View::contains_native_overlay()`), the standalone now routes through
+`pulp::view::capture_view()`, which calls the overlay's
+`capture_native_overlay_png()` (e.g. `WebViewPanel::snapshot_png()` → WKWebView
+takeSnapshot) so WebView editors are self-verifiable headlessly. A plain Skia UI
+falls through to the back-buffer capture unchanged. See the `screenshot` skill.
