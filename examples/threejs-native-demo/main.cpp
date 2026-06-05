@@ -2048,6 +2048,60 @@ bool load_demo(DemoEnvironment& env, int width, int height, DemoMode mode,
     return true;
 }
 
+// Emit a machine-parseable identity block proving exactly which JS runtime and
+// GPU adapter this binary is actually running on. Used by the strict provider-
+// identity CTest and the #30 A/B report. Brings up a real V8 ScriptEngine and a
+// real offscreen Dawn surface so every field is observed, not assumed.
+int print_engine_identity(int width, int height) {
+    const bool has_v8 = is_engine_available(JsEngineType::v8);
+    // Only construct the engine when V8 is linked — ScriptEngine(v8) throws
+    // otherwise. When it is missing we still emit a truthful block with empty
+    // engine fields and pulp_has_v8=0.
+    std::optional<ScriptEngine> engine;
+    if (has_v8)
+        engine.emplace(JsEngineType::v8);
+
+    bool gpu_available = false;
+    bool gpu_native_bridge = false;
+    std::string gpu_backend = "unavailable";
+    bool gpu_software = true;
+
+    auto surface = pulp::render::GpuSurface::create_dawn();
+    if (surface) {
+        pulp::render::GpuSurface::Config config{};
+        config.width = static_cast<uint32_t>(std::max(1, width));
+        config.height = static_cast<uint32_t>(std::max(1, height));
+        config.native_surface_handle = nullptr;
+        if (surface->initialize(config)) {
+            const auto info = surface->adapter_info();
+            gpu_available = info.available;
+            gpu_native_bridge = info.native_bridge;
+            gpu_backend = info.backend_type;
+            // "software" = no real hardware adapter: a fallback/null backend or
+            // an adapter that never resolved a concrete backend type.
+            gpu_software = !info.available
+                || info.backend_type.empty()
+                || info.backend_type == "Unknown"
+                || info.backend_type == "Null";
+        }
+    }
+
+    std::cout << "PULP_ENGINE_IDENTITY_BEGIN\n";
+    std::cout << "engine_type=" << (engine ? engine_type_name(engine->engine_type()) : "none") << "\n";
+    std::cout << "runtime_version=" << (engine ? engine->runtime_version() : std::string{}) << "\n";
+    std::cout << "provider_kind=" << (engine ? engine->provider_kind() : std::string{}) << "\n";
+    std::cout << "provider_path=" << (engine ? engine->provider_path() : std::string{}) << "\n";
+    std::cout << "expected_runtime_version=" << (engine ? engine->expected_runtime_version() : std::string{}) << "\n";
+    std::cout << "pulp_has_v8=" << (has_v8 ? 1 : 0) << "\n";
+    std::cout << "gpu_available=" << (gpu_available ? 1 : 0) << "\n";
+    std::cout << "gpu_native_bridge=" << (gpu_native_bridge ? 1 : 0) << "\n";
+    std::cout << "gpu_backend=" << gpu_backend << "\n";
+    std::cout << "gpu_software=" << (gpu_software ? 1 : 0) << "\n";
+    std::cout << "PULP_ENGINE_IDENTITY_END\n";
+    std::cout.flush();
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -2066,9 +2120,12 @@ int main(int argc, char* argv[]) {
     int height = 560;
     DemoMode mode = DemoMode::spectrum;
     int particle_count = 480;
+    bool print_identity = false;
     std::optional<std::filesystem::path> capture_path;
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
+        if (std::strcmp(argv[i], "--print-engine-identity") == 0) {
+            print_identity = true;
+        } else if (std::strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
             std::string size = argv[++i];
             const auto x = size.find('x');
             if (x != std::string::npos) {
@@ -2128,6 +2185,10 @@ int main(int argc, char* argv[]) {
         return run_particle_benchmark(bench_cfg);
     }
 #endif
+
+    if (print_identity) {
+        return print_engine_identity(width, height);
+    }
 
     if (!is_engine_available(JsEngineType::v8)) {
         std::cerr << "V8 is required for the native Three.js demo\n";
