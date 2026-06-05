@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03420"></a>
+## [0.342.0] - 2026-06-05
+
+- feat(design-import): per-shape gradient fill reproduces each shape's own colors ([#3455](https://github.com/danielraffel/pulp/pull/3455))
+
 <a id="v03410"></a>
 ## [0.341.0] - 2026-06-05
 
@@ -3637,6 +3642,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.342.0]: https://github.com/danielraffel/pulp/releases/tag/v0.342.0
 [0.341.0]: https://github.com/danielraffel/pulp/releases/tag/v0.341.0
 [0.340.0]: https://github.com/danielraffel/pulp/releases/tag/v0.340.0
 [0.339.0]: https://github.com/danielraffel/pulp/releases/tag/v0.339.0
