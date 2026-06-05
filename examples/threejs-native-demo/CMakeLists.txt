@@ -51,5 +51,31 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
             TIMEOUT 30
             LABELS "threejs;gpu;headless;gltf;texture"
         )
+
+        # pulp #30: strict (no skip-pass) V8 provider-identity + cube-coexistence
+        # gate. Opt-in via PULP_VALIDATE_V8_PROVIDER_STRICT so the default Pulp
+        # CI lane (which may build without V8) is unaffected. Asserts the sealed
+        # v8-builder seal is the linked runtime and that V8 coexists with
+        # Dawn/Skia in the real app by writing a non-empty cube PNG.
+        if(PULP_VALIDATE_V8_PROVIDER_STRICT)
+            set(_pulp_v8_strict_kind "${PULP_V8_PROVIDER_KIND}")
+            if(NOT _pulp_v8_strict_kind)
+                set(_pulp_v8_strict_kind "v8builder")
+            endif()
+            add_test(
+                NAME v8_provider_identity_strict
+                COMMAND ${CMAKE_COMMAND}
+                    -DDEMO_BIN=$<TARGET_FILE:pulp-threejs-native-demo>
+                    -DCAPTURE_PATH=${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-provider-identity.png
+                    -DEXPECTED_KIND=${_pulp_v8_strict_kind}
+                    -DEXPECTED_VERSION=${PULP_V8_EXPECTED_RUNTIME_VERSION}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/provider_identity_test.cmake
+            )
+            set_tests_properties(v8_provider_identity_strict PROPERTIES
+                TIMEOUT 120
+                LABELS "threejs;gpu;headless;v8;provider-identity"
+            )
+            unset(_pulp_v8_strict_kind)
+        endif()
     endif()
 endif()
