@@ -636,8 +636,8 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   Before erasing the hairline, the hoist stamps its geometry onto the knob as
   fractions of the disc half-extent: `knob_ind_r_in` / `knob_ind_r_out` (the
   radii the line runs between, derived from the hairline's endpoints vs the disc
-  center), `knob_ind_w` (stroke width frac, from `border_width`), `knob_ind_color`
-  (from `border_color`). The materializer forwards these via
+  center), `knob_ind_w` (stroke width frac, from `border_width`), `knob_ind_color`.
+  The materializer forwards these via
   `Knob::set_captured_indicator`, and `Knob::paint` draws THAT pointer — pivoted
   at the disc CORE center on the same `[-135°,+135°]` arc — instead of the generic
   `draw_knob_indicator_notch`. Two bugs this fixes: (1) double line (the synthetic
@@ -646,15 +646,39 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   ticks). Pivot at the disc center + the design's own line ⇒ it rides the ticks by
   construction. **The synthetic notch is still the fallback** for knobs with no
   captured indicator metadata.
-- **Baked-indicator cover** (`Knob::paint`): many captured discs (ELYSIUM's
-  included) BAKE an indicator groove into the disc PNG at the rest/up position.
-  Our pointer rotates with value, so that baked groove lingers at 12 o'clock as a
-  second line. `Knob::paint` covers the groove's ON-FACE portion by copying a
-  clean face strip from beside it (same radius ⇒ matching gradient) before
-  drawing the pointer. **Limitation:** a baked indicator that extends ABOVE the
-  ring (onto the PNG's transparent background) can't be covered by compositing —
-  the cleanest result is an indicator-FREE disc (remove the groove in the design
-  art; our pointer already draws at the right place).
+- **The pointer scan must handle the DEMOTED hairline, not just asset images**
+  (root-cause fix, 2026-06). `Vector 7` is a thin stroke vector, so the
+  stroke→fill demotion pass (see "Hairline strokes") rewrites it from
+  `type:image` into a **1px-wide frame** whose stroke color sits on
+  `background_color`, with NO `asset_ref`. The original hoist scanned only
+  asset-backed image children for the pointer, so it silently missed the demoted
+  `Vector 7` entirely: `knob_ind_*` was never stamped (knob fell back to the
+  synthetic notch) AND the stray 1px frame rendered as a stuck second line.
+  Captured-pointer was effectively dead on ELYSIUM despite the metadata plumbing
+  existing. The fix: the pointer scan walks **every** non-body, non-text child and
+  picks the thinnest one (`min(w,h) ≤ 2.5px`), so it catches both the raw 0-width
+  hairline AND the 1px demoted frame. It tags that node `__knob_pointer`, reads
+  color from `border_color` → else `background_color` (demoted) → else `color`,
+  and the erase predicate removes `__knob_pointer` nodes too. Test:
+  `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
+- **Import-time disc clean** (`clean_baked_knob_indicator`, `design_import.cpp`),
+  NOT a render-time cover. Many captured discs (ELYSIUM's included) BAKE an
+  indicator into the disc PNG at the rest/up position — and ELYSIUM's extends an
+  antenna ABOVE the ring onto the PNG's transparent background, which a
+  render-time face-strip composite physically cannot reach. Since we draw our own
+  rotating pointer, the baked one is a stuck second line. So when a knob carries
+  `knob_ind_*`, `enrich_imported_image_asset_metadata` decodes the disc PNG, walks
+  the up-column from disc center: on the opaque face/ring it copies a clean strip
+  from beside the groove (same radius ⇒ matching gradient); where the surround is
+  transparent (the antenna) it alphas the pixels out. It re-encodes the cleaned
+  RGBA via a minimal in-file PNG encoder (`encode_rgba_png_for_import`, filter-0
+  scanlines + runtime `zlib_compress` + IHDR/IDAT/IEND with hand-rolled CRC32),
+  writes it to `$TMPDIR/pulp-import-assets/knobclean_<hash>.png`, and repoints
+  `asset_path`. The decode→encode round-trip is lossless, so only the cleaned
+  pixels change. Result: a single moving pointer at every value, no antenna, the
+  min/center/max reference ticks intact. **This requires no edit to the Figma
+  source** — it's the right answer when the designer baked the indicator in and
+  can't re-export a clean disc.
 - **Materializer skin** (`make_widget` knob branch): when the knob node carries
   an enrich-stamped `asset_path` (+ `png_natural_*`), it builds a single-frame
   `SpriteStrip` + `set_sprite_core` from `art_core_*`, then applies the captured

@@ -1035,6 +1035,107 @@ struct ImportOpaqueCore {
     int png_h = 0;
 };
 
+// ── Minimal RGBA-PNG re-encoder (for cleaning captured knob art) ──────────
+// Re-encodes a decoded RGBA buffer to a valid 8-bit RGBA PNG using the runtime
+// zlib codec. The decode→encode round-trip is lossless (pixel values are
+// preserved), so editing a few pixels and re-encoding leaves the rest of the
+// image byte-for-byte identical after decode.
+uint32_t import_png_crc32(const uint8_t* data, size_t len) {
+    static uint32_t table[256];
+    static bool init = false;
+    if (!init) {
+        for (uint32_t n = 0; n < 256; ++n) {
+            uint32_t c = n;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            table[n] = c;
+        }
+        init = true;
+    }
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; ++i) c = table[(c ^ data[i]) & 0xffu] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
+}
+
+void import_png_put_be32(std::vector<uint8_t>& v, uint32_t x) {
+    v.push_back(static_cast<uint8_t>((x >> 24) & 0xff));
+    v.push_back(static_cast<uint8_t>((x >> 16) & 0xff));
+    v.push_back(static_cast<uint8_t>((x >> 8) & 0xff));
+    v.push_back(static_cast<uint8_t>(x & 0xff));
+}
+
+void import_png_put_chunk(std::vector<uint8_t>& out, const char* type,
+                          const std::vector<uint8_t>& data) {
+    import_png_put_be32(out, static_cast<uint32_t>(data.size()));
+    const size_t crc_start = out.size();
+    out.insert(out.end(), type, type + 4);
+    out.insert(out.end(), data.begin(), data.end());
+    out.insert(out.end(), 4, 0);  // placeholder, overwritten below
+    const uint32_t crc = import_png_crc32(out.data() + crc_start, 4 + data.size());
+    out[out.size() - 4] = static_cast<uint8_t>((crc >> 24) & 0xff);
+    out[out.size() - 3] = static_cast<uint8_t>((crc >> 16) & 0xff);
+    out[out.size() - 2] = static_cast<uint8_t>((crc >> 8) & 0xff);
+    out[out.size() - 1] = static_cast<uint8_t>(crc & 0xff);
+}
+
+std::optional<std::vector<uint8_t>> encode_rgba_png_for_import(
+        const ImportDecodedPng& img) {
+    if (!img.valid()) return std::nullopt;
+    std::vector<uint8_t> raw;
+    raw.reserve(static_cast<size_t>(img.height) * (static_cast<size_t>(img.width) * 4 + 1));
+    for (int y = 0; y < img.height; ++y) {
+        raw.push_back(0);  // filter type: none
+        const uint8_t* row = img.rgba.data() + static_cast<size_t>(y) * img.width * 4;
+        raw.insert(raw.end(), row, row + static_cast<size_t>(img.width) * 4);
+    }
+    auto comp = pulp::runtime::zlib_compress(raw.data(), raw.size(), 6);
+    if (!comp) return std::nullopt;
+    std::vector<uint8_t> out = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    std::vector<uint8_t> ihdr;
+    import_png_put_be32(ihdr, static_cast<uint32_t>(img.width));
+    import_png_put_be32(ihdr, static_cast<uint32_t>(img.height));
+    ihdr.push_back(8);  // bit depth
+    ihdr.push_back(6);  // color type RGBA
+    ihdr.push_back(0); ihdr.push_back(0); ihdr.push_back(0);  // compression/filter/interlace
+    import_png_put_chunk(out, "IHDR", ihdr);
+    import_png_put_chunk(out, "IDAT", *comp);
+    import_png_put_chunk(out, "IEND", {});
+    return out;
+}
+
+// Erase the indicator the design BAKED into a captured knob disc at the rest
+// (12 o'clock) position. We draw our own rotating pointer, so the baked one is a
+// stuck second line. Along the up-column from the disc center: on the opaque
+// face/ring copy a clean strip from beside the groove; where the surround is
+// transparent (the antenna above the ring) alpha it out. Mutates `img`.
+void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& core) {
+    if (!img.valid() || core.w <= 0 || core.h <= 0) return;
+    const int cx = core.x + core.w / 2;             // disc center column
+    const int cy = core.y + core.h / 2;
+    const int gw = std::max(3, core.w / 16);        // groove half-width
+    const int src_off = gw * 3;                     // sample beside the groove
+    // Start well above the disc: the indicator's antenna is semi-transparent so
+    // the opaque-core bbox excludes it, and it can stick up ~⅓ of the disc.
+    const int top = std::max(0, core.y - core.h / 2);
+    auto at = [&](int x, int y) -> uint8_t* {
+        return &img.rgba[(static_cast<size_t>(y) * img.width + x) * 4];
+    };
+    for (int y = top; y < cy; ++y) {
+        for (int dx = -gw; dx <= gw; ++dx) {
+            const int x = cx + dx;
+            const int sx = cx + src_off + dx;
+            if (x < 0 || x >= img.width || sx < 0 || sx >= img.width) continue;
+            uint8_t* p = at(x, y);
+            const uint8_t* s = at(sx, y);
+            if (s[3] < 16) {
+                p[3] = 0;                            // antenna: clear it
+            } else {
+                p[0] = s[0]; p[1] = s[1]; p[2] = s[2]; p[3] = s[3];  // face: copy beside
+            }
+        }
+    }
+}
+
 static std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vector<uint8_t>& bytes,
                                                                   float min_alpha = 0.5f) {
     auto img = decode_png_rgba_for_import(bytes);
@@ -1065,6 +1166,9 @@ static std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vec
         img->height,
     };
 }
+
+static bool write_binary_file(const fs::path& path,
+                              const std::vector<uint8_t>& bytes);
 
 void enrich_imported_image_asset_metadata(DesignIR& ir,
                                           const IRAssetManifest& manifest,
@@ -1101,6 +1205,28 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                 node.attributes["png_natural_w"] = std::to_string(core->png_w);
                                 node.attributes["png_natural_h"] = std::to_string(core->png_h);
                                 dims = {core->png_w, core->png_h};
+
+                                // Captured-art knob: erase the indicator baked
+                                // into the disc art (we draw our own rotating
+                                // pointer) by re-encoding a cleaned disc PNG.
+                                if (node.attributes.count("knob_ind_r_out")) {
+                                    if (auto img = decode_png_rgba_for_import(bytes)) {
+                                        clean_baked_knob_indicator(*img, *core);
+                                        if (auto enc = encode_rgba_png_for_import(*img)) {
+                                            fs::path dir = fs::temp_directory_path() /
+                                                           "pulp-import-assets";
+                                            std::error_code dec;
+                                            fs::create_directories(dir, dec);
+                                            const auto key = std::hash<std::string>{}(
+                                                asset_ref->second + path.string());
+                                            fs::path cleaned = dir /
+                                                ("knobclean_" + std::to_string(key) + ".png");
+                                            if (write_binary_file(cleaned, *enc))
+                                                node.attributes["asset_path"] =
+                                                    cleaned.string();
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2187,15 +2313,26 @@ void hoist_captured_art_knobs(DesignIR& ir) {
                     const float dcx = bx + bw * 0.5f;
                     const float dcy = by + bh * 0.5f;
                     const float half = std::min(bw, bh) * 0.5f;
+                    // The pointer (Figma "Vector 7") is the thinnest non-body,
+                    // non-text child — a hairline. It may still be an asset image,
+                    // OR a 1px frame the stroke→fill demotion pass produced (which
+                    // is why scanning only asset images missed it and the knob fell
+                    // back to the synthetic notch). Capture its geometry + color,
+                    // then erase it (we draw our own rotating pointer).
                     IRNode* pointer = nullptr;
-                    float pointer_area = std::numeric_limits<float>::max();
-                    for (auto* layer : captured) {
-                        if (layer == body) continue;
-                        const float a = layer->style.width.value_or(0.0f) *
-                                        layer->style.height.value_or(0.0f);
-                        if (a < pointer_area) { pointer_area = a; pointer = layer; }
+                    float pointer_len = std::numeric_limits<float>::max();
+                    for (auto& c : n.children) {
+                        if (&c == body || c.type == "text") continue;
+                        const float w = c.style.width.value_or(-1.0f);
+                        const float h = c.style.height.value_or(-1.0f);
+                        if (w < 0.0f || h < 0.0f) continue;
+                        const float thin = std::min(w, h);  // raw hairline ≈ 0; demoted = 1px
+                        const float lng = std::max(w, h);
+                        if (thin > 2.5f || lng <= 0.0f) continue;  // need tiny × real
+                        if (lng < pointer_len) { pointer_len = lng; pointer = &c; }
                     }
                     if (pointer != nullptr && half > 0.0f) {
+                        pointer->attributes["__knob_pointer"] = "1";
                         const float px = pointer->style.left.value_or(0.0f);
                         const float py = pointer->style.top.value_or(0.0f);
                         const float pw = pointer->style.width.value_or(0.0f);
@@ -2218,9 +2355,12 @@ void hoist_captured_art_knobs(DesignIR& ir) {
                             n.attributes["knob_ind_r_in"] = std::to_string(r_in);
                             n.attributes["knob_ind_r_out"] = std::to_string(r_out);
                             n.attributes["knob_ind_w"] = std::to_string(w_frac);
+                            // The demotion pass moves the stroke to background_color;
+                            // un-demoted strokes keep it on border_color.
                             if (pointer->style.border_color)
-                                n.attributes["knob_ind_color"] =
-                                    *pointer->style.border_color;
+                                n.attributes["knob_ind_color"] = *pointer->style.border_color;
+                            else if (pointer->style.background_color)
+                                n.attributes["knob_ind_color"] = *pointer->style.background_color;
                             else if (pointer->style.color)
                                 n.attributes["knob_ind_color"] = *pointer->style.color;
                         }
@@ -2228,8 +2368,9 @@ void hoist_captured_art_knobs(DesignIR& ir) {
                     n.children.erase(
                         std::remove_if(n.children.begin(), n.children.end(),
                             [](const IRNode& c) {
-                                return c.type == "image" &&
-                                       c.attributes.count("asset_ref") != 0;
+                                return (c.type == "image" &&
+                                        c.attributes.count("asset_ref") != 0) ||
+                                       c.attributes.count("__knob_pointer") != 0;
                             }),
                         n.children.end());
                 } else {

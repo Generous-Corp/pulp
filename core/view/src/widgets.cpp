@@ -407,10 +407,6 @@ void Knob::paint(canvas::Canvas& canvas) {
         // sweeps within. Defaults to the layout box; the core-fit branch
         // below tightens it to the disc's actual rendered radius.
         float notch_r = std::min(b.width, b.height) * 0.5f;
-        // Rendered rect the disc PNG was drawn to (core-fit branch fills these);
-        // used to map between rendered coords and PNG pixels for the baked-groove
-        // cover below. Zero ⇒ no mapping available (skip the cover).
-        float disc_dst_x = 0.0f, disc_dst_y = 0.0f, disc_dst_w = 0.0f, disc_dst_h = 0.0f;
         if (sprite_strip_->source() == SpriteStrip::Source::image_file) {
             if (has_sprite_core()) {
                 // Core-fit: scale the WHOLE frame uniformly so its opaque core
@@ -435,8 +431,6 @@ void Knob::paint(canvas::Canvas& canvas) {
                     sprite_strip_->path(),
                     static_cast<float>(fx), static_cast<float>(fy), fw, fh,
                     dst_x, dst_y, dst_w, dst_h);
-                disc_dst_x = dst_x; disc_dst_y = dst_y;
-                disc_dst_w = dst_w; disc_dst_h = dst_h;
             } else {
                 // Legacy fallback (no recovered core): render the frame at its
                 // NATURAL logical size centered on the layout box. Figma's PNG
@@ -490,32 +484,10 @@ void Knob::paint(canvas::Canvas& canvas) {
                 float r_out = ind_r_out_ * notch_r;
                 float r_in  = ind_r_in_  * notch_r;
                 float w = std::max(1.5f, ind_width_ * notch_r);
-                // Many captured discs (e.g. ELYSIUM's) BAKE an indicator groove
-                // into the disc art at the rest/up position. Our pointer rotates
-                // with value, so that baked groove lingers at 12 o'clock as a
-                // second line. Cover it by copying a clean face strip from beside
-                // it (same radius ⇒ same gradient) before drawing our pointer.
-                if (disc_dst_w > 0.0f && disc_dst_h > 0.0f) {
-                    const float gw = std::max(4.0f, w + 5.0f);
-                    // Extend the cover slightly past the groove ends so the
-                    // baked line's anti-aliased tips don't peek out.
-                    const float cover_x = cx - gw * 0.5f;
-                    const float cover_y = cy - r_out - 2.0f;   // straight up
-                    const float cover_w = gw;
-                    const float cover_h = std::max(1.0f, (r_out - r_in) + 4.0f);
-                    // Map the cover (rendered) rect back to PNG pixels, then take
-                    // the SOURCE from just to the side (clean face at the same
-                    // radius ⇒ matching gradient). A small offset keeps it on the
-                    // same highlight band the groove sits in.
-                    const float sx = fw / disc_dst_w, sy = fh / disc_dst_h;
-                    const float src_x = fx + (cover_x - disc_dst_x) * sx + (gw + 1.0f) * sx;
-                    const float src_y = fy + (cover_y - disc_dst_y) * sy;
-                    canvas.draw_image_from_file_rect(
-                        sprite_strip_->path(),
-                        src_x, src_y, cover_w * sx, cover_h * sy,
-                        cover_x, cover_y, cover_w, cover_h);
-                }
-                // Reproduce the design's own pointer over the static disc.
+                // The disc art's BAKED indicator (a stuck second line at the rest
+                // angle) is erased at import — clean_baked_knob_indicator rewrites
+                // the disc PNG — so here we just draw the design's own rotating
+                // pointer over the now-clean disc.
                 draw_knob_captured_pointer(canvas, cx, cy, r_in, r_out, w,
                                            ind_color_, value_);
             } else {
