@@ -228,6 +228,56 @@ tracked in `planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
 macOS arm64 is the proven lane; other platforms are pinned but pending
 per-platform verification.
 
+### Sealed v8-builder provider (`FindV8.cmake` → `external/v8-build/`)
+
+The pinned provider is a **sealed** `libv8.dylib` from the
+[v8-builder](https://github.com/danielraffel/v8-builder) project: a single
+dylib with `@rpath/libv8.dylib` install_name, no external ICU/zlib/Abseil
+links, and a pinned runtime version recorded in `tools/deps/manifest.json`.
+Fetch it once, then select `v8` — `FindV8.cmake` resolves the unpacked
+artifact under `external/v8-build/<platform>/` and exposes the `v8::v8`
+imported target; no `V8_*` paths are needed:
+
+```bash
+python3 tools/scripts/fetch_v8_for_release.py darwin-arm64   # once
+cmake -S . -B build -DPULP_JS_ENGINE=v8 \
+  -DPULP_VALIDATE_V8_PROVIDER_STRICT=ON \
+  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+```
+
+When `PULP_JS_ENGINE=v8`, `core/view/CMakeLists.txt` includes `FindV8.cmake`
+(fatal if no sealed V8 is resolved — an explicit `=v8` request never silently
+falls back), links `v8::v8`, and then fills in the provider-identity compile
+defs from the resolved artifact: `PULP_V8_PROVIDER_KIND` (`v8builder`),
+`PULP_V8_PROVIDER_PATH` (`${V8_RUNTIME_LIBRARY}`), and
+`PULP_V8_EXPECTED_RUNTIME_VERSION` (parsed from the V8 dependency's pinned tag
+in `manifest.json`). The build-tree rpath for `@rpath/libv8.dylib` is handled
+by FindV8's imported target. This is the explicit V8 lane only — it does NOT
+change the engine default (`auto` stays QuickJS; iOS is a configure-time
+`FATAL_ERROR` since V8 needs JIT).
+
+**Identity surface:** `JsEngine::runtime_version()` (V8's
+`v8::V8::GetVersion()`) / `provider_kind()` / `provider_path()` /
+`expected_runtime_version()` (defaults empty for QuickJS/JSC), forwarded
+through `ScriptEngine`. They prove which V8 is *actually linked*, not just
+which headers compiled. `examples/threejs-native-demo --print-engine-identity`
+emits a parseable `PULP_ENGINE_IDENTITY_BEGIN…END` block; `otool -L` the demo
+to confirm `@rpath/libv8.dylib` and no libnode.
+
+**Why the seal matters (observed A/B, 2026-06-05):** Homebrew
+`libnode.147.dylib` links external Homebrew ICU and exports ~567 Abseil
+symbols; under the full three.webgpu.js workload its bundled Abseil aborts with
+`PerTableSeed`/`raw_hash_set.h:456` (SIGABRT) — the cube never renders, though
+basic `evaluate()` and all `pulp-test-js-engine` cases still pass. The sealed
+v8-builder `libv8.dylib` (no external ICU, 4 incidental absl symbols) renders
+the cube cleanly next to Dawn/Skia. The libnode-147 three.js abort is also
+documented in `examples/threejs-native-demo/README.md`.
+
+**Strict CTest:** `PULP_VALIDATE_V8_PROVIDER_STRICT=ON` adds
+`v8_provider_identity_strict` — a no-skip-pass gate (contrast with
+`capture_test.cmake`, which tolerates no-V8/no-Dawn) that asserts the identity
+block and renders `--demo cube --capture` to a non-empty PNG.
+
 ## Gotchas
 
 ### Three.js V8 builds use the pinned sealed libv8 (no Homebrew node)

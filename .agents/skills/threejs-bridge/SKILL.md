@@ -176,6 +176,18 @@ Capture mode is also the CI/headless smoke path: `--capture` sets
 Keep future capture changes on that hidden path; do not add `show()` or
 focus-stealing activation before the screenshot is written.
 
+**Engine/GPU identity:** `--print-engine-identity` brings up a real V8
+ScriptEngine + offscreen Dawn surface and prints a parseable
+`PULP_ENGINE_IDENTITY_BEGIN…END` block (engine_type, runtime_version,
+provider_kind, provider_path, pulp_has_v8, gpu_available, gpu_native_bridge,
+gpu_backend, gpu_software). Use it to prove *which* V8 is linked (e.g. the
+sealed v8-builder seal vs Homebrew libnode — see the engine skill's
+sealed-provider (`FindV8.cmake`) section) and that the GPU is real hardware
+(`gpu_backend=Metal`, `gpu_software=0`). The strict
+`v8_provider_identity_strict` CTest (gated on
+`PULP_VALIDATE_V8_PROVIDER_STRICT`) parses that block with no skip-pass and
+then requires a non-empty `--demo cube --capture` PNG.
+
 ### 5. Prefer contract-driven bridge work
 
 When something breaks, do not guess at generic browser APIs.

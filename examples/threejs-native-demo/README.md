@@ -77,6 +77,52 @@ cmake -S . -B build-threejs-runtime-smoke -DCMAKE_BUILD_TYPE=Release \
   -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib
 ```
 
+## Sealed v8-builder V8 provider
+
+Instead of a Homebrew `libnode`, the demo runs on a sealed V8 from the
+[v8-builder](https://github.com/danielraffel/v8-builder) project — a single
+`libv8.dylib` with no external ICU / zlib / Abseil dependencies and a pinned
+runtime version. Fetch the sealed artifact once (it unpacks under
+`external/v8-build/<platform>/`), then select `v8`; `FindV8.cmake` resolves it:
+
+```bash
+python3 tools/scripts/fetch_v8_for_release.py darwin-arm64   # once
+
+cmake -S . -B build-v8seal -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON \
+  -DPULP_JS_ENGINE=v8 \
+  -DPULP_VALIDATE_V8_PROVIDER_STRICT=ON
+
+cmake --build build-v8seal \
+  --target pulp-threejs-native-demo pulp-test-js-engine -j8
+```
+
+`FindV8.cmake` resolves the sealed artifact, links the `v8::v8` imported target
+(`@rpath/libv8.dylib`), and `core/view/CMakeLists.txt` emits provider-identity
+compile definitions (`v8builder`, the resolved lib path, and the
+`manifest.json`-pinned runtime version). The engine default is unchanged — this
+is the explicit V8 lane only.
+
+Prove which V8 is actually linked:
+
+```bash
+./build-v8seal/examples/threejs-native-demo/pulp-threejs-native-demo \
+  --print-engine-identity
+# → engine_type=V8 / runtime_version=15.1.27 / provider_kind=v8builder
+#   pulp_has_v8=1 / gpu_backend=Metal / gpu_software=0
+
+otool -L ./build-v8seal/examples/threejs-native-demo/pulp-threejs-native-demo \
+  | grep -i 'v8\|node'      # → @rpath/libv8.dylib, no libnode
+```
+
+`PULP_VALIDATE_V8_PROVIDER_STRICT=ON` adds the `v8_provider_identity_strict`
+CTest, a no-skip-pass gate that asserts the identity block and renders
+`--demo cube --capture` to a non-empty PNG (proving V8 + Dawn/Skia coexist):
+
+```bash
+ctest --test-dir build-v8seal -R v8_provider_identity_strict --output-on-failure
+```
+
 ## Run
 
 ```bash
