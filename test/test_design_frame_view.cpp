@@ -13,6 +13,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 
 #include <string>
 
@@ -196,6 +197,31 @@ TEST_CASE("DesignFrameView positions the text_field overlay via the panel transf
 
     // A click inside the field's view rect routes to the editor, not the frame.
     CHECK(v.hit_test({60, 8}) == editor);
+}
+
+TEST_CASE("DesignFrameView overlays a ComboBox for a dropdown element",
+          "[view][design-import][frame][overlay]") {
+    DesignFrameElement dd;
+    dd.kind = DesignFrameElement::Kind::dropdown;
+    dd.x = 20; dd.y = 30; dd.w = 50; dd.h = 14;     // inside the 80x80 panel
+    dd.options = {"1/4 Delay", "1/8 Delay", "Reverb"};
+    dd.selected_index = 2;
+    DesignFrameView v(make_design_svg(), {dd});
+
+    auto* combo = dynamic_cast<ComboBox*>(v.overlay_widget(0));
+    REQUIRE(combo != nullptr);                       // a real ComboBox, not a fake
+    REQUIRE(combo->items().size() == 3);
+    CHECK(combo->selected() == 2);
+    CHECK(combo->selected_text() == "Reverb");
+
+    // Positioned via the panel transform (view 80x80 -> scale 1, ox=oy=0; panel
+    // origin (10,10)): rect (20,30,50,14) -> view (10,20,50,14).
+    v.set_bounds({0, 0, 80, 80});
+    v.layout_children();
+    auto b = combo->bounds();
+    CHECK(b.x == 10.0f); CHECK(b.y == 20.0f); CHECK(b.width == 50.0f); CHECK(b.height == 14.0f);
+    // A click inside the dropdown routes to the ComboBox, not the frame's knobs.
+    CHECK(v.hit_test({30, 25}) == combo);
 }
 
 TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",

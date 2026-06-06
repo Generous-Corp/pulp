@@ -643,8 +643,8 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
     (Codex review). Node coords are mapped into SVG space:
       svg = (node_abs - root_abs) + panel_origin
     because the node tree is frame-local while the SVG export adds the drop-shadow
-    margin (so the panel sits at panel_origin, not 0,0). Slice 2: text_field
-    (search). dropdown/tabs land in later slices."""
+    margin (so the panel sits at panel_origin, not 0,0). text_field (search) +
+    dropdown. tab_group lands in a later slice."""
     rax, ray = root_abs
     pox, poy = panel_origin
 
@@ -656,7 +656,9 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
 
     def visit(n, parent):
         name = (n.get("name") or "").lower()
+        ntype = n.get("type", "")
         bb = n.get("absoluteBoundingBox")
+        # ── search (text_field) ─────────────────────────────────────────
         # ELYSIUM names the placeholder TEXT "Search" (the field itself is its
         # parent group); the magnifier is "ic:round-search". Match the search
         # TEXT/field but skip the icon, and overlay the PARENT group's rect so the
@@ -677,6 +679,24 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
                 "source_node_id": field.get("id", n.get("id", "")),
             })
             return  # the field is a leaf overlay — don't recurse into it
+        # ── dropdown ────────────────────────────────────────────────────
+        # A FRAME named ~"dropdown" of field-like size (skip tiny "+" buttons and
+        # stray TEXT). The shown value is its first text; real option lists need
+        # source component variants, so we stub a couple so the popup is usable.
+        is_dropdown = ("dropdown" in name and ntype == "FRAME" and bb
+                       and bb.get("width", 0.0) >= 40.0
+                       and 14.0 <= bb.get("height", 0.0) <= 44.0)
+        if is_dropdown:
+            dx, dy, dw, dh = to_svg(bb)
+            current = _first_text(n) or "Select"
+            out.append({
+                "kind": "dropdown",
+                "x": dx, "y": dy, "w": dw, "h": dh,
+                "options": [current, "Option 2", "Option 3"],  # TODO: source variants
+                "selected_index": 0,
+                "source_node_id": n.get("id", ""),
+            })
+            return  # leaf overlay
         for c in n.get("children", []):
             visit(c, n)
 

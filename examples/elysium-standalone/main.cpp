@@ -13,8 +13,11 @@
 //   pulp-elysium-standalone /path/to/scene.pulp.zip
 //   pulp-elysium-standalone --screenshot=out.png  # headless capture
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
@@ -142,15 +145,24 @@ void apply_shape_knob_fills(pulp::view::View* root, float design_h) {
 int main(int argc, char** argv) {
     std::string screenshot_path;
     std::string raster_path;  // headless Skia-raster preview (no GPU window)
+    // Demo-state flags: showcase the faithful-vector overlays in a headless
+    // capture — focus the search field, and open a dropdown's popup.
+    bool demo_focus_search = false;
+    std::string demo_open_dropdown;  // open the dropdown whose value contains this
     fs::path zip_path = PULP_ELYSIUM_DEFAULT_ZIP;  // committed fixture (CMake)
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         constexpr std::string_view shot = "--screenshot=";
         constexpr std::string_view raster = "--raster=";
+        constexpr std::string_view open_dd = "--open-dropdown=";
         if (arg.rfind(shot, 0) == 0)
             screenshot_path = arg.substr(shot.size());
         else if (arg.rfind(raster, 0) == 0)
             raster_path = arg.substr(raster.size());
+        else if (arg == "--focus-search")
+            demo_focus_search = true;
+        else if (arg.rfind(open_dd, 0) == 0)
+            demo_open_dropdown = arg.substr(open_dd.size());
         else if (!arg.empty() && arg[0] != '-')
             zip_path = arg;
     }
@@ -203,6 +215,31 @@ int main(int argc, char** argv) {
         design_h = frame->panel_height();
     }
 
+    // Demo-state: focus the search field / open a dropdown's popup, so a headless
+    // capture (raster OR GPU) showcases the faithful-vector overlays in their
+    // active states. Call AFTER layout_children() so widget bounds exist.
+    auto apply_demo_state = [&] {
+        auto* frame = dynamic_cast<pulp::view::DesignFrameView*>(root.get());
+        if (!frame) return;
+        for (int i = 0; i < frame->element_count(); ++i) {
+            auto* w = frame->overlay_widget(i);
+            if (!w) continue;
+            if (demo_focus_search)
+                if (auto* ed = dynamic_cast<pulp::view::TextEditor*>(w)) ed->set_focus(true);
+            if (!demo_open_dropdown.empty())
+                if (auto* cb = dynamic_cast<pulp::view::ComboBox*>(w))
+                    if (cb->selected_text().find(demo_open_dropdown) != std::string::npos
+                        && !cb->is_open()) {
+                        // Open the popup the public way: a header click.
+                        const auto cb_b = cb->local_bounds();
+                        pulp::view::MouseEvent ev;
+                        ev.position = {cb_b.width * 0.5f, cb_b.height * 0.5f};
+                        ev.is_down = true;  // a header click toggles the popup open
+                        cb->on_mouse_event(ev);
+                    }
+        }
+    };
+
     // Headless Skia-RASTER preview: renders the imported tree (sprite knobs,
     // gradients, shapes — same SkiaCanvas paint as the GPU host) to a PNG with
     // no GPU window. Useful when no GPU surface is available; the sprite knobs
@@ -225,6 +262,7 @@ int main(int argc, char** argv) {
         root->set_bounds({0, 0, design_w, design_h});
         root->layout_children();
         apply_shape_knob_fills(root.get(), design_h);
+        apply_demo_state();  // focus search / open dropdown for the capture
         if (pulp::view::render_to_file(
                 *root, static_cast<uint32_t>(design_w),
                 static_cast<uint32_t>(design_h), raster_path, 2.0f,
@@ -266,7 +304,8 @@ int main(int argc, char** argv) {
     window->set_idle_callback([&] {
         apply_shape_knob_fills(root.get(), design_h);
         if (!capture) return;
-        if (++frame_count < 6) return;  // let the GPU surface settle
+        if (++frame_count == 2) apply_demo_state();  // after first layout/paint
+        if (frame_count < 6) return;  // let the GPU surface settle
         auto png = window->capture_back_buffer_png();
         std::ofstream out(screenshot_path, std::ios::binary);
         out.write(reinterpret_cast<const char*>(png.data()),

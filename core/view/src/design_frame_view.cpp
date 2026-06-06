@@ -2,6 +2,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -100,8 +101,20 @@ void DesignFrameView::build_overlays() {
             // Match the design's dark field; the focus ring + caret come for free.
             editor->set_background_color(canvas::Color::rgba8(0x2c, 0x2d, 0x2d, 0xff));
             widget = std::move(editor);
+        } else if (e.kind == DesignFrameElement::Kind::dropdown) {
+            // Opaque ComboBox over the design's dropdown: it paints its own box +
+            // selected text + chevron and opens a popup on click. Options come
+            // from the source (else just the shown value).
+            auto combo = std::make_unique<ComboBox>();
+            if (!e.options.empty()) {
+                combo->set_items(e.options);
+                combo->set_selected_silent(
+                    std::clamp(e.selected_index, 0,
+                               static_cast<int>(e.options.size()) - 1));
+            }
+            widget = std::move(combo);
         }
-        // dropdown / tab_group overlays land in the next slices.
+        // tab_group overlay lands in the next slice.
         if (widget) {
             View* raw = widget.get();
             add_child(std::move(widget));

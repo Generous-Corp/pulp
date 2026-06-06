@@ -623,15 +623,24 @@ in the ctor, positioned in `layout_children()` via the SAME `panel_transform`
 the SVG is painted with, so they track scaling/letterbox; `View::hit_test`
 routes events to them, knob hit-test is the parent fallback). `IRInteractiveElement`
 + `DesignFrameElement` carry `kind {knob,text_field,dropdown,tab_group}` + a
-rect (x,y,w,h) + `options`/`selected_index`/`placeholder`. Slice 2 wired
-`text_field` → `TextEditor` (tap-focus + caret + accent focus ring; set an
-opaque bg so it replaces the baked box — known fidelity cost: the SVG's leading
-icon is covered, a styling follow-up). `dropdown` → `ComboBox` and `tab_group`
-land next.
+rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
+- `text_field` → `TextEditor` (tap-focus + caret + accent focus ring; opaque bg
+  replaces the baked box — known fidelity cost: the SVG's leading icon is
+  covered, a styling follow-up).
+- `dropdown` → `ComboBox` (set_items from `options`; opens a popup on click).
+  Option LISTS aren't in a static design, so the producer stubs a couple after
+  the shown value — real lists need source component variants (TODO).
+- `tab_group` lands next.
+
+The `pulp-elysium-standalone` example has demo flags to capture overlay states
+headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens
+the matching ComboBox's popup). Use `--raster=out.png` (Skia) not `--screenshot`
+when the session's live GPU-present path is wedged — raster is the same paint,
+GPU-safe, and DOES render the open ComboBox popup (it paints its list inline).
 
 - **Detection is SOURCE-METADATA, not SVG geometry** (Codex): the producer
   walk has node names + `absoluteBoundingBox`. `detect_overlay_controls`
-  (figma_rest_export.py) finds e.g. a node named ~`search` (skipping the
+  (figma_rest_export.py) finds a node named ~`search` (skipping the
   `ic:round-search` icon; ELYSIUM names the placeholder TEXT "Search" with the
   field as its parent group). The plugin lane must mirror this when wired.
 - **COORDINATE GOTCHA (cost me real time):** the Figma node tree is frame-local

@@ -275,6 +275,31 @@ class FaithfulVectorTest(unittest.TestCase):
                '<rect x="83" y="112" width="980" height="367" fill="#1c1d1d"/></svg>')
         self.assertEqual(frx.parse_panel_bounds(svg), (73.0, 50.0, 1000.0, 600.0))
 
+    def test_detect_overlay_controls_finds_dropdowns_skips_tiny(self):
+        # A FRAME named ~dropdown of field size becomes a dropdown overlay (coords
+        # mapped node->SVG). A tiny "+"-button-sized dropdown and a stray TEXT are
+        # skipped.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Dropdown", "id": "d1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 700, "y": 480, "width": 103, "height": 27},
+                 "children": [{"type": "TEXT", "characters": "1/4 Delay"}]},
+                {"name": "Dropdown", "id": "d2", "type": "FRAME",          # "+" button — too small
+                 "absoluteBoundingBox": {"x": 950, "y": 480, "width": 26, "height": 27}},
+                {"name": "Dropdown", "id": "d3", "type": "TEXT",           # stray text — not a FRAME
+                 "absoluteBoundingBox": {"x": 100, "y": 480, "width": 93, "height": 7}},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        self.assertEqual(len(els), 1)
+        e = els[0]
+        self.assertEqual(e["kind"], "dropdown")
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (773.0, 530.0, 103.0, 27.0))
+        self.assertEqual(e["options"][0], "1/4 Delay")    # shown value first
+        self.assertGreater(len(e["options"]), 1)          # stub options so the popup is usable
+        self.assertEqual(e["source_node_id"], "d1")
+
     def test_detect_overlay_controls_none_when_no_match(self):
         root = {"absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10},
                 "children": [{"name": "Knob", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 4}}]}
