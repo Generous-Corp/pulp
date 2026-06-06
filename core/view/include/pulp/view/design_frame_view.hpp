@@ -103,4 +103,23 @@ private:
     float drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
 };
 
+// The native-overlay widget for a `tab_group` element: a compact segmented
+// control drawn opaque over the design's tab strip (so it replaces the baked
+// tabs + highlight). Clicking a slot selects it and moves the highlight — the
+// "regular selection state" a static SVG can't provide. Styling approximates the
+// design's dark strip; pixel-exact theming is a follow-up.
+class DesignTabGroup : public View {
+public:
+    DesignTabGroup(std::vector<std::string> labels, int selected);
+    int selected() const { return selected_; }
+    int tab_count() const { return static_cast<int>(labels_.size()); }
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+
+private:
+    std::vector<std::string> labels_;
+    int selected_ = 0;
+};
+
 }  // namespace pulp::view
