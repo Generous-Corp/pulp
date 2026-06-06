@@ -196,6 +196,10 @@ public:
         std::unique_ptr<View> content;
     };
 
+    // Reserve the tab-bar height as top padding so tab content flows BELOW the tab bar
+    // (instead of painting over it). Uses flex padding so child hit-testing stays correct.
+    TabPanel() { flex().padding_top = tab_height_; }
+
     void add_tab(std::string title, std::unique_ptr<View> content);
     void set_active_tab(int index);
     int active_tab() const { return active_; }
@@ -206,7 +210,6 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
-    void layout_children() override;  // lay out tab content below the tab bar
 
 private:
     std::vector<Tab> tabs_;
