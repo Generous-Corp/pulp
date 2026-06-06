@@ -5287,6 +5287,12 @@ target_compile_definitions(pulp-test-cli-import-design PRIVATE
 if(TARGET pulp-cli)
     add_dependencies(pulp-test-cli-import-design pulp-cli)
 endif()
+# The `import-design` command delegates to the standalone pulp-import-design
+# helper; without it the revived shell-out cases fail (exit 1) instead of
+# exercising the real path, so build it alongside this suite.
+if(TARGET pulp-import-design)
+    add_dependencies(pulp-test-cli-import-design pulp-import-design)
+endif()
 catch_discover_tests(pulp-test-cli-import-design
     PROPERTIES
         ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
