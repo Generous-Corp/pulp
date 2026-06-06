@@ -8,7 +8,9 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/screenshot.hpp>
 
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -85,6 +87,15 @@ TEST_CASE("add_section ignores a null view", "[format][settings]") {
     const int before = panel.tab_count();
     panel.add_section("Nope", nullptr);
     REQUIRE(panel.tab_count() == before);
+}
+
+TEST_CASE("SettingsPanel Audio tab renders for visual inspection", "[format][settings][.demo]") {
+    SettingsPanel panel;  // default Audio tab active; combos empty without bound systems
+    auto png = pulp::view::render_to_png(panel, 700, 460, 2.0f,
+                                         pulp::view::ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    std::ofstream("/tmp/settings-audio.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
 }
 
 TEST_CASE("Standalone settings persist across launches (save → load round-trip)", "[format][settings]") {

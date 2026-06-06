@@ -134,14 +134,15 @@ void SettingsPanel::build_audio_tab() {
     auto tone_row = std::make_unique<view::View>();
     tone_row->flex().direction = view::FlexDirection::row;
     tone_row->flex().gap = 8.0f;
-    tone_row->flex().preferred_height = 28.0f;
+    tone_row->flex().preferred_height = 32.0f;
+    tone_row->flex().align_items = view::FlexAlign::center;
 
+    // Just the switch (no stacked label) so it's compact and clearly clickable; the label is
+    // a separate sibling so it can't overflow the toggle's width.
     auto tone_toggle = std::make_unique<view::Toggle>();
     test_tone_toggle_ = tone_toggle.get();
-    tone_toggle->set_label("Sine Tone");
-    // The Toggle centers its label in its own width; without a width it collapses to ~40px
-    // and "Sine Tone" overflows off the left edge. Reserve room for the label.
-    tone_toggle->flex().preferred_width = 96.0f;
+    tone_toggle->flex().preferred_width = 48.0f;
+    tone_toggle->flex().preferred_height = 26.0f;
     tone_toggle->flex().flex_shrink = 0.0f;
     tone_toggle->on_toggle = [this](bool on) {
         if (callbacks_.on_test_signal_changed) {
@@ -157,6 +158,11 @@ void SettingsPanel::build_audio_tab() {
         }
     };
     tone_row->add_child(std::move(tone_toggle));
+
+    auto tone_label = make_info_label("Sine Tone");
+    tone_label->flex().preferred_width = 72.0f;
+    tone_label->flex().flex_shrink = 0.0f;
+    tone_row->add_child(std::move(tone_label));
 
     auto freq_combo = std::make_unique<view::ComboBox>();
     tone_freq_combo_ = freq_combo.get();
