@@ -437,6 +437,77 @@ TEST_CASE("DesignIR v1 canonical JSON round-trips source metadata and assets",
     REQUIRE_FALSE(parsed.asset_manifest.assets[0].content_hash.empty());
 }
 
+TEST_CASE("DesignIR round-trips faithful_svg render mode and interactive elements",
+          "[view][import][ir-v1][faithful-svg]") {
+    // Plan B: a node materialized as a faithful SVG render carries its render
+    // mode, the SVG asset id, and a typed list of source-identified interactive
+    // overlays. All three must survive canonical serialize -> parse -> serialize.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "ELYSIUM";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-frame-svg";
+
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.cx = 120.5f;
+    knob.cy = 240.25f;
+    knob.hit_radius = 32.0f;
+    knob.svg_patch_d = "M120 208L120 200";
+    knob.default_value = 0.33f;
+    knob.source_node_id = "3:225";
+    ir.root.interactive_elements.push_back(knob);
+
+    IRInteractiveElement knob2;          // a second, minimal overlay (no source id)
+    knob2.cx = 300.0f;
+    knob2.cy = 240.0f;
+    knob2.hit_radius = 28.0f;
+    knob2.default_value = 0.5f;
+    ir.root.interactive_elements.push_back(knob2);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    const auto canonical_again = serialize_design_ir(parsed);
+
+    REQUIRE(canonical_again == canonical);
+    REQUIRE(parsed.root.render_mode == NodeRenderMode::faithful_svg);
+    REQUIRE(parsed.root.svg_asset_id == "asset-frame-svg");
+    REQUIRE(parsed.root.interactive_elements.size() == 2);
+
+    const auto& k0 = parsed.root.interactive_elements[0];
+    REQUIRE(k0.kind == InteractiveElementKind::knob);
+    REQUIRE(k0.cx == 120.5f);
+    REQUIRE(k0.cy == 240.25f);
+    REQUIRE(k0.hit_radius == 32.0f);
+    REQUIRE(k0.svg_patch_d == "M120 208L120 200");
+    REQUIRE(k0.default_value == 0.33f);
+    REQUIRE(k0.source_node_id == "3:225");
+
+    const auto& k1 = parsed.root.interactive_elements[1];
+    REQUIRE(k1.svg_patch_d.empty());
+    REQUIRE_FALSE(k1.source_node_id.has_value());
+    REQUIRE(k1.default_value == 0.5f);
+}
+
+TEST_CASE("DesignIR defaults to normal render mode and omits faithful_svg keys",
+          "[view][import][ir-v1][faithful-svg]") {
+    // A node with no faithful-vector data must stay `normal` and not emit any of
+    // the Plan-B keys — the lanes coexist with zero footprint on normal nodes.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Plain";
+    const auto canonical = serialize_design_ir(ir);
+    REQUIRE(canonical.find("render_mode") == std::string::npos);
+    REQUIRE(canonical.find("svg_asset_id") == std::string::npos);
+    REQUIRE(canonical.find("interactive_elements") == std::string::npos);
+
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(parsed.root.render_mode == NodeRenderMode::normal);
+    REQUIRE_FALSE(parsed.root.svg_asset_id.has_value());
+    REQUIRE(parsed.root.interactive_elements.empty());
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

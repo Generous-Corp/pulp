@@ -126,6 +126,8 @@ public:
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
                                float x, float y, float w, float h) override;
+    bool draw_svg(const std::string& svg_document,
+                  float x, float y, float w, float h) override;
     // pulp #1737 — 9-arg drawImage source-rect form: routes through
     // SkCanvas::drawImageRect(image, src, dst, sampling) so a sub-rect of
     // the decoded SkImage maps onto the destination rect. Supports

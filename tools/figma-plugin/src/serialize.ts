@@ -189,6 +189,15 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   if (n.content !== undefined) out.content = n.content;
   if (n.asset_ref) out.asset_ref = n.asset_ref;
 
+  // Faithful-vector (Plan B / B4b) — emit the render-mode + SVG asset + typed
+  // interactive overlays the C++ materializer consumes (parse_ir_node already
+  // reads these keys). Only present on a faithful_svg node.
+  if (n.render_mode) out.render_mode = n.render_mode;
+  if (n.svg_asset_id) out.svg_asset_id = n.svg_asset_id;
+  if (n.interactive_elements && n.interactive_elements.length > 0) {
+    out.interactive_elements = n.interactive_elements;
+  }
+
   // Phase 3 — emit audio-widget metadata at the IR node root. The C++
   // parser (design_ir_json.cpp::parse_ir_node) reads:
   //   audio_widget  → IRNode.audio_widget enum

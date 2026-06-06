@@ -281,6 +281,40 @@ struct IRTextRun {
 };
 
 /// A single node in the normalized design IR.
+// ── Faithful-vector import (Plan B) ──────────────────────────────────────────
+// How a node should be rendered. `normal` is the existing widget/sprite
+// materialization. `faithful_svg` means: render this node's own SVG export
+// (svg_asset_id) pixel-faithfully via DesignFrameView, and overlay native
+// interaction from `interactive_elements` (source-side semantics — NOT guessed
+// from the SVG). Per-node so faithful-vector and sprite nodes coexist.
+enum class NodeRenderMode {
+    normal,
+    faithful_svg,
+};
+
+// The kind of an interactive overlay on a faithful_svg node. Deliberately
+// separate from AudioWidgetType (which is audio-parameter specific); this models
+// design-interaction semantics. Extensible: search / dropdown / button / fader
+// land with their own binding contracts in later slices.
+enum class InteractiveElementKind {
+    knob,
+};
+
+// One source-identified interactive element overlaid on a faithful_svg render.
+// Coordinates are in the SVG's own space. The importer fills this from the
+// source (Figma node ids/names/properties), so behavior is real, not inferred.
+struct IRInteractiveElement {
+    InteractiveElementKind kind = InteractiveElementKind::knob;
+    float cx = 0.0f;                 ///< pivot / hit center, SVG coords
+    float cy = 0.0f;
+    float hit_radius = 0.0f;         ///< click-target radius, SVG coords
+    /// Knob: the `d` of its needle path in the SVG (the patch target a drag
+    /// rotates around (cx, cy)).
+    std::string svg_patch_d;
+    float default_value = 0.5f;      ///< 0..1
+    std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
+};
+
 struct IRNode {
     std::string type;   // "frame", "text", "image", "button", "input", "slider"
     std::string name;
@@ -321,6 +355,18 @@ struct IRNode {
     /// Verbatim source slice for this node (debugging + AST-patch fallback).
     /// Optional; adapters may leave empty when the source is binary or large.
     std::optional<std::string> raw_source;
+
+    // ── Faithful-vector import (Plan B) ──────────────────────────────────
+    /// How this node materializes. `faithful_svg` renders `svg_asset_id` via
+    /// DesignFrameView and overlays `interactive_elements`; `normal` keeps the
+    /// existing widget/sprite path. Per-node so the two lanes coexist.
+    NodeRenderMode render_mode = NodeRenderMode::normal;
+    /// Asset id (into IRAssetManifest) of this node's SVG export, when
+    /// render_mode == faithful_svg. The asset's mime is image/svg+xml.
+    std::optional<std::string> svg_asset_id;
+    /// Source-identified interactive overlays for a faithful_svg render.
+    /// Empty for `normal` nodes.
+    std::vector<IRInteractiveElement> interactive_elements;
 };
 
 enum class ImportDiagnosticSeverity {

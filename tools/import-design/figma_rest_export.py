@@ -24,7 +24,7 @@ Usage:
   # or extract KEY/NODE from a URL:
   figma_rest_export.py --url 'https://figma.com/design/<KEY>/...?node-id=3-42' --out scene.pulp.json
 """
-import argparse, json, os, re, sys, urllib.request
+import argparse, json, os, re, sys, urllib.parse, urllib.request
 
 def hex2(v): return format(max(0, min(255, int(round(v)))), "02x")
 
@@ -274,6 +274,75 @@ def widget_kind_from_name(name):
     if "spectrum" in low: return "spectrum"
     return None
 
+# ── Faithful-vector import (Plan B / B4) ────────────────────────────────────
+# Geometry auto-detect of knobs in an exported frame SVG, ported verbatim from
+# the vector-knob PoC (examples/vector-knob parse_frame_knobs) and the C++
+# DesignFrameView convention. A knob DOME is a gradient-filled <circle>
+# (fill="url(...)") with r>=8; its NEEDLE is a thin LIGHT-stroked (white or
+# #ABABAB — the Figma needle convention; dark ticks are #506274) short vertical
+# <path d="Mx1 y1Lx2 y2"> sitting just above the dome center. Pair each needle
+# to its nearest dome. The emitted svg_patch_d is the EXACT `d` from the SVG, so
+# DesignFrameView can rotate only that needle and leave the chrome pixel-exact.
+_CIRCLE_RE = re.compile(r'<circle\b[^>]*>')
+_CXR_RE = re.compile(r'cx="([-\d.]+)"\s+cy="([-\d.]+)"\s+r="([-\d.]+)"')
+_PATH_RE = re.compile(r'<path\b[^>]*>')
+_PATHD_RE = re.compile(r'\bd="(M[^"]*)"')
+_NEEDLE_RE = re.compile(r'M([-\d.]+) ([-\d.]+)L([-\d.]+) ([-\d.]+)')
+
+def parse_frame_knobs(svg):
+    """Return [{kind,cx,cy,hit_radius,svg_patch_d,default_value}] for each knob
+    detected in the frame SVG text (geometry auto-detect — see header above)."""
+    domes = []  # (cx, cy, r)
+    for m in _CIRCLE_RE.finditer(svg):
+        tag = m.group(0)
+        cm = _CXR_RE.search(tag)
+        if not cm:
+            continue
+        cx, cy, r = float(cm.group(1)), float(cm.group(2)), float(cm.group(3))
+        if r >= 8.0 and 'fill="url' in tag:
+            domes.append((cx, cy, r))
+    knobs = []
+    for m in _PATH_RE.finditer(svg):
+        tag = m.group(0)
+        if 'stroke="white"' not in tag and 'stroke="#ABABAB"' not in tag:
+            continue
+        dm = _PATHD_RE.search(tag)
+        if not dm:
+            continue
+        d = dm.group(1)
+        pm = _NEEDLE_RE.match(d)
+        if not pm:
+            continue
+        x1, y1, x2, y2 = (float(v) for v in pm.groups())
+        if abs(x1 - x2) > 0.6 or abs(y1 - y2) > 14.0:  # short vertical needle
+            continue
+        ny = max(y1, y2)
+        best, bd = None, 1e9
+        for (dcx, dcy, dr) in domes:
+            if abs(dcx - x1) < 1.5 and dcy > ny - 2.0:
+                dd = abs(dcy - ny)
+                if dd < bd:
+                    bd, best = dd, (dcx, dcy, dr)
+        if best:
+            knobs.append({"kind": "knob", "cx": best[0], "cy": best[1],
+                          "hit_radius": best[2], "svg_patch_d": d, "default_value": 0.5})
+    return knobs
+
+def fetch_frame_svg(file_key, node_id, token):
+    """Render the frame to SVG via the Figma REST /images endpoint and return the
+    SVG document text (the faithful-vector source). scale=1 — SVG is resolution
+    independent; the importer scales it to the view."""
+    q = urllib.parse.quote(node_id)
+    req = urllib.request.Request(
+        f"https://api.figma.com/v1/images/{file_key}?ids={q}&format=svg",
+        headers={"X-Figma-Token": token})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        url = (json.load(r).get("images", {}) or {}).get(node_id)
+    if not url:
+        return None
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read().decode("utf-8")
+
 def _has_child_containers(n):
     """True if the node is a layout CONTAINER (has child frames/instances/
     components) rather than a leaf widget. A container named like a widget
@@ -493,6 +562,74 @@ def resolve_image_fills(file_key, refs, token, out_dir):
             print(f"  image fill {ref} failed: {e}", file=sys.stderr)
     return manifest, ref_to_rel
 
+def _name_override_knobs(figma_root, knob_names, geom_knobs):
+    """Name-override supplement to geometry auto-detect: any Figma node whose
+    name contains a --knob-name substring becomes a knob too, unless geometry
+    already found one at its center. Coordinates are frame-local (abs bbox minus
+    the frame origin), matching the exported SVG's space. These carry NO
+    svg_patch_d (no needle path identified), so they hit-test and hold a value
+    but don't visually rotate — the honest fallback for a knob geometry missed."""
+    if not knob_names:
+        return []
+    fb = figma_root.get("absoluteBoundingBox") or {}
+    ox, oy = fb.get("x", 0.0), fb.get("y", 0.0)
+    low_names = [s.lower() for s in knob_names]
+    added = []
+
+    def covered(cx, cy, r):
+        for k in geom_knobs + added:
+            if (cx - k["cx"]) ** 2 + (cy - k["cy"]) ** 2 < (max(r, k["hit_radius"])) ** 2:
+                return True
+        return False
+
+    def visit(n):
+        name = (n.get("name") or "").lower()
+        bb = n.get("absoluteBoundingBox")
+        if bb and any(s in name for s in low_names):
+            cx = bb.get("x", 0.0) - ox + bb.get("width", 0.0) / 2.0
+            cy = bb.get("y", 0.0) - oy + bb.get("height", 0.0) / 2.0
+            r = min(bb.get("width", 0.0), bb.get("height", 0.0)) / 2.0
+            if r > 0 and not covered(cx, cy, r):
+                added.append({"kind": "knob", "cx": cx, "cy": cy, "hit_radius": r,
+                              "svg_patch_d": "", "default_value": 0.5})
+        for c in n.get("children", []):
+            visit(c)
+
+    visit(figma_root)
+    return added
+
+def apply_faithful_vector(root_node, figma_root, svg, file_key, node_id, out_dir,
+                          knob_names, write_file=True):
+    """Mutate root_node into a faithful_svg frame: register the frame SVG as an
+    image/svg+xml asset (embedded as a data: URI so the importer always resolves
+    it, plus an optional assets/<hash>.svg on disk), set render_mode +
+    svg_asset_id, and attach geometry-detected (+ name-override) interactive
+    knobs. Returns the asset_manifest entry to append."""
+    import base64, hashlib
+    digest = hashlib.sha256(svg.encode("utf-8")).hexdigest()
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    asset_id = f"frame-svg-{node_id}"
+    entry = {"asset_id": asset_id,
+             "original_uri": f"data:image/svg+xml;base64,{b64}",
+             "original_uri_aliases": [f"figma://{file_key}/{node_id}#svg"],
+             "content_hash": digest, "mime": "image/svg+xml"}
+    if write_file and out_dir:
+        try:
+            os.makedirs(os.path.join(out_dir, "assets"), exist_ok=True)
+            rel = f"assets/{digest}.svg"
+            open(os.path.join(out_dir, rel), "w").write(svg)
+            entry["local_path"] = rel
+        except OSError as e:
+            print(f"  faithful-vector: could not write SVG file: {e}", file=sys.stderr)
+
+    knobs = parse_frame_knobs(svg)
+    knobs += _name_override_knobs(figma_root, knob_names, knobs)
+
+    root_node["render_mode"] = "faithful_svg"
+    root_node["svg_asset_id"] = asset_id
+    root_node["interactive_elements"] = knobs
+    return entry
+
 def _rewrite_image_fills(node, ref_to_rel):
     """Replace style.background_image 'pending:<ref>' with the resolved relative
     path (or drop it if the fill couldn't be resolved — never leave a pending:)."""
@@ -516,6 +653,14 @@ def main():
     ap.add_argument("--token", help="Figma PAT (else $FIGMA_TOKEN or ~/.config/pulp/figma-token)")
     ap.add_argument("--no-assets", action="store_true", help="skip /images PNG capture (geometry+style only)")
     ap.add_argument("--node-json", help="use a pre-fetched /v1/.../nodes JSON instead of calling REST")
+    ap.add_argument("--faithful-vector", action="store_true",
+                    help="faithful-vector lane (Plan B): capture the frame's own SVG and render it "
+                         "pixel-faithfully via DesignFrameView, with auto-detected interactive knobs")
+    ap.add_argument("--frame-svg",
+                    help="use a pre-fetched frame SVG file instead of calling /images (with --faithful-vector)")
+    ap.add_argument("--knob-name", action="append", default=[],
+                    help="name-override (repeatable): also treat any node whose name contains this "
+                         "substring as a knob, supplementing geometry auto-detect (with --faithful-vector)")
     args = ap.parse_args()
 
     file_key, node_id = args.file_key, args.node
@@ -551,6 +696,23 @@ def main():
             asset_manifest_entries += fill_entries
             print(f"  resolved {len(fill_entries)} image fill(s)")
         _rewrite_image_fills(root_node, ref_to_rel)
+
+    if args.faithful_vector:
+        svg = None
+        if args.frame_svg:
+            svg = open(args.frame_svg).read()
+        elif token:
+            print("fetching frame SVG via /images?format=svg ...")
+            svg = fetch_frame_svg(file_key, node_id, token)
+        if svg:
+            entry = apply_faithful_vector(root_node, root, svg, file_key, node_id,
+                                          out_dir, args.knob_name)
+            asset_manifest_entries.append(entry)
+            n_knobs = len(root_node.get("interactive_elements", []))
+            print(f"  faithful-vector: {len(svg)} byte SVG, {n_knobs} interactive knob(s)")
+        else:
+            print("  faithful-vector: no SVG available (need --frame-svg or a token); "
+                  "falling back to normal export", file=sys.stderr)
 
     envelope = {
         "$schema": "https://pulp.dev/schemas/figma-plugin-export-v1.json",

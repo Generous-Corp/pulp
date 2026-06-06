@@ -44,6 +44,10 @@ const LIBRARY_MANIFEST: LibraryManifestSnapshot = {
 };
 
 declare const TARGET_NODE_ID: string | undefined;
+// Faithful-vector lane (Plan B / B4b). When the injected prelude sets this true,
+// each top-level frame exports its own SVG and renders via DesignFrameView with
+// auto-detected interactive knobs, instead of the widget-recognition rebuild.
+declare const FAITHFUL_VECTOR: boolean | undefined;
 
 interface HeadlessAssetBundle {
   content_hash: string;
@@ -92,7 +96,9 @@ async function run(): Promise<HeadlessResult> {
     resolvedId = sel[0].id;
   }
 
-  const result = await extractScene(roots as readonly SceneNode[]);
+  const result = await extractScene(roots as readonly SceneNode[], {
+    faithfulVector: typeof FAITHFUL_VECTOR !== "undefined" && FAITHFUL_VECTOR === true,
+  });
 
   const fileKey =
     figma.fileKey ??
