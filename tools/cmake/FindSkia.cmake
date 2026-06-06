@@ -33,7 +33,7 @@ endif()
 
 # Determine platform library directory.
 #
-# iOS layout (skia-builder chrome/m149+): a single `build/ios-gpu/lib/Release/`
+# iOS layout (skia-builder chrome/m150+): a single `build/ios-gpu/lib/Release/`
 # directory contains three arch subdirs — `device-arm64/`, `simulator-arm64/`,
 # and `simulator-x86_64/`. Unlike the mac slice, these CANNOT be flattened
 # together (they'd collide on identical library names with different arch
@@ -185,7 +185,7 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
         list(APPEND SKIA_INCLUDE_DIRS "${_skia_root_dir}")
     endif()
     # SkParagraph, skshaper, skunicode, svg, skottie module headers.
-    # skunicode added in m149 — Pulp's text shaper now calls
+    # skunicode added in m149+ (still in m150) — Pulp's text shaper now calls
     # `SkUnicodes::ICU::Make()` (see core/canvas/src/skia_unicode.hpp);
     # the include lives at
     # `modules/skunicode/include/SkUnicode_icu.h` in source layouts.
@@ -222,7 +222,7 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     set(SKIA_LIBRARIES ${_skia_all_libs})
 
     # Skia chrome/m144+ split SkUnicode into libskunicode_core.a (definitions)
-    # and libskunicode_icu.a (uses core symbols). Still split in m149. file(GLOB) returns
+    # and libskunicode_icu.a (uses core symbols). Still split in m150. file(GLOB) returns
     # alphabetical order, so core comes first. With GNU ld's single-pass
     # static-archive resolution, the back-references from icu → core go
     # unresolved and the link fails with hundreds of

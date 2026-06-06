@@ -717,12 +717,17 @@ private:
         if (!pool_ || bufs.empty()) return;
 
         std::weak_ptr<detail::StagingBufferPool> pool_weak = pool_;
+        // The lambda is intentionally non-`mutable`: it only reads the
+        // captured buffers (StagingBufferPool::release takes a
+        // `const wgpu::Buffer&`). m150's Dawn `webgpu_cpp.h` only deduces
+        // capturing-callback traits for a `const` `operator()`, so a
+        // `mutable` lambda fails to instantiate `CppFTraitsImpl`.
         queue_.OnSubmittedWorkDone(
             wgpu::CallbackMode::AllowProcessEvents,
             [pool_weak, bufs = std::move(bufs)](wgpu::QueueWorkDoneStatus,
-                                                 wgpu::StringView) mutable {
+                                                 wgpu::StringView) {
                 if (auto pool = pool_weak.lock()) {
-                    for (auto& b : bufs) {
+                    for (const auto& b : bufs) {
                         pool->release(b);
                     }
                 }

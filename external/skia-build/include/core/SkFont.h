@@ -8,7 +8,7 @@
 #ifndef SkFont_DEFINED
 #define SkFont_DEFINED
 
-#include "include/core/SkPath.h"  // IWYU pragma: keep (for SK_HIDE_PATH_EDIT_METHODS)
+#include "include/core/SkPath.h"
 #include "include/core/SkPoint.h" // IWYU pragma: keep (for unspanned apis)
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
@@ -26,6 +26,7 @@
 
 class SkMatrix;
 class SkPaint;
+class SkStrikeRef;
 enum class SkFontHinting;
 enum class SkTextEncoding;
 struct SkFontMetrics;
@@ -356,6 +357,20 @@ public:
     SkScalar measureText(const void* text, size_t byteLength, SkTextEncoding encoding,
                          SkRect* bounds, const SkPaint* paint) const;
 
+    /** Returns an SkStrikeRef for this font's current settings.
+
+        An SkStrikeRef caches the resolved strike (font metrics engine), avoiding the overhead
+        of descriptor construction, hashing, and global cache lookup on each glyph query.
+        This is useful when making many glyph metric calls (e.g. getWidths) with the same
+        font configuration.
+
+        The returned SkStrikeRef is independent of this SkFont; subsequent changes to this
+        SkFont do not affect it. Create a new SkStrikeRef after changing font properties.
+
+        @return  an SkStrikeRef for the current font settings
+    */
+    SkStrikeRef makeStrikeRef() const;
+
     /** Retrieves the advance and bounds for each glyph in glyphs.
         widths receives min(widths.size(), glyphs.size()) values.
         bounds receives min(bounds.size(), glyphs.size()) values.
@@ -442,10 +457,6 @@ public:
      */
     std::optional<SkPath> getPath(SkGlyphID glyphID) const;
 
-#ifndef SK_HIDE_PATH_EDIT_METHODS
-    bool getPath(SkGlyphID glyphID, SkPath* path) const;
-#endif
-
     /** Returns path corresponding to glyph array.
 
         @param glyphIDs      array of glyph indices
@@ -485,56 +496,6 @@ public:
     void dump() const;
 
     using sk_is_trivially_relocatable = std::true_type;
-
-#ifdef SK_SUPPORT_UNSPANNED_APIS
-    int textToGlyphs(const void* text, size_t byteLength, SkTextEncoding encoding,
-                     SkGlyphID glyphs[], int maxGlyphCount) const {
-        return (int)this->textToGlyphs(text, byteLength, encoding, {glyphs, maxGlyphCount});
-    }
-    void unicharsToGlyphs(const SkUnichar uni[], int count, SkGlyphID glyphs[]) const {
-        this->unicharsToGlyphs({uni, count}, {glyphs, count});
-    }
-
-    void getPos(const SkGlyphID glyphs[], int count, SkPoint pos[], SkPoint origin = {0, 0}) const {
-        this->getPos({glyphs, count}, {pos, count}, origin);
-    }
-    void getXPos(const SkGlyphID glyphs[], int count, SkScalar xpos[], SkScalar origin = 0) const {
-        this->getXPos({glyphs, count}, {xpos, count}, origin);
-    }
-    void getPaths(const SkGlyphID glyphIDs[], int count,
-                  void (*glyphPathProc)(const SkPath* pathOrNull, const SkMatrix& mx, void* ctx),
-                  void* ctx) const {
-        this->getPaths({glyphIDs, count}, glyphPathProc, ctx);
-    }
-    void getWidthsBounds(const SkGlyphID glyphs[], int count, SkScalar widths[], SkRect bounds[],
-                         const SkPaint* paint) const {
-        const auto nw = widths ? count : 0;
-        const auto nb = bounds ? count : 0;
-        this->getWidthsBounds({glyphs, count}, {widths, nw}, {bounds, nb}, paint);
-    }
-    void getWidths(const SkGlyphID glyphs[], int count, SkScalar widths[], SkRect bounds[]) const {
-        const auto nw = widths ? count : 0;
-        const auto nb = bounds ? count : 0;
-        this->getWidthsBounds({glyphs, count}, {widths, nw}, {bounds, nb}, nullptr);
-    }
-    void getWidths(const SkGlyphID glyphs[], int count, SkScalar widths[], std::nullptr_t) const {
-        this->getWidthsBounds({glyphs, count}, {widths, count}, {}, nullptr);
-    }
-    void getWidths(const SkGlyphID glyphs[], int count, SkScalar widths[]) const {
-        this->getWidthsBounds({glyphs, count}, {widths, count}, {}, nullptr);
-    }
-    void getBounds(const SkGlyphID glyphs[], int count, SkRect bounds[],
-                   const SkPaint* paint) const {
-        this->getWidthsBounds({glyphs, count}, {}, {bounds, count}, paint);
-    }
-
-    std::vector<SkScalar> getIntercepts(const SkGlyphID glyphs[], int count, const SkPoint pos[],
-                                        SkScalar top, SkScalar bottom,
-                                        const SkPaint* paint = nullptr) const {
-        return this->getIntercepts({glyphs, count}, {pos, count}, top, bottom, paint);
-    }
-#endif
-
 
 private:
     enum PrivFlags {

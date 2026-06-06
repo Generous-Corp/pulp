@@ -291,9 +291,9 @@ class CheckSkiaPinTests(unittest.TestCase):
             self.assertEqual(check_skia_pin.main([]), 0)
 
         self.assertIn("matches tools/deps/manifest.json", stdout.getvalue())
-        self.assertEqual(pins.SKIA_BRANCH, "chrome/m149")
+        self.assertEqual(pins.SKIA_BRANCH, "chrome/m150")
         self.assertIn("linux-x64", pins.RELEASE_ASSET_SHA256)
-        # m149+ no longer exposes BUNDLED_PINS via pins.py — the fork tracks
+        # m150+ no longer exposes BUNDLED_PINS via pins.py — the fork tracks
         # branch HEAD; bundled Dawn/HarfBuzz/ICU revisions are Skia-internal.
 
 

@@ -2,20 +2,24 @@
 
 ## Source
 - **Repository:** https://github.com/danielraffel/skia-builder (fork of olilarkin/skia-builder)
-- **Release:** chrome/m149
-- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm149
-- **Downloaded:** 2026-05-23
-- **Skia branch:** chrome/m149 (Skia Graphite + Dawn)
+- **Release:** chrome/m150
+- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm150
+- **Downloaded:** 2026-06-05
+- **Skia branch:** chrome/m150 (Skia Graphite + Dawn)
 
 The fork tracks `olilarkin/skia-builder`'s tag pattern and additionally
 publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
 mac-x86_64, and `Skia.xcframework` slices that upstream does not. While
 upstream stays on m144, this fork is the active dependency.
 
+The chrome/m150 release does NOT ship a `linux-arm64` slice (m149 did).
+Linux arm64 stays on the m149 asset or rebuilds from source via
+`tools/build-skia.sh` until the fork republishes that slice.
+
 ## Bundled Text and GPU Pins
 
-These revisions are read from Skia's `DEPS` file at the chrome/m149 tip
-the build was cut from. Pulp ports against the m149 API surface:
+These revisions are read from Skia's `DEPS` file at the chrome/m150 tip
+the build was cut from. Pulp ports against the m150 API surface:
 
 - Gradient construction migrated from `SkGradientShader::Make*` to the
   `SkShaders::*` namespace with the `SkGradient` data class.
@@ -23,6 +27,10 @@ the build was cut from. Pulp ports against the m149 API surface:
   `sk_sp<SkUnicode>` argument (see `core/canvas/src/skia_unicode.hpp`
   for the shared singleton).
 - `SkSerialImageProc` callbacks return `sk_sp<const SkData>`.
+- `SkRegion::setRects` takes an `SkSpan<const SkIRect>` instead of a
+  raw pointer + count pair.
+- The `SkStrikeRef` accessor used by the text shaper changed; see
+  `core/canvas/src/text_shaper.cpp`.
 
 The B.0 visual harness pin (`skia-python==144.0.post2`) intentionally
 trails the C++ surface because Python bindings ship one milestone
@@ -46,7 +54,7 @@ a fresh worktree.
 |-----------|----------|--------------|-------|
 | `mac-gpu/` | macOS | arm64, x86_64, universal | mac-x86_64 only in the fork |
 | `win-gpu/` | Windows | x64 | |
-| `linux-gpu/` | Linux | x64, arm64 | arm64 added by Pulp #47 (built on the project's Ubuntu 24.04 aarch64 host) |
+| `linux-gpu/` | Linux | x64 | arm64 not published on the chrome/m150 release; rebuild from source or stay on the m149 slice |
 | `ios-gpu/` | iOS device + simulator | arm64, arm64+x86_64 | fork-only slices |
 | `visionos-gpu/` | visionOS device + simulator | arm64 | fork-only slices |
 | `wasm-gpu/` | WebAssembly | wasm32 | |
@@ -78,10 +86,11 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 
 | Asset | SHA-256 |
 |-------|---------|
-| `skia-build-linux-arm64-gpu-release.zip` | `4a6a99a7abefdaae83b864f2103bebdcf7c1455a20f726f2cdba44f51d52bf05` |
-| `skia-build-linux-x64-gpu-release.zip` | `53e2bfb5225148311da9bbcb7e65da4479acf774bc3d40b0341530cdc48e97b6` |
-| `skia-build-mac-arm64-gpu-release.zip` | `774f5df966cd7133d05ce217eb3ed7bb226246ac336f764d7409350f175437f7` |
-| `skia-build-mac-universal-gpu-release.zip` | `416c5872296bd69f307cd279a3125e6574b86ef9effbb10adc31203781e434aa` |
+| `skia-build-ios-device-arm64-gpu-release.zip` | `0b0a0dbb0224e94ea61d0f9d0107afb7ae063eae3ddb3ea0590bcd0f05fd0c44` |
+| `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `86a60cf963b41da8d30a46e98bb69d24a8bc7f102d8c0908087c9a8be3aa6a75` |
+| `skia-build-linux-x64-gpu-release.zip` | `bb4d3a868a72560b25e467952bb7792d4af2bc9dcab1f77afca208b7b1f0d07b` |
+| `skia-build-mac-arm64-gpu-release.zip` | `13b0e9818c3b05db661af85cb1e2bf2ef10e30d468b81351dd90295237d17734` |
+| `skia-build-mac-universal-gpu-release.zip` | `f27908b847a6a130828073f65a02d052bb1672c999bc9d26384348719c315035` |
 
 ## Libraries Per Platform
 
