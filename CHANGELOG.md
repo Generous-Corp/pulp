@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03460"></a>
+## [0.346.0] - 2026-06-05
+
+- feat(view): DesignFrameView — faithful-vector design-import view (Plan B / B1) ([#3465](https://github.com/danielraffel/pulp/pull/3465))
+
 <a id="v03450"></a>
 ## [0.345.0] - 2026-06-05
 
@@ -3658,6 +3663,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.346.0]: https://github.com/danielraffel/pulp/releases/tag/v0.346.0
 [0.345.0]: https://github.com/danielraffel/pulp/releases/tag/v0.345.0
 [0.344.0]: https://github.com/danielraffel/pulp/releases/tag/v0.344.0
 [0.343.0]: https://github.com/danielraffel/pulp/releases/tag/v0.343.0
