@@ -302,10 +302,8 @@ void Fader::advance_animations(float dt) {
 void Toggle::set_on(bool v) {
     if (on_ == v) return;
     on_ = v;
-    // Snap the thumb to its end state rather than animating. The slide needs a continuous
-    // frame driver; on a surface that isn't ticking frames (e.g. a Settings tab with no
-    // focused text field) the animation froze mid-slide and the toggle felt unresponsive.
-    thumb_position_.set(v ? 1.0f : 0.0f);
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    thumb_position_.animate_to(v ? 1.0f : 0.0f, dur, easing::ease_out_cubic);
     // pulp #73 — programmatic toggle (preset apply, JS bridge setValue) must reach the
     // screen on its own; user-input toggles also repaint via the host per-event path.
     request_repaint();

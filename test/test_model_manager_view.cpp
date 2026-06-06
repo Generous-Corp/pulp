@@ -5,6 +5,7 @@
 
 #include <pulp/runtime/model_store.hpp>
 #include <pulp/view/model_manager_view.hpp>
+#include <pulp/view/buttons.hpp>  // TextButton (momentary action buttons)
 #include <pulp/view/screenshot.hpp>
 
 #include <fstream>
@@ -42,6 +43,8 @@ View* model_block(View& v, size_t i) { return v.child_at(2 + i); }
 void fire_buttons(View* view) {
     if (auto* b = dynamic_cast<ToggleButton*>(view))
         if (b->on_toggle) b->on_toggle(true);
+    if (auto* t = dynamic_cast<TextButton*>(view))  // action buttons are momentary TextButtons
+        if (t->on_click) t->on_click();
     for (size_t i = 0; i < view->child_count(); ++i) fire_buttons(view->child_at(i));
 }
 
