@@ -578,6 +578,21 @@ Pieces, source-of-truth → runtime:
   hit_radius, svg_patch_d, default_value, source_node_id). These are
   source-side semantics filled by the importer, NOT inferred from the SVG.
   `InteractiveElementKind` is deliberately separate from `AudioWidgetType`.
+- **Producer (REST lane)** — `figma_rest_export.py --faithful-vector` fetches
+  the frame's own SVG (`/images?format=svg`, or `--frame-svg FILE` offline),
+  embeds it as a `data:image/svg+xml;base64` asset (so the importer always
+  resolves it — no dependency on local_path stamping), sets the root's
+  `render_mode`/`svg_asset_id`, and attaches `interactive_elements` from
+  `parse_frame_knobs(svg)`. That detector is the geometry auto-detect ported
+  from the vector-knob PoC: a knob DOME is a gradient `<circle>` (`fill="url("`,
+  r≥8); its NEEDLE is a thin **light-stroked** (`white` or `#ABABAB` — dark
+  ticks are `#506274`) short vertical `<path d="Mx1 y1Lx2 y2">` just above the
+  dome; pair each needle to its nearest dome and emit the EXACT `d` as
+  `svg_patch_d` so the runtime can rotate that one path. `--knob-name SUBSTR`
+  (repeatable) is the **name override**: it supplements geometry with any
+  node whose name contains the substring (frame-local center from its abs
+  bbox), but those carry NO `svg_patch_d` (hit + value, no visual rotation),
+  the honest fallback for a knob geometry missed.
 - **Materializer** — `materialize_node` (`design_import_native_common.cpp`)
   branches on `faithful_svg` first and builds a `DesignFrameView` via
   `make_faithful_svg_frame`: `resolve_svg_document()` resolves the SVG text

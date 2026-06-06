@@ -159,5 +159,71 @@ class TextRunsTest(unittest.TestCase):
              "styleOverrideTable": {}}), [])
 
 
+class FaithfulVectorTest(unittest.TestCase):
+    """Plan B / B4a: faithful-vector lane — frame-SVG knob auto-detect + the
+    envelope fields the C++ materializer (DesignFrameView) consumes."""
+
+    SVG = (
+        '<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">'
+        '<defs><linearGradient id="g"><stop offset="0" stop-color="#ebf5ff"/>'
+        '<stop offset="1" stop-color="#717f8e"/></linearGradient></defs>'
+        '<rect x="10" y="10" width="80" height="80" fill="#1c1d1d"/>'
+        '<circle cx="50" cy="50" r="20" fill="url(#g)"/>'            # dome
+        '<circle cx="50" cy="50" r="5" fill="#222222"/>'             # inner, non-gradient → ignored
+        '<path d="M50 38L50 30" stroke="white" stroke-width="3"/>'   # needle
+        '<path d="M20 20L25 25" stroke="#506274" stroke-width="2"/>'  # dark tick → ignored
+        '</svg>')
+
+    def test_parse_frame_knobs_geometry_autodetect(self):
+        knobs = frx.parse_frame_knobs(self.SVG)
+        self.assertEqual(len(knobs), 1)
+        k = knobs[0]
+        self.assertEqual(k["kind"], "knob")
+        self.assertEqual((k["cx"], k["cy"], k["hit_radius"]), (50.0, 50.0, 20.0))
+        self.assertEqual(k["svg_patch_d"], "M50 38L50 30")  # exact d so the needle can rotate
+        self.assertEqual(k["default_value"], 0.5)
+
+    def test_parse_frame_knobs_ignores_non_knob_shapes(self):
+        # No gradient dome + no light needle → nothing detected.
+        plain = ('<svg xmlns="http://www.w3.org/2000/svg">'
+                 '<circle cx="10" cy="10" r="20" fill="#333"/>'        # solid, not a dome
+                 '<path d="M5 5L9 9" stroke="#506274"/></svg>')        # dark tick
+        self.assertEqual(frx.parse_frame_knobs(plain), [])
+
+    def test_apply_faithful_vector_sets_fields_and_svg_asset(self):
+        root_node = {"type": "frame", "name": "ELYSIUM"}
+        figma_root = {"id": "3:42", "name": "ELYSIUM",
+                      "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100}}
+        entry = frx.apply_faithful_vector(root_node, figma_root, self.SVG,
+                                          "KEY", "3:42", out_dir="", knob_names=[],
+                                          write_file=False)
+        self.assertEqual(root_node["render_mode"], "faithful_svg")
+        self.assertEqual(root_node["svg_asset_id"], "frame-svg-3:42")
+        self.assertEqual(len(root_node["interactive_elements"]), 1)
+        # The asset is the SVG document, embedded so the importer always resolves it.
+        self.assertEqual(entry["asset_id"], "frame-svg-3:42")
+        self.assertEqual(entry["mime"], "image/svg+xml")
+        self.assertTrue(entry["original_uri"].startswith("data:image/svg+xml;base64,"))
+
+    def test_name_override_supplements_geometry(self):
+        geom = frx.parse_frame_knobs(self.SVG)  # one knob at (50,50)
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+            "children": [
+                # Far from the geometry knob, named like a knob → added (no needle d).
+                {"name": "Big Dial", "absoluteBoundingBox": {"x": 70, "y": 70, "width": 20, "height": 20}},
+                # AT the geometry knob's center → already covered, must NOT duplicate.
+                {"name": "Knob", "absoluteBoundingBox": {"x": 40, "y": 40, "width": 20, "height": 20}},
+            ],
+        }
+        added = frx._name_override_knobs(figma_root, ["dial", "knob"], geom)
+        self.assertEqual(len(added), 1)
+        self.assertEqual((added[0]["cx"], added[0]["cy"]), (80.0, 80.0))
+        self.assertEqual(added[0]["svg_patch_d"], "")  # no needle path identified
+
+    def test_name_override_empty_when_no_names(self):
+        self.assertEqual(frx._name_override_knobs({"children": []}, [], []), [])
+
+
 if __name__ == "__main__":
     unittest.main()
