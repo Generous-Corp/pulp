@@ -254,6 +254,10 @@ public:
         }
     }
 
+    bool is_attached() const noexcept override {
+        return view_ != nil && view_.superview != nil;
+    }
+
     void detach() override {
         @autoreleasepool {
             if (view_) {
@@ -667,6 +671,10 @@ public:
                 needs_repaint_.store(true, std::memory_order_relaxed);
             }
         }
+    }
+
+    bool is_attached() const noexcept override {
+        return metal_view_ != nil && metal_view_.superview != nil;
     }
 
     void detach() override {

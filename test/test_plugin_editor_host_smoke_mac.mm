@@ -149,7 +149,11 @@ TEST_CASE("embedded GPU plugin host attaches + paints first frame (mac)",
         }
 
         host->set_idle_callback(format::make_scripted_idle_pump(bridge));
-        host->attach_to_parent((__bridge void*)window.contentView);
+        // Attach seam: a real parent must report attached so a foreign embedder
+        // knows it is safe to fire notify_attached().
+        REQUIRE_FALSE(host->is_attached());
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        REQUIRE(host->is_attached());
         bridge.notify_attached();
         smoke::pump_run_loop(5);
 
@@ -167,6 +171,7 @@ TEST_CASE("embedded GPU plugin host attaches + paints first frame (mac)",
         REQUIRE(smoke::looks_like_png(png2));
 
         host->detach();
+        REQUIRE_FALSE(host->is_attached());
         host.reset();
         bridge.close();
         [window close];

@@ -66,6 +66,25 @@ public:
     // Attach this view to a parent native view (the DAW's editor window)
     virtual void attach_to_parent(NativeViewHandle parent) = 0;
 
+    // Attempt to attach to `parent` and report whether this host ended up
+    // attached. The default composes the existing `attach_to_parent()` command
+    // with the `is_attached()` query, so every host gets a success signal for
+    // free; a host can override to report a more precise outcome. Foreign-host
+    // embedders (the flat-C embedding SDK) use this to decide whether to fire
+    // `ViewBridge::notify_attached()` — they must NOT fire it when attach failed,
+    // or the editor open/close lifecycle goes unbalanced. Call on the UI thread.
+    [[nodiscard]] virtual bool try_attach_to_parent(NativeViewHandle parent) {
+        attach_to_parent(parent);
+        return is_attached();
+    }
+
+    // True when this host's native view is currently parented (i.e. attach
+    // succeeded and detach has not run). Default is conservative: a host that
+    // has not opted into attachment observability reports false, so callers
+    // never treat an unknown host as attached. Apple hosts override this to
+    // reflect the real native view-hierarchy state. Query on the UI thread.
+    virtual bool is_attached() const noexcept { return false; }
+
     // Detach from parent
     virtual void detach() = 0;
 

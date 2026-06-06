@@ -503,6 +503,13 @@ public:
         }
     }
 
+    bool is_attached() const noexcept override {
+        // Truthful native check: the view is parented iff it sits in a view
+        // hierarchy. `attach_to_parent` only ever adds `view_` to the supplied
+        // parent, so a non-nil superview means the attach took.
+        return view_ != nil && view_.superview != nil;
+    }
+
     void detach() override {
         @autoreleasepool {
             if (view_) {
@@ -807,6 +814,10 @@ public:
                 needs_repaint_.store(true, std::memory_order_relaxed);
             }
         }
+    }
+
+    bool is_attached() const noexcept override {
+        return metal_view_ != nil && metal_view_.superview != nil;
     }
 
     void detach() override {

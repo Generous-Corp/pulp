@@ -142,6 +142,27 @@ private:
     bool attached_ = false;
 };
 
+// Host that opts into attachment observability (is_attached) the way the real
+// Apple hosts do: attach succeeds only for a non-null parent, and is_attached()
+// reflects the live parent. Used to exercise the try_attach_to_parent() seam.
+class AttachAwarePluginViewHost final : public PluginViewHost {
+public:
+    NativeViewHandle native_handle() override { return &sentinel_; }
+    void attach_to_parent(NativeViewHandle parent) override {
+        if (parent) parent_ = parent;  // mirror real hosts: null parent no-ops
+    }
+    bool is_attached() const noexcept override { return parent_ != nullptr; }
+    void detach() override { parent_ = nullptr; }
+    void repaint() override {}
+    void set_size(uint32_t w, uint32_t h) override { size_ = {w, h}; }
+    Size get_size() const override { return size_; }
+
+private:
+    int sentinel_ = 0;
+    NativeViewHandle parent_ = nullptr;
+    Size size_{400, 300};
+};
+
 } // namespace
 
 TEST_CASE("View host bridges: registration APIs are safe on all platforms",
@@ -204,6 +225,38 @@ TEST_CASE("Host child embedding contract is implementable by concrete hosts",
     REQUIRE(plugin_host.bounds().height == 16.0f);
     plugin_host.detach_native_child_view(plugin_child);
     REQUIRE_FALSE(plugin_host.attached());
+}
+
+TEST_CASE("PluginViewHost attach seam: try_attach_to_parent + is_attached",
+          "[view][hosts][embed]") {
+    SECTION("default base contract is conservative (reports not-attached)") {
+        // A host that has not opted into attachment observability must report
+        // false so foreign embedders never fire notify_attached() blindly.
+        EmbeddingPluginViewHost host;  // overrides attach_to_parent, not is_attached
+        int parent_sentinel = 0;
+        REQUIRE_FALSE(host.is_attached());
+        REQUIRE_FALSE(host.try_attach_to_parent(
+            static_cast<NativeViewHandle>(&parent_sentinel)));
+        REQUIRE_FALSE(host.is_attached());
+    }
+
+    SECTION("attachment-aware host reports success and tracks detach") {
+        AttachAwarePluginViewHost host;
+        int parent_sentinel = 0;
+        auto parent = static_cast<NativeViewHandle>(&parent_sentinel);
+
+        REQUIRE_FALSE(host.is_attached());
+        // A null parent must not report attached (matches Apple host no-op).
+        REQUIRE_FALSE(host.try_attach_to_parent(nullptr));
+        REQUIRE_FALSE(host.is_attached());
+
+        // A real parent attaches and is observable.
+        REQUIRE(host.try_attach_to_parent(parent));
+        REQUIRE(host.is_attached());
+
+        host.detach();
+        REQUIRE_FALSE(host.is_attached());
+    }
 }
 
 TEST_CASE("InspectorWindow show is safe when host creation returns nullptr",
