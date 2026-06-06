@@ -919,6 +919,18 @@ public:
         return false; // Override in Skia backend
     }
 
+    /// Render an SVG document (the literal `<svg>…</svg>` string) into the box
+    /// [x,y,w,h], scaled to fit. Backed by Skia's SkSVGDOM, so gradients,
+    /// filters (drop shadows), masks, opacities, and transforms render exactly
+    /// as authored — the faithful-vector design-import lane draws a Figma node's
+    /// own SVG export through here instead of approximating it. Returns false if
+    /// the backend can't render SVG (non-Skia) or the document fails to parse.
+    virtual bool draw_svg(const std::string& svg_document,
+                          float x, float y, float w, float h) {
+        (void)svg_document; (void)x; (void)y; (void)w; (void)h;
+        return false; // Override in Skia backend
+    }
+
     // pulp #1737 — 9-arg drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh) source-rect
     // slicing. Default impl delegates to the dst-only form (loses the slice);
     // Skia + CG override to use drawImageRect(src, dst) / CGContextDrawImage
