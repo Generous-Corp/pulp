@@ -4,6 +4,8 @@
 // Field names mirror the JSON envelope in schema/figma-plugin-export-v1.json so
 // the Phase 2b serializer is mostly a passthrough.
 
+import type { InteractiveElement } from "./faithful-vector";
+
 export type AudioWidgetKind = "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
 
 export interface ExtractedFigmaNode {
@@ -33,6 +35,14 @@ export interface ExtractedFigmaNode {
   // Image / vector — populated in slice 2
   exported_asset?: { content_hash: string; mime: string; bytes_size: number };
   asset_ref?: string;       // reference into AssetCache; serialized as node.asset_ref
+
+  // Faithful-vector import (Plan B / B4b). When set, the node renders its own
+  // SVG export via DesignFrameView with the interactive overlays below, instead
+  // of the widget-recognition rebuild. Mirrors the canonical IR keys the C++
+  // parser reads (design_ir_json.cpp::parse_ir_node).
+  render_mode?: string;                        // "faithful_svg"
+  svg_asset_id?: string;                       // → asset_manifest entry (image/svg+xml)
+  interactive_elements?: InteractiveElement[];
 
   // Component / instance metadata — populated when walking INSTANCE nodes (slice 2)
   component_key?: string;
