@@ -113,8 +113,14 @@ void DesignFrameView::build_overlays() {
                                static_cast<int>(e.options.size()) - 1));
             }
             widget = std::move(combo);
+        } else if (e.kind == DesignFrameElement::Kind::tab_group &&
+                   !e.options.empty()) {
+            // Opaque segmented control over the design's tab strip; clicking a tab
+            // moves the selection highlight (real selection state).
+            widget = std::make_unique<DesignTabGroup>(
+                e.options, std::clamp(e.selected_index, 0,
+                                      static_cast<int>(e.options.size()) - 1));
         }
-        // tab_group overlay lands in the next slice.
         if (widget) {
             View* raw = widget.get();
             add_child(std::move(widget));
@@ -214,6 +220,53 @@ void DesignFrameView::on_mouse_drag(Point pos) {
     elements_[drag_].value =
         std::clamp(drag_start_value_ + dy_design * 0.005f, 0.0f, 1.0f);
     request_repaint();
+}
+
+// ── DesignTabGroup ──────────────────────────────────────────────────────────
+
+DesignTabGroup::DesignTabGroup(std::vector<std::string> labels, int selected)
+    : labels_(std::move(labels)),
+      selected_(labels_.empty() ? 0
+                                : std::clamp(selected, 0,
+                                             static_cast<int>(labels_.size()) - 1)) {}
+
+void DesignTabGroup::paint(canvas::Canvas& canvas) {
+    const auto b = local_bounds();
+    if (labels_.empty() || b.width <= 0 || b.height <= 0) return;
+    const int n = static_cast<int>(labels_.size());
+    const float slot = b.width / static_cast<float>(n);
+    // Opaque dark strip (covers the baked tabs so there's no double-render).
+    canvas.set_fill_color(canvas::Color::rgba8(0x25, 0x26, 0x26, 0xff));
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, std::min(b.height * 0.3f, 6.0f));
+    // Selection highlight.
+    if (selected_ >= 0 && selected_ < n) {
+        const float pad = 2.0f;
+        canvas.set_fill_color(canvas::Color::rgba8(0x3c, 0x3d, 0x3d, 0xff));
+        canvas.fill_rounded_rect(selected_ * slot + pad, pad,
+                                 slot - 2 * pad, b.height - 2 * pad,
+                                 std::min((b.height - 2 * pad) * 0.35f, 5.0f));
+    }
+    // Labels, centered per slot; selected is brighter.
+    const float font = std::min(b.height * 0.5f, 12.0f);
+    canvas.set_font("Inter", font);
+    for (int i = 0; i < n; ++i) {
+        canvas.set_fill_color(i == selected_
+                                  ? canvas::Color::rgba8(0xff, 0xff, 0xff, 0xff)
+                                  : canvas::Color::rgba8(0x9a, 0x9a, 0x9a, 0xff));
+        const float tw = canvas.measure_text(labels_[i]);
+        const float tx = i * slot + (slot - tw) * 0.5f;
+        const float ty = b.height * 0.5f + font * 0.34f;  // ~vertical center (baseline)
+        canvas.fill_text(labels_[i], tx, ty);
+    }
+}
+
+void DesignTabGroup::on_mouse_down(Point pos) {
+    const auto b = local_bounds();
+    if (labels_.empty() || b.width <= 0) return;
+    const int n = static_cast<int>(labels_.size());
+    int idx = static_cast<int>(pos.x / (b.width / static_cast<float>(n)));
+    idx = std::clamp(idx, 0, n - 1);
+    if (idx != selected_) { selected_ = idx; request_repaint(); }
 }
 
 }  // namespace pulp::view

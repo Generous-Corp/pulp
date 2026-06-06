@@ -300,6 +300,33 @@ class FaithfulVectorTest(unittest.TestCase):
         self.assertGreater(len(e["options"]), 1)          # stub options so the popup is usable
         self.assertEqual(e["source_node_id"], "d1")
 
+    def test_detect_overlay_controls_finds_tab_group(self):
+        # A row of >=3 container children with short labels = a tab group; the one
+        # with a visible SOLID fill is selected. Mapped node->SVG (+73,+50).
+        def tab(x, label, filled=False):
+            t = {"name": "Button", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": x, "y": 76, "width": 29, "height": 20},
+                 "children": [{"type": "TEXT", "characters": label}]}
+            if filled:
+                t["fills"] = [{"type": "SOLID", "visible": True}]
+            return t
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Pager", "id": "tg", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 220, "y": 76, "width": 120, "height": 20},
+                 "children": [tab(220, "1"), tab(249, "2"), tab(279, "3", filled=True), tab(308, "4")]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        tabs = [e for e in els if e["kind"] == "tab_group"]
+        self.assertEqual(len(tabs), 1)
+        t = tabs[0]
+        self.assertEqual(t["options"], ["1", "2", "3", "4"])
+        self.assertEqual(t["selected_index"], 2)          # the filled "3"
+        # rect = union of tabs (220,76)-(337,96) -> svg (293,126,117,20)
+        self.assertEqual((t["x"], t["y"], t["w"], t["h"]), (293.0, 126.0, 117.0, 20.0))
+
     def test_detect_overlay_controls_none_when_no_match(self):
         root = {"absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10},
                 "children": [{"name": "Knob", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 4}}]}

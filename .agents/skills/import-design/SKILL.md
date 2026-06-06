@@ -630,7 +630,11 @@ rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
 - `dropdown` → `ComboBox` (set_items from `options`; opens a popup on click).
   Option LISTS aren't in a static design, so the producer stubs a couple after
   the shown value — real lists need source component variants (TODO).
-- `tab_group` lands next.
+- `tab_group` → `DesignTabGroup` (a compact segmented control drawn opaque over
+  the tab strip; click a slot to move the selection highlight). Detected
+  structurally (`detect_tab_group`): a row of ≥3 similar-width container children
+  with short text labels; the child carrying a visible SOLID fill is the selected
+  tab. `--select-tab=N` is the elysium-standalone demo flag for capturing it.
 
 The `pulp-elysium-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens

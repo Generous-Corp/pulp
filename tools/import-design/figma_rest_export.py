@@ -654,10 +654,59 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
 
     out = []
 
+    _CONTAINER_TYPES = ("FRAME", "INSTANCE", "COMPONENT", "GROUP")
+
+    def detect_tab_group(n):
+        """A tab/segmented control = a horizontal row of >=3 container children,
+        each with a short text label, of similar width. The selected tab is the
+        one child carrying a visible SOLID fill (the highlight). Returns a
+        tab_group dict (rect = union of the tabs) or None. Source-structural —
+        works beyond ELYSIUM's "Button" naming."""
+        tabs = []
+        for c in n.get("children", []):
+            cb = c.get("absoluteBoundingBox")
+            if not cb or c.get("type") not in _CONTAINER_TYPES:
+                continue
+            label = _first_text(c)
+            if label and len(label) <= 3:
+                tabs.append((c, label, cb))
+        if len(tabs) < 3:
+            return None
+        ys = [cb["y"] for _, _, cb in tabs]
+        ws = [cb["width"] for _, _, cb in tabs]
+        if max(ys) - min(ys) > 6:                       # must be one horizontal row
+            return None
+        if min(ws) <= 0 or max(ws) / min(ws) > 1.6:     # similar-width slots
+            return None
+        tabs.sort(key=lambda t: t[2]["x"])              # left→right
+        selected = 0
+        for i, (c, _, _) in enumerate(tabs):
+            fills = [f for f in (c.get("fills") or [])
+                     if f.get("visible", True) and f.get("type") == "SOLID"]
+            if fills:
+                selected = i
+        x0 = min(cb["x"] for _, _, cb in tabs)
+        y0 = min(cb["y"] for _, _, cb in tabs)
+        x1 = max(cb["x"] + cb["width"] for _, _, cb in tabs)
+        y1 = max(cb["y"] + cb["height"] for _, _, cb in tabs)
+        gx, gy, gw, gh = to_svg({"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0})
+        return {
+            "kind": "tab_group",
+            "x": gx, "y": gy, "w": gw, "h": gh,
+            "options": [label for _, label, _ in tabs],
+            "selected_index": selected,
+            "source_node_id": n.get("id", ""),
+        }
+
     def visit(n, parent):
         name = (n.get("name") or "").lower()
         ntype = n.get("type", "")
         bb = n.get("absoluteBoundingBox")
+        # ── tab group (segmented control) ───────────────────────────────
+        tg = detect_tab_group(n)
+        if tg:
+            out.append(tg)
+            return  # the tabs are owned by the overlay — don't recurse
         # ── search (text_field) ─────────────────────────────────────────
         # ELYSIUM names the placeholder TEXT "Search" (the field itself is its
         # parent group); the magnifier is "ic:round-search". Match the search

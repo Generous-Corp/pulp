@@ -149,6 +149,7 @@ int main(int argc, char** argv) {
     // capture — focus the search field, and open a dropdown's popup.
     bool demo_focus_search = false;
     std::string demo_open_dropdown;  // open the dropdown whose value contains this
+    int demo_select_tab = -1;        // select this tab index on every tab group
     fs::path zip_path = PULP_ELYSIUM_DEFAULT_ZIP;  // committed fixture (CMake)
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
@@ -163,6 +164,8 @@ int main(int argc, char** argv) {
             demo_focus_search = true;
         else if (arg.rfind(open_dd, 0) == 0)
             demo_open_dropdown = arg.substr(open_dd.size());
+        else if (arg.rfind("--select-tab=", 0) == 0)
+            demo_select_tab = std::atoi(arg.substr(std::string_view("--select-tab=").size()).c_str());
         else if (!arg.empty() && arg[0] != '-')
             zip_path = arg;
     }
@@ -226,6 +229,15 @@ int main(int argc, char** argv) {
             if (!w) continue;
             if (demo_focus_search)
                 if (auto* ed = dynamic_cast<pulp::view::TextEditor*>(w)) ed->set_focus(true);
+            if (demo_select_tab >= 0)
+                if (auto* tg = dynamic_cast<pulp::view::DesignTabGroup*>(w))
+                    if (demo_select_tab < tg->tab_count()) {
+                        const auto tb = tg->local_bounds();
+                        pulp::view::Point p{
+                            (demo_select_tab + 0.5f) * tb.width / static_cast<float>(tg->tab_count()),
+                            tb.height * 0.5f};
+                        tg->on_mouse_down(p);
+                    }
             if (!demo_open_dropdown.empty())
                 if (auto* cb = dynamic_cast<pulp::view::ComboBox*>(w))
                     if (cb->selected_text().find(demo_open_dropdown) != std::string::npos

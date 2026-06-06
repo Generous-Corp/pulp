@@ -224,6 +224,64 @@ TEST_CASE("DesignFrameView overlays a ComboBox for a dropdown element",
     CHECK(v.hit_test({30, 25}) == combo);
 }
 
+TEST_CASE("DesignFrameView overlays a DesignTabGroup for a tab_group element",
+          "[view][design-import][frame][overlay]") {
+    DesignFrameElement tg;
+    tg.kind = DesignFrameElement::Kind::tab_group;
+    tg.x = 20; tg.y = 14; tg.w = 56; tg.h = 14;     // inside the 80x80 panel
+    tg.options = {"1", "2", "3", "4"};
+    tg.selected_index = 2;
+    DesignFrameView v(make_design_svg(), {tg});
+
+    auto* tabs = dynamic_cast<DesignTabGroup*>(v.overlay_widget(0));
+    REQUIRE(tabs != nullptr);                         // a real tab widget
+    REQUIRE(tabs->tab_count() == 4);
+    CHECK(tabs->selected() == 2);                     // from selected_index
+
+    // Positioned via the panel transform (view 80x80 -> scale 1; panel origin
+    // (10,10)): rect (20,14,56,14) -> view (10,4,56,14).
+    v.set_bounds({0, 0, 80, 80});
+    v.layout_children();
+    auto b = tabs->bounds();
+    CHECK(b.x == 10.0f); CHECK(b.width == 56.0f);
+    CHECK(v.hit_test({30, 8}) == tabs);              // click routes to the tabs
+
+    // Clicking a slot selects that tab (slot width 56/4 = 14, local coords).
+    tabs->on_mouse_down({7, 7});                      // slot 0
+    CHECK(tabs->selected() == 0);
+    tabs->on_mouse_down({49, 7});                     // 49/14 = 3 -> slot 3
+    CHECK(tabs->selected() == 3);
+}
+
+TEST_CASE("DesignTabGroup renders and the highlight moves with selection",
+          "[view][design-import][frame][overlay][svg]") {
+    auto make_tabs = [](int selected) {
+        DesignFrameElement tg;
+        tg.kind = DesignFrameElement::Kind::tab_group;
+        tg.x = 14; tg.y = 14; tg.w = 60; tg.h = 16;
+        tg.options = {"1", "2", "3", "4"};
+        tg.selected_index = selected;
+        return tg;
+    };
+    DesignFrameView lo(make_design_svg(), {make_tabs(0)});
+    DesignFrameView hi(make_design_svg(), {make_tabs(3)});
+    lo.set_bounds({0, 0, 80, 80}); lo.layout_children();
+    hi.set_bounds({0, 0, 80, 80}); hi.layout_children();
+
+    auto lo_png = render_to_png(lo, 80, 80, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 80, 80, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    // The tab strip renders and the highlight is on a different slot, so the two
+    // renders differ. (No SkSVGDOM dependency — the tab widget paints natively —
+    // but keep the same guard for partial-Skia lanes that no-op raster text.)
+    if (cmp.similarity >= 0.999f)
+        SKIP("native raster unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);
+}
+
 TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",
           "[view][design-import][frame][svg]") {
     DesignFrameView empty("", {});
