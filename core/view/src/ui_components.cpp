@@ -441,6 +441,16 @@ void TabPanel::on_mouse_event(const MouseEvent& event) {
     set_active_tab(index);
 }
 
+void TabPanel::layout_children() {
+    // The tab bar occupies the top `tab_height_`; lay out tab contents in the area
+    // below it so the active tab doesn't paint over (and hide) the tab bar.
+    const auto saved = bounds();
+    set_bounds({saved.x, saved.y + tab_height_, saved.width,
+                saved.height > tab_height_ ? saved.height - tab_height_ : 0.0f});
+    View::layout_children();
+    set_bounds(saved);
+}
+
 // ── ScrollView ───────────────────────────────────────────────────────────
 
 void ScrollView::clamp_scroll_targets() {

@@ -206,6 +206,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
+    void layout_children() override;  // lay out tab content below the tab bar
 
 private:
     std::vector<Tab> tabs_;
