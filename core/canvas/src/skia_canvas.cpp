@@ -13,6 +13,8 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/utils/SkParsePath.h"
+#include "include/core/SkStream.h"
+#include "modules/svg/include/SkSVGDOM.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMetrics.h"
 #include "include/core/SkFontMgr.h"
@@ -850,6 +852,27 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
+    return true;
+}
+
+bool SkiaCanvas::draw_svg(const std::string& svg_document,
+                          float x, float y, float w, float h) {
+    if (!canvas_ || svg_document.empty() || w <= 0.0f || h <= 0.0f) return false;
+    SkMemoryStream stream(svg_document.data(), svg_document.size(), /*copyData=*/false);
+    auto dom = SkSVGDOM::Builder().make(stream);
+    if (!dom) return false;
+    // Scale the SVG's intrinsic size to the [x,y,w,h] box. Prefer the document's
+    // own intrinsic size; fall back to the requested box so a viewBox-only SVG
+    // still lays out. setContainerSize maps the viewBox into the box.
+    SkSize intrinsic = dom->containerSize();
+    canvas_->save();
+    canvas_->translate(x, y);
+    if (intrinsic.width() > 0.0f && intrinsic.height() > 0.0f)
+        canvas_->scale(w / intrinsic.width(), h / intrinsic.height());
+    else
+        dom->setContainerSize(SkSize::Make(w, h));
+    dom->render(canvas_);
+    canvas_->restore();
     return true;
 }
 

@@ -4055,6 +4055,15 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-arcs)
 
+# Canvas::draw_svg — faithful SVG rendering via SkSVGDOM (gradients/filters).
+add_executable(pulp-test-canvas-svg test_canvas_svg.cpp)
+target_link_libraries(pulp-test-canvas-svg PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-canvas-svg PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-canvas-svg PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-canvas-svg)
+
 # Emoji-parity tests — cover the segmenter + cluster-aware shaping +
 # letter-spacing + cache invalidation paths. Also writes PNGs to
 # `$PULP_EMOJI_TEST_PNG_DIR` (default /tmp/pulp-emoji-validation/) for
