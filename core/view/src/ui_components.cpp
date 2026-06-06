@@ -403,6 +403,7 @@ void TabPanel::set_active_tab(int index) {
 }
 
 void TabPanel::paint(canvas::Canvas& canvas) {
+    if (!show_tab_bar_) return;  // card-stack mode: no tab bar, content fills the panel
     auto b = local_bounds();
 
     // Tab bar background
@@ -431,6 +432,7 @@ void TabPanel::paint(canvas::Canvas& canvas) {
 }
 
 void TabPanel::on_mouse_event(const MouseEvent& event) {
+    if (!show_tab_bar_) return;  // card-stack mode: nothing to click in the (absent) tab bar
     if (!event.is_down) return;
     if (tabs_.empty()) return;
     if (event.position.y > tab_height_) return; // click below tab bar

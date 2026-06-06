@@ -28,6 +28,26 @@ SettingsPanel::SettingsPanel() {
     flex().direction = view::FlexDirection::column;
     flex().flex_grow = 1.0f;
 
+    // Header: a "Done" that returns to the editor. The standalone hosts this panel inside
+    // an outer card-stack TabPanel (tab bar hidden) whose tab 0 is the editor — walk up to
+    // it and switch back. No-op if there's no such ancestor (panel used standalone).
+    auto header = std::make_unique<view::View>();
+    header->flex().direction = view::FlexDirection::row;
+    header->flex().padding = 8.0f;
+    auto done = std::make_unique<view::ToggleButton>();
+    done->set_label("\xE2\x9C\x95 Done");  // ✕ Done
+    done->flex().preferred_width = 96.0f;
+    done->flex().preferred_height = 28.0f;
+    done->on_toggle = [this](bool) {
+        for (view::View* v = parent(); v != nullptr; v = v->parent())
+            if (auto* tp = dynamic_cast<view::TabPanel*>(v)) {
+                tp->set_active_tab(0);
+                return;
+            }
+    };
+    header->add_child(std::move(done));
+    add_child(std::move(header));
+
     auto tabs = std::make_unique<view::TabPanel>();
     tab_panel_ = tabs.get();
     tabs->flex().flex_grow = 1.0f;

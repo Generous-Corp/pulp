@@ -168,11 +168,15 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     tab_panel->flex().flex_grow = 1.0f;
     tab_panel->add_tab("Editor", std::move(chrome.editor_root_));
     tab_panel->add_tab("Settings", std::move(settings_panel));
+    // No outer [Editor][Settings] tab bar — the editor reaches Settings via its own
+    // control (e.g. a gear button) and the Settings panel has a Done back to the editor.
+    // This keeps one level of tabs (the panel's own Audio/MIDI/<plugin> tabs).
+    tab_panel->set_show_tab_bar(false);
 
     chrome.window_root_ = tab_panel.get();
     chrome.settings_panel_ = settings_ptr;
     chrome.tab_panel_ = std::move(tab_panel);
-    chrome.extra_window_height_ = 32.0f;
+    chrome.extra_window_height_ = 0.0f;  // no outer tab bar to reserve room for
     return chrome;
 }
 

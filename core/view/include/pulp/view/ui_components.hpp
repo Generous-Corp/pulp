@@ -205,6 +205,15 @@ public:
     int active_tab() const { return active_; }
     int tab_count() const { return static_cast<int>(tabs_.size()); }
 
+    /// Hide the tab bar and use the panel purely as a navigable card stack (the active
+    /// tab is shown; switch with set_active_tab()). Useful when an outer container should
+    /// not show its own tabs — e.g. a standalone editor whose Settings is reached via a
+    /// button rather than a tab.
+    void set_show_tab_bar(bool show) {
+        show_tab_bar_ = show;
+        flex().padding_top = show ? tab_height_ : 0.0f;
+    }
+
     /// Called when the active tab changes.
     std::function<void(int index)> on_tab_change;
 
@@ -215,6 +224,7 @@ private:
     std::vector<Tab> tabs_;
     int active_ = 0;
     float tab_height_ = 32.0f;
+    bool show_tab_bar_ = true;
 };
 
 // ── ScrollView ───────────────────────────────────────────────────────────
