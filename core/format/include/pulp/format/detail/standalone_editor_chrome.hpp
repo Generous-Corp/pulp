@@ -129,7 +129,8 @@ private:
         audio::AudioSystem*,
         midi::MidiSystem*,
         view::AudioBridge*,
-        StandaloneSettingsActions);
+        StandaloneSettingsActions,
+        std::vector<Processor::SettingsSection>);
 
     view::View* window_root_ = nullptr;
     SettingsPanel* settings_panel_ = nullptr;
@@ -144,7 +145,8 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     audio::AudioSystem* audio_system,
     midi::MidiSystem* midi_system,
     view::AudioBridge* input_bridge,
-    StandaloneSettingsActions actions) {
+    StandaloneSettingsActions actions,
+    std::vector<Processor::SettingsSection> plugin_sections = {}) {
     StandaloneEditorChrome chrome(std::move(editor_root));
     if (!config.show_settings_tab) {
         return chrome;
@@ -157,6 +159,10 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     settings_panel->set_input_meter_bridge(input_bridge);
     settings_panel->set_callbacks(
         make_standalone_settings_callbacks(*settings_panel, std::move(actions)));
+
+    // Compose plugin-contributed settings tabs after the host-owned Audio/MIDI tabs.
+    for (auto& section : plugin_sections)
+        if (section.view) settings_panel->add_section(std::move(section.title), std::move(section.view));
 
     auto tab_panel = std::make_unique<view::TabPanel>();
     tab_panel->flex().flex_grow = 1.0f;

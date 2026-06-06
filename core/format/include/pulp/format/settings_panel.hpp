@@ -42,6 +42,13 @@ public:
     /// Provide an AudioBridge for input level metering.
     void set_input_meter_bridge(view::AudioBridge* bridge) { input_bridge_ = bridge; }
 
+    /// Append a plugin-contributed settings tab after the host-owned Audio/MIDI tabs.
+    /// Lets a plugin surface its own settings (e.g. a model picker) in one unified panel.
+    void add_section(std::string title, std::unique_ptr<view::View> view);
+
+    /// Number of tabs currently in the panel (Audio + MIDI + any added sections).
+    [[nodiscard]] int tab_count() const;
+
     /// Call periodically (~30 Hz) from idle/timer to refresh meters and hotplug.
     void poll();
 

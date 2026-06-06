@@ -1038,6 +1038,9 @@ pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 # Validation harness tests (Phase 2)
 pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 
+# Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
+pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
+
 pulp_add_test_suite(pulp-test-plugin-state-io LIBRARIES pulp::format)
 
 # AAX metadata/model tests

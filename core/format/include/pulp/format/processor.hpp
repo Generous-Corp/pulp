@@ -635,6 +635,20 @@ public:
     ///
     virtual std::unique_ptr<view::View> create_view() { return nullptr; }
 
+    /// A custom settings tab this plugin contributes to the host's Settings UI.
+    struct SettingsSection {
+        std::string title;                 ///< Tab label, e.g. "Models".
+        std::unique_ptr<view::View> view;  ///< Tab content (built by the plugin).
+    };
+
+    /// Settings tabs this plugin contributes, composed by the host alongside its own
+    /// host-owned tabs (e.g. Audio/MIDI device selection in the standalone). This keeps
+    /// device selection a host concern — correct in a DAW, where the host owns the audio
+    /// device — while letting a plugin surface its own settings (e.g. a model picker) in
+    /// one unified Settings panel. Called when the settings UI is built; may be called
+    /// again if it is rebuilt.
+    virtual std::vector<SettingsSection> settings_sections() { return {}; }
+
     /// Called after a view has been constructed and attached. Runs on the
     /// host/UI thread. Safe to read state and register UI listeners.
     virtual void on_view_opened(view::View& /*view*/) {}

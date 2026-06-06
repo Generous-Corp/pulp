@@ -169,6 +169,14 @@ void SettingsPanel::build_midi_tab() {
     tab_panel_->add_tab("MIDI", std::move(midi_tab));
 }
 
+void SettingsPanel::add_section(std::string title, std::unique_ptr<view::View> view) {
+    if (tab_panel_ && view) tab_panel_->add_tab(std::move(title), std::move(view));
+}
+
+int SettingsPanel::tab_count() const {
+    return tab_panel_ ? tab_panel_->tab_count() : 0;
+}
+
 void SettingsPanel::bind_systems(audio::AudioSystem* audio_sys, midi::MidiSystem* midi_sys) {
     audio_sys_ = audio_sys;
     midi_sys_ = midi_sys;

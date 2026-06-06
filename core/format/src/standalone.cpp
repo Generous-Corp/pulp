@@ -322,7 +322,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
                 test_signal_.set_loop(loop);
                 if (play) test_signal_.play(); else test_signal_.stop();
             },
-        });
+        },
+        processor_->settings_sections());  // plugin-contributed Settings tabs (e.g. Models)
     auto* settings_ptr = chrome.settings_panel();
     auto& window_root = chrome.window_root();
 
