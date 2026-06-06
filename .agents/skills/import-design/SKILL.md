@@ -614,6 +614,47 @@ Pieces, source-of-truth → runtime:
   the node FALLS BACK to normal materialization — a bad asset degrades, never
   blanks the frame.
 
+### Interactive overlays beyond knobs (Plan B "full A")
+
+Knobs are **SVG-patch** (rotate the needle path in the SVG — pixel-perfect).
+The other controls are **native-overlay**: `DesignFrameView` is a composite
+View that hosts an opaque child widget over the element's rect (`build_overlays`
+in the ctor, positioned in `layout_children()` via the SAME `panel_transform`
+the SVG is painted with, so they track scaling/letterbox; `View::hit_test`
+routes events to them, knob hit-test is the parent fallback). `IRInteractiveElement`
++ `DesignFrameElement` carry `kind {knob,text_field,dropdown,tab_group}` + a
+rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
+- `text_field` → `TextEditor` (tap-focus + caret + accent focus ring; opaque bg
+  replaces the baked box — known fidelity cost: the SVG's leading icon is
+  covered, a styling follow-up).
+- `dropdown` → `ComboBox` (set_items from `options`; opens a popup on click).
+  Option LISTS aren't in a static design, so the producer stubs a couple after
+  the shown value — real lists need source component variants (TODO).
+- `tab_group` → `DesignTabGroup` (a compact segmented control drawn opaque over
+  the tab strip; click a slot to move the selection highlight). Detected
+  structurally (`detect_tab_group`): a row of ≥3 similar-width container children
+  with short text labels; the child carrying a visible SOLID fill is the selected
+  tab. `--select-tab=N` is the elysium-standalone demo flag for capturing it.
+
+The `pulp-elysium-standalone` example has demo flags to capture overlay states
+headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens
+the matching ComboBox's popup). Use `--raster=out.png` (Skia) not `--screenshot`
+when the session's live GPU-present path is wedged — raster is the same paint,
+GPU-safe, and DOES render the open ComboBox popup (it paints its list inline).
+
+- **Detection is SOURCE-METADATA, not SVG geometry** (Codex): the producer
+  walk has node names + `absoluteBoundingBox`. `detect_overlay_controls`
+  (figma_rest_export.py) finds a node named ~`search` (skipping the
+  `ic:round-search` icon; ELYSIUM names the placeholder TEXT "Search" with the
+  field as its parent group). The plugin lane must mirror this when wired.
+- **COORDINATE GOTCHA (cost me real time):** the Figma node tree is frame-local
+  (root at abs origin, 1000×600 for ELYSIUM) but the SVG export adds the
+  drop-shadow margin (1146×746, panel at (73,50)). Node coords are NOT SVG
+  coords. Map every node-derived overlay rect:
+  `svg = (node_abs - root_abs) + panel_origin`, where `panel_origin` is
+  `parse_panel_bounds(svg)` (mirrors `DesignFrameView::detect_panel`). Knobs are
+  immune (parsed straight from the SVG); only node-tree-derived overlays need it.
+
 Gotchas:
 - `draw_svg` rebuilds the `SkSVGDOM` every call (a parsed-DOM cache is a
   planned optimization) — fine at interactive rates, but don't call it in a

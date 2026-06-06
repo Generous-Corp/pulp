@@ -598,6 +598,160 @@ def _name_override_knobs(figma_root, knob_names, geom_knobs):
     visit(figma_root)
     return added
 
+def _first_text(n):
+    """First TEXT descendant's characters, or '' (for a field's placeholder)."""
+    if n.get("type") == "TEXT" and n.get("characters"):
+        return n["characters"]
+    for c in n.get("children", []):
+        t = _first_text(c)
+        if t:
+            return t
+    return ""
+
+# SVG <rect> regex reused for panel detection (mirrors the C++ detect_panel).
+_RECT_RE = re.compile(r'<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)"')
+
+def parse_panel_bounds(svg):
+    """The design PANEL within the frame SVG = the largest <rect> that is a big
+    fraction of the frame (0.15..0.97) — its (x,y) is where the frame content sits
+    in SVG space (the surrounding margin is the Figma drop shadow). Mirrors
+    DesignFrameView::detect_panel so producer overlay coords land in the same
+    space the view crops to. Returns (px, py, pw, ph) or (0,0,0,0)."""
+    fw = fh = 0.0
+    mw = re.search(r'width="([-\d.]+)"', svg)
+    mh = re.search(r'height="([-\d.]+)"', svg)
+    if mw: fw = float(mw.group(1))
+    if mh: fh = float(mh.group(1))
+    frame_area = fw * fh
+    best = 0.0
+    out = (0.0, 0.0, 0.0, 0.0)
+    for m in _RECT_RE.finditer(svg):
+        x, y, w, h = (float(v) for v in m.groups())
+        area = w * h
+        if frame_area > 0:
+            frac = area / frame_area
+            if frac < 0.15 or frac > 0.97:
+                continue
+        if area > best:
+            best = area
+            out = (x, y, w, h)
+    return out
+
+def detect_overlay_controls(figma_root, root_abs, panel_origin):
+    """Detect NATIVE-OVERLAY controls (search/dropdown/tabs) from the Figma node
+    tree by name/structure — source metadata, more reliable than SVG glyphs
+    (Codex review). Node coords are mapped into SVG space:
+      svg = (node_abs - root_abs) + panel_origin
+    because the node tree is frame-local while the SVG export adds the drop-shadow
+    margin (so the panel sits at panel_origin, not 0,0). text_field (search) +
+    dropdown. tab_group lands in a later slice."""
+    rax, ray = root_abs
+    pox, poy = panel_origin
+
+    def to_svg(bb):
+        return (bb.get("x", 0.0) - rax + pox, bb.get("y", 0.0) - ray + poy,
+                bb.get("width", 0.0), bb.get("height", 0.0))
+
+    out = []
+
+    _CONTAINER_TYPES = ("FRAME", "INSTANCE", "COMPONENT", "GROUP")
+
+    def detect_tab_group(n):
+        """A tab/segmented control = a horizontal row of >=3 container children,
+        each with a short text label, of similar width. The selected tab is the
+        one child carrying a visible SOLID fill (the highlight). Returns a
+        tab_group dict (rect = union of the tabs) or None. Source-structural —
+        works beyond ELYSIUM's "Button" naming."""
+        tabs = []
+        for c in n.get("children", []):
+            cb = c.get("absoluteBoundingBox")
+            if not cb or c.get("type") not in _CONTAINER_TYPES:
+                continue
+            label = _first_text(c)
+            if label and len(label) <= 3:
+                tabs.append((c, label, cb))
+        if len(tabs) < 3:
+            return None
+        ys = [cb["y"] for _, _, cb in tabs]
+        ws = [cb["width"] for _, _, cb in tabs]
+        if max(ys) - min(ys) > 6:                       # must be one horizontal row
+            return None
+        if min(ws) <= 0 or max(ws) / min(ws) > 1.6:     # similar-width slots
+            return None
+        tabs.sort(key=lambda t: t[2]["x"])              # left→right
+        selected = 0
+        for i, (c, _, _) in enumerate(tabs):
+            fills = [f for f in (c.get("fills") or [])
+                     if f.get("visible", True) and f.get("type") == "SOLID"]
+            if fills:
+                selected = i
+        x0 = min(cb["x"] for _, _, cb in tabs)
+        y0 = min(cb["y"] for _, _, cb in tabs)
+        x1 = max(cb["x"] + cb["width"] for _, _, cb in tabs)
+        y1 = max(cb["y"] + cb["height"] for _, _, cb in tabs)
+        gx, gy, gw, gh = to_svg({"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0})
+        return {
+            "kind": "tab_group",
+            "x": gx, "y": gy, "w": gw, "h": gh,
+            "options": [label for _, label, _ in tabs],
+            "selected_index": selected,
+            "source_node_id": n.get("id", ""),
+        }
+
+    def visit(n, parent):
+        name = (n.get("name") or "").lower()
+        ntype = n.get("type", "")
+        bb = n.get("absoluteBoundingBox")
+        # ── tab group (segmented control) ───────────────────────────────
+        tg = detect_tab_group(n)
+        if tg:
+            out.append(tg)
+            return  # the tabs are owned by the overlay — don't recurse
+        # ── search (text_field) ─────────────────────────────────────────
+        # ELYSIUM names the placeholder TEXT "Search" (the field itself is its
+        # parent group); the magnifier is "ic:round-search". Match the search
+        # TEXT/field but skip the icon, and overlay the PARENT group's rect so the
+        # whole field is clickable.
+        is_search = ("search" in name and not name.startswith("ic")
+                     and not name.startswith("icon"))
+        if bb and is_search:
+            # If the match is the placeholder TEXT (ELYSIUM), the field is its
+            # parent group; a node already named like a field uses its own rect.
+            use_parent = (n.get("type") == "TEXT" and parent
+                          and parent.get("absoluteBoundingBox"))
+            field = parent if use_parent else n
+            fx, fy, fw, fh = to_svg(field["absoluteBoundingBox"])
+            out.append({
+                "kind": "text_field",
+                "x": fx, "y": fy, "w": fw, "h": fh,
+                "placeholder": _first_text(n) or n.get("name", "Search"),
+                "source_node_id": field.get("id", n.get("id", "")),
+            })
+            return  # the field is a leaf overlay — don't recurse into it
+        # ── dropdown ────────────────────────────────────────────────────
+        # A FRAME named ~"dropdown" of field-like size (skip tiny "+" buttons and
+        # stray TEXT). The shown value is its first text; real option lists need
+        # source component variants, so we stub a couple so the popup is usable.
+        is_dropdown = ("dropdown" in name and ntype == "FRAME" and bb
+                       and bb.get("width", 0.0) >= 40.0
+                       and 14.0 <= bb.get("height", 0.0) <= 44.0)
+        if is_dropdown:
+            dx, dy, dw, dh = to_svg(bb)
+            current = _first_text(n) or "Select"
+            out.append({
+                "kind": "dropdown",
+                "x": dx, "y": dy, "w": dw, "h": dh,
+                "options": [current, "Option 2", "Option 3"],  # TODO: source variants
+                "selected_index": 0,
+                "source_node_id": n.get("id", ""),
+            })
+            return  # leaf overlay
+        for c in n.get("children", []):
+            visit(c, n)
+
+    visit(figma_root, None)
+    return out
+
 def apply_faithful_vector(root_node, figma_root, svg, file_key, node_id, out_dir,
                           knob_names, write_file=True):
     """Mutate root_node into a faithful_svg frame: register the frame SVG as an
@@ -622,12 +776,16 @@ def apply_faithful_vector(root_node, figma_root, svg, file_key, node_id, out_dir
         except OSError as e:
             print(f"  faithful-vector: could not write SVG file: {e}", file=sys.stderr)
 
-    knobs = parse_frame_knobs(svg)
-    knobs += _name_override_knobs(figma_root, knob_names, knobs)
+    fb = figma_root.get("absoluteBoundingBox") or {}
+    root_abs = (fb.get("x", 0.0), fb.get("y", 0.0))
+    px, py, _, _ = parse_panel_bounds(svg)  # where the frame content sits in SVG space
+    elements = parse_frame_knobs(svg)
+    elements += _name_override_knobs(figma_root, knob_names, elements)
+    elements += detect_overlay_controls(figma_root, root_abs, (px, py))
 
     root_node["render_mode"] = "faithful_svg"
     root_node["svg_asset_id"] = asset_id
-    root_node["interactive_elements"] = knobs
+    root_node["interactive_elements"] = elements
     return entry
 
 def _rewrite_image_fills(node, ref_to_rel):
@@ -708,8 +866,12 @@ def main():
             entry = apply_faithful_vector(root_node, root, svg, file_key, node_id,
                                           out_dir, args.knob_name)
             asset_manifest_entries.append(entry)
-            n_knobs = len(root_node.get("interactive_elements", []))
-            print(f"  faithful-vector: {len(svg)} byte SVG, {n_knobs} interactive knob(s)")
+            els = root_node.get("interactive_elements", [])
+            import collections as _c
+            kinds = _c.Counter(x.get("kind", "knob") for x in els)
+            summary = ", ".join(f"{v} {k}" for k, v in sorted(kinds.items()))
+            print(f"  faithful-vector: {len(svg)} byte SVG, {len(els)} interactive element(s)"
+                  f" ({summary})")
         else:
             print("  faithful-vector: no SVG available (need --frame-svg or a token); "
                   "falling back to normal export", file=sys.stderr)

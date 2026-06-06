@@ -294,10 +294,19 @@ enum class NodeRenderMode {
 
 // The kind of an interactive overlay on a faithful_svg node. Deliberately
 // separate from AudioWidgetType (which is audio-parameter specific); this models
-// design-interaction semantics. Extensible: search / dropdown / button / fader
-// land with their own binding contracts in later slices.
+// design-interaction semantics.
+//
+// Two materialization mechanisms (see DesignFrameView):
+//   - `knob` is SVG-PATCH: its needle path is rotated in the SVG and re-rendered
+//     (pixel-perfect, uses cx/cy/hit_radius/svg_patch_d/default_value).
+//   - `dropdown` / `text_field` / `tab_group` are NATIVE-OVERLAY: an opaque child
+//     widget (ComboBox / TextEditor / tab group) is positioned over the element's
+//     `rect` and replaces that baked SVG region with a live control.
 enum class InteractiveElementKind {
     knob,
+    dropdown,
+    text_field,
+    tab_group,
 };
 
 // One source-identified interactive element overlaid on a faithful_svg render.
@@ -305,6 +314,8 @@ enum class InteractiveElementKind {
 // source (Figma node ids/names/properties), so behavior is real, not inferred.
 struct IRInteractiveElement {
     InteractiveElementKind kind = InteractiveElementKind::knob;
+
+    // ── knob (SVG-patch) ────────────────────────────────────────────────
     float cx = 0.0f;                 ///< pivot / hit center, SVG coords
     float cy = 0.0f;
     float hit_radius = 0.0f;         ///< click-target radius, SVG coords
@@ -312,6 +323,22 @@ struct IRInteractiveElement {
     /// rotates around (cx, cy)).
     std::string svg_patch_d;
     float default_value = 0.5f;      ///< 0..1
+
+    // ── overlay controls (dropdown / text_field / tab_group) ─────────────
+    /// Element bounding box in SVG coords — where the native overlay widget is
+    /// positioned (via DesignFrameView's panel transform). Zero for knobs.
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+    /// dropdown: the selectable options. tab_group: the tab labels. The first
+    /// entry is also the design's currently-shown value when selected_index is 0.
+    std::vector<std::string> options;
+    /// dropdown / tab_group: which option/tab is selected initially.
+    int selected_index = 0;
+    /// text_field: placeholder text shown until focused/typed.
+    std::string placeholder;
+
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };
 

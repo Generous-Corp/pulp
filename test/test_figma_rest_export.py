@@ -224,6 +224,114 @@ class FaithfulVectorTest(unittest.TestCase):
     def test_name_override_empty_when_no_names(self):
         self.assertEqual(frx._name_override_knobs({"children": []}, [], []), [])
 
+    def test_detect_overlay_controls_named_field_uses_own_rect(self):
+        # A node named like a field uses its OWN rect. Coords map node->SVG:
+        # svg = (node_abs - root_abs) + panel_origin. root_abs (100,200),
+        # panel_origin (73,50): node (116,250) -> (116-100+73, 250-200+50)=(89,100).
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 100, "y": 200, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Search Field", "id": "5:1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 116, "y": 250, "width": 280, "height": 32},
+                 "children": [{"type": "TEXT", "characters": "Search"}]},
+                {"name": "Some Frame", "id": "5:2",
+                 "absoluteBoundingBox": {"x": 500, "y": 250, "width": 100, "height": 100}},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (100.0, 200.0), (73.0, 50.0))
+        self.assertEqual(len(els), 1)
+        e = els[0]
+        self.assertEqual(e["kind"], "text_field")
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (89.0, 100.0, 280.0, 32.0))
+        self.assertEqual(e["placeholder"], "Search")
+        self.assertEqual(e["source_node_id"], "5:1")
+
+    def test_detect_overlay_controls_placeholder_text_uses_parent_group(self):
+        # ELYSIUM shape: the "Search" placeholder is a TEXT leaf; the field is its
+        # parent group. The magnifier "ic:round-search" must NOT match.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Group 59", "id": "g59", "type": "GROUP",
+                 "absoluteBoundingBox": {"x": 21, "y": 73, "width": 184, "height": 26},
+                 "children": [
+                     {"name": "ic:round-search", "type": "FRAME",
+                      "absoluteBoundingBox": {"x": 21, "y": 76, "width": 15, "height": 15}},
+                     {"name": "Search", "type": "TEXT", "characters": "Search",
+                      "absoluteBoundingBox": {"x": 44, "y": 78, "width": 43, "height": 17}},
+                 ]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        self.assertEqual(len(els), 1)              # icon skipped, one field found
+        e = els[0]
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (94.0, 123.0, 184.0, 26.0))
+        self.assertEqual(e["source_node_id"], "g59")  # the parent group, not the text
+
+    def test_parse_panel_bounds_picks_the_panel_rect(self):
+        svg = ('<svg width="1146" height="746" xmlns="http://www.w3.org/2000/svg">'
+               '<rect x="0" y="0" width="1146" height="746" fill="#000"/>'  # full frame -> excluded
+               '<rect x="73" y="50" width="1000" height="600" fill="#252626"/>'
+               '<rect x="83" y="112" width="980" height="367" fill="#1c1d1d"/></svg>')
+        self.assertEqual(frx.parse_panel_bounds(svg), (73.0, 50.0, 1000.0, 600.0))
+
+    def test_detect_overlay_controls_finds_dropdowns_skips_tiny(self):
+        # A FRAME named ~dropdown of field size becomes a dropdown overlay (coords
+        # mapped node->SVG). A tiny "+"-button-sized dropdown and a stray TEXT are
+        # skipped.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Dropdown", "id": "d1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 700, "y": 480, "width": 103, "height": 27},
+                 "children": [{"type": "TEXT", "characters": "1/4 Delay"}]},
+                {"name": "Dropdown", "id": "d2", "type": "FRAME",          # "+" button — too small
+                 "absoluteBoundingBox": {"x": 950, "y": 480, "width": 26, "height": 27}},
+                {"name": "Dropdown", "id": "d3", "type": "TEXT",           # stray text — not a FRAME
+                 "absoluteBoundingBox": {"x": 100, "y": 480, "width": 93, "height": 7}},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        self.assertEqual(len(els), 1)
+        e = els[0]
+        self.assertEqual(e["kind"], "dropdown")
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (773.0, 530.0, 103.0, 27.0))
+        self.assertEqual(e["options"][0], "1/4 Delay")    # shown value first
+        self.assertGreater(len(e["options"]), 1)          # stub options so the popup is usable
+        self.assertEqual(e["source_node_id"], "d1")
+
+    def test_detect_overlay_controls_finds_tab_group(self):
+        # A row of >=3 container children with short labels = a tab group; the one
+        # with a visible SOLID fill is selected. Mapped node->SVG (+73,+50).
+        def tab(x, label, filled=False):
+            t = {"name": "Button", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": x, "y": 76, "width": 29, "height": 20},
+                 "children": [{"type": "TEXT", "characters": label}]}
+            if filled:
+                t["fills"] = [{"type": "SOLID", "visible": True}]
+            return t
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Pager", "id": "tg", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 220, "y": 76, "width": 120, "height": 20},
+                 "children": [tab(220, "1"), tab(249, "2"), tab(279, "3", filled=True), tab(308, "4")]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        tabs = [e for e in els if e["kind"] == "tab_group"]
+        self.assertEqual(len(tabs), 1)
+        t = tabs[0]
+        self.assertEqual(t["options"], ["1", "2", "3", "4"])
+        self.assertEqual(t["selected_index"], 2)          # the filled "3"
+        # rect = union of tabs (220,76)-(337,96) -> svg (293,126,117,20)
+        self.assertEqual((t["x"], t["y"], t["w"], t["h"]), (293.0, 126.0, 117.0, 20.0))
+
+    def test_detect_overlay_controls_none_when_no_match(self):
+        root = {"absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10},
+                "children": [{"name": "Knob", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 4}}]}
+        self.assertEqual(frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0)), [])
+
 
 if __name__ == "__main__":
     unittest.main()

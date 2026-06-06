@@ -738,6 +738,42 @@ TEST_CASE("baked native materializer falls back when a faithful_svg asset is unr
                               "native-materialize-faithful-svg-unresolved"));
 }
 
+TEST_CASE("materializer overlays a TextEditor for a faithful_svg text_field element",
+          "[view][import][native-materializer][faithful-svg][overlay]") {
+    // Plan B full-A slice 2: a text_field interactive element on a faithful_svg
+    // node materializes (via to_frame_elements) into a DesignFrameView that hosts
+    // a native TextEditor overlay — not a knob.
+    const std::string svg =
+        R"(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="80" height="80" fill="#1c1d1d"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement search;
+    search.kind = InteractiveElementKind::text_field;
+    search.x = 16; search.y = 16; search.w = 60; search.h = 16;
+    search.placeholder = "Search";
+    ir.root.interactive_elements.push_back(search);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+    auto* editor = dynamic_cast<TextEditor*>(frame->overlay_widget(0));
+    REQUIRE(editor != nullptr);
+    CHECK(editor->placeholder == "Search");
+}
+
 TEST_CASE("faithful_svg flows producer envelope -> parse -> materialize -> DesignFrameView",
           "[view][import][native-materializer][faithful-svg][e2e]") {
     // The whole-chain proof (Plan B / B5): an envelope shaped EXACTLY like the

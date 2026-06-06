@@ -8,6 +8,34 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03530"></a>
+## [0.353.0] - 2026-06-06
+
+- feat(design-import): native-overlay tabs on faithful frames (Plan B / full-A slice 4) ([#3482](https://github.com/danielraffel/pulp/pull/3482))
+
+<a id="v03520"></a>
+## [0.352.0] - 2026-06-06
+
+- feat(design-import): native-overlay dropdowns on faithful frames (Plan B / full-A slice 3) ([#3480](https://github.com/danielraffel/pulp/pull/3480))
+
+<a id="v03510"></a>
+## [0.351.0] - 2026-06-06
+
+- feat(design-import): native-overlay search field on faithful frames (Plan B / full-A slice 2) ([#3477](https://github.com/danielraffel/pulp/pull/3477))
+
+<a id="v03500"></a>
+## [0.350.0] - 2026-06-06
+
+- feat(design-import): typed IR for dropdown/text_field/tab_group overlays (Plan B / full-A slice 1) ([#3475](https://github.com/danielraffel/pulp/pull/3475))
+
+<a id="v03490"></a>
+## [0.349.0] - 2026-06-06
+
+- fix(design-import): faithful frame is interactive + fits at any window aspect ([#3474](https://github.com/danielraffel/pulp/pull/3474))
+- test(design-import): end-to-end faithful_svg envelope → DesignFrameView (Plan B / B5) ([#3473](https://github.com/danielraffel/pulp/pull/3473))
+- feat(design-import): Figma plugin emits faithful-vector frames (Plan B / B4b) ([#3470](https://github.com/danielraffel/pulp/pull/3470))
+- feat(design-import): REST exporter emits faithful-vector frames (Plan B / B4a) ([#3469](https://github.com/danielraffel/pulp/pull/3469))
+
 <a id="v03480"></a>
 ## [0.348.0] - 2026-06-06
 
@@ -3673,6 +3701,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.353.0]: https://github.com/danielraffel/pulp/releases/tag/v0.353.0
+[0.352.0]: https://github.com/danielraffel/pulp/releases/tag/v0.352.0
+[0.351.0]: https://github.com/danielraffel/pulp/releases/tag/v0.351.0
+[0.350.0]: https://github.com/danielraffel/pulp/releases/tag/v0.350.0
+[0.349.0]: https://github.com/danielraffel/pulp/releases/tag/v0.349.0
 [0.348.0]: https://github.com/danielraffel/pulp/releases/tag/v0.348.0
 [0.347.0]: https://github.com/danielraffel/pulp/releases/tag/v0.347.0
 [0.346.0]: https://github.com/danielraffel/pulp/releases/tag/v0.346.0

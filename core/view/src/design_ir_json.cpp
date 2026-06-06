@@ -58,12 +58,20 @@ static NodeRenderMode render_mode_from_id(const std::string& s) {
 static const char* render_mode_id(NodeRenderMode m) {
     return m == NodeRenderMode::faithful_svg ? "faithful_svg" : "normal";
 }
-// Only `knob` exists today; unknown ids fall back to it. Extend alongside
-// InteractiveElementKind when search/dropdown/button land.
-static InteractiveElementKind interactive_kind_from_id(const std::string&) {
+// Unknown ids fall back to `knob` (the original kind) for forward-compat.
+static InteractiveElementKind interactive_kind_from_id(const std::string& s) {
+    if (s == "dropdown") return InteractiveElementKind::dropdown;
+    if (s == "text_field") return InteractiveElementKind::text_field;
+    if (s == "tab_group") return InteractiveElementKind::tab_group;
     return InteractiveElementKind::knob;
 }
-static const char* interactive_kind_id(InteractiveElementKind) {
+static const char* interactive_kind_id(InteractiveElementKind k) {
+    switch (k) {
+        case InteractiveElementKind::dropdown:   return "dropdown";
+        case InteractiveElementKind::text_field: return "text_field";
+        case InteractiveElementKind::tab_group:  return "tab_group";
+        case InteractiveElementKind::knob:       break;
+    }
     return "knob";
 }
 
@@ -806,6 +814,19 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.hit_radius = get_float(e, "hit_radius");
             el.svg_patch_d = get_string(e, "svg_patch_d");
             el.default_value = get_float(e, "default_value", 0.5f);
+            // Overlay-control fields (dropdown / text_field / tab_group).
+            el.x = get_float(e, "x");
+            el.y = get_float(e, "y");
+            el.w = get_float(e, "w");
+            el.h = get_float(e, "h");
+            el.selected_index = static_cast<int>(get_float(e, "selected_index"));
+            el.placeholder = get_string(e, "placeholder");
+            if (e.hasObjectMember("options") && e["options"].isArray()) {
+                const auto opts = e["options"];
+                for (uint32_t j = 0; j < opts.size(); ++j)
+                    if (opts[static_cast<int>(j)].isString())
+                        el.options.push_back(std::string(opts[static_cast<int>(j)].toString()));
+            }
             if (e.hasObjectMember("source_node_id") && e["source_node_id"].isString())
                 el.source_node_id = get_string(e, "source_node_id");
             node.interactive_elements.push_back(std::move(el));
@@ -1724,6 +1745,24 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             if (!el.svg_patch_d.empty())
                 write_string_member(out, ef, "svg_patch_d", el.svg_patch_d);
             write_float_member(out, ef, "default_value", el.default_value);
+            // Overlay-control fields — emitted only when set (knobs stay lean).
+            if (el.x != 0.0f) write_float_member(out, ef, "x", el.x);
+            if (el.y != 0.0f) write_float_member(out, ef, "y", el.y);
+            if (el.w != 0.0f) write_float_member(out, ef, "w", el.w);
+            if (el.h != 0.0f) write_float_member(out, ef, "h", el.h);
+            if (el.selected_index != 0)
+                write_int_member(out, ef, "selected_index", el.selected_index);
+            if (!el.placeholder.empty())
+                write_string_member(out, ef, "placeholder", el.placeholder);
+            if (!el.options.empty()) {
+                write_key(out, ef, "options");
+                out << '[';
+                for (size_t j = 0; j < el.options.size(); ++j) {
+                    if (j) out << ',';
+                    out << '"' << json_escape(el.options[j]) << '"';
+                }
+                out << ']';
+            }
             write_string_member(out, ef, "source_node_id", el.source_node_id);
             out << '}';
         }
