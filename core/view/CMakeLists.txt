@@ -353,6 +353,7 @@ target_sources(pulp-view-core PRIVATE
     src/screenshot_compare.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
+    src/design_frame_view.cpp
     src/svg_path_widget.cpp
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
