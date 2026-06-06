@@ -5060,6 +5060,14 @@ target_link_libraries(pulp-test-image-view-fill
 catch_discover_tests(pulp-test-image-view-fill
     PROPERTIES LABELS "view")
 
+# DesignFrameView (Plan B / B1) — faithful SVG render + typed interactive knobs.
+add_executable(pulp-test-design-frame-view
+    test_design_frame_view.cpp)
+target_link_libraries(pulp-test-design-frame-view
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-frame-view
+    PROPERTIES LABELS "view")
+
 # P5-3 follow-up — W3C Design Tokens cluster extracted from
 # test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math
