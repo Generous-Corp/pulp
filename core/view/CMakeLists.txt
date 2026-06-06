@@ -250,6 +250,14 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     set(PULP_V8_PROVIDER_KIND "${PULP_V8_PROVIDER_KIND}" CACHE INTERNAL "Resolved V8 provider kind")
     set(PULP_V8_PROVIDER_PATH "${PULP_V8_PROVIDER_PATH}" CACHE INTERNAL "Resolved V8 provider library path")
     set(PULP_V8_EXPECTED_RUNTIME_VERSION "${PULP_V8_EXPECTED_RUNTIME_VERSION}" CACHE INTERNAL "Manifest-pinned V8 runtime version")
+
+    # Windows: the sealed v8.dll exposes the Chromium libc++ (__Cr) ABI with
+    # pointer compression ON, so the V8 translation unit must be compiled
+    # with clang-cl + that libc++ + V8_COMPRESS_POINTERS. This is a no-op off
+    # Windows; on Windows it hard-fails if the compiler is MSVC cl rather
+    # than clang-cl. See tools/cmake/PulpV8Windows.cmake.
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpV8Windows.cmake)
+    pulp_v8_windows_apply_abi(pulp-view-script)
 endif()
 
 # JSC backend (Apple platforms only)

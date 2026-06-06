@@ -15,6 +15,17 @@
 
 #ifdef PULP_HAS_V8
 
+// CHOC's V8 + Console headers use std::ostringstream / std::endl / std::cerr /
+// std::cout but rely on a transitive include of <sstream>/<iostream>. The MSVC
+// STL pulls those in implicitly; libc++ (the Chromium-style libc++ the Windows
+// sealed v8.dll requires its consumer to use — see tools/cmake/PulpV8Windows.
+// cmake) does NOT, so the iostream headers must be included explicitly BEFORE
+// the choc headers or the TU fails to compile under clang-cl + libc++.
+#include <ios>
+#include <ostream>
+#include <sstream>
+#include <iostream>
+
 // Include CHOC's V8 wrapper — must appear in exactly one translation unit
 #include <choc/javascript/choc_javascript_V8.h>
 #include <choc/javascript/choc_javascript_Console.h>

@@ -222,6 +222,55 @@ appear, never re-exported `icu_NN::`/`absl::` library symbols. V8 is still
 confined to `js_v8_engine.cpp` and never shares a TU with a Skia/Dawn
 header.
 
+## Windows sealed v8-builder V8 (clang-cl + Chromium libc++ `__Cr`)
+
+The v8-builder sealed Windows `v8.dll` (e.g. `v8-15.1.27`) is a special
+ABI lane, NOT a drop-in for MSVC cl. It is built (v8-builder
+`build-v8.py:win_gn_args()`) with **pointer compression ON**, **Chromium's
+bundled libc++ (`__Cr` ABI namespace)**, sandbox OFF, rtti OFF. So
+`v8.dll.lib` exports its `std::`-bearing API mangled into `__Cr@std`
+(verify: hundreds of `...@__Cr@std@@` symbols). A consumer built with
+**MSVC cl + MSVC STL will not link** — its plain `@std@@` symbols never
+resolve against the `__Cr@std` imports. The contract (all verified on the
+Win11-24H2 arm64 QEMU golden, x64 V8 under ARM x64 emulation):
+
+1. Compile the V8 TU (`js_v8_engine.cpp`) with **clang-cl**, not cl.
+   `tools/cmake/PulpV8Windows.cmake` hard-fails configure if the compiler
+   is MSVC cl.
+2. **`-DV8_COMPRESS_POINTERS`** — mandatory; without it the inline
+   `v8-internal.h` tagged-field offsets mismatch the DLL and silently
+   corrupt the heap.
+3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
+   (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
+   `-nostdinc++` is silently dropped by clang-cl, which is the trap that
+   makes a build fall back to MSVC STL). The official Windows LLVM package
+   ships clang-cl but **no libc++**, so headers come from an llvm-project
+   `libcxx/include` checkout. The `__config_site` must set
+   `_LIBCPP_HAS_LOCALIZATION 1` or `<ostream>`/`<sstream>`/`std::endl`
+   silently vanish.
+4. **A `__Cr`-ABI `libc++.lib`** — `v8.dll` exports NONE of the
+   out-of-line libc++ runtime (no `std::cout`, `basic_string`/
+   `basic_ostream` ctors/dtors, `operator new`). Build it from
+   llvm-project `runtimes` with `LLVM_ENABLE_RUNTIMES=libcxx`,
+   `LIBCXX_ABI_NAMESPACE=__Cr`, `LIBCXX_ABI_VERSION=2`,
+   `LIBCXX_CXX_ABI=vcruntime`, RTTI ON + exceptions ON (libc++ refuses
+   exceptions-on/rtti-off). Link it + `msvcprt.lib` (the latter supplies
+   the `__ExceptionPtr*` vcruntime glue), and define
+   `_CRT_STDIO_ISO_WIDE_SPECIFIERS=1` to match the lib (else lld-link
+   `/FAILIFMISMATCH`).
+
+Wiring: select V8 the normal way (`PULP_JS_ENGINE=v8` after
+`fetch_v8_for_release.py windows-x64`, which unpacks the sealed
+`v8.dll.lib` under `external/v8-build/`, so `FindV8.cmake` resolves it).
+On Windows, additionally supply `PULP_V8_WIN_LIBCXX_INCLUDE` and
+`PULP_V8_WIN_LIBCXX_LIB` (the Chromium-style libc++ headers + the
+`__Cr`-ABI `libc++.lib`). `core/view/CMakeLists.txt` links `v8::v8` and
+then calls `pulp_v8_windows_apply_abi(pulp-view-script)` (no-op off
+Windows). Proven: choc V8 consumer init + `evaluateExpression
+("40 + 2") == 42`, `V8::GetVersion() == 15.1.27`. The mac/linux sealed
+artifacts use the **system** libc++ (no `__Cr`) and need none of this —
+the `__Cr` contract is Windows-only.
+
 **Cross-platform rollout + ship/sign/package** (Windows MSVC `/MT` ABI,
 macOS nested-dylib re-signing, Android ABI gating, golden-VM bake) are
 tracked in `planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
