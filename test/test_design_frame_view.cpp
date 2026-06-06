@@ -91,6 +91,59 @@ TEST_CASE("DesignFrameView renders faithfully and the needle visibly rotates",
     CHECK(cmp.similarity < 0.999f);
 }
 
+TEST_CASE("DesignFrameView hit-test agrees with the render at a non-panel aspect",
+          "[view][design-import][frame]") {
+    // Regression for the live-window bug: paint() and hit_element() must share ONE
+    // transform, so a knob is hit exactly where it's DRAWN even when the host
+    // window aspect != panel aspect (the sprite-demo host sized the window to the
+    // 1146x746 frame while the panel was 1000x600). The earlier "drag turns the
+    // hit knob" test only used square 1:1 bounds, so it missed this.
+    DesignFrameView v(make_design_svg(), {make_knob()});  // panel 80x80 at (10,10)
+    // Give it a tall 1:2 letterbox. Uniform fit: scale = min(80/80, 160/80) = 1,
+    // centered oy = (160-80)/2 = 40, ox = 0. The knob (SVG 50,50; panel origin
+    // 10,10) is therefore DRAWN at view (0+(50-10), 40+(50-10)) = (40, 80).
+    v.set_bounds({0, 0, 80, 160});
+
+    v.on_mouse_down({40, 80});     // exactly where the knob is rendered
+    v.on_mouse_drag({40, 50});     // drag up 30 view px
+    CHECK(v.element_value(0) > 0.6f);   // hit + turn at the rendered position
+
+    // A click in the letterbox margin (above the centered panel) hits nothing.
+    v.set_element_value(0, 0.5f);
+    v.on_mouse_down({40, 5});
+    v.on_mouse_drag({40, 0});
+    CHECK(v.element_value(0) == 0.5f);
+}
+
+TEST_CASE("DesignFrameView intrinsic size is the panel (so hosts size the window)",
+          "[view][design-import][frame]") {
+    DesignFrameView v(make_design_svg(), {make_knob()});
+    CHECK(v.intrinsic_width() == 80.0f);
+    CHECK(v.intrinsic_height() == 80.0f);
+}
+
+TEST_CASE("DesignFrameView renders + the needle rotates at a non-panel aspect",
+          "[view][design-import][frame][svg]") {
+    // Paint must also be correct (not just hit) at a mismatched aspect: the same
+    // knob at two values must produce different renders in a letterboxed view.
+    DesignFrameView lo(make_design_svg(), {make_knob()});
+    DesignFrameView hi(make_design_svg(), {make_knob()});
+    lo.set_bounds({0, 0, 80, 160});
+    hi.set_bounds({0, 0, 80, 160});
+    lo.set_element_value(0, 0.1f);
+    hi.set_element_value(0, 0.9f);
+
+    auto lo_png = render_to_png(lo, 80, 160, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 80, 160, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);
+}
+
 TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",
           "[view][design-import][frame][svg]") {
     DesignFrameView empty("", {});

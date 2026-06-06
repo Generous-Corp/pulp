@@ -53,11 +53,24 @@ public:
     float element_value(int i) const;
     void set_element_value(int i, float v);
 
+    // The panel is the view's natural size — a host should size its window to
+    // this aspect so the design fills it with no letterbox (see paint()).
+    float intrinsic_width() const override { return panel_w_; }
+    float intrinsic_height() const override { return panel_h_; }
+
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
 
 private:
+    // The ONE transform shared by paint() and hit_element(): a uniform fit of the
+    // panel into `bounds`, centered (letterbox when bounds aspect != panel
+    // aspect). `scale` is panel→view; (ox,oy) is the view-space position of the
+    // panel's top-left. paint draws through it; hit_element inverts it — so a
+    // knob is hit exactly where it is drawn, at ANY host window aspect.
+    struct PanelTransform { float scale = 0.0f, ox = 0.0f, oy = 0.0f; };
+    PanelTransform panel_transform(const Rect& bounds) const;
+
     int hit_element(Point pos) const;
 
     std::string svg_;

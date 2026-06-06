@@ -94,27 +94,39 @@ void DesignFrameView::set_element_value(int i, float v) {
     request_repaint();
 }
 
+DesignFrameView::PanelTransform DesignFrameView::panel_transform(const Rect& b) const {
+    PanelTransform t;
+    if (b.width <= 0 || b.height <= 0 || panel_w_ <= 0 || panel_h_ <= 0) return t;
+    // Uniform fit, preserving the panel's aspect, centered in the view. When the
+    // host sized the window to the panel aspect (the recommended path) the slack
+    // is zero and the panel fills the view exactly; otherwise it letterboxes.
+    t.scale = std::min(b.width / panel_w_, b.height / panel_h_);
+    t.ox = (b.width - panel_w_ * t.scale) * 0.5f;
+    t.oy = (b.height - panel_h_ * t.scale) * 0.5f;
+    return t;
+}
+
 void DesignFrameView::paint(canvas::Canvas& canvas) {
     if (svg_.empty() || panel_w_ <= 0 || panel_h_ <= 0) return;
     std::string s = svg_;
     for (const auto& e : elements_)
         if (e.kind == DesignFrameElement::Kind::knob && !e.needle_d.empty())
             wrap_needle_rotation(s, e.needle_d, (e.value - 0.5f) * kSweepDeg, e.cx, e.cy);
-    const auto b = local_bounds();
-    if (b.width <= 0 || b.height <= 0) return;
-    // Scale so the panel fills the view; offset so its top-left is the origin —
-    // the surrounding shadow margin falls outside the view and is clipped.
-    const float scale = b.width / panel_w_;
-    canvas.draw_svg(s, -panel_x_ * scale, -panel_y_ * scale,
-                    svg_w_ * scale, svg_h_ * scale);
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0) return;
+    // Map the panel's top-left (panel_x_, panel_y_) to (ox, oy) at `scale`; the
+    // surrounding shadow margin falls outside the view and is clipped. Same
+    // transform hit_element() inverts, so knobs are hit where they're drawn.
+    canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
+                    svg_w_ * t.scale, svg_h_ * t.scale);
 }
 
 int DesignFrameView::hit_element(Point pos) const {
-    const auto b = local_bounds();
-    if (b.width <= 0 || b.height <= 0) return -1;
-    // view -> SVG coords (the panel maps to the whole view).
-    const float sx = panel_x_ + pos.x * panel_w_ / b.width;
-    const float sy = panel_y_ + pos.y * panel_h_ / b.height;
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0) return -1;
+    // Invert the paint transform: view px -> SVG coords.
+    const float sx = panel_x_ + (pos.x - t.ox) / t.scale;
+    const float sy = panel_y_ + (pos.y - t.oy) / t.scale;
     int best = -1; float bd = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const float dx = sx - elements_[i].cx, dy = sy - elements_[i].cy;
@@ -131,8 +143,12 @@ void DesignFrameView::on_mouse_down(Point pos) {
 
 void DesignFrameView::on_mouse_drag(Point pos) {
     if (drag_ < 0) return;
+    // Convert the vertical drag from view pixels into panel (design) space via the
+    // same scale, so the turn sensitivity feels identical at any window size.
+    const float scale = panel_transform(local_bounds()).scale;
+    const float dy_design = scale > 0.0f ? (drag_start_y_ - pos.y) / scale : 0.0f;
     elements_[drag_].value =
-        std::clamp(drag_start_value_ + (drag_start_y_ - pos.y) * 0.006f, 0.0f, 1.0f);
+        std::clamp(drag_start_value_ + dy_design * 0.005f, 0.0f, 1.0f);
     request_repaint();
 }
 

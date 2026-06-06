@@ -12,6 +12,7 @@
 //   pulp-elysium-standalone                       # open the window, turn knobs
 //   pulp-elysium-standalone /path/to/scene.pulp.zip
 //   pulp-elysium-standalone --screenshot=out.png  # headless capture
+#include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
@@ -191,8 +192,16 @@ int main(int argc, char** argv) {
     }
     root->set_requires_gpu_host(true);
 
-    const float design_w = ir.root.style.width.value_or(1000.0f);
-    const float design_h = ir.root.style.height.value_or(600.0f);
+    float design_w = ir.root.style.width.value_or(1000.0f);
+    float design_h = ir.root.style.height.value_or(600.0f);
+    // Faithful-vector import (Plan B): the materializer returns a DesignFrameView
+    // that crops to its own PANEL. Size the window + design viewport to the panel
+    // (not the full frame), so the design fills the window with no letterbox and
+    // the view's shared paint/hit transform maps 1:1 — knobs turn where you click.
+    if (auto* frame = dynamic_cast<pulp::view::DesignFrameView*>(root.get())) {
+        design_w = frame->panel_width();
+        design_h = frame->panel_height();
+    }
 
     // Headless Skia-RASTER preview: renders the imported tree (sprite knobs,
     // gradients, shapes — same SkiaCanvas paint as the GPU host) to a PNG with
