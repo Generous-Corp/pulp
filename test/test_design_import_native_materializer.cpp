@@ -5,6 +5,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_sources.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/input_events.hpp>
@@ -735,6 +736,65 @@ TEST_CASE("baked native materializer falls back when a faithful_svg asset is unr
     CHECK(dynamic_cast<DesignFrameView*>(root.get()) == nullptr);  // fell back
     CHECK(diagnostics_contain(diagnostics,
                               "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("faithful_svg flows producer envelope -> parse -> materialize -> DesignFrameView",
+          "[view][import][native-materializer][faithful-svg][e2e]") {
+    // The whole-chain proof (Plan B / B5): an envelope shaped EXACTLY like the
+    // faithful-vector producers emit (figma_rest_export.py --faithful-vector and
+    // the Figma plugin's faithfulVector lane) must survive parse_figma_plugin_json
+    // -> parse_ir_node -> build_native_view_tree and become a DesignFrameView with
+    // the producer's typed knob. This pins the producer<->C++ contract that the
+    // TS/Python producer unit tests can't reach.
+    const std::string svg =
+        R"(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="80" height="80" fill="#1c1d1d"/>)"
+        R"(<circle cx="50" cy="50" r="20" fill="#8a97a6"/>)"
+        R"(<path d="M50 38L50 30" stroke="white" stroke-width="3"/></svg>)";
+    const std::string b64 = pulp::runtime::base64_encode(svg);
+
+    // Byte-for-byte the shape apply_faithful_vector / serialize.ts produce.
+    const std::string envelope = std::string(R"json({
+      "$schema": "https://pulp.dev/schemas/figma-plugin-export-v1.json",
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "asset_manifest": {"version": 1, "assets": [
+        {"asset_id": "frame-svg-3:42",
+         "original_uri": "data:image/svg+xml;base64,)json") + b64 + R"json(",
+         "mime": "image/svg+xml"}
+      ]},
+      "root": {
+        "type": "frame", "name": "ELYSIUM", "figma_node_id": "3:42",
+        "render_mode": "faithful_svg", "svg_asset_id": "frame-svg-3:42",
+        "interactive_elements": [
+          {"kind": "knob", "cx": 50, "cy": 50, "hit_radius": 22,
+           "svg_patch_d": "M50 38L50 30", "default_value": 0.5,
+           "source_node_id": "3:225"}
+        ]
+      }
+    })json";
+
+    // 1) The producer envelope parses into an IR that kept the faithful fields.
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.render_mode == NodeRenderMode::faithful_svg);
+    REQUIRE(ir.root.svg_asset_id == "frame-svg-3:42");
+    REQUIRE(ir.root.interactive_elements.size() == 1);
+    REQUIRE(ir.root.interactive_elements[0].svg_patch_d == "M50 38L50 30");
+    REQUIRE(ir.root.interactive_elements[0].source_node_id == "3:225");
+    REQUIRE(ir.asset_manifest.resolve("frame-svg-3:42") != nullptr);
+
+    // 2) Materializing that IR yields a DesignFrameView with the typed knob.
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+    CHECK(frame->panel_width() == 80.0f);   // panel auto-cropped from the 100x100 frame
+    CHECK(frame->element_value(0) == 0.5f);
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
 }
 
 TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
