@@ -899,6 +899,11 @@ pulp_add_test_suite(pulp-test-stream LIBRARIES pulp::runtime)
 # Generic model registry/store (MM-PR1)
 pulp_add_test_suite(pulp-test-model-store LIBRARIES pulp::runtime)
 
+# Streaming model downloader (MM-PR2) — uses a local httplib server fixture
+pulp_add_test_suite(pulp-test-model-download LIBRARIES pulp::runtime)
+target_include_directories(pulp-test-model-download PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../external/cpp-httplib)
+
 # Native-component core ABI contract tests. Always built (no Rust toolchain
 # needed) — one case per forward-compatibility decision (1-12) so the C ABI
 # shape can't silently drift. The Rust round-trip + RT-safety self-test is the

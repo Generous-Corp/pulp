@@ -109,6 +109,7 @@ target_sources(pulp-runtime PRIVATE
     src/json_rpc.cpp
     src/model_registry.cpp
     src/model_store.cpp
+    src/model_download.cpp
     src/ip_address.cpp
     src/mac_address.cpp
     src/url.cpp
@@ -172,6 +173,14 @@ if(TARGET mbedcrypto)
     target_include_directories(pulp-runtime PRIVATE
         ${mbedtls_SOURCE_DIR}/include
     )
+    # Enable HTTPS in cpp-httplib via the mbedTLS backend (used by the streaming
+    # model downloader, model_download.cpp). No OpenSSL dependency.
+    target_compile_definitions(pulp-runtime PRIVATE CPPHTTPLIB_MBEDTLS_SUPPORT)
+    if(APPLE)
+        # httplib's mbedTLS path loads system trust anchors from the macOS keychain
+        # via the Security framework.
+        target_link_libraries(pulp-runtime PRIVATE "-framework Security" "-framework CoreFoundation")
+    endif()
 endif()
 
 # CHOC headers (used by SpscQueue wrapper)

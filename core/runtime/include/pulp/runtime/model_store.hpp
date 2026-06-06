@@ -8,11 +8,17 @@
 // one mechanism. The downloader (install) lands in a follow-up (MM-PR2).
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <pulp/runtime/model_registry.hpp>
+
+namespace pulp::runtime {
+class CancellationToken;  // async_stream.hpp
+}
 
 namespace pulp::runtime {
 
@@ -73,5 +79,31 @@ ActivateModelResult activate_model(const std::vector<ModelEntry>& registry, std:
 
 std::string to_json(const ModelListResult& result);
 std::string to_json(const ActivateModelResult& result);
+
+// ---- install / remove (MM-PR2: built on the streaming downloader) -------------------
+
+struct InstallModelResult {
+    bool ok = false;
+    std::string error;
+    bool cancelled = false;
+    std::filesystem::path checkpoint_path;  // downloaded file
+    std::filesystem::path metadata_path;    // <home>/<subsystem>/models/<id>.json
+    std::string sha256;
+};
+
+/// Download `model`'s checkpoint into `<home>/<subsystem>/models/<id>/` (streaming,
+/// resumable, sha256-verified), then write the install metadata so read_installed_model/
+/// activate_model see it. `on_progress` returning false (or a cancelled token) aborts and
+/// keeps the partial for a later resume. Auth headers (e.g. HuggingFace token) optional.
+InstallModelResult install_model(const ModelEntry& model, std::string_view subsystem,
+                                 const std::function<bool(const struct DownloadProgress&)>& on_progress = {},
+                                 const CancellationToken* cancel = nullptr,
+                                 const std::vector<std::pair<std::string, std::string>>& headers = {},
+                                 const std::filesystem::path& pulp_home_override = {});
+
+/// Delete an installed model's files + metadata. Clears the active selection if it pointed
+/// here. Returns false (with `error` set) on failure; true if removed or already absent.
+bool remove_model(std::string_view subsystem, std::string_view model_id, std::string& error,
+                  const std::filesystem::path& pulp_home_override = {});
 
 }  // namespace pulp::runtime

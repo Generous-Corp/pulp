@@ -1,5 +1,6 @@
 #include <pulp/runtime/model_store.hpp>
 
+#include <pulp/runtime/model_download.hpp>
 #include <pulp/runtime/system.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -256,6 +257,86 @@ std::string to_json(const ActivateModelResult& result) {
     add_path_member(object, "resolved_checkpoint_path", result.resolved_checkpoint_path);
     add_string_member(object, "error", result.error);
     return choc::json::toString(object, true);
+}
+
+InstallModelResult install_model(const ModelEntry& model, std::string_view subsystem,
+                                 const std::function<bool(const DownloadProgress&)>& on_progress,
+                                 const CancellationToken* cancel,
+                                 const std::vector<std::pair<std::string, std::string>>& headers,
+                                 const fs::path& pulp_home_override) {
+    InstallModelResult r;
+    const std::string url =
+        model.download_url.empty() ? resolve_checkpoint_url(model.checkpoint_ref) : model.download_url;
+    if (url.empty()) {
+        r.error = "cannot resolve a download URL for " + model.model_id;
+        return r;
+    }
+    const auto home = resolve_pulp_home(pulp_home_override);
+    if (home.empty()) {
+        r.error = "unable to resolve PULP_HOME";
+        return r;
+    }
+
+    const fs::path files_dir = home / std::string(subsystem) / "models" / model.model_id;
+    std::string fname;
+    if (auto slash = url.find_last_of('/'); slash != std::string::npos) fname = url.substr(slash + 1);
+    if (auto q = fname.find('?'); q != std::string::npos) fname = fname.substr(0, q);
+    if (fname.empty()) fname = model.model_id + ".bin";
+    const fs::path dest = files_dir / fname;
+
+    DownloadRequest req;
+    req.url = url;
+    req.dest = dest;
+    req.expected_sha256 = model.sha256;
+    req.resume = true;
+    for (const auto& h : headers) req.headers.push_back(HttpHeader{h.first, h.second});
+
+    const auto dl = download_file(req, on_progress, cancel);
+    if (dl.cancelled) {
+        r.cancelled = true;
+        r.error = "cancelled";
+        return r;
+    }
+    if (!dl.ok) {
+        r.error = dl.error;
+        return r;
+    }
+
+    r.checkpoint_path = dest;
+    r.sha256 = dl.sha256;
+    r.metadata_path = model_install_path(subsystem, model.model_id, pulp_home_override);
+
+    auto object = choc::value::createObject("");
+    add_string_member(object, "model_id", model.model_id);
+    add_string_member(object, "backend", model.backend);
+    add_string_member(object, "checkpoint_ref", model.checkpoint_ref);
+    add_path_member(object, "resolved_checkpoint_path", dest);
+    add_string_member(object, "sha256", dl.sha256);
+
+    std::string error;
+    if (!write_text_file(r.metadata_path, choc::json::toString(object, true), error)) {
+        r.error = error;
+        return r;
+    }
+    r.ok = true;
+    return r;
+}
+
+bool remove_model(std::string_view subsystem, std::string_view model_id, std::string& error,
+                  const fs::path& pulp_home_override) {
+    const auto home = resolve_pulp_home(pulp_home_override);
+    if (home.empty()) {
+        error = "unable to resolve PULP_HOME";
+        return false;
+    }
+    std::error_code ec;
+    fs::remove_all(home / std::string(subsystem) / "models" / std::string(model_id), ec);
+    fs::remove(model_install_path(subsystem, model_id, pulp_home_override), ec);
+    // Clear the active selection if it pointed at the removed model.
+    if (read_active_model_id(subsystem, pulp_home_override) == model_id) {
+        fs::remove(model_state_path(subsystem, pulp_home_override), ec);
+    }
+    return true;
 }
 
 }  // namespace pulp::runtime
