@@ -10,8 +10,10 @@
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
 #import <Cocoa/Cocoa.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 
 #include <functional>
@@ -683,29 +685,77 @@ private:
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.wantsLayer = YES;
         // Follow the host's editor-container resize. AU v2 hosts (and VST3/CLAP
         // when they resize the parent) move our frame; flexible autoresizing
         // makes -setFrameSize: fire, which resizes the surfaces + relays out.
         self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        CAMetalLayer* layer = [CAMetalLayer layer];
-        layer.device = MTLCreateSystemDefaultDevice();
-        layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        // framebufferOnly = NO so the embedded back buffer can be read back
-        // for headless capture (`capture_back_buffer_png`) — matches the
-        // standalone MacGpuWindowHost. (Plugin host previously set YES,
-        // which blocked readback.)
-        layer.framebufferOnly = NO;
-        CGFloat scale = self.window ? self.window.backingScaleFactor
-                                    : [NSScreen mainScreen].backingScaleFactor;
-        layer.contentsScale = scale;
-        layer.drawableSize = CGSizeMake(frame.size.width * scale, frame.size.height * scale);
-        layer.opaque = YES;
-        self.layer = layer;
-        _metalLayer = layer;
+
+        // BLACK-SCREEN ROOT CAUSE (pulp foreign-host-embed): a foreign DAW host
+        // that embeds us via juce::NSViewComponent adds our NSView as a subview
+        // of *its own* layer-backed content view. Per Apple's NSView docs,
+        // "Creating a layer-backed view implicitly causes the entire view
+        // hierarchy under that view to become layer-backed." So AppKit forces
+        // THIS view layer-backed and — if we merely assign `self.layer` in init
+        // — wraps our content in an AppKit-owned `NSViewBackingLayer` and demotes
+        // our CAMetalLayer to a *sublayer*. Dawn presents into the CAMetalLayer
+        // every vsync (the GPU renders correct, non-black frames — proven via
+        // the env-gated live-stat readback), but the demoted sublayer's
+        // presented drawable is not what the window server composites → the
+        // editor stays BLACK on screen while headless capture looks perfect.
+        //
+        // The robust fix is to make our CAMetalLayer the view's genuine BACKING
+        // layer by returning it from -makeBackingLayer (the documented hook
+        // AppKit calls to create the backing layer). This survives forced
+        // layer-backing under any foreign parent: our CAMetalLayer IS the
+        // backing layer, never a wrapped sublayer. This is the same mechanism
+        // JUCE itself uses for its Metal peer. Trigger it now by requesting
+        // layer-backing; AppKit calls -makeBackingLayer synchronously.
+        self.wantsLayer = YES;
     }
     return self;
 }
+
+// AppKit calls this to create the view's backing layer (on first
+// `wantsLayer = YES`, and again if the view is forced layer-backed by a
+// layer-backed ancestor). Returning our configured CAMetalLayer guarantees it
+// is the view's real backing layer in every embedding, not a demoted sublayer.
+- (CALayer*)makeBackingLayer {
+    CAMetalLayer* layer = [CAMetalLayer layer];
+    layer.device = MTLCreateSystemDefaultDevice();
+    layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    // framebufferOnly = NO so the embedded back buffer can be read back for
+    // headless capture (`capture_back_buffer_png`) — matches MacGpuWindowHost.
+    layer.framebufferOnly = NO;
+    CGFloat scale = self.window ? self.window.backingScaleFactor
+                                : [NSScreen mainScreen].backingScaleFactor;
+    layer.contentsScale = scale;
+    layer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
+                                    self.bounds.size.height * scale);
+
+    // pulp #1382 — opaque + seeded dark background (RGB 30,30,46 = 0x1E1E2E),
+    // mirroring the standalone PulpMetalView, so there is no clear/undefined
+    // composite while the foreign host reparents and relayers the view.
+    layer.opaque = YES;
+    const CGFloat dark[4] = { 30.0 / 255.0, 30.0 / 255.0, 46.0 / 255.0, 1.0 };
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    layer.backgroundColor = CGColorCreate(cs, dark);
+    CGColorSpaceRelease(cs);
+
+    _metalLayer = layer;
+    return layer;
+}
+
+// pulp #1382 — `wantsUpdateLayer = YES` puts AppKit on the layer-update path
+// (calls -updateLayer instead of -drawRect:) and stops it from auto-clearing
+// the backing layer between updates, so the most-recent Metal frame stays
+// presented until the next display-link tick. Matches PulpMetalView.
+- (BOOL)wantsUpdateLayer { return YES; }
+
+// No-op: Metal frames are produced by MacGpuPluginViewHost::render_frame off
+// the display link, NOT inside AppKit's update cycle. We only need these to
+// exist so AppKit honors wantsUpdateLayer and skips its own paint pipeline.
+- (void)updateLayer {}
+- (void)drawRect:(NSRect)dirtyRect { (void)dirtyRect; }
 
 - (BOOL)isFlipped { return NO; }
 
@@ -972,6 +1022,7 @@ private:
     // teardown is a no-op (DAW teardown order is not under our control).
     std::shared_ptr<std::atomic<bool>> alive_;
     int frame_ok_count_ = 0;
+    int display_link_ticks_ = 0;  // env-gated diagnostic counter only
     // Design viewport: when (>0, >0) root paints at design size and the
     // Skia canvas applies translate+scale to fit the host bounds. Mouse
     // coords are inverse-mapped via window_to_root_point().
@@ -1098,7 +1149,75 @@ private:
             view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
-        skia_surface_->end_frame();
+        // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path
+        // pixel proof (NOT the forced capture path). Every Nth on-screen frame,
+        // flush the Graphite recording and read the back buffer back, then log a
+        // coarse luma / non-black stat. This proves the live present cadence is
+        // emitting real, non-black content frame after frame — impossible to
+        // confirm with screencapture in a permission-blocked env. Off by default;
+        // costs a full GPU readback on the sampled frames only.
+        static const int kStatEvery = [] {
+            if (const char* e = std::getenv("PULP_EMBED_GPU_FRAME_STAT")) {
+                int n = std::atoi(e);
+                return n > 0 ? n : 30;
+            }
+            return 0;
+        }();
+        // Once-per-run on-screen geometry/visibility proof. A foreign host that
+        // embeds us can leave the view at 0x0 (its NSViewComponent wrapper is
+        // never sized) or relayer it so the CAMetalLayer is no longer the view's
+        // backing layer — both render the editor black even though the GPU emits
+        // perfect frames. view_size > 0, not hidden, backing==metal confirms the
+        // full on-screen compositing chain is intact (the thing screencapture
+        // would otherwise verify).
+        if (kStatEvery > 0 && !capture_pixels && frame_ok_count_ == 5) {
+            CAMetalLayer* ml = metal_view_.metalLayer;
+            CALayer* backing = metal_view_.layer;
+            NSRect inWin = [metal_view_ convertRect:metal_view_.bounds toView:nil];
+            fprintf(stderr,
+                    "[plugin-gpu-host][onscreen] view_size=%.0fx%.0f "
+                    "frame_in_window=(%.0f,%.0f %.0fx%.0f) backing_is_metal=%d "
+                    "hidden=%d alpha=%.2f has_window=%d\n",
+                    metal_view_.bounds.size.width, metal_view_.bounds.size.height,
+                    inWin.origin.x, inWin.origin.y, inWin.size.width, inWin.size.height,
+                    (backing == ml) ? 1 : 0,
+                    metal_view_.hidden ? 1 : 0,
+                    (double)metal_view_.alphaValue,
+                    metal_view_.window != nil ? 1 : 0);
+        }
+        if (kStatEvery > 0 && !capture_pixels &&
+            (frame_ok_count_ % kStatEvery) == 1) {
+            std::vector<uint8_t> px;
+            uint32_t pw = 0, ph = 0;
+            // read_current_rgba() snaps + submits the in-progress Graphite
+            // recording itself before reading, so the readback sees the painted
+            // frame rather than a blank/cleared backing.
+            if (skia_surface_->read_current_rgba(px, pw, ph) && !px.empty()) {
+                double luma_sum = 0.0;
+                size_t non_black = 0;
+                size_t n = static_cast<size_t>(pw) * ph;
+                // Coarse unique-color estimate via a small bucketed signature
+                // set (top 3 bits per channel → 512 buckets).
+                std::array<bool, 512> seen{};
+                size_t unique = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    uint8_t r = px[i * 4 + 0], g = px[i * 4 + 1], b = px[i * 4 + 2];
+                    double l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                    luma_sum += l;
+                    if (r > 8 || g > 8 || b > 8) ++non_black;
+                    int bucket = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+                    if (!seen[bucket]) { seen[bucket] = true; ++unique; }
+                }
+                fprintf(stderr,
+                        "[plugin-gpu-host][live-stat] frame=%d size=%ux%u "
+                        "mean_luma=%.1f non_black=%.1f%% color_buckets=%zu\n",
+                        frame_ok_count_, pw, ph,
+                        luma_sum / static_cast<double>(n),
+                        100.0 * static_cast<double>(non_black) /
+                            static_cast<double>(n),
+                        unique);
+            }
+        }
 
         bool captured = true;
         if (capture_pixels && capture_width && capture_height) {
@@ -1107,6 +1226,7 @@ private:
                                                         *capture_height);
         }
 
+        skia_surface_->end_frame();
         gpu_surface_->end_frame();
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
@@ -1123,6 +1243,19 @@ private:
         // races this callback.
         auto alive = self->alive_;
         if (!alive->load(std::memory_order_acquire)) return kCVReturnSuccess;
+
+        // PULP_EMBED_GPU_FRAME_STAT — env-gated proof that the CVDisplayLink is
+        // actually ticking in the embedded case. Logs every ~120 vsyncs.
+        if (std::getenv("PULP_EMBED_GPU_FRAME_STAT")) {
+            int n = ++self->display_link_ticks_;
+            if (n == 1 || (n % 120) == 0) {
+                fprintf(stderr, "[plugin-gpu-host][dl] display-link tick=%d "
+                                "needs_repaint=%d continuous=%d\n",
+                        n,
+                        self->needs_repaint_.load(std::memory_order_relaxed) ? 1 : 0,
+                        self->continuous_frames_.load(std::memory_order_relaxed) ? 1 : 0);
+            }
+        }
 
         const bool has_idle = self->has_idle_callback_.load(std::memory_order_acquire);
         if (self->needs_repaint_.load(std::memory_order_relaxed) ||
