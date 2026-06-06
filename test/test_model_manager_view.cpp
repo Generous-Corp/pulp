@@ -1,5 +1,6 @@
-// ModelManagerView (MM-PR3) — builds rows from a model list, shows a download-progress
-// row, fires the action callbacks, and renders non-blank on the Skia canvas.
+// ModelManagerView (MM-PR3) — builds a block per model (header + subtitle + N blocks),
+// shows a progress bar line while downloading, fires the action callbacks, and renders
+// non-blank on the Skia canvas.
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/runtime/model_store.hpp>
@@ -31,33 +32,34 @@ ModelListResult make_models() {
     b.model.display_name = "Magenta RT2 (Small)";
     b.status = "not_installed";
 
-    r.models = {a, b};
+    r.models = {a, b};  // index 0 active+installed, index 1 available
     return r;
 }
 
-View* last_child(View& v) { return v.child_at(v.child_count() - 1); }
+// Children are: [0] header, [1] subtitle, [2..] one block per model.
+View* model_block(View& v, size_t i) { return v.child_at(2 + i); }
+
+void fire_buttons(View* view) {
+    if (auto* b = dynamic_cast<ToggleButton*>(view))
+        if (b->on_toggle) b->on_toggle(true);
+    for (size_t i = 0; i < view->child_count(); ++i) fire_buttons(view->child_at(i));
+}
 
 }  // namespace
 
-TEST_CASE("ModelManagerView builds a row per model", "[view][model]") {
+TEST_CASE("ModelManagerView builds a block per model", "[view][model]") {
     ModelManagerView v;
     v.set_models(make_models());
-    REQUIRE(v.child_count() >= 3);          // title + subtitle + rows container
-    REQUIRE(last_child(v)->child_count() == 2);  // two model rows
+    REQUIRE(v.child_count() == 4);  // header + subtitle + 2 model blocks
 }
 
-TEST_CASE("ModelManagerView shows a download-progress row", "[view][model]") {
+TEST_CASE("ModelManagerView adds a progress-bar line while downloading", "[view][model]") {
     ModelManagerView v;
     v.set_models(make_models());
 
-    auto* rows = last_child(v);
-    const size_t before = rows->child_at(1)->child_count();  // mrt2_small idle row
-
+    const size_t before = model_block(v, 1)->child_count();  // mrt2_small: just the line
     v.set_download_progress("mrt2_small", 0.47f);
-    rows = last_child(v);  // rebuilt
-    REQUIRE(rows->child_count() == 2);
-    // Downloading row gains a meter + "%" + Cancel, so it has more children than idle.
-    REQUIRE(rows->child_at(1)->child_count() > before);
+    REQUIRE(model_block(v, 1)->child_count() > before);  // gained the full-width bar line
 }
 
 TEST_CASE("ModelManagerView action callbacks fire with the model id", "[view][model]") {
@@ -68,25 +70,31 @@ TEST_CASE("ModelManagerView action callbacks fire with the model id", "[view][mo
     v.on_remove = [&](const std::string& id) { removed = id; };
     v.set_models(make_models());
 
-    auto* rows = last_child(v);
-    auto fire_buttons = [](View* row) {
-        for (size_t i = 0; i < row->child_count(); ++i)
-            if (auto* b = dynamic_cast<ToggleButton*>(row->child_at(i)))
-                if (b->on_toggle) b->on_toggle(true);
-    };
-    fire_buttons(rows->child_at(0));  // mrt2_base installed+active → Remove
-    fire_buttons(rows->child_at(1));  // mrt2_small not installed → Download
+    fire_buttons(model_block(v, 0));  // mrt2_base installed+active → Remove
+    fire_buttons(model_block(v, 1));  // mrt2_small not installed → Download
 
     REQUIRE(downloaded == "mrt2_small");
     REQUIRE(removed == "mrt2_base");
 }
 
+TEST_CASE("ModelManagerView shows a header Done when closeable", "[view][model]") {
+    ModelManagerView v;
+    bool done = false;
+    v.on_done = [&] { done = true; };
+    v.set_models(make_models());
+    v.set_can_close(true);
+    fire_buttons(v.child_at(0));  // header contains the Done button
+    REQUIRE(done);
+}
+
 TEST_CASE("ModelManagerView renders non-blank on the Skia canvas", "[view][model][.demo]") {
     ModelManagerView v;
+    v.on_done = [] {};
     v.set_models(make_models());
+    v.set_can_close(true);
     v.set_download_progress("mrt2_small", 0.47f);
 
-    auto png = render_to_png(v, 560, 280, 2.0f, ScreenshotBackend::skia);
+    auto png = render_to_png(v, 620, 300, 2.0f, ScreenshotBackend::skia);
     REQUIRE_FALSE(png.empty());
     std::ofstream("/tmp/model-manager.png", std::ios::binary)
         .write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
