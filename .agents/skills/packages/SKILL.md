@@ -152,6 +152,22 @@ archives with `lipo` into a combined `simulator/libskia.a` upstream
 of `find_package(Skia)`. The default Pulp iOS smoke (`pulp-ios-sim`,
 Apple Silicon dev machines) only needs `arm64`.
 
+The **V8** toolchain follows the same prebuilt-pin pattern (added 2026-06).
+It is the optional JS engine backend (`PULP_JS_ENGINE=v8`), a sealed
+embeddable `libv8` pinned at tag `v8-15.1.27` via the
+`danielraffel/v8-builder` fork (`tools/deps/manifest.json` → V8 entry,
+`determinism.release_assets` per-platform URL + sha256). Fetched by
+`tools/scripts/fetch_v8_for_release.py` into `external/v8-build/<platform>/`
+and resolved by `tools/cmake/FindV8.cmake`. Like Skia, it **bundles**
+third-party components internally — ICU, zlib, and Abseil — so it gets one
+manifest row for V8 (BSD-3-Clause) plus the bundled-component NOTICE
+attribution (ICU/zlib/Abseil), NOT separate manifest rows for the nested
+libs (their distribution boundary is the parent `libv8`). Re-verify the
+NOTICE list against the v8-builder artifact's own third-party manifest when
+the V8 pin bumps. iOS ships a headers-only slice (`library: false`) — V8
+needs JIT, forbidden on iOS, so iOS stays JSC. Full rollout/governance:
+`planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
+
 ## Bundled Fonts (and similar opt-in compile-time assets)
 
 Bundled fonts under `external/fonts/*.ttf` (`Inter`, `JetBrains Mono`,

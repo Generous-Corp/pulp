@@ -869,6 +869,79 @@ CTR-DRBG instance.
 
 ---
 
+## V8
+
+Copyright 2014 the V8 project authors. All rights reserved.
+
+BSD 3-Clause License
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+     copyright notice, this list of conditions and the following
+     disclaimer in the documentation and/or other materials provided
+     with the distribution.
+   * Neither the name of Google Inc. nor the names of its
+     contributors may be used to endorse or promote products derived
+     from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+V8 is an optional JS engine backend (selected with `PULP_JS_ENGINE=v8`;
+default is QuickJS, JSC on Apple). Pulp ships a sealed, embeddable
+prebuilt `libv8` (version 15.1.27) produced by the
+[danielraffel/v8-builder](https://github.com/danielraffel/v8-builder)
+fork. The shared library exports only the `v8::`/`cppgc::` API surface,
+but it **statically bundles** several third-party libraries whose
+attribution obligations survive that sealing. Those bundled
+dependencies are reproduced below.
+
+> Note: this attribution is derived from the V8 source tree's
+> `third_party` licenses for the pinned `built_revision`. Re-verify
+> against the v8-builder artifact's own third-party manifest whenever the
+> V8 pin in `tools/deps/manifest.json` is bumped — bundled components may
+> change between V8 revisions.
+
+### Bundled: ICU (International Components for Unicode)
+
+Copyright © 1991-2024 Unicode, Inc. All rights reserved.
+
+Distributed under the Unicode License v3 / ICU License (a permissive,
+BSD-style license). V8 is built with `Intl` enabled, so the ICU
+libraries **and ICU locale data** are bundled. Full text:
+https://github.com/unicode-org/icu/blob/main/icu4c/LICENSE
+
+### Bundled: zlib
+
+Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
+
+zlib License — a permissive license. This software is provided 'as-is',
+without any express or implied warranty. Full text:
+https://github.com/madler/zlib/blob/master/LICENSE
+
+### Bundled: Abseil
+
+Copyright 2017 The Abseil Authors.
+
+Licensed under the Apache License, Version 2.0. Full text:
+https://www.apache.org/licenses/LICENSE-2.0
+
+---
+
 ## VST3 SDK
 
 Copyright (c) 2024 Steinberg Media Technologies GmbH

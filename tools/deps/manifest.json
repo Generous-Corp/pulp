@@ -738,6 +738,60 @@
       ]
     },
     {
+      "name": "V8",
+      "category": "view",
+      "license": "BSD-3-Clause",
+      "version": "v8-15.1.27",
+      "external_names": ["v8-build"],
+      "source_kind": "prebuilt-toolchain",
+      "repository": "https://chromium.googlesource.com/v8/v8.git",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release pairs V8 against a specific Skia/Dawn revision; re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
+      "determinism": {
+        "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
+        "built_revision": "535361f082f89df6b3ceecea73b3ba7503bc83ef",
+        "paired_skia": "4fdb859c8da740f1c1d94183637ff0c175329bc2",
+        "paired_dawn": "075626b4b324101b06cd309c4140672588a5adf2",
+        "release_assets": {
+          "mac-arm64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-mac-arm64-15.1.27.zip",
+            "sha256": "458fc35de48613c43148077a5057515f54cd47e26ad3b29832e8207a34e5f939"
+          },
+          "mac-x86_64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-mac-x86_64-15.1.27.zip",
+            "sha256": "159e244f47c9c3e51c6b55c2398031fbc67298e32ab367b080d68dbcbd5d6fe4"
+          },
+          "linux-x64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-linux-x64-15.1.27.zip",
+            "sha256": "3f702331e0c62c18b69bce2d98dab0e441d057eb0d00f850d9011195ac344338"
+          },
+          "linux-arm64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-linux-arm64-15.1.27.zip",
+            "sha256": "4a8b639ec5d448a44d15982f9556c9a29163d9f8935d4dfca1cf845288f8f8bf"
+          },
+          "win-x64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-win-x64-15.1.27.zip",
+            "sha256": "4d7efebe50f154d79ab2790762db34aa09e81300b1ca25f32d65077d54470b90"
+          },
+          "win-arm64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-win-arm64-15.1.27.zip",
+            "sha256": "fe6014f6de58abcdd1266717f4dd361167e306d203f10fbe3e33f850f5f1f0b2"
+          },
+          "android-arm64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-android-arm64-15.1.27.zip",
+            "sha256": "8f1f6ff31b13567bf24ff0559298ae7706fde4da5fb82345247730ecdd732e17"
+          },
+          "ios-simulator-arm64": {
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-ios-simulator-arm64-15.1.27.zip",
+            "sha256": "b343409e6ca4f2d33ff4929a7578bc5ce25291aa367ed8b041a3c618d2562779",
+            "library": false
+          }
+        }
+      }
+    },
+    {
       "name": "VST3 SDK",
       "category": "format-sdk",
       "license": "MIT",
