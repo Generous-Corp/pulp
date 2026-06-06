@@ -508,6 +508,61 @@ TEST_CASE("DesignIR defaults to normal render mode and omits faithful_svg keys",
     REQUIRE(parsed.root.interactive_elements.empty());
 }
 
+TEST_CASE("DesignIR round-trips dropdown / text_field / tab_group overlay elements",
+          "[view][import][ir-v1][faithful-svg]") {
+    // The native-overlay interactive kinds (Plan B "full A") carry a rect + their
+    // own typed data and must survive serialize -> parse -> serialize, and must
+    // NOT collapse to `knob` (the prior interactive_kind_from_id bug).
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement dropdown;
+    dropdown.kind = InteractiveElementKind::dropdown;
+    dropdown.x = 210; dropdown.y = 180; dropdown.w = 120; dropdown.h = 28;
+    dropdown.options = {"1/4 Delay", "1/8 Delay", "Reverb"};
+    dropdown.selected_index = 0;
+    dropdown.source_node_id = "9:1";
+    ir.root.interactive_elements.push_back(dropdown);
+
+    IRInteractiveElement search;
+    search.kind = InteractiveElementKind::text_field;
+    search.x = 16; search.y = 50; search.w = 280; search.h = 32;
+    search.placeholder = "Search";
+    ir.root.interactive_elements.push_back(search);
+
+    IRInteractiveElement tabs;
+    tabs.kind = InteractiveElementKind::tab_group;
+    tabs.x = 320; tabs.y = 48; tabs.w = 160; tabs.h = 28;
+    tabs.options = {"1", "2", "3", "4"};
+    tabs.selected_index = 2;
+    ir.root.interactive_elements.push_back(tabs);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+    REQUIRE(parsed.root.interactive_elements.size() == 3);
+
+    const auto& d = parsed.root.interactive_elements[0];
+    REQUIRE(d.kind == InteractiveElementKind::dropdown);   // NOT collapsed to knob
+    REQUIRE(d.w == 120.0f);
+    REQUIRE(d.options.size() == 3);
+    REQUIRE(d.options[2] == "Reverb");
+    REQUIRE(d.source_node_id == "9:1");
+
+    const auto& s = parsed.root.interactive_elements[1];
+    REQUIRE(s.kind == InteractiveElementKind::text_field);
+    REQUIRE(s.placeholder == "Search");
+    REQUIRE(s.w == 280.0f);
+
+    const auto& t = parsed.root.interactive_elements[2];
+    REQUIRE(t.kind == InteractiveElementKind::tab_group);
+    REQUIRE(t.options.size() == 4);
+    REQUIRE(t.selected_index == 2);
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({
