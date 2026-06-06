@@ -1,7 +1,9 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/platform/child_process.hpp>
+#include <pulp/runtime/base64.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -597,6 +599,142 @@ TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sourc
     REQUIRE(image != nullptr);
     REQUIRE(image->image_source() == "file:///resolved/import/assets/3_43.png");
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
+}
+
+TEST_CASE("baked native materializer renders a faithful_svg node as a DesignFrameView",
+          "[view][import][native-materializer][faithful-svg]") {
+    // Plan B / B3: a faithful_svg node materializes to a DesignFrameView that
+    // renders the node's own SVG (resolved from a data: asset) and overlays the
+    // typed interactive elements. The view auto-crops to the panel (the largest
+    // in-frame rect) and holds the knob overlay.
+    // A percent-encoded data: payload (the form a URL-safe SVG export emits) —
+    // exercises the resolver's percent-decode path. Decodes to a 100x100 frame
+    // with an 80x80 panel rect, a dome circle, and a needle path at "M50 38L50 30".
+    const std::string encoded_payload =
+        "%3Csvg%20width%3D%22100%22%20height%3D%22100%22%20"
+        "xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E"
+        "%3Crect%20x%3D%2210%22%20y%3D%2210%22%20width%3D%2280%22%20height%3D%2280%22%20"
+        "rx%3D%224%22%20fill%3D%22%23cccccc%22%2F%3E"
+        "%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2220%22%20fill%3D%22%238a97a6%22%2F%3E"
+        "%3Cpath%20d%3D%22M50%2038L50%2030%22%20stroke%3D%22white%22%20stroke-width%3D%223%22%2F%3E"
+        "%3C%2Fsvg%3E";
+
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.root.name = "ELYSIUM";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-frame-svg";
+
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.cx = 50.0f;
+    knob.cy = 50.0f;
+    knob.hit_radius = 22.0f;
+    knob.svg_patch_d = "M50 38L50 30";
+    knob.default_value = 0.5f;
+    ir.root.interactive_elements.push_back(knob);
+
+    IRAssetRef asset;
+    asset.asset_id = "asset-frame-svg";
+    asset.original_uri = "data:image/svg+xml," + encoded_payload;
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+    CHECK(frame->panel_width() == 80.0f);   // the 80x80 panel, not the 100x100 frame
+    CHECK(frame->panel_height() == 80.0f);
+    CHECK(frame->element_value(0) == 0.5f);
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("baked native materializer resolves a faithful_svg base64 data asset",
+          "[view][import][native-materializer][faithful-svg]") {
+    // The same path, but the SVG arrives base64-encoded (the form the REST/SVG
+    // export lane emits). Resolver must decode it before handing to the view.
+    const std::string svg =
+        R"(<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="4" y="4" width="32" height="32" fill="#222"/></svg>)";
+    const std::string b64 = pulp::runtime::base64_encode(svg);
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + b64;
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    CHECK(frame->panel_width() == 32.0f);
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("baked native materializer reads a faithful_svg asset from local_path",
+          "[view][import][native-materializer][faithful-svg]") {
+    // The asset's SVG lives on disk (the form the CLI asset-resolution pass
+    // stamps). Resolver must read the file before handing it to the view.
+    const std::string svg =
+        R"(<svg width="50" height="50" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="5" y="5" width="40" height="40" fill="#333"/></svg>)";
+    const auto dir = fs::temp_directory_path();
+    const auto file = dir / "pulp-faithful-svg-test.svg";
+    { std::ofstream(file, std::ios::binary) << svg; }
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg-on-disk";
+
+    IRAssetRef asset;
+    asset.asset_id = "svg-on-disk";
+    asset.original_uri = "figma://file/node";  // not a data: URI — must use local_path
+    asset.local_path = file.string();
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    CHECK(frame->panel_width() == 40.0f);
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+    fs::remove(file);
+}
+
+TEST_CASE("baked native materializer falls back when a faithful_svg asset is unresolved",
+          "[view][import][native-materializer][faithful-svg]") {
+    // A faithful_svg node whose SVG asset is missing must NOT blank out: it
+    // emits a diagnostic and falls back to normal materialization (a plain View
+    // for a frame), so the rest of the tree still renders.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Broken";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "missing-asset";  // not in the manifest
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    CHECK(dynamic_cast<DesignFrameView*>(root.get()) == nullptr);  // fell back
+    CHECK(diagnostics_contain(diagnostics,
+                              "native-materialize-faithful-svg-unresolved"));
 }
 
 TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",

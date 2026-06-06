@@ -556,6 +556,50 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
   also handled now — see the per-range text section.)
 
+### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
+
+A parallel, newer rendering strategy to the per-widget sprite/native lanes
+above: instead of recognizing each widget and rebuilding it, render the
+node's **own SVG export** pixel-faithfully and overlay native interaction.
+This is the lane that makes an imported frame look identical to the source
+(gradients, multi-layer drop shadows, masks) while staying interactive.
+
+Pieces, source-of-truth → runtime:
+- **Rendering** — `Canvas::draw_svg` (SkiaCanvas, Skia `SkSVGDOM`, `libsvg.a`)
+  renders an SVG document pixel-faithfully. Knob animation = wrap the needle
+  `<path>` in `<g transform="rotate(a cx cy)">` and re-render; the rest of the
+  chrome stays pixel-exact. `DesignFrameView` (core/view) renders the SVG,
+  auto-crops to the panel (largest in-frame `<rect>`, frac 0.15–0.97 of the
+  frame), and overlays interaction from a TYPED element list — it does NOT
+  guess widgets from SVG structure.
+- **IR** — a node opts in with `render_mode = NodeRenderMode::faithful_svg`,
+  points `svg_asset_id` at an `IRAssetManifest` entry (mime `image/svg+xml`),
+  and carries `interactive_elements[]` (`IRInteractiveElement`: cx, cy,
+  hit_radius, svg_patch_d, default_value, source_node_id). These are
+  source-side semantics filled by the importer, NOT inferred from the SVG.
+  `InteractiveElementKind` is deliberately separate from `AudioWidgetType`.
+- **Materializer** — `materialize_node` (`design_import_native_common.cpp`)
+  branches on `faithful_svg` first and builds a `DesignFrameView` via
+  `make_faithful_svg_frame`: `resolve_svg_document()` resolves the SVG text
+  from the asset — `data:image/svg+xml` (base64 AND percent-encoded) or an
+  on-disk file (`local_path` / `file://` `original_uri`), read host-side at
+  materialize time. An unresolved/missing SVG emits a
+  `native-materialize-faithful-svg-unresolved` diagnostic and returns null so
+  the node FALLS BACK to normal materialization — a bad asset degrades, never
+  blanks the frame.
+
+Gotchas:
+- `draw_svg` rebuilds the `SkSVGDOM` every call (a parsed-DOM cache is a
+  planned optimization) — fine at interactive rates, but don't call it in a
+  hot per-frame loop without profiling.
+- The ASan/UBSan macOS runners link a PARTIAL Skia where `draw_svg` (and
+  url()-mask compositing) is a no-op — render-comparison tests must SKIP when
+  `similarity >= 0.999` rather than fail (mirror `test_image_view_fill`'s
+  url()-mask guard and `test_design_frame_view`).
+- Pure IR/round-trip + materializer tests (no actual SVG compositing) are
+  safe on every lane, so put coverage there; reserve the SKIP-guarded
+  render-diff assertions for the lanes that can composite.
+
 ### Interactive (turnable) sprite knobs — `--knob-style sprite`
 
 `--knob-style sprite` no longer DEMOTES a recognized knob to a static image.
