@@ -5,6 +5,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -13,10 +14,15 @@
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 
+#include <pulp/runtime/base64.hpp>
+
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -927,6 +933,109 @@ std::string asset_uri(const IRAssetRef& asset) {
     return {};
 }
 
+// ── Faithful-vector import (Plan B): resolve an SVG asset to its document text ─
+// Percent-decode a `data:` payload (`%3C` → `<`, `+` stays literal in data URIs).
+std::string svg_percent_decode(std::string_view in) {
+    std::string out;
+    out.reserve(in.size());
+    for (std::size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size()) {
+            auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            const int hi = hex(in[i + 1]), lo = hex(in[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back(in[i]);
+    }
+    return out;
+}
+
+// Returns the SVG document text for a faithful_svg node's asset, or empty if it
+// can't be resolved. Handles `data:image/svg+xml[;base64],…` payloads and
+// on-disk files (local_path or a `file://` original_uri). Read at materialize
+// time — host-side, never on the audio/render thread.
+std::string resolve_svg_document(const IRAssetRef& asset) {
+    const std::string& uri = asset.original_uri;
+    if (uri.rfind("data:", 0) == 0) {
+        const auto comma = uri.find(',');
+        if (comma == std::string::npos) return {};
+        const std::string meta = uri.substr(5, comma - 5);
+        const std::string payload = uri.substr(comma + 1);
+        if (meta.find(";base64") != std::string::npos) {
+            if (auto decoded = runtime::base64_decode(payload))
+                return std::string(decoded->begin(), decoded->end());
+            return {};
+        }
+        return svg_percent_decode(payload);
+    }
+    auto read_file = [](const std::string& path) -> std::string {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return {};
+        return std::string(std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>());
+    };
+    if (asset.local_path && !asset.local_path->empty())
+        return read_file(*asset.local_path);
+    if (uri.rfind("file://", 0) == 0)
+        return read_file(uri.substr(7));
+    return {};
+}
+
+// Translate the IR's typed interactive overlays into DesignFrameView's element
+// list. Only `knob` exists today; new kinds map here as they land.
+std::vector<DesignFrameElement> to_frame_elements(
+    const std::vector<IRInteractiveElement>& elements) {
+    std::vector<DesignFrameElement> out;
+    out.reserve(elements.size());
+    for (const auto& e : elements) {
+        DesignFrameElement el;
+        el.kind = DesignFrameElement::Kind::knob;  // InteractiveElementKind::knob
+        el.cx = e.cx;
+        el.cy = e.cy;
+        el.hit_radius = e.hit_radius;
+        el.needle_d = e.svg_patch_d;
+        el.value = e.default_value;
+        out.push_back(std::move(el));
+    }
+    return out;
+}
+
+// Build a DesignFrameView for a faithful_svg node, or nullptr (with a
+// diagnostic) when its SVG asset can't be resolved — letting the caller fall
+// back to normal materialization.
+std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
+                                              const IRAssetManifest& manifest,
+                                              std::string_view path,
+                                              std::vector<ImportDiagnostic>& diagnostics) {
+    const std::string asset_id = node.svg_asset_id.value_or("");
+    const IRAssetRef* asset = asset_id.empty() ? nullptr : manifest.resolve(asset_id);
+    std::string svg = asset ? resolve_svg_document(*asset) : std::string{};
+    if (svg.empty()) {
+        diagnostics.push_back(diagnostic(
+            ImportDiagnosticSeverity::warning,
+            ImportDiagnosticKind::unresolved_asset,
+            "native-materialize-faithful-svg-unresolved",
+            std::string(path),
+            asset_id.empty()
+                ? "faithful_svg node has no svg_asset_id"
+                : "faithful_svg asset '" + asset_id + "' could not be resolved to an SVG document",
+            node,
+            asset_id.empty() ? std::optional<std::string>("svg_asset_id") : std::nullopt));
+        return nullptr;
+    }
+    auto frame = std::make_unique<DesignFrameView>(std::move(svg),
+                                                   to_frame_elements(node.interactive_elements));
+    return frame;
+}
+
 bool has_missing_asset_diagnostic(const std::vector<ImportDiagnostic>& diagnostics,
                                   std::string_view path,
                                   std::string_view asset_id) {
@@ -1582,6 +1691,15 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
                                        std::string_view path,
                                        std::optional<LayoutDirection> parent_direction,
                                        std::vector<ImportDiagnostic>& diagnostics) {
+    // Faithful-vector lane (Plan B): render this node's own SVG export via
+    // DesignFrameView and overlay native interaction from the typed element
+    // list. Falls through to normal materialization (with a diagnostic) if the
+    // SVG asset can't be resolved, so a bad asset degrades rather than blanks.
+    if (node.render_mode == NodeRenderMode::faithful_svg) {
+        if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
+            return frame;
+    }
+
     // An unconfigured "Dropdown" template renders nothing (a zero-size, inert
     // view) — it's a design-system placeholder the design never shows.
     if (is_unconfigured_dropdown_template(node)) {
