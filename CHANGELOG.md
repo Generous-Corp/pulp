@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03490"></a>
+## [0.349.0] - 2026-06-06
+
+- fix(design-import): faithful frame is interactive + fits at any window aspect ([#3474](https://github.com/danielraffel/pulp/pull/3474))
+- test(design-import): end-to-end faithful_svg envelope → DesignFrameView (Plan B / B5) ([#3473](https://github.com/danielraffel/pulp/pull/3473))
+- feat(design-import): Figma plugin emits faithful-vector frames (Plan B / B4b) ([#3470](https://github.com/danielraffel/pulp/pull/3470))
+- feat(design-import): REST exporter emits faithful-vector frames (Plan B / B4a) ([#3469](https://github.com/danielraffel/pulp/pull/3469))
+
 <a id="v03480"></a>
 ## [0.348.0] - 2026-06-06
 
@@ -3673,6 +3681,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.349.0]: https://github.com/danielraffel/pulp/releases/tag/v0.349.0
 [0.348.0]: https://github.com/danielraffel/pulp/releases/tag/v0.348.0
 [0.347.0]: https://github.com/danielraffel/pulp/releases/tag/v0.347.0
 [0.346.0]: https://github.com/danielraffel/pulp/releases/tag/v0.346.0
