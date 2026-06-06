@@ -18,6 +18,7 @@ import type {
   ExtractedDiagnostic,
 } from "./extract-model";
 import { AssetCache } from "./assets";
+import { parseFrameKnobs, decodeSvgBytes } from "./faithful-vector";
 import { extractTokens, type ExtractedTokens } from "./tokens";
 import {
   widgetKindByLibraryKey,
@@ -48,6 +49,10 @@ export interface ExtractOptions {
   includeHidden?: boolean;
   /// Max nodes before the walker bails out with a diagnostic (perf safety).
   maxNodes?: number;
+  /// Faithful-vector lane (Plan B / B4b): export each top-level frame's own
+  /// SVG and render it pixel-faithfully via DesignFrameView, with knobs
+  /// auto-detected from the SVG. Off by default (the widget-recognition lane).
+  faithfulVector?: boolean;
 }
 
 export interface ExtractResult {
@@ -100,6 +105,7 @@ export async function extractScene(
   const cfg = {
     includeHidden: opts.includeHidden ?? false,
     maxNodes: opts.maxNodes ?? 5000,
+    faithfulVector: opts.faithfulVector ?? false,
   };
   const diagnostics: ExtractedDiagnostic[] = [];
   const assets = new AssetCache();
@@ -121,7 +127,10 @@ export async function extractScene(
     ctx.pathStack.push(`/root[${i}]`);
     const extracted = await walk(n, null, i, ctx, null);
     ctx.pathStack.pop();
-    if (extracted) roots.push(extracted);
+    if (extracted) {
+      if (cfg.faithfulVector) await applyFaithfulVector(extracted, n, ctx);
+      roots.push(extracted);
+    }
   }
 
   // Collect the unique font-family/style/weight tuples used by text
@@ -667,6 +676,31 @@ function pushDiag(
   message: string,
 ): void {
   ctx.diagnostics.push({ severity, code, kind, message, path: pathOf(ctx) });
+}
+
+// Faithful-vector capture (Plan B / B4b): export the frame's own SVG, register
+// it as an image/svg+xml asset, and attach the render-mode + auto-detected
+// interactive knobs the C++ DesignFrameView consumes. A capture failure leaves
+// the node on the normal widget-recognition lane (diagnostic only) — the import
+// degrades, it never blanks.
+async function applyFaithfulVector(
+  node: ExtractedFigmaNode,
+  sceneNode: SceneNode,
+  ctx: WalkCtx,
+): Promise<void> {
+  const res = await ctx.assets.captureExportedNode(sceneNode, "SVG");
+  if ("error" in res) {
+    pushDiag(ctx, "warning", "faithful-svg-export-failed", "capture_partial",
+      `Faithful-vector frame ${sceneNode.name}: ${res.error}`);
+    return;
+  }
+  node.render_mode = "faithful_svg";
+  node.svg_asset_id = res.assetId;
+  const entry = ctx.assets.entries().find((e) => e.asset_id === res.assetId);
+  if (entry) {
+    const knobs = parseFrameKnobs(decodeSvgBytes(entry.bytes));
+    if (knobs.length > 0) node.interactive_elements = knobs;
+  }
 }
 
 function pathOf(ctx: WalkCtx): string {

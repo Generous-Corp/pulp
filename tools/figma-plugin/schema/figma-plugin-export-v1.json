@@ -137,11 +137,40 @@
           "type": "string",
           "description": "When type=image, references asset_manifest.assets[*].asset_id"
         },
+        "render_mode": {
+          "type": "string",
+          "description": "Faithful-vector lane (Plan B). 'faithful_svg' makes the C++ materializer render svg_asset_id via DesignFrameView with interactive_elements overlays, instead of widget-recognition. Maps to IRNode.render_mode.",
+          "enum": ["normal", "faithful_svg"]
+        },
+        "svg_asset_id": {
+          "type": "string",
+          "description": "When render_mode=faithful_svg, references the asset_manifest entry (mime image/svg+xml) holding this node's SVG export. Maps to IRNode.svg_asset_id."
+        },
+        "interactive_elements": {
+          "type": "array",
+          "description": "Source-identified interactive overlays for a faithful_svg render. Maps to IRNode.interactive_elements.",
+          "items": { "$ref": "#/$defs/interactive_element" }
+        },
         "children": {
           "type": "array",
           "items": { "$ref": "#/$defs/node" }
         }
       }
+    },
+    "interactive_element": {
+      "type": "object",
+      "description": "One interactive overlay on a faithful_svg node (currently only knobs). Coordinates are in the SVG's own space.",
+      "required": ["kind", "cx", "cy", "hit_radius"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["knob"] },
+        "cx": { "type": "number", "description": "Pivot / hit center X, SVG coords." },
+        "cy": { "type": "number", "description": "Pivot / hit center Y, SVG coords." },
+        "hit_radius": { "type": "number", "description": "Click-target radius, SVG coords." },
+        "svg_patch_d": { "type": "string", "description": "Exact `d` of the needle path to rotate; empty if none was identified." },
+        "default_value": { "type": "number", "description": "Initial normalized value (0..1)." },
+        "source_node_id": { "type": "string", "description": "Figma node id (binding key)." }
+      },
+      "additionalProperties": false
     },
     "attributes": {
       "type": "object",

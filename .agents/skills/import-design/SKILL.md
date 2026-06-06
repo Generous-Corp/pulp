@@ -593,6 +593,17 @@ Pieces, source-of-truth → runtime:
   node whose name contains the substring (frame-local center from its abs
   bbox), but those carry NO `svg_patch_d` (hit + value, no visual rotation),
   the honest fallback for a knob geometry missed.
+- **Producer (plugin lane)** — the Figma plugin mirrors the REST lane in
+  lockstep: `extractScene(nodes, {faithfulVector:true})` (or headless
+  `run-headless.mjs <node> --faithful-vector`, which injects the
+  `FAITHFUL_VECTOR` global) captures each frame's SVG via
+  `captureExportedNode(node,"SVG")`, decodes the bytes with `decodeSvgBytes`
+  (the sandbox has NO `TextDecoder`), and runs the SAME knob detector
+  (`src/faithful-vector.ts`, kept identical to the Python `parse_frame_knobs`).
+  `serialize.ts` emits the three keys; the envelope schema
+  (`figma-plugin-export-v1.json`) documents them. Keep `faithful-vector.ts`
+  and `figma_rest_export.py`'s detector in sync — both are ES-conservative
+  regex passes over the SVG text.
 - **Materializer** — `materialize_node` (`design_import_native_common.cpp`)
   branches on `faithful_svg` first and builds a `DesignFrameView` via
   `make_faithful_svg_frame`: `resolve_svg_document()` resolves the SVG text

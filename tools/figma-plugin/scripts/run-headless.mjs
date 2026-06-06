@@ -40,18 +40,22 @@ const root = path.resolve(here, "..");
 
 function usage(code = 2) {
   process.stderr.write(
-    "usage: node scripts/run-headless.mjs <NODE_ID|--selection>\n" +
+    "usage: node scripts/run-headless.mjs <NODE_ID|--selection> [--faithful-vector]\n" +
     "\n" +
-    "  NODE_ID      — Figma node id (e.g. '26:3'). Forwarded as TARGET_NODE_ID\n" +
-    "                 to the headless bundle.\n" +
-    "  --selection  — fall back to figma.currentPage.selection inside the\n" +
-    "                 sandbox. Useful when running interactively in Figma\n" +
-    "                 with a frame already selected.\n",
+    "  NODE_ID            — Figma node id (e.g. '26:3'). Forwarded as TARGET_NODE_ID\n" +
+    "                       to the headless bundle.\n" +
+    "  --selection        — fall back to figma.currentPage.selection inside the\n" +
+    "                       sandbox. Useful when running interactively in Figma\n" +
+    "                       with a frame already selected.\n" +
+    "  --faithful-vector  — faithful-vector lane (Plan B): export each frame's own\n" +
+    "                       SVG + auto-detect interactive knobs (FAITHFUL_VECTOR).\n",
   );
   process.exit(code);
 }
 
-const arg = process.argv[2];
+const argv = process.argv.slice(2);
+const faithfulVector = argv.includes("--faithful-vector");
+const arg = argv.find((a) => a !== "--faithful-vector");
 if (!arg) usage();
 
 const bundlePath = path.join(root, "dist", "headless.js");
@@ -76,6 +80,7 @@ if (arg === "--selection") {
   // JSON-encode the node id so any quotes/escapes are safe inside the JS string.
   prelude = `const TARGET_NODE_ID = ${JSON.stringify(arg)};`;
 }
+if (faithfulVector) prelude += " const FAITHFUL_VECTOR = true;";
 
 const tail = "return await globalThis.__pulp_headless_result;";
 
