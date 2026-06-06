@@ -68,14 +68,27 @@ bool json_structurally_equal(const std::string& a, const std::string& b) {
     return choc::json::toString(va, false) == choc::json::toString(vb, false);
 }
 
-// The pulp CLI binary lands at <build>/tools/cli/pulp once `pulp-cli`
-// has been built. The test runner's working directory at invocation
-// is <build>/test, so "../tools/cli/pulp" is the relative path.
+// Locate a runnable CLI that implements `import-design`. The C++ delegate
+// target `pulp-cli` emits `pulp-cpp` (CMake OUTPUT_NAME) in <build>/tools/cli;
+// the Rust front-end lands at <build>/pulp and forwards import-design to that
+// delegate. The test runner's working directory at invocation is <build>/test.
+// Prefer an explicit override, then the C++ delegate (the real implementation
+// of this command), then the legacy/Rust names. Returning a non-existent path
+// makes binary_exists() false so the case skips when nothing is built.
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
-    return fs::current_path() / ".." / "tools" / "cli" / "pulp";
+    const auto build = fs::current_path() / "..";
+    for (const auto& candidate : {
+             build / "tools" / "cli" / "pulp-cpp",  // C++ delegate (current name)
+             build / "tools" / "cli" / "pulp",      // legacy name
+             build / "pulp",                         // Rust front-end
+         }) {
+        std::error_code ec;
+        if (fs::is_regular_file(candidate, ec)) return candidate;
+    }
+    return build / "tools" / "cli" / "pulp-cpp";
 }
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
@@ -466,9 +479,10 @@ TEST_CASE("pulp import-design --from figma auto-routes a figma-plugin envelope",
                        "--no-tokens"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
-    // Guardrail fired: routed to the plugin parser with a notice.
+    // Guardrail fired: routed to the plugin parser with a notice. (The note
+    // names the format with a capital F: "Figma-plugin export envelope".)
     const auto combined = r.stdout_output + r.stderr_output;
-    REQUIRE(combined.find("figma-plugin export envelope") != std::string::npos);
+    REQUIRE(combined.find("Figma-plugin export envelope") != std::string::npos);
     // Children were actually parsed (NOT the empty root-only output): the
     // text node's content reaches the generated JS.
     REQUIRE(fs::exists(js_out));
@@ -542,6 +556,40 @@ TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interac
     REQUIRE(js.find(", 100, 100)") != std::string::npos);
     // Sprite mode does NOT apply the silver vector style.
     REQUIRE(js.find("setWidgetStyle('GainKnob") == std::string::npos);
+}
+
+// ── baked ir-json lane preserves the figma-plugin tree + assets ──────────
+// Two bugs used to silently gut the `--emit ir-json` (and cpp/swiftui) lane for
+// figma-plugin envelopes while `--emit js` worked:
+//   1) looks_like_serialized_design_ir() false-matched the envelope (it has a
+//      top-level "root" and nested "version" keys), short-circuiting to the
+//      bare-node DesignIR parser, which dropped every child.
+//   2) refresh_design_ir_asset_manifest() rebuilt the manifest from a node-URI
+//      scan that does not recognize figma-plugin `asset_ref` attributes, so the
+//      parsed asset_manifest was discarded.
+// This guards the baked lane: children survive AND the parsed manifest is kept.
+TEST_CASE("pulp import-design --emit ir-json keeps a figma-plugin tree + assets",
+          "[cli][import-design][ir-json][figma-plugin][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-irjson-figma-plugin");
+    auto scene = write_sprite_knob_fixture(tmp);  // 1 asset (knob_body) + nested GainKnob
+    auto ir_out = tmp / "design.ir.json";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", scene.string(), "--emit", "ir-json",
+                       "--mode", "baked", "--output", ir_out.string(),
+                       "--no-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(ir_out));
+    const auto ir = read_text(ir_out);
+
+    // Bug 1 guard: NOT the empty bare-node fallback, and the child survived.
+    REQUIRE(ir.find("parsed legacy bare-node DesignIR JSON") == std::string::npos);
+    REQUIRE(ir.find("GainKnob") != std::string::npos);
+    // Bug 2 guard: the parsed asset_manifest is preserved (not scanned away).
+    REQUIRE(ir.find("\"assetManifest\"") != std::string::npos);
+    REQUIRE(ir.find("knob_body") != std::string::npos);
 }
 
 TEST_CASE("pulp import-design normalizes + emits a Figma blend mode (end-to-end)",

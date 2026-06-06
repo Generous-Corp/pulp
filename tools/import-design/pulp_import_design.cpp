@@ -1810,7 +1810,8 @@ int main(int argc, char* argv[]) {
         if (runtime_mode == RuntimeMode::baked &&
             (artifact_emit == ArtifactEmit::ir_json || artifact_emit == ArtifactEmit::cpp ||
              artifact_emit == ArtifactEmit::swiftui) &&
-            looks_like_serialized_design_ir(content)) {
+            looks_like_serialized_design_ir(content) &&
+            !looks_like_figma_plugin_export(content)) {
             ir = parse_design_ir_json(content);
             parsed_serialized_design_ir = true;
         } else {
@@ -1958,7 +1959,11 @@ int main(int argc, char* argv[]) {
         std::cout << "[execute-bundle] runtime path produced the IR (no fallback)\n";
     }
 
-    if (!parsed_serialized_design_ir)
+    // Preserve a parser-detected figma_plugin source: `--from figma` fed an
+    // export envelope is auto-routed to parse_figma_plugin_json (which sets
+    // source = figma_plugin), and downstream asset handling keys off that. Don't
+    // clobber it back to the CLI-requested `figma`.
+    if (!parsed_serialized_design_ir && ir.source != DesignSource::figma_plugin)
         ir.source = *source;
     ir.source_file = input_url.empty() ? input_file : input_url;
     if (ir.imported_at.empty()) ir.imported_at = current_utc_timestamp();

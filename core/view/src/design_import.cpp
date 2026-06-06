@@ -1416,8 +1416,23 @@ static void clear_asset_id_annotations(IRNode& node) {
 
 void refresh_design_ir_asset_manifest(DesignIR& ir,
                                       const DesignIrAssetOptions& options) {
-    ir.asset_manifest = collect_design_ir_assets(ir, options);
+    // figma-plugin envelopes ship a complete, local_path-backed asset_manifest
+    // keyed by asset_id, and their nodes reference assets via an `asset_ref`
+    // attribute (not a URL or any is_asset_reference_key key). A node-URI scan
+    // therefore finds nothing and would discard the parsed manifest, so for that
+    // lane we preserve the parsed manifest instead of rebuilding it.
+    const bool preserve_parsed_manifest =
+        ir.source == DesignSource::figma_plugin && !ir.asset_manifest.assets.empty();
+    if (!preserve_parsed_manifest)
+        ir.asset_manifest = collect_design_ir_assets(ir, options);
     std::unordered_map<std::string, std::string> asset_id_by_uri;
+    if (preserve_parsed_manifest) {
+        // Map asset_id → asset_id so `asset_ref` attributes resolve to the
+        // canonical asset id during node annotation below.
+        for (const auto& asset : ir.asset_manifest.assets)
+            if (!asset.asset_id.empty())
+                asset_id_by_uri.emplace(asset.asset_id, asset.asset_id);
+    }
     for (const auto& asset : ir.asset_manifest.assets) {
         if (!asset.original_uri.empty())
             asset_id_by_uri.emplace(asset.original_uri, asset.asset_id);
