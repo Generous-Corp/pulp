@@ -224,6 +224,62 @@ class FaithfulVectorTest(unittest.TestCase):
     def test_name_override_empty_when_no_names(self):
         self.assertEqual(frx._name_override_knobs({"children": []}, [], []), [])
 
+    def test_detect_overlay_controls_named_field_uses_own_rect(self):
+        # A node named like a field uses its OWN rect. Coords map node->SVG:
+        # svg = (node_abs - root_abs) + panel_origin. root_abs (100,200),
+        # panel_origin (73,50): node (116,250) -> (116-100+73, 250-200+50)=(89,100).
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 100, "y": 200, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Search Field", "id": "5:1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 116, "y": 250, "width": 280, "height": 32},
+                 "children": [{"type": "TEXT", "characters": "Search"}]},
+                {"name": "Some Frame", "id": "5:2",
+                 "absoluteBoundingBox": {"x": 500, "y": 250, "width": 100, "height": 100}},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (100.0, 200.0), (73.0, 50.0))
+        self.assertEqual(len(els), 1)
+        e = els[0]
+        self.assertEqual(e["kind"], "text_field")
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (89.0, 100.0, 280.0, 32.0))
+        self.assertEqual(e["placeholder"], "Search")
+        self.assertEqual(e["source_node_id"], "5:1")
+
+    def test_detect_overlay_controls_placeholder_text_uses_parent_group(self):
+        # ELYSIUM shape: the "Search" placeholder is a TEXT leaf; the field is its
+        # parent group. The magnifier "ic:round-search" must NOT match.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Group 59", "id": "g59", "type": "GROUP",
+                 "absoluteBoundingBox": {"x": 21, "y": 73, "width": 184, "height": 26},
+                 "children": [
+                     {"name": "ic:round-search", "type": "FRAME",
+                      "absoluteBoundingBox": {"x": 21, "y": 76, "width": 15, "height": 15}},
+                     {"name": "Search", "type": "TEXT", "characters": "Search",
+                      "absoluteBoundingBox": {"x": 44, "y": 78, "width": 43, "height": 17}},
+                 ]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        self.assertEqual(len(els), 1)              # icon skipped, one field found
+        e = els[0]
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (94.0, 123.0, 184.0, 26.0))
+        self.assertEqual(e["source_node_id"], "g59")  # the parent group, not the text
+
+    def test_parse_panel_bounds_picks_the_panel_rect(self):
+        svg = ('<svg width="1146" height="746" xmlns="http://www.w3.org/2000/svg">'
+               '<rect x="0" y="0" width="1146" height="746" fill="#000"/>'  # full frame -> excluded
+               '<rect x="73" y="50" width="1000" height="600" fill="#252626"/>'
+               '<rect x="83" y="112" width="980" height="367" fill="#1c1d1d"/></svg>')
+        self.assertEqual(frx.parse_panel_bounds(svg), (73.0, 50.0, 1000.0, 600.0))
+
+    def test_detect_overlay_controls_none_when_no_match(self):
+        root = {"absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10},
+                "children": [{"name": "Knob", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 4}}]}
+        self.assertEqual(frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0)), [])
+
 
 if __name__ == "__main__":
     unittest.main()

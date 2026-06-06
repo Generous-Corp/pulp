@@ -9,8 +9,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/text_editor.hpp>
 
 #include <string>
 
@@ -142,6 +144,58 @@ TEST_CASE("DesignFrameView renders + the needle rotates at a non-panel aspect",
     if (cmp.similarity >= 0.999f)
         SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
     CHECK(cmp.similarity < 0.999f);
+}
+
+namespace {
+// A text_field (search) overlay element inside the 80x80 panel at (10,10).
+DesignFrameElement make_search() {
+    DesignFrameElement s;
+    s.kind = DesignFrameElement::Kind::text_field;
+    s.x = 14; s.y = 14; s.w = 60; s.h = 16;   // SVG coords, inside the panel
+    s.placeholder = "Search";
+    return s;
+}
+}  // namespace
+
+TEST_CASE("DesignFrameView overlays a focusable TextEditor for a text_field",
+          "[view][design-import][frame][overlay]") {
+    DesignFrameView v(make_design_svg(), {make_search()});
+    REQUIRE(v.element_count() == 1);
+    auto* editor = dynamic_cast<TextEditor*>(v.overlay_widget(0));
+    REQUIRE(editor != nullptr);                 // a real native widget, not a fake
+    CHECK(editor->placeholder == "Search");
+
+    // Tap inside the field routes to the editor (children are hit before the
+    // frame's knob fallback), focuses it, and typing inserts text.
+    editor->on_focus_changed(true);
+    CHECK(editor->has_focus());
+    TextInputEvent te; te.text = "kick"; editor->on_text_input(te);
+    CHECK(editor->text() == "kick");
+}
+
+TEST_CASE("DesignFrameView positions the text_field overlay via the panel transform",
+          "[view][design-import][frame][overlay]") {
+    DesignFrameView v(make_design_svg(), {make_search()});  // panel (10,10,80,80)
+    auto* editor = v.overlay_widget(0);
+    REQUIRE(editor != nullptr);
+
+    // Matched aspect: view 80x80 -> scale 1, ox=oy=0. Field (14,14,60,16) maps to
+    // view ((14-10), (14-10), 60, 16) = (4,4,60,16).
+    v.set_bounds({0, 0, 80, 80});
+    v.layout_children();
+    auto b = editor->bounds();
+    CHECK(b.x == 4.0f); CHECK(b.y == 4.0f); CHECK(b.width == 60.0f); CHECK(b.height == 16.0f);
+
+    // Mismatched aspect: view 160x80 -> uniform scale 1, centered ox=40, oy=0.
+    // Field maps to ((14-10)+40, (14-10), 60, 16) = (44,4,60,16). The overlay
+    // tracks the SAME transform the SVG is painted with.
+    v.set_bounds({0, 0, 160, 80});
+    v.layout_children();
+    b = editor->bounds();
+    CHECK(b.x == 44.0f); CHECK(b.y == 4.0f); CHECK(b.width == 60.0f); CHECK(b.height == 16.0f);
+
+    // A click inside the field's view rect routes to the editor, not the frame.
+    CHECK(v.hit_test({60, 8}) == editor);
 }
 
 TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",

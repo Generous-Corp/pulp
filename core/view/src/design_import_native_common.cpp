@@ -997,12 +997,27 @@ std::vector<DesignFrameElement> to_frame_elements(
     out.reserve(elements.size());
     for (const auto& e : elements) {
         DesignFrameElement el;
-        el.kind = DesignFrameElement::Kind::knob;  // InteractiveElementKind::knob
+        switch (e.kind) {
+            case InteractiveElementKind::dropdown:
+                el.kind = DesignFrameElement::Kind::dropdown; break;
+            case InteractiveElementKind::text_field:
+                el.kind = DesignFrameElement::Kind::text_field; break;
+            case InteractiveElementKind::tab_group:
+                el.kind = DesignFrameElement::Kind::tab_group; break;
+            case InteractiveElementKind::knob:
+                el.kind = DesignFrameElement::Kind::knob; break;
+        }
+        // knob (SVG-patch) data
         el.cx = e.cx;
         el.cy = e.cy;
         el.hit_radius = e.hit_radius;
         el.needle_d = e.svg_patch_d;
         el.value = e.default_value;
+        // overlay-control data (dropdown / text_field / tab_group)
+        el.x = e.x; el.y = e.y; el.w = e.w; el.h = e.h;
+        el.placeholder = e.placeholder;
+        el.options = e.options;
+        el.selected_index = e.selected_index;
         out.push_back(std::move(el));
     }
     return out;

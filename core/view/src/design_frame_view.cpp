@@ -1,11 +1,13 @@
 #include <pulp/view/design_frame_view.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/text_editor.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <memory>
 
 namespace pulp::view {
 
@@ -81,6 +83,31 @@ DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement
     if (panel_w_ <= 0 || panel_h_ <= 0) {  // fallback: the whole frame
         panel_x_ = 0; panel_y_ = 0; panel_w_ = svg_w_; panel_h_ = svg_h_;
     }
+    build_overlays();
+}
+
+void DesignFrameView::build_overlays() {
+    for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        const auto& e = elements_[i];
+        std::unique_ptr<View> widget;
+        if (e.kind == DesignFrameElement::Kind::text_field) {
+            // Opaque TextEditor over the design's search box: it paints its own
+            // rounded bg (covering the baked box so there's no double-render),
+            // shows the placeholder until focused, and draws an accent focus ring
+            // on tap — the requested tap-to-focus + highlight behavior.
+            auto editor = std::make_unique<TextEditor>();
+            editor->placeholder = e.placeholder;
+            // Match the design's dark field; the focus ring + caret come for free.
+            editor->set_background_color(canvas::Color::rgba8(0x2c, 0x2d, 0x2d, 0xff));
+            widget = std::move(editor);
+        }
+        // dropdown / tab_group overlays land in the next slices.
+        if (widget) {
+            View* raw = widget.get();
+            add_child(std::move(widget));
+            overlays_.push_back({i, raw});
+        }
+    }
 }
 
 float DesignFrameView::element_value(int i) const {
@@ -92,6 +119,27 @@ void DesignFrameView::set_element_value(int i, float v) {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return;
     elements_[i].value = std::clamp(v, 0.0f, 1.0f);
     request_repaint();
+}
+
+View* DesignFrameView::overlay_widget(int i) const {
+    for (const auto& o : overlays_)
+        if (o.element_index == i) return o.widget;
+    return nullptr;
+}
+
+void DesignFrameView::layout_children() {
+    // Position each native overlay over its element's rect, mapped through the
+    // SAME panel transform paint() uses, so the widget tracks the design exactly
+    // as the window scales (Codex: layout_children is the hook hosts/screenshots
+    // call before paint; set_bounds only fires on_resized).
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0) return;
+    for (const auto& o : overlays_) {
+        const auto& e = elements_[o.element_index];
+        o.widget->set_bounds({t.ox + (e.x - panel_x_) * t.scale,
+                              t.oy + (e.y - panel_y_) * t.scale,
+                              e.w * t.scale, e.h * t.scale});
+    }
 }
 
 DesignFrameView::PanelTransform DesignFrameView::panel_transform(const Rect& b) const {
@@ -129,6 +177,9 @@ int DesignFrameView::hit_element(Point pos) const {
     const float sy = panel_y_ + (pos.y - t.oy) / t.scale;
     int best = -1; float bd = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        // Only knobs are hit here; overlay controls own their hits via their child
+        // widget (View::hit_test reaches children before this parent fallback).
+        if (elements_[i].kind != DesignFrameElement::Kind::knob) continue;
         const float dx = sx - elements_[i].cx, dy = sy - elements_[i].cy;
         const float d = std::sqrt(dx * dx + dy * dy);
         if (d < elements_[i].hit_radius && d < bd) { bd = d; best = i; }
