@@ -869,3 +869,22 @@ Slice 1 of the iOS-D.3b program (PR #3146 @ `3e15f61cb`) added the cross-platfor
 **`presentable` flag** (iOS-D.3b Slice 4): `WidgetBridge`'s `__gpuCanvasConfigureImpl` and `__gpuCanvasDescribeCurrentTextureImpl` both expose a `presentable` boolean to JS. `true` iff `gpu_surface_->has_surface()` is true (i.e., the surface has a real swapchain, not just an offscreen texture). Three.js draws to a `presentable=false` canvas land in a silent offscreen render that's not composited to the visible AUv3 editor. Always check this flag in any new GPU bridge code path.
 
 See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` for the full 6-slice program.
+
+## Plugin-contributed settings sections
+
+`Processor::settings_sections()` lets a plugin surface its own Settings tabs (e.g. a model
+picker) that the **host composes** alongside its host-owned Audio/MIDI tabs — keep device
+selection a host concern (a plugin can't pick the audio device in a DAW; the host owns it),
+while still giving one unified Settings panel. The standalone chrome
+(`make_standalone_editor_chrome`) calls `processor.settings_sections()` and appends each via
+`SettingsPanel::add_section(title, view)` after the Audio/MIDI tabs. Gotchas:
+
+- The `Settings` tab (with Audio/MIDI) only exists when `StandaloneConfig::show_settings_tab`
+  is true; that's also the gate for composing plugin sections. A plugin that wants its
+  settings visible in the standalone must leave it on.
+- Do NOT pull host audio settings down into the plugin editor — invert it: contribute the
+  plugin's sections up. In a DAW the same `settings_sections()` show with no Audio/MIDI tab,
+  automatically correct.
+- `make_standalone_editor_chrome` accesses `StandaloneEditorChrome`'s private members via a
+  `friend` declaration — if you change its signature, update the friend decl to match or it
+  silently loses friendship and fails to compile on the private-member access.
