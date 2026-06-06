@@ -401,7 +401,17 @@ if(PULP_HAS_WEBGPU AND DEFINED WEBGPU_RUNTIME_LIB AND TARGET webgpu)
 endif()
 
 if(PULP_HAS_SKIA)
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build"
-        DESTINATION external
-    )
+    # Ship the Skia tree the build actually linked against — including the
+    # prebuilt static libs (build/<plat>-gpu/lib/Release/*.a) consumers need to
+    # link Pulp::view/render. FindSkia sets SKIA_DIR to the in-tree default on a
+    # normal checkout, or to an out-of-tree cache when -DSKIA_DIR/$SKIA_DIR is
+    # used (e.g. a worktree whose external/skia-build holds only headers). Using
+    # the resolved SKIA_DIR makes the installed SDK self-contained either way.
+    if(SKIA_DIR AND EXISTS "${SKIA_DIR}")
+        install(DIRECTORY "${SKIA_DIR}/" DESTINATION external/skia-build)
+    else()
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build"
+            DESTINATION external
+        )
+    endif()
 endif()
