@@ -51,6 +51,22 @@ static bool get_bool(const choc::value::ValueView& obj, const char* key, bool de
     return def;
 }
 
+// ── Faithful-vector import (Plan B) enum<->id ───────────────────────────
+static NodeRenderMode render_mode_from_id(const std::string& s) {
+    return s == "faithful_svg" ? NodeRenderMode::faithful_svg : NodeRenderMode::normal;
+}
+static const char* render_mode_id(NodeRenderMode m) {
+    return m == NodeRenderMode::faithful_svg ? "faithful_svg" : "normal";
+}
+// Only `knob` exists today; unknown ids fall back to it. Extend alongside
+// InteractiveElementKind when search/dropdown/button land.
+static InteractiveElementKind interactive_kind_from_id(const std::string&) {
+    return InteractiveElementKind::knob;
+}
+static const char* interactive_kind_id(InteractiveElementKind) {
+    return "knob";
+}
+
 // ── box-shadow parse / serialize (pulp #41) ─────────────────────────────
 //
 // CSS `box-shadow` is a comma-separated list of layers; each layer is
@@ -762,6 +778,39 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         node.raw_source = std::string(obj["raw_source"].toString());
     } else if (obj.hasObjectMember("rawSource") && obj["rawSource"].isString()) {
         node.raw_source = std::string(obj["rawSource"].toString());
+    }
+
+    // ── Faithful-vector import (Plan B): render mode + SVG asset + overlays ──
+    for (const char* k : {"render_mode", "renderMode"}) {
+        if (obj.hasObjectMember(k) && obj[k].isString()) {
+            node.render_mode = render_mode_from_id(get_string(obj, k));
+            break;
+        }
+    }
+    for (const char* k : {"svg_asset_id", "svgAssetId"}) {
+        if (obj.hasObjectMember(k) && obj[k].isString()) {
+            node.svg_asset_id = get_string(obj, k);
+            break;
+        }
+    }
+    for (const char* arr_key : {"interactive_elements", "interactiveElements"}) {
+        if (!obj.hasObjectMember(arr_key) || !obj[arr_key].isArray()) continue;
+        const auto arr = obj[arr_key];
+        for (uint32_t i = 0; i < arr.size(); ++i) {
+            const auto e = arr[static_cast<int>(i)];
+            if (!e.isObject()) continue;
+            IRInteractiveElement el;
+            el.kind = interactive_kind_from_id(get_string(e, "kind", "knob"));
+            el.cx = get_float(e, "cx");
+            el.cy = get_float(e, "cy");
+            el.hit_radius = get_float(e, "hit_radius");
+            el.svg_patch_d = get_string(e, "svg_patch_d");
+            el.default_value = get_float(e, "default_value", 0.5f);
+            if (e.hasObjectMember("source_node_id") && e["source_node_id"].isString())
+                el.source_node_id = get_string(e, "source_node_id");
+            node.interactive_elements.push_back(std::move(el));
+        }
+        if (!node.interactive_elements.empty()) break;
     }
 
     if (obj.hasObjectMember("style"))
@@ -1652,6 +1701,33 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
         if (node.confidence)
             write_string_member(out, first, "confidence", confidence_id(*node.confidence));
         write_string_member(out, first, "raw_source", node.raw_source);
+    }
+
+    // ── Faithful-vector import (Plan B) ──────────────────────────────────
+    // Structural, not source-metadata: a faithful_svg node must round-trip
+    // its render mode + asset + overlays regardless of metadata stripping.
+    if (node.render_mode != NodeRenderMode::normal)
+        write_string_member(out, first, "render_mode", render_mode_id(node.render_mode));
+    write_string_member(out, first, "svg_asset_id", node.svg_asset_id);
+    if (!node.interactive_elements.empty()) {
+        write_key(out, first, "interactive_elements");
+        out << '[';
+        for (size_t i = 0; i < node.interactive_elements.size(); ++i) {
+            if (i) out << ',';
+            const auto& el = node.interactive_elements[i];
+            out << '{';
+            bool ef = true;
+            write_string_member(out, ef, "kind", interactive_kind_id(el.kind));
+            write_float_member(out, ef, "cx", el.cx);
+            write_float_member(out, ef, "cy", el.cy);
+            write_float_member(out, ef, "hit_radius", el.hit_radius);
+            if (!el.svg_patch_d.empty())
+                write_string_member(out, ef, "svg_patch_d", el.svg_patch_d);
+            write_float_member(out, ef, "default_value", el.default_value);
+            write_string_member(out, ef, "source_node_id", el.source_node_id);
+            out << '}';
+        }
+        out << ']';
     }
 
     write_key(out, first, "children");
