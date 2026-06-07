@@ -154,15 +154,19 @@ target_include_directories(pulp-view-script
 
 # ── JS engine backend selection ──────────────────────────────────────────────
 # PULP_JS_ENGINE: auto | quickjs | jsc | v8
-#   auto    → JSC on Apple, QuickJS elsewhere (V8 if PULP_HAS_V8)
+#   auto    → JSC on Apple, QuickJS elsewhere (never V8 — V8 is opt-in)
 #   quickjs → QuickJS only (always available, portable)
 #   jsc     → JavaScriptCore (Apple platforms only)
-#   v8      → V8 (requires external V8 build, set V8_INCLUDE_DIR / V8_LIB_DIR,
-#                 and optionally V8_LIBRARY_PATH or V8_LIBRARY_NAME)
+#   v8      → V8 via the pinned sealed libv8 (FindV8.cmake →
+#             external/v8-build/<platform>/, populated by
+#             tools/scripts/fetch_v8_for_release.py). Not supported on iOS.
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
-set(V8_LIBRARY_PATH "" CACHE FILEPATH "Full path to the V8 provider library (e.g. libv8_monolith or libnode)")
-set(V8_LIBRARY_NAME "" CACHE STRING "Library name to link for V8 when V8_LIBRARY_PATH is not set")
+# Advanced local-experiment overrides only — normal v8 builds need none (FindV8
+# resolves external/v8-build or a baked $V8_DIR). The former Homebrew-libnode
+# provider search (v8_monolith/node/versioned libnode glob) was removed: when v8
+# is selected, the provider is the pinned sealed libv8, nothing else.
+set(V8_LIBRARY_PATH "" CACHE FILEPATH "Advanced: full path to a V8 runtime library (local experiments)")
 
 # QuickJS backend is always compiled (portable fallback)
 set(PULP_JS_ENGINE_SOURCES
@@ -186,69 +190,30 @@ if(_pulp_ubsan_enabled AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
 endif()
 unset(_pulp_ubsan_enabled)
 
-# V8 backend (optional, needs external V8)
-if(PULP_JS_ENGINE STREQUAL "v8" OR (PULP_JS_ENGINE STREQUAL "auto" AND DEFINED V8_INCLUDE_DIR))
-    if(DEFINED V8_INCLUDE_DIR AND DEFINED V8_LIB_DIR)
-        list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
-        target_include_directories(pulp-view-script PRIVATE ${V8_INCLUDE_DIR})
-        target_link_directories(pulp-view-script PRIVATE ${V8_LIB_DIR})
-        if(V8_LIBRARY_PATH)
-            target_link_libraries(pulp-view-script PRIVATE ${V8_LIBRARY_PATH})
-        else()
-            set(PULP_V8_PROVIDER_NAMES)
-            if(V8_LIBRARY_NAME)
-                list(APPEND PULP_V8_PROVIDER_NAMES ${V8_LIBRARY_NAME})
-            endif()
-            # `node` (unversioned) matches a libnode.so/.dylib dev symlink as
-            # shipped by Linux distro libnode-dev. `v8_monolith` matches a
-            # self-built or prebuilt static V8 (e.g. rusty_v8, kuoruan/libv8).
-            list(APPEND PULP_V8_PROVIDER_NAMES v8_monolith node)
-
-            find_library(PULP_V8_PROVIDER_LIBRARY
-                NAMES ${PULP_V8_PROVIDER_NAMES}
-                PATHS ${V8_LIB_DIR}
-                NO_DEFAULT_PATH
-            )
-            set(PULP_V8_PROVIDER "${PULP_V8_PROVIDER_LIBRARY}")
-
-            # Homebrew libnode (and a non-dev distro libnode) is version-
-            # suffixed — libnode.147.dylib on macOS, libnode.so.115 on Linux —
-            # so it is invisible to find_library's NAMES matching. Glob for any
-            # versioned libnode so the V8 lane survives Node upgrades without a
-            # hard-coded ABI pin, and pick the highest version present.
-            if(NOT PULP_V8_PROVIDER)
-                file(GLOB _pulp_v8_libnode
-                    "${V8_LIB_DIR}/libnode.*.dylib"
-                    "${V8_LIB_DIR}/libnode.so.*"
-                    "${V8_LIB_DIR}/libnode.*.so")
-                if(_pulp_v8_libnode)
-                    list(SORT _pulp_v8_libnode COMPARE NATURAL)
-                    list(POP_BACK _pulp_v8_libnode PULP_V8_PROVIDER)
-                endif()
-                unset(_pulp_v8_libnode)
-            endif()
-
-            if(PULP_V8_PROVIDER)
-                target_link_libraries(pulp-view-script PRIVATE ${PULP_V8_PROVIDER})
-                message(STATUS "Pulp V8 provider library: ${PULP_V8_PROVIDER}")
-            else()
-                message(FATAL_ERROR
-                    "Could not find a V8 provider library in ${V8_LIB_DIR}. "
-                    "Looked for v8_monolith, node, and versioned libnode.* "
-                    "(e.g. libnode.147.dylib, libnode.so.115). Set V8_LIBRARY_PATH "
-                    "to a full library path or V8_LIBRARY_NAME to the library basename."
-                )
-            endif()
-        endif()
-        set(PULP_HAS_V8_ACTUAL ON)
-    else()
-        if(PULP_JS_ENGINE STREQUAL "v8")
-            message(FATAL_ERROR "PULP_JS_ENGINE=v8 requires V8_INCLUDE_DIR and V8_LIB_DIR")
-        endif()
-        list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
+# V8 backend — provider is the pinned sealed libv8 (FindV8.cmake →
+# external/v8-build/<platform>/, fetched by tools/scripts/fetch_v8_for_release.py).
+# js_v8_engine.cpp is ALWAYS compiled; it is #ifdef PULP_HAS_V8 internally and
+# becomes a stub when V8 is not linked. V8 is linked ONLY when explicitly selected
+# with PULP_JS_ENGINE=v8 — `auto` never silently pulls in V8 (Codex review P2).
+list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
+if(PULP_JS_ENGINE STREQUAL "v8")
+    # iOS cannot JIT — V8 is forbidden in iOS apps / AUv3 extensions. Hard error,
+    # not a silent fallback, so a misconfigured iOS build fails loudly.
+    if(IOS OR PULP_IOS)
+        message(FATAL_ERROR
+            "PULP_JS_ENGINE=v8 is not supported on iOS: V8 requires JIT, which iOS "
+            "apps and AUv3 extensions forbid. iOS uses JSC (the default on Apple).")
     endif()
-else()
-    list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/FindV8.cmake)
+    if(NOT PULP_V8_FOUND)
+        message(FATAL_ERROR
+            "PULP_JS_ENGINE=v8 selected but no sealed V8 was found. Populate it with:\n"
+            "    python3 tools/scripts/fetch_v8_for_release.py <platform>\n"
+            "(unpacks to external/v8-build/), or point V8_DIR at a baked V8, or set "
+            "the advanced V8_INCLUDE_DIR + V8_LIB_DIR overrides for a local build.")
+    endif()
+    target_link_libraries(pulp-view-script PRIVATE v8::v8)
+    set(PULP_HAS_V8_ACTUAL ON)
 endif()
 
 # JSC backend (Apple platforms only)

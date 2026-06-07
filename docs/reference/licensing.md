@@ -124,6 +124,7 @@ Fetched only when the corresponding CMake option or platform gate is enabled.
 | **scheduler** | MIT | Cooperative-scheduling runtime pulled in transitively by `react-reconciler` for `@pulp/react`; npm-installed | [github.com/facebook/react](https://github.com/facebook/react) |
 | **simdjson** | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/simdjson/simdjson](https://github.com/simdjson/simdjson) |
 | **three.js** | MIT | Native WebGPU bridge demos and tests; fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
+| **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS, JSC on Apple). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. iOS is JSC-only (V8 needs JIT) | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
 
 ## Standards and Specifications
 

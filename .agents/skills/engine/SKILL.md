@@ -169,91 +169,96 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
   old header comment, not the implementation.
 - `quickjs`: Explicit QuickJS. Same as auto today.
 - `jsc`: JavaScriptCore on Apple. Build fails on non-Apple.
-- `v8`: V8 on desktop. Requires V8 headers/libs. Build fails without them.
+- `v8`: V8 on desktop/Android via the pinned sealed `libv8` (fetched into `external/v8-build/`). Build fails if not fetched; iOS errors out (no JIT). See "V8 provider library" below.
 
 The engine choice is a **build-time** CMake option. Changing it requires reconfigure + rebuild. The abstraction ensures all JS bridge code works identically across engines — the switch is invisible to UI scripts.
 
-## V8 provider libraries (how V8 is obtained)
+## V8 provider library (how V8 is obtained)
 
-Pulp does **not** build V8 from source. It links a prebuilt V8 via three
-cache variables consumed in `core/view/CMakeLists.txt`:
+Pulp does **not** build V8 from source, and (since 2026-06) does **not**
+use a developer's Homebrew `libnode`. The provider is a **pinned, sealed
+prebuilt `libv8`** from the
+[danielraffel/v8-builder](https://github.com/danielraffel/v8-builder)
+fork — the same pin/fetch/Find pattern as Skia:
 
-- `V8_INCLUDE_DIR` — header root containing `v8.h`
-- `V8_LIB_DIR` — directory searched for the provider library
-- `V8_LIBRARY_PATH` — full path to the provider when it can't be matched
-  by name (the usual case for a version-suffixed `libnode`)
-- `V8_LIBRARY_NAME` — optional basename override
+1. **Pin:** the `V8` entry in `tools/deps/manifest.json`
+   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-15.1.27`).
+2. **Fetch:** `python3 tools/scripts/fetch_v8_for_release.py <platform>`
+   downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
+   (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
+   `linux-x64`, `linux-arm64`, `windows-x64`, `windows-arm64`,
+   `android-arm64`, `ios-simulator-arm64` (headers-only — iOS is JSC).
+3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
+   (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
+   imported target. The configure log prints
+   `-- Pulp V8 provider: <path> (platform key: ...)`.
 
-Resolution order when `V8_LIBRARY_PATH` is unset: `find_library` for
-`v8_monolith` then `node`, then a `file(GLOB)` fallback for version-
-suffixed `libnode.*.dylib` / `libnode.so.*` (highest version wins, by
-natural sort). The glob exists because Homebrew/distro `libnode` is
-ABI-suffixed (`libnode.147.dylib`, `libnode.so.115`) and invisible to
-`find_library`'s NAMES matching — so the lane survives Node upgrades
-without a hard-coded pin. The configure log prints the resolved provider
-(`-- Pulp V8 provider library: ...`); check it if a V8 build links the
-wrong thing.
-
-**macOS (proven lane):** Homebrew Node's `libnode`.
+**Selecting V8 — that's all you need:**
 
 ```bash
+python3 tools/scripts/fetch_v8_for_release.py darwin-arm64   # once
 cmake -S . -B build -DPULP_JS_ENGINE=v8 \
-  -DV8_INCLUDE_DIR=/opt/homebrew/opt/node/include/node \
-  -DV8_LIB_DIR=/opt/homebrew/opt/node/lib \
-  -DV8_LIBRARY_PATH=/opt/homebrew/opt/node/lib/libnode.147.dylib \
-  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON                 # no V8_* paths
 ```
 
-Passing `V8_LIBRARY_PATH` explicitly is still the most robust on macOS;
-the glob is the fallback when it's omitted.
+FindV8 resolves the fetched artifact automatically — no `V8_INCLUDE_DIR`/
+`V8_LIB_DIR`/`V8_LIBRARY_PATH` needed. Those still exist as **advanced
+local-experiment overrides** (point at a hand-built V8). `V8_DIR` points at
+a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 
-**Cross-platform provider options (not yet validated):**
+**Two behavior rules (Codex review, 2026-06):**
+- `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
+  `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
+- `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR` — V8
+  needs JIT, forbidden in iOS apps / AUv3 extensions. iOS uses JSC.
 
-- **Linux:** distro `libnode` is the direct analog of the macOS lane —
-  `apt install libnode-dev` (Debian/Ubuntu; `libv8-dev` aliases it) or
-  `dnf install nodejs-devel`. The dev package ships an unversioned
-  `libnode.so` symlink that `find_library NAMES node` matches directly.
-- **Windows:** no clean dev `libnode` package. Either build Node
-  `--shared` (inherits Node's sealed ICU — cleanest), or use a prebuilt
-  static `v8_monolith` (denoland/rusty_v8, kuoruan/libv8) via
-  `V8_LIBRARY_PATH`.
+**Why the sealed build (the ICU caveat):** the v8-builder `libv8` exports
+only the `v8::`/`cppgc::` API and keeps its bundled ICU/zlib/Abseil
+internal, so they don't collide with Skia's bundled-but-flat-named
+ICU/HarfBuzz at the final link. Confirm any provider is seal-safe with
+`nm -gU <lib> | c++filt | grep -cE 'icu_[0-9]+::|absl::'` — only
+`v8::internal::` functions whose *signatures* mention those types should
+appear, never re-exported `icu_NN::`/`absl::` library symbols. V8 is still
+confined to `js_v8_engine.cpp` and never shares a TU with a Skia/Dawn
+header.
 
-**The ICU caveat that makes the macOS lane work:** `libnode` keeps its
-bundled ICU/zlib symbols private (two-level namespace / hidden
-visibility), so they don't collide with Skia's bundled-but-flat-named
-ICU/HarfBuzz (in `libskunicode_icu.a` / `libskshaper.a`) at the final
-link. A self-built `v8_monolith` flat-exports ICU and will clash with
-Skia unless those symbols are hidden. Confirm a provider is safe with
-`nm -gU <lib> | grep -cE '_ubrk_|_ucnv_|_uloc_'` — it should print 0.
-This is also why V8 is confined to `js_v8_engine.cpp` and never shares a
-translation unit with any Skia/Dawn header.
+**Cross-platform rollout + ship/sign/package** (Windows MSVC `/MT` ABI,
+macOS nested-dylib re-signing, Android ABI gating, golden-VM bake) are
+tracked in `planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
+macOS arm64 is the proven lane; other platforms are pinned but pending
+per-platform verification.
 
 ## Gotchas
 
-### Three.js V8 builds must pin a compatible Node/V8 dylib
+### Three.js V8 builds use the pinned sealed libv8 (no Homebrew node)
 
-The native Three.js bridge needs V8, but the exact Node/V8 ABI matters. On
-macOS, prefer Homebrew `node@24` and pass all three CMake paths explicitly:
+The native Three.js bridge needs V8. Use the pinned sealed `libv8` — fetch
+once, then just select `v8`:
 
 ```bash
-cmake -S . -B build-threejs-runtime-node24 -DCMAKE_BUILD_TYPE=Release \
-  -DPULP_JS_ENGINE=v8 \
-  -DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/include/node \
-  -DV8_LIB_DIR=/opt/homebrew/opt/node@24/lib \
-  -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib \
-  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+python3 tools/scripts/fetch_v8_for_release.py darwin-arm64
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_JS_ENGINE=v8 -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
 ```
 
 Do not trust an old build directory just because CMake says V8 is enabled.
-Check the linked dylib with:
+Check the linked dylib points at the pinned artifact:
 
 ```bash
-otool -L build-threejs-runtime-node24/test/web-compat/pulp-test-threejs-bridge | grep libnode
+otool -L build/examples/threejs-native-demo/pulp-threejs-native-demo | grep libv8
+# → @rpath/libv8.dylib ; rpath includes external/v8-build/<key>/lib
 ```
 
-If it reports unversioned Homebrew `node` / `libnode.147.dylib`, Three.js
-tests can compile but abort inside embedded V8 during runtime evaluation.
-Reconfigure a clean Release build against `node@24` before debugging source.
+If it reports a Homebrew `libnode.*.dylib`, you're on a stale build dir from
+before the sealed-libv8 cutover — reconfigure clean. (The former
+`-DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/...` libnode recipe is gone; see
+the V8 provider section above.)
+
+> Headless-render gotcha (non-V8): `threejs-native-demo` loads
+> `demo.js.template` via `fs::path(__FILE__)`. ccache `CCACHE_BASEDIR`+
+> `NOHASHDIR` (CI/VM builds) relativizes `__FILE__` so it resolves into the
+> *build* tree (missing) → SIGABRT. Stage the template into the build dir or
+> build without ccache. Unrelated to V8.
 
 ### Web-API global registration is hybrid native+JS by design (#915)
 
