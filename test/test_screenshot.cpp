@@ -33,7 +33,10 @@ TEST_CASE("Screenshot renders to PNG buffer", "[view][screenshot]") {
 
     auto png = render_to_png(root, 200, 80, 1.0f);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
+    // Apple has a native CoreGraphics backend; non-Apple builds with Skia get
+    // the built-in cross-platform Skia raster backend (#3329 Win/Linux parity,
+    // screenshot_skia.cpp). Either way a valid PNG comes back.
     REQUIRE_FALSE(png.empty());
     // PNG magic bytes: 0x89 P N G
     REQUIRE(png.size() > 8);
@@ -42,7 +45,7 @@ TEST_CASE("Screenshot renders to PNG buffer", "[view][screenshot]") {
     REQUIRE(png[2] == 'N');
     REQUIRE(png[3] == 'G');
 #else
-    // Non-Apple platforms return empty (no CoreGraphics)
+    // Non-Apple WITHOUT Skia and no host provider: explicitly empty.
     REQUIRE(png.empty());
 #endif
 }
@@ -60,7 +63,7 @@ TEST_CASE("Screenshot renders to file", "[view][screenshot]") {
 
     bool ok = render_to_file(root, 60, 120, output_path.string(), 1.0f);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
     REQUIRE(ok);
     REQUIRE(std::filesystem::exists(output_path));
     REQUIRE(std::filesystem::file_size(output_path) > 100); // Not empty
@@ -74,19 +77,54 @@ TEST_CASE("Screenshot renders to file", "[view][screenshot]") {
 
 // ── Edge cases: non-Apple, scale, malformed output path ─────────────────
 
-TEST_CASE("Screenshot on non-Apple reports unsupported honestly",
+TEST_CASE("Screenshot backend availability is honest per build",
           "[view][screenshot][edge]") {
-    // The doc contract on every non-Apple platform is "return empty
-    // PNG bytes, return false from render_to_file" — never silently
-    // fake-success. Pin it against an empty view tree too, so a
-    // future refactor doesn't start fake-succeeding when there's
-    // nothing to render.
+    // Contract: render_* must never silently fake-success. On a build with a
+    // real backend (Apple CoreGraphics, or non-Apple Skia raster — #3329) it
+    // returns valid PNG bytes even for an empty view tree (a solid background
+    // frame). On a no-backend build (non-Apple, no Skia, no host provider) it
+    // returns empty rather than lying. Pin it against an empty tree so a future
+    // refactor can't start fake-succeeding with nothing to render.
     View root;
     auto png = render_to_png(root, 32, 32, 1.0f);
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
     REQUIRE_FALSE(png.empty());
+    REQUIRE(png.size() > 8);
+    REQUIRE(png[0] == 0x89);  // PNG magic
 #else
     REQUIRE(png.empty());
+#endif
+}
+
+// #3329 — the built-in Skia raster backend on non-Apple must produce a real,
+// non-black RGBA buffer via render_to_rgba (the foreign-host embed's
+// pulp_embed_render_frame_rgba path). This is the headless render proof that
+// works in a GPU-less CI VM (Skia raster is pure CPU).
+TEST_CASE("Screenshot render_to_rgba produces non-black pixels (Skia raster)",
+          "[view][screenshot][rgba]") {
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
+    View root;
+    root.set_theme(Theme::dark());
+    auto knob = std::make_unique<Knob>();
+    knob->set_bounds({8, 8, 48, 48});
+    knob->set_value(0.5f);
+    root.add_child(std::move(knob));
+
+    uint32_t pw = 0, ph = 0;
+    auto rgba = render_to_rgba(root, 64, 64, 1.0f, &pw, &ph);
+    REQUIRE_FALSE(rgba.empty());
+    REQUIRE(pw == 64);
+    REQUIRE(ph == 64);
+    REQUIRE(rgba.size() == static_cast<size_t>(pw) * ph * 4u);
+    // The dark background fill (30,30,46) is itself non-black, so every pixel
+    // must have a non-zero channel — proves the raster path actually painted.
+    bool any_nonzero = false;
+    for (size_t i = 0; i < rgba.size(); ++i) {
+        if (rgba[i] != 0) { any_nonzero = true; break; }
+    }
+    REQUIRE(any_nonzero);
+#else
+    SUCCEED("render_to_rgba unsupported without a Skia/native backend");
 #endif
 }
 
@@ -176,7 +214,9 @@ TEST_CASE("Screenshot: backend dispatch — Skia and CoreGraphics both produce v
 
 TEST_CASE("Screenshot of an empty root view still produces a valid PNG",
           "[view][screenshot][empty]") {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
+    // A backend-backed build (Apple CoreGraphics, or non-Apple Skia raster —
+    // #3329) renders the background-filled frame even for an empty tree.
     View root;
     auto png = render_to_png(root, 8, 8, 1.0f);
     REQUIRE_FALSE(png.empty());

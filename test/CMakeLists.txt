@@ -3970,12 +3970,18 @@ if(_PULP_NODE_FOR_TESTS)
         LABELS "ios-d3b;node;threejs")
 endif()
 
-# Screenshot tests (macOS only — uses CoreGraphics bitmap context)
-if(APPLE)
+# Screenshot tests. macOS uses the CoreGraphics bitmap context; non-Apple
+# builds with Skia use the built-in cross-platform Skia raster backend
+# (#3329 Win/Linux parity), so the test runs there too and proves the
+# headless render_to_png/rgba path the foreign-host embed depends on. A
+# non-Apple build WITHOUT Skia has no backend, so skip there.
+if(APPLE OR PULP_HAS_SKIA)
     add_executable(pulp-test-screenshot test_screenshot.cpp)
     target_link_libraries(pulp-test-screenshot PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot)
+endif()
 
+if(APPLE)
     # P1 — smart capture (capture_view) + offscreen-GPU path (render_to_png_gpu).
     add_executable(pulp-test-screenshot-gpu test_screenshot_gpu.cpp)
     target_link_libraries(pulp-test-screenshot-gpu PRIVATE pulp::view Catch2::Catch2WithMain)
