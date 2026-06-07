@@ -235,10 +235,12 @@ void DesignTabGroup::paint(canvas::Canvas& canvas) {
     if (labels_.empty() || b.width <= 0 || b.height <= 0) return;
     const int n = static_cast<int>(labels_.size());
     const float slot = b.width / static_cast<float>(n);
-    // Opaque dark strip (covers the baked tabs so there's no double-render).
-    canvas.set_fill_color(canvas::Color::rgba8(0x25, 0x26, 0x26, 0xff));
-    canvas.fill_rounded_rect(0, 0, b.width, b.height, std::min(b.height * 0.3f, 6.0f));
-    // Selection highlight.
+    // NO opaque full-width strip: the design's tab/radio groups are NOT a solid
+    // box — they're digits with a small highlight pill on the selected one,
+    // sitting over content (e.g. the envelope graph). Painting a strip occludes
+    // that content (the "floating box" bug). We draw ONLY the moving highlight
+    // pill (matching the design's selected-pill) + the labels, so the rest of the
+    // design shows through and only the selected slot reads as highlighted.
     if (selected_ >= 0 && selected_ < n) {
         const float pad = 2.0f;
         canvas.set_fill_color(canvas::Color::rgba8(0x3c, 0x3d, 0x3d, 0xff));
