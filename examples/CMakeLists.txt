@@ -81,9 +81,10 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
     add_subdirectory(design-tool)
 endif()
 
-# ELYSIUM standalone: imports the committed figma-plugin .pulp.zip natively
-# (sprite-knob hoist) and renders it in a GPU window — launchable demo.
-add_subdirectory(elysium-standalone)
+# Design-import standalone: imports a figma-plugin .pulp.zip natively
+# (sprite-knob hoist) and renders it in a GPU window — launchable demo. The
+# default fixture is a private dev-only test design (not shipped).
+add_subdirectory(design-import-standalone)
 
 # TextEditor keyboard input test (Phase 21.1)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)

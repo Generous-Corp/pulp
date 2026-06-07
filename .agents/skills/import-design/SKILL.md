@@ -489,7 +489,7 @@ they share no code unless you make them.
   With them dropped, the panel rendered dark `#1c1d1d` and the `position_cylinder`
   GPU-ROI similarity was 0.055; after wiring it jumped to 0.979 (`range_prism`
   0.029→0.78, `grains_knob_cap` 0.15→0.79). Verify with
-  `pulp-test-mac-platform-harness` (`PULP_ELYSIUM_GPU_DUMP_DIR=… ` dumps ROIs).
+  `pulp-test-mac-platform-harness` (`PULP_DESIGN_GPU_DUMP_DIR=… ` dumps ROIs).
 - **Gotcha — stale CLI binary:** after touching `emit_visual_style`, rebuild
   `pulp-import-design` before re-emitting `--emit cpp`; the tool links
   `pulp-view-core` statically and a stale binary silently emits the old output
@@ -666,9 +666,9 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   the tab strip; click a slot to move the selection highlight). Detected
   structurally (`detect_tab_group`): a row of ≥3 similar-width container children
   with short text labels; the child carrying a visible SOLID fill is the selected
-  tab. `--select-tab=N` is the elysium-standalone demo flag for capturing it.
+  tab. `--select-tab=N` is the design-import-standalone demo flag for capturing it.
 
-The `pulp-elysium-standalone` example has demo flags to capture overlay states
+The `pulp-design-import-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens
 the matching ComboBox's popup). Use `--raster=out.png` (Skia) not `--screenshot`
 when the session's live GPU-present path is wedged — raster is the same paint,
@@ -932,7 +932,7 @@ content only where the image alpha is non-zero). Works on Skia raster AND
 Graphite/GPU.
 
 Binding which knob drives which shape is NOT in the figma source (no Figma
-binding), so the import does not auto-wire it. The `elysium-standalone` example
+binding), so the import does not auto-wire it. The `design-import-standalone` example
 demonstrates the opt-in by pairing each upper illustration with its column knob
 (`apply_shape_knob_fills`, by laid-out x) and driving `set_fill_value` from the
 knob each frame; the per-shape gradient flows through automatically because the
