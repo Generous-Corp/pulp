@@ -26,6 +26,16 @@ import unittest
 HERE = pathlib.Path(__file__).resolve().parent
 SCHEMA_PATH = HERE / "schemas" / "project-import-ir-v0.schema.json"
 FIXTURE_DIR = HERE / "fixtures" / "project-import-ir-v0"
+SPI_SCHEMA_PATH = HERE / "schemas" / "import-spi-v0.schema.json"
+SPI_FIXTURE_DIR = HERE / "fixtures" / "import-spi-v0"
+
+# SPI companion fixtures validate against a specific self-contained $def (these
+# carry no cross-file $ref, so the stdlib local-ref validator is sufficient).
+SPI_FIXTURE_DEFS = {
+    "plan": "pulp_import_plan",
+    "manifest": "emission_manifest",
+    "compat": "compat_matrix",
+}
 
 # Vendor names must never appear in SDK schema/fixtures — identity is runtime
 # data only. This guard list is the mainline tripwire for plan §16.2.
@@ -98,6 +108,12 @@ def errors_for(doc, schema) -> list[str]:
     return errs
 
 
+def errors_against_def(doc, schema, def_name: str) -> list[str]:
+    errs: list[str] = []
+    validate(doc, {"$ref": f"#/$defs/{def_name}"}, schema, "$", errs)
+    return errs
+
+
 # --- tests -----------------------------------------------------------------
 
 class ProjectImportIRSchemaTest(unittest.TestCase):
@@ -135,14 +151,39 @@ class ProjectImportIRSchemaTest(unittest.TestCase):
         errs = errors_for(doc, self.schema)
         self.assertTrue(any("parameters" in e for e in errs), errs)
 
+    def test_spi_schema_loads_and_is_shaped(self):
+        spi = json.loads(SPI_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(spi["$defs"]["request"]["properties"]["verb"]["enum"],
+                         ["detect", "analyze", "plan", "emit"])
+        for d in ("pulp_import_plan", "emission_manifest", "compat_matrix"):
+            self.assertIn(d, spi["$defs"])
+
+    def test_spi_companion_fixtures_validate(self):
+        spi = json.loads(SPI_SCHEMA_PATH.read_text(encoding="utf-8"))
+        found = sorted(SPI_FIXTURE_DIR.glob("*.json"))
+        self.assertTrue(found, "no SPI fixtures found")
+        for f in found:
+            def_name = SPI_FIXTURE_DEFS.get(f.stem)
+            self.assertIsNotNone(def_name, f"no $def mapping for SPI fixture {f.name}")
+            doc = json.loads(f.read_text(encoding="utf-8"))
+            errs = errors_against_def(doc, spi, def_name)
+            self.assertEqual(errs, [], f"{f.name} did not validate against {def_name}: {errs[:5]}")
+
+    def test_spi_bad_enum_is_rejected(self):
+        spi = json.loads(SPI_SCHEMA_PATH.read_text(encoding="utf-8"))
+        doc = json.loads((SPI_FIXTURE_DIR / "compat.json").read_text())
+        doc["features"][0]["status"] = "mostly-supported"
+        errs = errors_against_def(doc, spi, "compat_matrix")
+        self.assertTrue(any("enum" in e for e in errs), errs)
+
     def test_no_vendor_names_in_schema_or_fixtures(self):
-        blobs = [SCHEMA_PATH.read_text(encoding="utf-8").lower()]
-        for f in FIXTURE_DIR.glob("*.json"):
-            blobs.append(f.read_text(encoding="utf-8").lower())
-        for blob, label in zip(blobs, ["schema"] + [f.name for f in FIXTURE_DIR.glob("*.json")]):
+        files = [SCHEMA_PATH, SPI_SCHEMA_PATH]
+        files += sorted(FIXTURE_DIR.glob("*.json")) + sorted(SPI_FIXTURE_DIR.glob("*.json"))
+        for f in files:
+            blob = f.read_text(encoding="utf-8").lower()
             for tok in FORBIDDEN_VENDOR_TOKENS:
                 self.assertNotIn(tok, blob,
-                                 f"vendor token {tok!r} leaked into {label} — SDK must stay vendor-agnostic (plan §16.2)")
+                                 f"vendor token {tok!r} leaked into {f.name} — SDK must stay vendor-agnostic (plan §16.2)")
 
 
 if __name__ == "__main__":

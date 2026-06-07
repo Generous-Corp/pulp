@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/schemas/import-spi-v0.schema.json",
+  "title": "Pulp project-import SPI v0",
+  "description": "The JSON-over-stdio service-provider interface between the Pulp SDK (host) and an installed project importer (add-on tool). The SDK invokes the importer with one request envelope per line on stdin and reads one response envelope per line on stdout; stderr is human/log only. Four verbs: `detect` (is this a project I understand, and how confident?), `analyze` (produce a project-import IR), `plan` (turn an IR + target capabilities into an emission plan), `emit` (the IR/plan the SDK materializes — the tool returns the plan, the SDK WRITES the files). Version is negotiated: every message carries `spi_version`, and the registry pins each importer to an `spi_min`/`spi_max` window so a mismatch fails loudly ('upgrade Pulp' / 'upgrade importer') instead of silently misbehaving. Framework identity is runtime DATA throughout (`framework`/`vendor_id` strings); the SDK and this schema name no vendor.",
+  "schema": "pulp-import-spi-v0",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "version_range": {
+      "type": "object",
+      "description": "An inclusive [min, max] SPI/SDK version window for negotiation.",
+      "required": ["min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "request": {
+      "type": "object",
+      "description": "SDK -> importer. One per line on stdin.",
+      "required": ["spi_version", "verb", "id", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "spi_version": { "type": "integer", "minimum": 0 },
+        "verb": { "type": "string", "enum": ["detect", "analyze", "plan", "emit"] },
+        "id": { "type": "string", "description": "Correlates the response to this request." },
+        "payload": {
+          "description": "Verb-specific input.",
+          "oneOf": [
+            { "$ref": "#/$defs/detect_input" },
+            { "$ref": "#/$defs/analyze_input" },
+            { "$ref": "#/$defs/plan_input" },
+            { "$ref": "#/$defs/emit_input" }
+          ]
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "description": "importer -> SDK. One per line on stdout. `ok=false` carries `error`; diagnostics may accompany either outcome.",
+      "required": ["spi_version", "id", "ok"],
+      "additionalProperties": false,
+      "properties": {
+        "spi_version": { "type": "integer", "minimum": 0 },
+        "id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "result": {
+          "description": "Verb-specific output, present when ok=true.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": { "$ref": "https://pulp.dev/schemas/project-import-ir-v0.schema.json#/$defs/diagnostic" }
+        }
+      }
+    },
+    "detect_input": {
+      "type": "object",
+      "required": ["project_dir"],
+      "additionalProperties": true,
+      "properties": {
+        "project_dir": { "type": "string" }
+      }
+    },
+    "detect_candidate": {
+      "type": "object",
+      "description": "A framework the importer recognises in the target dir, with confidence and evidence. Returned by `detect` even when the matching importer would be a different tool (so the SDK can print the install hint).",
+      "required": ["framework", "confidence"],
+      "additionalProperties": true,
+      "properties": {
+        "framework": { "type": "string", "description": "Runtime framework id (DATA)." },
+        "vendor_id": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "type": "string" }, "description": "e.g. manifest / build-script markers found." }
+      }
+    },
+    "analyze_input": {
+      "type": "object",
+      "required": ["project_dir"],
+      "additionalProperties": true,
+      "properties": {
+        "project_dir": { "type": "string" },
+        "framework_path": { "type": "string", "description": "The user's own framework checkout (read-only; never vendored)." },
+        "options": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "plan_input": {
+      "type": "object",
+      "required": ["project_ir"],
+      "additionalProperties": true,
+      "properties": {
+        "project_ir": { "type": "object", "additionalProperties": true, "description": "A document conforming to project-import-ir-v0." },
+        "target_caps": { "$ref": "#/$defs/target_caps" }
+      }
+    },
+    "target_caps": {
+      "type": "object",
+      "description": "What the destination Pulp SDK can express, so the plan only commits to supported facts (e.g. whether shaped param ranges exist yet).",
+      "additionalProperties": true,
+      "properties": {
+        "sdk_version": { "type": "string" },
+        "shaped_param_ranges": { "type": "boolean" },
+        "formats": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "emit_input": {
+      "type": "object",
+      "required": ["plan", "out_dir"],
+      "additionalProperties": true,
+      "properties": {
+        "plan": { "$ref": "#/$defs/pulp_import_plan" },
+        "out_dir": { "type": "string" }
+      }
+    },
+    "pulp_import_plan": {
+      "type": "object",
+      "description": "The SDK-materialized emission plan: an ordered list of file actions plus the residual policy. The importer PROPOSES this; the SDK WRITES the files (the tool never writes the final project, except via an explicit unstable custom-emitter escape hatch).",
+      "required": ["schema", "actions"],
+      "additionalProperties": true,
+      "properties": {
+        "schema": { "type": "string" },
+        "target_name": { "type": "string", "description": "e.g. '<Name> Migration Scaffold'." },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/emit_action" }
+        },
+        "residual_policy": { "$ref": "https://pulp.dev/schemas/project-import-ir-v0.schema.json#/$defs/residual_policy" }
+      }
+    },
+    "emit_action": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string", "enum": ["generate", "copy_user_file", "scaffold_stub", "write_report", "write_manifest"] },
+        "path": { "type": "string", "description": "Destination path relative to out_dir." },
+        "from": { "type": "string", "description": "Source path for copy actions (read-only user file)." },
+        "template": { "type": "string", "description": "SDK template id for generate/scaffold actions." },
+        "provenance": {
+          "type": "string",
+          "enum": ["pulp-generated", "copied-user-file", "scaffold", "report"],
+          "description": "Drives license_provenance in the report and the clean-room output check."
+        }
+      }
+    },
+    "emission_manifest": {
+      "type": "object",
+      "description": "What the SDK actually wrote, returned/recorded after emit. Feeds the migration_status manifest + the `pulp ship` unresolved-scaffold gate.",
+      "required": ["schema", "files", "migration_status"],
+      "additionalProperties": true,
+      "properties": {
+        "schema": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "provenance"],
+            "additionalProperties": true,
+            "properties": {
+              "path": { "type": "string" },
+              "provenance": { "type": "string", "enum": ["pulp-generated", "copied-user-file", "scaffold", "report"] }
+            }
+          }
+        },
+        "migration_status": { "type": "string", "enum": ["unresolved", "partial", "resolved"] },
+        "verdict": { "type": "string", "description": "e.g. 'Builds: yes. Audio parity: partial. UI parity: no. Session compatibility: no.'" }
+      }
+    },
+    "compat_matrix": {
+      "type": "object",
+      "description": "Per-feature supported / partial / unsupported map for a framework, sourced from the importer (content is package-owned; schema is SDK-owned). Powers the public per-framework honesty matrix.",
+      "required": ["schema", "framework", "features"],
+      "additionalProperties": true,
+      "properties": {
+        "schema": { "type": "string" },
+        "framework": { "type": "string" },
+        "importer_version": { "type": "string" },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["feature", "status"],
+            "additionalProperties": true,
+            "properties": {
+              "feature": { "type": "string" },
+              "status": { "type": "string", "enum": ["supported", "partial", "unsupported"] },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

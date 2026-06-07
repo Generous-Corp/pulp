@@ -52,9 +52,10 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
 
 ## Roadmap (Phase 1 substrate, narrowed)
 
-- [x] `ProjectImportIR` schema + conformance test (this slice).
-- [ ] SPI contract (`detect`/`analyze`/`plan`/`emit`, JSON-over-stdio, version
-      negotiation) + `PulpImportPlan` / `EmissionManifest` / `CompatMatrix`.
+- [x] `ProjectImportIR` schema + conformance test.
+- [x] SPI **contract** (`detect`/`analyze`/`plan`/`emit`, JSON-over-stdio,
+      version negotiation) + `PulpImportPlan` / `EmissionManifest` /
+      `CompatMatrix` schemas + fixtures. (The C++ SPI *runner* is still pending.)
 - [ ] `pulp import` built-in command (detects framework from the target dir even
       with no importer installed; prints the install-hint path).
 - [ ] tool-registry importer fields (`category:importer`, `frameworks[]`,

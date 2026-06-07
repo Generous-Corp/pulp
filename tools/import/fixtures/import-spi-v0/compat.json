@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.import.compat_matrix.v0",
+  "framework": "example-framework",
+  "importer_version": "0.0.0",
+  "features": [
+    { "feature": "metadata", "status": "supported" },
+    { "feature": "parameters", "status": "supported" },
+    { "feature": "parameter-curves", "status": "partial", "note": "emitted linear until SDK shaped-range lands" },
+    { "feature": "static-buses", "status": "supported" },
+    { "feature": "dynamic-bus-layout", "status": "partial", "note": "declared layouts imported; dynamic policy flagged" },
+    { "feature": "opaque-session-state", "status": "unsupported" }
+  ]
+}
