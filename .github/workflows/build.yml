@@ -736,6 +736,18 @@ jobs:
           if [ "${RUNNER_OS}" = "macOS" ]; then
             command -v ninja >/dev/null 2>&1 || brew install ninja
             gen=(-G Ninja)
+            # ODR guard (see ~/.claude/skills/pulp-runner-ops): an interrupted
+            # or cancelled prior build can leave partial object files in the warm
+            # self-hosted build dir, mixing object layouts on the next
+            # incremental build → heap corruption / SEGFAULTs in unrelated tests
+            # (HttpStream, model_store, etc.). A sentinel marks a build
+            # in-progress; if it survived from last time, the prior build did not
+            # finish cleanly, so recreate the dir for a pristine rebuild (ccache
+            # keeps the recompile fast; Skia at external/skia-build is untouched).
+            if [ -f "$PULP_BUILD_DIR/.pulp-build-incomplete" ]; then
+              echo "macOS Configure: prior build did not finish cleanly → recreating $PULP_BUILD_DIR"
+              rm -rf "$PULP_BUILD_DIR"
+            fi
             cache="$PULP_BUILD_DIR/CMakeCache.txt"
             if [ -f "$cache" ] && ! grep -q '^CMAKE_GENERATOR:INTERNAL=Ninja$' "$cache"; then
               echo "macOS Configure: build-dir generator changed → recreating $PULP_BUILD_DIR"
@@ -747,11 +759,20 @@ jobs:
           else
             cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
           fi
+          # Mark the build in-progress; the Build step clears it on success, so a
+          # build interrupted/cancelled before completion is detected next run
+          # (ODR guard above). Harmless on github-hosted (fresh dir each run).
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            mkdir -p "$PULP_BUILD_DIR" && : > "$PULP_BUILD_DIR/.pulp-build-incomplete"
+          fi
         shell: bash
 
       - name: Build
         shell: bash
-        run: cmake --build "$PULP_BUILD_DIR" --config Release
+        run: |
+          cmake --build "$PULP_BUILD_DIR" --config Release
+          # Build finished cleanly → clear the in-progress sentinel (ODR guard).
+          rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 
       - name: Ccache stats
         if: always()
