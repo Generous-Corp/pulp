@@ -899,10 +899,11 @@ pulp_add_test_suite(pulp-test-stream LIBRARIES pulp::runtime)
 # Generic model registry/store (MM-PR1)
 pulp_add_test_suite(pulp-test-model-store LIBRARIES pulp::runtime)
 
-# Streaming model downloader (MM-PR2) — uses a local httplib server fixture
-pulp_add_test_suite(pulp-test-model-download LIBRARIES pulp::runtime)
-target_include_directories(pulp-test-model-download PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../external/cpp-httplib)
+# Streaming model downloader (MM-PR2) — uses a local httplib server fixture.
+# Link pulp-cpp-httplib so this TU compiles httplib.h with the SAME
+# CPPHTTPLIB_MBEDTLS_SUPPORT macro as pulp-runtime (else httplib's inline
+# functions ODR-fold across the two layouts → corrupt mutex → EINVAL).
+pulp_add_test_suite(pulp-test-model-download LIBRARIES pulp::runtime pulp-cpp-httplib)
 
 # ModelManager view (MM-PR3) — needs the view stack (pulp::view) for render_to_png
 add_executable(pulp-test-model-manager-view test_model_manager_view.cpp)
@@ -1023,7 +1024,7 @@ pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 
 # Network Stream tests (Phase 3)
 pulp_add_test_suite(pulp-test-network-stream
-    LIBRARIES pulp::runtime
+    LIBRARIES pulp::runtime pulp-cpp-httplib
     PROPERTIES RESOURCE_LOCK network-stream)
 
 # MessageChannel tests (Phase 4)
@@ -1084,7 +1085,7 @@ target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMai
 catch_discover_tests(pulp-test-sync PROPERTIES LABELS slow)
 
 # License and BigInteger tests
-pulp_add_test_suite(pulp-test-license LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-license LIBRARIES pulp::runtime pulp-cpp-httplib)
 
 # License v1 -> v2 migration (macOS plan item 7.2)
 pulp_add_test_suite(pulp-test-license-migration LIBRARIES pulp::runtime)
@@ -1701,7 +1702,7 @@ pulp_add_test_suite(pulp-test-animation-3d LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-animator-set LIBRARIES pulp::view)
 
 # Runtime utility tests (mmap, temp file, dynlib, base64, range, child process)
-pulp_add_test_suite(pulp-test-runtime-utils LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-runtime-utils LIBRARIES pulp::runtime pulp-cpp-httplib)
 
 # MAC address parser/formatter (gap-doc Runtime row "MACAddress")
 pulp_add_test_suite(pulp-test-mac-address LIBRARIES pulp::runtime)

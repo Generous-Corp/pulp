@@ -414,6 +414,41 @@ FetchContent_MakeAvailable(mbedtls)
 set(PULP_HAS_MBEDTLS TRUE)
 message(STATUS "Pulp: Mbed TLS crypto library enabled")
 
+# cpp-httplib (MIT) — header-only HTTP(S) client/server. Exposed as ONE
+# interface target so every translation unit that includes httplib.h sees the
+# IDENTICAL CPPHTTPLIB_MBEDTLS_SUPPORT macro.
+#
+# Why this matters: httplib.h is header-only with inline member functions, and
+# the macro gates the mbedTLS SSL members of httplib::ClientImpl/Server/detail::
+# helpers — i.e. it changes their layout. If one TU compiles the header with the
+# macro (pulp-runtime: http.cpp, model_download.cpp) and another without it
+# (the test fixtures that #include httplib.h directly), the inline functions are
+# ODR-folded by the linker to a SINGLE definition that need not match the layout
+# assumed at a given call site. The observed symptom was httplib's internal
+# request_mutex_ being corrupted so std::recursive_mutex::lock() returned EINVAL
+# ("recursive_mutex lock failed: Invalid argument"), failing every HTTP test.
+# Being an ODR violation, which definition wins is link-order dependent: it
+# stayed latent on GitHub-hosted macOS but reproduced deterministically on the
+# self-hosted runner, blocking the required macos check repo-wide. Linking this
+# target from every httplib consumer keeps the macro consistent and removes the
+# violation.
+add_library(pulp-cpp-httplib INTERFACE)
+target_include_directories(pulp-cpp-httplib INTERFACE
+    ${CMAKE_SOURCE_DIR}/external/cpp-httplib)
+if(TARGET mbedcrypto)
+    target_compile_definitions(pulp-cpp-httplib INTERFACE CPPHTTPLIB_MBEDTLS_SUPPORT)
+    target_include_directories(pulp-cpp-httplib INTERFACE ${mbedtls_SOURCE_DIR}/include)
+    target_link_libraries(pulp-cpp-httplib INTERFACE mbedcrypto mbedx509 mbedtls)
+    if(APPLE)
+        # httplib's mbedTLS path loads system trust anchors from the macOS
+        # keychain via the Security framework. Carried here (not on individual
+        # consumers) so every TU that compiles the SSL-enabled header also
+        # resolves these symbols.
+        target_link_libraries(pulp-cpp-httplib INTERFACE
+            "-framework Security" "-framework CoreFoundation")
+    endif()
+endif()
+
 # SheenBidi (Apache-2.0) — Unicode Bidirectional Algorithm implementation.
 # Item 6.8 of the 2026-05-24 macOS plugin-authoring plan. Adds a Pulp-owned
 # bidi engine independent of system ICU; consumed by

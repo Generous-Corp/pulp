@@ -135,11 +135,13 @@ target_sources(pulp-runtime PRIVATE
 # the source file for each SIMD target. The source dir must be on the include path.
 target_include_directories(pulp-runtime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-# Vendored dependencies (header-only or single-file)
+# Vendored dependencies (header-only or single-file). cpp-httplib is consumed
+# via the pulp-cpp-httplib interface target (see below) so its include path and
+# the CPPHTTPLIB_MBEDTLS_SUPPORT macro stay identical across every TU that
+# includes httplib.h — mismatched macros ODR-corrupt httplib's mutexes.
 target_include_directories(pulp-runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/cpp-httplib
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external
 )
 
@@ -167,27 +169,27 @@ unset(_pulp_ubsan_enabled)
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 target_link_libraries(pulp-runtime PRIVATE hwy)
 
-# Mbed TLS for cryptographic operations
+# Mbed TLS for cryptographic operations (SHA-256, RSA, AES — used directly by
+# crypto.cpp, independent of HTTP).
 if(TARGET mbedcrypto)
     target_link_libraries(pulp-runtime PRIVATE mbedcrypto mbedx509 mbedtls)
     target_include_directories(pulp-runtime PRIVATE
         ${mbedtls_SOURCE_DIR}/include
     )
-    # Enable HTTPS in cpp-httplib via the mbedTLS backend ONLY for the streaming
-    # model downloader (model_download.cpp). Scoping the define to that one
-    # source file avoids flipping every other httplib consumer in pulp-runtime
-    # onto the TLS code path and changing existing HTTP helper behavior. No
-    # OpenSSL dependency.
-    set_source_files_properties(
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/model_download.cpp
-        PROPERTIES COMPILE_DEFINITIONS CPPHTTPLIB_MBEDTLS_SUPPORT
-    )
-    if(APPLE)
-        # httplib's mbedTLS path loads system trust anchors from the macOS keychain
-        # via the Security framework.
-        target_link_libraries(pulp-runtime PRIVATE "-framework Security" "-framework CoreFoundation")
-    endif()
 endif()
+
+# cpp-httplib (header-only HTTP(S) client/server). Consumed via the shared
+# interface target so the CPPHTTPLIB_MBEDTLS_SUPPORT macro, include path, and
+# mbedTLS/Security links stay identical across every TU that includes httplib.h
+# (http.cpp, model_download.cpp here; the HTTP test fixtures elsewhere).
+# Inconsistent macros ODR-corrupt httplib's internal mutexes — see the target's
+# definition in tools/cmake/PulpDependencies.cmake.
+#
+# httplib is a private implementation detail (no public header includes it), so
+# wrap the link in $<BUILD_INTERFACE:...>: its usage requirements apply when
+# building pulp-runtime's own TUs, but it is absent from the installed/exported
+# interface (it is not itself in pulp's export set).
+target_link_libraries(pulp-runtime PRIVATE $<BUILD_INTERFACE:pulp-cpp-httplib>)
 
 # CHOC headers (used by SpscQueue wrapper)
 target_include_directories(pulp-runtime PUBLIC
