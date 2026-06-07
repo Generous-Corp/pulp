@@ -280,53 +280,114 @@ InstallModelResult install_model(const ModelEntry& model, std::string_view subsy
                                  const std::vector<std::pair<std::string, std::string>>& headers,
                                  const fs::path& pulp_home_override) {
     InstallModelResult r;
-    const std::string url =
-        model.download_url.empty() ? resolve_checkpoint_url(model.checkpoint_ref) : model.download_url;
-    if (url.empty()) {
-        r.error = "cannot resolve a download URL for " + model.model_id;
-        return r;
-    }
     const auto home = resolve_pulp_home(pulp_home_override);
     if (home.empty()) {
         r.error = "unable to resolve PULP_HOME";
         return r;
     }
-
     const fs::path files_dir = home / std::string(subsystem) / "models" / model.model_id;
-    std::string fname;
-    if (auto slash = url.find_last_of('/'); slash != std::string::npos) fname = url.substr(slash + 1);
-    if (auto q = fname.find('?'); q != std::string::npos) fname = fname.substr(0, q);
-    if (fname.empty()) fname = model.model_id + ".bin";
-    const fs::path dest = files_dir / fname;
 
-    DownloadRequest req;
-    req.url = url;
-    req.dest = dest;
-    req.expected_sha256 = model.sha256;
-    req.resume = true;
-    for (const auto& h : headers) req.headers.push_back(HttpHeader{h.first, h.second});
-
-    const auto dl = download_file(req, on_progress, cancel);
-    if (dl.cancelled) {
-        r.cancelled = true;
-        r.error = "cancelled";
-        return r;
+    // A model is either a single primary checkpoint or a multi-asset bundle (e.g. Magenta's
+    // weights + state). Fetch EVERY asset so the model is complete on disk — a half-downloaded
+    // bundle (weights only) silently fails to load. Falls back to the primary checkpoint when
+    // assets[] is empty.
+    struct Item {
+        std::string url, role, sha;
+    };
+    std::vector<Item> items;
+    if (!model.assets.empty()) {
+        for (const auto& a : model.assets) {
+            const std::string u = (a.checkpoint_ref.rfind("http", 0) == 0)
+                                      ? a.checkpoint_ref
+                                      : resolve_checkpoint_url(a.checkpoint_ref);
+            if (u.empty()) {
+                r.error = "cannot resolve a download URL for asset '" + a.role + "' of " + model.model_id;
+                return r;
+            }
+            items.push_back({u, a.role.empty() ? "asset" : a.role, ""});
+        }
+    } else {
+        const std::string u =
+            model.download_url.empty() ? resolve_checkpoint_url(model.checkpoint_ref) : model.download_url;
+        if (u.empty()) {
+            r.error = "cannot resolve a download URL for " + model.model_id;
+            return r;
+        }
+        items.push_back({u, "primary", model.sha256});
     }
-    if (!dl.ok) {
-        r.error = dl.error;
-        return r;
+
+    auto filename_of = [](const std::string& url, const std::string& fallback) {
+        std::string fname;
+        if (auto slash = url.find_last_of('/'); slash != std::string::npos) fname = url.substr(slash + 1);
+        if (auto q = fname.find('?'); q != std::string::npos) fname = fname.substr(0, q);
+        return fname.empty() ? fallback : fname;
+    };
+
+    const int n = static_cast<int>(items.size());
+    auto assets_obj = choc::value::createEmptyArray();
+    fs::path primary_path;  // the first/weights asset — what the engine loads
+
+    for (int i = 0; i < n; ++i) {
+        const auto& it = items[static_cast<size_t>(i)];
+        const fs::path dest = files_dir / filename_of(it.url, model.model_id + ".bin");
+
+        DownloadRequest req;
+        req.url = it.url;
+        req.dest = dest;
+        req.expected_sha256 = it.sha;
+        req.resume = true;
+        for (const auto& h : headers) req.headers.push_back(HttpHeader{h.first, h.second});
+
+        // Aggregate progress so the UI sees one 0→100% bar across all assets; asset i
+        // contributes 1/n of the whole.
+        const int idx = i;
+        // download_file() enforces cancellation via `cancel`; this wrapper only reshapes the
+        // progress into one aggregate 0→100% bar across all assets.
+        auto wrapped = [&on_progress, idx, n](const DownloadProgress& p) -> bool {
+            if (!on_progress) return true;
+            DownloadProgress agg = p;
+            if (p.total > 0) {
+                const double frac = (static_cast<double>(idx) +
+                                     static_cast<double>(p.downloaded) / static_cast<double>(p.total)) /
+                                    static_cast<double>(n);
+                agg.downloaded = static_cast<std::uint64_t>(frac * 1'000'000.0);
+                agg.total = 1'000'000;
+            }
+            return on_progress(agg);
+        };
+
+        const auto dl = download_file(req, wrapped, cancel);
+        if (dl.cancelled) {
+            r.cancelled = true;
+            r.error = "cancelled";
+            return r;
+        }
+        if (!dl.ok) {
+            r.error = dl.error;
+            return r;
+        }
+
+        if (i == 0) {
+            primary_path = dest;
+            r.sha256 = dl.sha256;
+        }
+        auto a = choc::value::createObject("");
+        add_string_member(a, "role", it.role);
+        add_path_member(a, "path", dest);
+        add_string_member(a, "sha256", dl.sha256);
+        assets_obj.addArrayElement(a);
     }
 
-    r.checkpoint_path = dest;
-    r.sha256 = dl.sha256;
+    r.checkpoint_path = primary_path;
     r.metadata_path = model_install_path(subsystem, model.model_id, pulp_home_override);
 
     auto object = choc::value::createObject("");
     add_string_member(object, "model_id", model.model_id);
     add_string_member(object, "backend", model.backend);
     add_string_member(object, "checkpoint_ref", model.checkpoint_ref);
-    add_path_member(object, "resolved_checkpoint_path", dest);
-    add_string_member(object, "sha256", dl.sha256);
+    add_path_member(object, "resolved_checkpoint_path", primary_path);
+    add_string_member(object, "sha256", r.sha256);
+    object.addMember("assets", assets_obj);
 
     std::string error;
     if (!write_text_file(r.metadata_path, choc::json::toString(object, true), error)) {

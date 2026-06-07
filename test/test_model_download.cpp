@@ -187,3 +187,43 @@ TEST_CASE("model store: install_model downloads + records, then remove_model del
 
     fs::remove_all(root);
 }
+
+TEST_CASE("model store: install_model fetches every asset of a multi-asset bundle",
+          "[runtime][model][download]") {
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-multiasset";
+    fs::remove_all(root);
+    fs::create_directories(root / "serve");
+    const std::string weights = make_fixture(root / "serve" / "mrt2.mlxfn", 80'000);
+    const std::string state = make_fixture(root / "serve" / "mrt2_state.safetensors", 50'000);
+
+    LocalServer server(root / "serve");
+    const fs::path home = root / "home";
+
+    ModelEntry model{.model_id = "mrt2", .display_name = "MRT2", .backend = "mlx"};
+    model.assets = {
+        ModelAsset{.role = "weights", .checkpoint_ref = server.url("/mrt2.mlxfn")},
+        ModelAsset{.role = "state", .checkpoint_ref = server.url("/mrt2_state.safetensors")},
+    };
+
+    auto inst = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
+                              /*headers=*/{}, home);
+    INFO("install error: " << inst.error);
+    REQUIRE(inst.ok);
+
+    // BOTH assets land on disk in the model directory — not just the primary.
+    const fs::path dir = home / "magenta" / "models" / "mrt2";
+    REQUIRE(fs::exists(dir / "mrt2.mlxfn"));
+    REQUIRE(fs::exists(dir / "mrt2_state.safetensors"));
+    REQUIRE(fs::file_size(dir / "mrt2.mlxfn") == weights.size());
+    REQUIRE(fs::file_size(dir / "mrt2_state.safetensors") == state.size());
+
+    // The engine-facing checkpoint path is the first (weights) asset, and the metadata
+    // records every asset by role.
+    REQUIRE(inst.checkpoint_path == dir / "mrt2.mlxfn");
+    std::ifstream meta_in(inst.metadata_path);
+    const std::string meta((std::istreambuf_iterator<char>(meta_in)), std::istreambuf_iterator<char>());
+    REQUIRE(meta.find("\"weights\"") != std::string::npos);
+    REQUIRE(meta.find("\"state\"") != std::string::npos);
+
+    fs::remove_all(root);
+}
