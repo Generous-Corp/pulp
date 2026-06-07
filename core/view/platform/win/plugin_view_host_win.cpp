@@ -36,8 +36,9 @@
 
 #include <pulp/runtime/log.hpp>
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+// WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
+// macros don't collide with std::min/std::max or Skia (#384).
+#include <pulp/platform/win32_sane.hpp>
 
 #include <atomic>
 #include <functional>
@@ -51,6 +52,13 @@ namespace {
 
 constexpr const wchar_t* kChildClassName = L"PulpPluginViewHostChild";
 
+class WinPluginViewHost;
+
+// WndProc: routes WM_PAINT to the host's render path. `this` is stashed in
+// GWLP_USERDATA at WM_NCCREATE so ordinary host-driven invalidations
+// (InvalidateRect) actually render, not just the synchronous repaint() path.
+LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+
 // Register the child window class once per process.
 ATOM ensure_window_class() {
     static std::once_flag once;
@@ -61,7 +69,7 @@ ATOM ensure_window_class() {
         // CS_OWNDC: give the child its own device context (matches a GPU surface
         // backing). CS_HREDRAW/VREDRAW: repaint on resize.
         wc.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-        wc.lpfnWndProc = DefWindowProcW;  // we drive paint explicitly via render_frame
+        wc.lpfnWndProc = pulp_pvh_wndproc;
         wc.hInstance = GetModuleHandleW(nullptr);
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         wc.lpszClassName = kChildClassName;
@@ -77,13 +85,16 @@ class WinPluginViewHost : public PluginViewHost {
 public:
     WinPluginViewHost(View& root, Size size) : root_(root), size_(size) {
         ensure_window_class();
-        // Create a hidden child window not yet parented. It is reparented to the
-        // DAW's editor HWND in attach_to_parent(). WS_CHILD without a parent is
-        // legal at creation; SetParent fixes it up on attach.
+        // Create a hidden TOP-LEVEL window first (WS_POPUP). A WS_CHILD window
+        // with a null parent is not a valid creation shape; we flip the style to
+        // WS_CHILD and SetParent() in attach_to_parent(). `this` is passed as
+        // lpParam so the wndproc can stash it at WM_NCCREATE.
         hwnd_ = CreateWindowExW(
-            0, kChildClassName, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+            0, kChildClassName, L"",
+            WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
             0, 0, static_cast<int>(size.width), static_cast<int>(size.height),
-            /*parent*/ nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+            /*parent*/ nullptr, nullptr, GetModuleHandleW(nullptr),
+            /*lpParam*/ this);
         if (!hwnd_) {
             runtime::log_warn("WinPluginViewHost: CreateWindowExW failed");
             return;
@@ -111,14 +122,24 @@ public:
         if (!hwnd_) return;
         HWND parent_hwnd = static_cast<HWND>(parent);
         if (!parent_hwnd) return;
-        // Re-parent and ensure WS_CHILD style is set (SetParent on a top-level
-        // window does not implicitly add it).
+        // Switch WS_POPUP -> WS_CHILD before reparenting (SetParent does not add
+        // the style itself); SWP_FRAMECHANGED makes the style edit take effect.
         LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
-        SetWindowLongPtrW(hwnd_, GWL_STYLE, style | WS_CHILD);
-        SetParent(hwnd_, parent_hwnd);
+        style = (style & ~static_cast<LONG_PTR>(WS_POPUP)) | WS_CHILD;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, style);
+        if (SetParent(hwnd_, parent_hwnd) == nullptr) {
+            runtime::log_warn("WinPluginViewHost: SetParent failed (err {})",
+                              static_cast<unsigned>(GetLastError()));
+            // Restore top-level style so we don't leave a parentless WS_CHILD.
+            SetWindowLongPtrW(hwnd_, GWL_STYLE,
+                              (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP);
+            SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            return;  // attached_ stays false; try_attach_to_parent reports failure
+        }
         SetWindowPos(hwnd_, nullptr, 0, 0,
                      static_cast<int>(size_.width), static_cast<int>(size_.height),
-                     SWP_NOZORDER | SWP_SHOWWINDOW);
+                     SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         ShowWindow(hwnd_, SW_SHOW);
         attached_.store(true, std::memory_order_release);
         repaint();
@@ -136,7 +157,24 @@ public:
         if (!hwnd_) return;
         ShowWindow(hwnd_, SW_HIDE);
         SetParent(hwnd_, nullptr);
+        // Restore the top-level style so the detached window is a valid
+        // WS_POPUP again (not a parentless WS_CHILD).
+        LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
+        style = (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, style);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         attached_.store(false, std::memory_order_release);
+    }
+
+    // Called from the wndproc on WM_PAINT (host-driven invalidation path).
+    void handle_wm_paint() {
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd_, &ps);
+#ifdef PULP_HAS_SKIA
+        if (gpu_surface_ && skia_surface_) render_frame(nullptr, nullptr, nullptr);
+#endif
+        EndPaint(hwnd_, &ps);
     }
 
     void repaint() override {
@@ -310,17 +348,21 @@ private:
             return false;
         }
         paint_scene(*canvas);
+        bool readback_ok = true;
         if (cap) {
             // read_current_rgba finalizes + submits the open frame's recording
             // before readback (see SkiaSurface contract), so no separate flush.
             uint32_t pw = 0, ph = 0;
-            skia_surface_->read_current_rgba(*cap, pw, ph);
+            readback_ok = skia_surface_->read_current_rgba(*cap, pw, ph) &&
+                          !cap->empty() && pw > 0 && ph > 0;
             if (cap_w) *cap_w = pw;
             if (cap_h) *cap_h = ph;
         }
         skia_surface_->end_frame();
         gpu_surface_->end_frame();
-        return true;
+        // A failed/empty readback must report false so capture_back_buffer_png()
+        // falls back to the raster path instead of returning a blank frame.
+        return cap ? readback_ok : true;
     }
 
     // Pure-CPU raster capture, GPU-independent — the VM proof path.
@@ -358,6 +400,23 @@ private:
     }
 #endif  // PULP_HAS_SKIA
 };
+
+LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCCREATE) {
+        // Stash the host pointer passed via CreateWindowEx lpParam.
+        auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    auto* host = reinterpret_cast<WinPluginViewHost*>(
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (host && msg == WM_PAINT) {
+        host->handle_wm_paint();
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
 
 }  // namespace
 
