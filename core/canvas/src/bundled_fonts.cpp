@@ -32,6 +32,7 @@
 
 #include "include/core/SkData.h"
 #include "include/core/SkFontMgr.h"
+#include "include/core/SkFontParameters.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 
@@ -224,6 +225,31 @@ sk_sp<SkFontMgr> platform_font_manager() {
     return mgr;
 }
 
+bool face_wght_axis(const SkTypeface* face,
+                    float& out_min, float& out_max, float& out_default) {
+    if (!face) return false;
+    // Query the axis count by passing an empty span (this Skia build's
+    // getVariationDesignParameters returns the total axis count and only
+    // fills as many as the span holds).
+    const int count = face->getVariationDesignParameters(
+        SkSpan<SkFontParameters::Variation::Axis>{});
+    if (count <= 0) return false;  // static face (or query failed)
+    std::vector<SkFontParameters::Variation::Axis> axes(
+        static_cast<std::size_t>(count));
+    if (face->getVariationDesignParameters(SkSpan(axes)) != count)
+        return false;
+    constexpr SkFourByteTag kWght = SkSetFourByteTag('w', 'g', 'h', 't');
+    for (const auto& a : axes) {
+        if (a.tag == kWght) {
+            out_min = a.min;
+            out_max = a.max;
+            out_default = a.def;
+            return true;
+        }
+    }
+    return false;
+}
+
 sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
                                             SkFontStyle style) {
     if (family.empty()) return nullptr;
@@ -281,7 +307,40 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
         if (gap > kMaxWeightGap) continue;             // weight too far off-style
         if (gap < best_gap) { best_gap = gap; best = f; }
     }
-    return best;
+    if (best) return best;
+
+    // pulp #2163 follow-up — pass 3: variable-font weight eligibility.
+    //
+    // A registered VARIABLE font is stored as one typeface at its default
+    // `wght` instance (e.g. Funnel Display defaults to 400). A request for
+    // a far-off weight (700) fails passes 1-2 above because the static
+    // weight gap (300) exceeds kMaxWeightGap. But the face can actually
+    // RENDER 700 — its `wght` axis covers it. Rather than dropping to a
+    // heavier system fallback (which loses the design's typeface entirely),
+    // return the base variable face so the resolver can `makeClone` it at
+    // the requested weight. Same slant is still required; the wght axis
+    // only governs weight, not slant. Static faces are untouched (they
+    // have no wght axis), so the #1150 / #956 fallback contract for
+    // single-static-Regular families is preserved.
+    for (const auto& f : it->second.faces) {
+        if (!f) continue;
+        if (f->fontStyle().slant() != style.slant()) continue;
+        float lo = 0, hi = 0, def = 0;
+        if (face_wght_axis(f.get(), lo, hi, def)) return f;
+    }
+    return nullptr;
+}
+
+std::vector<RegisteredTypeface> registered_typefaces_snapshot() {
+    std::vector<RegisteredTypeface> out;
+    std::lock_guard<std::mutex> guard(registered_mutex());
+    const auto& map = registered_fonts();
+    for (const auto& [family, entry] : map) {
+        for (const auto& f : entry.faces) {
+            if (f) out.push_back({family, f});
+        }
+    }
+    return out;
 }
 
 bool register_font(const std::uint8_t* data, std::size_t size,

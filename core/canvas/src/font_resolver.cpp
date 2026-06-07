@@ -301,13 +301,44 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     // clone the typeface with those axes applied so the cache holds
     // one entry per distinct axis instance (the FontOptions hash
     // already keys on variation_axes — this just applies them).
+    constexpr SkFourByteTag kWghtTag = SkSetFourByteTag('w', 'g', 'h', 't');
     auto apply_variation_axes = [&](sk_sp<SkTypeface> face) -> sk_sp<SkTypeface> {
-        if (!face || options.variation_axes.empty()) return face;
+        if (!face) return face;
+
         std::vector<SkFontArguments::VariationPosition::Coordinate> coords;
-        coords.reserve(options.variation_axes.size());
+        bool caller_set_wght = false;
+        coords.reserve(options.variation_axes.size() + 1);
         for (const auto& axis : options.variation_axes) {
             coords.push_back({static_cast<SkFourByteTag>(axis.tag), axis.value});
+            if (static_cast<SkFourByteTag>(axis.tag) == kWghtTag)
+                caller_set_wght = true;
         }
+
+        // pulp #2163 follow-up — synthetic `wght` from CSS font-weight.
+        //
+        // A variable font registered/resolved at its default instance
+        // (e.g. Funnel Display @ 400) must honour `font-weight: 700` by
+        // instancing its `wght` axis, not by falling back to a heavier
+        // system face. Only synthesize when:
+        //   * the face actually exposes a `wght` axis,
+        //   * the caller didn't already pin `wght` via
+        //     `font-variation-settings` (explicit axes win), and
+        //   * the requested weight differs from the axis default (no-op
+        //     clone otherwise).
+        // The requested weight is clamped to the axis range so an
+        // out-of-range request renders at the nearest real instance.
+        float wmin = 0, wmax = 0, wdef = 0;
+        if (!caller_set_wght && options.weight > 0.0f &&
+            face_wght_axis(face.get(), wmin, wmax, wdef)) {
+            float want = options.weight;
+            if (want < wmin) want = wmin;
+            if (want > wmax) want = wmax;
+            if (want != wdef) {
+                coords.push_back({kWghtTag, want});
+            }
+        }
+
+        if (coords.empty()) return face;
         SkFontArguments args;
         SkFontArguments::VariationPosition pos{
             coords.data(), static_cast<int>(coords.size())
