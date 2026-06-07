@@ -596,6 +596,20 @@ elseif(WIN32)
         platform/win/appearance_win.cpp
         platform/win/motion_preferences_win.cpp
     )
+    # Win/Linux parity (#3329). When Skia is available, add the built-in
+    # Skia raster screenshot backend and the native HWND PluginViewHost.
+    # plugin_view_host_stub.cpp stays (it owns the always-compiled
+    # set_factory/has_factory registration API + the factory-dispatching
+    # create()); the native impl registers ITSELF as the factory via
+    # register_platform_plugin_view_host(). screenshot_skia.cpp self-guards
+    # on PULP_HAS_SKIA and supersedes the stub's render_* fallback (which is
+    # now compiled only when !PULP_HAS_SKIA).
+    if(PULP_HAS_SKIA)
+        target_sources(pulp-view-core PRIVATE
+            src/screenshot_skia.cpp
+            platform/win/plugin_view_host_win.cpp
+        )
+    endif()
     # Workstream 04 #247 phase 1: UIAutomationCore for
     # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
     # UiaRaiseStructureChangedEvent.
@@ -614,6 +628,23 @@ elseif(UNIX)
         src/window_host_stub.cpp
         platform/linux/accessibility_linux.cpp
     )
+    # Win/Linux parity (#3329). Same split as the WIN32 branch: when Skia is
+    # available add the built-in Skia raster screenshot backend and the native
+    # X11 PluginViewHost (which registers itself via
+    # register_platform_plugin_view_host()). The X11 host links Xlib; missing
+    # X11 dev headers degrade to the headless-render-only path.
+    if(PULP_HAS_SKIA)
+        target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
+        find_package(X11)
+        if(X11_FOUND)
+            target_sources(pulp-view-core PRIVATE platform/linux/plugin_view_host_linux.cpp)
+            target_link_libraries(pulp-view-core PRIVATE ${X11_LIBRARIES})
+            target_include_directories(pulp-view-core PRIVATE ${X11_INCLUDE_DIR})
+            target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_X11=1)
+        else()
+            message(STATUS "Pulp: X11 not found — Linux PluginViewHost limited to headless render")
+        endif()
+    endif()
     # Linux AT-SPI bridge (workstream 04 #248). Optional: linking atk-
     # bridge-2.0 when pkg-config finds it enables screen-reader
     # (Orca) registration via atk_bridge_adaptor_init. Skipped on

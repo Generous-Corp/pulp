@@ -226,4 +226,27 @@ public:
     virtual Point window_to_root_point(Point pt) const { return pt; }
 };
 
+// Install the built-in platform PluginViewHost factory (and matching headless
+// screenshot provider) on non-Apple platforms (#3329 Win/Linux parity).
+//
+// Idempotent and thread-safe: the first call registers the platform factory via
+// PluginViewHost::set_factory(); subsequent calls are no-ops. A host that wants
+// a custom factory can call PluginViewHost::set_factory() AFTER this and win.
+//
+// Platform behavior:
+//   - Windows (Skia build): registers the native HWND host
+//     (plugin_view_host_win.cpp).
+//   - Linux (Skia + X11 build): registers the native X11 host
+//     (plugin_view_host_linux.cpp).
+//   - Apple: no-op (built-in NSView/UIView hosts; no factory needed).
+//   - Builds without a platform host: no-op (create() still returns nullptr,
+//     but the headless render_to_png/rgba path remains available via Skia).
+//
+// PluginViewHost::create() calls this automatically on non-Apple platforms
+// before consulting the factory, so the foreign-host embed and the VST3/CLAP
+// adapters get a working host without the caller doing anything. Exposed
+// publicly so a host can force-register early (e.g. before its own
+// set_factory()) or in a test.
+void register_platform_plugin_view_host();
+
 } // namespace pulp::view
