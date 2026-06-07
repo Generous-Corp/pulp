@@ -8,10 +8,10 @@ platforms:
     notes: Primary development platform. ARM64 (Apple Silicon) only.
   windows:
     status: experimental
-    notes: WASAPI audio, Win32 MIDI, NSIS installer, Authenticode signing. CI enabled.
+    notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
   linux:
     status: experimental
-    notes: ALSA audio, ALSA MIDI, .deb packaging. CI enabled.
+    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), .deb packaging via `pulp ship package`. CI enabled.
   ios:
     status: experimental
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
