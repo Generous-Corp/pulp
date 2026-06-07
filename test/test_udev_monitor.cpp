@@ -1,18 +1,16 @@
-// Linux device-hotplug (libudev) monitor — issue #3327 / L4 (hotplug half).
-// The pure action-classifier and the honest-fail availability probe are unit
-// tested here; the live add/remove path needs a real udev event (exercised on
-// the tartci Linux VM via `modprobe snd-dummy` / `modprobe -r snd-dummy`).
-// Linux-only: the symbols live in pulp-audio only on Linux.
+// Cross-platform device-hotplug monitor (libudev on Linux) — #3327 / L4.
+// The pure action-classifier and the honest-fail availability/lifecycle probe
+// run on every platform (off Linux the monitor is a documented no-op). The
+// live add/remove path needs a real udev event, exercised on the tartci Linux
+// VM via `modprobe snd-dummy` / `modprobe -r snd-dummy`.
 
 #include <catch2/catch_test_macros.hpp>
 
-#if defined(__linux__)
+#include <pulp/runtime/udev_monitor.hpp>
 
-#include "../core/audio/platform/linux/udev_monitor.hpp"
+using namespace pulp::runtime;
 
-using namespace pulp::audio::linux_platform;
-
-TEST_CASE("classify_udev_action maps udev ACTION strings", "[audio][hotplug][udev][issue-3327]") {
+TEST_CASE("classify_udev_action maps udev ACTION strings", "[runtime][hotplug][udev][issue-3327]") {
     REQUIRE(classify_udev_action("add") == UdevChange::added);
     REQUIRE(classify_udev_action("remove") == UdevChange::removed);
     // Everything else is a non-hotplug action we must not treat as add/remove.
@@ -25,7 +23,10 @@ TEST_CASE("classify_udev_action maps udev ACTION strings", "[audio][hotplug][ude
 }
 
 TEST_CASE("UdevMonitor honest-fails without libudev and never crashes",
-          "[audio][hotplug][udev][issue-3327]") {
+          "[runtime][hotplug][udev][issue-3327]") {
+    // Off Linux (or without libudev) library_available() is false and start()
+    // returns false — callers get no hotplug, no crash. On Linux+libudev+udevd
+    // start() succeeds and the lifecycle is clean.
     const bool avail = UdevMonitor::library_available();
 
     UdevMonitor mon;
@@ -37,6 +38,9 @@ TEST_CASE("UdevMonitor honest-fails without libudev and never crashes",
         REQUIRE(avail);
         REQUIRE(mon.running());
         mon.stop();
+    } else {
+        // No monitor started → nothing running.
+        REQUIRE_FALSE(mon.running());
     }
     REQUIRE_FALSE(mon.running());
 
@@ -45,11 +49,3 @@ TEST_CASE("UdevMonitor honest-fails without libudev and never crashes",
     unused.stop();
     REQUIRE_FALSE(unused.running());
 }
-
-#else  // !linux
-
-TEST_CASE("udev hotplug monitor is Linux-only", "[audio][hotplug][udev][skip]") {
-    SUCCEED("libudev device hotplug is Linux-only");
-}
-
-#endif

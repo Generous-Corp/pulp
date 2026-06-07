@@ -8,7 +8,7 @@
 
 #include <alsa/asoundlib.h>
 
-#include "udev_monitor.hpp"
+#include <pulp/runtime/udev_monitor.hpp>
 
 #include <atomic>
 #include <thread>
@@ -83,7 +83,7 @@ public:
     void set_device_change_callback(DeviceChangeCallback cb) override;
 
 private:
-    UdevMonitor hotplug_monitor_;
+    runtime::UdevMonitor hotplug_monitor_;
 };
 
 } // namespace pulp::audio::linux_platform

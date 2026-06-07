@@ -2,6 +2,7 @@
 #include <pulp/midi/monotonic_timestamp.hpp>
 #include <pulp/midi/raw_midi_parser.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/udev_monitor.hpp>
 
 #ifndef __linux__
 #error "alsa_midi_device.cpp is Linux-only"
@@ -10,6 +11,7 @@
 #include <alsa/asoundlib.h>
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <string>
 #include <vector>
@@ -170,7 +172,40 @@ public:
         return std::make_unique<AlsaMidiOutput>();
     }
 
+    ~AlsaMidiSystem() override {
+        // Stop the monitor thread (which captures `this`) before members.
+        hotplug_monitor_.stop();
+    }
+
+    /// Start (or stop) a libudev "sound"-subsystem monitor that fires the
+    /// stored port-change callback on MIDI card add/remove. The "sound"
+    /// subsystem covers ALSA raw-midi devices. Honest no-op for hotplug if
+    /// libudev is unavailable (the callback is stored but never fired).
+    void set_port_change_callback(PortChangeCallback cb) override {
+        const bool want_monitor = static_cast<bool>(cb);
+        {
+            std::lock_guard<std::mutex> lock(cb_mutex_);
+            port_change_cb_ = std::move(cb);
+        }
+        if (want_monitor) {
+            if (!hotplug_monitor_.running())
+                hotplug_monitor_.start({"sound"},
+                    [this](runtime::UdevChange) { fire_port_change(); });
+        } else {
+            hotplug_monitor_.stop();
+        }
+    }
+
 private:
+    void fire_port_change() {
+        PortChangeCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(cb_mutex_);
+            cb = port_change_cb_;
+        }
+        if (cb) cb();
+    }
+
     std::vector<MidiPortInfo> enumerate_ports(bool inputs) {
         std::vector<MidiPortInfo> ports;
 
@@ -208,6 +243,10 @@ private:
 
         return ports;
     }
+
+    std::mutex cb_mutex_;
+    PortChangeCallback port_change_cb_;
+    runtime::UdevMonitor hotplug_monitor_;
 };
 
 } // namespace pulp::midi::linux_platform

@@ -1,20 +1,27 @@
-#include "udev_monitor.hpp"
-
-#include <pulp/runtime/log.hpp>
+#include "pulp/runtime/udev_monitor.hpp"
 
 #include <cstring>
 
-#include <poll.h>
-#include <unistd.h>
+namespace pulp::runtime {
 
-namespace pulp::audio::linux_platform {
-
+// Pure classifier — available on every platform.
 UdevChange classify_udev_action(const char* action) noexcept {
     if (action == nullptr) return UdevChange::other;
     if (std::strcmp(action, "add") == 0) return UdevChange::added;
     if (std::strcmp(action, "remove") == 0) return UdevChange::removed;
     return UdevChange::other;
 }
+
+}  // namespace pulp::runtime
+
+#if defined(__linux__)
+
+#include <pulp/runtime/log.hpp>
+
+#include <poll.h>
+#include <unistd.h>
+
+namespace pulp::runtime {
 
 // ── libudev entry points (resolved at runtime; opaque types as void*) ───────
 struct UdevMonitor::Api {
@@ -48,20 +55,19 @@ struct UdevMonitor::Api {
 };
 
 namespace {
-// libudev SONAME is libudev.so.1 across all modern distros; the unversioned
-// libudev.so only ships with -dev. Try both so a runtime-only host still works.
-bool open_libudev(runtime::DynamicLibrary& lib) {
+// libudev SONAME is libudev.so.1 across modern distros; the unversioned
+// libudev.so only ships with -dev. Try both so a runtime-only host works.
+bool open_libudev(DynamicLibrary& lib) {
     return lib.open("libudev.so.1") || lib.open("libudev.so");
 }
-
 template <typename Fn>
-Fn sym(runtime::DynamicLibrary& lib, const char* name) {
+Fn sym(DynamicLibrary& lib, const char* name) {
     return reinterpret_cast<Fn>(lib.find_symbol(name));
 }
 }  // namespace
 
 bool UdevMonitor::library_available() {
-    runtime::DynamicLibrary lib;
+    DynamicLibrary lib;
     return open_libudev(lib);
 }
 
@@ -71,7 +77,7 @@ bool UdevMonitor::start(const std::vector<std::string>& subsystems,
                         ChangeCallback on_change) {
     if (running_.load(std::memory_order_acquire)) return false;
     if (!open_libudev(lib_)) {
-        runtime::log_info("udev: libudev unavailable — device hotplug disabled");
+        log_info("udev: libudev unavailable — device hotplug disabled");
         return false;
     }
 
@@ -87,7 +93,7 @@ bool UdevMonitor::start(const std::vector<std::string>& subsystems,
     api->device_get_action = sym<Api::fn_dev_get_action>(lib_, "udev_device_get_action");
     api->device_unref      = sym<Api::fn_dev_unref>(lib_, "udev_device_unref");
     if (!api->complete()) {
-        runtime::log_warn("udev: libudev symbols incomplete — hotplug disabled");
+        log_warn("udev: libudev symbols incomplete — hotplug disabled");
         delete api; lib_.close(); return false;
     }
 
@@ -157,4 +163,17 @@ void UdevMonitor::stop() {
     lib_.close();
 }
 
-}  // namespace pulp::audio::linux_platform
+}  // namespace pulp::runtime
+
+#else  // ── non-Linux: honest no-op ────────────────────────────────────────
+
+namespace pulp::runtime {
+struct UdevMonitor::Api {};
+bool UdevMonitor::library_available() { return false; }
+UdevMonitor::~UdevMonitor() = default;
+bool UdevMonitor::start(const std::vector<std::string>&, ChangeCallback) { return false; }
+void UdevMonitor::run_loop() {}
+void UdevMonitor::stop() {}
+}  // namespace pulp::runtime
+
+#endif

@@ -1368,10 +1368,11 @@ target_link_libraries(pulp-test-alsa-input PRIVATE pulp::audio Catch2::Catch2Wit
 target_include_directories(pulp-test-alsa-input PRIVATE ${CMAKE_SOURCE_DIR})
 catch_discover_tests(pulp-test-alsa-input)
 
-# libudev device-hotplug monitor (#3327 / L4). Source-guarded for non-Linux;
-# the udev symbols live in pulp-audio only on Linux.
+# Cross-platform device-hotplug monitor (#3327 / L4). Lives in pulp::runtime so
+# both audio (AlsaSystem) and MIDI (AlsaMidiSystem) share it; libudev is the
+# Linux backend, no-op elsewhere — so this test runs on every platform.
 add_executable(pulp-test-udev-monitor test_udev_monitor.cpp)
-target_link_libraries(pulp-test-udev-monitor PRIVATE pulp::audio Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-udev-monitor PRIVATE pulp::runtime Catch2::Catch2WithMain)
 target_include_directories(pulp-test-udev-monitor PRIVATE ${CMAKE_SOURCE_DIR})
 catch_discover_tests(pulp-test-udev-monitor)
 

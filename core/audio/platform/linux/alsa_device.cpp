@@ -453,7 +453,7 @@ void AlsaSystem::set_device_change_callback(DeviceChangeCallback cb) {
             // The "sound" subsystem covers ALSA PCM + raw-midi cards, so a
             // single monitor catches USB audio/MIDI add + remove. Honest no-op
             // if libudev is unavailable.
-            hotplug_monitor_.start({"sound"}, [this](UdevChange) { fire_device_change(); });
+            hotplug_monitor_.start({"sound"}, [this](runtime::UdevChange) { fire_device_change(); });
         }
     } else {
         hotplug_monitor_.stop();
