@@ -112,21 +112,26 @@ void DesignFrameView::build_overlays() {
                     std::clamp(e.selected_index, 0,
                                static_cast<int>(e.options.size()) - 1));
             }
+            combo->on_change = [this, i](int idx) { notify_choice(i, idx); };
             widget = std::move(combo);
         } else if (e.kind == DesignFrameElement::Kind::tab_group &&
                    !e.options.empty()) {
             // Opaque segmented control over the design's tab strip; clicking a tab
             // moves the selection highlight (real selection state).
-            widget = std::make_unique<DesignTabGroup>(
+            auto tabs = std::make_unique<DesignTabGroup>(
                 e.options, std::clamp(e.selected_index, 0,
                                       static_cast<int>(e.options.size()) - 1));
+            tabs->on_select = [this, i](int idx) { notify_choice(i, idx); };
+            widget = std::move(tabs);
         } else if (e.kind == DesignFrameElement::Kind::stepper &&
                    !e.options.empty()) {
             // `< >` stepper over the design's header preset selector: the value
             // text slides as the chevrons step through the options in place.
-            widget = std::make_unique<DesignStepper>(
+            auto stepper = std::make_unique<DesignStepper>(
                 e.options, std::clamp(e.selected_index, 0,
                                       static_cast<int>(e.options.size()) - 1));
+            stepper->on_select = [this, i](int idx) { notify_choice(i, idx); };
+            widget = std::move(stepper);
         }
         if (widget) {
             View* raw = widget.get();
@@ -136,14 +141,78 @@ void DesignFrameView::build_overlays() {
     }
 }
 
+DesignFrameElement::Kind DesignFrameView::element_kind(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size()))
+        return DesignFrameElement::Kind::knob;
+    return elements_[i].kind;
+}
+
+float DesignFrameView::choice_to_norm(int i, int selected) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return 0.0f;
+    const int n = static_cast<int>(elements_[i].options.size());
+    if (n <= 1) return 0.0f;
+    return std::clamp(selected, 0, n - 1) / static_cast<float>(n - 1);
+}
+
+int DesignFrameView::norm_to_choice(int i, float v) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
+    const int n = static_cast<int>(elements_[i].options.size());
+    if (n <= 1) return 0;
+    return std::clamp(static_cast<int>(std::clamp(v, 0.0f, 1.0f) * (n - 1) + 0.5f),
+                      0, n - 1);
+}
+
+void DesignFrameView::notify_choice(int i, int selected) {
+    if (i >= 0 && i < static_cast<int>(elements_.size()))
+        elements_[i].selected_index = selected;
+    if (on_element_changed) on_element_changed(i, choice_to_norm(i, selected));
+}
+
 float DesignFrameView::element_value(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return -1.0f;
-    return elements_[i].value;
+    const auto& e = elements_[i];
+    switch (e.kind) {
+        case DesignFrameElement::Kind::knob:
+            return e.value;
+        case DesignFrameElement::Kind::dropdown:
+        case DesignFrameElement::Kind::tab_group:
+        case DesignFrameElement::Kind::stepper: {
+            int sel = e.selected_index;  // live widget wins when present
+            if (View* w = overlay_widget(i)) {
+                if (auto* c = dynamic_cast<ComboBox*>(w)) sel = c->selected();
+                else if (auto* t = dynamic_cast<DesignTabGroup*>(w)) sel = t->selected();
+                else if (auto* s = dynamic_cast<DesignStepper*>(w)) sel = s->selected();
+            }
+            return choice_to_norm(i, sel);
+        }
+        case DesignFrameElement::Kind::text_field:
+            return -1.0f;  // text is not a normalized value
+    }
+    return -1.0f;
 }
 
 void DesignFrameView::set_element_value(int i, float v) {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return;
-    elements_[i].value = std::clamp(v, 0.0f, 1.0f);
+    auto& e = elements_[i];
+    switch (e.kind) {
+        case DesignFrameElement::Kind::knob:
+            e.value = std::clamp(v, 0.0f, 1.0f);
+            break;
+        case DesignFrameElement::Kind::dropdown:
+        case DesignFrameElement::Kind::tab_group:
+        case DesignFrameElement::Kind::stepper: {
+            const int idx = norm_to_choice(i, v);
+            e.selected_index = idx;
+            if (View* w = overlay_widget(i)) {  // silent: host->view push, no echo
+                if (auto* c = dynamic_cast<ComboBox*>(w)) c->set_selected_silent(idx);
+                else if (auto* t = dynamic_cast<DesignTabGroup*>(w)) t->set_selected_silent(idx);
+                else if (auto* s = dynamic_cast<DesignStepper*>(w)) s->set_selected_silent(idx);
+            }
+            break;
+        }
+        case DesignFrameElement::Kind::text_field:
+            return;  // not a normalized value
+    }
     request_repaint();
 }
 
@@ -215,7 +284,11 @@ int DesignFrameView::hit_element(Point pos) const {
 
 void DesignFrameView::on_mouse_down(Point pos) {
     drag_ = hit_element(pos);
-    if (drag_ >= 0) { drag_start_y_ = pos.y; drag_start_value_ = elements_[drag_].value; }
+    if (drag_ >= 0) {
+        drag_start_y_ = pos.y;
+        drag_start_value_ = elements_[drag_].value;
+        if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
+    }
 }
 
 void DesignFrameView::on_mouse_drag(Point pos) {
@@ -227,6 +300,13 @@ void DesignFrameView::on_mouse_drag(Point pos) {
     elements_[drag_].value =
         std::clamp(drag_start_value_ + dy_design * 0.005f, 0.0f, 1.0f);
     request_repaint();
+    // User-driven turn -> notify the binder (knob is value-bearing).
+    if (on_element_changed) on_element_changed(drag_, elements_[drag_].value);
+}
+
+void DesignFrameView::on_mouse_up(Point /*pos*/) {
+    if (drag_ >= 0 && on_gesture_end) on_gesture_end(drag_);
+    drag_ = -1;
 }
 
 // ── DesignTabGroup ──────────────────────────────────────────────────────────
@@ -269,13 +349,23 @@ void DesignTabGroup::paint(canvas::Canvas& canvas) {
     }
 }
 
+void DesignTabGroup::set_selected_silent(int index) {
+    if (labels_.empty()) return;
+    const int idx = std::clamp(index, 0, static_cast<int>(labels_.size()) - 1);
+    if (idx != selected_) { selected_ = idx; request_repaint(); }
+}
+
 void DesignTabGroup::on_mouse_down(Point pos) {
     const auto b = local_bounds();
     if (labels_.empty() || b.width <= 0) return;
     const int n = static_cast<int>(labels_.size());
     int idx = static_cast<int>(pos.x / (b.width / static_cast<float>(n)));
     idx = std::clamp(idx, 0, n - 1);
-    if (idx != selected_) { selected_ = idx; request_repaint(); }
+    if (idx != selected_) {
+        selected_ = idx;
+        request_repaint();
+        if (on_select) on_select(idx);  // user tap
+    }
 }
 
 // ── DesignStepper ─────────────────────────────────────────────────────────
@@ -319,6 +409,12 @@ void DesignStepper::paint(canvas::Canvas& canvas) {
     canvas.fill_text(val, (b.width - tw) * 0.5f, ty);
 }
 
+void DesignStepper::set_selected_silent(int index) {
+    if (options_.empty()) return;
+    const int idx = std::clamp(index, 0, static_cast<int>(options_.size()) - 1);
+    if (idx != selected_) { selected_ = idx; request_repaint(); }
+}
+
 void DesignStepper::on_mouse_down(Point pos) {
     const auto b = local_bounds();
     if (options_.empty() || b.width <= 0) return;
@@ -327,7 +423,11 @@ void DesignStepper::on_mouse_down(Point pos) {
     if (pos.x < b.width * 0.5f) next = selected_ - 1;  // left half: previous
     else                        next = selected_ + 1;  // right half: next
     next = std::clamp(next, 0, n - 1);
-    if (next != selected_) { selected_ = next; request_repaint(); }
+    if (next != selected_) {
+        selected_ = next;
+        request_repaint();
+        if (on_select) on_select(next);  // user step
+    }
 }
 
 }  // namespace pulp::view

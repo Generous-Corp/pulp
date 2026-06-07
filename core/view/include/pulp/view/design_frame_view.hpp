@@ -2,6 +2,7 @@
 
 #include <pulp/view/view.hpp>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -59,12 +60,34 @@ public:
     int element_count() const { return static_cast<int>(elements_.size()); }
     float panel_width() const { return panel_w_; }
     float panel_height() const { return panel_h_; }
-    // Value of element `i` (0..1), or -1 if out of range. For tests/bindings.
+    // Kind of element `i` (knob / dropdown / tab_group / stepper / text_field),
+    // or knob if out of range. Lets a binder treat knobs as continuous params
+    // and dropdown/tab/stepper as normalized-index "choice" params.
+    DesignFrameElement::Kind element_kind(int i) const;
+    // Normalized [0,1] value of element `i`, or -1 if out of range / not a
+    // value-bearing control (text_field). For a knob this is its turn; for a
+    // dropdown/tab_group/stepper it is the live selection mapped to
+    // selected_index / max(1, option_count - 1). Reads the live overlay widget
+    // when one exists. For tests/bindings.
     float element_value(int i) const;
+    // Set element `i` from a normalized [0,1] value WITHOUT firing
+    // on_element_changed (a host->view push: knob turn, or choice index =
+    // round(v * (count-1)) applied to the live overlay widget silently). Use for
+    // automation/preset application so it doesn't echo back to the host.
     void set_element_value(int i, float v);
     // The native-overlay child widget for element `i`, or nullptr (e.g. for a
     // knob, or out of range). For tests/bindings.
     View* overlay_widget(int i) const;
+
+    // Fired when the USER changes an element (knob drag, dropdown/tab/stepper
+    // select) — index + the new normalized value. NOT fired by set_element_value
+    // (that's a programmatic host->view push). A foreign-host binder forwards
+    // this to its parameter system. gesture begin/end bracket a knob drag so the
+    // binder can group an undo step; choice controls fire one changed (no
+    // gesture). All on the UI thread.
+    std::function<void(int index, float value)> on_element_changed;
+    std::function<void(int index)> on_gesture_begin;
+    std::function<void(int index)> on_gesture_end;
 
     // The panel is the view's natural size — a host should size its window to
     // this aspect so the design fills it with no letterbox (see paint()).
@@ -75,8 +98,15 @@ public:
     void layout_children() override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
 
 private:
+    // Map a choice element's selected index to a normalized [0,1] value and back,
+    // using its option count. Single source of truth for choice<->normalized.
+    float choice_to_norm(int i, int selected) const;
+    int   norm_to_choice(int i, float v) const;
+    // Sync a user choice change (overlay widget -> element + on_element_changed).
+    void  notify_choice(int i, int selected);
     // Build the native-overlay child widgets (TextEditor / ComboBox / tabs) for
     // the non-knob elements; called once from the constructor.
     void build_overlays();
@@ -114,6 +144,11 @@ public:
     DesignTabGroup(std::vector<std::string> labels, int selected);
     int selected() const { return selected_; }
     int tab_count() const { return static_cast<int>(labels_.size()); }
+    // Set selection without firing on_select (programmatic host->view push).
+    void set_selected_silent(int index);
+    // Fired when the USER taps a different tab (index). Not fired by
+    // set_selected_silent.
+    std::function<void(int index)> on_select;
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
@@ -135,6 +170,11 @@ public:
     int selected() const { return selected_; }
     int option_count() const { return static_cast<int>(options_.size()); }
     const std::string& current() const;
+    // Set selection without firing on_select (programmatic host->view push).
+    void set_selected_silent(int index);
+    // Fired when the USER steps to a different option (index). Not fired by
+    // set_selected_silent.
+    std::function<void(int index)> on_select;
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
