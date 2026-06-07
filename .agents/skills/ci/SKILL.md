@@ -1023,6 +1023,40 @@ Pulp's local macOS runner runs through `actions-runner` (PIDs surfaced
 via `ps aux | grep Runner.Listener`); the daemon co-exists with the
 existing service.
 
+### Prevent: ccache false-hit guard (#3504 follow-up)
+
+The build-dir sentinel above does **not** cover the *ccache*, and the
+self-hosted macОS runners share one cache (`CCACHE_DIR=…/cache/ccache`,
+configured in each runner's `~/actions-runner-*/.env`). That `.env` sets
+`CCACHE_DEPEND=true` with the default `compiler_check=mtime` — depend mode
+skips the preprocessor and trusts the compiler's dependency manifest, and
+`mtime` keys the compiler weakly; on a shared cache a stale/false-hit object
+gets served and corrupts unrelated TUs **even on a clean build dir**. Observed
+2026-06-07: the same change-unrelated tests failed on *every* PR's `macos`
+gate — including a pure function `resolve_checkpoint_url()` returning `""` —
+while the identical tests passed on clean local Debug **and** Release builds on
+the same machine. A one-time `ccache -C` does **not** fix it: concurrent builds
+repopulate the cache within minutes, so the bad entries come right back.
+
+The fix is a *config* override, not a clear. `build.yml`'s `build` job `env:`
+forces the safe ccache path (job env overrides the runner-service `.env` for
+those steps): `CCACHE_COMPILERCHECK=content` (key the compiler by content, which
+also changes the cache-key namespace so the contaminated mtime-keyed entries are
+never hit — self-cleaning), `CCACHE_NODEPEND=true` (disable depend mode, the
+actual culprit), and `CCACHE_SLOPPINESS=time_macros` (pulp uses no PCH, so
+`pch_defines` was inert). **Gotcha:** ccache rejects `CCACHE_DEPEND=false` with
+`invalid boolean environment variable value "false" (did you mean
+CCACHE_NODEPEND=true?)` — the env spelling to *disable* a ccache boolean is the
+negated `CCACHE_NO<X>=true` form, not `CCACHE_<X>=false`. Direct mode is left
+**on** (the fast path) on purpose: it hashes the source + include manifest and
+is correct once depend mode is off and the compiler is content-keyed, so there's
+no need to force full preprocessor mode (`CCACHE_NODIRECT=true`) and pay its
+speed cost. A `Ccache effective config (proof of override)` step prints
+`ccache --show-config` before Configure so the run log proves the override
+reached the step. Durable host-side hardening (not required once the env
+override is in place): give each runner its own `CCACHE_DIR`, or set
+`compiler_check=content` in the runner `.env`.
+
 ### Keep current: `shipyard update`
 
 ```bash

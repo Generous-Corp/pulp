@@ -530,6 +530,32 @@ jobs:
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
       # cached CMake flags such as -fsanitize=address cannot bleed into it.
       PULP_BUILD_DIR: build-${{ matrix.key }}
+      # ── ccache correctness overrides (pulp #3504 follow-up) ──────────────
+      # The self-hosted macOS runners' service env (~/actions-runner-*/.env)
+      # sets CCACHE_DEPEND=true with the default compiler_check=mtime on a
+      # ccache shared across all three runners. Depend mode skips the
+      # preprocessor and trusts the compiler's dependency manifest; combined
+      # with mtime-only compiler keying on a shared cache, a stale/false-hit
+      # object gets served and corrupts unrelated TUs at once — observed as a
+      # pure function (resolve_checkpoint_url) returning "" and other
+      # change-unrelated tests failing on every PR while clean local Debug AND
+      # Release builds pass. #3504's build-dir guard does not touch ccache, so
+      # it cannot fix this. Force the safe path here (job env overrides the
+      # runner-service .env for these steps):
+      #   - compiler_check=content → key the compiler by content, not mtime;
+      #     this also changes the cache-key namespace, so the existing
+      #     contaminated mtime-keyed entries are never hit (self-cleaning).
+      #   - CCACHE_NODEPEND=true → disable depend mode (the actual culprit).
+      #     ccache rejects `CCACHE_DEPEND=false` ("invalid boolean … did you
+      #     mean CCACHE_NODEPEND=true?"); the negated NO-form is the env spelling.
+      #     Direct mode stays ON (fast path) — it hashes the source + include
+      #     manifest and is correct once depend mode is off and the compiler is
+      #     content-keyed.
+      #   - sloppiness=time_macros only (pulp uses no precompiled headers, so
+      #     pch_defines was inert).
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
 
     steps:
       # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by
@@ -709,6 +735,21 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+
+      - name: Ccache effective config (proof of override)
+        if: always()
+        shell: bash
+        run: |
+          # Proves the job-level ccache correctness overrides actually reached
+          # this step's environment (vs the runner-service .env). Expect
+          # compiler_check=content, depend_mode=false, direct_mode=false,
+          # sloppiness=time_macros.
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --show-config 2>/dev/null \
+              | grep -iE 'compiler_check|depend_mode|direct_mode|sloppiness|cache_dir' || true
+          else
+            echo "ccache not available; skipping config proof"
+          fi
 
       - name: Configure
         # On pull_request events, skip example plugin builds
