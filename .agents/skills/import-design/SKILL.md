@@ -161,7 +161,17 @@ const NativeMaterializeOptions&)` is public in
 detached `std::unique_ptr<View>` subtree, and catches API-boundary failures into
 diagnostics instead of throwing. Keep image assets routed through
 `IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
-from IR attributes. The materialization call site itself should not run JS, but
+from IR attributes.
+
+**Windows path-separator gotcha (asset/font paths baked into generated JS):**
+when `pulp_import_design.cpp` resolves an `asset_ref`/font `asset_id` to a path
+that is stamped into `attributes["asset_path"]` / `font.resolved_path` (and from
+there into `setImageSource(...)` / `registerFont(...)` in the generated JS),
+convert it with `fs::path::generic_string()`, NOT `.string()`. On Windows
+`.string()` emits native backslashes, which (a) bakes non-portable separators
+into the generated UI and (b) breaks tests that assert on `assets/...`
+substrings. `generic_string()` always emits `/`, and Windows file APIs accept
+forward slashes. On POSIX the two are identical, so the change is a no-op there. The materialization call site itself should not run JS, but
 do not market this as "no JS engine" globally because live React/parity lanes
 still use the JS runtime. Baked/native consumers can link `pulp::view-core`;
 live import, `ScriptEngine`, `WidgetBridge`, and scripted UI consumers should

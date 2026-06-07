@@ -63,7 +63,10 @@ public:
     fs::path path;
 };
 
-void write_text(const fs::path& path, const std::string& text) {
+// [[maybe_unused]]: only the codegen-compile test cases use these helpers, and
+// those compile legs are skipped on Windows (see the SKIP guards below), so the
+// helpers are unreferenced in a Windows build.
+[[maybe_unused]] void write_text(const fs::path& path, const std::string& text) {
     fs::create_directories(path.parent_path());
     std::ofstream out(path);
     REQUIRE(out.is_open());
@@ -71,9 +74,9 @@ void write_text(const fs::path& path, const std::string& text) {
     REQUIRE(out.good());
 }
 
-bool compile_generated_source(const fs::path& source_path,
-                              const fs::path& output_path,
-                              std::string* diagnostics) {
+[[maybe_unused]] bool compile_generated_source(const fs::path& source_path,
+                                               const fs::path& output_path,
+                                               std::string* diagnostics) {
     const fs::path compiler(PULP_TEST_CXX_COMPILER);
     if (compiler.empty() || !fs::exists(compiler)) {
         if (diagnostics != nullptr) *diagnostics = "C++ compiler path is unavailable";
@@ -1935,6 +1938,17 @@ TEST_CASE("generated C++ binding helper requires a unique materialized anchor",
     REQUIRE(result.source.find("route_0_match_count == 1") != std::string::npos);
     REQUIRE(result.source.find("route_1_match_count == 1") != std::string::npos);
 
+#if defined(_WIN32)
+    // The string contract above is exercised on every platform; only the
+    // optional compile leg is skipped on Windows. Compiling the freestanding
+    // generated translation unit standalone runs the toolchain outside a
+    // configured MSVC environment, so it cannot resolve the STL / platform
+    // transitive includes the way the macOS clang invocation does. This is the
+    // same compile-on-Windows limitation that keeps the sibling
+    // pulp-test-design-import-cpp-codegen target behind the
+    // `windows-pr-quarantine` ctest label (see test/CMakeLists.txt).
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
     TempDir tmp("pulp-native-materializer-duplicate-anchor-codegen");
     const auto header = tmp.path / "imported_ui.hpp";
     const auto source = tmp.path / "imported_ui.cpp";
@@ -1946,6 +1960,7 @@ TEST_CASE("generated C++ binding helper requires a unique materialized anchor",
     const bool compiled = compile_generated_source(source, object, &diagnostics);
     INFO(diagnostics);
     REQUIRE(compiled);
+#endif
 }
 
 TEST_CASE("native materializer binding helper binds routed checkbox metadata",
@@ -2065,6 +2080,13 @@ TEST_CASE("generated C++ binding helper emits routed checkbox bindings",
     REQUIRE(result.binding_manifest.find("\"native_primitive\": \"checkbox\"") != std::string::npos);
     REQUIRE(result.binding_manifest.find("\"param_key\": \"filter.bypass\"") != std::string::npos);
 
+#if defined(_WIN32)
+    // See the duplicate-anchor codegen case above: the freestanding generated
+    // translation unit cannot be compiled on the Windows CI toolchain (same
+    // limitation as the windows-pr-quarantined cpp-codegen target). The
+    // source/manifest string contract above runs on every platform.
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
     TempDir tmp("pulp-native-materializer-checkbox-codegen");
     const auto header = tmp.path / "imported_ui.hpp";
     const auto source = tmp.path / "imported_ui.cpp";
@@ -2076,6 +2098,7 @@ TEST_CASE("generated C++ binding helper emits routed checkbox bindings",
     const bool compiled = compile_generated_source(source, object, &diagnostics);
     INFO(diagnostics);
     REQUIRE(compiled);
+#endif
 }
 
 TEST_CASE("compiled generated C++ binding helper binds and fails closed at runtime",

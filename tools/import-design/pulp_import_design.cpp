@@ -2696,7 +2696,13 @@ int main(int argc, char* argv[]) {
                     if (ref->local_path && !ref->local_path->empty()) {
                         fs::path p(*ref->local_path);
                         if (p.is_relative()) p = base_dir / p;
-                        std::string abs = p.lexically_normal().string();
+                        // generic_string() (forward slashes) so the path baked
+                        // into the generated JS is identical on every platform.
+                        // fs::path::string() would emit native backslashes on
+                        // Windows, breaking both downstream consumers that
+                        // expect web-style separators and the import tests that
+                        // assert on "assets/...". Windows file APIs accept '/'.
+                        std::string abs = p.lexically_normal().generic_string();
                         n.attributes["asset_path"] = abs;
 
                         // Stamp the asset's TRUE pixel dimensions from the PNG
@@ -2886,7 +2892,10 @@ int main(int argc, char* argv[]) {
                 if (ref->local_path && !ref->local_path->empty()) {
                     fs::path p(*ref->local_path);
                     if (p.is_relative()) p = base_dir / p;
-                    fa.resolved_path = p.lexically_normal().string();
+                    // generic_string() for the same cross-platform reason as the
+                    // node asset-path pass above: the resolved font path is baked
+                    // into the generated JS (registerFont) and must use '/'.
+                    fa.resolved_path = p.lexically_normal().generic_string();
                 }
             }
         }
