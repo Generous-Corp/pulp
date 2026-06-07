@@ -267,6 +267,14 @@ TEST_CASE("audio model registry rejects unsafe Hugging Face file paths",
     REQUIRE(resolve_checkpoint_url("hf://org/repo/../model.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo/path/../model.pt").empty());
     REQUIRE(resolve_checkpoint_url("hf://org/repo/path/to/..").empty());
+    // Percent-encoded traversal must also be rejected — a normalizing proxy/CDN
+    // could decode `%2e%2e` -> `..` or `%2f` -> `/` after the literal checks.
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/%2e%2e/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/%2E%2E/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/sub%2f%2e%2e/model.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/%5c..%5cmodel.pt").empty());
+    REQUIRE(resolve_checkpoint_url("hf://org/repo/trailing%").empty());    // truncated
+    REQUIRE(resolve_checkpoint_url("hf://org/re%2fpo/model.pt").empty());  // encoded slash in repo
 }
 
 TEST_CASE("audio model registry rejects unsafe Hugging Face owner and repo names",

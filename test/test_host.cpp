@@ -471,7 +471,25 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
         return;
     }
 
-    const auto& pinfo = params.front();
+    // Pick a CONTINUOUS, writable parameter. A stepped/boolean param — the very
+    // common "Bypass" toggle is frequently params.front() — legitimately
+    // quantizes a mid-range set to its nearest step (e.g. 0.5 -> 1.0), which is
+    // correct plugin behavior, not a controller-mirror failure. Skip stepped,
+    // bypass, and read-only params so the round-trip exercises real precision.
+    const HostParamInfo* continuous = nullptr;
+    for (const auto& p : params) {
+        if (p.flags.stepped || p.flags.is_bypass || p.flags.read_only) continue;
+        if (p.max_value <= p.min_value) continue;
+        continuous = &p;
+        break;
+    }
+    if (!continuous) {
+        SUCCEED("plugin exposes no continuous writable parameter — "
+                "cannot exercise a precise set_parameter round-trip");
+        return;
+    }
+
+    const auto& pinfo = *continuous;
     const auto pid = pinfo.id;
     const float target = (pinfo.min_value + pinfo.max_value) * 0.5f;
 

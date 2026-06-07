@@ -24,12 +24,25 @@ bool has_dot_dot_segment(std::string_view path) {
     return false;
 }
 
-// Reject percent-encoded path content. hf:// checkpoint paths are plain
-// user/repo/file references; a `%` only appears as an encoded byte (e.g.
-// `%2e%2e` for `..`), which a normalizing proxy/CDN could decode into a
-// traversal segment that `has_dot_dot_segment` cannot see. Fail closed.
-bool has_percent_encoding(std::string_view text) {
-    return text.find('%') != std::string_view::npos;
+// Reject only the percent-encodings that could decode — in a normalizing
+// proxy/CDN — into a path-traversal segment the literal has_dot_dot_segment()
+// check above cannot see: `%2e` ('.'), `%2f` ('/'), `%5c` ('\\'), and any
+// control byte (`%00`–`%1f`). A truncated `%`/`%x` is treated as dangerous
+// (fail closed). Benign encodings such as `%20` (a space in a real filename)
+// are allowed through so legitimate Hugging Face file paths resolve.
+bool has_dangerous_percent_encoding(std::string_view text) {
+    for (std::size_t i = text.find('%'); i != std::string_view::npos;
+         i = text.find('%', i + 1)) {
+        if (i + 2 >= text.size()) return true;  // truncated `%`/`%x`
+        const char a = text[i + 1];
+        const char b = text[i + 2];
+        const bool dot_or_slash = (a == '2') &&
+            (b == 'e' || b == 'E' || b == 'f' || b == 'F');  // %2e '.', %2f '/'
+        const bool backslash = (a == '5') && (b == 'c' || b == 'C');  // %5c '\'
+        const bool control = (a == '0' || a == '1');  // %00–%1f
+        if (dot_or_slash || backslash || control) return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -54,9 +67,11 @@ std::string resolve_checkpoint_url(const std::string& checkpoint_ref) {
         // `resolve/main/<file>` prefix (or escape the user/repo namespace entirely,
         // e.g. `hf://user/../evil/file.pt`).
         if (has_dot_dot_segment(user_repo) || has_dot_dot_segment(file_path)) return {};
-        // Reject percent-encoded segments (e.g. `%2e%2e`) that could decode to `..`
-        // after the literal check above.
-        if (has_percent_encoding(user_repo) || has_percent_encoding(file_path)) return {};
+        // Reject percent-encoded traversal segments (e.g. `%2e%2e`, `%2f`) that
+        // could decode to `..`/separators after the literal check above. Benign
+        // encodings like `%20` are allowed.
+        if (has_dangerous_percent_encoding(user_repo)
+                || has_dangerous_percent_encoding(file_path)) return {};
         return "https://huggingface.co/" + user_repo + "/resolve/main/" + file_path;
     }
     if (checkpoint_ref.starts_with("http://") || checkpoint_ref.starts_with("https://"))
