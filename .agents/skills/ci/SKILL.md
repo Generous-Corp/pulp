@@ -1000,6 +1000,25 @@ Pair with launchd / systemd so the watchdog survives reboots. JSON
 contract: `runner.watch` envelopes with `event=auto_kill_worker`,
 `phase ∈ {attempt, killed, failed, no-pid-found}`.
 
+### Prevent: build-dir ODR guard (interrupted-build sentinel)
+
+The self-hosted macОS lane uses `clean: false` (warm `build-<key>` dir for
+fast incremental builds). A build that is **cancelled/interrupted** mid-compile
+leaves partial object files; the next incremental build then mixes object
+layouts → heap corruption / **SEGFAULTs in unrelated tests** (HttpStream,
+model_store, Theme dtor) while a clean github-hosted build passes. This bit
+every open PR on 2026-06-07 after heavy branch churn + many cancelled runs.
+
+`build.yml`'s macОS Configure step writes a `.pulp-build-incomplete` sentinel
+into `$PULP_BUILD_DIR` after configure; the Build step removes it on success.
+If a new job's Configure finds the sentinel still present, the previous build
+did not finish cleanly, so it `rm -rf`s the dir for a pristine rebuild (ccache
+keeps the recompile fast; Skia at `external/skia-build` is untouched). This is
+the durable complement to `--kill-hung-workers`: the watchdog kills the hung
+worker, the sentinel ensures the *next* build doesn't inherit its corruption.
+For an already-corrupted dir (no sentinel yet), clean it once with the personal
+`pulp-runner-ops` skill / `ssh macstudio … rm -rf … build-macos`.
+
 Pulp's local macOS runner runs through `actions-runner` (PIDs surfaced
 via `ps aux | grep Runner.Listener`); the daemon co-exists with the
 existing service.
