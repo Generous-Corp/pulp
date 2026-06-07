@@ -50,9 +50,24 @@ public:
         /// Opaque platform-specific handle for on-screen rendering.
         /// On macOS/iOS: CAMetalLayer*
         /// On Windows:   HWND
-        /// On Linux:     platform-dependent (X11 Window, wl_surface*, etc.)
+        /// On Linux:     a pointer to an X11NativeHandle (see below). A bare
+        ///               X11 Window id is NOT enough — Dawn's Xlib surface
+        ///               source needs both the Display* and the Window. Wayland
+        ///               (wl_display*/wl_surface*) is not wired yet.
         /// nullptr = offscreen-only mode (no presentation)
         void* native_surface_handle = nullptr;
+    };
+
+    /// Typed X11 surface handle. Pass a pointer to one of these as
+    /// Config::native_surface_handle on Linux so Dawn can build an
+    /// SurfaceSourceXlibWindow (#3329 Win/Linux parity). `display` is an
+    /// `Display*` and `window` is an X11 `Window` (an `unsigned long`); both are
+    /// kept opaque here so this header stays Xlib-include-free for non-Linux and
+    /// no-X11 consumers. The pointed-to struct only needs to outlive the
+    /// initialize() call.
+    struct X11NativeHandle {
+        void*         display = nullptr;  // Display*
+        unsigned long window  = 0;        // Window
     };
 
     virtual ~GpuSurface() = default;

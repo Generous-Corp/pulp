@@ -3970,12 +3970,42 @@ if(_PULP_NODE_FOR_TESTS)
         LABELS "ios-d3b;node;threejs")
 endif()
 
-# Screenshot tests (macOS only — uses CoreGraphics bitmap context)
-if(APPLE)
+# Screenshot tests. macOS uses the CoreGraphics bitmap context; non-Apple
+# builds with Skia use the built-in cross-platform Skia raster backend
+# (#3329 Win/Linux parity), so the test runs there too and proves the
+# headless render_to_png/rgba path the foreign-host embed depends on. A
+# non-Apple build WITHOUT Skia has no backend, so skip there.
+if(APPLE OR PULP_HAS_SKIA)
     add_executable(pulp-test-screenshot test_screenshot.cpp)
     target_link_libraries(pulp-test-screenshot PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot)
+endif()
 
+# #3329 — native PluginViewHost factory + headless-capture proof on non-Apple.
+# Built only where core/view actually compiled a platform host: Windows with
+# Skia, or non-Android UNIX with Skia + X11. Mirrors the core/view/CMakeLists
+# conditions. The host degrades to capture-only when no display server is
+# present (headless CI VM), and capture_back_buffer_png() still yields a frame.
+if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
+    set(_pulp_has_platform_pvh OFF)
+    if(WIN32)
+        set(_pulp_has_platform_pvh ON)
+    elseif(UNIX)
+        find_package(X11 QUIET)
+        if(X11_FOUND)
+            set(_pulp_has_platform_pvh ON)
+        endif()
+    endif()
+    if(_pulp_has_platform_pvh)
+        add_executable(pulp-test-plugin-view-host-factory
+            test_plugin_view_host_factory.cpp)
+        target_link_libraries(pulp-test-plugin-view-host-factory
+            PRIVATE pulp::view Catch2::Catch2WithMain)
+        catch_discover_tests(pulp-test-plugin-view-host-factory)
+    endif()
+endif()
+
+if(APPLE)
     # P1 — smart capture (capture_view) + offscreen-GPU path (render_to_png_gpu).
     add_executable(pulp-test-screenshot-gpu test_screenshot_gpu.cpp)
     target_link_libraries(pulp-test-screenshot-gpu PRIVATE pulp::view Catch2::Catch2WithMain)

@@ -93,6 +93,31 @@ std::vector<uint8_t> render_to_png_gpu(
 // compiled in). Lets capture_view fall back honestly when GPU is unavailable.
 bool has_gpu_capture();
 
+// Raw-RGBA sibling of render_to_png: render a view tree headlessly and hand
+// back the decoded pixel buffer instead of PNG bytes — for callers that want
+// to composite or upload the frame themselves (e.g. a foreign host that draws
+// Pulp's output into its own surface) without paying a PNG encode + decode
+// round-trip. The internal Skia raster path already holds these pixels before
+// encoding, so this exposes them directly.
+//
+// Output: tightly packed RGBA8 (R,G,B,A byte order), premultiplied alpha,
+// sRGB, top-to-bottom rows, stride == out_width * 4. The pixel dimensions are
+// the logical width/height multiplied by `scale`, returned via out_width /
+// out_height so the caller can size its buffer exactly. Returns an empty
+// vector on failure (no Skia backend, surface alloc failed, read-back failed).
+//
+// Backend: forces the Skia raster path when available (the only backend that
+// produces a stable, host-independent RGBA buffer). Without Skia this returns
+// empty (CoreGraphics capture is PNG-only here).
+std::vector<uint8_t> render_to_rgba(
+    View& root,
+    uint32_t width,
+    uint32_t height,
+    float scale,
+    uint32_t* out_width,
+    uint32_t* out_height
+);
+
 // ── Host-registered screenshot provider (#299) ──────────────────────────
 //
 // Non-Apple platforms don't have a built-in screenshot backend in

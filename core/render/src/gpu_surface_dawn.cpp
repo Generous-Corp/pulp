@@ -397,9 +397,27 @@ private:
             runtime::log_warn("GpuSurface: failed to create Android Vulkan surface");
         }
 #elif defined(__linux__)
-        // Linux: native_layer is platform-dependent.
-        (void)native_handle;
-        runtime::log_warn("GpuSurface: Linux surface creation requires platform-specific handle — use SDL3 integration");
+        // Linux: native_handle is a pointer to a GpuSurface::X11NativeHandle
+        // (Display* + Window). A bare Window id is not enough — Dawn's Xlib
+        // surface source needs both (#3329). Wayland is not wired yet.
+        if (auto* x11 = static_cast<X11NativeHandle*>(native_handle);
+            x11 && x11->display && x11->window) {
+            wgpu::SurfaceDescriptor surface_desc{};
+            wgpu::SurfaceSourceXlibWindow xlib_source{};
+            xlib_source.display = x11->display;
+            xlib_source.window = static_cast<uint64_t>(x11->window);
+            surface_desc.nextInChain = &xlib_source;
+
+            surface_ = instance_.CreateSurface(&surface_desc);
+            if (surface_) {
+                runtime::log_info("GpuSurface: created Vulkan surface from X11 window");
+            } else {
+                runtime::log_warn("GpuSurface: failed to create X11 surface");
+            }
+        } else {
+            runtime::log_warn("GpuSurface: Linux surface needs an X11NativeHandle "
+                              "(Display* + Window); got null/incomplete handle");
+        }
 #else
         (void)native_handle;
 #endif

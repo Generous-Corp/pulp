@@ -163,6 +163,47 @@ std::vector<uint8_t> render_to_png_skia(View& root,
     return encode_rgba_to_png(pixels.data(), pixel_w, pixel_h,
                               static_cast<size_t>(pixel_w) * 4u);
 }
+
+// Raw-RGBA producer (no PNG encode). Forces R,G,B,A byte order via an explicit
+// kRGBA_8888 read-back so the output is endianness-independent (kN32 is BGRA on
+// Apple), premultiplied sRGB, stride == pixel_w * 4. Writes the pixel
+// dimensions to out_width/out_height. Empty on failure.
+std::vector<uint8_t> render_to_rgba_skia(View& root,
+                                         uint32_t width,
+                                         uint32_t height,
+                                         float scale,
+                                         uint32_t* out_width,
+                                         uint32_t* out_height) {
+    uint32_t pixel_w = static_cast<uint32_t>(width * scale);
+    uint32_t pixel_h = static_cast<uint32_t>(height * scale);
+    if (pixel_w == 0 || pixel_h == 0) return {};
+    auto color_space = SkColorSpace::MakeSRGB();
+    SkImageInfo info = SkImageInfo::Make(pixel_w, pixel_h, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType, color_space);
+    auto surface = SkSurfaces::Raster(info);
+    if (!surface) return {};
+
+    auto* sk_canvas = surface->getCanvas();
+    if (!sk_canvas) return {};
+    if (scale != 1.0f) sk_canvas->scale(scale, scale);
+
+    pulp::canvas::SkiaCanvas canvas(sk_canvas);
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
+    canvas.fill_rect(0, 0, static_cast<float>(width), static_cast<float>(height));
+
+    root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+    root.layout_children();
+    root.paint_all(canvas);
+    pulp::view::View::paint_overlays(canvas, &root);
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(pixel_w) * pixel_h * 4u);
+    SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(pixel_w) * 4u);
+    if (!surface->readPixels(pixmap, 0, 0)) return {};
+
+    if (out_width) *out_width = pixel_w;
+    if (out_height) *out_height = pixel_h;
+    return pixels;
+}
 #endif
 
 } // namespace
@@ -199,6 +240,19 @@ bool render_to_file(View& root, uint32_t width, uint32_t height,
     }
 }
 
+std::vector<uint8_t> render_to_rgba(View& root, uint32_t width, uint32_t height,
+                                    float scale, uint32_t* out_width,
+                                    uint32_t* out_height) {
+    if (out_width) *out_width = 0;
+    if (out_height) *out_height = 0;
+#ifdef PULP_HAS_SKIA
+    return render_to_rgba_skia(root, width, height, scale, out_width, out_height);
+#else
+    (void)root; (void)width; (void)height; (void)scale;
+    return {};
+#endif
+}
+
 } // namespace pulp::view
 
 #else
@@ -206,6 +260,9 @@ bool render_to_file(View& root, uint32_t width, uint32_t height,
 namespace pulp::view {
 std::vector<uint8_t> render_to_png(View&, uint32_t, uint32_t, float, ScreenshotBackend) { return {}; }
 bool render_to_file(View&, uint32_t, uint32_t, const std::string&, float, ScreenshotBackend) { return false; }
+std::vector<uint8_t> render_to_rgba(View&, uint32_t, uint32_t, float, uint32_t* ow, uint32_t* oh) {
+    if (ow) *ow = 0; if (oh) *oh = 0; return {};
+}
 }
 
 #endif
