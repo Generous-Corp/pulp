@@ -1002,6 +1002,10 @@ pulp_add_test_suite(pulp-test-frame-fill LIBRARIES pulp::audio)
 # machine shared by Android/ALSA/Windows/iOS MIDI backends. Header-only.
 pulp_add_test_suite(pulp-test-sysex-accumulator LIBRARIES pulp::midi)
 
+# #3327 L4: MonotonicMidiClock — seconds-since-open MIDI input timestamps,
+# the cross-platform helper that replaced ALSA's hardcoded 0.0 stamps.
+pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
+
 # planning/2026-05-24 gap-doc row "BLE MIDI" — BLE-MIDI 1.0 packet
 # codec + cross-platform BleMidiCentral factory contract. The
 # CoreBluetooth backend's live discovery / pairing path is exercised
@@ -1363,6 +1367,18 @@ add_executable(pulp-test-alsa-input test_alsa_input.cpp)
 target_link_libraries(pulp-test-alsa-input PRIVATE pulp::audio Catch2::Catch2WithMain)
 target_include_directories(pulp-test-alsa-input PRIVATE ${CMAKE_SOURCE_DIR})
 catch_discover_tests(pulp-test-alsa-input)
+
+# JACK device-enumeration contract (#3327 / L5a). Registered only when CMake
+# detected a JACK dev package and compiled the backend into pulp-audio — the
+# test calls JackSystem symbols that exist only in that configuration, and it
+# is the regression guard for the enumerate_devices() build break.
+if(PULP_JACK_AVAILABLE)
+    add_executable(pulp-test-jack-device test_jack_device.cpp)
+    target_link_libraries(pulp-test-jack-device PRIVATE pulp::audio Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-jack-device PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(pulp-test-jack-device PRIVATE PULP_HAS_JACK=1)
+    catch_discover_tests(pulp-test-jack-device)
+endif()
 # Processor on_host_tempo_changed hook (workstream 01 slice 1.10)
 pulp_add_test_suite(pulp-test-tempo-hook LIBRARIES pulp::format)
 # Resizable plugin shell (workstream 07 slice 7.5)

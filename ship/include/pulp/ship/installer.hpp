@@ -40,6 +40,25 @@ bool create_nsis_installer(const InstallerConfig& config);
 // Useful for inspection or manual builds
 std::string generate_nsis_script(const InstallerConfig& config);
 
+// Debian architecture string matching the architecture this code was
+// compiled for. The plugins packaged on a native build share the ship
+// library's target arch, so this is the correct `Architecture:` field for
+// the generated `.deb`. Header-only so it is available (and testable) on
+// every platform without depending on the Linux-only package TU.
+inline std::string debian_architecture() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+    return "amd64";
+#elif defined(__arm__)
+    return "armhf";
+#elif defined(__i386__)
+    return "i386";
+#else
+    return "amd64";  // best-effort default for unrecognised hosts
+#endif
+}
+
 // Create Linux package artifacts from a build output directory.
 // create_deb() requires dpkg-deb to be available on PATH.
 bool create_deb(const std::string& plugin_name,

@@ -391,6 +391,58 @@ int cmd_ship(const std::vector<std::string>& args) {
         // wraps even plugin bundles in a disk image when that's
         // explicitly requested, useful for the "drag to Plug-Ins"
         // distribution pattern).
+#if defined(__linux__)
+        // Linux: produce a real `.deb` from the plugin bundles via the
+        // first-party helper in ship/platform/linux/package_linux.cpp. The
+        // macOS pkgbuild/dmg path below is Apple-only (`pkgbuild`/`hdiutil`
+        // don't exist on Linux), so falling through to it previously yielded
+        // nothing usable. `.tar.gz` is the fallback when `dpkg-deb` is absent.
+        {
+            // Name the package after the first plugin bundle we find,
+            // falling back to the project directory name.
+            std::string product_name;
+            for (auto dir_name : {"VST3", "CLAP", "LV2"}) {
+                auto dir = build_dir / dir_name;
+                if (!fs::exists(dir)) continue;
+                for (auto& entry : fs::directory_iterator(dir)) {
+                    product_name = entry.path().stem().string();
+                    break;
+                }
+                if (!product_name.empty()) break;
+            }
+            if (product_name.empty()) product_name = root.filename().string();
+
+            const bool any_bundles = fs::exists(build_dir / "VST3")
+                                  || fs::exists(build_dir / "CLAP")
+                                  || fs::exists(build_dir / "LV2");
+            if (!any_bundles) {
+                std::cerr << "Error: no VST3/CLAP/LV2 plugins found in "
+                          << build_dir.string() << "\n";
+                return 1;
+            }
+
+            auto deb_path = artifacts / (product_name + "-" + version + ".deb");
+            std::cout << "Packaging " << product_name << " (Linux → .deb)...\n";
+            if (pulp::ship::create_deb(product_name, version, build_dir.string(),
+                                       deb_path.string(), "Pulp")) {
+                std::cout << "  Created " << deb_path.string() << "\n";
+                return 0;
+            }
+
+            std::cerr << "  .deb creation failed (is dpkg-deb installed?) — "
+                         "writing .tar.gz fallback\n";
+            auto tar_path = artifacts / (product_name + "-" + version + ".tar.gz");
+            if (pulp::ship::create_tar_gz(product_name, build_dir.string(),
+                                          tar_path.string())) {
+                std::cout << "  Created " << tar_path.string() << "\n";
+                return 0;
+            }
+            std::cerr << "  FAILED to create Linux package\n";
+            return 1;
+        }
+#endif  // __linux__
+
+#if defined(__APPLE__)
         int pkg_count = 0, dmg_count = 0;
 
         // Resolve the Developer ID Installer identity for flat-package
@@ -478,7 +530,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::cout << "Created " << pkg_count << " .pkg and " << dmg_count
                   << " .dmg artifacts in " << artifacts.string() << "\n";
         return 0;
-#endif
+#else
+        std::cerr << "Error: `pulp ship package` has no packager for this "
+                     "platform (supported: macOS, Windows, Linux)\n";
+        return 1;
+#endif  // __APPLE__
+#endif  // _WIN32 else
     }
 
     // ── check ───────────────────────────────────────────────────────────────

@@ -40,6 +40,8 @@ std::string default_audio_entitlements() { return {}; }
 
 } // namespace pulp::ship
 
+#include <pulp/ship/installer.hpp>
+
 #include <filesystem>
 #include <fstream>
 
@@ -63,7 +65,7 @@ bool create_deb(const std::string& plugin_name,
         if (!ctl) return false;
         ctl << "Package: " << plugin_name << "\n"
             << "Version: " << version << "\n"
-            << "Architecture: amd64\n"
+            << "Architecture: " << debian_architecture() << "\n"
             << "Maintainer: " << manufacturer << "\n"
             << "Description: " << plugin_name << " audio plugin\n"
             << "Section: sound\n"

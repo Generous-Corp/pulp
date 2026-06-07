@@ -314,7 +314,8 @@ TEST_CASE("Linux packaging builds deb archives and removes staging",
     REQUIRE(control.exit_code == 0);
     REQUIRE_THAT(control.stdout_output, ContainsSubstring("Package: pulp-meter"));
     REQUIRE_THAT(control.stdout_output, ContainsSubstring("Version: 1.2.3"));
-    REQUIRE_THAT(control.stdout_output, ContainsSubstring("Architecture: amd64"));
+    REQUIRE_THAT(control.stdout_output,
+                 ContainsSubstring("Architecture: " + pulp::ship::debian_architecture()));
     REQUIRE_THAT(control.stdout_output, ContainsSubstring("Maintainer: Pulp Audio"));
     REQUIRE_THAT(control.stdout_output, ContainsSubstring("Section: sound"));
     REQUIRE_THAT(control.stdout_output, ContainsSubstring("Priority: optional"));
@@ -457,4 +458,23 @@ TEST_CASE("Linux packaging deb control keeps package metadata literal",
     REQUIRE_THAT(contents.stdout_output, ContainsSubstring("./usr/lib/clap/Literal.clap"));
     REQUIRE(contents.stdout_output.find("./usr/lib/vst3/") == std::string::npos);
     REQUIRE(contents.stdout_output.find("./usr/lib/lv2/") == std::string::npos);
+}
+
+TEST_CASE("Linux packaging reports the host Debian architecture",
+          "[ship][linux-package][coverage][issue-3327]") {
+    // The .deb `Architecture:` field must reflect the build host, not the
+    // historical hardcoded "amd64" — otherwise an arm64 build produces an
+    // .deb that won't install on arm64.
+    const std::string arch = pulp::ship::debian_architecture();
+    REQUIRE_FALSE(arch.empty());
+    REQUIRE((arch == "amd64" || arch == "arm64" || arch == "armhf" || arch == "i386"));
+
+    auto machine = run_sh("uname -m");
+    if (machine.exit_code == 0) {
+        std::string m = machine.stdout_output;
+        while (!m.empty() && (m.back() == '\n' || m.back() == '\r' || m.back() == ' '))
+            m.pop_back();
+        if (m == "x86_64") REQUIRE(arch == "amd64");
+        else if (m == "aarch64" || m == "arm64") REQUIRE(arch == "arm64");
+    }
 }

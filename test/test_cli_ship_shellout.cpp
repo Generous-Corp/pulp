@@ -1350,3 +1350,46 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 #endif  // __APPLE__
+
+// ── Linux packaging CLI routing (#3327 / L8a) ────────────────────────────
+// Regression guard: `pulp ship package` on Linux must invoke the first-party
+// .deb/.tar.gz packagers (ship/platform/linux/package_linux.cpp), NOT fall
+// through to the macOS `pkgbuild` path — which produced nothing usable
+// off-Apple because `pkgbuild` does not exist on Linux.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package on Linux produces a .deb/.tar.gz, not pkgbuild",
+                 "[cli][shellout][ship][linux-package][issue-3327]") {
+#if defined(__linux__)
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("linux-deb-route", true);
+    make_fake_bundle(root, "VST3", "Foo.vst3");
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0"}, 60000);
+    INFO("stdout: " << r.stdout_output);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    // Took the Linux packager, not the macOS pkgbuild loop.
+    REQUIRE(contains(combined, "Linux"));
+    REQUIRE_FALSE(contains(combined, "pkgbuild"));
+    REQUIRE_FALSE(contains(combined, ".pkg"));
+
+    // A real artifact landed in artifacts/ — `.deb` when dpkg-deb is present,
+    // `.tar.gz` fallback otherwise. Either proves the helpers were reached.
+    auto artifacts = root / "artifacts";
+    bool found = false;
+    if (fs::exists(artifacts)) {
+        for (auto& e : fs::directory_iterator(artifacts)) {
+            auto ext = e.path().extension().string();
+            if (ext == ".deb" || ext == ".gz") { found = true; break; }
+        }
+    }
+    REQUIRE(found);
+
+    fs::remove_all(root);
+#else
+    SUCCEED("Linux-only packaging route");
+#endif
+}

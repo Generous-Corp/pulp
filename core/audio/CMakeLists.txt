@@ -112,6 +112,10 @@ elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         target_include_directories(pulp-audio PRIVATE ${JACK_INCLUDE_DIRS})
         target_link_libraries(pulp-audio PRIVATE ${JACK_LIBRARIES})
         target_compile_definitions(pulp-audio PRIVATE PULP_HAS_JACK=1)
+        # Surface JACK availability to sibling subdirectories (e.g. test/)
+        # so the JACK-only test target is registered only when the backend
+        # was actually compiled into pulp-audio.
+        set(PULP_JACK_AVAILABLE TRUE CACHE INTERNAL "JACK audio backend compiled into pulp-audio")
         message(STATUS "Pulp: JACK audio support enabled")
     else()
         message(STATUS "Pulp: JACK not found — ALSA-only audio")

@@ -1,4 +1,5 @@
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/monotonic_timestamp.hpp>
 #include <pulp/midi/raw_midi_parser.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -37,6 +38,9 @@ public:
         }
 
         is_open_ = true;
+        // Base the per-event monotonic timestamps at open time so they read
+        // as seconds-since-open, matching the Windows/CoreMIDI backends.
+        clock_.reset();
         running_.store(true, std::memory_order_release);
         read_thread_ = std::thread([this] { read_thread_func(); });
 
@@ -84,11 +88,12 @@ private:
                     if (!callback_) return;
                     MidiEvent evt;
                     evt.message = choc::midi::ShortMessage(status, d1, d2);
-                    evt.timestamp = 0.0;
+                    evt.timestamp = clock_.seconds_since_open();
                     callback_(evt);
                 },
                 [this](const std::vector<uint8_t>& sysex) {
-                    if (sysex_callback_) sysex_callback_(sysex, 0.0);
+                    if (sysex_callback_)
+                        sysex_callback_(sysex, clock_.seconds_since_open());
                 });
         }
     }
@@ -97,6 +102,7 @@ private:
     MidiInputCallback callback_;
     MidiSysexCallback sysex_callback_;
     RawMidiParserState parser_state_;
+    MonotonicMidiClock clock_;
     bool is_open_ = false;
     std::atomic<bool> running_{false};
     std::thread read_thread_;

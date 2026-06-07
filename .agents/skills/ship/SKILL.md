@@ -200,6 +200,34 @@ place the API parity break appears. Keep this covered in
 `test/test_linux_packaging.cpp` alongside the macOS parser tests in
 `test/test_codesign.cpp`.
 
+### Linux: Build → Package (.deb / .tar.gz, no signing)
+
+```bash
+pulp build                                              # Must build first
+pulp ship package --version 1.0.0                       # Creates a .deb (or .tar.gz)
+```
+
+`pulp ship package` on Linux builds a Debian package from the plugin
+bundles in `build/{VST3,CLAP,LV2}` via `pulp::ship::create_deb`
+(`ship/platform/linux/package_linux.cpp`), installing them under
+`/usr/lib/{vst3,clap,lv2}`. When `dpkg-deb` is not on `PATH` it falls back
+to a `.tar.gz`. Linux has no signing requirement.
+
+**Routing invariant:** the `pulp ship package` branch in
+`tools/cli/cmd_ship.cpp` keeps three mutually exclusive platform arms —
+`#if defined(__linux__)` (→ `.deb` via `create_deb`, `.tar.gz` fallback),
+`#if defined(__APPLE__)` (→ `.pkg`/`.dmg`), and an honest-fail `#else` for
+other Unixes. `pkgbuild`/`hdiutil` exist only on macOS, so the Linux arm
+must never fall through into them. If you touch that block, preserve the
+mutual exclusion and re-run `test_cli_ship_shellout.cpp` (the Linux routing
+regression guard) plus `test_linux_packaging.cpp` (the
+`create_deb`/`create_tar_gz` helper coverage).
+
+**Architecture field:** `create_deb` stamps the `.deb` `Architecture:` from
+the compile-time `debian_architecture()` helper in `installer.hpp`, so a
+native build labels the package for its own arch (arm64/amd64/…) rather
+than a fixed value. Keep that helper and the package field in sync.
+
 ### Android: Build → Package (includes Gradle build + optional signing) → Verify
 
 ```bash

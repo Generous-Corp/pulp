@@ -6,6 +6,14 @@
 
 namespace pulp::audio::linux_platform {
 
+// JACK ports are registered one-per-channel and the device path hard-caps
+// the count when opening (see JackDevice::open). enumerate_devices() must
+// advertise the same ceiling so a host never asks for more channels than
+// the device will actually create — keeping the two in lockstep via one
+// constant prevents the advertise-64 / open-8 drift that previously made
+// enumeration dishonest.
+constexpr int kJackMaxChannels = 8;
+
 // ── JackDevice ───────────────────────────────────────────────────────────
 
 JackDevice::JackDevice(const std::string& client_name)
@@ -35,7 +43,7 @@ bool JackDevice::open(const DeviceConfig& config) {
     jack_on_shutdown(client_, shutdown_callback, this);
 
     // Register output ports
-    int out_channels = std::min(config_.output_channels, 8);
+    int out_channels = std::min(config_.output_channels, kJackMaxChannels);
     output_ports_.resize(out_channels);
     for (int i = 0; i < out_channels; ++i) {
         std::string port_name = "output_" + std::to_string(i + 1);
@@ -49,7 +57,7 @@ bool JackDevice::open(const DeviceConfig& config) {
     }
 
     // Register input ports (if requested)
-    int in_channels = std::min(config_.input_channels, 8);
+    int in_channels = std::min(config_.input_channels, kJackMaxChannels);
     input_ports_.resize(in_channels);
     for (int i = 0; i < in_channels; ++i) {
         std::string port_name = "input_" + std::to_string(i + 1);
@@ -226,16 +234,16 @@ std::vector<DeviceInfo> JackSystem::enumerate_devices() {
     DeviceInfo info;
     info.id = "jack";
     info.name = "JACK Audio Server";
-    info.max_input_channels = 64;
-    info.max_output_channels = 64;
-    info.default_sample_rate = 48000.0;
+    info.max_input_channels = kJackMaxChannels;
+    info.max_output_channels = kJackMaxChannels;
+    info.sample_rates = {48000.0};
     info.buffer_sizes = {64, 128, 256, 512, 1024};
-    info.is_default = true;
+    info.is_default_input = true;
+    info.is_default_output = true;
     jack_status_t status;
     if (jack_client_t* probe = jack_client_open(
             "pulp_enum", JackNoStartServer, &status)) {
-        info.default_sample_rate =
-            static_cast<double>(jack_get_sample_rate(probe));
+        info.sample_rates = {static_cast<double>(jack_get_sample_rate(probe))};
         int bs = static_cast<int>(jack_get_buffer_size(probe));
         if (bs > 0) info.buffer_sizes = {bs};
         jack_client_close(probe);
