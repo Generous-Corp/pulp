@@ -7,6 +7,7 @@
 // rendered output, and fail-safe behavior — with no design-import dependency.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/input_events.hpp>
@@ -355,4 +356,67 @@ TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",
     // out). Render path returns an empty/uniform image; the call must be safe.
     auto png = render_to_png(empty, 40, 40, 1.0f, ScreenshotBackend::skia);
     SUCCEED("paint with empty SVG did not crash");
+}
+
+// ── v2: event-driven binding (on_element_changed + gestures) + uniform value ──
+
+namespace {
+// A dropdown element with three options, initially on index 1.
+DesignFrameElement make_dropdown() {
+    DesignFrameElement d;
+    d.kind = DesignFrameElement::Kind::dropdown;
+    d.x = 12; d.y = 12; d.w = 60; d.h = 16;
+    d.options = {"A", "B", "C"};
+    d.selected_index = 1;
+    return d;
+}
+}  // namespace
+
+TEST_CASE("DesignFrameView knob drag fires on_element_changed + gesture begin/end",
+          "[view][design-import][frame][binding]") {
+    DesignFrameView v(make_design_svg(), {make_knob()});
+    v.set_bounds({0, 0, 100, 100});
+
+    int begins = 0, ends = 0, changes = 0;
+    float last = -1.0f;
+    v.on_gesture_begin   = [&](int i) { CHECK(i == 0); ++begins; };
+    v.on_gesture_end     = [&](int i) { CHECK(i == 0); ++ends; };
+    v.on_element_changed = [&](int i, float val) { CHECK(i == 0); last = val; ++changes; };
+
+    v.on_mouse_down({40, 40});   // on the knob
+    v.on_mouse_drag({40, 10});   // turn up
+    v.on_mouse_up({40, 10});
+
+    CHECK(begins == 1);
+    CHECK(ends == 1);
+    CHECK(changes >= 1);
+    CHECK(last > 0.5f);                       // the reported value tracked the turn
+    CHECK(v.element_value(0) == last);        // accessor agrees with the callback
+
+    // set_element_value is a programmatic push: it must NOT fire on_element_changed.
+    const int before = changes;
+    v.set_element_value(0, 0.25f);
+    CHECK(changes == before);
+    CHECK(v.element_value(0) == 0.25f);
+}
+
+TEST_CASE("DesignFrameView exposes a choice control as a normalized param",
+          "[view][design-import][frame][binding]") {
+    DesignFrameView v(make_design_svg(), {make_dropdown()});
+    v.set_bounds({0, 0, 100, 100});
+
+    REQUIRE(v.element_kind(0) == DesignFrameElement::Kind::dropdown);
+    // 3 options -> indices 0,1,2 map to 0, 0.5, 1.0. Initial index 1 -> 0.5.
+    CHECK(v.element_value(0) == Catch::Approx(0.5f));
+
+    // Host push: 1.0 -> last option (index 2), silently (no on_element_changed).
+    int changes = 0;
+    v.on_element_changed = [&](int, float) { ++changes; };
+    v.set_element_value(0, 1.0f);
+    CHECK(v.element_value(0) == Catch::Approx(1.0f));
+    CHECK(changes == 0);
+
+    // 0.0 -> first option (index 0).
+    v.set_element_value(0, 0.0f);
+    CHECK(v.element_value(0) == Catch::Approx(0.0f));
 }
