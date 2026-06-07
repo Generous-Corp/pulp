@@ -1,7 +1,7 @@
-// ELYSIUM standalone — imports the real figma-plugin ELYSIUM .pulp.zip from
-// scratch and renders it as native Pulp UI in a GPU window. The GRAINS knobs
-// come up as the design's captured metallic discs (sprite-skinned) with a
-// native rotating indicator notch, and they TURN under the mouse.
+// Design-import standalone — imports a figma-plugin .pulp.zip from scratch and
+// renders it as native Pulp UI in a GPU window. Captured-art knobs come up as
+// the design's discs (sprite-skinned) with a native rotating indicator notch,
+// and they TURN under the mouse.
 //
 // This is the production wiring of the sprite-knob path: the import pipeline
 // calls hoist_captured_art_knobs() (which promotes a captured-art knob to a
@@ -9,9 +9,11 @@
 // then materializes via build_native_view_tree — the same path proven by the
 // mac-platform-harness, now in a launchable app.
 //
-//   pulp-elysium-standalone                       # open the window, turn knobs
-//   pulp-elysium-standalone /path/to/scene.pulp.zip
-//   pulp-elysium-standalone --screenshot=out.png  # headless capture
+// The default fixture is a PRIVATE, dev-only test design (the pulp-planning
+// submodule; not shipped). Pass any .pulp.zip to import your own design:
+//   pulp-design-import-standalone                       # open the window, turn knobs
+//   pulp-design-import-standalone /path/to/scene.pulp.zip
+//   pulp-design-import-standalone --screenshot=out.png  # headless capture
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/design_import.hpp>
@@ -150,7 +152,7 @@ int main(int argc, char** argv) {
     bool demo_focus_search = false;
     std::string demo_open_dropdown;  // open the dropdown whose value contains this
     int demo_select_tab = -1;        // select this tab index on every tab group
-    fs::path zip_path = PULP_ELYSIUM_DEFAULT_ZIP;  // committed fixture (CMake)
+    fs::path zip_path = PULP_DESIGN_IMPORT_DEFAULT_ZIP;  // private dev fixture (CMake)
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         constexpr std::string_view shot = "--screenshot=";
@@ -177,7 +179,7 @@ int main(int argc, char** argv) {
 
     // 1) Extract the .pulp.zip (scene.pulp.json + assets/).
     const fs::path extract_dir =
-        fs::temp_directory_path() / "pulp-elysium-standalone";
+        fs::temp_directory_path() / "pulp-design-import-standalone";
     std::error_code ec;
     fs::remove_all(extract_dir, ec);
     fs::create_directories(extract_dir, ec);
@@ -290,7 +292,7 @@ int main(int argc, char** argv) {
     // 3) Open a GPU window (or capture a screenshot headlessly).
 
     pulp::view::WindowOptions options;
-    options.title = "ELYSIUM — imported native (turn the knobs)";
+    options.title = "Design Import — native (turn the knobs)";
     options.width = design_w;
     options.height = design_h;
     options.min_width = design_w * 0.6f;

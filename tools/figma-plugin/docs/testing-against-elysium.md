@@ -1,4 +1,11 @@
-# Testing the plugin against an ELYSIUM-shaped frame
+# Testing the plugin against a real-world frame (ELYSIUM)
+
+> ELYSIUM is a plugin UI by **Julian Behrens** ([vst-design.com](https://www.vst-design.com)),
+> shared on the [Figma Community](https://www.figma.com/community/file/1476177446001979362).
+> Pulp uses it **only** as a real-world test reference to harden the Figma
+> importer — it is not vendored, bundled, or shipped, and nothing is hardcoded to
+> it (the lessons are generalized). Credited in `docs/reference/licensing.md`.
+> Thanks, Julian!
 
 End-to-end smoke for Phase 2a slice 1.
 

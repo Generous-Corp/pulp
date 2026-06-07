@@ -440,7 +440,7 @@ bool roi_passes_floor(const pulp::view::ScreenshotContentStats& stats, const Roi
 }
 
 std::optional<fs::path> elysium_gpu_dump_dir() {
-    if (const char* value = std::getenv("PULP_ELYSIUM_GPU_DUMP_DIR"); value && *value)
+    if (const char* value = std::getenv("PULP_DESIGN_GPU_DUMP_DIR"); value && *value)
         return fs::path(value);
     return std::nullopt;
 }
@@ -598,7 +598,7 @@ TEST_CASE("mac harness captures ELYSIUM default C++ import through GPU path",
         SKIP("ELYSIUM source/reference fixtures are not present in this checkout");
     }
 
-    ScopedTempDir extracted("pulp-elysium-gpu-fixture");
+    ScopedTempDir extracted("pulp-design-gpu-fixture");
     REQUIRE_FALSE(extracted.path.empty());
 
     std::string extract_error;
@@ -783,7 +783,7 @@ TEST_CASE("mac harness drives ELYSIUM imported knob body through hidden GPU host
         SKIP("ELYSIUM source fixture is not present in this checkout");
     }
 
-    ScopedTempDir extracted("pulp-elysium-gpu-interaction-fixture");
+    ScopedTempDir extracted("pulp-design-gpu-interaction-fixture");
     pulp::view::DesignIR ir;
     std::vector<pulp::view::ImportDiagnostic> diagnostics;
     auto view = load_elysium_default_cpp_view(fixture_zip, extracted, ir, diagnostics);
