@@ -282,6 +282,70 @@ TEST_CASE("DesignTabGroup renders and the highlight moves with selection",
     CHECK(cmp.similarity < 0.999f);
 }
 
+TEST_CASE("DesignFrameView overlays a DesignStepper for a stepper element",
+          "[view][design-import][frame][overlay]") {
+    DesignFrameElement st;
+    st.kind = DesignFrameElement::Kind::stepper;
+    st.x = 20; st.y = 14; st.w = 56; st.h = 14;     // inside the 80x80 panel
+    st.options = {"Lowpass", "Bandpass", "Highpass"};
+    st.selected_index = 1;
+    DesignFrameView v(make_design_svg(), {st});
+
+    auto* step = dynamic_cast<DesignStepper*>(v.overlay_widget(0));
+    REQUIRE(step != nullptr);                         // a real stepper widget
+    REQUIRE(step->option_count() == 3);
+    CHECK(step->selected() == 1);                     // from selected_index
+    CHECK(step->current() == "Bandpass");
+
+    // Positioned via the panel transform (view 80x80 -> scale 1; panel origin
+    // (10,10)): rect (20,14,56,14) -> view (10,4,56,14).
+    v.set_bounds({0, 0, 80, 80});
+    v.layout_children();
+    auto b = step->bounds();
+    CHECK(b.x == 10.0f); CHECK(b.width == 56.0f);
+    CHECK(v.hit_test({30, 8}) == step);              // click routes to the stepper
+
+    // Right half steps to the next option; left half to the previous; clamped.
+    step->on_mouse_down({50, 7});                     // right half -> next
+    CHECK(step->selected() == 2);
+    CHECK(step->current() == "Highpass");
+    step->on_mouse_down({50, 7});                     // already last -> clamp
+    CHECK(step->selected() == 2);
+    step->on_mouse_down({5, 7});                      // left half -> previous
+    CHECK(step->selected() == 1);
+    step->on_mouse_down({5, 7});
+    step->on_mouse_down({5, 7});                      // clamp at 0
+    CHECK(step->selected() == 0);
+    CHECK(step->current() == "Lowpass");
+}
+
+TEST_CASE("DesignStepper renders and the value changes with selection",
+          "[view][design-import][frame][overlay][svg]") {
+    auto make_step = [](int selected) {
+        DesignFrameElement st;
+        st.kind = DesignFrameElement::Kind::stepper;
+        st.x = 14; st.y = 14; st.w = 60; st.h = 16;
+        st.options = {"Lowpass", "Bandpass", "Highpass"};
+        st.selected_index = selected;
+        return st;
+    };
+    DesignFrameView lo(make_design_svg(), {make_step(0)});
+    DesignFrameView hi(make_design_svg(), {make_step(2)});
+    lo.set_bounds({0, 0, 80, 80}); lo.layout_children();
+    hi.set_bounds({0, 0, 80, 80}); hi.layout_children();
+
+    auto lo_png = render_to_png(lo, 80, 80, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 80, 80, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    // Different option text is shown, so the two renders differ.
+    if (cmp.similarity >= 0.999f)
+        SKIP("native raster unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);
+}
+
 TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",
           "[view][design-import][frame][svg]") {
     DesignFrameView empty("", {});

@@ -63,6 +63,7 @@ static InteractiveElementKind interactive_kind_from_id(const std::string& s) {
     if (s == "dropdown") return InteractiveElementKind::dropdown;
     if (s == "text_field") return InteractiveElementKind::text_field;
     if (s == "tab_group") return InteractiveElementKind::tab_group;
+    if (s == "stepper") return InteractiveElementKind::stepper;
     return InteractiveElementKind::knob;
 }
 static const char* interactive_kind_id(InteractiveElementKind k) {
@@ -70,6 +71,7 @@ static const char* interactive_kind_id(InteractiveElementKind k) {
         case InteractiveElementKind::dropdown:   return "dropdown";
         case InteractiveElementKind::text_field: return "text_field";
         case InteractiveElementKind::tab_group:  return "tab_group";
+        case InteractiveElementKind::stepper:    return "stepper";
         case InteractiveElementKind::knob:       break;
     }
     return "knob";

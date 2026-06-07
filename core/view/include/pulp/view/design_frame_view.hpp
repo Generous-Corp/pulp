@@ -14,9 +14,10 @@ namespace pulp::view {
 // metadata, not SVG structure.)
 struct DesignFrameElement {
     // `knob` is SVG-patch (rotates its needle path in the SVG). `text_field` /
-    // `dropdown` / `tab_group` are NATIVE-OVERLAY: an opaque child widget is
-    // positioned over the element's rect and replaces that baked SVG region.
-    enum class Kind { knob, text_field, dropdown, tab_group };
+    // `dropdown` / `tab_group` / `stepper` are NATIVE-OVERLAY: an opaque child
+    // widget is positioned over the element's rect and replaces that baked SVG
+    // region. `stepper` is a header value cycled in place by `< >` chevrons.
+    enum class Kind { knob, text_field, dropdown, tab_group, stepper };
 
     Kind kind = Kind::knob;
 
@@ -119,6 +120,27 @@ public:
 
 private:
     std::vector<std::string> labels_;
+    int selected_ = 0;
+};
+
+// The native-overlay widget for a `stepper` element: a header value cycled in
+// place by `< >` chevrons (the design's section-header preset selectors). It
+// paints the current option centered with a `<` on the left and `>` on the
+// right; clicking the left third steps to the previous option, the right third
+// to the next (clamped). Nothing is drawn behind the text, so the design's
+// header chrome shows through — only the value text and chevrons are ours.
+class DesignStepper : public View {
+public:
+    DesignStepper(std::vector<std::string> options, int selected);
+    int selected() const { return selected_; }
+    int option_count() const { return static_cast<int>(options_.size()); }
+    const std::string& current() const;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+
+private:
+    std::vector<std::string> options_;
     int selected_ = 0;
 };
 

@@ -278,8 +278,8 @@ class FaithfulVectorTest(unittest.TestCase):
     def test_detect_overlay_controls_dropdowns_only_with_down_chevron(self):
         # Only a FRAME named ~dropdown WITH a down-chevron ("expand_more") child is
         # a real dropdown. The < > section-header steppers (chevron child is a
-        # "Frame 41" pair) and the unconfigured "Dropdown" placeholder must NOT be
-        # detected. A tiny "+" and a stray TEXT are skipped too.
+        # "Frame 41" pair) become STEPPERS, not dropdowns. The unconfigured
+        # "Dropdown" placeholder must NOT be detected. A tiny "+" is skipped too.
         def chev(name):  # a chevron icon child
             return {"name": name, "type": "FRAME",
                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8}}
@@ -312,6 +312,44 @@ class FaithfulVectorTest(unittest.TestCase):
         self.assertEqual(e["options"][0], "1/4 Delay")    # shown value first
         self.assertGreater(len(e["options"]), 1)          # stub options so the popup is usable
         self.assertEqual(e["source_node_id"], "d1")
+        # s1 (Frame 41 < > pair) is a stepper, not a dropdown; placeholder p1 skipped.
+        steppers = [e for e in els if e["kind"] == "stepper"]
+        self.assertEqual(len(steppers), 1)                # only s1
+        self.assertEqual(steppers[0]["source_node_id"], "s1")
+
+    def test_detect_overlay_controls_finds_stepper(self):
+        # A "Dropdown"-named FRAME whose chevron child is a < > PAIR ("Frame 41",
+        # or a left+right chevron pair) and whose shown value != "Dropdown" is a
+        # < > stepper. Mapped node->SVG with the (+73,+50) panel origin.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                # Frame-41 style < > pair
+                {"name": "Dropdown", "id": "st1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 100, "y": 120, "width": 180, "height": 22},
+                 "children": [{"type": "TEXT", "characters": "Short Plucks"},
+                              {"name": "Frame 41", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 12}}]},
+                # explicit left+right chevron pair (no Frame 41)
+                {"name": "Dropdown", "id": "st2", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 400, "y": 120, "width": 160, "height": 22},
+                 "children": [{"type": "TEXT", "characters": "Sine"},
+                              {"name": "chevron_left", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8}},
+                              {"name": "chevron_right", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8}}]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
+        steppers = [e for e in els if e["kind"] == "stepper"]
+        self.assertEqual(len(steppers), 2)
+        s = next(e for e in steppers if e["source_node_id"] == "st1")
+        self.assertEqual((s["x"], s["y"], s["w"], s["h"]), (173.0, 170.0, 180.0, 22.0))
+        self.assertEqual(s["options"][0], "Short Plucks")  # shown value first
+        self.assertEqual(s["selected_index"], 0)
+        self.assertGreater(len(s["options"]), 1)           # stub options until variants are wired
+        # No dropdowns produced (neither has a down-chevron).
+        self.assertEqual([e for e in els if e["kind"] == "dropdown"], [])
 
     def test_detect_overlay_controls_finds_tab_group(self):
         # A row of >=3 container children with short labels = a tab group; the one
