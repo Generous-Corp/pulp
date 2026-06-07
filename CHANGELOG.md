@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03580"></a>
+## [0.358.0] - 2026-06-07
+
+- fix(model-manager): address code-review findings from PRs #3463/#3464 ([#3486](https://github.com/danielraffel/pulp/pull/3486))
+- fix(ci): guard self-hosted macOS build dir against interrupted-build ODR ([#3504](https://github.com/danielraffel/pulp/pull/3504))
+
 <a id="v03570"></a>
 ## [0.357.0] - 2026-06-07
 
@@ -3729,6 +3735,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.358.0]: https://github.com/danielraffel/pulp/releases/tag/v0.358.0
 [0.357.0]: https://github.com/danielraffel/pulp/releases/tag/v0.357.0
 [0.356.0]: https://github.com/danielraffel/pulp/releases/tag/v0.356.0
 [0.355.1]: https://github.com/danielraffel/pulp/releases/tag/v0.355.1
