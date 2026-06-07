@@ -28,9 +28,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
-const SELF = path.dirname(new URL(import.meta.url).pathname);
+// Use fileURLToPath rather than `new URL(import.meta.url).pathname`. On
+// Windows the latter yields a `/D:/...` path whose leading slash becomes a
+// backslash after path.join, and resolving that against the cwd doubles the
+// drive letter (`D:\D:\a\...`), so the child `node` invocation fails with
+// "Cannot find module". fileURLToPath produces a native, properly-rooted path.
+const SELF = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLER = path.join(SELF, "bundle_threejs_for_jsc.mjs");
 
 function assert(cond, message) {
