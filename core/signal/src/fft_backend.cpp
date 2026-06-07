@@ -11,6 +11,14 @@
 
 #if !defined(_WIN32)
 #include <dlfcn.h>
+#else
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #endif
 
 #if defined(__APPLE__)
@@ -39,8 +47,10 @@ int log2_int(int n) noexcept {
 // once a backend is opened, leave it open (no dlclose).
 void* try_dlopen(const std::vector<const char*>& names) noexcept {
 #if defined(_WIN32)
-    (void)names;
-    return nullptr;  // backend dlopen not wired on Windows yet
+    for (const char* n : names) {
+        if (HMODULE h = ::LoadLibraryA(n)) return reinterpret_cast<void*>(h);
+    }
+    return nullptr;
 #else
     for (const char* n : names) {
         if (void* h = dlopen(n, RTLD_LAZY | RTLD_LOCAL)) return h;
@@ -52,8 +62,8 @@ void* try_dlopen(const std::vector<const char*>& names) noexcept {
 template <typename Fn>
 Fn dlsym_cast(void* handle, const char* name) noexcept {
 #if defined(_WIN32)
-    (void)handle; (void)name;
-    return nullptr;
+    return reinterpret_cast<Fn>(
+        ::GetProcAddress(reinterpret_cast<HMODULE>(handle), name));
 #else
     return reinterpret_cast<Fn>(dlsym(handle, name));
 #endif
@@ -97,6 +107,9 @@ static const Bindings& get() noexcept {
             "libfftw3f.so",
             "libfftw3f.3.dylib",
             "libfftw3f.dylib",
+            "libfftw3f-3.dll",  // FFTW's official Windows build name
+            "fftw3f.dll",
+            "libfftw3f.dll",
         });
         if (!b.handle) return b;
         b.plan_dft_1d = dlsym_cast<fn_plan_dft_1d>(b.handle, "fftwf_plan_dft_1d");
@@ -166,6 +179,9 @@ static const Bindings& get() noexcept {
             "libmkl_rt.2.dylib",
             "libmkl_rt.1.dylib",
             "libmkl_rt.dylib",
+            "mkl_rt.2.dll",  // Intel oneMKL single-DLL runtime, Windows
+            "mkl_rt.1.dll",
+            "mkl_rt.dll",
         });
         if (!b.handle) return b;
         b.create  = dlsym_cast<fn_create>(b.handle, "DftiCreateDescriptor");
