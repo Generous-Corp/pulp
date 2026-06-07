@@ -18,6 +18,79 @@
 using namespace pulp::host;
 using Catch::Matchers::WithinAbs;
 
+namespace {
+// Pick the first *continuous*, writable parameter — one whose value isn't
+// quantized and which the host may drive. A midpoint round-trip assertion is
+// only meaningful for such a param: a stepped/bypass param snaps the midpoint
+// to a discrete step (e.g. boolean Bypass: 0.5 → 1.0), which is correct plugin
+// behaviour but not a round-trip. Returns nullptr when no such param exists.
+const HostParamInfo* first_continuous_writable_param(
+        const std::vector<HostParamInfo>& params) {
+    for (const auto& p : params) {
+        if (p.flags.stepped || p.flags.is_bypass || p.flags.read_only) continue;
+        if (!(p.max_value > p.min_value)) continue;
+        return &p;
+    }
+    return nullptr;
+}
+}  // namespace
+
+// ── Parameter selection helper (guards the round-trip test's robustness) ──
+
+TEST_CASE("first_continuous_writable_param skips stepped/bypass/read-only params",
+          "[host][slot][params]") {
+    auto mk = [](uint32_t id, float lo, float hi, ParamFlags f) {
+        HostParamInfo p;
+        p.id = id; p.min_value = lo; p.max_value = hi; p.flags = f;
+        return p;
+    };
+
+    SECTION("a leading Bypass is skipped in favour of a continuous param") {
+        ParamFlags bypass; bypass.stepped = true; bypass.is_bypass = true;
+        std::vector<HostParamInfo> params = {
+            mk(65536, 0.0f, 1.0f, bypass),   // boolean Bypass — the trap
+            mk(1, 0.0f, 1.0f, ParamFlags{}), // continuous gain — the right pick
+        };
+        const HostParamInfo* chosen = first_continuous_writable_param(params);
+        REQUIRE(chosen != nullptr);
+        REQUIRE(chosen->id == 1);
+    }
+
+    SECTION("stepped (non-bypass) and read-only params are also skipped") {
+        ParamFlags stepped; stepped.stepped = true;
+        ParamFlags ro; ro.read_only = true;
+        std::vector<HostParamInfo> params = {
+            mk(1, 0.0f, 4.0f, stepped),      // discrete mode selector
+            mk(2, -1.0f, 1.0f, ro),          // metering / read-only
+            mk(3, 20.0f, 20000.0f, ParamFlags{}),
+        };
+        const HostParamInfo* chosen = first_continuous_writable_param(params);
+        REQUIRE(chosen != nullptr);
+        REQUIRE(chosen->id == 3);
+    }
+
+    SECTION("a degenerate (min == max) range is skipped") {
+        std::vector<HostParamInfo> params = {
+            mk(1, 0.5f, 0.5f, ParamFlags{}),  // fixed-value param
+            mk(2, 0.0f, 1.0f, ParamFlags{}),
+        };
+        const HostParamInfo* chosen = first_continuous_writable_param(params);
+        REQUIRE(chosen != nullptr);
+        REQUIRE(chosen->id == 2);
+    }
+
+    SECTION("returns nullptr when no continuous writable param exists") {
+        ParamFlags bypass; bypass.stepped = true; bypass.is_bypass = true;
+        ParamFlags stepped; stepped.stepped = true;
+        std::vector<HostParamInfo> params = {
+            mk(65536, 0.0f, 1.0f, bypass),
+            mk(1, 0.0f, 7.0f, stepped),
+        };
+        REQUIRE(first_continuous_writable_param(params) == nullptr);
+        REQUIRE(first_continuous_writable_param({}) == nullptr);
+    }
+}
+
 // ── Scanner tests ───────────────────────────────────────────────────────
 
 TEST_CASE("PluginScanner default paths", "[host][scanner]") {
@@ -471,7 +544,19 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
         return;
     }
 
-    const auto& pinfo = params.front();
+    // The midpoint round-trip below assumes the value isn't quantized. The
+    // first parameter of an arbitrary *installed* plugin is often a stepped
+    // Bypass (a boolean: midpoint 0.5 snaps to 1.0), which is correct plugin
+    // behaviour but breaks the round-trip assertion — so the test must reflect
+    // host mirroring, not whichever plugin happens to be installed.
+    const HostParamInfo* chosen = first_continuous_writable_param(params);
+    if (chosen == nullptr) {
+        SUCCEED("plugin exposes no continuous writable parameter — "
+                "cannot exercise a midpoint round-trip");
+        return;
+    }
+
+    const auto& pinfo = *chosen;
     const auto pid = pinfo.id;
     const float target = (pinfo.min_value + pinfo.max_value) * 0.5f;
 
