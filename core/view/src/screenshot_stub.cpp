@@ -53,24 +53,46 @@ bool has_screenshot_provider() {
     return g_provider_installed;
 }
 
-// Compile render impls when no native impl takes precedence.
-// macOS has native screenshot_mac.mm; iOS does NOT yet have native,
-// so include the stub on iOS too.
-#if !defined(__APPLE__) || TARGET_OS_IOS
+// Shared provider-invocation helper. Copies the registered provider out under
+// the lock (#313 Codex P2: never call it while holding the mutex), releases,
+// then invokes. `*had_provider` reports whether a provider was installed so
+// callers can distinguish "no provider, fall back" from "provider returned
+// empty (render failed)". Used by both the no-Skia fallback render path below
+// AND the built-in Skia backend (screenshot_skia.cpp), so a host that installs
+// a provider still wins on every non-Apple build.
+std::vector<uint8_t> invoke_screenshot_provider(View& root, uint32_t width,
+                                                uint32_t height, float scale,
+                                                ScreenshotBackend backend,
+                                                bool* had_provider) {
+    ScreenshotProvider local;
+    {
+        std::lock_guard lock(g_provider_mu);
+        if (!g_provider_installed || !g_provider) {
+            if (had_provider) *had_provider = false;
+            return {};
+        }
+        local = g_provider;
+    }
+    if (had_provider) *had_provider = true;
+    return local(root, width, height, scale, backend);
+}
+
+// Compile the fallback render impls only when no built-in render backend takes
+// precedence:
+//   - macOS:  native screenshot_mac.mm provides render_*; not compiled here.
+//   - iOS:    no iOS-native render impl yet, so the provider-backed fallback
+//             below is what iOS uses (compiled even when Skia is present).
+//   - Linux/Windows WITH Skia: screenshot_skia.cpp provides a built-in raster
+//             backend; the fallback below is NOT compiled (would collide).
+//   - Linux/Windows WITHOUT Skia / Android: provider-backed fallback below.
+#if (!defined(__APPLE__) && !defined(PULP_HAS_SKIA)) || (defined(__APPLE__) && TARGET_OS_IOS)
 
 std::vector<uint8_t> render_to_png(
     View& root, uint32_t width, uint32_t height, float scale,
     ScreenshotBackend backend)
 {
-    // #313 Codex P2: copy the provider out, release the lock, then
-    // invoke. The provider can be long-running or re-enter the API.
-    ScreenshotProvider local;
-    {
-        std::lock_guard lock(g_provider_mu);
-        if (!g_provider_installed || !g_provider) return {};
-        local = g_provider;
-    }
-    return local(root, width, height, scale, backend);
+    bool had = false;
+    return invoke_screenshot_provider(root, width, height, scale, backend, &had);
 }
 
 bool render_to_file(
@@ -99,6 +121,6 @@ std::vector<uint8_t> render_to_rgba(
     return {};
 }
 
-#endif // !defined(__APPLE__) || TARGET_OS_IOS
+#endif // (!__APPLE__ && !PULP_HAS_SKIA) || (__APPLE__ && TARGET_OS_IOS)
 
 } // namespace pulp::view
