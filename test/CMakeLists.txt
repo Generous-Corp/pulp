@@ -2420,7 +2420,10 @@ if(PULP_HAS_SKIA)
     target_include_directories(pulp-test-canvas-fonts PRIVATE ${SKIA_INCLUDE_DIRS})
 endif()
 target_compile_definitions(pulp-test-canvas-fonts PRIVATE
-    "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
+    "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\""
+    # Deterministic variable font (wght axis 300-800) for the variable-font
+    # weight-instancing regression tests. Test-only; not in bundled_blobs().
+    "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
 catch_discover_tests(pulp-test-canvas-fonts)
 
 # CG-degraded gradient + pattern cluster (P5-2 follow-up — extracted from
