@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <memory>
@@ -741,4 +744,85 @@ TEST_CASE("TextEditor caret-blink subscription is removed even after detach", "[
     REQUIRE_FALSE(clock.has_active_subscribers());  // subscription cleaned up
     clock.tick(0.016f);                             // must not touch freed memory
     SUCCEED("tick after destruction did not use freed memory");
+}
+
+// Regression: a selection must recolor glyphs in place — never move them.
+//
+// The painter used to draw a selection as three independently-shaped runs
+// (before / selected / after). Re-shaping a substring in isolation loses the
+// kerning/left-side-bearing context it had inside the full string, so the
+// selected glyphs landed at the wrong x — the "gap between the letters in the
+// 2nd word" a user sees when dragging a selection across a space and into a
+// word. The fix paints the whole string as ONE shaped run, then overlays the
+// selected color clipped to the selection rect, so a glyph cannot move just
+// because it became selected.
+//
+// The invariant under test is text-engine-level and design-agnostic. We
+// neutralize every selection color (selection fill and selected-text color both
+// resolve to colors that paint identically over the background) so that the
+// ONLY thing that could change pixels between the unselected and selected
+// renders is a glyph moving. A correct painter therefore yields two identical
+// frames; the old three-run painter shifts the mid-word selected glyphs and the
+// frames diverge.
+TEST_CASE("TextEditor selecting mid-word recolors in place without moving glyphs",
+          "[view][text_editor][selection][svg]") {
+    const std::string kText = "WAVE table mix";   // strong W-A kern; spaces
+    constexpr int kW = 240, kH = 30;
+    constexpr float kScale = 2.0f;
+
+    // White page, black text. selected-text color resolves from "bg.primary"
+    // (black, == text) and the selection fill from "accent.primary" (white, ==
+    // page, alpha-blended to a no-op). So selection changes no color — only a
+    // moved glyph can change a pixel.
+    Theme neutral;
+    neutral.colors["text.primary"]   = Color::rgba8(0, 0, 0, 255);
+    neutral.colors["bg.primary"]     = Color::rgba8(0, 0, 0, 255);
+    neutral.colors["accent.primary"] = Color::rgba8(255, 255, 255, 255);
+
+    auto render = [&](bool select_mid_word) {
+        TextEditor editor;
+        editor.set_theme(neutral);
+        editor.set_background_color(Color::rgba8(255, 255, 255, 255));
+        editor.set_bounds({0, 0, float(kW), float(kH)});
+        editor.set_text(kText);
+        if (select_mid_word) {
+            editor.on_focus_changed(true);
+            editor.on_key_event(key_event(KeyCode::home));         // caret -> 0
+            editor.on_key_event(key_event(KeyCode::right));        // caret -> 1 (after 'W')
+            auto shift_right = key_event(KeyCode::right, kModShift);
+            for (int i = 0; i < 3; ++i) editor.on_key_event(shift_right);  // select "AVE"
+            editor.on_focus_changed(false);   // drop the caret; selection persists
+        }
+        // Both frames render unfocused: no caret, identical background.
+        return render_to_png(editor, kW, kH, kScale, ScreenshotBackend::skia);
+    };
+
+    const auto base = render(false);
+    if (base.empty()) SKIP("Skia raster screenshot backend unavailable");
+    const auto selected = render(true);
+    REQUIRE_FALSE(selected.empty());
+
+    // Some partial-Skia lanes no-op raster text; skip rather than false-fail.
+    const auto stats = analyze_screenshot_content(base);
+    if (!stats.passes_content_floor()) SKIP("native raster unavailable in this build");
+
+    // With colors neutralized, the only source of difference is a moving glyph.
+    // Concentrate the signal on the first word ("WAVE", left ~25% of the strip)
+    // where the mid-word selection lives; the global frame is mostly the stable
+    // tail, which dilutes the metric.
+    const uint32_t png_w = static_cast<uint32_t>(kW * kScale);
+    const uint32_t png_h = static_cast<uint32_t>(kH * kScale);
+    const uint32_t band_w = png_w / 4;   // left quarter: comfortably covers "WAVE"
+    const auto base_band = crop_png(base, 0, 0, band_w, png_h);
+    const auto sel_band = crop_png(selected, 0, 0, band_w, png_h);
+    REQUIRE_FALSE(base_band.empty());
+    REQUIRE_FALSE(sel_band.empty());
+    const auto cmp = compare_screenshots(base_band, sel_band, /*tolerance=*/4);
+    REQUIRE(cmp.valid);
+    INFO("band similarity = " << cmp.similarity);
+    // A correct painter tiles the width with disjoint clips, so neutralized
+    // selection leaves the band pixel-identical. The old three-run painter
+    // shifted the selected glyphs, dropping the band well below this floor
+    // (~0.95 at the time of the fix).
+    CHECK(cmp.similarity >= 0.99f);
 }

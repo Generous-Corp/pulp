@@ -740,11 +740,14 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         return xoff[i];
     };
 
+    // Selection rect + selected-glyph x-range, from the SHAPED full-string
+    // offsets (the same the painter draws), so the highlight aligns exactly.
+    float sel_x = 0.0f, sel_w = 0.0f;
     if (has_selection()) {
-        int start = std::min(selection_start_, selection_end_);
-        int end = std::max(selection_start_, selection_end_);
-        float sel_x = text_x + x_at(start);
-        float sel_w = x_at(end) - x_at(start);
+        const int start = std::min(selection_start_, selection_end_);
+        const int end = std::max(selection_start_, selection_end_);
+        sel_x = text_x + x_at(start);
+        sel_w = x_at(end) - x_at(start);
         canvas.set_fill_color(selection_fill);
         canvas.fill_rect(sel_x, b.y + 2, sel_w, b.height - 4);
     }
@@ -752,26 +755,34 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     if (display.empty() && !placeholder.empty() && !has_focus()) {
         canvas.set_fill_color(text_secondary);
         canvas.fill_text(placeholder, text_x, text_y);
-    } else {
-        if (has_selection()) {
-            int start = std::min(selection_start_, selection_end_);
-            int end = std::max(selection_start_, selection_end_);
-            auto before = display.substr(0, static_cast<size_t>(start));
-            auto selected = display.substr(static_cast<size_t>(start), static_cast<size_t>(end - start));
-            auto after = display.substr(static_cast<size_t>(end));
-            float selected_x = text_x + x_at(start);
-            float after_x = text_x + x_at(end);
-
-            canvas.set_fill_color(text_primary);
-            if (!before.empty()) canvas.fill_text(before, text_x, text_y);
-            canvas.set_fill_color(selected_text_color);
-            if (!selected.empty()) canvas.fill_text(selected, selected_x, text_y);
-            canvas.set_fill_color(text_primary);
-            if (!after.empty()) canvas.fill_text(after, after_x, text_y);
-        } else {
-            canvas.set_fill_color(text_primary);
+    } else if (has_selection() && sel_w > 0.0f) {
+        // Paint the WHOLE string as ONE shaped run, re-colored per region by
+        // clipping. The three clip rects tile the editor width edge-to-edge and
+        // are disjoint, so every pixel is painted exactly once and a glyph never
+        // moves just because part of it became selected — a glyph straddling the
+        // selection boundary is simply split between the two colors at the same x.
+        //
+        // The previous painter re-shaped before/selected/after as three separate
+        // runs positioned by full-string offsets; a piece shaped in isolation
+        // lost its in-context kerning/side-bearing, so selected glyphs drifted —
+        // the "gap between the letters" a user sees dragging a selection across a
+        // space into a word.
+        const float band_l = sel_x;
+        const float band_r = sel_x + sel_w;
+        auto paint_clipped = [&](float clip_x, float clip_w, canvas::Color color) {
+            if (clip_w <= 0.0f) return;
+            canvas.save();
+            canvas.clip_rect(clip_x, b.y, clip_w, b.height);
+            canvas.set_fill_color(color);
             canvas.fill_text(display, text_x, text_y);
-        }
+            canvas.restore();
+        };
+        paint_clipped(b.x, band_l - b.x, text_primary);                       // before
+        paint_clipped(band_l, band_r - band_l, selected_text_color);          // selected
+        paint_clipped(band_r, (b.x + b.width) - band_r, text_primary);        // after
+    } else {
+        canvas.set_fill_color(text_primary);
+        canvas.fill_text(display, text_x, text_y);
     }
 
     // Caret with blinking (530ms on, 530ms off)
