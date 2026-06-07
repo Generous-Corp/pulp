@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03610"></a>
+## [0.361.0] - 2026-06-07
+
+- feat(view): GPU plugin-view embedding hardening ([#3496](https://github.com/danielraffel/pulp/pull/3496))
+- test(view): harden capture_view raster tests against transient CI starvation ([#3520](https://github.com/danielraffel/pulp/pull/3520))
+
 <a id="v03602"></a>
 ## [0.360.2] - 2026-06-07
 
@@ -3769,6 +3775,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.361.0]: https://github.com/danielraffel/pulp/releases/tag/v0.361.0
 [0.360.2]: https://github.com/danielraffel/pulp/releases/tag/v0.360.2
 [0.360.1]: https://github.com/danielraffel/pulp/releases/tag/v0.360.1
 [0.360.0]: https://github.com/danielraffel/pulp/releases/tag/v0.360.0
