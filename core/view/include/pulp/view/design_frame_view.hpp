@@ -32,11 +32,16 @@ struct DesignFrameElement {
     std::string needle_d;
     float value = 0.5f;        ///< 0..1
 
-    // ── overlay controls (text_field / dropdown / tab_group) ─────────────
+    // ── overlay controls (text_field / dropdown / tab_group / stepper) ────
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  ///< element rect, SVG coords
     std::string placeholder;                ///< text_field
     std::vector<std::string> options;       ///< dropdown options / tab labels
     int selected_index = 0;                 ///< dropdown / tab selection
+    /// text_field: the design's own field background ("#RRGGBB"). When set, the
+    /// overlay paints this exact color so it blends seamlessly with the baked
+    /// box (the overlay is inset past the leading icon, which stays visible).
+    /// Empty → the default dark field color.
+    std::string bg_color;
 };
 
 // Renders a design's own SVG document pixel-faithfully via Canvas::draw_svg

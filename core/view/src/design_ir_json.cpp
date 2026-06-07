@@ -823,6 +823,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.h = get_float(e, "h");
             el.selected_index = static_cast<int>(get_float(e, "selected_index"));
             el.placeholder = get_string(e, "placeholder");
+            el.bg_color = get_string(e, "bg_color");
             if (e.hasObjectMember("options") && e["options"].isArray()) {
                 const auto opts = e["options"];
                 for (uint32_t j = 0; j < opts.size(); ++j)
@@ -1756,6 +1757,8 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 write_int_member(out, ef, "selected_index", el.selected_index);
             if (!el.placeholder.empty())
                 write_string_member(out, ef, "placeholder", el.placeholder);
+            if (!el.bg_color.empty())
+                write_string_member(out, ef, "bg_color", el.bg_color);
             if (!el.options.empty()) {
                 write_key(out, ef, "options");
                 out << '[';

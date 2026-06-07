@@ -344,6 +344,10 @@ struct IRInteractiveElement {
     int selected_index = 0;
     /// text_field: placeholder text shown until focused/typed.
     std::string placeholder;
+    /// text_field: the design's own field background ("#RRGGBB"), so the overlay
+    /// matches it exactly and the inset-past-the-icon edge is seamless. Empty →
+    /// the default dark field color.
+    std::string bg_color;
 
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };

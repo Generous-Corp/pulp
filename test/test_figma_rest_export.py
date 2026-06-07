@@ -247,16 +247,23 @@ class FaithfulVectorTest(unittest.TestCase):
         self.assertEqual(e["source_node_id"], "5:1")
 
     def test_detect_overlay_controls_placeholder_text_uses_parent_group(self):
-        # ELYSIUM shape: the "Search" placeholder is a TEXT leaf; the field is its
-        # parent group. The magnifier "ic:round-search" must NOT match.
+        # A common shape: the "Search" placeholder is a TEXT leaf; the field is its
+        # parent group with a filled box + a leading magnifier icon. The icon must
+        # NOT match; the overlay is INSET past the icon (starts at the text's x) so
+        # the baked magnifier stays visible, and carries the box's own bg color so
+        # the inset edge blends seamlessly.
         figma_root = {
             "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
             "children": [
                 {"name": "Group 59", "id": "g59", "type": "GROUP",
                  "absoluteBoundingBox": {"x": 21, "y": 73, "width": 184, "height": 26},
                  "children": [
+                     {"name": "Box", "type": "RECTANGLE",
+                      "absoluteBoundingBox": {"x": 21, "y": 73, "width": 184, "height": 26},
+                      "fills": [{"type": "SOLID", "visible": True,
+                                 "color": {"r": 37 / 255, "g": 38 / 255, "b": 38 / 255, "a": 1}}]},
                      {"name": "ic:round-search", "type": "FRAME",
-                      "absoluteBoundingBox": {"x": 21, "y": 76, "width": 15, "height": 15}},
+                      "absoluteBoundingBox": {"x": 27, "y": 76, "width": 15, "height": 15}},
                      {"name": "Search", "type": "TEXT", "characters": "Search",
                       "absoluteBoundingBox": {"x": 44, "y": 78, "width": 43, "height": 17}},
                  ]},
@@ -265,8 +272,10 @@ class FaithfulVectorTest(unittest.TestCase):
         els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (73.0, 50.0))
         self.assertEqual(len(els), 1)              # icon skipped, one field found
         e = els[0]
-        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (94.0, 123.0, 184.0, 26.0))
+        # Inset to the text x (44) past the icon: x = 44+73 = 117, w = 21+184-44 = 161.
+        self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (117.0, 123.0, 161.0, 26.0))
         self.assertEqual(e["source_node_id"], "g59")  # the parent group, not the text
+        self.assertEqual(e["bg_color"], "#252626")    # the box's own fill (seamless inset)
 
     def test_parse_panel_bounds_picks_the_panel_rect(self):
         svg = ('<svg width="1146" height="746" xmlns="http://www.w3.org/2000/svg">'

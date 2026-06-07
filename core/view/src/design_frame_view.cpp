@@ -92,14 +92,23 @@ void DesignFrameView::build_overlays() {
         const auto& e = elements_[i];
         std::unique_ptr<View> widget;
         if (e.kind == DesignFrameElement::Kind::text_field) {
-            // Opaque TextEditor over the design's search box: it paints its own
-            // rounded bg (covering the baked box so there's no double-render),
-            // shows the placeholder until focused, and draws an accent focus ring
-            // on tap — the requested tap-to-focus + highlight behavior.
+            // TextEditor over the design's search box: it shows the placeholder
+            // until focused and draws an accent focus ring on tap. Its rect is
+            // inset past the leading magnifier icon (which stays baked/visible),
+            // and it paints the design's OWN field color when supplied so the
+            // inset edge blends seamlessly with the baked box.
             auto editor = std::make_unique<TextEditor>();
             editor->placeholder = e.placeholder;
-            // Match the design's dark field; the focus ring + caret come for free.
-            editor->set_background_color(canvas::Color::rgba8(0x2c, 0x2d, 0x2d, 0xff));
+            canvas::Color bg = canvas::Color::rgba8(0x2c, 0x2d, 0x2d, 0xff);
+            if (e.bg_color.size() >= 7 && e.bg_color[0] == '#') {
+                try {
+                    const unsigned v = static_cast<unsigned>(
+                        std::stoul(e.bg_color.substr(1, 6), nullptr, 16));
+                    bg = canvas::Color::rgba8((v >> 16) & 0xff, (v >> 8) & 0xff,
+                                              v & 0xff, 0xff);
+                } catch (...) { /* keep the default on malformed hex */ }
+            }
+            editor->set_background_color(bg);
             widget = std::move(editor);
         } else if (e.kind == DesignFrameElement::Kind::dropdown) {
             // Opaque ComboBox over the design's dropdown: it paints its own box +

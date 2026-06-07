@@ -1020,6 +1020,7 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.placeholder = e.placeholder;
         el.options = e.options;
         el.selected_index = e.selected_index;
+        el.bg_color = e.bg_color;
         out.push_back(std::move(el));
     }
     return out;

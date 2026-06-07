@@ -634,9 +634,14 @@ the SVG is painted with, so they track scaling/letterbox; `View::hit_test`
 routes events to them, knob hit-test is the parent fallback). `IRInteractiveElement`
 + `DesignFrameElement` carry `kind {knob,text_field,dropdown,tab_group,stepper}` +
 a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
-- `text_field` → `TextEditor` (tap-focus + caret + accent focus ring; opaque bg
-  replaces the baked box — known fidelity cost: the SVG's leading icon is
-  covered, a styling follow-up).
+- `text_field` → `TextEditor` (tap-focus + caret + accent focus ring). To keep
+  the baked leading icon (e.g. a search magnifier) visible, the producer INSETS
+  the overlay rect to start at the placeholder text's x (past the icon) and emits
+  the field's own box color (`bg_color`, from the box's SOLID fill). The overlay
+  paints that exact color, so the inset edge — and any corner curves — blend
+  seamlessly with the still-baked box+icon (same-color reveal). Empty `bg_color`
+  → a default dark field. This is general (any leading-icon field), detected from
+  source structure, not a per-design constant.
 - `dropdown` → `ComboBox` (set_items from `options`; opens a popup on click).
   A real dropdown is detected only when the "dropdown"-named FRAME has a
   DOWN-chevron child (Material `expand_more`) AND its shown text isn't the

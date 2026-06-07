@@ -30,6 +30,7 @@ export interface InteractiveElement {
   options?: string[];
   selected_index?: number;
   placeholder?: string;
+  bg_color?: string;  // text_field: the design's own field bg ("#RRGGBB")
 }
 
 // Minimal structural node shape detectOverlayControls needs. ExtractedFigmaNode
@@ -179,6 +180,20 @@ function firstText(n: OverlayNode): string {
   return "";
 }
 
+// The field's own box background ("#RRGGBB"): its own resolved SOLID fill, else
+// the first child rect carrying one (e.g. ELYSIUM's box inside the search group).
+// "" when none. Mirrors the REST lane's _field_bg_hex (style.background_color is
+// the TS lane's already-resolved SOLID fill).
+function fieldBgHex(field: OverlayNode): string {
+  if (field.style && field.style.background_color) return field.style.background_color;
+  const kids = field.children || [];
+  for (let i = 0; i < kids.length; i++) {
+    const k = kids[i];
+    if (k.style && k.style.background_color) return k.style.background_color;
+  }
+  return "";
+}
+
 const OVERLAY_CONTAINER_TYPES = ["FRAME", "INSTANCE", "COMPONENT", "GROUP"];
 
 export function detectOverlayControls(
@@ -255,7 +270,7 @@ export function detectOverlayControls(
     };
   }
 
-  function visit(n: OverlayNode): void {
+  function visit(n: OverlayNode, parent: OverlayNode | null): void {
     const name = (n.name || "").toLowerCase();
     const ntype = n.figma_type || "";
     const bb = n.absolute_bounds;
@@ -268,20 +283,33 @@ export function detectOverlayControls(
     }
 
     // ── search (text_field) ────────────────────────────────────────────────
-    // The field is named ~"search" (not the "ic*"/"icon*" magnifier). The field
-    // rect is the node's own bounds; the parent group's rect is used when the
-    // match is the placeholder TEXT.
+    // Named ~"search" (not the "ic*"/"icon*" magnifier). When the match is the
+    // placeholder TEXT, the field is its parent group; the overlay is INSET past
+    // the leading icon (start at the text's x) so the baked magnifier stays
+    // visible, and carries the field's own bg color so the inset edge is seamless.
     const isSearch =
       name.indexOf("search") !== -1 &&
       name.indexOf("ic") !== 0 && name.indexOf("icon") !== 0;
     if (bb && isSearch) {
-      const f = toSvg(bb);
-      out.push({
+      const useParent = ntype === "TEXT" && !!parent && !!parent.absolute_bounds;
+      const field = useParent ? (parent as OverlayNode) : n;
+      const fbb = field.absolute_bounds;
+      let ox = fbb.x;
+      let ow = fbb.w;
+      if (useParent && bb.x > fbb.x) {  // inset left to the text's x (past the icon)
+        ox = bb.x;
+        ow = fbb.x + fbb.w - bb.x;
+      }
+      const f = toSvg({ x: ox, y: fbb.y, w: ow, h: fbb.h });
+      const el: InteractiveElement = {
         kind: "text_field",
         x: f[0], y: f[1], w: f[2], h: f[3],
         placeholder: firstText(n) || n.name || "Search",
-        source_node_id: n.figma_node_id || "",
-      });
+        source_node_id: field.figma_node_id || "",
+      };
+      const bgc = fieldBgHex(field);
+      if (bgc) el.bg_color = bgc;
+      out.push(el);
       return;  // leaf overlay
     }
 
@@ -350,9 +378,9 @@ export function detectOverlayControls(
       return;  // leaf overlay
     }
 
-    for (let i = 0; i < kids.length; i++) visit(kids[i]);
+    for (let i = 0; i < kids.length; i++) visit(kids[i], n);
   }
 
-  visit(root);
+  visit(root, null);
   return out;
 }

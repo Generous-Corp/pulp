@@ -182,7 +182,19 @@ test("detectOverlayControls: finds a search text_field and a tab group", () => {
   const root = baseNode({
     absolute_bounds: { x: 0, y: 0, w: 1000, h: 600 },
     children: [
-      child("Search Field", 21, 73, 184, 26, "se1", [txt("Search")]),
+      // search field group: filled box + leading magnifier + placeholder TEXT.
+      // The overlay insets past the icon (text x) and carries the box bg color.
+      baseNode({ name: "Group 59", figma_type: "GROUP", figma_node_id: "g59",
+        absolute_bounds: { x: 21, y: 73, w: 184, h: 26 },
+        children: [
+          baseNode({ name: "Box", figma_type: "RECTANGLE",
+            absolute_bounds: { x: 21, y: 73, w: 184, h: 26 },
+            style: { background_color: "#252626" } }),
+          baseNode({ name: "ic:round-search", figma_type: "FRAME",
+            absolute_bounds: { x: 27, y: 76, w: 15, h: 15 } }),
+          baseNode({ name: "Search", figma_type: "TEXT", content: "Search",
+            absolute_bounds: { x: 44, y: 78, w: 43, h: 17 } }),
+        ] }),
       // segmented control: 4 short-label buttons in a row; #3 carries a fill
       child("Pager", 220, 76, 120, 20, "tg", [
         child("Button", 220, 76, 29, 20, "b1", [txt("1")]),
@@ -199,6 +211,11 @@ test("detectOverlayControls: finds a search text_field and a tab group", () => {
   const tabs = els.filter((e) => e.kind === "tab_group");
   assert.equal(search.length, 1);
   assert.equal(search[0].placeholder, "Search");
+  assert.equal(search[0].source_node_id, "g59");          // the parent group
+  // inset past the icon: x = 44+73 = 117, w = 21+184-44 = 161
+  assert.deepEqual([search[0].x, search[0].y, search[0].w, search[0].h],
+                   [117, 123, 161, 26]);
+  assert.equal(search[0].bg_color, "#252626");            // box bg → seamless inset
   assert.equal(tabs.length, 1);
   assert.deepEqual(tabs[0].options, ["1", "2", "3", "4"]);
   assert.equal(tabs[0].selected_index, 2);  // the filled button

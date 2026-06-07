@@ -608,6 +608,30 @@ def _first_text(n):
             return t
     return ""
 
+def _solid_fill_hex(n):
+    """The node's first visible SOLID fill as '#RRGGBB', or '' if none."""
+    for f in (n.get("fills") or []):
+        if f.get("visible", True) and f.get("type") == "SOLID":
+            c = f.get("color") or {}
+            r = int(round(c.get("r", 0.0) * 255))
+            g = int(round(c.get("g", 0.0) * 255))
+            b = int(round(c.get("b", 0.0) * 255))
+            return "#%02x%02x%02x" % (r, g, b)
+    return ""
+
+def _field_bg_hex(field):
+    """The field's own box background ('#RRGGBB'): its own SOLID fill, else the
+    first child rect carrying one (e.g. ELYSIUM's 'Rectangle 66' box inside the
+    search group). '' when none — the overlay then uses its default color."""
+    own = _solid_fill_hex(field)
+    if own:
+        return own
+    for c in field.get("children", []):
+        h = _solid_fill_hex(c)
+        if h:
+            return h
+    return ""
+
 # SVG <rect> regex reused for panel detection (mirrors the C++ detect_panel).
 _RECT_RE = re.compile(r'<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)"')
 
@@ -710,8 +734,10 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
         # ── search (text_field) ─────────────────────────────────────────
         # ELYSIUM names the placeholder TEXT "Search" (the field itself is its
         # parent group); the magnifier is "ic:round-search". Match the search
-        # TEXT/field but skip the icon, and overlay the PARENT group's rect so the
-        # whole field is clickable.
+        # TEXT/field but skip the icon. The overlay is INSET past the leading
+        # icon (start at the placeholder TEXT's x) so the baked magnifier stays
+        # visible, and it carries the field's own bg color so the inset edge
+        # blends seamlessly with the baked box.
         is_search = ("search" in name and not name.startswith("ic")
                      and not name.startswith("icon"))
         if bb and is_search:
@@ -720,13 +746,27 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
             use_parent = (n.get("type") == "TEXT" and parent
                           and parent.get("absoluteBoundingBox"))
             field = parent if use_parent else n
-            fx, fy, fw, fh = to_svg(field["absoluteBoundingBox"])
-            out.append({
+            fbb = field["absoluteBoundingBox"]
+            # Inset the left edge to the placeholder text's x (past the icon) when
+            # the matched node is the TEXT sitting inside the field group.
+            if use_parent and bb.get("x", fbb["x"]) > fbb["x"]:
+                ox = bb["x"]
+                ow = fbb["x"] + fbb.get("width", 0.0) - bb["x"]
+            else:
+                ox = fbb["x"]
+                ow = fbb.get("width", 0.0)
+            fx, fy, fw, fh = to_svg(
+                {"x": ox, "y": fbb["y"], "width": ow, "height": fbb.get("height", 0.0)})
+            el = {
                 "kind": "text_field",
                 "x": fx, "y": fy, "w": fw, "h": fh,
                 "placeholder": _first_text(n) or n.get("name", "Search"),
                 "source_node_id": field.get("id", n.get("id", "")),
-            })
+            }
+            bgc = _field_bg_hex(field)
+            if bgc:
+                el["bg_color"] = bgc
+            out.append(el)
             return  # the field is a leaf overlay — don't recurse into it
         # ── dropdown ────────────────────────────────────────────────────
         # A real dropdown is a FRAME named ~"dropdown", field-sized, that contains
