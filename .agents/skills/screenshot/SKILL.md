@@ -102,6 +102,18 @@ gradient-heavy design. Treat the % as a smoke signal; **eyeball the montage**
   `import-design` does not load that way (throws). Prefer `--validate` with the
   Skia backend for an imported `ui.js`.
 - **`pulp::view::render_to_file`** in tests — headless view-tree PNGs in CI.
+- **`pulp::view::render_to_rgba`** (`screenshot.hpp`) — raw-pixel sibling of
+  `render_to_png`. Returns the decoded **RGBA8** buffer (R,G,B,A byte order,
+  premultiplied alpha, sRGB, top-to-bottom, stride `*out_width*4`) + the pixel
+  dims, instead of PNG bytes — for callers that composite/upload the frame
+  themselves (e.g. the foreign-host embed SDK's offscreen mode) and don't want a
+  PNG encode+decode round-trip. **macOS-only** (forces the Skia raster path,
+  which is endianness-independent; the non-Apple stub returns empty — the
+  registered `ScreenshotProvider` is PNG-only). The internal `render_to_png_skia`
+  already holds these pixels before encoding; this just exposes them. Note
+  `AssetManager::decode_png` does NOT actually decode (it stores raw PNG bytes +
+  parses IHDR), so you cannot get RGBA by round-tripping a PNG through it — use
+  `render_to_rgba` for raw pixels.
 
 ## Render size: use the design's true root, not the source bbox
 
