@@ -117,7 +117,10 @@ std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height,
                                          kPremul_SkAlphaType,
                                          SkColorSpace::MakeSRGB());
     SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(pw) * 4u);
-    sk_sp<SkData> png = SkPngEncoder::Encode(nullptr, pixmap, SkPngEncoder::Options{});
+    // 2-arg pixmap overload (returns sk_sp<SkData>); the 3-arg
+    // Encode(SkWStream*, ...) returns bool, so a null first arg there is the
+    // wrong overload (matches headless_surface.cpp).
+    sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
     if (!png || png->isEmpty()) return {};
 
     const auto* bytes = static_cast<const uint8_t*>(png->data());

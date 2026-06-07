@@ -348,7 +348,9 @@ private:
                                              kPremul_SkAlphaType,
                                              SkColorSpace::MakeSRGB());
         SkPixmap pixmap(info, rgba.data(), static_cast<size_t>(w) * 4u);
-        sk_sp<SkData> png = SkPngEncoder::Encode(nullptr, pixmap, SkPngEncoder::Options{});
+        // 2-arg pixmap overload returns sk_sp<SkData> (the 3-arg SkWStream*
+        // overload returns bool).
+        sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
         if (!png || png->isEmpty()) return {};
         const auto* p = static_cast<const uint8_t*>(png->data());
         return std::vector<uint8_t>(p, p + png->size());
