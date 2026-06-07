@@ -1004,6 +1004,8 @@ std::vector<DesignFrameElement> to_frame_elements(
                 el.kind = DesignFrameElement::Kind::text_field; break;
             case InteractiveElementKind::tab_group:
                 el.kind = DesignFrameElement::Kind::tab_group; break;
+            case InteractiveElementKind::stepper:
+                el.kind = DesignFrameElement::Kind::stepper; break;
             case InteractiveElementKind::knob:
                 el.kind = DesignFrameElement::Kind::knob; break;
         }

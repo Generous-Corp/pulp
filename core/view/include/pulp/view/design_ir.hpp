@@ -299,14 +299,20 @@ enum class NodeRenderMode {
 // Two materialization mechanisms (see DesignFrameView):
 //   - `knob` is SVG-PATCH: its needle path is rotated in the SVG and re-rendered
 //     (pixel-perfect, uses cx/cy/hit_radius/svg_patch_d/default_value).
-//   - `dropdown` / `text_field` / `tab_group` are NATIVE-OVERLAY: an opaque child
-//     widget (ComboBox / TextEditor / tab group) is positioned over the element's
-//     `rect` and replaces that baked SVG region with a live control.
+//   - `dropdown` / `text_field` / `tab_group` / `stepper` are NATIVE-OVERLAY: an
+//     opaque child widget (ComboBox / TextEditor / tab group / < > stepper) is
+//     positioned over the element's `rect` and replaces that baked SVG region
+//     with a live control.
 enum class InteractiveElementKind {
     knob,
     dropdown,
     text_field,
     tab_group,
+    // A `< >` stepper: a header value cycled by prev/next chevrons (the design's
+    // section-header preset selectors — named "Dropdown" but carrying a `< >`
+    // pair, not a down-chevron). Uses `options` + `selected_index` like a
+    // dropdown, but steps through them in place instead of opening a popup.
+    stepper,
 };
 
 // One source-identified interactive element overlaid on a faithful_svg render.

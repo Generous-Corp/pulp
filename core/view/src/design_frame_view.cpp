@@ -120,6 +120,13 @@ void DesignFrameView::build_overlays() {
             widget = std::make_unique<DesignTabGroup>(
                 e.options, std::clamp(e.selected_index, 0,
                                       static_cast<int>(e.options.size()) - 1));
+        } else if (e.kind == DesignFrameElement::Kind::stepper &&
+                   !e.options.empty()) {
+            // `< >` stepper over the design's header preset selector: the value
+            // text slides as the chevrons step through the options in place.
+            widget = std::make_unique<DesignStepper>(
+                e.options, std::clamp(e.selected_index, 0,
+                                      static_cast<int>(e.options.size()) - 1));
         }
         if (widget) {
             View* raw = widget.get();
@@ -269,6 +276,58 @@ void DesignTabGroup::on_mouse_down(Point pos) {
     int idx = static_cast<int>(pos.x / (b.width / static_cast<float>(n)));
     idx = std::clamp(idx, 0, n - 1);
     if (idx != selected_) { selected_ = idx; request_repaint(); }
+}
+
+// ── DesignStepper ─────────────────────────────────────────────────────────
+
+namespace {
+const std::string kEmptyOption;
+}  // namespace
+
+DesignStepper::DesignStepper(std::vector<std::string> options, int selected)
+    : options_(std::move(options)),
+      selected_(options_.empty()
+                    ? 0
+                    : std::clamp(selected, 0,
+                                 static_cast<int>(options_.size()) - 1)) {}
+
+const std::string& DesignStepper::current() const {
+    if (selected_ < 0 || selected_ >= static_cast<int>(options_.size()))
+        return kEmptyOption;
+    return options_[selected_];
+}
+
+void DesignStepper::paint(canvas::Canvas& canvas) {
+    const auto b = local_bounds();
+    if (options_.empty() || b.width <= 0 || b.height <= 0) return;
+    const float font = std::min(b.height * 0.5f, 12.0f);
+    canvas.set_font("Inter", font);
+    const float ty = b.height * 0.5f + font * 0.34f;  // baseline ~vertical center
+    // Chevrons hug the edges; dimmer when there's nowhere further to step.
+    const bool can_prev = selected_ > 0;
+    const bool can_next = selected_ < static_cast<int>(options_.size()) - 1;
+    const auto dim = canvas::Color::rgba8(0x6a, 0x6a, 0x6a, 0xff);
+    const auto lit = canvas::Color::rgba8(0xcf, 0xcf, 0xcf, 0xff);
+    canvas.set_fill_color(can_prev ? lit : dim);
+    canvas.fill_text("<", 2.0f, ty);
+    canvas.set_fill_color(can_next ? lit : dim);
+    canvas.fill_text(">", b.width - 2.0f - canvas.measure_text(">"), ty);
+    // Current value, centered between the chevrons.
+    canvas.set_fill_color(canvas::Color::rgba8(0xff, 0xff, 0xff, 0xff));
+    const std::string& val = current();
+    const float tw = canvas.measure_text(val);
+    canvas.fill_text(val, (b.width - tw) * 0.5f, ty);
+}
+
+void DesignStepper::on_mouse_down(Point pos) {
+    const auto b = local_bounds();
+    if (options_.empty() || b.width <= 0) return;
+    const int n = static_cast<int>(options_.size());
+    int next = selected_;
+    if (pos.x < b.width * 0.5f) next = selected_ - 1;  // left half: previous
+    else                        next = selected_ + 1;  // right half: next
+    next = std::clamp(next, 0, n - 1);
+    if (next != selected_) { selected_ = next; request_repaint(); }
 }
 
 }  // namespace pulp::view

@@ -756,6 +756,38 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
                 "source_node_id": n.get("id", ""),
             })
             return  # leaf overlay
+        # ── stepper (< > header preset selector) ──────────────────────────
+        # Same "Dropdown"-named FRAME family, but its chevron child is a < > PAIR
+        # ("Frame 41" in ELYSIUM), NOT a down-chevron. These cycle a header value
+        # in place rather than opening a popup — emit a stepper so the value can
+        # slide via the chevrons. (Real option lists need source component
+        # variants; stub a few until then.)
+        def _cname(c):
+            return (c.get("name") or "").lower()
+        kids = n.get("children", [])
+        has_stepper_pair = any(_cname(c).startswith("frame 41") for c in kids) or (
+            any(k in _cname(c) for c in kids
+                for k in ("chevron_left", "navigate_before",
+                          "keyboard_arrow_left", "arrow_left", "arrow_back"))
+            and any(k in _cname(c) for c in kids
+                    for k in ("chevron_right", "navigate_next",
+                              "keyboard_arrow_right", "arrow_right", "arrow_forward")))
+        is_stepper = ("dropdown" in name and ntype == "FRAME" and bb
+                      and bb.get("width", 0.0) >= 40.0
+                      and 14.0 <= bb.get("height", 0.0) <= 44.0
+                      and not has_down_chevron
+                      and has_stepper_pair
+                      and current != "Dropdown")
+        if is_stepper:
+            sx, sy, sw, sh = to_svg(bb)
+            out.append({
+                "kind": "stepper",
+                "x": sx, "y": sy, "w": sw, "h": sh,
+                "options": [current, "Option 2", "Option 3"],  # TODO: source variants
+                "selected_index": 0,
+                "source_node_id": n.get("id", ""),
+            })
+            return  # leaf overlay
         for c in n.get("children", []):
             visit(c, n)
 

@@ -632,19 +632,26 @@ View that hosts an opaque child widget over the element's rect (`build_overlays`
 in the ctor, positioned in `layout_children()` via the SAME `panel_transform`
 the SVG is painted with, so they track scaling/letterbox; `View::hit_test`
 routes events to them, knob hit-test is the parent fallback). `IRInteractiveElement`
-+ `DesignFrameElement` carry `kind {knob,text_field,dropdown,tab_group}` + a
-rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
++ `DesignFrameElement` carry `kind {knob,text_field,dropdown,tab_group,stepper}` +
+a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
 - `text_field` → `TextEditor` (tap-focus + caret + accent focus ring; opaque bg
   replaces the baked box — known fidelity cost: the SVG's leading icon is
   covered, a styling follow-up).
 - `dropdown` → `ComboBox` (set_items from `options`; opens a popup on click).
   A real dropdown is detected only when the "dropdown"-named FRAME has a
   DOWN-chevron child (Material `expand_more`) AND its shown text isn't the
-  unconfigured placeholder "Dropdown". ELYSIUM names the `< >` section-header
-  STEPPERS "Dropdown" too, but their chevron child is a `Frame 41` pair (no
-  `expand_more`) — so they stay faithful-static, not dropdowns. Option LISTS
-  aren't in a static design, so the producer stubs a couple after the shown
-  value — real lists need source component variants (TODO).
+  unconfigured placeholder "Dropdown". Option LISTS aren't in a static design, so
+  the producer stubs a couple after the shown value — real lists need source
+  component variants (a follow-up).
+- `stepper` → `DesignStepper` (a `< >` header value cycled in place: paints the
+  current option centered with `<`/`>` chevrons; left half steps to previous,
+  right half to next, clamped — nothing painted behind the text so the header
+  chrome shows through). This is the SAME "Dropdown"-named FRAME family as the
+  dropdown, discriminated by its chevron child: a `< >` PAIR (`Frame 41` in
+  ELYSIUM, or an explicit left+right chevron pair) and NOT a down-chevron, with
+  shown text != "Dropdown". (Previously these were dropped as faithful-static;
+  they are now live steppers.) Options stubbed like dropdowns until source
+  component variants are wired.
 - `tab_group` → `DesignTabGroup` (a compact segmented control drawn opaque over
   the tab strip; click a slot to move the selection highlight). Detected
   structurally (`detect_tab_group`): a row of ≥3 similar-width container children
