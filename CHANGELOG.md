@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03601"></a>
+## [0.360.1] - 2026-06-07
+
+- fix(signal): wire FFTW3/MKL dynamic loading on Windows (perf parity) ([#3511](https://github.com/danielraffel/pulp/pull/3511))
+
 <a id="v03600"></a>
 ## [0.360.0] - 2026-06-07
 
@@ -3757,6 +3762,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.360.1]: https://github.com/danielraffel/pulp/releases/tag/v0.360.1
 [0.360.0]: https://github.com/danielraffel/pulp/releases/tag/v0.360.0
 [0.359.1]: https://github.com/danielraffel/pulp/releases/tag/v0.359.1
 [0.359.0]: https://github.com/danielraffel/pulp/releases/tag/v0.359.0
