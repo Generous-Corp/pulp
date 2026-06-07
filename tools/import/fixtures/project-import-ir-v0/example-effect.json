@@ -1,0 +1,120 @@
+{
+  "schema": "pulp.import.project_ir.v0",
+  "extraction_context": {
+    "tool": "example-importer",
+    "tool_version": "0.0.0",
+    "parser": "libclang",
+    "parser_version": "example",
+    "cpp_standard": "c++20",
+    "target": "host-default",
+    "compile_db": "synthesized",
+    "system_includes": "resolved from driver",
+    "framework_resolution": "user-supplied framework checkout",
+    "parse_errors": []
+  },
+  "source": {
+    "framework": "example-framework",
+    "vendor_id": "example-vendor",
+    "project_dir": "ExampleEffect",
+    "metadata_source": "project-manifest",
+    "metadata_file": "ExampleEffect.manifest",
+    "main_source": "PluginProcessor.cpp",
+    "processor_class": "ExampleEffectProcessor"
+  },
+  "metadata": {
+    "name": "Example Effect",
+    "manufacturer": "Example Co",
+    "manufacturer_code": "Exmp",
+    "plugin_code": "Exe0",
+    "version": "1.0.0",
+    "bundle_id": "com.example.exampleeffect",
+    "vendor_url": "https://example.com",
+    "vendor_email": "dev@example.com",
+    "category": "effect",
+    "pulp_category": "Effect",
+    "formats": ["VST3", "AU"],
+    "vst3_category": "Fx",
+    "channel_configs": "{2, 2}",
+    "confidence": 0.95
+  },
+  "midi": { "accepts_midi": false, "produces_midi": false, "is_midi_effect": false },
+  "buses": {
+    "inputs": [
+      { "name": "Input", "channels": 2, "optional": false },
+      { "name": "Sidechain", "channels": 2, "optional": true }
+    ],
+    "outputs": [ { "name": "Output", "channels": 2, "optional": false } ],
+    "source": "explicit",
+    "confidence": 0.9
+  },
+  "parameters": [
+    {
+      "source_type": "float",
+      "id": "gain",
+      "source_id_string": "gain",
+      "source_version_hint": 1,
+      "proposed_pulp_id": 458499838,
+      "name": "Gain",
+      "pulp_range": { "min": -60.0, "max": 12.0, "step": 0.1 },
+      "default": 0.0,
+      "source_curve": { "skew": 0.25, "symmetric": false },
+      "choices": null,
+      "display_conversion": "default",
+      "source_ref": { "file": "PluginProcessor.cpp", "line": 8 },
+      "confidence": 0.92,
+      "computed": false,
+      "diagnostics": [
+        "Source uses a non-linear (skewed) range; emitted linear + flagged PARTIAL until SDK shaped-range lands."
+      ]
+    }
+  ],
+  "constructs": [
+    {
+      "kind": "parameter_construct",
+      "construct_type": "loop_or_factory",
+      "source_ref": { "file": "PluginProcessor.cpp", "line": 40 },
+      "enumeration_status": "unknown_cardinality",
+      "cardinality": { "lower_bound": 0, "upper_bound": null, "known_count": null, "reason": "non_literal_array_or_factory" },
+      "partial_params": [],
+      "diagnostic_ids": ["PARAMS_UNENUMERATED_LOOP"],
+      "confidence": 0.2
+    }
+  ],
+  "state_model": { "classification": "apvts-like", "confidence": 0.8, "diagnostics": [] },
+  "dsp": {
+    "classification": "portable-core",
+    "reachability_scope": "direct_body",
+    "reachable_framework_symbols": [],
+    "confidence": 0.8,
+    "diagnostics": []
+  },
+  "ui": { "model": "stock-generic-editor", "confidence": 0.85, "diagnostics": [] },
+  "lifecycle_hooks": { "prepare": true, "release": true, "reset": false, "process": true },
+  "format_matrix": {
+    "formats": ["VST3", "AU"],
+    "per_format_defines": {},
+    "differences": []
+  },
+  "project_inputs": {
+    "manifests": ["ExampleEffect.manifest"],
+    "build_scripts": [],
+    "framework_modules": [],
+    "framework_version": "unknown",
+    "generated_roots": []
+  },
+  "residual_policy": {
+    "emission": "partial",
+    "reason_codes": ["UNENUMERATED_PARAMS", "SKEWED_CURVE_LINEARIZED"]
+  },
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "constructs",
+      "message": "1 parameter construct of unknown cardinality could not be enumerated."
+    }
+  ],
+  "migration_tasks": [
+    "Manually resolve data-driven/computed parameters flagged with low confidence."
+  ],
+  "confidence_overall": 0.2
+}
