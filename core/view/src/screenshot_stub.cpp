@@ -87,6 +87,18 @@ bool render_to_file(
     return out.good();
 }
 
+// Raw-RGBA render is unsupported on platforms without a native raster path.
+// The registered ScreenshotProvider is PNG-only (no raw-pixel contract), so
+// there is no portable producer here yet — return empty explicitly.
+std::vector<uint8_t> render_to_rgba(
+    View& /*root*/, uint32_t /*width*/, uint32_t /*height*/, float /*scale*/,
+    uint32_t* out_width, uint32_t* out_height)
+{
+    if (out_width) *out_width = 0;
+    if (out_height) *out_height = 0;
+    return {};
+}
+
 #endif // !defined(__APPLE__) || TARGET_OS_IOS
 
 } // namespace pulp::view
