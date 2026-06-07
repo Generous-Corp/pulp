@@ -1368,6 +1368,13 @@ target_link_libraries(pulp-test-alsa-input PRIVATE pulp::audio Catch2::Catch2Wit
 target_include_directories(pulp-test-alsa-input PRIVATE ${CMAKE_SOURCE_DIR})
 catch_discover_tests(pulp-test-alsa-input)
 
+# libudev device-hotplug monitor (#3327 / L4). Source-guarded for non-Linux;
+# the udev symbols live in pulp-audio only on Linux.
+add_executable(pulp-test-udev-monitor test_udev_monitor.cpp)
+target_link_libraries(pulp-test-udev-monitor PRIVATE pulp::audio Catch2::Catch2WithMain)
+target_include_directories(pulp-test-udev-monitor PRIVATE ${CMAKE_SOURCE_DIR})
+catch_discover_tests(pulp-test-udev-monitor)
+
 # JACK device-enumeration contract (#3327 / L5a). Registered only when CMake
 # detected a JACK dev package and compiled the backend into pulp-audio — the
 # test calls JackSystem symbols that exist only in that configuration, and it
