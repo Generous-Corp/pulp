@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 
@@ -72,6 +73,36 @@ constexpr float kSweepDeg = 270.0f;  // value 0->-135, 0.5->0 (up), 1->+135
 
 }  // namespace
 
+bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
+                       float tol) {
+    // Read a numeric attribute by its space-delimited key (" x=\"") so we don't
+    // mistake rx=/cx=/ry= for x=/y=. Returns NaN when absent.
+    auto attr = [](const std::string& tag, const char* spaced_key) -> float {
+        const auto p = tag.find(spaced_key);
+        if (p == std::string::npos) return std::numeric_limits<float>::quiet_NaN();
+        const auto vs = p + std::string(spaced_key).size();
+        const auto ve = tag.find('"', vs);
+        if (ve == std::string::npos) return std::numeric_limits<float>::quiet_NaN();
+        return std::strtof(tag.substr(vs, ve - vs).c_str(), nullptr);
+    };
+    std::size_t pos = 0;
+    while ((pos = svg.find("<rect", pos)) != std::string::npos) {
+        const auto end = svg.find('>', pos);
+        if (end == std::string::npos) break;
+        const std::string tag = svg.substr(pos, end - pos + 1);
+        const float rx = attr(tag, " x=\""), ry = attr(tag, " y=\"");
+        const float rw = attr(tag, " width=\""), rh = attr(tag, " height=\"");
+        if (!std::isnan(rx) && !std::isnan(ry) && !std::isnan(rw) && !std::isnan(rh) &&
+            std::fabs(rx - x) <= tol && std::fabs(ry - y) <= tol &&
+            std::fabs(rw - w) <= tol && std::fabs(rh - h) <= tol) {
+            svg.erase(pos, end - pos + 1);
+            return true;
+        }
+        pos = end + 1;
+    }
+    return false;
+}
+
 DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
                                  float panel_x, float panel_y, float panel_w, float panel_h)
     : svg_(std::move(svg)), elements_(std::move(elements)) {
@@ -85,6 +116,23 @@ DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement
         panel_x_ = 0; panel_y_ = 0; panel_w_ = svg_w_; panel_h_ = svg_h_;
     }
     build_overlays();
+
+    // Suppress each design's BAKED selected-tab highlight so the live
+    // DesignTabGroup pill is the ONLY highlight ever shown — otherwise switching
+    // tabs leaves the baked pill behind at the original slot (a double-pill). The
+    // baked highlight is a filled <rect> occupying the originally-selected slot;
+    // remove it by geometry computed from the tab_group element (general — no
+    // per-design constant). The strip background behind it remains, so the slot
+    // reads as unselected until the live pill lands there.
+    for (const auto& e : elements_) {
+        if (e.kind != DesignFrameElement::Kind::tab_group || e.options.empty())
+            continue;
+        const int n = static_cast<int>(e.options.size());
+        const float slot_w = e.w / static_cast<float>(n);
+        const int sel = std::clamp(e.selected_index, 0, n - 1);
+        suppress_svg_rect(svg_, e.x + static_cast<float>(sel) * slot_w, e.y,
+                          slot_w, e.h);
+    }
 }
 
 void DesignFrameView::build_overlays() {

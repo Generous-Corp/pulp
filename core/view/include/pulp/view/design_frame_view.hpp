@@ -44,6 +44,13 @@ struct DesignFrameElement {
     std::string bg_color;
 };
 
+// Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
+// the given box, returning true if one was erased. Used to suppress a design's
+// BAKED selected-tab highlight so the live overlay's pill is the only one shown
+// (no double-pill when the selection moves). Pure geometry — no per-design data.
+bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
+                       float tol = 2.0f);
+
 // Renders a design's own SVG document pixel-faithfully via Canvas::draw_svg
 // (Skia SkSVGDOM), cropped to its panel, and overlays native interaction from a
 // typed element list. This is the faithful-vector design-import lane's view: the

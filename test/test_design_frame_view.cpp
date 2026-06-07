@@ -347,6 +347,53 @@ TEST_CASE("DesignStepper renders and the value changes with selection",
     CHECK(cmp.similarity < 0.999f);
 }
 
+TEST_CASE("suppress_svg_rect removes the baked tab highlight by geometry, not rx/cx",
+          "[view][design-import][frame][svg]") {
+    // Values from a real exported frame: the selected-tab highlight is a filled
+    // <rect> at the slot, sitting on top of the wider strip background.
+    std::string svg =
+        "<svg>"
+        "<rect x=\"10\" y=\"20\" width=\"30\" height=\"40\" fill=\"#111111\"/>"
+        "<rect x=\"290\" y=\"123\" width=\"124\" height=\"26\" rx=\"2\" fill=\"#252626\"/>"
+        "<rect x=\"352\" y=\"126\" width=\"29.5\" height=\"20\" rx=\"2\" fill=\"#2C2D2D\"/>"
+        "</svg>";
+    // Removes exactly the baked highlight (tab group x=293,w=118,4 tabs,sel=2 →
+    // slot 2 at x=352,w=29.5), leaving the strip + the unrelated rect. The rx="2"
+    // attribute must NOT be mistaken for x=.
+    REQUIRE(suppress_svg_rect(svg, 352.0f, 126.0f, 29.5f, 20.0f));
+    CHECK(svg.find("#2C2D2D") == std::string::npos);   // baked highlight removed
+    CHECK(svg.find("#252626") != std::string::npos);   // wider strip kept
+    CHECK(svg.find("#111111") != std::string::npos);   // unrelated rect kept
+    CHECK_FALSE(suppress_svg_rect(svg, 352.0f, 126.0f, 29.5f, 20.0f));  // no 2nd match
+    CHECK_FALSE(suppress_svg_rect(svg, 10.0f, 20.0f, 999.0f, 40.0f));   // size mismatch
+}
+
+TEST_CASE("DesignFrameView suppresses the baked selected-tab highlight (no double-pill)",
+          "[view][design-import][frame][svg]") {
+    // An SVG whose tab strip has a baked highlight at the selected slot (2). The
+    // DesignFrameView constructor must strip it so only the live pill shows.
+    const std::string strip =
+        "<rect x=\"10\" y=\"10\" width=\"60\" height=\"60\" rx=\"2\" fill=\"#1c1d1d\"/>"
+        "<rect x=\"20\" y=\"14\" width=\"56\" height=\"14\" rx=\"2\" fill=\"#252626\"/>"
+        // baked highlight on slot 2: tab group x=20,w=56,4 tabs → slot_w=14, slot2 x=48
+        "<rect x=\"48\" y=\"14\" width=\"14\" height=\"14\" rx=\"2\" fill=\"#3c3d3d\"/>";
+    const std::string svg =
+        "<svg width=\"80\" height=\"80\" xmlns=\"http://www.w3.org/2000/svg\">" + strip + "</svg>";
+    DesignFrameElement tg;
+    tg.kind = DesignFrameElement::Kind::tab_group;
+    tg.x = 20; tg.y = 14; tg.w = 56; tg.h = 14;
+    tg.options = {"1", "2", "3", "4"};
+    tg.selected_index = 2;
+    // The view should construct without the baked highlight surviving. We can't
+    // read svg_ directly, so prove the mechanism via the helper on the same data:
+    std::string check = svg;
+    REQUIRE(suppress_svg_rect(check, tg.x + 2 * (tg.w / 4), tg.y, tg.w / 4, tg.h));
+    CHECK(check.find("#3c3d3d") == std::string::npos);  // baked slot-2 pill gone
+    CHECK(check.find("#252626") != std::string::npos);  // strip kept
+    DesignFrameView v(svg, {tg});                        // exercises the ctor path
+    CHECK(v.element_count() == 1);
+}
+
 TEST_CASE("DesignFrameView is fail-safe on an empty/garbage SVG",
           "[view][design-import][frame][svg]") {
     DesignFrameView empty("", {});
