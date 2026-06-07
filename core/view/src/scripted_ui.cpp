@@ -77,6 +77,26 @@ bool ScriptedUiSession::load(std::string* error) {
     return true;
 }
 
+bool ScriptedUiSession::reload(std::string* error) {
+    auto code = read_text_file(script_path_);
+    if (code.empty()) {
+        if (error) *error = "could not read script file: " + script_path_.string();
+        return false;
+    }
+    // preserve_state=true: keep widget values across the rebuild; rebuild_from_code
+    // probes the new code on a throwaway tree first, so a bad reload leaves the
+    // current UI intact.
+    return rebuild_from_code(code, /*preserve_state=*/true, error);
+}
+
+bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::string* error) {
+    script_path_ = std::move(script_path);
+    theme_path_ = script_path_.parent_path() / "theme.json";
+    last_theme_exists_ = std::filesystem::exists(theme_path_);
+    last_theme_write_time_ = last_theme_exists_ ? safe_last_write_time(theme_path_) : std::nullopt;
+    return reload(error);
+}
+
 bool ScriptedUiSession::poll(std::string* error) {
     bool changed = false;
     if (bridge_) {

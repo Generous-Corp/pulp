@@ -386,3 +386,57 @@ TEST_CASE("ScriptedUiSession::attach_gpu_surface forwards to bridge",
 
     fs::remove_all(tmp_dir);
 }
+
+TEST_CASE("ScriptedUiSession explicit reload() rebuilds without a watcher, preserving state + last-good",
+          "[view][scripted-ui][reload]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-ui");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, "createKnob('gain', 10, 10, 48, 48);\ncreateLabel('status', 'v1', '');\n");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    // No hot-reload watcher: reload() is the on-demand path.
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+
+    auto* knob = dynamic_cast<Knob*>(session.bridge()->widget("gain"));
+    REQUIRE(knob != nullptr);
+    knob->set_value(0.66f);
+
+    // Edit + explicit reload (no poll/watcher). State preserved, new widget present.
+    write_text(script_path,
+               "createKnob('gain', 10, 10, 48, 48);\n"
+               "createLabel('status', 'v2', '');\n"
+               "createLabel('added', 'yes', '');\n");
+    REQUIRE(session.reload(&error));
+    REQUIRE(error.empty());
+
+    auto* knob2 = dynamic_cast<Knob*>(session.bridge()->widget("gain"));
+    REQUIRE(knob2 != nullptr);
+    REQUIRE_THAT(knob2->value(), WithinAbs(0.66f, 0.001f));   // state preserved
+    auto* added = dynamic_cast<Label*>(session.bridge()->widget("added"));
+    REQUIRE(added != nullptr);                                 // new code applied
+    REQUIRE(added->text() == "yes");
+
+    // Last-good: a broken reload keeps the current UI and reports the error.
+    write_text(script_path, "this is not valid javascript {{{");
+    std::string bad_error;
+    REQUIRE_FALSE(session.reload(&bad_error));
+    REQUIRE_FALSE(bad_error.empty());
+    REQUIRE(session.bridge()->widget("added") != nullptr);     // old UI intact
+
+    // reload_from(): swap to a different bundle's script.
+    const auto other = temp_dir / "other.js";
+    write_text(other, "createLabel('only-here', 'B', '');\n");
+    REQUIRE(session.reload_from(other, &error));
+    REQUIRE(session.script_path() == other);
+    REQUIRE(session.bridge()->widget("only-here") != nullptr);
+
+    fs::remove_all(temp_dir);
+}

@@ -38,6 +38,17 @@ public:
     bool load(std::string* error = nullptr);
     bool poll(std::string* error = nullptr);
 
+    // Explicitly reload the current script in place: rebuilds the widget bridge
+    // under the SAME root + GPU surface, preserving widget state, and probes the
+    // new code first so a bad reload keeps the last-good UI. The on-demand
+    // counterpart to enable_hot_reload's file-watched poll() — for a host/editor
+    // that wants to reload a just-edited bundle without a file watcher.
+    bool reload(std::string* error = nullptr);
+    // Repoint at a different script file and reload it (e.g. swap to another
+    // design bundle's ui.js). Updates script_path()/theme_path(); same in-place,
+    // last-good semantics as reload(). Does not re-arm the hot-reload watcher.
+    bool reload_from(std::filesystem::path script_path, std::string* error = nullptr);
+
     void set_repaint_callback(std::function<void()> cb);
     WidgetBridge* bridge() const { return bridge_.get(); }
 
