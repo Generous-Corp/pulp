@@ -80,6 +80,18 @@ wrapping it in the outer `Editor/Settings` `TabPanel`. The same
 ownership rule still applies: close the bridge before the released
 root view is destroyed.
 
+`run_with_editor()` also opts the host into the platform's native
+file-dialog backend by calling `platform::FileDialog::install_native_backend()`
+once the processor's editor is confirmed. This is a no-op on macOS (a
+native impl is compiled in) and on platforms with no built-in backend
+(iOS/Windows/Android), but on Linux it installs the xdg-desktop-portal
+FileChooser bridge (`core/platform/.../file_dialog_portal_linux.cpp`,
+talking to the portal over the runtime-dlopen `pulp::platform::DBus`
+client) so editor file pickers work natively. We install here — not via a
+static initializer — because raising a portal dialog blocks, so the
+default "no backend → no selection" contract must hold for headless/test
+callers until a host explicitly opts in.
+
 Standalone now also keeps the bridge's size in sync with the real host
 content area. `run_with_editor()` reads `WindowHost::get_content_size()`
 immediately after `notify_attached()`, subtracts any standalone chrome

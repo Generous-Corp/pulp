@@ -1854,6 +1854,9 @@ catch_discover_tests(pulp-test-clipboard
 # FileDialog backend-registration tests (#301)
 pulp_add_test_suite(pulp-test-file-dialog LIBRARIES pulp::platform)
 
+# D-Bus client + Linux xdg-desktop-portal file-dialog backend (#301 / L6)
+pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform)
+
 # Platform tests
 pulp_add_test_suite(pulp-test-platform LIBRARIES pulp::platform)
 
