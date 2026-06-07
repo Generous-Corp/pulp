@@ -309,8 +309,7 @@ class FaithfulVectorTest(unittest.TestCase):
         self.assertEqual(len(dropdowns), 1)               # only d1
         e = dropdowns[0]
         self.assertEqual((e["x"], e["y"], e["w"], e["h"]), (773.0, 530.0, 103.0, 27.0))
-        self.assertEqual(e["options"][0], "1/4 Delay")    # shown value first
-        self.assertGreater(len(e["options"]), 1)          # stub options so the popup is usable
+        self.assertEqual(e["options"], ["1/4 Delay"])     # only the real shown value (no fabricated options)
         self.assertEqual(e["source_node_id"], "d1")
         # s1 (Frame 41 < > pair) is a stepper, not a dropdown; placeholder p1 skipped.
         steppers = [e for e in els if e["kind"] == "stepper"]
@@ -345,9 +344,8 @@ class FaithfulVectorTest(unittest.TestCase):
         self.assertEqual(len(steppers), 2)
         s = next(e for e in steppers if e["source_node_id"] == "st1")
         self.assertEqual((s["x"], s["y"], s["w"], s["h"]), (173.0, 170.0, 180.0, 22.0))
-        self.assertEqual(s["options"][0], "Short Plucks")  # shown value first
+        self.assertEqual(s["options"], ["Short Plucks"])   # only the real shown value (no fabricated options)
         self.assertEqual(s["selected_index"], 0)
-        self.assertGreater(len(s["options"]), 1)           # stub options until variants are wired
         # No dropdowns produced (neither has a down-chevron).
         self.assertEqual([e for e in els if e["kind"] == "dropdown"], [])
 

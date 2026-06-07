@@ -751,7 +751,13 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
             out.append({
                 "kind": "dropdown",
                 "x": dx, "y": dy, "w": dw, "h": dh,
-                "options": [current, "Option 2", "Option 3"],  # TODO: source variants
+                # Faithful options: emit ONLY the real shown value. A static design
+                # defines no alternatives, and these selectors are plain frames
+                # (not component instances), so there are no variants to enumerate.
+                # Fabricating "Option 2/3" placeholders would be misleading; a
+                # design that DID define variants would source the full list from
+                # the component set's property definitions.
+                "options": [current],
                 "selected_index": 0,
                 "source_node_id": n.get("id", ""),
             })
@@ -760,8 +766,10 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
         # Same "Dropdown"-named FRAME family, but its chevron child is a < > PAIR
         # ("Frame 41" in ELYSIUM), NOT a down-chevron. These cycle a header value
         # in place rather than opening a popup — emit a stepper so the value can
-        # slide via the chevrons. (Real option lists need source component
-        # variants; stub a few until then.)
+        # slide via the chevrons once alternatives exist. As with dropdowns, a
+        # static design defines only the shown value (no component variants), so
+        # emit just that — the developer (or a variant-carrying design) supplies
+        # the full list.
         def _cname(c):
             return (c.get("name") or "").lower()
         kids = n.get("children", [])
@@ -783,7 +791,7 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
             out.append({
                 "kind": "stepper",
                 "x": sx, "y": sy, "w": sw, "h": sh,
-                "options": [current, "Option 2", "Option 3"],  # TODO: source variants
+                "options": [current],  # real shown value only (see note above)
                 "selected_index": 0,
                 "source_node_id": n.get("id", ""),
             })

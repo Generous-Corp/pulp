@@ -640,9 +640,11 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
 - `dropdown` → `ComboBox` (set_items from `options`; opens a popup on click).
   A real dropdown is detected only when the "dropdown"-named FRAME has a
   DOWN-chevron child (Material `expand_more`) AND its shown text isn't the
-  unconfigured placeholder "Dropdown". Option LISTS aren't in a static design, so
-  the producer stubs a couple after the shown value — real lists need source
-  component variants (a follow-up).
+  unconfigured placeholder "Dropdown". Options carry ONLY the real shown value:
+  a static design defines no alternatives, and ELYSIUM's selectors are plain
+  frames (not component instances), so there are no variants to enumerate —
+  fabricating placeholders would be misleading. A design that defines component
+  variants would source the full list from its property definitions.
 - `stepper` → `DesignStepper` (a `< >` header value cycled in place: paints the
   current option centered with `<`/`>` chevrons; left half steps to previous,
   right half to next, clamped — nothing painted behind the text so the header
@@ -650,8 +652,11 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   dropdown, discriminated by its chevron child: a `< >` PAIR (`Frame 41` in
   ELYSIUM, or an explicit left+right chevron pair) and NOT a down-chevron, with
   shown text != "Dropdown". (Previously these were dropped as faithful-static;
-  they are now live steppers.) Options stubbed like dropdowns until source
-  component variants are wired.
+  they are now live steppers.) Options carry only the real shown value, like
+  dropdowns — ELYSIUM's `< >` headers are actually a decorative pair of
+  `expand_more` icons inside `Frame 41` with no defined alternatives, so there is
+  nothing to step to until a variant-carrying design or the developer supplies
+  the list.
 - `tab_group` → `DesignTabGroup` (a compact segmented control drawn opaque over
   the tab strip; click a slot to move the selection highlight). Detected
   structurally (`detect_tab_group`): a row of ≥3 similar-width container children

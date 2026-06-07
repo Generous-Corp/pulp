@@ -1135,7 +1135,7 @@ TEST_CASE("baked native materializer maps a Dropdown frame to an interactive Com
     REQUIRE_FALSE(combo->items().empty());
     CHECK(combo->items().front() == "1/4 Delay");
     CHECK(combo->selected_text() == "1/4 Delay");
-    CHECK(combo->items().size() >= 2);           // stub options for the popup
+    CHECK(combo->items().size() == 1);           // only the real shown value (no fabricated stubs)
     CHECK(combo->child_count() == 0);            // text + chevron suppressed
 }
 
