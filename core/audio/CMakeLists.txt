@@ -95,6 +95,7 @@ elseif(WIN32)
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     target_sources(pulp-audio PRIVATE
         platform/linux/alsa_device.cpp
+        platform/linux/udev_monitor.cpp
     )
     find_package(ALSA REQUIRED)
     target_link_libraries(pulp-audio PRIVATE ALSA::ALSA)

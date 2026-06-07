@@ -438,6 +438,28 @@ DeviceInfo AlsaSystem::default_input_device() {
     return info;
 }
 
+AlsaSystem::~AlsaSystem() {
+    // Stop the monitor thread (which captures `this`) before the AudioSystem
+    // base — and its callback slot — are torn down.
+    hotplug_monitor_.stop();
+}
+
+void AlsaSystem::set_device_change_callback(DeviceChangeCallback cb) {
+    const bool want_monitor = static_cast<bool>(cb);
+    // Store/clear the callback in the base slot first.
+    AudioSystem::set_device_change_callback(std::move(cb));
+    if (want_monitor) {
+        if (!hotplug_monitor_.running()) {
+            // The "sound" subsystem covers ALSA PCM + raw-midi cards, so a
+            // single monitor catches USB audio/MIDI add + remove. Honest no-op
+            // if libudev is unavailable.
+            hotplug_monitor_.start({"sound"}, [this](UdevChange) { fire_device_change(); });
+        }
+    } else {
+        hotplug_monitor_.stop();
+    }
+}
+
 } // namespace pulp::audio::linux_platform
 
 #ifdef PULP_HAS_JACK

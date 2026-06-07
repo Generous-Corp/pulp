@@ -8,6 +8,8 @@
 
 #include <alsa/asoundlib.h>
 
+#include "udev_monitor.hpp"
+
 #include <atomic>
 #include <thread>
 #include <string>
@@ -68,10 +70,20 @@ private:
 
 class AlsaSystem : public AudioSystem {
 public:
+    ~AlsaSystem() override;  // stops the hotplug monitor before the base dtor
+
     std::vector<DeviceInfo> enumerate_devices() override;
     std::unique_ptr<AudioDevice> create_device(const std::string& device_id) override;
     DeviceInfo default_output_device() override;
     DeviceInfo default_input_device() override;
+
+    /// Start (or stop) a libudev "sound"-subsystem monitor that calls
+    /// `fire_device_change()` on card add/remove. Honest no-op for hotplug if
+    /// libudev is unavailable — the callback is still stored, just never fired.
+    void set_device_change_callback(DeviceChangeCallback cb) override;
+
+private:
+    UdevMonitor hotplug_monitor_;
 };
 
 } // namespace pulp::audio::linux_platform
