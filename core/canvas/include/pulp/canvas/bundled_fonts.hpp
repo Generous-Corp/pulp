@@ -242,6 +242,46 @@ sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
 sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
                                             SkFontStyle style);
 
+/// pulp #2163 follow-up — variable-font weight instancing support.
+///
+/// Reports whether `face` exposes an OpenType `wght` (weight) variation
+/// axis, and if so writes the axis min / max / default design values.
+/// A static (non-variable) face, or a variable face with no `wght`
+/// axis, returns `false` and leaves the out-params untouched.
+///
+/// The resolver uses this to instantiate a registered variable font at
+/// the caller's requested CSS `font-weight` (via `SkTypeface::makeClone`)
+/// instead of dropping to a heavier system fallback when the requested
+/// weight is outside the static-face matching tolerance. Generalized:
+/// any imported / registered variable font (e.g. Funnel Display,
+/// Clash Grotesk Variable) honours `font-weight` across its full axis.
+bool face_wght_axis(const SkTypeface* face,
+                    float& out_min, float& out_max, float& out_default);
+
+/// A single user-registered typeface paired with the family name it was
+/// registered under (the `family_override` passed to `register_font`).
+struct RegisteredTypeface {
+    std::string       family;
+    sk_sp<SkTypeface> typeface;
+};
+
+/// Snapshot of every typeface registered via the public `register_font` /
+/// `register_font_file` API, keyed by registered family name. Taken under
+/// the registry lock and returned by value so callers (notably
+/// `TextFontContext::font_collection()`) can wire user fonts into the
+/// SkParagraph `TypefaceFontProvider` WITHOUT holding the registry lock
+/// while they touch Skia — avoiding lock-order coupling between the font
+/// registry mutex and Skia's internal locks.
+///
+/// Why this exists: `register_font` populates a private registry that the
+/// `FontResolver` / `make_font` (Canvas2D fillText) path consults, but the
+/// SkParagraph label-rendering path resolves fonts through its own
+/// `FontCollection`. Without bridging the two, an imported design's
+/// registered fonts render only on the fillText path and silently fall
+/// back to a system face for every Label (which routes through
+/// SkParagraph). This snapshot is the bridge.
+std::vector<RegisteredTypeface> registered_typefaces_snapshot();
+
 /// Number of embedded bundled fonts compiled in. Useful for tests that want
 /// to assert "the build actually pulled in some .ttfs". Always returns the
 /// embedded count regardless of whether `match_bundled_typeface` has been

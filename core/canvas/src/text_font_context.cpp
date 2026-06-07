@@ -7,7 +7,9 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 
 #include "include/core/SkData.h"
+#include "include/core/SkFontArguments.h"
 #include "include/core/SkFontMgr.h"
+#include "include/core/SkFontParameters.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 
@@ -136,6 +138,66 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
         if (!emoji_family_name_.empty()) {
             provider->registerTypeface(emoji_typeface_,
                                        SkString("Pulp Emoji"));
+        }
+    }
+
+    // pulp #2163 follow-up — bridge user-registered fonts into the
+    // SkParagraph font collection. Without this, fonts registered via
+    // `register_font` / `register_font_file` (e.g. an imported Figma
+    // design's "Funnel Display" / "Clash Grotesk Variable") resolve only
+    // on the Canvas2D fillText / FontResolver path; every Label renders
+    // through SkParagraph, which previously only saw the platform
+    // SkFontMgr and silently fell back to a system face. Register each
+    // user typeface under the family alias it was registered with so
+    // `TextStyle::setFontFamilies({"Funnel Display"})` matches.
+    //
+    // Variable fonts: SkParagraph does NOT instance a `wght` axis from the
+    // requested SkFontStyle — it picks the closest STATIC face by
+    // CSS-weight match. A variable font is registered once at its default
+    // instance (Funnel Display defaults to wght 300 — "Light"), so a
+    // request for 400/700 would land on the single 300 instance for every
+    // weight. To honour distinct CSS weights we pre-bake one clone per
+    // common weight step across the axis range and register each under the
+    // same family alias; `TypefaceFontProvider::matchStyle` then selects
+    // the closest baked instance for the requested weight. Cloning sets
+    // the variation design position, and the clone reports the instanced
+    // weight via `fontStyle()`, which is what the provider matches on.
+    for (const auto& reg : registered_typefaces_snapshot()) {
+        if (!reg.typeface || reg.family.empty()) continue;
+        const SkString alias(reg.family.c_str());
+
+        float wmin = 0, wmax = 0, wdef = 0;
+        if (face_wght_axis(reg.typeface.get(), wmin, wmax, wdef)) {
+            // Variable face: bake instances at the standard CSS weight
+            // ladder, clamped to the axis range. Dedupe so an axis like
+            // [300..800] doesn't register a 200 clone, and a narrow axis
+            // doesn't register duplicates at its clamped endpoints.
+            static constexpr float kWeights[] = {
+                100, 200, 300, 400, 500, 600, 700, 800, 900};
+            constexpr SkFourByteTag kWght = SkSetFourByteTag('w', 'g', 'h', 't');
+            float last = -1.0f;
+            bool any = false;
+            for (float w : kWeights) {
+                float v = w;
+                if (v < wmin) v = wmin;
+                if (v > wmax) v = wmax;
+                if (v == last) continue;  // clamped duplicate
+                last = v;
+                SkFontArguments::VariationPosition::Coordinate coord{kWght, v};
+                SkFontArguments args;
+                SkFontArguments::VariationPosition pos{&coord, 1};
+                args.setVariationDesignPosition(pos);
+                if (auto clone = reg.typeface->makeClone(args)) {
+                    provider->registerTypeface(clone, alias);
+                    any = true;
+                }
+            }
+            // Cloning unsupported by this Skia build — register the base
+            // face so at least the default instance is reachable.
+            if (!any) provider->registerTypeface(reg.typeface, alias);
+        } else {
+            // Static face — register as-is under its alias.
+            provider->registerTypeface(reg.typeface, alias);
         }
     }
 
