@@ -19,9 +19,63 @@ TEST_CASE("resolve_checkpoint_url: hf:// resolution + path hardening", "[runtime
     REQUIRE(resolve_checkpoint_url("hf://user/repo/path/to/w.mlxfn") ==
             "https://huggingface.co/user/repo/resolve/main/path/to/w.mlxfn");
     REQUIRE(resolve_checkpoint_url("https://example.com/m.bin") == "https://example.com/m.bin");
-    REQUIRE(resolve_checkpoint_url("hf://user/repo/../escape").empty());  // `..` rejected
-    REQUIRE(resolve_checkpoint_url("hf://user/repo").empty());            // no file part
-    REQUIRE(resolve_checkpoint_url("ftp://x/y").empty());                 // unsupported scheme
+    REQUIRE(resolve_checkpoint_url("hf://user/repo/../escape").empty());   // `..` in file_path rejected
+    REQUIRE(resolve_checkpoint_url("hf://user/../evil/file.pt").empty());  // `..` in user_repo rejected
+    REQUIRE(resolve_checkpoint_url("hf://user/repo/a/../b.pt").empty());   // nested `..` rejected
+    REQUIRE(resolve_checkpoint_url("hf://user/repo/%2e%2e/x.pt").empty()); // encoded `..` rejected
+    REQUIRE(resolve_checkpoint_url("hf://%2e%2e/repo/x.pt").empty());      // encoded `..` in user_repo
+    REQUIRE(resolve_checkpoint_url("hf://user/repo").empty());             // no file part
+    REQUIRE(resolve_checkpoint_url("ftp://x/y").empty());                  // unsupported scheme
+}
+
+TEST_CASE("model path builders reject traversal in subsystem/model_id", "[runtime][model]") {
+    const fs::path home = fs::temp_directory_path() / "pulp-mm-pathguard";
+    // Safe literals resolve normally.
+    REQUIRE(model_state_path("magenta", home) == home / "magenta" / "model-state.json");
+    REQUIRE(model_install_path("magenta", "m1", home) == home / "magenta" / "models" / "m1.json");
+
+    // Unsafe subsystem values are rejected (empty path returned).
+    REQUIRE(model_state_path("..", home).empty());
+    REQUIRE(model_state_path("../secrets", home).empty());
+    REQUIRE(model_state_path("a/b", home).empty());
+    REQUIRE(model_state_path("", home).empty());
+    REQUIRE(model_install_path("..", "m1", home).empty());
+    REQUIRE(model_install_path("magenta", "../etc", home).empty());
+    REQUIRE(model_install_path("magenta", "a/b", home).empty());
+    REQUIRE(model_install_path("magenta", "", home).empty());
+#ifdef _WIN32
+    REQUIRE(model_install_path("magenta", "a\\b", home).empty());  // backslash separator
+    REQUIRE(model_state_path("c:evil", home).empty());             // drive-relative
+#endif
+}
+
+TEST_CASE("remove_model: return value reflects what was actually removed", "[runtime][model]") {
+    const fs::path home = fs::temp_directory_path() / "pulp-mm-remove";
+    fs::remove_all(home);
+    std::string err;
+
+    // Nothing installed → no-op, returns false (no error).
+    REQUIRE_FALSE(remove_model("magenta", "ghost", err, home));
+    REQUIRE(err.empty());
+
+    // Invalid subsystem/model_id → false with an error, never touches the FS.
+    REQUIRE_FALSE(remove_model("..", "m1", err, home));
+    REQUIRE_FALSE(err.empty());
+    err.clear();
+    REQUIRE_FALSE(remove_model("magenta", "../escape", err, home));
+    REQUIRE_FALSE(err.empty());
+
+    // Something present → removes it and returns true.
+    const fs::path meta = model_install_path("magenta", "m1", home);
+    fs::create_directories(meta.parent_path());
+    std::ofstream(meta) << R"({"model_id":"m1"})";
+    REQUIRE(fs::exists(meta));
+    err.clear();
+    REQUIRE(remove_model("magenta", "m1", err, home));
+    REQUIRE(err.empty());
+    REQUIRE_FALSE(fs::exists(meta));
+
+    fs::remove_all(home);
 }
 
 TEST_CASE("generic model store: list / install / activate round-trip + isolation",

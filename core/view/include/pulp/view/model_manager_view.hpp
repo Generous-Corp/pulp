@@ -42,6 +42,9 @@ public:
     }
 
     /// Per-row download progress in [0,1]. Negative clears (not downloading).
+    /// NOTE: this rebuilds the full row subtree (Yoga layout + Skia repaint), so
+    /// callers driving live download progress should throttle updates (e.g. ~4 Hz)
+    /// rather than calling it at the raw byte-callback rate.
     void set_download_progress(const std::string& model_id, float fraction) {
         if (fraction < 0.0f)
             progress_.erase(model_id);

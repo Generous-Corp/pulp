@@ -41,6 +41,28 @@ ParsedUrl parse_url(const std::string& url) {
     return out;
 }
 
+// Resolve a redirect Location (absolute, host-absolute, or relative) against the
+// current scheme/host/port + path. Returns ok=false if it can't be resolved.
+ParsedUrl resolve_redirect(const std::string& cur_scheme_host_port, const std::string& cur_path,
+                           const std::string& location) {
+    ParsedUrl out;
+    if (location.empty()) return out;
+    if (location.starts_with("http://") || location.starts_with("https://"))
+        return parse_url(location);
+    if (location.front() == '/') {  // host-absolute
+        out.scheme_host_port = cur_scheme_host_port;
+        out.path = location;
+        out.ok = true;
+        return out;
+    }
+    // Path-relative: replace the last segment of the current path.
+    out.scheme_host_port = cur_scheme_host_port;
+    auto slash = cur_path.find_last_of('/');
+    out.path = (slash == std::string::npos ? std::string("/") : cur_path.substr(0, slash + 1)) + location;
+    out.ok = true;
+    return out;
+}
+
 std::string to_hex(const unsigned char* data, size_t n) {
     static const char* digits = "0123456789abcdef";
     std::string s;
@@ -66,8 +88,30 @@ bool hash_existing(mbedtls_sha256_context& ctx, const fs::path& path, std::uint6
             counted += static_cast<std::uint64_t>(got);
         }
     }
+    // Distinguish a clean EOF from a genuine read error: badbit means the
+    // partial could not be fully re-hashed, so the caller must restart rather
+    // than trust a truncated hash for a resumed transfer.
+    if (in.bad()) return false;
     return true;
 }
+
+// Verify a 206 (Partial Content) response actually continues from the byte
+// offset we asked for. A server that returns 206 but a different range (or no
+// Content-Range at all) would corrupt the appended .part + rehash, so treat
+// any mismatch as untrusted.
+bool content_range_starts_at(const httplib::Response& resp, std::uint64_t expected_start) {
+    auto it = resp.headers.find("Content-Range");
+    if (it == resp.headers.end()) return false;  // 206 must carry Content-Range
+    static const std::regex re(R"(bytes\s+(\d+)-(\d+)/(\d+|\*))", std::regex::icase);
+    std::smatch m;
+    if (!std::regex_search(it->second, m, re)) return false;
+    try {
+        return std::stoull(m[1].str()) == expected_start;
+    } catch (...) {
+        return false;
+    }
+}
+
 
 // Best-effort system CA bundle for mbedTLS verification (macOS / common Linux).
 const char* system_ca_path() {
@@ -102,7 +146,13 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
     part += ".part";
 
     std::uint64_t resume_from = 0;
-    if (req.resume && fs::exists(part, ec)) resume_from = static_cast<std::uint64_t>(fs::file_size(part, ec));
+    if (req.resume && fs::exists(part, ec)) {
+        const auto sz = fs::file_size(part, ec);
+        // file_size returns static_cast<uintmax_t>(-1) and sets `ec` on error;
+        // guard against that turning into a bogus huge Range offset.
+        if (!ec && sz != static_cast<std::uintmax_t>(-1))
+            resume_from = static_cast<std::uint64_t>(sz);
+    }
 
     mbedtls_sha256_context sha;
     mbedtls_sha256_init(&sha);
@@ -124,16 +174,6 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
         return r;
     }
 
-    httplib::Client cli(parsed.scheme_host_port);
-    cli.set_follow_location(true);
-    cli.set_keep_alive(true);
-    if (req.timeout_seconds > 0) {
-        cli.set_read_timeout(req.timeout_seconds, 0);
-        cli.set_connection_timeout(req.timeout_seconds, 0);
-    }
-    if (const char* ca = system_ca_path()) cli.set_ca_cert_path(ca);
-    cli.enable_server_certificate_verification(true);
-
     httplib::Headers headers;
     for (const auto& h : req.headers) headers.emplace(h.name, h.value);
     const bool attempted_resume = resume_from > 0;
@@ -143,8 +183,39 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
     bool reset_due_to_200 = false;
     bool user_cancel = false;
     bool write_error = false;
+    bool http_status_error = false;
+    bool range_mismatch = false;
+    bool is_redirect = false;
+    int response_status = 0;
+    std::string redirect_location;
 
     auto response_handler = [&](const httplib::Response& resp) -> bool {
+        response_status = resp.status;
+        // Redirect: capture Location and abort before any body is streamed into
+        // .part. We follow redirects manually (below) so we can strip sensitive
+        // headers on a cross-origin hop.
+        if (resp.status >= 300 && resp.status < 400) {
+            if (auto it = resp.headers.find("Location"); it != resp.headers.end()) {
+                redirect_location = it->second;
+                is_redirect = true;
+                return false;
+            }
+            http_status_error = true;  // 3xx without Location — give up
+            return false;
+        }
+        // Reject other non-success responses before any content is received so an
+        // error body is never written into the resumable .part file.
+        if (resp.status != 200 && resp.status != 206) {
+            http_status_error = true;
+            return false;
+        }
+        // A 206 must continue from exactly the offset we requested; otherwise
+        // appending its bytes to our partial would corrupt the file + hash.
+        if (attempted_resume && resp.status == 206 &&
+            !content_range_starts_at(resp, resume_from)) {
+            range_mismatch = true;
+            return false;
+        }
         if (attempted_resume && resp.status == 200) {
             // Server ignored our Range request — discard the partial and restart.
             reset_due_to_200 = true;
@@ -183,7 +254,54 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
         return true;
     };
 
-    auto result = cli.Get(parsed.path, headers, response_handler, content_receiver);
+    // Manual redirect loop. set_follow_location is OFF so cpp-httplib can't replay
+    // the (possibly sensitive) request headers to a redirect target on another
+    // host — HF gated downloads 302 to a pre-signed S3 URL, and the Authorization
+    // token must not travel there (httplib::Headers compares keys case-insensitively).
+    std::string cur_shp = parsed.scheme_host_port;
+    std::string cur_path = parsed.path;
+    int redirects_left = 8;
+    httplib::Result result;
+    while (true) {
+        is_redirect = false;
+        redirect_location.clear();
+
+        httplib::Client cli(cur_shp);
+        cli.set_follow_location(false);
+        cli.set_keep_alive(true);
+        if (req.timeout_seconds > 0) {
+            cli.set_read_timeout(req.timeout_seconds, 0);
+            cli.set_connection_timeout(req.timeout_seconds, 0);
+        }
+        if (const char* ca = system_ca_path()) cli.set_ca_cert_path(ca);
+        cli.enable_server_certificate_verification(true);
+
+        result = cli.Get(cur_path, headers, response_handler, content_receiver);
+
+        if (!is_redirect) break;
+        if (redirects_left-- <= 0) {
+            mbedtls_sha256_free(&sha);
+            out.close();
+            r.error = "too many redirects";
+            return r;
+        }
+        const auto next = resolve_redirect(cur_shp, cur_path, redirect_location);
+        if (!next.ok) {
+            mbedtls_sha256_free(&sha);
+            out.close();
+            r.error = "invalid redirect location: " + redirect_location;
+            return r;
+        }
+        if (next.scheme_host_port != cur_shp) {
+            // Cross-origin hop: drop credentials so they don't leak to the new host.
+            headers.erase("Authorization");
+            headers.erase("Proxy-Authorization");
+            headers.erase("Cookie");
+        }
+        cur_shp = next.scheme_host_port;
+        cur_path = next.path;
+    }
+
     out.flush();
     out.close();
 
@@ -197,6 +315,21 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
         r.cancelled = true;
         r.error = "cancelled";
         return r;  // keep .part for resume
+    }
+    // Status / range checks happen in the response handler (which aborts the
+    // transfer via `return false`) so no error/short body is ever appended to
+    // .part. Surface those before the generic transport-error path, since an
+    // aborted handler makes `result` falsy with Error::Canceled.
+    if (http_status_error) {
+        mbedtls_sha256_free(&sha);
+        r.error = "http status " + std::to_string(response_status);
+        return r;  // .part untouched — safe to resume against later
+    }
+    if (range_mismatch) {
+        mbedtls_sha256_free(&sha);
+        fs::remove(part, ec);  // partial no longer trustworthy
+        r.error = "server returned unexpected content-range for resume";
+        return r;
     }
     if (!result) {
         mbedtls_sha256_free(&sha);

@@ -161,6 +161,10 @@ private:
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
     float caret_blink_time_ = 0.0f; ///< Accumulated time for caret blinking
     int caret_blink_sub_ = -1;      ///< Frame-clock subscription that drives blink repaints while focused
+    FrameClock* caret_blink_clock_ = nullptr;  ///< Clock the subscription lives on; cached so we can
+                                               ///< always unsubscribe even after the editor is detached
+                                               ///< from the view tree (frame_clock() walks parent_ and
+                                               ///< would return null once detached → leaked sub + UAF).
 
     // IME composition state
     std::string marked_text_;        ///< Active composition string

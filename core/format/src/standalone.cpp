@@ -266,11 +266,14 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     // dangle an editor ViewBridge holding a Processor& (#2693).
     if (was_running) stop_audio_keep_processor();
     config_ = new_config;
-    // Remember the user's device/rate/buffer selection across launches (default on).
-    if (config_.persist_settings && processor_)
+    bool ok = true;
+    if (was_running) ok = start();
+    // Remember the user's device/rate/buffer selection across launches (default on),
+    // but only after a successful (re)start — otherwise a failed apply would persist
+    // a broken selection that the next launch restores.
+    if (ok && config_.persist_settings && processor_)
         save_persisted_config(processor_->descriptor().name, config_);
-    if (was_running) return start();
-    return true;
+    return ok;
 }
 
 bool StandaloneApp::run_with_editor(bool use_gpu) {

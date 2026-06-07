@@ -82,6 +82,18 @@ bool write_text_file(const fs::path& path, const std::string& content, std::stri
     return true;
 }
 
+// Reject path segments (subsystem, model_id) that could escape pulp_home via
+// path traversal or absolute paths. These are public-API inputs even though
+// current callers pass safe literals. A valid segment is non-empty, contains
+// no path separators (`/`, `\\`), no drive/scheme colon, and no `..` segment.
+bool is_safe_path_segment(std::string_view segment) {
+    if (segment.empty()) return false;
+    if (segment.find_first_of("/\\:") != std::string_view::npos) return false;
+    if (segment == "." || segment == "..") return false;
+    if (segment.find("..") != std::string_view::npos) return false;
+    return true;
+}
+
 }  // namespace
 
 fs::path resolve_pulp_home(const fs::path& override_path) {
@@ -98,6 +110,7 @@ fs::path resolve_pulp_home(const fs::path& override_path) {
 fs::path model_state_path(std::string_view subsystem, const fs::path& pulp_home_override) {
     auto pulp_home = resolve_pulp_home(pulp_home_override);
     if (pulp_home.empty()) return {};
+    if (!is_safe_path_segment(subsystem)) return {};
     return pulp_home / std::string(subsystem) / "model-state.json";
 }
 
@@ -105,6 +118,7 @@ fs::path model_install_path(std::string_view subsystem, std::string_view model_i
                             const fs::path& pulp_home_override) {
     auto pulp_home = resolve_pulp_home(pulp_home_override);
     if (pulp_home.empty()) return {};
+    if (!is_safe_path_segment(subsystem) || !is_safe_path_segment(model_id)) return {};
     return pulp_home / std::string(subsystem) / "models" / (std::string(model_id) + ".json");
 }
 
@@ -168,17 +182,31 @@ ModelListResult list_models(const std::vector<ModelEntry>& registry, std::string
             listed.resolved_checkpoint_path = installed.resolved_checkpoint_path;
         } else {
             // Not installed — surface a resumable partial (an interrupted/cancelled .part).
+            // Pick deterministically (the largest .part = most-complete resume) rather
+            // than the first one the OS happens to enumerate, since stale partials may
+            // coexist.
             const fs::path dir = result.pulp_home / std::string(subsystem) / "models" / model.model_id;
             std::error_code ec;
+            std::uint64_t best_bytes = 0;
+            bool found_part = false;
             if (fs::exists(dir, ec)) {
                 for (const auto& entry : fs::directory_iterator(dir, ec)) {
                     if (entry.path().extension() != ".part") continue;
-                    listed.status = "partial";
-                    if (model.size_bytes > 0) {
-                        const auto got = static_cast<float>(fs::file_size(entry.path(), ec));
-                        listed.partial_fraction = got / static_cast<float>(model.size_bytes);
-                    }
-                    break;
+                    std::error_code size_ec;
+                    const auto sz = fs::file_size(entry.path(), size_ec);
+                    if (size_ec || sz == static_cast<std::uintmax_t>(-1)) continue;
+                    found_part = true;
+                    if (static_cast<std::uint64_t>(sz) >= best_bytes)
+                        best_bytes = static_cast<std::uint64_t>(sz);
+                }
+            }
+            if (found_part) {
+                listed.status = "partial";
+                if (model.size_bytes > 0) {
+                    float frac = static_cast<float>(best_bytes) / static_cast<float>(model.size_bytes);
+                    if (frac < 0.0f) frac = 0.0f;
+                    if (frac > 1.0f) frac = 1.0f;  // clamp: stale/oversized .part
+                    listed.partial_fraction = frac;
                 }
             }
         }
@@ -245,6 +273,7 @@ std::string to_json(const ModelListResult& result) {
         auto value = choc::value::createObject("");
         add_string_member(value, "model_id", item.model.model_id);
         add_string_member(value, "display_name", item.model.display_name);
+        add_string_member(value, "description", item.model.description);
         add_string_member(value, "backend", item.model.backend);
         add_string_member(value, "checkpoint_ref", item.model.checkpoint_ref);
         auto tags = choc::value::createEmptyArray();
@@ -252,9 +281,30 @@ std::string to_json(const ModelListResult& result) {
             tags.addArrayElement(choc::value::createString(tag));
         value.addMember("task_tags", tags);
         value.addMember("size_bytes", choc::value::createInt64(static_cast<int64_t>(item.model.size_bytes)));
+        // Round-trip the remaining catalog metadata so CLI / MCP JSON consumers
+        // see download URL, hashes, licensing, attribution, and device hints.
+        add_string_member(value, "download_url", item.model.download_url);
+        add_string_member(value, "sha256", item.model.sha256);
+        value.addMember("auto_downloadable", choc::value::createBool(item.model.auto_downloadable));
+        value.addMember("is_recommended", choc::value::createBool(item.model.is_recommended));
+        add_string_member(value, "license", item.model.license);
+        add_string_member(value, "attribution", item.model.attribution);
+        add_string_member(value, "min_device", item.model.min_device);
+        auto assets = choc::value::createEmptyArray();
+        for (const auto& asset : item.model.assets) {
+            auto a = choc::value::createObject("");
+            add_string_member(a, "role", asset.role);
+            add_string_member(a, "checkpoint_ref", asset.checkpoint_ref);
+            add_string_member(a, "sha256", asset.sha256);
+            a.addMember("size_bytes", choc::value::createInt64(static_cast<int64_t>(asset.size_bytes)));
+            assets.addArrayElement(a);
+        }
+        value.addMember("assets", assets);
         add_string_member(value, "status", item.status);
         value.addMember("active", choc::value::createBool(item.active));
         add_path_member(value, "resolved_checkpoint_path", item.resolved_checkpoint_path);
+        // Resumable-progress for a "partial" entry (>= 0 only when a .part exists).
+        value.addMember("partial_fraction", choc::value::createFloat64(item.partial_fraction));
         models.addArrayElement(value);
     }
     object.addMember("models", models);
@@ -285,6 +335,11 @@ InstallModelResult install_model(const ModelEntry& model, std::string_view subsy
         r.error = "unable to resolve PULP_HOME";
         return r;
     }
+    if (!is_safe_path_segment(subsystem) || !is_safe_path_segment(model.model_id)) {
+        r.error = "invalid subsystem or model_id";
+        return r;
+    }
+
     const fs::path files_dir = home / std::string(subsystem) / "models" / model.model_id;
 
     // A model is either a single primary checkpoint or a multi-asset bundle (e.g. Magenta's
@@ -405,14 +460,38 @@ bool remove_model(std::string_view subsystem, std::string_view model_id, std::st
         error = "unable to resolve PULP_HOME";
         return false;
     }
+    if (!is_safe_path_segment(subsystem) || !is_safe_path_segment(model_id)) {
+        error = "invalid subsystem or model_id";
+        return false;
+    }
     std::error_code ec;
-    fs::remove_all(home / std::string(subsystem) / "models" / std::string(model_id), ec);
-    fs::remove(model_install_path(subsystem, model_id, pulp_home_override), ec);
+    const auto files_dir = home / std::string(subsystem) / "models" / std::string(model_id);
+    const auto metadata_path = model_install_path(subsystem, model_id, pulp_home_override);
+    const bool had_files = fs::exists(files_dir, ec);
+    const bool had_metadata = fs::exists(metadata_path, ec);
+
+    fs::remove_all(files_dir, ec);
+    if (ec) {
+        error = "failed to remove model files: " + ec.message();
+        return false;
+    }
+    fs::remove(metadata_path, ec);
+    if (ec) {
+        error = "failed to remove model metadata: " + ec.message();
+        return false;
+    }
     // Clear the active selection if it pointed at the removed model.
     if (read_active_model_id(subsystem, pulp_home_override) == model_id) {
         fs::remove(model_state_path(subsystem, pulp_home_override), ec);
+        if (ec) {
+            error = "failed to clear active model state: " + ec.message();
+            return false;
+        }
     }
-    return true;
+    error.clear();
+    // Report whether anything was actually removed so callers can distinguish a
+    // no-op (nothing installed) from a successful deletion.
+    return had_files || had_metadata;
 }
 
 }  // namespace pulp::runtime

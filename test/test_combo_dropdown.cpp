@@ -344,3 +344,64 @@ TEST_CASE("ComboBox: close_active_popup is focus-independent [issue-68]",
     REQUIRE(ComboBox::active_popup_ == nullptr);
 }
 
+
+TEST_CASE("ComboBox: closed-stepper arrow keys skip separators (no separator commit)", "[combo]") {
+    // Regression: when closed, Up/Down must step OVER "---" separator rows rather
+    // than committing a separator index (which would fire on_change with an empty
+    // selection). Items: 0=A, 1="---", 2=B.
+    ComboBox combo;
+    combo.set_items({"A", "---", "B"});
+    combo.set_selected(0);
+
+    int changed_to = -1;
+    std::string changed_text;
+    combo.on_change = [&](int idx) {
+        changed_to = idx;
+        changed_text = combo.selected_text();
+    };
+
+    KeyEvent down;
+    down.key = KeyCode::down;
+    down.is_down = true;
+    REQUIRE(combo.on_key_event(down));   // steps from 0 over the separator to 2
+    REQUIRE(changed_to == 2);            // NOT 1 (the "---" separator)
+    REQUIRE(changed_text == "B");
+    REQUIRE(combo.selected_text() == "B");
+
+    // Going back up lands on A, never on the separator.
+    KeyEvent up;
+    up.key = KeyCode::up;
+    up.is_down = true;
+    REQUIRE(combo.on_key_event(up));
+    REQUIRE(combo.selected_text() == "A");
+}
+
+TEST_CASE("ComboBox: open-menu Enter on a separator does not commit", "[combo]") {
+    ComboBox combo;
+    combo.set_items({"A", "---", "B"});
+    combo.set_selected(0);
+    combo.set_bounds({0, 0, 140, 120});
+
+    // Open the menu.
+    KeyEvent space;
+    space.key = KeyCode::space;
+    space.is_down = true;
+    REQUIRE(combo.on_key_event(space));
+
+    // Down from selected (0) should skip the separator via move_hover, but even if
+    // a separator were highlighted, Enter must not commit it.
+    int changed_to = -1;
+    combo.on_change = [&](int idx) { changed_to = idx; };
+
+    KeyEvent down;
+    down.key = KeyCode::down;
+    down.is_down = true;
+    combo.on_key_event(down);  // move_hover skips "---" → highlights B (index 2)
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+    REQUIRE(combo.on_key_event(enter));
+    REQUIRE(changed_to != 1);  // separator index 1 was never committed
+    REQUIRE(combo.selected_text() != "---");
+}

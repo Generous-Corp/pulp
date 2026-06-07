@@ -146,6 +146,123 @@ TEST_CASE("model downloader: cancel keeps the partial for resume", "[runtime][mo
     fs::remove_all(root);
 }
 
+TEST_CASE("model downloader: http error status is reported and not written into .part",
+          "[runtime][model][download]") {
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-pr2-404";
+    fs::remove_all(root);
+    fs::create_directories(root / "out");
+
+    // A server that answers everything with a distinctive 404 error body.
+    httplib::Server svr;
+    const std::string error_body = "NOT-FOUND-ERROR-PAYLOAD";
+    svr.Get(".*", [&](const httplib::Request&, httplib::Response& res) {
+        res.status = 404;
+        res.set_content(error_body, "text/plain");
+    });
+    int port = svr.bind_to_any_port("127.0.0.1");
+    std::thread th([&] { svr.listen_after_bind(); });
+    svr.wait_until_ready();
+
+    const fs::path dest = root / "out" / "fixture.bin";
+    DownloadRequest req{.url = "http://127.0.0.1:" + std::to_string(port) + "/missing.bin",
+                        .dest = dest};
+    auto res = download_file(req);
+    REQUIRE_FALSE(res.ok);
+    REQUIRE(res.error.find("http status 404") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(dest));  // not published
+
+    // The error body must never end up in the resumable .part.
+    fs::path part = dest;
+    part += ".part";
+    if (fs::exists(part)) {
+        std::ifstream in(part, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), {});
+        REQUIRE(contents.find(error_body) == std::string::npos);
+    }
+
+    svr.stop();
+    if (th.joinable()) th.join();
+    fs::remove_all(root);
+}
+
+TEST_CASE("model downloader: a stale oversized partial fails closed instead of resuming blindly",
+          "[runtime][model][download]") {
+    // A resumed download must verify the server is actually continuing from the
+    // requested offset rather than trusting the 206. A conforming server (httplib)
+    // can't be coerced into emitting a *lying* Content-Range — it returns the
+    // correct range or a 416 when the requested offset is unsatisfiable. This test
+    // exercises the latter, real, fail-closed path: a partial larger than the file
+    // on the server must NOT be silently accepted as a finished download. (The
+    // content-range-start check in download_file guards the complementary case of a
+    // non-conforming server that returns 206 from the wrong offset.)
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-pr2-badrange";
+    fs::remove_all(root);
+    fs::create_directories(root / "serve");
+    fs::create_directories(root / "out");
+    make_fixture(root / "serve" / "fixture.bin", 10);  // tiny real file
+
+    // Seed a 100k partial — much larger than the 10-byte file on the server.
+    make_fixture(root / "out" / "fixture.bin.part", 100'000);
+
+    LocalServer server(root / "serve");
+    const fs::path dest = root / "out" / "fixture.bin";
+    DownloadRequest req{.url = server.url("/fixture.bin"), .dest = dest, .resume = true};
+    auto res = download_file(req);
+    INFO("error: " << res.error);
+    REQUIRE_FALSE(res.ok);
+    REQUIRE_FALSE(fs::exists(dest));  // not published as a completed download
+
+    fs::remove_all(root);
+}
+
+TEST_CASE("model downloader: cross-origin redirect drops the Authorization header",
+          "[runtime][model][download]") {
+    // HF gated downloads 302 from huggingface.co to a pre-signed S3 URL on another
+    // host. The auth token must NOT be replayed to the redirect target. Two local
+    // servers on different ports model the two origins; the second records whether
+    // it saw an Authorization header.
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-pr2-redirect";
+    fs::remove_all(root);
+    fs::create_directories(root / "out");
+    const std::string body = make_fixture(root / "out" / "payload-src.bin", 4096);
+    const std::string sha = sha256_hex(body);
+
+    // Origin B: serves the real bytes, records any Authorization header it received.
+    std::atomic<bool> saw_auth_on_b{false};
+    httplib::Server b;
+    b.Get("/payload.bin", [&](const httplib::Request& reqB, httplib::Response& res) {
+        if (reqB.has_header("Authorization")) saw_auth_on_b = true;
+        res.set_content(body, "application/octet-stream");
+    });
+    int port_b = b.bind_to_any_port("127.0.0.1");
+    std::thread tb([&] { b.listen_after_bind(); });
+    b.wait_until_ready();
+
+    // Origin A: 302-redirects to origin B (different port == different origin).
+    httplib::Server a;
+    a.Get("/gated.bin", [&](const httplib::Request&, httplib::Response& res) {
+        res.status = 302;
+        res.set_header("Location", "http://127.0.0.1:" + std::to_string(port_b) + "/payload.bin");
+    });
+    int port_a = a.bind_to_any_port("127.0.0.1");
+    std::thread ta([&] { a.listen_after_bind(); });
+    a.wait_until_ready();
+
+    const fs::path dest = root / "out" / "fixture.bin";
+    DownloadRequest req{.url = "http://127.0.0.1:" + std::to_string(port_a) + "/gated.bin",
+                        .dest = dest, .expected_sha256 = sha};
+    req.headers.push_back(HttpHeader{"Authorization", "Bearer hf_secret_token"});
+    auto res = download_file(req);
+    INFO("error: " << res.error);
+    REQUIRE(res.ok);              // redirect followed, bytes fetched
+    REQUIRE(res.sha256 == sha);
+    REQUIRE_FALSE(saw_auth_on_b); // token did NOT leak to the cross-origin target
+
+    a.stop(); if (ta.joinable()) ta.join();
+    b.stop(); if (tb.joinable()) tb.join();
+    fs::remove_all(root);
+}
+
 TEST_CASE("model store: install_model downloads + records, then remove_model deletes",
           "[runtime][model][download]") {
     const fs::path root = fs::temp_directory_path() / "pulp-mm-pr2-install";

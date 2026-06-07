@@ -46,7 +46,8 @@ struct ModelEntry {
 
 /// Resolve a checkpoint_ref to a direct download URL.
 /// "hf://user/repo/file" → "https://huggingface.co/user/repo/resolve/main/file".
-/// Rejects control bytes and `..` path segments. Passes http(s):// URLs through.
+/// Rejects control bytes, `..` segments (in both the user/repo and file parts),
+/// and percent-encoded path content. Passes http(s):// URLs through.
 std::string resolve_checkpoint_url(const std::string& checkpoint_ref);
 
 /// Find a model by id in a caller-supplied registry/catalog. Returns nullptr if absent.

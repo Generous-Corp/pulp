@@ -6,6 +6,13 @@ namespace pulp::view {
 
 const std::string ComboBox::empty_string_;
 
+namespace {
+// Rows whose text starts with "---" are non-selectable visual separators.
+bool is_separator_item(const std::string& item) {
+    return item.size() >= 3 && item.substr(0, 3) == "---";
+}
+}  // namespace
+
 // ── ComboBox ─────────────────────────────────────────────────────────────
 
 void ComboBox::set_selected_impl(int index, bool notify) {
@@ -280,14 +287,24 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
 
     if (!open_) {
         // Closed: Up/Down step the value like a stepper; Enter/Space opens the menu.
-        if (event.key == KeyCode::up && selected_ > 0) {
-            set_selected(selected_ - 1);
-            return true;
-        }
-        if (event.key == KeyCode::down && selected_ < static_cast<int>(items_.size()) - 1) {
-            set_selected(selected_ + 1);
-            return true;
-        }
+        // Step OVER "---" separators so the stepper can never commit a separator
+        // index (which would fire on_change with an invalid/empty value).
+        auto step_to_selectable = [&](int delta) -> bool {
+            const int n = static_cast<int>(items_.size());
+            int idx = selected_;
+            for (int s = 0; s < n; ++s) {
+                const int next = idx + delta;
+                if (next < 0 || next >= n) return false;  // ran off the end
+                idx = next;
+                if (!is_separator_item(items_[static_cast<size_t>(idx)])) {
+                    set_selected(idx);
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (event.key == KeyCode::up) return step_to_selectable(-1);
+        if (event.key == KeyCode::down) return step_to_selectable(+1);
         if (event.key == KeyCode::enter || event.key == KeyCode::space) {
             open_dropdown();
             request_repaint();
@@ -306,8 +323,9 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
             return true;
         case KeyCode::enter:
         case KeyCode::space:
-            if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()))
-                set_selected(hover_index_);
+            if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
+                !is_separator_item(items_[static_cast<size_t>(hover_index_)]))
+                set_selected(hover_index_);  // never commit a "---" separator row
             close_dropdown();
             request_repaint();
             return true;

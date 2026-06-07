@@ -475,7 +475,11 @@ endif()
 target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 # pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
-target_link_libraries(pulp-view-core PRIVATE pulp::runtime)
+# PUBLIC because the public header model_manager_view.hpp includes
+# <pulp/runtime/model_store.hpp> (exposes runtime::ModelListResult in its API),
+# so downstream targets that link only pulp::view must inherit the runtime
+# include path + link.
+target_link_libraries(pulp-view-core PUBLIC pulp::runtime)
 target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
 
 # yaml-cpp (MIT) — DESIGN.md frontmatter parsing.

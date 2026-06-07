@@ -396,8 +396,13 @@ void TextEditor::on_text_input(const TextInputEvent& event) {
 }
 
 TextEditor::~TextEditor() {
-    if (caret_blink_sub_ >= 0)
-        if (auto* fc = frame_clock()) fc->unsubscribe(caret_blink_sub_);
+    // Unsubscribe from the clock we actually subscribed to (cached), NOT
+    // frame_clock() — by destruction the editor may already be detached from the
+    // view tree, in which case frame_clock() walks a null parent_ and returns
+    // nullptr, leaking the subscription with a dangling `this` (use-after-free on
+    // the next tick).
+    if (caret_blink_sub_ >= 0 && caret_blink_clock_)
+        caret_blink_clock_->unsubscribe(caret_blink_sub_);
 }
 
 void TextEditor::on_focus_changed(bool gained) {
@@ -410,15 +415,18 @@ void TextEditor::on_focus_changed(bool gained) {
         // paint() advances caret_blink_time_.
         caret_blink_time_ = 0.0f;
         if (caret_blink_sub_ < 0)
-            if (auto* fc = frame_clock())
+            if (auto* fc = frame_clock()) {
+                caret_blink_clock_ = fc;  // cache so we can always unsubscribe later
                 caret_blink_sub_ = fc->subscribe([this](float) {
                     request_repaint();
                     return true;
                 });
+            }
     } else {
-        if (caret_blink_sub_ >= 0)
-            if (auto* fc = frame_clock()) fc->unsubscribe(caret_blink_sub_);
+        if (caret_blink_sub_ >= 0 && caret_blink_clock_)
+            caret_blink_clock_->unsubscribe(caret_blink_sub_);
         caret_blink_sub_ = -1;
+        caret_blink_clock_ = nullptr;
         request_repaint();  // clear the caret now that focus is lost
     }
 }

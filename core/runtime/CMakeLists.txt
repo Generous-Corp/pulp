@@ -173,9 +173,15 @@ if(TARGET mbedcrypto)
     target_include_directories(pulp-runtime PRIVATE
         ${mbedtls_SOURCE_DIR}/include
     )
-    # Enable HTTPS in cpp-httplib via the mbedTLS backend (used by the streaming
-    # model downloader, model_download.cpp). No OpenSSL dependency.
-    target_compile_definitions(pulp-runtime PRIVATE CPPHTTPLIB_MBEDTLS_SUPPORT)
+    # Enable HTTPS in cpp-httplib via the mbedTLS backend ONLY for the streaming
+    # model downloader (model_download.cpp). Scoping the define to that one
+    # source file avoids flipping every other httplib consumer in pulp-runtime
+    # onto the TLS code path and changing existing HTTP helper behavior. No
+    # OpenSSL dependency.
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/model_download.cpp
+        PROPERTIES COMPILE_DEFINITIONS CPPHTTPLIB_MBEDTLS_SUPPORT
+    )
     if(APPLE)
         # httplib's mbedTLS path loads system trust anchors from the macOS keychain
         # via the Security framework.

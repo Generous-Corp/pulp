@@ -103,7 +103,8 @@ InstallModelResult install_model(const ModelEntry& model, std::string_view subsy
                                  const std::filesystem::path& pulp_home_override = {});
 
 /// Delete an installed model's files + metadata. Clears the active selection if it pointed
-/// here. Returns false (with `error` set) on failure; true if removed or already absent.
+/// here. Returns false (with `error` set) on a filesystem error or invalid input, and false
+/// (no error) when nothing was present to remove; true only when files/metadata were deleted.
 bool remove_model(std::string_view subsystem, std::string_view model_id, std::string& error,
                   const std::filesystem::path& pulp_home_override = {});
 

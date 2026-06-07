@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/canvas/canvas.hpp>
+
+#include <memory>
 
 using namespace pulp::view;
 using namespace pulp::canvas;
@@ -709,4 +712,33 @@ TEST_CASE("TextEditor multi-line wheel clamps scroll offset before hit testing",
     editor.on_mouse_event(click);
     REQUIRE(editor.caret_pos() >= 0);
     REQUIRE(editor.caret_pos() <= static_cast<int>(editor.text().size()));
+}
+
+TEST_CASE("TextEditor caret-blink subscription is removed even after detach", "[view][text_editor]") {
+    // Regression: the caret-blink frame-clock subscription must be torn down on
+    // destruction even when the editor was removed from the view tree first.
+    // frame_clock() walks parent_, so a detached editor can't find its clock; the
+    // editor caches the clock pointer at subscribe time so it can always
+    // unsubscribe. If it doesn't, the clock holds a callback capturing a destroyed
+    // `this` and the next tick() is a use-after-free.
+    FrameClock clock;
+
+    auto parent = std::make_unique<View>();
+    parent->set_frame_clock(&clock);
+
+    auto editor_owned = std::make_unique<TextEditor>();
+    TextEditor* editor = editor_owned.get();
+    parent->add_child(std::move(editor_owned));
+
+    editor->on_focus_changed(true);                 // subscribes to the clock
+    REQUIRE(clock.has_active_subscribers());
+
+    // Detach from the tree BEFORE destruction — now frame_clock() would return null.
+    auto detached = parent->remove_child(editor);
+    REQUIRE(detached != nullptr);
+    detached.reset();                               // destroy the editor
+
+    REQUIRE_FALSE(clock.has_active_subscribers());  // subscription cleaned up
+    clock.tick(0.016f);                             // must not touch freed memory
+    SUCCEED("tick after destruction did not use freed memory");
 }
