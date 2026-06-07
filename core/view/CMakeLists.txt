@@ -609,6 +609,10 @@ elseif(WIN32)
             src/screenshot_skia.cpp
             platform/win/plugin_view_host_win.cpp
         )
+        # The native HWND host supplies register_platform_plugin_view_host();
+        # tell the stub not to compile its no-op default (one definition).
+        set_source_files_properties(src/plugin_view_host_stub.cpp PROPERTIES
+            COMPILE_DEFINITIONS PULP_HAS_PLATFORM_PLUGIN_VIEW_HOST=1)
     endif()
     # Workstream 04 #247 phase 1: UIAutomationCore for
     # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
@@ -641,6 +645,10 @@ elseif(UNIX)
             target_link_libraries(pulp-view-core PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-view-core PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_X11=1)
+            # The native X11 host supplies register_platform_plugin_view_host();
+            # tell the stub not to compile its no-op default (one definition).
+            set_source_files_properties(src/plugin_view_host_stub.cpp PROPERTIES
+                COMPILE_DEFINITIONS PULP_HAS_PLATFORM_PLUGIN_VIEW_HOST=1)
         else()
             message(STATUS "Pulp: X11 not found — Linux PluginViewHost limited to headless render")
         endif()
