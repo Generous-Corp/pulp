@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03690"></a>
+## [0.369.0] - 2026-06-07
+
+- fix(design-import): suppress the baked selected-tab highlight (no double-pill) ([#3544](https://github.com/danielraffel/pulp/pull/3544))
+- chore: de-brand the design-import example; credit ELYSIUM as a test reference ([#3527](https://github.com/danielraffel/pulp/pull/3527))
+
 <a id="v03680"></a>
 ## [0.368.0] - 2026-06-07
 
@@ -3814,6 +3820,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.369.0]: https://github.com/danielraffel/pulp/releases/tag/v0.369.0
 [0.368.0]: https://github.com/danielraffel/pulp/releases/tag/v0.368.0
 [0.367.0]: https://github.com/danielraffel/pulp/releases/tag/v0.367.0
 [0.366.0]: https://github.com/danielraffel/pulp/releases/tag/v0.366.0
