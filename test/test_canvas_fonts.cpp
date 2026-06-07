@@ -495,4 +495,83 @@ TEST_CASE("SkiaCanvas::text_x_for_byte reads caret x off the shaped run",
     REQUIRE(caret_after_A < av_full);
 }
 
+// ── Variable-font weight instancing + SkParagraph bridge ────────────────────
+//
+// Root cause fixed here: imported designs register fonts via register_font,
+// but Label text rasterizes through SkParagraph whose FontCollection never
+// saw user-registered fonts (only the emoji typeface). And variable fonts
+// were pinned to their single default instance, so font-weight was ignored.
+//
+// PULP_TEST_VARIABLE_FONT_PATH points at Funnel Display (wght axis 300-800,
+// default 300) — a deterministic variable font shipped for tests only.
+
+#ifndef PULP_TEST_VARIABLE_FONT_PATH
+#error "PULP_TEST_VARIABLE_FONT_PATH must be defined by test/CMakeLists.txt"
+#endif
+
+TEST_CASE("face_wght_axis reports variable wght axis; false for static fonts",
+          "[canvas][skia][fonts][variable-weight]") {
+    auto mgr = test_platform_font_mgr();
+    if (!mgr) return;  // platform without a font manager (Linux test build)
+
+    // A static face (bundled Inter Regular) has no variation axes.
+    auto inter = pulp::canvas::match_bundled_typeface(
+        mgr.get(), "Inter", SkFontStyle::Normal());
+    REQUIRE(inter);
+    float lo = -1, hi = -1, def = -1;
+    REQUIRE_FALSE(pulp::canvas::face_wght_axis(inter.get(), lo, hi, def));
+
+    // The Funnel Display variable face exposes a wght axis 300..800.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             "PulpVarTest-FunnelDisplay"));
+    auto var = pulp::canvas::match_registered_typeface(
+        "PulpVarTest-FunnelDisplay", SkFontStyle::Normal());
+    REQUIRE(var);
+    float vmin = 0, vmax = 0, vdef = 0;
+    REQUIRE(pulp::canvas::face_wght_axis(var.get(), vmin, vmax, vdef));
+    REQUIRE(vmin == Catch::Approx(300.0f));
+    REQUIRE(vmax == Catch::Approx(800.0f));
+}
+
+TEST_CASE("match_registered_typeface returns a variable face for an "
+          "out-of-tolerance weight (instead of dropping to fallback)",
+          "[canvas][skia][fonts][variable-weight]") {
+    // The static-font matcher rejects a weight gap > 200 so the cascade can
+    // walk on to a real system Bold. A VARIABLE face must NOT be rejected —
+    // it can render the requested weight via its wght axis, so the matcher
+    // returns the base variable face for the resolver to instance.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             "PulpVarTest-Funnel700"));
+    // Funnel Display's default instance is wght 300. A 700 request is a
+    // gap of 400 — far past the 200-unit static tolerance. A static font
+    // would return nullptr here; the variable font must still resolve.
+    SkFontStyle heavy{700, SkFontStyle::kNormal_Width,
+                      SkFontStyle::kUpright_Slant};
+    auto face = pulp::canvas::match_registered_typeface(
+        "PulpVarTest-Funnel700", heavy);
+    REQUIRE(face);  // variable eligibility, not a fallback
+}
+
+TEST_CASE("registered fonts are visible to the SkParagraph font collection",
+          "[canvas][skia][fonts][variable-weight]") {
+    // The bug: register_font populated only the FontResolver/fillText path;
+    // SkParagraph (every Label) resolved through its own FontCollection and
+    // never saw user fonts. registered_typefaces_snapshot() is the bridge
+    // that font_collection() iterates — assert a registered family shows up.
+    const std::string family = "PulpVarTest-SnapshotProbe";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             family));
+    auto snap = pulp::canvas::registered_typefaces_snapshot();
+    bool found = false;
+    for (const auto& r : snap) {
+        if (r.family == family && r.typeface) { found = true; break; }
+    }
+    REQUIRE(found);
+    // font_collection() iterates this snapshot to register user fonts into
+    // its TypefaceFontProvider — the snapshot being correct is the bridge.
+    // (The collection rebuild itself is exercised end-to-end by the embed
+    // smoke + import-design --validate render, which route Label text
+    // through SkParagraph.)
+}
+
 #endif  // PULP_HAS_SKIA
