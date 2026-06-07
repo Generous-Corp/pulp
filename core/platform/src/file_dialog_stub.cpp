@@ -14,6 +14,17 @@
 
 #include <mutex>
 
+// On Linux a real built-in backend exists: the xdg-desktop-portal bridge
+// (file_dialog_portal_linux.cpp). A host opts in by calling
+// FileDialog::install_native_backend() at startup — we do NOT auto-install,
+// because a portal call raises a real (blocking) dialog and unit tests /
+// headless callers must keep the documented "no backend → no selection"
+// contract. install_native_backend() references the portal factory, which
+// also force-links that TU.
+#if defined(__linux__)
+#include <pulp/platform/dbus.hpp>
+#endif
+
 // TargetConditionals provides TARGET_OS_OSX / TARGET_OS_IOS macros
 // so has_backend() can narrow its unconditional-true to macOS only
 // (Apple has no built-in file_dialog impl on iOS yet — #316 P2).
@@ -22,6 +33,13 @@
 #endif
 
 namespace pulp::platform {
+
+#if defined(__linux__)
+// Defined in platform/linux/file_dialog_portal_linux.cpp. Referencing it here
+// forces that TU to link (static-lib object files with only static
+// initializers can otherwise be dropped).
+FileDialog::Backend make_linux_portal_backend();
+#endif
 
 namespace {
     std::mutex           g_backend_mu;
@@ -33,6 +51,24 @@ void FileDialog::set_backend(Backend backend) {
     std::lock_guard lock(g_backend_mu);
     g_backend = std::move(backend);
     g_backend_installed = true;
+}
+
+bool FileDialog::install_native_backend() {
+    // Opt-in install of the platform's built-in backend. Linux: the
+    // xdg-desktop-portal bridge, available only when libdbus is loadable.
+    // Idempotent — leaves an already-installed (incl. host-set) backend in
+    // place. No-op elsewhere (macOS has a compiled-in native impl; iOS,
+    // Windows, and Android have no built-in backend yet).
+#if defined(__linux__)
+    std::lock_guard lock(g_backend_mu);
+    if (g_backend_installed) return true;
+    if (!DBus::library_available()) return false;
+    g_backend = make_linux_portal_backend();
+    g_backend_installed = true;
+    return true;
+#else
+    return has_backend();
+#endif
 }
 
 void FileDialog::clear_backend() {

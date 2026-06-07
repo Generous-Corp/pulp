@@ -5,6 +5,7 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/platform/file_dialog.hpp>
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -292,6 +293,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         stop();
         return false;
     }
+
+    // Opt into the platform's built-in file-dialog backend so editor file
+    // pickers work natively. No-op on macOS (compiled-in impl); on Linux this
+    // installs the xdg-desktop-portal bridge when libdbus is available.
+    platform::FileDialog::install_native_backend();
 
     std::string editor_error;
     auto bridge = std::make_unique<ViewBridge>(
