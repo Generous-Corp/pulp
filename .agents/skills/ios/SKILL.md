@@ -321,6 +321,16 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 - **Detach on close** — plugin-editor child views must be explicitly detached
   in `on_view_closed()`/destructors just like standalone window-hosted child
   views; the host clears propagated references when subtrees are removed.
+- **Gate `notify_attached()` on `is_attached()`, never assume attach
+  succeeded** — `PluginViewHost` exposes `is_attached() const noexcept` and
+  `[[nodiscard]] try_attach_to_parent(...)`. The iOS hosts override
+  `is_attached()` with the truthful native check (`view_.superview != nil`,
+  and `metal_view_.superview != nil` for the GPU host). A foreign or
+  AUv3 embedder must call `try_attach_to_parent()` (or check `is_attached()`
+  after `attach_to_parent()`) before firing `ViewBridge::notify_attached()` —
+  firing it when the parent rejected the view leaves the editor open/close
+  lifecycle unbalanced. The base default is conservative (`false`), so a host
+  that has not opted in never reports a phantom attach. Query on the UI thread.
 - **Standalone `WindowHost` now reports live content bounds on iOS** —
   `window_host_ios.mm` exposes `WindowHost::get_content_size()` and
   `set_resize_callback(...)` on both the CPU and Metal hosts, driven from
