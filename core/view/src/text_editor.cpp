@@ -675,13 +675,13 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         line_snap.baseline_y = text_y;
         line_snap.line_height = metrics.line_height > 0.f ? metrics.line_height : font_size_;
         line_snap.inner_x = visual_inner_x;
+        // Caret/selection x from the SHAPED run (text_x_for_byte), not a sum of
+        // isolated glyph widths — the per-char sum drifts on kerned/spaced runs,
+        // which showed as extra space after the last char + padding around a
+        // selection. text_x_for_byte queries the same shaping the painter draws.
         line_snap.x_offsets.resize(display.size() + 1);
-        line_snap.x_offsets[0] = 0.f;
-        float cum = 0.f;
-        for (size_t j = 0; j < display.size(); ++j) {
-            cum += canvas.measure_text(std::string(1, display[j]));
-            line_snap.x_offsets[j + 1] = cum;
-        }
+        for (size_t j = 0; j <= display.size(); ++j)
+            line_snap.x_offsets[j] = canvas.text_x_for_byte(display, j);
         last_layout_.lines.push_back(std::move(line_snap));
         last_layout_key_ = key;
     } else if (!last_layout_.lines.empty()) {
@@ -771,7 +771,9 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         caret_blink_time_ += 1.0f / 60.0f;  // approximate frame time
         bool caret_visible = std::fmod(caret_blink_time_, 1.06f) < 0.53f;
         if (caret_visible || has_selection()) {
-            float caret_x = text_x + canvas.measure_text(display.substr(0, static_cast<size_t>(caret_position_)));
+            // Use the shaped offsets (same as the drawn text), not measure_text of
+            // a prefix substring — keeps the caret exactly at the glyph boundary.
+            float caret_x = text_x + x_at(caret_position_);
             canvas.set_stroke_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
             canvas.set_line_width(1.5f);
             canvas.stroke_line(caret_x, b.y + 4, caret_x, b.y + b.height - 4);

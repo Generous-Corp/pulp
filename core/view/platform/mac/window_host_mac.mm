@@ -627,6 +627,13 @@ static void install_app_menu(NSString* appName) {
             }
         }
             [self setNeedsDisplay:YES];
+            // A click can kick off a widget animation (e.g. a Toggle's thumb
+            // slide, a Knob detent). mouseDown only paints one frame, so without
+            // starting the 60fps driver here the animation would not advance until
+            // some later unrelated event repaints — which reads as a "stuck" /
+            // slow-to-respond control. The timer self-invalidates once no widget
+            // animation remains active (see -startAnimationTimerIfNeeded).
+            [self startAnimationTimerIfNeeded];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost mouseDown error: " << e.what() << "\n";
         } catch (...) {
