@@ -88,7 +88,15 @@ TEST_CASE("capture_view accepts a sparse-but-real UI (content-floor leniency)",
     View root;
     root.set_theme(Theme::dark());
     auto chip = std::make_unique<View>();
-    chip->set_bounds({4.0f, 4.0f, 80.0f, 40.0f});  // 3200 / 240000 ≈ 1.3% of 600x400
+    // Size the chip through the flex layout, not set_bounds: capture_view runs
+    // layout_children() (Yoga), which computes child bounds from flex styles and
+    // overrides any set_bounds on a child — so a set_bounds chip lays out to 0x0
+    // and never paints, making the frame genuinely blank (the failure this test
+    // was hitting). An explicit preferred width/height survives the layout pass.
+    // 80x40 = 3200 / 240000 ≈ 1.3% of 600x400 — well under the strict 5%
+    // non-background floor, so this still guards the content-floor leniency.
+    chip->flex().preferred_width = 80.0f;
+    chip->flex().preferred_height = 40.0f;
     chip->set_background_gradient_linear(
         0.0f, 0.0f, 1.0f, 1.0f,
         {pulp::canvas::Color::rgba8(240, 120, 60), pulp::canvas::Color::rgba8(80, 200, 250)},
