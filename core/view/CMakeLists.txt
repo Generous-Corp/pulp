@@ -419,6 +419,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/list_style_api.cpp
     src/widget_bridge/metadata_api.cpp
     src/widget_bridge/platform_services_api.cpp
+    src/widget_bridge/runtime_import_api.cpp
     src/widget_bridge/state_binding_api.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp

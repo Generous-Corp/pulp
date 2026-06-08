@@ -2,8 +2,8 @@
 # Columns: name<TAB>category<TAB>kind<TAB>source
 # category must be one of the allowlist in test_widget_bridge_api_contracts.cpp.
 name	category	kind	source
-__pulpRuntimeImport__	runtime_import	function	core/view/src/widget_bridge.cpp
-__pulpRuntimeSettle__	runtime_import	function	core/view/src/widget_bridge.cpp
+__pulpRuntimeImport__	runtime_import	function	core/view/src/widget_bridge/runtime_import_api.cpp
+__pulpRuntimeSettle__	runtime_import	function	core/view/src/widget_bridge/runtime_import_api.cpp
 createKnob	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createFader	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createToggle	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
