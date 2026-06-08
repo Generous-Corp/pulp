@@ -478,3 +478,50 @@ TEST_CASE("Linux packaging reports the host Debian architecture",
         else if (m == "aarch64" || m == "arm64") REQUIRE(arch == "arm64");
     }
 }
+
+TEST_CASE("Linux AppImage packaging fails closed on bad inputs",
+          "[ship][linux-package][appimage]") {
+    TempDir dir("appimage-bad");
+    const auto out = dir.path / "out.AppImage";
+
+    // Missing executable → honest false, regardless of appimagetool presence.
+    REQUIRE_FALSE(pulp::ship::create_appimage(
+        "App", "1.0.0", (dir.path / "does-not-exist").string(), out.string()));
+
+    // Empty app name → honest false.
+    auto exe = dir.path / "bin" / "App";
+    write_file(exe, "#!/bin/sh\necho hi\n");
+    REQUIRE_FALSE(pulp::ship::create_appimage("", "1.0.0", exe.string(), out.string()));
+
+    // No AppImage should have been produced on the failure paths.
+    REQUIRE_FALSE(fs::exists(out));
+}
+
+TEST_CASE("Linux AppImage packaging builds a real AppImage when appimagetool is present",
+          "[ship][linux-package][appimage]") {
+    if (!command_available("appimagetool")) {
+        // No appimagetool on PATH → create_appimage must honest-fail (false),
+        // not crash or leave a stray AppDir. The real round-trip is exercised
+        // on the tartci VM where appimagetool is installed.
+        TempDir dir("appimage-absent");
+        auto exe = dir.path / "Demo";
+        write_file(exe, "#!/bin/sh\nexit 0\n");
+        const auto out = dir.path / "Demo.AppImage";
+        REQUIRE_FALSE(pulp::ship::create_appimage("Demo", "1.0.0", exe.string(), out.string()));
+        REQUIRE_FALSE(fs::exists(out));
+        REQUIRE_FALSE(fs::exists(dir.path / "Demo.AppDir"));  // staging cleaned up
+        SUCCEED("appimagetool not installed — honest-fail path verified");
+        return;
+    }
+
+    TempDir dir("appimage-ok");
+    auto exe = dir.path / "Demo";
+    write_file(exe, "#!/bin/sh\nexit 0\n");
+    const auto out = dir.path / "Demo.AppImage";
+
+    REQUIRE(pulp::ship::create_appimage("Demo", "3.2.1", exe.string(), out.string()));
+    REQUIRE(fs::exists(out));
+    REQUIRE(fs::file_size(out) > 0);
+    // The transient AppDir is removed after packaging.
+    REQUIRE_FALSE(fs::exists(dir.path / "Demo.AppDir"));
+}

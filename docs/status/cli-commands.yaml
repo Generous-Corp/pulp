@@ -135,6 +135,15 @@ commands:
             required: false
           - name: --per-user
             required: false
+          - name: --format
+            required: false
+            description: "Linux packaging format selector; `appimage` wraps a standalone executable into a single-file AppImage"
+          - name: --binary
+            required: false
+            description: "Linux AppImage: path to the standalone executable to wrap (required with --format appimage)"
+          - name: --icon
+            required: false
+            description: "Linux AppImage: optional .png icon (a placeholder is used when omitted)"
       - name: appcast
         summary: Generate Sparkle-compatible XML update feed
         args:

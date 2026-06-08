@@ -106,6 +106,112 @@ bool create_tar_gz(const std::string& plugin_name,
     return exec_status(cmd) == 0;
 }
 
+namespace {
+
+// appimagetool's ARCH value for the architecture this code was compiled for
+// (distinct from Debian's naming used by debian_architecture()).
+const char* appimage_arch() {
+#if defined(__aarch64__)
+    return "aarch64";
+#elif defined(__x86_64__)
+    return "x86_64";
+#elif defined(__arm__)
+    return "armhf";
+#elif defined(__i386__)
+    return "i686";
+#else
+    return "x86_64";
+#endif
+}
+
+// A 1×1 transparent PNG (67 bytes). appimagetool requires an icon matching the
+// .desktop Icon= key; we ship this placeholder when the caller provides none so
+// the build never fails purely for lack of an icon.
+const unsigned char kPlaceholderPng[] = {
+    0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+    0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x06,0x00,0x00,0x00,0x1F,0x15,0xC4,
+    0x89,0x00,0x00,0x00,0x0A,0x49,0x44,0x41,0x54,0x78,0x9C,0x63,0x00,0x01,0x00,0x00,
+    0x05,0x00,0x01,0x0D,0x0A,0x2D,0xB4,0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,
+    0x42,0x60,0x82};
+
+}  // namespace
+
+bool create_appimage(const std::string& app_name,
+                     const std::string& version,
+                     const std::string& exe_path,
+                     const std::string& output_path,
+                     const std::string& icon_path) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // The standalone binary must exist; everything else we synthesize.
+    if (app_name.empty() || !fs::exists(exe_path)) return false;
+
+    auto appdir = fs::path(output_path).parent_path() / (app_name + ".AppDir");
+    fs::remove_all(appdir, ec);
+    auto bindir = appdir / "usr" / "bin";
+    fs::create_directories(bindir, ec);
+    if (ec) return false;
+
+    // usr/bin/<app> — the standalone executable.
+    auto dest_exe = bindir / app_name;
+    fs::copy_file(exe_path, dest_exe, fs::copy_options::overwrite_existing, ec);
+    if (ec) { fs::remove_all(appdir, ec); return false; }
+    fs::permissions(dest_exe,
+                    fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                        fs::perms::others_read | fs::perms::others_exec,
+                    fs::perm_options::replace, ec);
+
+    // AppRun — the entry point AppImage executes; resolves its own dir so the
+    // bundle is relocatable.
+    {
+        std::ofstream apprun(appdir / "AppRun");
+        if (!apprun) { fs::remove_all(appdir, ec); return false; }
+        apprun << "#!/bin/sh\n"
+               << "HERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\n"
+               << "exec \"$HERE/usr/bin/" << app_name << "\" \"$@\"\n";
+    }
+    fs::permissions(appdir / "AppRun",
+                    fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                        fs::perms::others_read | fs::perms::others_exec,
+                    fs::perm_options::replace, ec);
+
+    // Top-level desktop entry (appimagetool requires one; Icon= must match the
+    // icon basename at the AppDir root).
+    {
+        std::ofstream desktop(appdir / (app_name + ".desktop"));
+        if (!desktop) { fs::remove_all(appdir, ec); return false; }
+        desktop << "[Desktop Entry]\n"
+                << "Type=Application\n"
+                << "Name=" << app_name << "\n"
+                << "Exec=" << app_name << "\n"
+                << "Icon=" << app_name << "\n"
+                << "Categories=AudioVideo;Audio;\n"
+                << "Terminal=false\n"
+                << "Comment=" << app_name << " " << version << "\n";
+    }
+
+    // Icon: a caller-supplied .png, else the placeholder. .DirIcon is the
+    // AppImage thumbnail; appimagetool also wants <Icon>.png at the root.
+    auto root_icon = appdir / (app_name + ".png");
+    if (!icon_path.empty() && fs::exists(icon_path)) {
+        fs::copy_file(icon_path, root_icon, fs::copy_options::overwrite_existing, ec);
+    } else {
+        std::ofstream png(root_icon, std::ios::binary);
+        png.write(reinterpret_cast<const char*>(kPlaceholderPng), sizeof(kPlaceholderPng));
+    }
+    fs::copy_file(root_icon, appdir / ".DirIcon", fs::copy_options::overwrite_existing, ec);
+
+    // appimagetool turns the AppDir into a single-file AppImage. Honest-fail
+    // when it isn't installed (it is not vendored).
+    std::string cmd = "ARCH=" + std::string(appimage_arch()) +
+                      " appimagetool --no-appstream \"" + appdir.string() + "\" \"" +
+                      output_path + "\"";
+    const int rc = exec_status(cmd);
+    fs::remove_all(appdir, ec);
+    return rc == 0;
+}
+
 } // namespace pulp::ship
 
 #endif // __linux__

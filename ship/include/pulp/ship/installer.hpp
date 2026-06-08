@@ -71,4 +71,15 @@ bool create_tar_gz(const std::string& plugin_name,
                    const std::string& build_dir,
                    const std::string& output_path);
 
+// Wrap a standalone executable into a single-file AppImage. `exe_path` is the
+// built standalone binary; `icon_path` is an optional .png (a placeholder is
+// used when empty). Requires `appimagetool` on PATH — returns false honestly
+// when it (or the executable) is absent. Linux-only; defined in
+// ship/platform/linux/package_linux.cpp.
+bool create_appimage(const std::string& app_name,
+                     const std::string& version,
+                     const std::string& exe_path,
+                     const std::string& output_path,
+                     const std::string& icon_path = "");
+
 } // namespace pulp::ship
