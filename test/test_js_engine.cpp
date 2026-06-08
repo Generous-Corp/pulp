@@ -376,6 +376,36 @@ TEST_CASE("JsEngine runtime/provider identity defaults are empty for non-V8 back
     }
 }
 
+TEST_CASE("ScriptEngine forwards runtime/provider identity to the active backend",
+          "[js_engine][identity][script_engine]") {
+    // ScriptEngine's identity accessors are thin pass-throughs to the wrapped
+    // JsEngine. Exercise them through the wrapper (not just the raw engine) so
+    // the forwarding layer is covered, and assert it agrees with the backend it
+    // wraps. For non-V8 backends the identity surface is empty; for a linked V8
+    // the wrapper must report exactly what the underlying engine reports.
+    for (auto type : {JsEngineType::quickjs, JsEngineType::jsc, JsEngineType::v8}) {
+        if (!is_engine_available(type))
+            continue;
+        DYNAMIC_SECTION("engine=" << engine_type_name(type)) {
+            ScriptEngine script(type);
+            const auto& engine = script.engine();
+            CHECK(script.engine_type() == type);
+            CHECK(script.runtime_version() == engine.runtime_version());
+            CHECK(script.provider_kind() == engine.provider_kind());
+            CHECK(script.provider_path() == engine.provider_path());
+            CHECK(script.expected_runtime_version() ==
+                  engine.expected_runtime_version());
+            if (type == JsEngineType::v8) {
+                CHECK_FALSE(script.runtime_version().empty());
+                CHECK_FALSE(script.provider_kind().empty());
+            } else {
+                CHECK(script.runtime_version().empty());
+                CHECK(script.provider_kind().empty());
+            }
+        }
+    }
+}
+
 TEST_CASE("V8 engine reports a non-empty runtime version and provider identity",
           "[js_engine][identity][v8]") {
     // Runtime-gated (not #ifdef): PULP_HAS_V8 is private to pulp-view-script, so
