@@ -252,9 +252,9 @@ setBoxShadow	css_style	function	core/view/src/widget_bridge.cpp
 clearBoxShadow	css_style	function	core/view/src/widget_bridge.cpp
 beginPath	canvas2d	function	core/view/src/widget_bridge.cpp
 drawPath	canvas2d	function	core/view/src/widget_bridge.cpp
-compileShader	shader	function	core/view/src/widget_bridge.cpp
-setWidgetShader	shader	function	core/view/src/widget_bridge.cpp
-clearWidgetShader	shader	function	core/view/src/widget_bridge.cpp
+compileShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
+setWidgetShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
+clearWidgetShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
 setWidgetSchema	widget_schema	function	core/view/src/widget_bridge/widget_schema_api.cpp
 setWidgetLottie	widget_schema	function	core/view/src/widget_bridge/widget_schema_api.cpp
 seekWidgetLottie	widget_schema	function	core/view/src/widget_bridge/widget_schema_api.cpp
@@ -337,7 +337,7 @@ canvasPutImageData	canvas2d	function	core/view/src/widget_bridge.cpp
 registerDrop	events	function	core/view/src/widget_bridge.cpp
 loadFont	storage_assets	function	core/view/src/widget_bridge.cpp
 registerFont	storage_assets	function	core/view/src/widget_bridge.cpp
-applyShader	shader	function	core/view/src/widget_bridge.cpp
+applyShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
 getGPUInfo	gpu	function	core/view/src/widget_bridge.cpp
 navigatorGPU	gpu	host_object	core/view/src/widget_bridge.cpp
 __describeNativeAdapterImpl	gpu	function	core/view/src/widget_bridge.cpp

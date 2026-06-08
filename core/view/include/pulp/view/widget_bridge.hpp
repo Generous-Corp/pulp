@@ -311,6 +311,8 @@ private:
     void register_list_style_api();
     void register_state_binding_api();
     void register_svg_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_shader_widget_api();
+    void register_shader_canvas_api();
     void register_theme_api();
     void register_tokens_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_schema_api();
