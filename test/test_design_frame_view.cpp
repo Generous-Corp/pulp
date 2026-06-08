@@ -347,6 +347,38 @@ TEST_CASE("DesignStepper renders and the value changes with selection",
     CHECK(cmp.similarity < 0.999f);
 }
 
+TEST_CASE("DesignStepper with a single option paints nothing (no double-text over the baked label)",
+          "[view][design-import][frame][overlay][svg]") {
+    // A header stepper detected from a baked `< value >` whose source has only
+    // the one shown value has nowhere to step. Re-drawing its chevrons + value
+    // would double them on top of the design's baked label. So a 1-option
+    // stepper must paint NOTHING (let the baked SVG show through); a multi-option
+    // one paints its live value. Render both on a transparent surface and
+    // compare painted content.
+    DesignStepper one({"Reverb"}, 0);
+    DesignStepper many({"Reverb", "Delay", "Chorus"}, 0);
+    one.set_bounds({0, 0, 80, 24});
+    many.set_bounds({0, 0, 80, 24});
+
+    auto one_png = render_to_png(one, 80, 24, 2.0f, ScreenshotBackend::skia);
+    if (one_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto many_png = render_to_png(many, 80, 24, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(many_png.empty());
+
+    const auto one_stats = analyze_screenshot_content(one_png);
+    const auto many_stats = analyze_screenshot_content(many_png);
+    REQUIRE(one_stats.valid);
+    REQUIRE(many_stats.valid);
+    // Multi-option stepper paints text (chevrons + value) → many colors. If even
+    // that is blank, the raster lane no-ops text; skip rather than false-pass.
+    if (many_stats.unique_colors <= 2)
+        SKIP("native raster unavailable in this build");
+    // The single-option stepper drew nothing: a near-uniform (transparent)
+    // frame, strictly fewer colors than the multi-option one.
+    CHECK(one_stats.unique_colors <= 2);
+    CHECK(one_stats.unique_colors < many_stats.unique_colors);
+}
+
 TEST_CASE("suppress_svg_rect removes the baked tab highlight by geometry, not rx/cx",
           "[view][design-import][frame][svg]") {
     // Values from a real exported frame: the selected-tab highlight is a filled

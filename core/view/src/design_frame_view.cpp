@@ -447,6 +447,12 @@ const std::string& DesignStepper::current() const {
 void DesignStepper::paint(canvas::Canvas& canvas) {
     const auto b = local_bounds();
     if (options_.empty() || b.width <= 0 || b.height <= 0) return;
+    // A single option has nowhere to step: there is no live value to show beyond
+    // what the design already baked. Painting the chevrons + value here would
+    // double them on top of the baked header (the "doubled header text" bug). Let
+    // the baked SVG show through untouched; the overlay stays as a (no-op) hit
+    // target so a future multi-option list lights it up without re-importing.
+    if (options_.size() <= 1) return;
     const float font = std::min(b.height * 0.5f, 12.0f);
     canvas.set_font("Inter", font);
     const float ty = b.height * 0.5f + font * 0.34f;  // baseline ~vertical center
