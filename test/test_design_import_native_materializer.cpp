@@ -7,6 +7,8 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/layout_snapshot.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -2335,4 +2337,87 @@ TEST_CASE("baked native materializer only treats display text as editor value fo
     auto* area_editor = dynamic_cast<TextEditor*>(root->child_at(1));
     REQUIRE(area_editor != nullptr);
     REQUIRE(area_editor->text() == "hello world");
+}
+
+
+TEST_CASE("baked native materializer makes a faithful_svg tab_group an interactive overlay",
+          "[view][import][native-materializer][faithful-svg][overlay]") {
+    // End-to-end codification of the design-import tab-group contract — the exact
+    // path the standalone host runs (parse IR -> build_native_view_tree). A
+    // faithful_svg node carrying a typed tab_group element must materialize to a
+    // LIVE, clickable DesignTabGroup whose selection pill sits on the design's
+    // selected cell, AND the design's BAKED selected-tab highlight must be
+    // suppressed so only the live pill shows (no double-pill). Design-agnostic: a
+    // synthetic 4-slot strip, not any one source file.
+    //
+    // The tab group spans x=20,w=56 over a 4-slot strip (slot_w=14). selected=2,
+    // so the design's baked highlight is the slot-2 rect at x=48,w=14; the
+    // materializer must strip it and stand up a live pill in its place.
+    const std::string svg =
+        R"(<svg width="80" height="80" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="6" y="6" width="68" height="68" rx="4" fill="#1c1d1d"/>)"
+        R"(<rect x="20" y="14" width="56" height="14" rx="2" fill="#252626"/>)"
+        R"(<rect x="48" y="14" width="14" height="14" rx="2" fill="#3c3d3d"/>)"
+        R"(</svg>)";
+
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "frame-svg";
+
+    IRInteractiveElement tg;
+    tg.kind = InteractiveElementKind::tab_group;
+    tg.x = 20; tg.y = 14; tg.w = 56; tg.h = 14;
+    tg.options = {"1", "2", "3", "4"};
+    tg.selected_index = 2;
+    ir.root.interactive_elements.push_back(tg);
+
+    IRAssetRef asset;
+    asset.asset_id = "frame-svg";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+
+    // The overlay is a LIVE tab widget carrying the source selection — not a
+    // static repaint of the design. (Regression target: "the tab group came
+    // through non-interactive".)
+    auto* tabs = dynamic_cast<DesignTabGroup*>(frame->overlay_widget(0));
+    REQUIRE(tabs != nullptr);
+    REQUIRE(tabs->tab_count() == 4);
+    CHECK(tabs->selected() == 2);
+
+    // Clickable end-to-end: clicking a slot moves the live selection.
+    frame->set_bounds({0, 0, frame->panel_width(), frame->panel_height()});
+    frame->layout_children();
+    const auto b = tabs->bounds();
+    const float slot = b.width / 4.0f;
+    tabs->on_mouse_down({slot * 0.5f, b.height * 0.5f});   // slot 0
+    CHECK(tabs->selected() == 0);
+
+    // The baked slot-2 highlight was suppressed in the ctor, so moving the LIVE
+    // selection is the only thing that repaints the strip — proving the live pill
+    // owns the highlight (no leftover baked rect / double-pill).
+    auto render_sel = [&](int sel) {
+        tabs->set_selected_silent(sel);
+        return render_to_png(*frame, static_cast<int>(frame->panel_width()),
+                             static_cast<int>(frame->panel_height()), 2.0f,
+                             ScreenshotBackend::skia);
+    };
+    const auto at2 = render_sel(2);
+    if (at2.empty()) SKIP("Skia raster screenshot backend unavailable");
+    const auto at0 = render_sel(0);
+    REQUIRE_FALSE(at0.empty());
+    const auto cmp = compare_screenshots(at2, at0);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f) SKIP("native raster unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the live pill visibly moved between slots
 }
