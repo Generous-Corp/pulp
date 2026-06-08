@@ -24,9 +24,11 @@ TEST_CASE("HighResolutionTimer DedicatedThread mode fires callbacks", "[runtime]
     REQUIRE(ticks.load() >= 5);
 }
 
-#ifdef __APPLE__
-TEST_CASE("HighResolutionTimer OsTimerQueue mode fires callbacks on Apple",
-          "[runtime][hrt][apple]") {
+// Apple (dispatch_source) and Windows (high-resolution waitable timer) both back
+// OsTimerQueue with a real OS timer; the path runs on the respective CI lane.
+#if defined(__APPLE__) || defined(_WIN32)
+TEST_CASE("HighResolutionTimer OsTimerQueue mode fires callbacks",
+          "[runtime][hrt][os-timer]") {
     HighResolutionTimer timer;
     std::atomic<int> ticks{0};
     timer.start(std::chrono::milliseconds(2),
@@ -43,7 +45,7 @@ TEST_CASE("HighResolutionTimer OsTimerQueue mode fires callbacks on Apple",
 }
 
 TEST_CASE("HighResolutionTimer OS queue cleans up on destruction",
-          "[runtime][hrt][apple]") {
+          "[runtime][hrt][os-timer]") {
     std::atomic<int> ticks{0};
     {
         HighResolutionTimer timer;
@@ -59,7 +61,8 @@ TEST_CASE("HighResolutionTimer OS queue cleans up on destruction",
 }
 #endif
 
-TEST_CASE("HighResolutionTimer OS queue falls back to dedicated thread off-Apple",
+TEST_CASE("HighResolutionTimer OS queue falls back to dedicated thread "
+          "on platforms without an OS timer queue",
           "[runtime][hrt]") {
     HighResolutionTimer timer;
     std::atomic<int> ticks{0};
@@ -68,7 +71,9 @@ TEST_CASE("HighResolutionTimer OS queue falls back to dedicated thread off-Apple
                 TimerMode::OsTimerQueue);
     REQUIRE(timer.is_running());
 
-#ifndef __APPLE__
+    // Only Linux (and any other platform without an OsTimerQueue backend) falls
+    // back to DedicatedThread; Apple and Windows take their real OS-timer path.
+#if !defined(__APPLE__) && !defined(_WIN32)
     REQUIRE(timer.active_mode() == TimerMode::DedicatedThread);
 #endif
 

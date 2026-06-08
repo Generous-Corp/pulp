@@ -6,6 +6,11 @@
 #elif defined(__linux__)
 #include <sched.h>
 #include <pthread.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #endif
 
 namespace pulp::runtime {
@@ -14,6 +19,18 @@ struct HighResolutionTimer::TimerState {
     std::atomic<bool> running{false};
     std::atomic<bool> thread_ready{false};
     std::function<void()> callback;
+#if defined(_WIN32)
+    // Windows OsTimerQueue handles. Owned here so their lifetime tracks the last
+    // shared_ptr reference — the worker thread and stop() both hold the state, so
+    // whichever drops last closes the handles, avoiding a close-while-in-use race
+    // when a callback stops its own timer.
+    void* win_timer = nullptr;       // HANDLE — high-resolution waitable timer
+    void* win_stop_event = nullptr;  // HANDLE — manual-reset stop event
+    ~TimerState() {
+        if (win_timer) CloseHandle(static_cast<HANDLE>(win_timer));
+        if (win_stop_event) CloseHandle(static_cast<HANDLE>(win_stop_event));
+    }
+#endif
 };
 
 HighResolutionTimer::~HighResolutionTimer() {
@@ -73,8 +90,57 @@ void HighResolutionTimer::start(std::chrono::microseconds interval,
         dispatch_resume(source);
         return;
     }
+#elif defined(_WIN32)
+    if (mode == TimerMode::OsTimerQueue) {
+        // High-resolution waitable timer (Win10 1803+). If the high-res flag
+        // isn't supported, fall through to DedicatedThread so the contract holds.
+        HANDLE timer = CreateWaitableTimerExW(
+            nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        HANDLE stop_ev = timer ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
+        if (timer && stop_ev) {
+            auto state = std::make_shared<TimerState>();
+            state->callback = std::move(callback);
+            state->win_timer = timer;
+            state->win_stop_event = stop_ev;
+            state->running.store(true, std::memory_order_release);
+
+            // microseconds → 100-ns ticks; clamp to >=1 so SetWaitableTimer never
+            // gets a 0 relative due (which would spin).
+            LONGLONG period_100ns = static_cast<LONGLONG>(interval.count()) * 10;
+            if (period_100ns < 1) period_100ns = 1;
+
+            std::thread thread([state, period_100ns]() {
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+                HANDLE t = static_cast<HANDLE>(state->win_timer);
+                HANDLE s = static_cast<HANDLE>(state->win_stop_event);
+                HANDLE handles[2] = {s, t};  // stop event first → wins ties
+                while (state->running.load(std::memory_order_acquire)) {
+                    LARGE_INTEGER due;
+                    due.QuadPart = -period_100ns;  // negative = relative
+                    if (!SetWaitableTimer(t, &due, 0, nullptr, nullptr, FALSE)) break;
+                    DWORD r = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+                    if (r != WAIT_OBJECT_0 + 1) break;  // stop event / error → exit
+                    if (state->running.load(std::memory_order_acquire) && state->callback)
+                        state->callback();
+                }
+                CancelWaitableTimer(t);
+            });
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                state_ = state;
+                thread_ = std::move(thread);
+                active_mode_ = TimerMode::OsTimerQueue;
+                running_.store(true, std::memory_order_release);
+            }
+            return;
+        }
+        // Couldn't create the high-res timer — clean up and fall through.
+        if (stop_ev) CloseHandle(stop_ev);
+        if (timer) CloseHandle(timer);
+    }
 #else
-    (void) mode; // OsTimerQueue falls through to DedicatedThread off-Apple.
+    (void) mode; // OsTimerQueue falls through to DedicatedThread off-Apple/Windows.
 #endif
 
     active_mode_ = TimerMode::DedicatedThread;
@@ -143,6 +209,11 @@ void HighResolutionTimer::stop() {
             state->running.store(false, std::memory_order_release);
             state->thread_ready.store(true, std::memory_order_release);
             state->thread_ready.notify_one();
+#if defined(_WIN32)
+            // Wake the OsTimerQueue worker out of its blocking wait promptly.
+            if (state->win_stop_event)
+                SetEvent(static_cast<HANDLE>(state->win_stop_event));
+#endif
         }
 
         if (thread_.joinable()) {
