@@ -205,6 +205,9 @@ place the API parity break appears. Keep this covered in
 ```bash
 pulp build                                              # Must build first
 pulp ship package --version 1.0.0                       # Creates a .deb (or .tar.gz)
+# Standalone app → single-file AppImage (point --binary at the built executable):
+pulp ship package --version 1.0.0 --format appimage \
+    --binary build/examples/myapp/MyApp_Standalone [--icon myapp.png]
 ```
 
 `pulp ship package` on Linux builds a Debian package from the plugin
@@ -213,15 +216,33 @@ bundles in `build/{VST3,CLAP,LV2}` via `pulp::ship::create_deb`
 `/usr/lib/{vst3,clap,lv2}`. When `dpkg-deb` is not on `PATH` it falls back
 to a `.tar.gz`. Linux has no signing requirement.
 
+**AppImage (standalone apps):** `--format appimage` routes to
+`pulp::ship::create_appimage`, which wraps a single standalone executable
+(plugins ship as `.deb`/`.tar.gz`, not AppImage). It synthesizes an AppDir
+(`AppRun` launcher, `<app>.desktop`, an icon — caller `--icon` or a built-in
+1×1 PNG placeholder, `.DirIcon`) and invokes `appimagetool` with
+`ARCH=<appimage_arch()>` (note: `aarch64`/`x86_64`/…, distinct from the
+Debian arch names). It honest-fails (returns false, no stray AppDir) when
+`appimagetool` is absent or the executable is missing — `appimagetool` is
+**not vendored**. The standalone binary must be passed explicitly via
+`--binary`; the plugin-centric `build/` layout has no standardized
+standalone location to auto-discover. To run the produced AppImage at the
+end-user's side, FUSE (libfuse2) or `APPIMAGE_EXTRACT_AND_RUN=1` is needed,
+same as any AppImage.
+
 **Routing invariant:** the `pulp ship package` branch in
 `tools/cli/cmd_ship.cpp` keeps three mutually exclusive platform arms —
 `#if defined(__linux__)` (→ `.deb` via `create_deb`, `.tar.gz` fallback),
 `#if defined(__APPLE__)` (→ `.pkg`/`.dmg`), and an honest-fail `#else` for
 other Unixes. `pkgbuild`/`hdiutil` exist only on macOS, so the Linux arm
-must never fall through into them. If you touch that block, preserve the
+must never fall through into them. Inside the Linux arm, `--format appimage`
+is an early sub-branch (standalone executable) that returns before the
+plugin-bundle `.deb`/`.tar.gz` path. If you touch that block, preserve the
 mutual exclusion and re-run `test_cli_ship_shellout.cpp` (the Linux routing
 regression guard) plus `test_linux_packaging.cpp` (the
-`create_deb`/`create_tar_gz` helper coverage).
+`create_deb`/`create_tar_gz`/`create_appimage` helper coverage; the AppImage
+real-build case runs only where `appimagetool` is installed — e.g. the
+tartci VM with libfuse2 — and verifies honest-fail otherwise).
 
 **Architecture field:** `create_deb` stamps the `.deb` `Architecture:` from
 the compile-time `debian_architecture()` helper in `installer.hpp`, so a

@@ -231,6 +231,9 @@ int cmd_ship(const std::vector<std::string>& args) {
 
         std::string version, target, keystore_path, key_alias, store_pass, key_pass, abi_arg;
         std::string installer_identity;  // Developer ID Installer (macOS .pkg signing)
+        std::string format;        // Linux: "appimage" selects the AppImage packager
+        std::string binary_path;   // Linux AppImage: path to the standalone executable
+        std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         // Item 7.5: per-artifact packaging on macOS. When the user
         // passes neither flag we use the historical default — `.pkg`
@@ -260,6 +263,12 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], abi_arg)) return 2;
             } else if (args[i] == "--installer-identity") {
                 if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
+            } else if (args[i] == "--format") {
+                if (!take_ship_value(args, i, sub, args[i], format)) return 2;
+            } else if (args[i] == "--binary") {
+                if (!take_ship_value(args, i, sub, args[i], binary_path)) return 2;
+            } else if (args[i] == "--icon") {
+                if (!take_ship_value(args, i, sub, args[i], icon_path)) return 2;
             }
             else if (args[i] == "--apk-only") apk_only = true;
             else if (args[i] == "--aab-only") aab_only = true;
@@ -398,6 +407,29 @@ int cmd_ship(const std::vector<std::string>& args) {
         // don't exist on Linux), so falling through to it previously yielded
         // nothing usable. `.tar.gz` is the fallback when `dpkg-deb` is absent.
         {
+            // AppImage path (`--format appimage`): wraps a standalone
+            // executable, not the plugin bundles. The caller points at the
+            // built binary with `--binary` (the plugin-centric build_dir has no
+            // standardized standalone location to auto-discover).
+            if (format == "appimage") {
+                if (binary_path.empty() || !fs::exists(binary_path)) {
+                    std::cerr << "Error: --format appimage needs --binary <path-to-standalone-executable>"
+                              << (binary_path.empty() ? "" : " (not found: " + binary_path + ")") << "\n";
+                    return 1;
+                }
+                std::string app_name = fs::path(binary_path).filename().string();
+                auto out = artifacts / (app_name + "-" + version + "-" +
+                                        pulp::ship::debian_architecture() + ".AppImage");
+                std::cout << "Packaging " << app_name << " (Linux → AppImage)...\n";
+                if (pulp::ship::create_appimage(app_name, version, binary_path,
+                                                out.string(), icon_path)) {
+                    std::cout << "  Created " << out.string() << "\n";
+                    return 0;
+                }
+                std::cerr << "  AppImage creation failed (is appimagetool installed?)\n";
+                return 1;
+            }
+
             // Name the package after the first plugin bundle we find,
             // falling back to the project directory name.
             std::string product_name;

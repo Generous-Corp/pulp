@@ -134,6 +134,14 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   tests proving malformed argv is rejected before platform guards or side
   effects, especially for commands like `pulp ship release` where macOS-only
   execution follows cross-platform flag parsing.
+- Platform-specific flags are still parsed cross-platform but only *act*
+  inside a platform `#if`. E.g. `pulp ship package --format appimage --binary
+  <exe> [--icon <png>]` parses everywhere, yet only the `#if defined(__linux__)`
+  arm routes to `pulp::ship::create_appimage`; on other platforms the flags are
+  accepted-but-inert. Document the flag in `cli-commands.yaml` regardless, and
+  put the behavioral assertion in a platform-gated unit test (here:
+  `test_linux_packaging.cpp`) rather than a cross-platform shellout, since the
+  required macOS lane can't exercise the Linux-only branch.
 
 ### Rust CLI cutover path convention
 
