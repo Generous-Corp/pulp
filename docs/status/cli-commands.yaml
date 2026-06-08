@@ -1181,7 +1181,7 @@ commands:
             kind: option
             description: Override importer resolution with an explicit command string
       - name: emit
-        summary: analyze the project to a ProjectIR; full scaffold emission (plan + SDK file materialisation) is implemented in a later slice
+        summary: Resolve the importer, run its SPI analyze then emit verbs to get an EmissionManifest, then the SDK writes a buildable migration scaffold under --output. Every generated file passes a clean-room output denylist scan (framework source is rejected; copied-user-file DSP is exempt); a .pulp-import-provenance.json marker and migration_status.json are written by the SDK.
         args:
           - name: --from
             kind: option
@@ -1195,6 +1195,9 @@ commands:
             kind: option
             required: true
             description: Scaffold output directory
+          - name: --importer-cmd
+            kind: option
+            description: Override importer resolution with an explicit command string
     docs: reference/cli.md#import
 
   - name: tool

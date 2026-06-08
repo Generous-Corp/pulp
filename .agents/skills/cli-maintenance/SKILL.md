@@ -156,10 +156,11 @@ debug comparisons.
 ### `pulp import` — framework-importer substrate
 
 `pulp import` (`tools/cli/cmd_import.cpp` + `import_detect.{hpp,cpp}` +
-`import_spi.{hpp,cpp}`) reads an existing audio-plugin project read-only and
-emits a Pulp migration scaffold. The SDK owns only the *generalized*
-substrate; the framework-specific parsers are **vendor-specific add-on
-tools** in their own private repos, driven over a JSON-over-stdio SPI.
+`import_spi.{hpp,cpp}` + `import_emit.{hpp,cpp}` + `import_emit_scan.{hpp,cpp}`)
+reads an existing audio-plugin project read-only and emits a Pulp migration
+scaffold. The SDK owns only the *generalized* substrate; the framework-specific
+parsers are **vendor-specific add-on tools** in their own private repos, driven
+over a JSON-over-stdio SPI.
 
 Gotchas / invariants when touching this surface:
 
@@ -191,10 +192,31 @@ Gotchas / invariants when touching this surface:
   `spi_min`/`spi_max`, `sdk_min`/`sdk_max`, `capabilities`, `health_check`
   are parsed only when present. Don't add a fake vendor entry to
   `tool-registry.json`; the loader tolerates their absence.
-- **`emit` is stubbed this slice.** `detect`/`inspect` are fully real;
-  `emit` runs `analyze` to a ProjectIR and prints a "next slice" notice for
-  the plan + file-materialisation step. When you implement emit, the SDK
-  writes the files (provenance-tagged) — the importer only proposes the plan.
+- **`emit` materialises a real scaffold; the SDK writes + gates the output.**
+  `detect`/`inspect`/`emit` are all real. `emit` runs `analyze` → ProjectIR
+  then the SPI `emit` verb → an **EmissionManifest** (the importer PROPOSES
+  files, never writes them). The SDK then: parses the manifest
+  (`import_emit::parse_manifest`), runs the clean-room **output denylist scan**
+  (`import_emit_scan::scan_manifest`) over every `generated`/`stub` file,
+  computes a write-plan that rejects any path escaping `--output`
+  (`compute_write_plan`), writes each file (inline `content`, or a verbatim
+  `copy_from` copy for `copied-user-file` provenance), and writes
+  `migration_status.json` + `.pulp-import-provenance.json`. Parse / write-plan /
+  scan are **pure functions over structs** so they unit-test without spawning;
+  the spawn/IO is a thin shell in `cmd_import.cpp`.
+- **The output scan is data-driven, not hardcoded.** Keep the clean-room
+  denylist vendor-free: `denylist_from_known_frameworks()` builds it from the
+  known-frameworks index's `content_match` markers (the ONE place real tells
+  live). Do NOT hardcode `juce`/`iplug`/… tokens in `import_emit_scan.cpp` — the
+  vendor guard greps for them. `copied-user-file` provenance is EXEMPT from the
+  scan (it's the user's own DSP); only `generated`/`stub` content is scanned.
+  Watch comment wording too: a literal `.jucer` in a comment trips the `juce`
+  substring guard.
+- **The importer may double-wrap the IR.** When `emit` hands the analyze result
+  back as `project_ir`, an importer that frames analyze as `{"project_ir": IR}`
+  must unwrap its own envelope (the SDK passes the analyze `result` verbatim).
+  If a scaffold comes out with empty formats / pass-through-only DSP, suspect a
+  double-wrapped IR on the importer side, not the SDK.
 
 ### Binary subcommand delegation
 

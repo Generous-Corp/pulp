@@ -156,6 +156,44 @@
         }
       }
     },
+    "emit_result": {
+      "type": "object",
+      "description": "The `emit` verb's result: an EmissionManifest the importer PROPOSES and the SDK MATERIALISES. The importer never writes into the user's tree — every generated/stub file ships its `content` inline, every verbatim portable-core copy ships an absolute `copy_from` source path. The SDK writes each file under the request's `output_dir`, runs the clean-room output denylist scan over every `generated` file (a `copied-user-file` is the user's own code and is EXEMPT), and records provenance. `migration_status` here is the rich status document (the on-disk migration_status.json), distinct from the short enum in `emission_manifest`.",
+      "required": ["schema", "files"],
+      "additionalProperties": true,
+      "properties": {
+        "schema": { "type": "string", "description": "e.g. 'pulp.import.emission_manifest.v0'." },
+        "importer_id": { "type": "string", "description": "Importer identity for the provenance marker (DATA, importer-owned)." },
+        "framework": { "type": "string", "description": "Runtime framework id (DATA)." },
+        "output_dir": { "type": "string", "description": "Informational echo of the requested output dir; paths are relative to it." },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/emit_file" }
+        },
+        "migration_status": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The rich migration-status document the SDK writes to migration_status.json."
+        },
+        "formats": { "type": "array", "items": { "type": "string" }, "description": "Formats the scaffold builds (self-contained)." },
+        "deferred_formats": { "type": "array", "items": { "type": "string" }, "description": "Source formats not yet emitted, recorded so the info isn't lost." },
+        "unresolved": { "type": "array", "items": { "type": "string" }, "description": "Labelled-stub / unresolved-construct notes carried into the scaffold." },
+        "verdict": { "type": "string" }
+      }
+    },
+    "emit_file": {
+      "type": "object",
+      "description": "One file the importer proposes. Exactly one of `content` (generated/stub) or `copy_from` (verbatim copy of a framework-free user file) is set.",
+      "required": ["path", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "description": "Destination path relative to output_dir." },
+        "provenance": { "type": "string", "enum": ["generated", "copied-user-file", "stub"], "description": "Drives the clean-room output scan: generated/stub are scanned for framework-source tells, copied-user-file is the user's own code and is exempt." },
+        "classification": { "type": "string", "description": "Optional hint, e.g. 'source' / 'build' / 'report' / 'manifest'." },
+        "content": { "type": "string", "description": "Inline file content (generated/stub files)." },
+        "copy_from": { "type": "string", "description": "Absolute source path for a verbatim copied-user-file." }
+      }
+    },
     "emission_manifest": {
       "type": "object",
       "description": "What the SDK actually wrote, returned/recorded after emit. Feeds the migration_status manifest + the `pulp ship` unresolved-scaffold gate.",

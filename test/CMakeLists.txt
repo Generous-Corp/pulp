@@ -376,6 +376,29 @@ target_compile_definitions(pulp-test-cli-import PRIVATE
 catch_discover_tests(pulp-test-cli-import
     PROPERTIES LABELS "parser-import")
 
+# CLI import EMIT materialisation — manifest parse, write-plan, the clean-room
+# output denylist scan (all pure), plus an end-to-end shell-out through a mock
+# emit responder. Links the pure import-emit logic directly.
+add_executable(pulp-test-cli-import-emit
+    test_cli_import_emit.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_emit.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_emit_scan.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_detect.cpp
+)
+target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-import-emit PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-emit pulp-cli)
+    target_compile_definitions(pulp-test-cli-import-emit PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+target_compile_definitions(pulp-test-cli-import-emit PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-import-emit
+    PROPERTIES LABELS "parser-import")
+
 # pulp #914 — `pulp run` flag parser unit tests. Pure parser, no I/O,
 # no project resolution. The shell-out CLI behaviour for the same
 # flags lives in test_cli_shellout.cpp.
