@@ -114,7 +114,8 @@ public:
                             DropData d;
                             d.type = DropData::Type::text;
                             d.text = event.drop.data;
-                            dispatch_drop(root_, d, {event.drop.x, event.drop.y});
+                            dispatch_drop(root_, drag_session_, d,
+                                          {event.drop.x, event.drop.y});
                             needs_repaint_ = true;
                         }
                         break;
@@ -126,7 +127,8 @@ public:
                             DropData d;
                             d.type = DropData::Type::files;
                             d.file_paths = pending_drop_files_;
-                            dispatch_drag_move(root_, d, {event.drop.x, event.drop.y});
+                            dispatch_drag_move(root_, drag_session_, d,
+                                               {event.drop.x, event.drop.y});
                             needs_repaint_ = true;
                         }
                         break;
@@ -135,11 +137,11 @@ public:
                             DropData d;
                             d.type = DropData::Type::files;
                             d.file_paths = std::move(pending_drop_files_);
-                            dispatch_drop(root_, d, pending_drop_pos_);
+                            dispatch_drop(root_, drag_session_, d, pending_drop_pos_);
                             pending_drop_files_.clear();
                             needs_repaint_ = true;
                         } else {
-                            dispatch_drag_exit(root_);
+                            dispatch_drag_exit(root_, drag_session_);
                         }
                         break;
                     default:
@@ -205,6 +207,8 @@ private:
     // drop position, both in window coordinates (== root coords here).
     std::vector<std::string> pending_drop_files_;
     Point pending_drop_pos_{0, 0};
+    // Per-window drop hover state (owned here, not a process global).
+    DragSession drag_session_;
 
     struct DispatcherQueueState {
         mutable std::mutex mutex;

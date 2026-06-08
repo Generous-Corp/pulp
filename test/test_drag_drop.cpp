@@ -118,7 +118,8 @@ TEST_CASE("dispatch_drop routes a file drop to View::on_drop", "[view][dnd]") {
     root.on_drop = [&](const std::string& type, const std::string& data, float x,
                        float y) { recs.push_back({type, data, x, y}); };
 
-    REQUIRE(dispatch_drop(root, make_files({"/tmp/a.wav"}), {50, 60}));
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_files({"/tmp/a.wav"}), {50, 60}));
     REQUIRE(recs.size() == 1);
     CHECK(recs[0].type == "file");
     CHECK(recs[0].data == "/tmp/a.wav");
@@ -133,7 +134,8 @@ TEST_CASE("multi-file drop fires View::on_drop once per path", "[view][dnd]") {
     root.on_drop = [&](const std::string& t, const std::string& d, float x,
                        float y) { recs.push_back({t, d, x, y}); };
 
-    REQUIRE(dispatch_drop(root, make_files({"/a.txt", "/b.txt", "/c.txt"}),
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_files({"/a.txt", "/b.txt", "/c.txt"}),
                           {10, 10}));
     REQUIRE(recs.size() == 3);
     CHECK(recs[0].data == "/a.txt");
@@ -149,7 +151,8 @@ TEST_CASE("text drop carries the text type + payload", "[view][dnd]") {
     root.on_drop = [&](const std::string& t, const std::string& d, float x,
                        float y) { got = {t, d, x, y}; ++n; };
 
-    REQUIRE(dispatch_drop(root, make_text("hello world"), {5, 5}));
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_text("hello world"), {5, 5}));
     CHECK(n == 1);
     CHECK(got.type == "text");
     CHECK(got.data == "hello world");
@@ -175,7 +178,8 @@ TEST_CASE("drop bubbles to the nearest ancestor handler with local coords",
 
     // Drop at root (130,70): inside leaf; leaf has no handler → bubble to child.
     // child-local coords = 130-100, 70-50.
-    REQUIRE(dispatch_drop(root, make_files({"/x"}), {130, 70}));
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_files({"/x"}), {130, 70}));
     REQUIRE(recs.size() == 1);
     CHECK(recs[0].x == 30.0f);
     CHECK(recs[0].y == 20.0f);
@@ -188,7 +192,8 @@ TEST_CASE("drop outside the root bounds is not handled", "[view][dnd]") {
     root.on_drop = [&](const std::string&, const std::string&, float, float) {
         fired = true;
     };
-    CHECK_FALSE(dispatch_drop(root, make_files({"/x"}), {500, 500}));
+    DragSession session;
+    CHECK_FALSE(dispatch_drop(root, session, make_files({"/x"}), {500, 500}));
     CHECK_FALSE(fired);
 }
 
@@ -208,7 +213,8 @@ TEST_CASE("FileDropZone receives typed paths with extension filtering",
     };
 
     // .wav accepted, .mp3 filtered out by the zone.
-    REQUIRE(dispatch_drop(root, make_files({"/a.wav", "/b.mp3"}), {10, 10}));
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_files({"/a.wav", "/b.mp3"}), {10, 10}));
     REQUIRE(dropped.size() == 1);
     CHECK(dropped[0] == "/a.wav");
 }
@@ -222,11 +228,12 @@ TEST_CASE("drag enter/exit toggles FileDropZone hover state", "[view][dnd]") {
     zone->set_accepted_extensions({".wav"});
     root.add_child(std::move(zone_owned));
 
+    DragSession session;
     CHECK_FALSE(zone->is_drag_over());
-    REQUIRE(dispatch_drag_enter(root, make_files({"/a.wav"}), {10, 10}));
+    REQUIRE(dispatch_drag_enter(root, session, make_files({"/a.wav"}), {10, 10}));
     CHECK(zone->is_drag_over());
     CHECK(zone->is_drag_valid());
-    dispatch_drag_exit(root);
+    dispatch_drag_exit(root, session);
     CHECK_FALSE(zone->is_drag_over());
 }
 
@@ -240,11 +247,12 @@ TEST_CASE("drag enter over an invalid extension marks the zone invalid",
     zone->set_accepted_extensions({".wav"});
     root.add_child(std::move(zone_owned));
 
-    dispatch_drag_enter(root, make_files({"/a.mp3"}), {10, 10});
+    DragSession session;
+    dispatch_drag_enter(root, session, make_files({"/a.mp3"}), {10, 10});
     CHECK(zone->is_drag_over());
     CHECK_FALSE(zone->is_drag_valid());
 
-    dispatch_drop(root, make_files({"/a.mp3"}), {10, 10});  // clears hover
+    dispatch_drop(root, session, make_files({"/a.mp3"}), {10, 10});  // clears hover
     CHECK_FALSE(zone->is_drag_over());
 }
 
@@ -262,14 +270,43 @@ TEST_CASE("drag move from one zone to another transfers hover", "[view][dnd]") {
     z2->set_bounds({200, 0, 200, 200});
     root.add_child(std::move(z2_owned));
 
-    dispatch_drag_enter(root, make_files({"/a.wav"}), {50, 50});
+    DragSession session;
+    dispatch_drag_enter(root, session, make_files({"/a.wav"}), {50, 50});
     CHECK(z1->is_drag_over());
     CHECK_FALSE(z2->is_drag_over());
 
-    dispatch_drag_move(root, make_files({"/a.wav"}), {300, 50});
+    dispatch_drag_move(root, session, make_files({"/a.wav"}), {300, 50});
     CHECK_FALSE(z1->is_drag_over());
     CHECK(z2->is_drag_over());
 
-    dispatch_drag_exit(root);
+    dispatch_drag_exit(root, session);
     CHECK_FALSE(z2->is_drag_over());
+}
+
+TEST_CASE("independent DragSessions do not share hover state", "[view][dnd]") {
+    // Two windows / two backends each own their own DragSession; a drag in one
+    // must not be cleared or hijacked by the other (the reason hover state is
+    // caller-owned, not a process global).
+    View root_a, root_b;
+    root_a.set_bounds({0, 0, 200, 200});
+    root_b.set_bounds({0, 0, 200, 200});
+    auto za_owned = std::make_unique<FileDropZone>();
+    FileDropZone* za = za_owned.get();
+    za->set_bounds({0, 0, 200, 200});
+    root_a.add_child(std::move(za_owned));
+    auto zb_owned = std::make_unique<FileDropZone>();
+    FileDropZone* zb = zb_owned.get();
+    zb->set_bounds({0, 0, 200, 200});
+    root_b.add_child(std::move(zb_owned));
+
+    DragSession sa, sb;
+    dispatch_drag_enter(root_a, sa, make_files({"/a.wav"}), {10, 10});
+    dispatch_drag_enter(root_b, sb, make_files({"/b.wav"}), {10, 10});
+    CHECK(za->is_drag_over());
+    CHECK(zb->is_drag_over());
+
+    // Exiting B's drag leaves A's hover intact.
+    dispatch_drag_exit(root_b, sb);
+    CHECK(za->is_drag_over());
+    CHECK_FALSE(zb->is_drag_over());
 }

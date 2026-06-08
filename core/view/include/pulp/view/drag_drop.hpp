@@ -8,6 +8,7 @@
 namespace pulp::view {
 
 class View;
+class FileDropZone;
 
 // ── Drop data types ──────────────────────────────────────────────────────────
 
@@ -76,18 +77,30 @@ void unregister_drop_target(void* native_view);
 // the platform backend is responsible for any window→root viewport transform
 // (e.g. PluginViewHost::window_to_root_point) before calling in.
 //
-// Threading: UI thread only (mirrors the rest of the view input path). A single
-// hover target is tracked across a drag (one pointer at a time); the backend must
-// bracket a drag with enter … (move)* … exit|drop so the tracked pointer never
-// outlives the view.
+// Threading: UI thread only (mirrors the rest of the view input path).
+//
+// Hover state is held in a DragSession the *caller* owns — one per platform
+// backend / window, NOT a process global — so concurrent drags on separate
+// windows can't corrupt each other and the tracked pointer's lifetime is scoped
+// to the backend that brackets the drag (enter … (move)* … exit|drop).
+
+// Per-drag hover state owned by the platform backend (a member of the window
+// host / drop target). Opaque to callers beyond construction; reset between
+// drags happens automatically via exit/drop.
+struct DragSession {
+    FileDropZone* hover_zone = nullptr;  // currently-highlighted zone, or null
+};
 
 // Hover lifecycle for visual feedback (FileDropZone highlight). Returns true if a
 // drop zone / handler is under the point and would accept the drag.
-bool dispatch_drag_enter(View& root, const DropData& data, Point root_pos);
-void dispatch_drag_move(View& root, const DropData& data, Point root_pos);
-void dispatch_drag_exit(View& root);
+bool dispatch_drag_enter(View& root, DragSession& session, const DropData& data,
+                         Point root_pos);
+void dispatch_drag_move(View& root, DragSession& session, const DropData& data,
+                        Point root_pos);
+void dispatch_drag_exit(View& root, DragSession& session);
 
 // Commit a drop. Returns true if a view handled it. Also clears any hover state.
-bool dispatch_drop(View& root, const DropData& data, Point root_pos);
+bool dispatch_drop(View& root, DragSession& session, const DropData& data,
+                   Point root_pos);
 
 } // namespace pulp::view

@@ -19,12 +19,6 @@ namespace pulp::view {
 
 namespace {
 
-// The single drop zone currently highlighted by an in-flight drag. One pointer
-// drags at a time, so a single raw pointer suffices; it is cleared on exit/drop,
-// and the backend always brackets a drag (enter … exit|drop), so it never
-// outlives the view. UI thread only — no synchronization.
-FileDropZone* g_hover_zone = nullptr;
-
 // Walk a root-space point down into `target`'s local coordinates by subtracting
 // each ancestor's origin up to (but not including) `root`. Mirrors the local
 // conversion in View::simulate_click.
@@ -82,19 +76,20 @@ void fire_view_on_drop(View& root, View* handler, const DropData& data,
     }
 }
 
-void clear_hover() {
-    if (g_hover_zone) {
-        g_hover_zone->drag_leave();
-        g_hover_zone = nullptr;
+void clear_hover(DragSession& session) {
+    if (session.hover_zone) {
+        session.hover_zone->drag_leave();
+        session.hover_zone = nullptr;
     }
 }
 
 }  // namespace
 
-bool dispatch_drag_enter(View& root, const DropData& data, Point root_pos) {
+bool dispatch_drag_enter(View& root, DragSession& session, const DropData& data,
+                         Point root_pos) {
     View* target = root.hit_test(root_pos);
     if (!target) {  // outside the window entirely
-        clear_hover();
+        clear_hover(session);
         return false;
     }
 
@@ -102,25 +97,29 @@ bool dispatch_drag_enter(View& root, const DropData& data, Point root_pos) {
     FileDropZone* zone = (data.type == DropData::Type::files)
                              ? find_drop_zone(root, target)
                              : nullptr;
-    if (zone != g_hover_zone) {
-        clear_hover();
-        g_hover_zone = zone;
-        if (g_hover_zone) g_hover_zone->drag_enter(data.file_paths);
+    if (zone != session.hover_zone) {
+        clear_hover(session);
+        session.hover_zone = zone;
+        if (session.hover_zone) session.hover_zone->drag_enter(data.file_paths);
     }
 
     return zone != nullptr || find_drop_handler(root, target) != nullptr;
 }
 
-void dispatch_drag_move(View& root, const DropData& data, Point root_pos) {
+void dispatch_drag_move(View& root, DragSession& session, const DropData& data,
+                        Point root_pos) {
     // A move is an enter against the (possibly new) target; enter already handles
     // the leave-old / enter-new transition.
-    dispatch_drag_enter(root, data, root_pos);
+    dispatch_drag_enter(root, session, data, root_pos);
 }
 
-void dispatch_drag_exit(View& /*root*/) { clear_hover(); }
+void dispatch_drag_exit(View& /*root*/, DragSession& session) {
+    clear_hover(session);
+}
 
-bool dispatch_drop(View& root, const DropData& data, Point root_pos) {
-    clear_hover();
+bool dispatch_drop(View& root, DragSession& session, const DropData& data,
+                   Point root_pos) {
+    clear_hover(session);
 
     View* target = root.hit_test(root_pos);
     if (!target) return false;  // dropped outside the window
