@@ -212,8 +212,8 @@ setAnimation	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setScale	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setSkew	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setTextOverflow	typography	function	core/view/src/widget_bridge/typography_api.cpp
-setCursor	css_style	function	core/view/src/widget_bridge.cpp
-setDirection	css_style	function	core/view/src/widget_bridge.cpp
+setCursor	css_style	function	core/view/src/widget_bridge/style_cursor_api.cpp
+setDirection	css_style	function	core/view/src/widget_bridge/style_cursor_api.cpp
 setFilter	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp
 setBackdropFilter	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp
 setClipPath	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp

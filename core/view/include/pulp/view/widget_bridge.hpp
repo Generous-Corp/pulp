@@ -327,6 +327,7 @@ private:
     void register_wheel_event_api();
     void register_context_menu_event_api();
     void register_drop_event_api();
+    void register_widget_style_cursor_direction_api();
     void register_widget_style_filter_clip_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_style_blend_api();
     void register_widget_style_rn_compat_api(std::function<canvas::Color(const std::string&)> parse_color);
