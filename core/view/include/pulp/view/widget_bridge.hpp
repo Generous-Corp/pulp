@@ -354,6 +354,7 @@ private:
     void register_widget_factory_text_editor_api();
     void register_widget_value_label_api();
     void register_widget_value_basic_api();
+    void register_widget_typography_api();
     void register_widget_value_content_api();
 };
 
