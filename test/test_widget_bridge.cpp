@@ -446,6 +446,136 @@ TEST_CASE("WidgetBridge range slider drag dispatches change event",
     REQUIRE_THAT(val, WithinAbs(0.5, 0.05));
 }
 
+// pulp 2026-06-08 (jsx-live-knob-drag-fix) — `@pulp/react`'s `<Knob>` lowers to
+// a lowercase `knob` DOM element in the live-JSX path
+// (`pulp import-design --from jsx --mode live --emit js`, run via
+// `Standalone --pulp-bundle`). The React-commit fast path creates that element
+// through the C++ `__domAppend` handler, NOT through `createKnob` or JS
+// `_ensureNative`. Before this fix `knob` fell through to the plain-View
+// default: no rotary `on_mouse_drag`, no `on_change`, so dragging did nothing
+// and the React-side `onChange` never fired. This is the headless test whose
+// absence let the routing gap hide. See planning/for-matt-svg-response.md.
+TEST_CASE("WidgetBridge __domAppend routes <knob> tag to a draggable native Knob",
+          "[view][bridge][jsx-live-knob-drag-fix]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var changes = [];
+        __dispatch__ = function(id, type, value) {
+            changes.push({id: id, type: type, value: value});
+        };
+        // Mirror the React-commit fast path: append a lowercase <knob>
+        // element, exactly as @pulp/react's <Knob> lowers to.
+        __domAppend('', 'gain', 'knob');
+    )");
+
+    // Routed to a native Knob — not a bare container View (the pre-fix default).
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("gain"));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 48, 48});
+
+    // Drag upward (smaller y = larger value). Knob::on_mouse_drag fires
+    // on_change → __dispatch__('gain', 'change', v) via wire_callbacks.
+    knob->on_mouse_down({24, 40});
+    knob->on_mouse_drag({24, 10});
+
+    auto count = engine.evaluate("changes.length").getWithDefault<double>(0);
+    REQUIRE(count >= 1);
+    auto id0 = engine.evaluate("changes[0].id").getWithDefault<std::string>("");
+    REQUIRE(id0 == "gain");
+    auto type0 = engine.evaluate("changes[0].type").getWithDefault<std::string>("");
+    REQUIRE(type0 == "change");
+    auto val0 = engine.evaluate("changes[0].value").getWithDefault<double>(-1);
+    REQUIRE(val0 > 0.0);  // dragged up from the 0.0 initial value
+}
+
+// ── Routing-parity sweep (breadth) ─────────────────────────────────────────
+// Asserts every `@pulp/react` widget intrinsic, lowered to its lowercase tag,
+// routes to the correct NATIVE widget type — not the createCol/View container
+// fallback — on BOTH live-JSX C++ surfaces: the `__domAppend` React-commit
+// fast path AND the JS `_ensureNative` createElement path. This is routing
+// BREADTH; interaction DEPTH (the routed widget's drag/onChange actually
+// firing) is the separate behavioral knob-drag test above. The canonical
+// tag→type list below is the source of truth, mirroring the capitalized
+// `createWidget` cases in `@pulp/react` host-config.ts — keep it in lockstep
+// with `make_widget_for_tag` (widget_bridge.cpp) and `__widgetTagFactory__`
+// (web-compat-element.js). A new widget added to one surface but not the
+// others (the exact class of bug that hid the knob gap) fails this sweep.
+namespace {
+struct WidgetTagCase {
+    const char* tag;
+    std::function<bool(View*)> is_native;  // dynamic_cast probe
+    const char* type_name;
+};
+inline std::vector<WidgetTagCase> widget_tag_cases() {
+    return {
+        {"knob",     [](View* w){ return dynamic_cast<Knob*>(w) != nullptr; },         "Knob"},
+        {"fader",    [](View* w){ return dynamic_cast<Fader*>(w) != nullptr; },        "Fader"},
+        {"toggle",   [](View* w){ return dynamic_cast<Toggle*>(w) != nullptr; },       "Toggle"},
+        {"combo",    [](View* w){ return dynamic_cast<ComboBox*>(w) != nullptr; },     "ComboBox"},
+        {"checkbox", [](View* w){ return dynamic_cast<Checkbox*>(w) != nullptr; },     "Checkbox"},
+        {"spectrum", [](View* w){ return dynamic_cast<SpectrumView*>(w) != nullptr; }, "SpectrumView"},
+        {"waveform", [](View* w){ return dynamic_cast<WaveformView*>(w) != nullptr; }, "WaveformView"},
+        {"meter",    [](View* w){ return dynamic_cast<Meter*>(w) != nullptr; },        "Meter"},
+        {"xypad",    [](View* w){ return dynamic_cast<XYPad*>(w) != nullptr; },        "XYPad"},
+        {"listbox",  [](View* w){ return dynamic_cast<ListBox*>(w) != nullptr; },      "ListBox"},
+        {"icon",     [](View* w){ return dynamic_cast<Icon*>(w) != nullptr; },         "Icon"},
+        // HTML aliases that must ALSO route on both surfaces (these were the
+        // tags missing specifically from __domAppend before the sweep):
+        {"select",   [](View* w){ return dynamic_cast<ComboBox*>(w) != nullptr; },     "ComboBox"},
+        {"progress", [](View* w){ return dynamic_cast<ProgressBar*>(w) != nullptr; },  "ProgressBar"},
+        {"img",      [](View* w){ return dynamic_cast<ImageView*>(w) != nullptr; },    "ImageView"},
+    };
+}
+}  // namespace
+
+TEST_CASE("WidgetBridge routing-parity sweep — __domAppend React-commit path",
+          "[view][bridge][jsx-live-knob-drag-fix][routing-parity]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    for (const auto& c : widget_tag_cases()) {
+        std::string id = std::string("dom_") + c.tag;
+        engine.evaluate("__domAppend('', '" + id + "', '" + c.tag + "')");
+        auto* w = bridge.widget(id);
+        INFO("lowercase <" << c.tag << "> via __domAppend should materialize as "
+             << c.type_name << " (not a container View)");
+        REQUIRE(w != nullptr);
+        REQUIRE(c.is_native(w));
+    }
+}
+
+TEST_CASE("WidgetBridge routing-parity sweep — _ensureNative createElement path",
+          "[view][bridge][jsx-live-knob-drag-fix][routing-parity]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    for (const auto& c : widget_tag_cases()) {
+        // Drive the createElement-then-mount path explicitly (distinct from the
+        // appendChild fast path, which routes through __domAppend in C++).
+        std::string expr =
+            "(function(){var e=document.createElement('" + std::string(c.tag) +
+            "');e._ensureNative();return e._id;})()";
+        auto nid = std::string(engine.evaluate(expr).getWithDefault<std::string_view>(""));
+        INFO("lowercase <" << c.tag << "> via _ensureNative should materialize as "
+             << c.type_name << " (not a container View)");
+        REQUIRE(!nid.empty());
+        auto* w = bridge.widget(nid);
+        REQUIRE(w != nullptr);
+        REQUIRE(c.is_native(w));
+    }
+}
+
 TEST_CASE("WidgetBridge creates modal overlay from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;

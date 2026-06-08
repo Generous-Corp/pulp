@@ -56,6 +56,30 @@ function Element(tagName, nativeId) {
     __nativeElements__[this._id] = this;
 }
 
+// pulp 2026-06-08 (routing-parity sweep) — shared lowercase widget-tag →
+// native-widget factory. `@pulp/react`'s capitalized widget intrinsics
+// (<Knob>, <Fader>, …) lower to lowercase DOM tags (knob, fader, …) on the
+// live-JSX / web-compat path; this table routes each to the new-API
+// createX(id, …) bridge call that constructs the native widget AND wires its
+// callbacks. Single source of truth for `_ensureNative` (below); kept in
+// lockstep with the C++ `__domAppend` table (widget_bridge.cpp
+// make_widget_for_tag) and the `@pulp/react` host-config lowercase aliases —
+// the routing-parity sweep test asserts the surfaces agree. Closures (not
+// eager calls) so the bridge globals only need to exist at call time.
+var __widgetTagFactory__ = {
+    knob:     function(id) { createKnob(id, ""); },
+    fader:    function(id) { createFader(id, "vertical", ""); },
+    toggle:   function(id) { createToggle(id, ""); },
+    combo:    function(id) { createCombo(id, ""); },
+    checkbox: function(id) { createCheckbox(id, ""); },
+    spectrum: function(id) { createSpectrum(id, ""); },
+    waveform: function(id) { createWaveform(id, ""); },
+    meter:    function(id) { createMeter(id, "vertical", ""); },
+    xypad:    function(id) { createXYPad(id, ""); },
+    listbox:  function(id) { createListBox(id, ""); },
+    icon:     function(id) { createIcon(id, "image_upload", ""); }
+};
+
 // Create the native widget based on tag + type
 Element.prototype._ensureNative = function() {
     if (this._nativeCreated) return;
@@ -178,6 +202,18 @@ Element.prototype._ensureNative = function() {
         setMultiLine(id, 1);
     } else if (tag === "select") {
         createCombo(id, "");
+    } else if (Object.prototype.hasOwnProperty.call(__widgetTagFactory__, tag)) {
+        // pulp 2026-06-08 (routing-parity sweep) — lowercase `@pulp/react`
+        // widget intrinsics (<Knob>/<Fader>/<Toggle>/<Combo>/<Checkbox>/
+        // <Spectrum>/<Waveform>/<Meter>/<XYPad>/<ListBox>/<Icon>) lower to
+        // lowercase DOM tags in the live-JSX path. Route them to native
+        // widgets via the shared __widgetTagFactory__ table (defined above),
+        // whose new-API createX(id, …) forms wire callbacks. Before this they
+        // fell to the createCol container default below — no drag, no
+        // on_change — so e.g. a knob never fired onChange. Keeps this surface
+        // in lockstep with __domAppend (widget_bridge.cpp) and the
+        // @pulp/react host-config lowercase map.
+        __widgetTagFactory__[tag](id);
     } else if (tag === "canvas") {
         createCanvas(id, "");
     } else if (tag === "progress") {

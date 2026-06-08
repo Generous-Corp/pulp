@@ -1165,7 +1165,73 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         r->on_change = [alive, engine, id](float v) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "range slider change");
         };
+    } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
+        // pulp 2026-06-08 (routing-parity sweep) — mirror createCombo's inline
+        // wiring so a `<combo>`/`<select>` tag routed through __domAppend
+        // dispatches the same `select` event as the factory path.
+        c->on_change = [alive, engine, id](int idx) {
+            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "combo select");
+        };
+    } else if (auto* cb = dynamic_cast<Checkbox*>(w)) {
+        // pulp 2026-06-08 — mirror createCheckbox's inline `change` wiring.
+        cb->on_change = [alive, engine, id](bool v) {
+            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::string(v?"1":"0") + ")", "checkbox change");
+        };
+    } else if (auto* lb = dynamic_cast<ListBox*>(w)) {
+        // pulp 2026-06-08 — mirror createListBox's inline select/activate wiring.
+        lb->on_select = [alive, engine, id](int idx) {
+            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "list select");
+        };
+        lb->on_activate = [alive, engine, id](int idx) {
+            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'activate', " + std::to_string(idx) + ")", "list activate");
+        };
     }
+}
+
+std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
+                                                        const std::string& id) {
+    // Shared lowercase widget-tag → native widget table. Keep in lockstep with
+    // the `createX` factory functions (factory_api.cpp), the JS `_ensureNative`
+    // map (web-compat-element.js), and the `@pulp/react` host-config lowercase
+    // aliases — the routing-parity sweep test asserts all four agree. Returns
+    // nullptr for any non-widget tag so __domAppend falls through to its
+    // container/HTML defaults (div/span/canvas/svg-prims/input are handled by
+    // their own branches before this is consulted).
+    std::unique_ptr<View> w;
+    if (tag == "knob") {
+        auto k = std::make_unique<Knob>();
+        k->set_label(id);  // match createKnob's default label
+        w = std::move(k);
+    } else if (tag == "fader") {
+        w = std::make_unique<Fader>();
+    } else if (tag == "toggle") {
+        w = std::make_unique<Toggle>();
+    } else if (tag == "combo" || tag == "select") {
+        w = std::make_unique<ComboBox>();
+    } else if (tag == "checkbox") {
+        w = std::make_unique<Checkbox>();
+    } else if (tag == "spectrum") {
+        w = std::make_unique<SpectrumView>();
+    } else if (tag == "waveform") {
+        w = std::make_unique<WaveformView>();
+    } else if (tag == "meter") {
+        w = std::make_unique<Meter>();
+    } else if (tag == "xypad") {
+        w = std::make_unique<XYPad>();
+    } else if (tag == "listbox") {
+        w = std::make_unique<ListBox>();
+    } else if (tag == "icon") {
+        w = std::make_unique<Icon>();
+    } else if (tag == "progress") {
+        w = std::make_unique<ProgressBar>();
+    } else if (tag == "img" || tag == "image") {
+        w = std::make_unique<ImageView>();
+    }
+    if (w) {
+        w->set_id(id);
+        wire_callbacks(id, w.get());  // no-op for display-only widgets
+    }
+    return w;
 }
 
 void WidgetBridge::clear() {
@@ -2618,6 +2684,21 @@ void WidgetBridge::register_api() {
                 v->set_id(childId);
                 child = std::move(v);
             }
+        } else if (auto widget_for_tag = make_widget_for_tag(tag, childId)) {
+            // pulp 2026-06-08 (routing-parity sweep) — route lowercase
+            // `@pulp/react` widget intrinsics (knob/fader/toggle/combo/
+            // checkbox/spectrum/waveform/meter/xypad/listbox/icon, plus the
+            // select/progress/img HTML aliases) to native widgets here in the
+            // React-commit fast path. `<Knob>` etc. lower to lowercase DOM
+            // tags in the live-JSX path (`pulp import-design --from jsx --mode
+            // live --emit js`, run via `Standalone --pulp-bundle`), and child
+            // widgets are created HERE rather than through JS `_ensureNative`
+            // or the `createX` factories. Before this they fell to the
+            // plain-View default below — no drag, no callbacks. The shared
+            // `make_widget_for_tag` table wires callbacks (the load-bearing
+            // `on_change → __dispatch__`) and keeps this surface in lockstep
+            // with `_ensureNative` and the `@pulp/react` host-config map.
+            child = std::move(widget_for_tag);
         } else {
             auto v = std::make_unique<View>();
             v->set_id(childId);

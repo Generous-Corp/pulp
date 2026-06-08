@@ -188,6 +188,25 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'progress': call('createProgress', id, parentId); return;
                 case 'img':      call('createImage', id, parentId); return;
                 case 'canvas':   call('createCanvas', id, parentId); return;
+                // pulp routing-parity sweep 2026-06-08 — lowercase widget
+                // intrinsic aliases. These mirror the capitalized widget
+                // cases above (the source of truth) so a lowercase
+                // `<knob>` / `<fader>` / … tag dispatches to the SAME
+                // native createX bridge call instead of silently falling
+                // through to the createCol container fallback. (lowercase
+                // `select`/`progress`/`img`/`canvas` are already handled
+                // just above; widget-specific intrinsics added here.)
+                case 'knob':     call('createKnob', id, parentId); return;
+                case 'fader':    call('createFader', id, (props.orientation as 'vertical' | 'horizontal') ?? 'vertical', parentId); return;
+                case 'toggle':   call('createToggle', id, parentId); return;
+                case 'combo':    call('createCombo', id, parentId); return;
+                case 'checkbox': call('createCheckbox', id, parentId); return;
+                case 'spectrum': call('createSpectrum', id, parentId); return;
+                case 'waveform': call('createWaveform', id, parentId); return;
+                case 'meter':    call('createMeter', id, parentId); return;
+                case 'xypad':    call('createXYPad', id, parentId); return;
+                case 'listbox':  call('createListBox', id, parentId); return;
+                case 'icon':     call('createIcon', id, parentId); return;
                 case 'svg':      call('createCol', id, parentId); return;  // SVG = container; children paint
                 case 'path': {
                     call('createSvgPath', id, parentId);

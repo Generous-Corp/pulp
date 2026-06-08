@@ -299,6 +299,19 @@ private:
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);
 
+    // pulp 2026-06-08 (routing-parity sweep) — the single source-of-truth
+    // table that maps a lowercase widget tag (`knob`/`fader`/`toggle`/`combo`/
+    // `checkbox`/`spectrum`/`waveform`/`meter`/`xypad`/`listbox`/`icon`, plus
+    // the `select`/`progress`/`img` HTML aliases) to a freshly constructed,
+    // id-set, callback-wired native widget. Returns nullptr for non-widget
+    // tags (so callers fall through to their container default). Used by the
+    // `__domAppend` React-commit fast path; mirrors the `createX` factory
+    // functions and the JS `_ensureNative` / `@pulp/react` host-config maps so
+    // the four widget-routing surfaces can't drift again (asserted by the
+    // routing-parity sweep test).
+    std::unique_ptr<View> make_widget_for_tag(const std::string& tag,
+                                              const std::string& id);
+
     // Called by the JS `__requestFrame__` / async-result chain whenever
     // pending work needs the surface to repaint. Routes through
     // `repaint_callback_`, which is wired in the constructor to
