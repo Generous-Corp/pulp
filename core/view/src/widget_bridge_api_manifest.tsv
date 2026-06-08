@@ -50,7 +50,7 @@ registerGesture	events	function	core/view/src/widget_bridge.cpp
 nativeSetPointerCapture	events	function	core/view/src/widget_bridge.cpp
 nativeReleasePointerCapture	events	function	core/view/src/widget_bridge.cpp
 enableInspectClick	events	function	core/view/src/widget_bridge.cpp
-removeWidget	metadata	function	core/view/src/widget_bridge.cpp
+removeWidget	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 createRow	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createCol	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createModal	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
@@ -81,8 +81,8 @@ setListRowHeight	widget_value	function	core/view/src/widget_bridge.cpp
 createTextEditor	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createCanvas	canvas2d	function	core/view/src/widget_bridge.cpp
 setLabel	widget_value	function	core/view/src/widget_bridge.cpp
-setAnchor	metadata	function	core/view/src/widget_bridge.cpp
-setSource	metadata	function	core/view/src/widget_bridge.cpp
+setAnchor	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
+setSource	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setStyle	widget_value	function	core/view/src/widget_bridge.cpp
 setWidgetStyle	widget_value	function	core/view/src/widget_bridge.cpp
 setItems	widget_value	function	core/view/src/widget_bridge.cpp
@@ -269,7 +269,7 @@ importDesignTokens	theme	function	core/view/src/widget_bridge/theme_api.cpp
 exportDesignTokens	theme	function	core/view/src/widget_bridge/theme_api.cpp
 setAICli	platform_services	function	core/view/src/widget_bridge.cpp
 getAICli	platform_services	function	core/view/src/widget_bridge.cpp
-getComputedValue	metadata	function	core/view/src/widget_bridge.cpp
+getComputedValue	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 exec	platform_services	function	core/view/src/widget_bridge.cpp
 execAsync	platform_services	function	core/view/src/widget_bridge.cpp
 registerContextMenu	events	function	core/view/src/widget_bridge.cpp

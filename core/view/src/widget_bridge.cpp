@@ -2077,18 +2077,7 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // removeWidget(id)
-    engine_.register_function("removeWidget", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        if (auto* w = widget(id)) {
-            View* parent = w->parent();
-            if (parent) {
-                auto removed = parent->remove_child(w);
-                erase_widget_subtree(widgets_, removed.get());
-            }
-        }
-        return choc::value::Value();
-    });
+    register_metadata_removal_api();
 
     // ═══════════════════════════════════════════════════════════════
     // Extended API: containers, layout, all widgets, themes, canvas
@@ -3034,36 +3023,7 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // Phase 0b: bind a design-import anchor (the `// @pulp-anchor`
-    // codegen trail from Phase 0a) to a live widget. The inspector
-    // (Phase 0b PR-C) reads anchor_id back to key tweaks against the
-    // originating source element. Silent no-op on unknown widget id —
-    // matches the rest of the bridge's tolerance for unmounted ids.
-    engine_.register_function("setAnchor", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto anchor = args.get<std::string>(1, "");
-        if (auto* v = widget(id)) v->set_anchor_id(std::move(anchor));
-        return choc::value::Value();
-    });
-
-    // Phase 5.1 (inspector source-jump): bind the authored-source
-    // location for a widget. The `@pulp/react` reconciler reads React's
-    // `__source` prop ({fileName, lineNumber, columnNumber}) inside
-    // `createInstance` and forwards it here. The inspector later reads
-    // this back via `Inspector.jumpToSource` to open the user's editor
-    // at the originating JSX file:line. Silent no-op on unknown widget
-    // id and on an empty file path — matches setAnchor's tolerance for
-    // unmounted ids and views authored outside the JSX path.
-    engine_.register_function("setSource", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto file = args.get<std::string>(1, "");
-        auto line = static_cast<int>(args.get<double>(2, 0.0));
-        auto col = static_cast<int>(args.get<double>(3, 0.0));
-        if (file.empty()) return choc::value::Value();
-        if (auto* v = widget(id))
-            v->set_source_loc({std::move(file), line, col});
-        return choc::value::Value();
-    });
+    register_metadata_source_api();
 
     // setStyle — placeholder until KnobStyle/ToggleStyle enums added to main widgets
     engine_.register_function("setStyle", [](choc::javascript::ArgumentList) {
@@ -5985,19 +5945,7 @@ void WidgetBridge::register_api() {
         return choc::value::createString(ai_cli_command_);
     });
 
-    // getComputedValue(id, prop) → string
-    engine_.register_function("getComputedValue", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto prop = args.get<std::string>(1, "");
-        auto* v = widget(id);
-        if (!v) return choc::value::createString("");
-        if (prop == "width") return choc::value::createString(std::to_string(v->bounds().width) + "px");
-        if (prop == "height") return choc::value::createString(std::to_string(v->bounds().height) + "px");
-        if (prop == "opacity") return choc::value::createString(std::to_string(v->opacity()));
-        if (prop == "display") return choc::value::createString(v->visible() ? "flex" : "none");
-        if (prop == "visibility") return choc::value::createString(v->visible() ? "visible" : "hidden");
-        return choc::value::createString("");
-    });
+    register_metadata_computed_api();
 
     // Shell exec
     // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
