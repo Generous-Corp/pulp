@@ -434,6 +434,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/text_runs_api.cpp
     src/widget_bridge/border_box_api.cpp
     src/widget_bridge/outline_api.cpp
+    src/widget_bridge/border_radius_api.cpp
     src/widget_bridge/widget_value_list_api.cpp
     src/widget_bridge/widget_value_content_api.cpp
     src/widget_bridge_input.cpp
