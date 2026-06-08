@@ -1044,22 +1044,40 @@ advisory unless explicitly required by branch protection.
 
 #### Runner priority (hard rule)
 
-Pulp's macOS leg is local-first with Namespace overflow (Plan B,
-`planning/2026-05-13-namespace-overflow-implementation.md`). The
-`resolve-provider` job in `build.yml` routes the macOS matrix leg to
-Namespace when the local self-hosted Mac runner has >= 2 busy workers
-AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set. Otherwise it
-stays local. Linux and Windows continue to route via the existing
-provider machinery (default `github-hosted`). The `macos` wrapper job
-that branch protection requires is unchanged.
+**No Namespace.** Namespace cloud macOS runners are a *paid* overflow we do NOT
+use (cost). The capability stays wired in Shipyard / `build.yml` as an explicit,
+operator-dispatched break-glass option, but it is OFF by default and must never
+be auto-routed. Keep `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` (and the
+Linux/Windows equivalents) **UNSET**, and **never hijack that variable to point
+at self-hosted runners** — doing so dumps the high-volume sanitizer/coverage
+lanes onto the Mac Studio runners that host the required `macos` gate and breaks
+it across PRs (the 2026-06-07 lesson). This matches `.shipyard/config.toml`
+("Namespace macOS routing is disabled for cost control").
 
-1. **macOS local runner**: primary required gate when local has capacity.
-2. **Namespace macOS cloud**: automatic overflow when local is saturated. See `docs/guides/local-ci.md` § "macOS overflow routing".
-3. **GitHub-hosted Linux/Windows**: advisory cross-platform signal.
-4. **SSH Ubuntu/Windows**: use only when a human explicitly asks for those local hosts.
+macOS runs on **local Macs + GitHub-hosted**, in this order:
 
-If Shipyard tries to probe SSH Ubuntu or Windows for a macOS-focused PR where
-those hosts are not in scope, use `--skip-target ubuntu --skip-target windows`
-and file a Shipyard issue if the CLI should have inferred that from config.
+1. **Mac Studio** (`pulp-studio-01/02/03`, `PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the
+   primary required `macos` gate.
+2. **M5 Mac** (`pulp-build-m5`, `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`) — local
+   overflow when the Studio runners are saturated
+   (>= `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` busy).
+3. **GitHub-hosted `macos-15`** — sanitizers, coverage, release-cli, and the
+   build-overflow fallback (each via its own `PULP_SANITIZER_*` /
+   `PULP_COVERAGE_MACOS` var, all `macos-15`). Clean per run, so the ODR-prone
+   lanes stay OFF the warm self-hosted build dirs.
+4. **Namespace macOS cloud** — break-glass ONLY, operator-dispatched, never
+   automatic.
+
+Linux and Windows use GitHub-hosted runners (advisory). SSH Ubuntu/Windows only
+when a human explicitly asks. If Shipyard probes SSH Ubuntu/Windows for a
+macOS-focused PR where they're out of scope, use
+`--skip-target ubuntu --skip-target windows`.
+
+**Future (deliberate, not automatic):** using the local Macs (Studio/M5) for the
+heavier lanes (release-cli, sanitizers) means wiring each lane its OWN dedicated
+`runs-on` var pointing at the local labels — **not** the Namespace var — paired
+with auto-cleaning the warm `build-<key>` dirs on churn (see the
+`pulp-runner-ops` skill, since warm-dir ODR is why those lanes stay on
+GitHub-hosted today). Until that lands, they stay on `macos-15`.
 
 See `docs/guides/local-ci.md` for setup.

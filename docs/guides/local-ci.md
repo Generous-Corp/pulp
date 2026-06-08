@@ -161,10 +161,19 @@ To opt out for an individual run, pass `--pipeline default` explicitly.
 
 ## macOS overflow routing (Plan B)
 
+> **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
+> only. `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is kept **UNSET**, so the
+> Namespace overflow described here never fires — it's a documented break-glass
+> option, not the active path. The local overflow tier is the **M5 Mac**
+> (`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON = pulp-build-m5`); the required gate is
+> the **Mac Studio** (`PULP_LOCAL_MACOS_RUNS_ON_JSON`). Do **not** repurpose the
+> Namespace var to point at self-hosted runners (see CLAUDE.md "Runner priority").
+
 When the local self-hosted Mac runner is saturated, `build.yml`'s
-`resolve-provider` job routes new macOS legs to a Namespace cloud
-runner instead of queueing on local. Snap-back is automatic — once
-local clears, fresh dispatches return to local. Source of truth:
+`resolve-provider` job *could* route new macOS legs to a Namespace cloud runner
+instead of queueing on local — but only if the Namespace var is set, which it is
+not. Snap-back is automatic — once local clears, fresh dispatches return to
+local. Source of truth:
 `planning/2026-05-13-namespace-overflow-implementation.md` (Plan B,
 reviewed by `/codex` 2026-05-13).
 
