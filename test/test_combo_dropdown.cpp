@@ -66,6 +66,37 @@ TEST_CASE("ComboBox: paints with correct tokens", "[combo]") {
     REQUIRE(rc.commands().size() > 0);
 }
 
+TEST_CASE("fit_combo_label shrinks the font to fit, ellipsizes only at the floor", "[combo]") {
+    // Font-scaling width model: width = chars * font * 0.5 (the real Skia
+    // measure scales with font; RecordingCanvas's does not, which is why this is
+    // a pure-logic test). "1/4 Delay" is 9 chars.
+    auto width_at = [](const std::string& s, float f) {
+        return static_cast<float>(s.size()) * f * 0.5f;
+    };
+
+    // Wide box: fits at the base font, full text, no shrink.
+    std::string t1 = "1/4 Delay";
+    float f1 = pulp::view::fit_combo_label(t1, 100.0f, 12.0f, 9.0f, width_at);
+    CHECK(t1 == "1/4 Delay");
+    CHECK(f1 == 12.0f);
+
+    // Snug box: too wide at 12 (54px) but fits when shrunk — full text, smaller
+    // font, NO ellipsis (this is the "1/4 Delay" truncation the user hit).
+    std::string t2 = "1/4 Delay";
+    float f2 = pulp::view::fit_combo_label(t2, 50.0f, 12.0f, 9.0f, width_at);
+    CHECK(t2 == "1/4 Delay");
+    CHECK(f2 < 12.0f);
+    CHECK(f2 >= 9.0f);
+    CHECK(width_at(t2, f2) <= 50.0f);
+
+    // Tiny box: even the floor font overflows → ellipsize, clamped to min font.
+    std::string t3 = "1/4 Delay";
+    float f3 = pulp::view::fit_combo_label(t3, 30.0f, 12.0f, 9.0f, width_at);
+    CHECK(f3 == 9.0f);
+    CHECK(t3.size() >= 3);
+    CHECK(t3.substr(t3.size() - 3) == "...");
+}
+
 TEST_CASE("ComboBox: keyboard up/down changes selection", "[combo]") {
     ComboBox combo;
     combo.set_items({"A", "B", "C"});

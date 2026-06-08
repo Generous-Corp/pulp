@@ -424,6 +424,26 @@ TEST_CASE("suppress_svg_glow_at removes the selected digit's baked glow group",
     CHECK_FALSE(suppress_svg_glow_at(svg, 0.0f, 0.0f, 5.0f, 5.0f));
 }
 
+TEST_CASE("suppress_svg_glyph_at removes a baked digit glyph in the cell",
+          "[view][design-import][frame][svg]") {
+    // Non-selected tab digits are plain <path> glyphs. We drop each so the live
+    // overlay is the sole renderer of the digits (no faint doubled glyph). Only
+    // the path whose first point is inside the cell is removed; glyphs in other
+    // cells, and the strip <rect>, stay.
+    std::string svg =
+        "<svg>"
+        "<rect x=\"290\" y=\"123\" width=\"124\" height=\"26\" fill=\"#252626\"/>"
+        "<path d=\"M308.6 138.5L310 132\" fill=\"#ABABAB\"/>"   // digit "1" in slot 0
+        "<path d=\"M339.2 138.5L341 132\" fill=\"#ABABAB\"/>"   // digit "2" in slot 1
+        "</svg>";
+    // Slot 0 cell: x=293..322.5, y=126..146. Removes "1" only.
+    REQUIRE(suppress_svg_glyph_at(svg, 293.0f, 126.0f, 29.5f, 20.0f));
+    CHECK(svg.find("M308.6 138.5") == std::string::npos);  // slot-0 digit removed
+    CHECK(svg.find("M339.2 138.5") != std::string::npos);  // slot-1 digit kept
+    CHECK(svg.find("#252626") != std::string::npos);       // strip rect kept (not a <path>)
+    CHECK_FALSE(suppress_svg_glyph_at(svg, 293.0f, 126.0f, 29.5f, 20.0f));  // no 2nd match in cell
+}
+
 TEST_CASE("DesignFrameView suppresses the baked selected-tab highlight (no double-pill)",
           "[view][design-import][frame][svg]") {
     // An SVG whose tab strip has a baked highlight at the selected slot (2). The

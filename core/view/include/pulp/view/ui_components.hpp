@@ -15,6 +15,16 @@
 
 namespace pulp::view {
 
+// Fit a label into `avail` px. Prefer SHRINKING the font from `base` toward
+// `min` to show the full text; only ellipsize (in-place, with "...") if it still
+// overflows at `min`. `width_at(s, f)` returns the rendered width of `s` at font
+// size `f` (e.g. a canvas set_font + measure_text). Returns the chosen font
+// size and rewrites `text` to the string to draw. Pure logic — unit-tested
+// independently of any canvas (a ComboBox box is often sized tight to a design's
+// own label, so truncating reads worse than a slightly smaller full label).
+float fit_combo_label(std::string& text, float avail, float base, float min,
+                      const std::function<float(const std::string&, float)>& width_at);
+
 // ── ComboBox ─────────────────────────────────────────────────────────────
 
 /// Drop-down selector for enumerated parameters.

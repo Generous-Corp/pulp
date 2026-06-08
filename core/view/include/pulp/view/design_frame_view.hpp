@@ -60,6 +60,13 @@ bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
 // geometry — no per-design data.
 bool suppress_svg_glow_at(std::string& svg, float x, float y, float w, float h);
 
+// Remove the first standalone `<path …/>` whose first drawn coordinate falls
+// inside the box [x, x+w] × [y, y+h], returning true if one was erased. Used to
+// drop a BAKED tab digit glyph so the live DesignTabGroup is the sole renderer
+// of the digits (no faint "doubled" glyph where the live label paints over the
+// baked one). Pure geometry — no per-design data.
+bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h);
+
 // Renders a design's own SVG document pixel-faithfully via Canvas::draw_svg
 // (Skia SkSVGDOM), cropped to its panel, and overlays native interaction from a
 // typed element list. This is the faithful-vector design-import lane's view: the
