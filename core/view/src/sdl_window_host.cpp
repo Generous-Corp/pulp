@@ -103,11 +103,11 @@ public:
                     // dispatch core (drag_drop.cpp).
                     case SDL_EVENT_DROP_BEGIN:
                         pending_drop_files_.clear();
-                        pending_drop_pos_ = {event.drop.x, event.drop.y};
+                        pending_drop_pos_ = window_to_root(event.drop.x, event.drop.y);
                         break;
                     case SDL_EVENT_DROP_FILE:
                         if (event.drop.data) pending_drop_files_.emplace_back(event.drop.data);
-                        pending_drop_pos_ = {event.drop.x, event.drop.y};
+                        pending_drop_pos_ = window_to_root(event.drop.x, event.drop.y);
                         break;
                     case SDL_EVENT_DROP_TEXT:
                         if (event.drop.data) {
@@ -115,7 +115,7 @@ public:
                             d.type = DropData::Type::text;
                             d.text = event.drop.data;
                             dispatch_drop(root_, drag_session_, d,
-                                          {event.drop.x, event.drop.y});
+                                          window_to_root(event.drop.x, event.drop.y));
                             needs_repaint_ = true;
                         }
                         break;
@@ -128,7 +128,7 @@ public:
                             d.type = DropData::Type::files;
                             d.file_paths = pending_drop_files_;
                             dispatch_drag_move(root_, drag_session_, d,
-                                               {event.drop.x, event.drop.y});
+                                               window_to_root(event.drop.x, event.drop.y));
                             needs_repaint_ = true;
                         }
                         break;
@@ -218,6 +218,16 @@ private:
 
     std::shared_ptr<DispatcherQueueState> dispatcher_queue_;
     events::MainThreadDispatcher::Token dispatcher_token_ = 0;
+
+    // Map SDL window coordinates → root-view coordinates. The single chokepoint
+    // for all drop-event coords. render_frame() lays the root tree out at the
+    // full window size with no design-viewport / HiDPI scale, so this is identity
+    // today. When the SDL host gains a design-viewport or per-monitor scale
+    // (W8/L9 HiDPI), apply that inverse transform HERE — and route mouse events
+    // through the same helper — so drops keep landing under the cursor.
+    Point window_to_root(float window_x, float window_y) const {
+        return {window_x, window_y};
+    }
 
     void register_dispatcher() {
         shutdown_dispatcher();

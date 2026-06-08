@@ -3,16 +3,17 @@
 // Platform backends (SDL3 standalone drop events, Windows IDropTarget, Linux
 // XDND, macOS NSDraggingDestination) extract the dropped payload into a DropData
 // and a root-space point, then call these to route it into the view tree. The
-// target-resolution + local-coordinate walk + handler-bubble mirror
-// View::simulate_click (core/view/src/view.cpp) so drops land on the same view a
-// click at that point would.
+// target-resolution + local-coordinate walk mirror View::simulate_click
+// (core/view/src/view.cpp) so drops land on the same view a click would.
 //
-// Platform-specific *capture* lives in the per-OS backends; this file is the one
-// shared place that understands the Pulp view tree, so it compiles everywhere.
+// Resolution is generic: it knows about the DropReceiver interface and the
+// View::on_drop std::function, never a concrete widget — so new drop-aware
+// widgets just implement DropReceiver. Platform-specific *capture* lives in the
+// per-OS backends; this file is the one shared place that understands the view
+// tree, so it compiles everywhere.
 
 #include <pulp/view/drag_drop.hpp>
 
-#include <pulp/view/file_drop_zone.hpp>
 #include <pulp/view/view.hpp>
 
 namespace pulp::view {
@@ -33,35 +34,10 @@ Point to_local(View& root, View* target, Point root_pos) {
     return local;
 }
 
-// Nearest ancestor (inclusive of `target`, bounded by `root`) with a generic
-// View::on_drop handler. nullptr if none.
-View* find_drop_handler(View& root, View* target) {
-    View* v = target;
-    while (v) {
-        if (v->on_drop) return v;
-        if (v == &root) break;
-        v = v->parent();
-    }
-    return nullptr;
-}
-
-// Nearest FileDropZone ancestor (inclusive of `target`, bounded by `root`).
-FileDropZone* find_drop_zone(View& root, View* target) {
-    View* v = target;
-    while (v) {
-        if (auto* zone = dynamic_cast<FileDropZone*>(v)) return zone;
-        if (v == &root) break;
-        v = v->parent();
-    }
-    return nullptr;
-}
-
 // Fire View::on_drop with the (type, data, x, y) string contract. A multi-file
 // drop fires once per path (matches the JS-bridge expectation of one callback
 // invocation per dropped item).
-void fire_view_on_drop(View& root, View* handler, const DropData& data,
-                       Point root_pos) {
-    const Point local = to_local(root, handler, root_pos);
+void fire_view_on_drop(Point local, View* handler, const DropData& data) {
     switch (data.type) {
         case DropData::Type::files:
             for (const auto& path : data.file_paths)
@@ -77,10 +53,31 @@ void fire_view_on_drop(View& root, View* handler, const DropData& data,
 }
 
 void clear_hover(DragSession& session) {
-    if (session.hover_zone) {
-        session.hover_zone->drag_leave();
-        session.hover_zone = nullptr;
+    if (session.hover) {
+        session.hover->leave_drag();
+        session.hover = nullptr;
     }
+}
+
+// Walk from the hit target up to `root` and return the first DropReceiver that
+// claims the drag via accept_drag (idempotent; sets its own highlight). nullptr
+// if none. `target` must be non-null.
+DropReceiver* find_drag_receiver(View& root, View* target, const DropData& data,
+                                 Point root_pos) {
+    for (View* v = target; v; v = (v == &root ? nullptr : v->parent())) {
+        if (auto* r = dynamic_cast<DropReceiver*>(v)) {
+            if (r->accept_drag(data, to_local(root, v, root_pos))) return r;
+        }
+    }
+    return nullptr;
+}
+
+// True if some View::on_drop handler sits at or above `target` (bounded by root).
+bool has_on_drop_handler(View& root, View* target) {
+    for (View* v = target; v; v = (v == &root ? nullptr : v->parent())) {
+        if (v->on_drop) return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -93,17 +90,15 @@ bool dispatch_drag_enter(View& root, DragSession& session, const DropData& data,
         return false;
     }
 
-    // Hover visuals only apply to file drags over a FileDropZone.
-    FileDropZone* zone = (data.type == DropData::Type::files)
-                             ? find_drop_zone(root, target)
-                             : nullptr;
-    if (zone != session.hover_zone) {
-        clear_hover(session);
-        session.hover_zone = zone;
-        if (session.hover_zone) session.hover_zone->drag_enter(data.file_paths);
+    DropReceiver* found = find_drag_receiver(root, target, data, root_pos);
+    if (found != session.hover) {
+        // leave the previously-highlighted receiver; `found` (if any) already
+        // highlighted itself via accept_drag during the search.
+        if (session.hover) session.hover->leave_drag();
+        session.hover = found;
     }
 
-    return zone != nullptr || find_drop_handler(root, target) != nullptr;
+    return found != nullptr || has_on_drop_handler(root, target);
 }
 
 void dispatch_drag_move(View& root, DragSession& session, const DropData& data,
@@ -124,25 +119,20 @@ bool dispatch_drop(View& root, DragSession& session, const DropData& data,
     View* target = root.hit_test(root_pos);
     if (!target) return false;  // dropped outside the window
 
-    bool handled = false;
-
-    // FileDropZone gets the typed paths (extension validation + visual reset live
-    // in FileDropZone::drop) for file drops.
-    if (data.type == DropData::Type::files) {
-        if (auto* zone = find_drop_zone(root, target)) {
-            zone->drop(data.file_paths);
-            handled = true;
+    // First-handler-wins: walk deepest→root; at each view try the DropReceiver
+    // surface first, then the View::on_drop convenience surface. The first that
+    // consumes the drop ends the walk (no double-dispatch).
+    for (View* v = target; v; v = (v == &root ? nullptr : v->parent())) {
+        const Point local = to_local(root, v, root_pos);
+        if (auto* r = dynamic_cast<DropReceiver*>(v)) {
+            if (r->accept_drop(data, local)) return true;
+        }
+        if (v->on_drop) {
+            fire_view_on_drop(local, v, data);
+            return true;
         }
     }
-
-    // Generic View::on_drop — the surface the JS bridge wires. A view can carry
-    // both (a FileDropZone subclass with its own on_drop), so fire both.
-    if (auto* handler = find_drop_handler(root, target)) {
-        fire_view_on_drop(root, handler, data, root_pos);
-        handled = true;
-    }
-
-    return handled;
+    return false;
 }
 
 }  // namespace pulp::view
