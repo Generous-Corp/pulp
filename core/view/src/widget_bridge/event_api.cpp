@@ -1,0 +1,434 @@
+// widget_bridge/event_api.cpp - event registrations for WidgetBridge.
+
+#include <pulp/view/widget_bridge.hpp>
+
+#include <pulp/platform/popup_menu.hpp>
+
+#include <choc/text/choc_JSON.h>
+
+#include <atomic>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <string>
+
+namespace pulp::view {
+
+namespace {
+
+void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char* context) {
+    try {
+        engine.evaluate(js);
+        // Pump microtasks so React setState commits before the next event arrives.
+        engine.pump_message_loop();
+    } catch (const std::exception& e) {
+        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
+    }
+}
+
+void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
+                        ScriptEngine* engine,
+                        const std::string& js,
+                        const char* context) {
+    if (!alive || !alive->load(std::memory_order_acquire) || engine == nullptr) return;
+    try {
+        if (!static_cast<bool>(*engine)) return;
+        engine->evaluate(js);
+        // Pump microtasks so React setState commits before the next event arrives.
+        engine->pump_message_loop();
+    } catch (const std::exception& e) {
+        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
+    }
+}
+
+} // namespace
+
+void WidgetBridge::register_hover_event_api() {
+    // registerHover(id) - enables "mouseenter"/"mouseleave" JS callbacks (CSS :hover).
+    engine_.register_function("registerHover", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            it->second->on_hover_enter = [alive, engine, id]() {
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'mouseenter', 0)", "hover enter");
+            };
+            it->second->on_hover_leave = [alive, engine, id]() {
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'mouseleave', 0)", "hover leave");
+            };
+        }
+        return choc::value::Value();
+    });
+}
+
+void WidgetBridge::register_pointer_event_api() {
+    // registerClick(id) - enables "click" event dispatch for any widget.
+    engine_.register_function("registerClick", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            it->second->on_click = [alive, engine, id]() {
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'click', 0)", "click");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // claimOverlay(id) / releaseOverlay(id) - generalized overlay click routing.
+    engine_.register_function("claimOverlay", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end() && it->second) {
+            // Install a JS-visible dismiss callback so React overlay consumers
+            // can flip setOpen(false) when the framework dismisses the overlay.
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            it->second->on_overlay_dismissed = [alive, engine, id]() {
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('" + id + "', 'dismiss', 0)", "overlay dismiss");
+            };
+            it->second->claim_overlay();
+        }
+        return choc::value::Value();
+    });
+    engine_.register_function("releaseOverlay", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end() && it->second) {
+            // JS-driven release, typically React unmount. Clear the dismiss
+            // callback first so a later ESC/outside-click cannot re-fire it.
+            it->second->on_overlay_dismissed = nullptr;
+            it->second->release_overlay();
+        }
+        return choc::value::Value();
+    });
+
+    // registerPointer(id) - enables pointer event dispatch for a widget.
+    engine_.register_function("registerPointer", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        // Idempotency: re-renders re-issue registerPointer for the same id.
+        // Without this gate each call wraps the previous on_pointer_event,
+        // stacking N lambdas and multiplying dispatch cost by render count.
+        if (!pointer_registered_.insert(id).second) {
+            return choc::value::Value();
+        }
+        if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
+            std::cerr << "[bridge] registerPointer id=" << id << " widgets_.has=" << (widgets_.count(id) ? "yes" : "NO") << "\n";
+        }
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            auto* w = it->second;
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            auto previous_pointer = w->on_pointer_event;
+            w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
+                if (previous_pointer) {
+                    previous_pointer(me);
+                }
+                if (me.is_wheel) {
+                    return;
+                }
+                std::string type;
+                if (me.is_down) type = "pointerdown";
+                else type = "pointerup";
+                if (me.is_cancelled) type = "pointercancel";
+
+                // W3C MouseEvent.button: left=0, middle=1, right=2.
+                int w3c_button = 0;
+                switch (me.button) {
+                    case MouseButton::left:   w3c_button = 0; break;
+                    case MouseButton::middle: w3c_button = 1; break;
+                    case MouseButton::right:  w3c_button = 2; break;
+                    case MouseButton::none:   w3c_button = 0; break;
+                }
+                std::string data = "{"
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) + ","
+                    "offsetX:" + std::to_string(me.position.x) + ","
+                    "offsetY:" + std::to_string(me.position.y) + ","
+                    "pointerId:" + std::to_string(me.pointer_id) + ","
+                    "pointerType:'" + std::string(me.pointerTypeString()) + "',"
+                    "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
+                    "pressure:" + std::to_string(me.pressure) + ","
+                    "altitudeAngle:" + std::to_string(me.altitude_angle) + ","
+                    "azimuthAngle:" + std::to_string(me.azimuth_angle) + ","
+                    "button:" + std::to_string(w3c_button) + ","
+                    "ctrlKey:" + (me.isCtrlDown() ? "true" : "false") + ","
+                    "shiftKey:" + (me.isShiftDown() ? "true" : "false") + ","
+                    "altKey:" + (me.isAltDown() ? "true" : "false") + ","
+                    "metaKey:" + (me.isCmdDown() ? "true" : "false") +
+                    "}";
+
+                if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
+                    std::cerr << "[bridge] pointer " << type << " id=" << id << "\n";
+                }
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "pointer");
+
+                std::string mouse_type;
+                if (type == "pointerdown") mouse_type = "mousedown";
+                else if (type == "pointerup") mouse_type = "mouseup";
+                else if (type == "pointercancel") mouse_type = "mouseup";
+                if (!mouse_type.empty()) {
+                    safe_dispatch_eval(alive, engine,
+                        "__dispatch__('" + id + "', '" + mouse_type + "', " + data + ")",
+                        "per-widget mouse");
+                    safe_dispatch_eval(alive, engine,
+                        "__dispatch__('__global__', '" + mouse_type + "', " + data + ")",
+                        "global mouse");
+                }
+            };
+
+            // W3C PointerEvents: forward drag as pointermove.
+            w->on_drag = [alive, engine, id, w](Point pos) {
+                float wx = pos.x, wy = pos.y;
+                for (View* cur = w; cur; cur = cur->parent()) {
+                    wx += cur->bounds().x;
+                    wy += cur->bounds().y;
+                }
+                std::string data = "{"
+                    "clientX:" + std::to_string(wx) + ","
+                    "clientY:" + std::to_string(wy) + ","
+                    "offsetX:" + std::to_string(pos.x) + ","
+                    "offsetY:" + std::to_string(pos.y) + ","
+                    "pointerId:0,pointerType:'mouse',isPrimary:true,"
+                    "button:0,buttons:1}";
+                if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
+                    std::cerr << "[bridge] drag id=" << id << " @(" << pos.x << "," << pos.y << ")\n";
+                }
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'pointermove', " + data + ")", "pointermove");
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('" + id + "', 'mousemove', " + data + ")",
+                    "per-widget mousemove");
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('__global__', 'mousemove', " + data + ")",
+                    "global mousemove");
+            };
+
+            // Identity-preserving pointermove for iOS multi-touch.
+            w->on_pointer_move = [alive, engine, id](const MouseEvent& me) {
+                std::string data = "{"
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) + ","
+                    "offsetX:" + std::to_string(me.position.x) + ","
+                    "offsetY:" + std::to_string(me.position.y) + ","
+                    "pointerId:" + std::to_string(me.pointer_id) + ","
+                    "pointerType:'" + std::string(me.pointerTypeString()) + "',"
+                    "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
+                    "pressure:" + std::to_string(me.pressure) + ","
+                    "button:0,buttons:1}";
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('" + id + "', 'pointermove', " + data + ")",
+                    "pointermove");
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('" + id + "', 'mousemove', " + data + ")",
+                    "per-widget mousemove");
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('__global__', 'mousemove', " + data + ")",
+                    "global mousemove");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // registerGesture(id) - enables gesture event dispatch for a widget.
+    engine_.register_function("registerGesture", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            it->second->on_gesture_cb = [alive, engine, id](const GestureEvent& ge) {
+                std::string type;
+                switch (ge.phase) {
+                    case GesturePhase::began:     type = "gesturestart"; break;
+                    case GesturePhase::ended:     type = "gestureend"; break;
+                    case GesturePhase::cancelled: type = "gestureend"; break;
+                    default:                      type = "gesturechange"; break;
+                }
+                std::string data = "{"
+                    "scale:" + std::to_string(ge.scale) + ","
+                    "rotation:" + std::to_string(ge.rotation) + ","
+                    "clientX:" + std::to_string(ge.position.x) + ","
+                    "clientY:" + std::to_string(ge.position.y) +
+                    "}";
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "gesture");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // nativeSetPointerCapture(id, pointerId).
+    engine_.register_function("nativeSetPointerCapture", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pointerId = static_cast<int>(args.get<double>(1, 0));
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            it->second->set_pointer_capture(pointerId);
+            safe_dispatch_eval(engine_, "__dispatch__('" + id + "', 'gotpointercapture', {pointerId:" + std::to_string(pointerId) + "})", "gotpointercapture");
+        }
+        return choc::value::Value();
+    });
+
+    // nativeReleasePointerCapture(id, pointerId).
+    engine_.register_function("nativeReleasePointerCapture", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pointerId = static_cast<int>(args.get<double>(1, 0));
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            it->second->release_pointer_capture(pointerId);
+            safe_dispatch_eval(engine_, "__dispatch__('" + id + "', 'lostpointercapture', {pointerId:" + std::to_string(pointerId) + "})", "lostpointercapture");
+        }
+        return choc::value::Value();
+    });
+
+    // enableInspectClick() - sets up Cmd+click detection on all registered widgets.
+    engine_.register_function("enableInspectClick", [this](choc::javascript::ArgumentList) {
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        root_.on_global_click = [alive, engine](const std::string& id, uint16_t mods) {
+            bool cmd = (mods & (0x10 | 0x08)) != 0;
+            if (cmd) {
+                safe_dispatch_eval(alive, engine, "__dispatch__('__inspect__', 'click', '" + id + "')", "inspect click");
+            }
+        };
+        return choc::value::Value();
+    });
+}
+
+void WidgetBridge::register_wheel_event_api() {
+    // registerWheel(id) - enable wheel event dispatch for scroll/zoom.
+    engine_.register_function("registerWheel", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        // Idempotency: re-renders re-issue registerWheel for the same id.
+        // Without this gate each call wraps the previous on_pointer_event,
+        // stacking N lambdas and multiplying dispatch cost by render count.
+        if (!wheel_registered_.insert(id).second) {
+            return choc::value::Value();
+        }
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            auto* w = it->second;
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            auto previous_pointer = w->on_pointer_event;
+            w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
+                if (previous_pointer) {
+                    previous_pointer(me);
+                }
+                if (!me.is_wheel) {
+                    return;
+                }
+                std::string data = "{"
+                    "deltaX:" + std::to_string(me.scroll_delta_x) + ","
+                    "deltaY:" + std::to_string(me.scroll_delta_y) + ","
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) +
+                    "}";
+                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'wheel', " + data + ")", "wheel");
+            };
+        }
+        return choc::value::Value();
+    });
+}
+
+void WidgetBridge::register_context_menu_event_api() {
+    // registerContextMenu(id, callbackName)
+    engine_.register_function("registerContextMenu", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto cb = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (v && !cb.empty()) {
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            v->on_context_menu = [alive, engine, cb](Point pos) {
+                safe_dispatch_eval(alive, engine,
+                    cb + "(" + std::to_string(pos.x) + "," + std::to_string(pos.y) + ")",
+                    "context menu");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // showContextMenu(itemsJSON, x, y) -> selected id or -1.
+    engine_.register_function("showContextMenu", [](choc::javascript::ArgumentList args) {
+        auto json = args.get<std::string>(0, "");
+        auto x = args.get<double>(1, 0);
+        auto y = args.get<double>(2, 0);
+
+        platform::PopupMenu menu;
+        try {
+            auto items = choc::json::parse(json);
+            if (items.isArray()) {
+                for (uint32_t i = 0; i < items.size(); ++i) {
+                    auto item = items[i];
+                    bool sep = false;
+                    if (item.hasObjectMember("separator")) {
+                        sep = item["separator"].getWithDefault(false);
+                    }
+                    if (sep) {
+                        menu.add_separator();
+                    } else {
+                        int id = item["id"].getWithDefault(0);
+                        std::string label;
+                        if (item.hasObjectMember("label"))
+                            label = item["label"].getWithDefault(std::string(""));
+                        bool enabled = item.hasObjectMember("enabled") ? item["enabled"].getWithDefault(true) : true;
+                        bool checked = item.hasObjectMember("checked") ? item["checked"].getWithDefault(false) : false;
+                        menu.add_item(id, label, enabled, checked);
+                    }
+                }
+            }
+        } catch (...) {}
+        auto result = menu.show(static_cast<float>(x), static_cast<float>(y));
+        return choc::value::createInt32(result.value_or(-1));
+    });
+
+    // registerShortcut(key, modifiers, callbackName)
+    engine_.register_function("registerShortcut", [this](choc::javascript::ArgumentList args) {
+        auto key = args.get<int>(0, 0);
+        auto mods = args.get<int>(1, 0);
+        auto cb = args.get<std::string>(2, "");
+        if (!cb.empty()) {
+            shortcuts_.push_back({static_cast<KeyCode>(key),
+                                  static_cast<uint16_t>(mods), cb});
+        }
+        return choc::value::Value();
+    });
+}
+
+void WidgetBridge::register_drop_event_api() {
+    // Drag-and-drop: register JS callback for file/text drops.
+    engine_.register_function("registerDrop", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto cb = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (v && !cb.empty()) {
+            auto alive = callback_alive_;
+            auto* engine = &engine_;
+            v->on_drop = [alive, engine, cb](const std::string& type, const std::string& data, float x, float y) {
+                std::string safe_data;
+                for (char c : data) {
+                    if (c == '\'') safe_data += "\\'";
+                    else if (c == '\n') safe_data += "\\n";
+                    else safe_data += c;
+                }
+                safe_dispatch_eval(alive, engine,
+                    cb + "('" + type + "','" + safe_data + "'," +
+                    std::to_string(x) + "," + std::to_string(y) + ")",
+                    "drop");
+            };
+        }
+        return choc::value::Value();
+    });
+}
+
+} // namespace pulp::view
