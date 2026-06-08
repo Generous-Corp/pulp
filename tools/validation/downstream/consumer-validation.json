@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "roadmap_item": "P0.4",
+  "manifest_kind": "downstream_consumer_validation",
+  "reviewed_at_utc": "2026-06-08T07:30:00Z",
+  "canonical_sdk_recipe": {
+    "build_type": "Release",
+    "source_dir": "${PULP_SOURCE_DIR}",
+    "build_dir": "${PULP_BUILD_DIR}",
+    "install_prefix_env": "PULP_SDK_PREFIX",
+    "configure": [
+      "cmake",
+      "-S",
+      "${PULP_SOURCE_DIR}",
+      "-B",
+      "${PULP_BUILD_DIR}",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_INSTALL_PREFIX=${PULP_SDK_PREFIX}"
+    ],
+    "build": [
+      "cmake",
+      "--build",
+      "${PULP_BUILD_DIR}",
+      "-j"
+    ],
+    "install": [
+      "cmake",
+      "--install",
+      "${PULP_BUILD_DIR}",
+      "--prefix",
+      "${PULP_SDK_PREFIX}"
+    ],
+    "required_verification": [
+      "Pulp_DIR=${PULP_SDK_PREFIX}/lib/cmake/Pulp",
+      "find_package(Pulp REQUIRED CONFIG)",
+      "consumer builds from a clean build directory"
+    ]
+  },
+  "consumers": [
+    {
+      "name": "pulp-view-embed",
+      "repo_url": "https://github.com/danielraffel/pulp-view-embed.git",
+      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-view-embed",
+      "reviewed_head": "787b2e9",
+      "contract": "ViewEmbed C ABI and installed SDK consumption",
+      "dependency_surfaces": [
+        "pulp_view_embed.h",
+        "installed_sdk_cmake_targets",
+        "DesignIR JSON",
+        "scripted UI bundles",
+        "host attach/resize/tick/capture lifecycle"
+      ],
+      "required_checks": [
+        {
+          "id": "configure-installed-sdk",
+          "command": "cmake -S ${CHECKOUT} -B ${CHECKOUT}/build-pulp-sdk -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=${PULP_SDK_PREFIX} -DPulp_DIR=${PULP_SDK_PREFIX}/lib/cmake/Pulp",
+          "expected_evidence": "CMake configure succeeds against the installed Pulp SDK"
+        },
+        {
+          "id": "build",
+          "command": "cmake --build ${CHECKOUT}/build-pulp-sdk -j",
+          "expected_evidence": "pulp-view-embed library and smoke targets build"
+        },
+        {
+          "id": "ctest",
+          "command": "ctest --test-dir ${CHECKOUT}/build-pulp-sdk -R \"embed-smoke|embed-validate-faithful\" --output-on-failure",
+          "expected_evidence": "embed smoke and faithful validation tests pass"
+        }
+      ]
+    },
+    {
+      "name": "pulp-embed-iplug2",
+      "repo_url": "https://github.com/danielraffel/pulp-embed-iplug2.git",
+      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-embed-iplug2",
+      "reviewed_head": "e7f8c78",
+      "contract": "iPlug2 editor lifecycle through pulp-view-embed",
+      "dependency_surfaces": [
+        "pulp_view_embed.h",
+        "installed_sdk_cmake_targets",
+        "iPlug2 editor attach/detach lifecycle",
+        "host parameter bridge"
+      ],
+      "required_checks": [
+        {
+          "id": "configure-installed-sdk",
+          "command": "cmake -S ${CHECKOUT} -B ${CHECKOUT}/build-pulp-sdk -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=${PULP_SDK_PREFIX} -DPulp_DIR=${PULP_SDK_PREFIX}/lib/cmake/Pulp -DPULP_VIEW_EMBED_DIR=/Volumes/Workshop/Code/pulp-view-embed",
+          "expected_evidence": "CMake configure succeeds against the installed Pulp SDK and embed ABI"
+        },
+        {
+          "id": "build",
+          "command": "cmake --build ${CHECKOUT}/build-pulp-sdk -j",
+          "expected_evidence": "iPlug2 embed example builds"
+        },
+        {
+          "id": "ctest",
+          "command": "ctest --test-dir ${CHECKOUT}/build-pulp-sdk -R \"compilecheck|binding-test\" --output-on-failure",
+          "expected_evidence": "iPlug2 compilecheck and binding tests pass"
+        }
+      ]
+    },
+    {
+      "name": "pulp-embed-juce",
+      "repo_url": "https://github.com/danielraffel/pulp-embed-juce.git",
+      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-embed-juce",
+      "reviewed_head": "1704f10",
+      "contract": "JUCE component lifecycle through pulp-view-embed",
+      "dependency_surfaces": [
+        "pulp_view_embed.h",
+        "installed_sdk_cmake_targets",
+        "JUCE component attach/detach lifecycle",
+        "host parameter bridge"
+      ],
+      "required_checks": [
+        {
+          "id": "configure-installed-sdk",
+          "command": "cmake -S ${CHECKOUT} -B ${CHECKOUT}/build-pulp-sdk -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=${PULP_SDK_PREFIX} -DPulp_DIR=${PULP_SDK_PREFIX}/lib/cmake/Pulp -DPULP_VIEW_EMBED_DIR=/Volumes/Workshop/Code/pulp-view-embed",
+          "expected_evidence": "CMake configure succeeds against the installed Pulp SDK and embed ABI"
+        },
+        {
+          "id": "build",
+          "command": "cmake --build ${CHECKOUT}/build-pulp-sdk --target PulpEmbedJucePlugin_All -j",
+          "expected_evidence": "JUCE embed example builds"
+        }
+      ]
+    },
+    {
+      "name": "pulp-import-iplug",
+      "repo_url": "https://github.com/danielraffel/pulp-import-iplug.git",
+      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-import-iplug",
+      "reviewed_head": "2ba9883",
+      "contract": "ProjectIR importer SPI, separate from Pulp DesignIR",
+      "dependency_surfaces": [
+        "ProjectIR schema",
+        "pulp import CLI/package story",
+        "scaffold emission"
+      ],
+      "required_checks": [
+        {
+          "id": "importer-tests",
+          "command": "cd ${CHECKOUT}/spike && ./run_spike.sh && python3 test_spi.py",
+          "expected_evidence": "iPlug ProjectIR extraction and scaffold tests pass"
+        }
+      ]
+    },
+    {
+      "name": "pulp-import-juce",
+      "repo_url": "https://github.com/danielraffel/pulp-import-juce.git",
+      "local_checkout_hint": "/Volumes/Workshop/Code/pulp-import-juce",
+      "reviewed_head": "e06b04b",
+      "contract": "ProjectIR importer SPI, separate from Pulp DesignIR",
+      "dependency_surfaces": [
+        "ProjectIR schema",
+        "pulp import CLI/package story",
+        "scaffold emission"
+      ],
+      "required_checks": [
+        {
+          "id": "importer-tests",
+          "command": "cd ${CHECKOUT}/spike && ./run_spike.sh && python3 test_spi.py && python3 emit/test_emit.py",
+          "expected_evidence": "JUCE ProjectIR extraction and scaffold tests pass"
+        }
+      ]
+    }
+  ]
+}

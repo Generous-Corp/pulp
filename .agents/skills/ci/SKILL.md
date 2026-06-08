@@ -2025,6 +2025,24 @@ use `CMAKE_CURRENT_LIST_DIR`. The two existing helpers paths
 (`_pulp_add_standalone` for fontconfig, top-level fallbacks for
 `_PULP_FORMAT_SOURCE_DIR` etc.) demonstrate the pattern.
 
+### Downstream validation manifest (P0.4)
+
+`tools/validation/downstream/consumer-validation.json` records the
+external consumer checklist for refactors that can affect installed SDK,
+embed ABI, ProjectIR, or generated UI bundle behavior. It is not a
+per-PR external-build gate; it is the canonical inventory of which
+downstream repos must be run for a given API/schema/ABI surface and what
+evidence each run must produce.
+
+`tools/scripts/verify_downstream_validation_manifest.py` is the fast
+schema/checklist guard. `version-skill-check.yml` runs
+`tools/scripts/test_downstream_validation_manifest.py` with the other
+gate-script fixture tests so the manifest cannot drift to a stale SDK
+recipe, drop a roadmap P0.4 consumer, or conflate ProjectIR importer
+coverage with Pulp DesignIR coverage. Use `--check-local` only on a
+developer machine when you want advisory checkout presence and current
+HEAD reporting.
+
 ## Versioning & Skill-Sync gates (Layer 3)
 
 `pulp pr` orchestrates the full shipping flow. CI enforces the fast invariant gates on every PR to `main`:
