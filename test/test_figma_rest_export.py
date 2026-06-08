@@ -390,6 +390,57 @@ class FaithfulVectorTest(unittest.TestCase):
                 "children": [{"name": "Knob", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 4}}]}
         self.assertEqual(frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0)), [])
 
+    def _tab_group_node(self, nid, x, y):
+        def tab(tx, label):
+            return {"name": "Button", "type": "FRAME",
+                    "absoluteBoundingBox": {"x": tx, "y": y, "width": 29, "height": 20},
+                    "children": [{"type": "TEXT", "characters": label}]}
+        return {"name": "Radio Button", "id": nid, "type": "FRAME",
+                "absoluteBoundingBox": {"x": x, "y": y, "width": 120, "height": 20},
+                "children": [tab(x, "1"), tab(x + 29, "2"), tab(x + 58, "3"), tab(x + 87, "4")]}
+
+    def test_detect_overlay_controls_drops_occluded_control(self):
+        # A tab group fully painted over by a LATER opaque sibling (an envelope
+        # graph panel drawn on top) is not visible → must NOT be surfaced. This
+        # is the "spurious envelope 1/2/3/4" guard: the leftover radio layer sits
+        # under an opaque panel, so the importer must skip it.
+        tg = self._tab_group_node("buried", 50, 530)
+        cover = {"name": "Graph Panel", "id": "cover", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 0, "y": 434, "width": 1000, "height": 142},
+                 "fills": [{"type": "GRADIENT_RADIAL", "visible": True,
+                            "gradientStops": [{"color": {"a": 1.0}}, {"color": {"a": 1.0}}]}],
+                 "children": []}
+        root = {"id": "root", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+                "children": [tg, cover]}              # tg painted BEFORE the cover
+        els = frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0))
+        self.assertEqual([e for e in els if e["kind"] == "tab_group"], [])
+
+    def test_detect_overlay_controls_keeps_visible_control(self):
+        # Same tab group, but the opaque panel is painted BEFORE it (lower z) —
+        # so the tab group is on top and visible. It must be surfaced.
+        cover = {"name": "Graph Panel", "id": "cover", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 0, "y": 434, "width": 1000, "height": 142},
+                 "fills": [{"type": "SOLID", "visible": True, "color": {"a": 1.0}}],
+                 "children": []}
+        tg = self._tab_group_node("ontop", 50, 530)
+        root = {"id": "root", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+                "children": [cover, tg]}              # tg painted AFTER the cover
+        els = frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(len([e for e in els if e["kind"] == "tab_group"]), 1)
+
+    def test_detect_overlay_controls_own_background_is_not_an_occluder(self):
+        # A control whose OWN background <rect> fills it (a descendant painted
+        # after the group) must NOT be treated as occluding itself.
+        tg = self._tab_group_node("self", 50, 530)
+        tg["children"].insert(0, {  # background rect spanning the whole group, drawn first child
+            "name": "bg", "id": "selfbg", "type": "RECTANGLE",
+            "absoluteBoundingBox": {"x": 50, "y": 530, "width": 120, "height": 20},
+            "fills": [{"type": "SOLID", "visible": True, "color": {"a": 1.0}}]})
+        root = {"id": "root", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+                "children": [tg]}
+        els = frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(len([e for e in els if e["kind"] == "tab_group"]), 1)
+
 
 class FaithfulVectorDefaultTest(unittest.TestCase):
     """The faithful-vector lane (interactive overlays) must be the DEFAULT — a

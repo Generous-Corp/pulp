@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.import.plan.v0",
+  "target_name": "Example Effect Migration Scaffold",
+  "actions": [
+    { "kind": "generate", "path": "CMakeLists.txt", "template": "pulp_add_plugin", "provenance": "pulp-generated" },
+    { "kind": "generate", "path": "src/PluginProcessor.cpp", "template": "processor_shell", "provenance": "pulp-generated" },
+    { "kind": "copy_user_file", "path": "src/DspCore.h", "from": "Source/DspCore.h", "provenance": "copied-user-file" },
+    { "kind": "scaffold_stub", "path": "src/process_stub.cpp", "template": "effect_passthrough", "provenance": "scaffold" },
+    { "kind": "write_report", "path": "IMPORT_REPORT.md", "provenance": "report" },
+    { "kind": "write_manifest", "path": "migration_status.json", "provenance": "report" }
+  ]
+}

@@ -1,0 +1,321 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/schemas/project-import-ir-v0.schema.json",
+  "title": "Pulp project-import IR v0",
+  "description": "Versioned, framework-AGNOSTIC intermediate representation produced by a project importer (an add-on tool, installed on demand) when it reads an existing audio-plugin project read-only and proposes a Pulp migration scaffold. This is the contract between the Pulp SDK (which owns emission) and the importer tool (which owns framework-specific parsing). The SDK never hardcodes a source-framework identity: `source.framework` and `vendor_id` are runtime DATA strings, not enumerated values, so the SDK, mainline tests, and CI carry no vendor names. This IR is project-shaped and is deliberately distinct from the design-import `ImportDiagnostic` / source-contract (core/view + tools/import-validation), which is design-shaped; the two must not be conflated or merged. The schema is intentionally permissive (additionalProperties true on open-ended objects) so importers may carry framework-specific extras without a schema bump, while the required fields lock the facts every consumer relies on. Honesty is structural: a fact the importer could not statically resolve is recorded as a low-confidence value plus a first-class `constructs[]` entry and a diagnostic, never silently dropped or guessed.",
+  "schema": "pulp-project-import-ir-v0",
+  "type": "object",
+  "required": ["schema", "extraction_context", "source", "metadata", "parameters", "constructs", "diagnostics"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "Schema tag, e.g. 'pulp.import.project_ir.v0'. Consumers must check this before reading."
+    },
+    "extraction_context": { "$ref": "#/$defs/extraction_context" },
+    "source": { "$ref": "#/$defs/source" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "midi": { "$ref": "#/$defs/midi" },
+    "buses": { "$ref": "#/$defs/bus_set" },
+    "parameters": {
+      "type": "array",
+      "description": "Statically resolved parameters. Parameters the importer could NOT enumerate (loops, factories, computed args) live in `constructs`, not here.",
+      "items": { "$ref": "#/$defs/parameter" }
+    },
+    "constructs": {
+      "type": "array",
+      "description": "First-class inventory of parameter (or other) constructs the importer found but could not reduce to concrete facts. Lets emission report 'N unresolved constructs of unknown cardinality' instead of under-reporting a fabricated count.",
+      "items": { "$ref": "#/$defs/construct" }
+    },
+    "state_model": { "$ref": "#/$defs/state_model" },
+    "dsp": { "$ref": "#/$defs/dsp" },
+    "ui": { "$ref": "#/$defs/ui" },
+    "lifecycle_hooks": { "$ref": "#/$defs/lifecycle_hooks" },
+    "format_matrix": { "$ref": "#/$defs/format_matrix" },
+    "project_inputs": { "$ref": "#/$defs/project_inputs" },
+    "residual_policy": { "$ref": "#/$defs/residual_policy" },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+    "migration_tasks": {
+      "type": "array",
+      "description": "Human-facing TODOs the residual report surfaces.",
+      "items": { "type": "string" }
+    },
+    "confidence_overall": { "$ref": "#/$defs/confidence" }
+  },
+  "$defs": {
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Per-fact confidence in [0,1]. Consumers should report per-section confidence and a weighted overall, not a single global minimum."
+    },
+    "source_ref": {
+      "type": "object",
+      "description": "A location in the user's source tree. Read-only provenance for a fact.",
+      "required": ["file"],
+      "additionalProperties": true,
+      "properties": {
+        "file": { "type": "string", "description": "Path relative to the source project root." },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "macro_expansion": {
+          "type": "boolean",
+          "description": "True when the spelling location differs from the expansion location (the fact came through a macro)."
+        }
+      }
+    },
+    "extraction_context": {
+      "type": "object",
+      "description": "How this IR was extracted, so VST3-vs-AU / debug-vs-release / macro-conditional runs are explainable and the parse environment is auditable. The shipped importer records the full compile command, macro set, include graph, target triple, and exact parser/libclang version.",
+      "required": ["tool", "tool_version", "parser"],
+      "additionalProperties": true,
+      "properties": {
+        "tool": { "type": "string", "description": "Importer tool id (framework-agnostic at the SDK layer)." },
+        "tool_version": { "type": "string" },
+        "parser": { "type": "string", "description": "e.g. 'libclang'." },
+        "parser_version": { "type": "string", "description": "Exact parser identity; pinned + reported so behaviour drift is explainable." },
+        "cpp_standard": { "type": "string" },
+        "target": { "type": "string", "description": "Target triple or a documented placeholder." },
+        "compile_db": {
+          "type": "string",
+          "description": "How compile flags were obtained: a real compile_commands.json, a generated one, or a documented fallback. Guessing include flags is a hard boundary, not a silent fallback — record which path was used."
+        },
+        "system_includes": { "type": "string", "description": "How the system/SDK include search paths were resolved." },
+        "framework_resolution": { "type": "string", "description": "How framework #includes were resolved (the user's own checkout path at the SDK boundary; never vendored)." },
+        "macros": { "type": "array", "items": { "type": "string" } },
+        "include_dirs": { "type": "array", "items": { "type": "string" } },
+        "parse_errors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "source": {
+      "type": "object",
+      "description": "Identity of the imported project. `framework`/`vendor_id` are runtime data strings — the SDK never enumerates them.",
+      "required": ["framework"],
+      "additionalProperties": true,
+      "properties": {
+        "framework": { "type": "string", "description": "Runtime framework id (DATA, not an SDK enum)." },
+        "vendor_id": { "type": "string", "description": "Runtime vendor id (DATA)." },
+        "project_dir": { "type": "string" },
+        "metadata_source": { "type": "string", "description": "Where metadata came from (project manifest / build script / none)." },
+        "metadata_file": { "type": ["string", "null"] },
+        "main_source": { "type": "string" },
+        "processor_class": { "type": ["string", "null"] }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Maps onto pulp::format::PluginDescriptor. `pulp_category` is one of the three Pulp categories; `category` is the importer's own framework-shaped label (data).",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "manufacturer": { "type": "string" },
+        "manufacturer_code": { "type": "string" },
+        "plugin_code": { "type": "string" },
+        "version": { "type": "string" },
+        "bundle_id": { "type": "string" },
+        "vendor_url": { "type": "string" },
+        "vendor_email": { "type": "string" },
+        "category": { "type": "string", "description": "Source-framework category label (data)." },
+        "pulp_category": {
+          "type": "string",
+          "enum": ["Effect", "Instrument", "MidiEffect"],
+          "description": "pulp::format::PluginCategory."
+        },
+        "formats": { "type": "array", "items": { "type": "string" } },
+        "vst3_category": { "type": "string" },
+        "channel_configs": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "midi": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "accepts_midi": { "type": "boolean" },
+        "produces_midi": { "type": "boolean" },
+        "is_midi_effect": { "type": "boolean" }
+      }
+    },
+    "param_range": {
+      "type": "object",
+      "description": "LINEAR range mapping onto pulp::state::ParamRange. Source non-linearity is recorded separately in `source_curve`.",
+      "additionalProperties": true,
+      "properties": {
+        "min": { "type": ["number", "null"] },
+        "max": { "type": ["number", "null"] },
+        "step": { "type": ["number", "null"], "description": "0 = continuous." }
+      }
+    },
+    "source_curve": {
+      "type": "object",
+      "description": "Source parameter curve recorded separately because Pulp's registered ParamInfo.range is linear today. A non-unity skew flags the emitted param PARTIAL until SDK shaped-range lands.",
+      "additionalProperties": true,
+      "properties": {
+        "skew": { "type": "number", "description": "1 = linear." },
+        "symmetric": { "type": "boolean" }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "description": "Maps onto pulp::state::ParamInfo. Identity is preserved as the source string id + version hint AND a stable proposed uint32 id so preset/state migration survives id assignment.",
+      "required": ["source_type", "confidence"],
+      "additionalProperties": true,
+      "properties": {
+        "source_type": { "type": "string", "enum": ["float", "choice", "bool", "int", "unknown"] },
+        "id": { "type": ["string", "null"] },
+        "source_id_string": { "type": ["string", "null"] },
+        "source_version_hint": { "type": ["integer", "null"] },
+        "proposed_pulp_id": { "type": ["integer", "null"], "description": "Stable uint32 hash of the source id (Pulp ParamID is uint32)." },
+        "name": { "type": ["string", "null"] },
+        "unit": { "type": "string" },
+        "pulp_range": { "$ref": "#/$defs/param_range" },
+        "default": { "type": ["number", "null"] },
+        "source_curve": { "$ref": "#/$defs/source_curve" },
+        "choices": { "type": ["array", "null"], "items": { "type": "string" } },
+        "display_conversion": {
+          "type": "string",
+          "description": "Whether display string conversion is the framework default or a custom (non-data-extractable) callback that must be migrated by hand."
+        },
+        "source_ref": { "$ref": "#/$defs/source_ref" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "computed": { "type": "boolean", "description": "True if any constructor argument depends on a runtime value; such params also appear in `constructs`." },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "construct": {
+      "type": "object",
+      "description": "A parameter (or similar) construct the importer found but could not reduce to concrete facts (loop / factory / computed args / nested group). Carries cardinality bounds so consumers report unresolved counts honestly.",
+      "required": ["kind", "enumeration_status"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string", "description": "e.g. 'parameter_construct'." },
+        "construct_type": { "type": "string", "enum": ["loop_or_factory", "computed_args", "parameter_group", "factory_call", "unknown"] },
+        "source_ref": { "$ref": "#/$defs/source_ref" },
+        "enumeration_status": { "type": "string", "enum": ["unknown_cardinality", "partial", "resolved"] },
+        "cardinality": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "lower_bound": { "type": ["integer", "null"], "minimum": 0 },
+            "upper_bound": { "type": ["integer", "null"] },
+            "known_count": { "type": ["integer", "null"] },
+            "reason": { "type": "string" }
+          }
+        },
+        "partial_params": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "diagnostic_ids": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "bus": {
+      "type": "object",
+      "description": "Maps onto pulp::format::BusInfo. `optional` is true for buses not activated by default (e.g. a sidechain). Order is declaration order: main bus at index 0.",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "channels": { "type": ["integer", "null"], "description": "Channel count (channel-set expressions are resolved to a count)." },
+        "optional": { "type": "boolean" }
+      }
+    },
+    "bus_set": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/bus" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/bus" } },
+        "source": { "type": "string", "description": "Whether buses were declared explicitly or derived from category (lower confidence). Dynamic layout policy is flagged, not imported." },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "state_model": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "classification": { "type": "string", "enum": ["opaque-custom", "apvts-like", "default-params", "unknown"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "dsp": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "classification": { "type": "string", "enum": ["portable-core", "framework-bound-mappable", "framework-bound-midi", "labelled-silence", "stub", "unknown"] },
+        "reachability_scope": {
+          "type": "string",
+          "enum": ["direct_body", "intra_tu", "compile_db_graph", "unknown"],
+          "description": "How deep the DSP reachability analysis went. portable-core confidence must not be read from a shallow direct_body scan."
+        },
+        "reachable_framework_symbols": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "model": { "type": "string", "enum": ["stock-generic-editor", "custom-paint", "webview", "unknown"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "lifecycle_hooks": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "prepare": { "type": "boolean" },
+        "release": { "type": "boolean" },
+        "reset": { "type": "boolean" },
+        "process": { "type": "boolean" }
+      }
+    },
+    "format_matrix": {
+      "type": "object",
+      "description": "Per-format differences (formats enabled, per-format defines, bus/MIDI/category deltas behind conditional compilation). Lets a consumer see why two formats extracted different worlds.",
+      "additionalProperties": true,
+      "properties": {
+        "formats": { "type": "array", "items": { "type": "string" } },
+        "per_format_defines": { "type": "object", "additionalProperties": true },
+        "differences": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "project_inputs": {
+      "type": "object",
+      "description": "Provenance of the files read: project manifest(s), build scripts, enabled framework modules, framework version/path, generated-file roots. Expensive to reconstruct later; critical for the residual report.",
+      "additionalProperties": true,
+      "properties": {
+        "manifests": { "type": "array", "items": { "type": "string" } },
+        "build_scripts": { "type": "array", "items": { "type": "string" } },
+        "framework_modules": { "type": "array", "items": { "type": "string" } },
+        "framework_version": { "type": "string" },
+        "generated_roots": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "residual_policy": {
+      "type": "object",
+      "description": "Whether emission is complete, partial, or blocked, with reason codes — feeds the migration_status manifest and the `pulp ship` unresolved-scaffold gate.",
+      "additionalProperties": true,
+      "properties": {
+        "emission": { "type": "string", "enum": ["complete", "partial", "blocked"] },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "description": "Project-import diagnostic (distinct from the design-import ImportDiagnostic). Neutral language; never accusatory.",
+      "required": ["severity", "code", "message"],
+      "additionalProperties": true,
+      "properties": {
+        "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "source_ref": { "$ref": "#/$defs/source_ref" }
+      }
+    }
+  }
+}

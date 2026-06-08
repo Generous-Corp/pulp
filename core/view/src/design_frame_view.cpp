@@ -103,6 +103,85 @@ bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
     return false;
 }
 
+bool suppress_svg_glow_at(std::string& svg, float x, float y, float w, float h) {
+    const float x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    const char* kOpen = "<g filter=\"url(#";
+    std::size_t pos = 0;
+    while ((pos = svg.find(kOpen, pos)) != std::string::npos) {
+        const auto gt = svg.find('>', pos);
+        if (gt == std::string::npos) break;
+        // First drawn coordinate of the group: the "d=\"M x y" of its first path.
+        // A glyph glow's first point sits on the digit, inside the tab cell.
+        float fx = std::numeric_limits<float>::quiet_NaN(), fy = fx;
+        const auto dp = svg.find("d=\"M", gt);
+        if (dp != std::string::npos && dp < gt + 600) {
+            const char* p = svg.c_str() + dp + 4;
+            while (*p == ' ') ++p;
+            char* endp = nullptr;
+            fx = std::strtof(p, &endp);
+            if (endp != p) {
+                p = endp;
+                while (*p == ' ' || *p == ',') ++p;
+                fy = std::strtof(p, &endp);
+                if (endp == p) fy = std::numeric_limits<float>::quiet_NaN();
+            } else {
+                fx = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        if (!std::isnan(fx) && !std::isnan(fy) &&
+            fx >= x0 && fx <= x1 && fy >= y0 && fy <= y1) {
+            // Erase the whole group, depth-matching nested <g>…</g>.
+            std::size_t i = gt + 1;
+            int depth = 1;
+            while (i < svg.size() && depth > 0) {
+                const auto ng = svg.find("<g", i);
+                const auto cg = svg.find("</g>", i);
+                if (cg == std::string::npos) break;
+                if (ng != std::string::npos && ng < cg) { depth++; i = ng + 2; }
+                else { depth--; i = cg + 4; }
+            }
+            if (depth == 0) {
+                svg.erase(pos, i - pos);
+                return true;
+            }
+        }
+        pos = gt + 1;
+    }
+    return false;
+}
+
+bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h) {
+    const float x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    std::size_t pos = 0;
+    while ((pos = svg.find("<path", pos)) != std::string::npos) {
+        const auto end = svg.find("/>", pos);
+        if (end == std::string::npos) break;
+        const auto dp = svg.find("d=\"M", pos);
+        float fx = std::numeric_limits<float>::quiet_NaN(), fy = fx;
+        if (dp != std::string::npos && dp < end) {
+            const char* p = svg.c_str() + dp + 4;
+            while (*p == ' ') ++p;
+            char* endp = nullptr;
+            fx = std::strtof(p, &endp);
+            if (endp != p) {
+                p = endp;
+                while (*p == ' ' || *p == ',') ++p;
+                fy = std::strtof(p, &endp);
+                if (endp == p) fy = std::numeric_limits<float>::quiet_NaN();
+            } else {
+                fx = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        if (!std::isnan(fx) && !std::isnan(fy) &&
+            fx >= x0 && fx <= x1 && fy >= y0 && fy <= y1) {
+            svg.erase(pos, end - pos + 2);
+            return true;
+        }
+        pos = end + 2;
+    }
+    return false;
+}
+
 DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
                                  float panel_x, float panel_y, float panel_w, float panel_h)
     : svg_(std::move(svg)), elements_(std::move(elements)) {
@@ -132,6 +211,18 @@ DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement
         const int sel = std::clamp(e.selected_index, 0, n - 1);
         suppress_svg_rect(svg_, e.x + static_cast<float>(sel) * slot_w, e.y,
                           slot_w, e.h);
+        // Drop the BAKED tab digits so the live DesignTabGroup is the sole,
+        // consistent renderer of them. Otherwise the live labels paint over the
+        // baked ones — two slightly different glyphs (the design font vs the
+        // overlay font) → a faint "doubled" look — and the baked SELECTED digit
+        // keeps its glow + bright colour stuck in place when the live pill moves.
+        // Per slot, remove the baked glyph: the selected one is a glow filter
+        // group, the rest are plain <path>s; try the group first, then the path.
+        for (int slot = 0; slot < n; ++slot) {
+            const float cx = e.x + static_cast<float>(slot) * slot_w;
+            if (!suppress_svg_glow_at(svg_, cx, e.y, slot_w, e.h))
+                suppress_svg_glyph_at(svg_, cx, e.y, slot_w, e.h);
+        }
     }
 }
 

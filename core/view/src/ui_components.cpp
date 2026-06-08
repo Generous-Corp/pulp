@@ -13,6 +13,24 @@ bool is_separator_item(const std::string& item) {
 }
 }  // namespace
 
+float fit_combo_label(std::string& text, float avail, float base, float min,
+                      const std::function<float(const std::string&, float)>& width_at) {
+    if (avail <= 0.0f) return base;
+    float font = base;
+    // Shrink the font (in 0.5px steps) until the FULL text fits or we hit `min`.
+    while (font > min && width_at(text, font) > avail) {
+        font = std::max(min, font - 0.5f);
+    }
+    // Still overflowing at the floor → ellipsize, trimming until "text..." fits.
+    if (width_at(text, font) > avail && text.size() > 1) {
+        while (text.size() > 1) {
+            text.pop_back();
+            if (width_at(text + "...", font) <= avail) { text += "..."; break; }
+        }
+    }
+    return font;
+}
+
 // ── ComboBox ─────────────────────────────────────────────────────────────
 
 void ComboBox::set_selected_impl(int index, bool notify) {
@@ -63,22 +81,25 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     canvas.set_line_width(1);
     canvas.stroke_rounded_rect(0, 0, b.width, base_h, 4);
 
-    // Selected text
+    // Selected text. The box width often comes straight from a design (a Figma
+    // dropdown sized tight to its own label), so prefer SHRINKING the font to fit
+    // the full text over truncating it — a short label like "1/4 Delay" should
+    // read in full, just a touch smaller, not "1/4 De…". fit_combo_label measures
+    // with the font actually used (the old inline code measured in the default
+    // font, so truncation was wrong at any window size) and only ellipsizes as a
+    // last resort once the font hits its floor.
     std::string display_text = selected_text();
-    float avail = std::max(0.0f, b.width - 30.0f);
-    if (canvas.measure_text(display_text) > avail && display_text.size() > 3) {
-        while (display_text.size() > 1) {
-            display_text.pop_back();
-            if (canvas.measure_text(display_text + "...") <= avail) {
-                display_text += "...";
-                break;
-            }
-        }
-    }
-    canvas.set_font("Inter", 12);
+    const float avail = std::max(0.0f, b.width - 22.0f);  // 8px left pad + ~14px arrow
+    const float font_size = fit_combo_label(
+        display_text, avail, /*base=*/12.0f, /*min=*/9.0f,
+        [&canvas](const std::string& s, float f) {
+            canvas.set_font("Inter", f);
+            return canvas.measure_text(s);
+        });
+    canvas.set_font("Inter", font_size);
     canvas.set_fill_color(text_c);
     canvas.set_text_align(canvas::TextAlign::left);
-    canvas.fill_text(display_text, 8, base_h * 0.5f + 4);
+    canvas.fill_text(display_text, 8, base_h * 0.5f + font_size * 0.34f);
 
     // Dropdown arrow
     float ax = b.width - 16;

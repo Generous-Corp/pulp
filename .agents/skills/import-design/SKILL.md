@@ -691,6 +691,24 @@ GPU-safe, and DOES render the open ComboBox popup (it paints its list inline).
   (figma_rest_export.py) finds a node named ~`search` (skipping the
   `ic:round-search` icon; ELYSIUM names the placeholder TEXT "Search" with the
   field as its parent group). The plugin lane must mirror this when wired.
+- **OCCLUSION GUARD — skip controls painted over by a later opaque node.** A
+  design can carry a leftover/under-layer control that is fully covered by a
+  panel drawn on top (e.g. a stray "Radio Button" 1/2/3/4 buried under the
+  envelope graph). The baked SVG hides it, but a naive detector resurfaces it as
+  a live overlay floating ON TOP. Guard: in detection, drop any candidate whose
+  bbox is fully contained by a node painted AFTER its entire subtree (document
+  preorder = paint order) that has an opaque fill. Key invariants that took a
+  round to get right: (1) key the paint-index/subtree maps on OBJECT IDENTITY,
+  not the figma `id` string (absent/dup ids collide); (2) compare against the
+  candidate's `subtree_end`, NOT its own index — else the control's OWN
+  background `<rect>` (a descendant that fills it) looks like an occluder and
+  drops the control (this nuked the search field on the first cut); (3) "opaque"
+  must accept GRADIENT fills, not just SOLID — ELYSIUM's occluding panel is a
+  radial gradient. REST: `_opaque_cover` checks SOLID `a>=.99` or GRADIENT with
+  all stops `a>=.99` + node opacity. TS (`faithful-vector.ts`): proxies opacity
+  via `style.background_color` presence (the extractor sets it for SOLID and the
+  flat fallback of GRADIENT) + the node `opacity` field; `Map<OverlayNode>` keys
+  give object identity for free. KEEP both lanes' guards in sync.
 - **COORDINATE GOTCHA (cost me real time):** the Figma node tree is frame-local
   (root at abs origin, 1000×600 for ELYSIUM) but the SVG export adds the
   drop-shadow margin (1146×746, panel at (73,50)). Node coords are NOT SVG

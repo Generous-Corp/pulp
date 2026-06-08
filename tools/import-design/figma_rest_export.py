@@ -678,6 +678,73 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
 
     out = []
 
+    # ── Occlusion guard ──────────────────────────────────────────────────────
+    # A control that is fully painted over by a later (higher-z) OPAQUE node is
+    # not actually visible — it must NOT become an interactive overlay, or we
+    # resurface a layer the design hides (e.g. a leftover radio strip buried
+    # under an envelope graph). Paint order = document preorder (children after
+    # parent, siblings in order); a node is occluded when some node painted AFTER
+    # it (greater preorder index — which naturally excludes its own ancestors and
+    # itself, since they paint earlier) has an opaque fill and a bbox containing
+    # it. A node nested INSIDE the occluder is a descendant of it and so paints
+    # later (higher index) → not flagged, so real controls inside an opaque panel
+    # are kept.
+    def _opaque_cover(nd):
+        if nd.get("opacity", 1.0) < 0.99:
+            return False
+        for f in (nd.get("fills") or []):
+            if not f.get("visible", True) or f.get("opacity", 1.0) < 0.99:
+                continue
+            t = f.get("type", "")
+            if t == "SOLID":
+                if f.get("color", {}).get("a", 1.0) >= 0.99:
+                    return True
+            elif t.startswith("GRADIENT"):
+                stops = f.get("gradientStops") or []
+                if stops and all(s.get("color", {}).get("a", 1.0) >= 0.99 for s in stops):
+                    return True
+        return False
+
+    # Key on Python object identity (id(node)), NOT the figma "id" string — the
+    # latter can be absent or duplicated, which would collide nodes in the maps.
+    _paint_index = {}
+    _subtree_end = {}  # last preorder index within a node's own subtree
+    _occluders = []    # (paint_index, x0, y0, x1, y1)
+
+    def _scan(nd, counter):
+        idx = counter[0]
+        counter[0] += 1
+        _paint_index[id(nd)] = idx
+        b = nd.get("absoluteBoundingBox")
+        if b and _opaque_cover(nd):
+            _occluders.append((idx, b["x"], b["y"],
+                               b["x"] + b.get("width", 0.0), b["y"] + b.get("height", 0.0)))
+        last = idx
+        for c in nd.get("children", []) or []:
+            last = _scan(c, counter)
+        _subtree_end[id(nd)] = last
+        return last
+
+    _scan(figma_root, [0])
+
+    def _occluded(nd):
+        b = nd.get("absoluteBoundingBox")
+        if not b:
+            return False
+        # Only nodes painted AFTER this node's ENTIRE subtree can occlude it.
+        # That excludes the node's own descendants (e.g. its background <rect>,
+        # which fills it and would otherwise look like an occluder of its parent).
+        after = _subtree_end.get(id(nd), _paint_index.get(id(nd), -1))
+        cx0, cy0 = b["x"], b["y"]
+        cx1, cy1 = b["x"] + b.get("width", 0.0), b["y"] + b.get("height", 0.0)
+        eps = 0.5
+        for oi, ox0, oy0, ox1, oy1 in _occluders:
+            if oi <= after:
+                continue
+            if ox0 - eps <= cx0 and oy0 - eps <= cy0 and ox1 + eps >= cx1 and oy1 + eps >= cy1:
+                return True
+        return False
+
     _CONTAINER_TYPES = ("FRAME", "INSTANCE", "COMPONENT", "GROUP")
 
     def detect_tab_group(n):
@@ -723,6 +790,10 @@ def detect_overlay_controls(figma_root, root_abs, panel_origin):
         }
 
     def visit(n, parent):
+        # Painted-over (occluded) subtrees hold no visible controls — skip the
+        # whole subtree so a buried layer never becomes an interactive overlay.
+        if _occluded(n):
+            return
         name = (n.get("name") or "").lower()
         ntype = n.get("type", "")
         bb = n.get("absoluteBoundingBox")

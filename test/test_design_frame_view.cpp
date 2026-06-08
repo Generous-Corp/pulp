@@ -400,6 +400,50 @@ TEST_CASE("suppress_svg_rect removes the baked tab highlight by geometry, not rx
     CHECK_FALSE(suppress_svg_rect(svg, 10.0f, 20.0f, 999.0f, 40.0f));   // size mismatch
 }
 
+TEST_CASE("suppress_svg_glow_at removes the selected digit's baked glow group",
+          "[view][design-import][frame][svg]") {
+    // Figma bakes the selected tab digit with a glow = a big-blur drop-shadow
+    // filter group wrapping the glyph. The live pill moves on click but the baked
+    // glow stays stuck on the original digit. Suppress the filtered group whose
+    // first drawn point sits inside the selected cell (x=352..381.5, y=126..146,
+    // matching the highlight rect above). A nested <g> inside it must be
+    // depth-matched so the whole glow group is erased.
+    std::string svg =
+        "<svg>"
+        "<g filter=\"url(#glowSel)\"><g><path d=\"M366.78 138.58L370 132\" fill=\"#fff\"/></g></g>"
+        "<g filter=\"url(#glowElsewhere)\"><path d=\"M12 600L20 610\" fill=\"#fff\"/></g>"
+        "<path d=\"M360 140L362 142\" fill=\"#aaa\"/>"   // a plain (unfiltered) glyph stays
+        "</svg>";
+    REQUIRE(suppress_svg_glow_at(svg, 352.0f, 126.0f, 29.5f, 20.0f));
+    CHECK(svg.find("#glowSel") == std::string::npos);        // selected-cell glow removed...
+    CHECK(svg.find("M366.78 138.58") == std::string::npos);  // ...including its glyph + nested <g>
+    CHECK(svg.find("#glowElsewhere") != std::string::npos);  // glow outside the cell kept
+    CHECK(svg.find("M360 140") != std::string::npos);        // plain unfiltered glyph kept
+    CHECK_FALSE(suppress_svg_glow_at(svg, 352.0f, 126.0f, 29.5f, 20.0f));  // no 2nd match
+    // A cell with no filtered group inside reports no removal.
+    CHECK_FALSE(suppress_svg_glow_at(svg, 0.0f, 0.0f, 5.0f, 5.0f));
+}
+
+TEST_CASE("suppress_svg_glyph_at removes a baked digit glyph in the cell",
+          "[view][design-import][frame][svg]") {
+    // Non-selected tab digits are plain <path> glyphs. We drop each so the live
+    // overlay is the sole renderer of the digits (no faint doubled glyph). Only
+    // the path whose first point is inside the cell is removed; glyphs in other
+    // cells, and the strip <rect>, stay.
+    std::string svg =
+        "<svg>"
+        "<rect x=\"290\" y=\"123\" width=\"124\" height=\"26\" fill=\"#252626\"/>"
+        "<path d=\"M308.6 138.5L310 132\" fill=\"#ABABAB\"/>"   // digit "1" in slot 0
+        "<path d=\"M339.2 138.5L341 132\" fill=\"#ABABAB\"/>"   // digit "2" in slot 1
+        "</svg>";
+    // Slot 0 cell: x=293..322.5, y=126..146. Removes "1" only.
+    REQUIRE(suppress_svg_glyph_at(svg, 293.0f, 126.0f, 29.5f, 20.0f));
+    CHECK(svg.find("M308.6 138.5") == std::string::npos);  // slot-0 digit removed
+    CHECK(svg.find("M339.2 138.5") != std::string::npos);  // slot-1 digit kept
+    CHECK(svg.find("#252626") != std::string::npos);       // strip rect kept (not a <path>)
+    CHECK_FALSE(suppress_svg_glyph_at(svg, 293.0f, 126.0f, 29.5f, 20.0f));  // no 2nd match in cell
+}
+
 TEST_CASE("DesignFrameView suppresses the baked selected-tab highlight (no double-pill)",
           "[view][design-import][frame][svg]") {
     // An SVG whose tab strip has a baked highlight at the selected slot (2). The
