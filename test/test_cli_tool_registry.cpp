@@ -240,6 +240,60 @@ TEST_CASE("tool registry parses descriptors and reports malformed roots",
     REQUIRE(malformed.error == "Tool registry is not a valid JSON object");
 }
 
+TEST_CASE("tool registry parses optional project-importer fields",
+          "[cli][tool-registry][import][issue-290]") {
+    TempDir tmp;
+    // A framework-importer add-on tool declares the optional importer fields.
+    // Vendor-agnostic: framework ids are neutral DATA, no vendor token.
+    write_file(tmp.path / "importer.json", R"({
+  "schema_version": 1,
+  "tools": {
+    "import-example-framework": {
+      "display_name": "Example Framework Importer",
+      "category": "python_tool",
+      "install_method": "python_pip",
+      "pip_package": "pulp_import_example",
+      "pinned_version": "0.1.0",
+      "frameworks": ["example-framework", "example-framework-lite"],
+      "spi_min": 0,
+      "spi_max": 0,
+      "sdk_min": "0.78.0",
+      "sdk_max": "1.0.0",
+      "capabilities": ["detect", "analyze", "emit"],
+      "health_check": "import-example-framework --selftest"
+    },
+    "plain-tool": {
+      "display_name": "Plain Tool",
+      "category": "binary",
+      "install_method": "binary_download"
+    }
+  }
+})");
+    auto loaded = load_tool_registry(tmp.path / "importer.json");
+    REQUIRE(loaded.error.empty());
+
+    const auto& imp = loaded.registry.tools.at("import-example-framework");
+    REQUIRE(imp.frameworks ==
+            std::vector<std::string>{"example-framework", "example-framework-lite"});
+    REQUIRE(imp.spi_min == 0);
+    REQUIRE(imp.spi_max == 0);
+    REQUIRE(imp.sdk_min == "0.78.0");
+    REQUIRE(imp.sdk_max == "1.0.0");
+    REQUIRE(imp.capabilities ==
+            std::vector<std::string>{"detect", "analyze", "emit"});
+    REQUIRE(imp.health_check == "import-example-framework --selftest");
+
+    // A tool without importer fields parses them as their empty defaults.
+    const auto& plain = loaded.registry.tools.at("plain-tool");
+    REQUIRE(plain.frameworks.empty());
+    REQUIRE(plain.spi_min == 0);
+    REQUIRE(plain.spi_max == 0);
+    REQUIRE(plain.sdk_min.empty());
+    REQUIRE(plain.sdk_max.empty());
+    REQUIRE(plain.capabilities.empty());
+    REQUIRE(plain.health_check.empty());
+}
+
 TEST_CASE("tool registry accepts empty and partial descriptor shapes",
           "[cli][tool-registry][issue-643]") {
     TempDir tmp;

@@ -118,6 +118,16 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("managed_by_pulp")) tool.managed_by_pulp = v->as_bool();
             if (auto v = val.get("bundleable")) tool.bundleable = v->as_bool();
 
+            // Optional project-importer fields (DATA-only; present on
+            // framework-importer add-on tools).
+            if (auto v = val.get("frameworks")) tool.frameworks = v->as_string_array();
+            if (auto v = val.get("spi_min")) tool.spi_min = v->as_int();
+            if (auto v = val.get("spi_max")) tool.spi_max = v->as_int();
+            if (auto v = val.get("sdk_min")) tool.sdk_min = v->as_string();
+            if (auto v = val.get("sdk_max")) tool.sdk_max = v->as_string();
+            if (auto v = val.get("capabilities")) tool.capabilities = v->as_string_array();
+            if (auto v = val.get("health_check")) tool.health_check = v->as_string();
+
             if (auto bs = val.get("binary_sources"); bs && bs->type == JsonValue::Object) {
                 for (auto& [platform, src] : bs->obj()) {
                     BinarySource s;

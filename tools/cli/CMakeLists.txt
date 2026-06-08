@@ -65,6 +65,9 @@ add_executable(pulp-cli
     cmd_dev.cpp
     cmd_loop.cpp
     cmd_host.cpp
+    cmd_import.cpp
+    import_detect.cpp
+    import_spi.cpp
     cmd_pr.cpp
     cmd_inspect.cpp
     cmd_tweaks.cpp
