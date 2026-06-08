@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "_comment": "P0.1 refactor-roadmap guard. Hard ceilings freeze known hotspot line counts at the current baseline. Lower a ceiling only in the same PR that shrinks the file.",
+  "new_file_warning": {
+    "max_loc": 1000,
+    "paths": [
+      "core/**",
+      "tools/**"
+    ]
+  },
+  "hotspots": [
+    {
+      "path": "core/view/src/widget_bridge.cpp",
+      "max_loc": 10509,
+      "note": "WidgetBridge native JS API registration hotspot"
+    },
+    {
+      "path": "tools/local-ci/local_ci.py",
+      "max_loc": 8710,
+      "note": "local CI runner orchestration hotspot"
+    },
+    {
+      "path": "test/CMakeLists.txt",
+      "max_loc": 5940,
+      "note": "shared test registration hotspot"
+    },
+    {
+      "path": "test/test_design_import.cpp",
+      "max_loc": 5486,
+      "note": "design-import test outlier"
+    },
+    {
+      "path": "test/test_renderer3d.cpp",
+      "max_loc": 4805,
+      "note": "Renderer3D test outlier"
+    },
+    {
+      "path": "core/render/src/renderer3d.cpp",
+      "max_loc": 3642,
+      "note": "Renderer3D implementation hotspot"
+    },
+    {
+      "path": "tools/import-design/pulp_import_design.cpp",
+      "max_loc": 3271,
+      "note": "import-design CLI orchestration hotspot"
+    },
+    {
+      "path": "core/view/platform/mac/window_host_mac.mm",
+      "max_loc": 2790,
+      "note": "Mac window host lifecycle/capture/geometry hotspot"
+    },
+    {
+      "path": "core/view/src/design_import.cpp",
+      "max_loc": 2473,
+      "note": "design-import orchestration hotspot"
+    },
+    {
+      "path": "core/view/src/design_ir_json.cpp",
+      "max_loc": 2102,
+      "note": "DesignIR serialization contract hotspot"
+    },
+    {
+      "path": "core/view/src/design_cpp_codegen.cpp",
+      "max_loc": 2023,
+      "note": "DesignIR C++ codegen contract hotspot"
+    },
+    {
+      "path": "core/view/src/design_import_native_common.cpp",
+      "max_loc": 1998,
+      "note": "native materialization/import boundary hotspot"
+    },
+    {
+      "path": "core/view/src/design_codegen.cpp",
+      "max_loc": 1997,
+      "note": "generated JS bridge contract hotspot"
+    },
+    {
+      "path": "core/view/include/pulp/view/view.hpp",
+      "max_loc": 1657,
+      "note": "public view header trim candidate"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/canvas.hpp",
+      "max_loc": 1535,
+      "note": "public canvas header trim candidate"
+    },
+    {
+      "path": "tools/cli/cli_common.cpp",
+      "max_loc": 1296,
+      "note": "CLI common cleanup candidate"
+    },
+    {
+      "path": "core/canvas/src/skia_canvas.cpp",
+      "max_loc": 1197,
+      "note": "Skia canvas split stabilization candidate"
+    }
+  ]
+}

@@ -121,6 +121,13 @@ jobs:
               --base "${{ steps.base.outputs.ref }}" \
               --mode=report
 
+      - name: Hotspot size guard
+        run: |
+          python3 tools/scripts/hotspot_size_guard.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --config tools/scripts/hotspot_size_guard.json \
+              --mode=report
+
       - name: Source-contract registry check
         # Lightweight import-provider contract gate. The registry linter is
         # intentionally no-build and treats optional planning-submodule paths
@@ -144,6 +151,7 @@ jobs:
         run: |
           python3 tools/scripts/test_gates.py
           python3 tools/scripts/test_node_abi_gate.py
+          python3 tools/scripts/test_hotspot_size_guard.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
