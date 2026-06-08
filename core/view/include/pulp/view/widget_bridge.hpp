@@ -356,6 +356,7 @@ private:
     void register_widget_value_basic_api();
     void register_widget_typography_api();
     void register_widget_value_content_api();
+    void register_widget_text_runs_api(std::function<canvas::Color(const std::string&)> parse_color);
 };
 
 } // namespace pulp::view

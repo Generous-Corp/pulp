@@ -105,7 +105,7 @@ setText	widget_value	function	core/view/src/widget_bridge/widget_value_content_a
 getText	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setPanelStyle	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setScrollContentSize	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
-setTextRuns	typography	function	core/view/src/widget_bridge.cpp
+setTextRuns	typography	function	core/view/src/widget_bridge/text_runs_api.cpp
 setBackground	css_style	function	core/view/src/widget_bridge.cpp
 createSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
