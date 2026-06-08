@@ -61,6 +61,7 @@ tiers:
     paths:
       - core/view/**
       - core/render/**
+      - core/scene/**
       - inspect/**
       - tools/cli/**
       # pulp #1886 Phase 1 — JS/TS sources in @pulp/react are user-visible
