@@ -21,6 +21,7 @@
     "fmt": "Wraps clang-format -i against .clang-format; agents shell out directly",
     "harness": "Catalog-driven verifier; agents drive via Bash",
     "host": "Long-running synthetic-block runner; not RPC-shaped",
+    "import": "Framework-import command; needs an installed add-on importer tool — MCP exposure deferred until the importer ships via `pulp tool install` (packaging task)",
     "import-design": "Heavy multi-step import; agents call the binary directly today (see #1997 follow-up)",
     "inspect": "Top-level inspect command — superseded by 5 pulp_inspect_* tools",
     "loop": "Watch loop; same reasoning as dev",

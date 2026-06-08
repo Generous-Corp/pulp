@@ -202,3 +202,13 @@ Synthetic missing-dep test: `tools/deps/test_audit.py::
 ManifestSourceScannerTests::test_uncovered_detection_catches_missing_pip_dep`
 — don't delete it. If the completeness gate regresses, this is the
 regression test that catches it.
+
+## Importer tool-registry fields (pulp import)
+
+`tools/packages/tool-registry.json` `ToolDescriptor` carries optional importer
+fields — `frameworks[]`, `spi_min`/`spi_max`, `sdk_min`/`sdk_max`,
+`capabilities[]`, `health_check` — for `category: "importer"` tools (the
+framework→Pulp project importers resolved by `pulp import`). They're parsed by
+`tools/cli/tool_registry.cpp` and ignored for non-importer tools. The importers
+themselves install via the tool lane (`pulp tool install <importer>`), never as
+project `packages.lock.json` dependencies.
