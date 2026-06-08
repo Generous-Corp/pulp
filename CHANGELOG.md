@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03810"></a>
+## [0.381.0] - 2026-06-08
+
+- refactor(view): unify drag-drop on DropReceiver + fix header self-containment ([#3647](https://github.com/danielraffel/pulp/pull/3647))
+- refactor: split WidgetBridge typography style registrars ([#3646](https://github.com/danielraffel/pulp/pull/3646))
+
 <a id="v03800"></a>
 ## [0.380.0] - 2026-06-08
 
@@ -3918,6 +3924,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.381.0]: https://github.com/danielraffel/pulp/releases/tag/v0.381.0
 [0.380.0]: https://github.com/danielraffel/pulp/releases/tag/v0.380.0
 [0.379.0]: https://github.com/danielraffel/pulp/releases/tag/v0.379.0
 [0.378.0]: https://github.com/danielraffel/pulp/releases/tag/v0.378.0
