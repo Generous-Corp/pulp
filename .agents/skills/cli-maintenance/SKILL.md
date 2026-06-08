@@ -250,6 +250,18 @@ Rust `pulp config`, `pulp status`, the import-design helper, docs, slash
 commands, and the MCP status output aligned whenever these keys change. If
 only `default_mode=baked` is configured, `ir-json` is implied.
 
+**Adding a `pulp config` key:** `cmd_config.cpp` allow-lists every key in three
+places — `is_allowed_key`, `validate_value`, and the `list` dump (plus the
+`usage()` help text). Add the key to all of them or `set` rejects it / `list`
+omits it. Example: `[claude] send_user_file` (`on|off`, default `on`) gates the
+plugin's `SessionStart` hook (`hooks/scripts/inject-claude-prefs.sh`) that tells
+the agent to surface image/file artifacts via `SendUserFile`. A config-only key
+needs no `cli-commands.yaml` subcommand entry (it's not a new command), but do
+update the command `summary` there + `docs/reference/cli.md#config` + a
+`test_cli_shellout.cpp` get/set/validate case. Reading config from a hook (bash)
+means a small TOML scan — scope the read to the right `[section]` so a same-named
+key in another table can't flip it.
+
 **Sidecar output anchoring:** when a CLI command takes `--output
 <path>/main.ext` and also emits sidecar artifacts (e.g.
 `pulp import-design` writes `bridge_handlers.cpp`, `classnames.json`,

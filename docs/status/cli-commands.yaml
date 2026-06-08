@@ -421,12 +421,12 @@ commands:
 
   - name: config
     status: usable
-    summary: Read or write ~/.pulp/config.toml settings. Supports `[pr] workflow`, `[update]` settings, and `[import_design]` defaults for import-design mode/emit. `set update.mode` clears ~/.pulp/update-snooze so the new mode takes effect on the next invocation.
+    summary: Read or write ~/.pulp/config.toml settings. Supports `[pr] workflow`, `[update]` settings, `[import_design]` defaults for import-design mode/emit, and `[claude] send_user_file` (plugin SendUserFile preference). `set update.mode` clears ~/.pulp/update-snooze so the new mode takes effect on the next invocation.
     subcommands:
       - name: get
-        summary: Print the value for a dotted key (e.g. `pr.workflow` or `update.mode`). Empty output if unset.
+        summary: Print the value for a dotted key (e.g. `pr.workflow`, `update.mode`, or `claude.send_user_file`). Empty output if unset.
       - name: set
-        summary: Write a value for a dotted key. Validates PR workflow, update enums, import-design defaults, and integer shapes. Mode changes clear the 24h snooze file.
+        summary: Write a value for a dotted key. Validates PR workflow, update enums, import-design defaults, claude.send_user_file (on|off), and integer shapes. Mode changes clear the 24h snooze file.
       - name: list
         summary: Dump current supported settings with defaults filled in.
     docs: reference/cli.md#config

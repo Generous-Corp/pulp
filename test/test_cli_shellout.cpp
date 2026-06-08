@@ -492,6 +492,42 @@ TEST_CASE("pulp config supports pr.workflow",
     REQUIRE(bad.stderr_output.find("pr.workflow must be one of") != std::string::npos);
 }
 
+TEST_CASE("pulp config supports claude.send_user_file",
+          "[cli][shellout][claude]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-claude-send-user-file");
+    fs::create_directories(tmp_home);
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+    // Defaults to "on" in `list` before anything is written.
+    auto list_default = run_pulp({"config", "list"});
+    auto set_off = run_pulp({"config", "set", "claude.send_user_file", "off"});
+    auto get_off = run_pulp({"config", "get", "claude.send_user_file"});
+    auto set_on = run_pulp({"config", "set", "claude.send_user_file", "on"});
+    auto list_on = run_pulp({"config", "list"});
+    auto bad = run_pulp({"config", "set", "claude.send_user_file", "true"});
+
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(list_default.timed_out);
+    REQUIRE(list_default.exit_code == 0);
+    REQUIRE(list_default.stdout_output.find("claude.send_user_file = on") != std::string::npos);
+    REQUIRE_FALSE(set_off.timed_out);
+    REQUIRE(set_off.exit_code == 0);
+    REQUIRE_FALSE(get_off.timed_out);
+    REQUIRE(get_off.exit_code == 0);
+    REQUIRE(get_off.stdout_output.find("off") != std::string::npos);
+    REQUIRE(set_on.exit_code == 0);
+    REQUIRE(list_on.stdout_output.find("claude.send_user_file = on") != std::string::npos);
+    REQUIRE_FALSE(bad.timed_out);
+    REQUIRE(bad.exit_code != 0);
+    REQUIRE(bad.stderr_output.find("claude.send_user_file must be one of") != std::string::npos);
+}
+
 TEST_CASE("pulp status reports effective PR workflow",
           "[cli][shellout][pr-workflow]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

@@ -78,10 +78,11 @@ Skills activate automatically based on context. You don't need to invoke them ex
 
 ### Hooks
 
-The plugin includes two hooks that run automatically:
+The plugin includes hooks that run automatically:
 
 - **docs-reminder** — When you modify files in `core/`, `examples/`, or `tools/cli/`, reminds you to update documentation manifests
 - **cli-plugin-sync** — When you modify the CLI or MCP server, reminds you to check if the plugin commands and skills need matching updates
+- **inject-claude-prefs** (`SessionStart`) — Reads `claude.send_user_file` from `~/.pulp/config.toml` (default **on**) and, when enabled, tells the agent to surface generated image/file artifacts with the `SendUserFile` tool so they embed in the Claude app instead of being printed as a bare path. Toggle with `pulp config set claude.send_user_file off` (and `on` to re-enable).
 
 ### MCP server
 
