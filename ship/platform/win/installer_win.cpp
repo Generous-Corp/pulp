@@ -70,10 +70,18 @@ std::string generate_nsis_script(const InstallerConfig& config) {
     // Language
     nsi << "!insertmacro MUI_LANGUAGE \"English\"\n\n";
 
+    // Start-menu shortcuts live under $SMPROGRAMS\<publisher>. Created for
+    // standalone apps so users get a launchable entry; plugins (VST3/CLAP) are
+    // loaded by a DAW and get none. Tracked so the uninstaller can remove the
+    // folder when at least one standalone shortcut was written.
+    const std::string smprograms_dir = "$SMPROGRAMS\\" + config.publisher;
+    bool has_start_menu = false;
+
     // Sections for each plugin format
     for (const auto& plugin : config.plugins) {
         std::string section_name;
         std::string out_dir;
+        const bool is_standalone = (plugin.format == "standalone");
 
         if (plugin.format == "vst3") {
             section_name = config.product_name + " (VST3)";
@@ -81,7 +89,7 @@ std::string generate_nsis_script(const InstallerConfig& config) {
         } else if (plugin.format == "clap") {
             section_name = config.product_name + " (CLAP)";
             out_dir = clap_dir;
-        } else if (plugin.format == "standalone") {
+        } else if (is_standalone) {
             section_name = config.product_name + " (Standalone)";
             out_dir = "$INSTDIR";
         } else {
@@ -98,6 +106,15 @@ std::string generate_nsis_script(const InstallerConfig& config) {
             nsi << "  File /r \"" << plugin.source_path << "\"\n";
         } else {
             nsi << "  File \"" << plugin.source_path << "\"\n";
+        }
+
+        // Standalone apps get a Start-menu shortcut to the installed executable.
+        if (is_standalone) {
+            auto exe = fs::path(plugin.source_path).filename().string();
+            nsi << "  CreateDirectory \"" << smprograms_dir << "\"\n";
+            nsi << "  CreateShortcut \"" << smprograms_dir << "\\" << config.product_name
+                << ".lnk\" \"$INSTDIR\\" << exe << "\"\n";
+            has_start_menu = true;
         }
 
         nsi << "SectionEnd\n\n";
@@ -118,6 +135,10 @@ std::string generate_nsis_script(const InstallerConfig& config) {
         namespace fs = std::filesystem;
         auto filename = fs::path(plugin.source_path).filename().string();
         nsi << "  RMDir /r \"" << out_dir << "\\" << filename << "\"\n";
+    }
+    if (has_start_menu) {
+        nsi << "  Delete \"" << smprograms_dir << "\\" << config.product_name << ".lnk\"\n";
+        nsi << "  RMDir \"" << smprograms_dir << "\"\n";  // only removes if now empty
     }
     nsi << "  Delete \"$INSTDIR\\uninstall.exe\"\n";
     nsi << "  RMDir \"$INSTDIR\"\n";

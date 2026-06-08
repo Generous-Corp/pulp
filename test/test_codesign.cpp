@@ -82,6 +82,19 @@ TEST_CASE("codesign includes entitlements path on failure path",
                            "/nonexistent/entitlements.plist"));
 }
 
+#if defined(_WIN32)
+// W7 signtool failure contract (#295 lesson): an empty identity or path must be
+// rejected up front rather than invoking signtool with `/n ""` (which could
+// latch onto an unintended cert or no-op "successfully"). This guard runs
+// without signtool present, so it's exercised on the Windows CI lane.
+TEST_CASE("codesign (Windows) rejects empty identity and empty path before signing",
+          "[ship][codesign][windows]") {
+    REQUIRE_FALSE(codesign("C:/some/app.exe", ""));        // empty identity
+    REQUIRE_FALSE(codesign("", "Some Cert"));               // empty path
+    REQUIRE_FALSE(codesign("", ""));                        // both empty
+}
+#endif
+
 TEST_CASE("notarization staple on nonexistent path is false",
           "[ship][codesign][coverage][issue-644]") {
     REQUIRE_FALSE(notarize_staple("/nonexistent/binary"));

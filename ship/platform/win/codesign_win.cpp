@@ -40,9 +40,19 @@ bool check_notarization(const std::string&) { return false; }
 bool codesign(const std::string& path, const std::string& identity,
               const std::string& entitlements) {
     (void)entitlements; // Not used on Windows
+    // Reject an empty identity (or path) up front. `signtool sign /n ""` can
+    // otherwise latch onto an unintended cert or appear to no-op "successfully"
+    // — the #295 lesson: never emit an unusable/empty signature silently.
+    if (identity.empty() || path.empty()) return false;
+
     std::string cmd = "signtool sign /n \"" + identity + "\" /t http://timestamp.digicert.com"
         " /fd sha256 \"" + path + "\" >nul 2>&1";
-    return exec_status(cmd) == 0;
+    if (exec_status(cmd) != 0) return false;
+
+    // Failure contract: a sign that exits 0 but left the artifact unverifiable
+    // must still fail. Verify the produced signature before reporting success,
+    // so callers never ship a "signed" binary that signtool itself rejects.
+    return exec_status("signtool verify /pa \"" + path + "\" >nul 2>&1") == 0;
 }
 
 std::optional<std::string> notarize_submit(const std::string&, const std::string&,

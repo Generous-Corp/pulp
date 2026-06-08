@@ -274,6 +274,30 @@ still define every public notarization symbol from
 `pulp-test-codesign` links on Windows and the cross-platform API surface
 stays in lockstep with macOS/Linux.
 
+**signtool failure contract (W7, #295 lesson).** `codesign()` on Windows
+must never report success for an unusable signature: it rejects an empty
+identity/path up front (no `signtool sign /n ""`), and after signing it runs
+`signtool verify /pa` and returns false if verification fails — so a sign that
+exits 0 but leaves the artifact unverifiable still fails. The empty-input
+reject is covered by the `[windows]`-guarded case in `test_codesign.cpp`
+(runs without signtool present); the verify-after-sign path is compile-verified
+on the Windows lane (a real round-trip needs a cert).
+
+**NSIS installer (W7).** `generate_nsis_script()` is a pure function — assert
+its output in `test_nsis_installer.cpp` (cross-platform, real verification, no
+NSIS/Windows needed). It places VST3/CLAP under `$COMMONFILES\{VST3,CLAP}`
+(or `$LOCALAPPDATA\Programs\Common\...` for `--per-user`), and **standalone
+apps get a Start-menu shortcut** under `$SMPROGRAMS\<publisher>` (removed on
+uninstall); plugins get none. When you touch the generator, add/extend the
+pure-output assertions.
+
+**Auto-update decision (W7): DEFERRED.** No WinSparkle/auto-update is wired on
+Windows. Rationale: Pulp targets developers shipping their own apps/plugins,
+who pick their own update channel (DAW-scanned plugins don't self-update at
+all); pulling WinSparkle in would add a dependency for a story the SDK doesn't
+own. macOS Sparkle appcast generation stays available for those who want it.
+Revisit if a first-party standalone-app updater becomes a requirement.
+
 ## Android-Specific
 
 ### ABI Selection
