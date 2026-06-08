@@ -57,6 +57,30 @@ TEST_CASE("NSIS script has VST3 and CLAP sections", "[ship][installer]") {
     REQUIRE_THAT(script, ContainsSubstring("CLAP"));
 }
 
+TEST_CASE("NSIS script creates a Start-menu shortcut for standalone apps "
+          "and removes it on uninstall", "[ship][installer]") {
+    auto config = make_test_config();
+    config.plugins = {{"/path/to/TestPlugin.exe", "", "standalone"}};
+    auto script = generate_nsis_script(config);
+
+    // Shortcut under $SMPROGRAMS\<publisher>, pointing at the installed exe.
+    REQUIRE_THAT(script, ContainsSubstring("CreateDirectory \"$SMPROGRAMS\\TestCorp\""));
+    REQUIRE_THAT(script, ContainsSubstring(
+        "CreateShortcut \"$SMPROGRAMS\\TestCorp\\TestPlugin.lnk\" \"$INSTDIR\\TestPlugin.exe\""));
+    // Uninstaller removes the shortcut and the (now-empty) publisher folder.
+    REQUIRE_THAT(script, ContainsSubstring("Delete \"$SMPROGRAMS\\TestCorp\\TestPlugin.lnk\""));
+    REQUIRE_THAT(script, ContainsSubstring("RMDir \"$SMPROGRAMS\\TestCorp\""));
+}
+
+TEST_CASE("NSIS script creates no Start-menu shortcut for plugin-only installs",
+          "[ship][installer]") {
+    auto config = make_test_config();  // VST3 + CLAP only — no standalone
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, !ContainsSubstring("CreateShortcut"));
+    REQUIRE_THAT(script, !ContainsSubstring("$SMPROGRAMS"));
+}
+
 TEST_CASE("NSIS script includes uninstaller", "[ship][installer]") {
     auto config = make_test_config();
     auto script = generate_nsis_script(config);
