@@ -262,11 +262,11 @@ clearWidgetSchema	widget_schema	function	core/view/src/widget_bridge/widget_sche
 saveStylePreset	widget_schema	function	core/view/src/widget_bridge/widget_schema_api.cpp
 loadStylePreset	widget_schema	function	core/view/src/widget_bridge/widget_schema_api.cpp
 measureText	canvas2d	function	core/view/src/widget_bridge.cpp
-setTheme	theme	function	core/view/src/widget_bridge.cpp
-applyTokenDiff	theme	function	core/view/src/widget_bridge.cpp
-getThemeJson	theme	function	core/view/src/widget_bridge.cpp
-importDesignTokens	theme	function	core/view/src/widget_bridge.cpp
-exportDesignTokens	theme	function	core/view/src/widget_bridge.cpp
+setTheme	theme	function	core/view/src/widget_bridge/theme_api.cpp
+applyTokenDiff	theme	function	core/view/src/widget_bridge/theme_api.cpp
+getThemeJson	theme	function	core/view/src/widget_bridge/theme_api.cpp
+importDesignTokens	theme	function	core/view/src/widget_bridge/theme_api.cpp
+exportDesignTokens	theme	function	core/view/src/widget_bridge/theme_api.cpp
 setAICli	platform_services	function	core/view/src/widget_bridge.cpp
 getAICli	platform_services	function	core/view/src/widget_bridge.cpp
 getComputedValue	metadata	function	core/view/src/widget_bridge.cpp

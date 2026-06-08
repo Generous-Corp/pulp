@@ -408,6 +408,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/list_style_api.cpp
     src/widget_bridge/state_binding_api.cpp
     src/widget_bridge/svg_api.cpp
+    src/widget_bridge/theme_api.cpp
     src/widget_bridge/tokens_api.cpp
     src/widget_bridge/widget_schema_api.cpp
     src/widget_bridge_input.cpp
