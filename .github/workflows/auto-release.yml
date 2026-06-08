@@ -209,8 +209,14 @@ jobs:
           # safer to compare against HEAD~1 than a missing-tag sentinel; for
           # first-release cases the tag lookup returns empty and our
           # decision script treats empty as "less than anything").
-          latest_sdk_tag=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
-          latest_plugin_tag=$(git tag --list 'plugin-v[0-9]*' --sort=-version:refname | head -1)
+          # NB: `git tag --list … | head -1` SIGPIPEs the tag walk (exit 141)
+          # under `set -o pipefail` once the tag set is large enough that
+          # `--sort` is still streaming when `head` closes the pipe — which is
+          # exactly what wedged every auto-release on 2026-06-08 after the day's
+          # version bumps grew the tag list. `for-each-ref --count=1` returns a
+          # single ref with no pipe, so there is no reader to close early.
+          latest_sdk_tag=$(git for-each-ref --sort=-version:refname --format='%(refname:short)' --count=1 'refs/tags/v[0-9]*')
+          latest_plugin_tag=$(git for-each-ref --sort=-version:refname --format='%(refname:short)' --count=1 'refs/tags/plugin-v[0-9]*')
 
           sdk_tag=$(extract_cmake_version "${latest_sdk_tag:-HEAD~1}" || true)
           sdk_after=$(extract_cmake_version HEAD || true)
