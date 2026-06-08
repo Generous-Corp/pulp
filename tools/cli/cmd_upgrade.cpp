@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -309,6 +310,33 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
     if (pulp::cli::upgrade_install::installed_cpp_delegate(installed_payloads)) {
         std::cout << "    Installed pulp-cpp delegate alongside pulp.\n";
+    }
+
+    // pulp #path-on-update: self-heal PATH so `pulp` resolves in a fresh shell
+    // even when the user first got the CLI via a source / SDK-prefix install
+    // (e.g. `cmake --install --prefix ~/pulp-sdk`), which — unlike install.sh —
+    // never touched a shell profile. Honors PULP_NO_MODIFY_PATH.
+    {
+        const char* path_env = std::getenv("PATH");
+        const char* shell_env = std::getenv("SHELL");
+        const char* home_env = std::getenv("HOME");
+        const char* opt = std::getenv("PULP_NO_MODIFY_PATH");
+        std::string shell_name = shell_env ? fs::path(shell_env).filename().string() : "";
+        auto outcome = pulp::cli::upgrade_install::ensure_dir_on_path(
+            install_dir, path_env ? path_env : "", shell_name,
+            home_env ? fs::path(home_env) : fs::path{},
+            opt && std::string(opt) == "1");
+        using S = pulp::cli::upgrade_install::PathEnsureOutcome::Status;
+        if (outcome.status == S::added) {
+            std::cout << "    Added " << install_dir.string() << " to PATH in "
+                      << outcome.profile.string() << "\n"
+                      << "    Restart your shell or run: source "
+                      << outcome.profile.string() << "\n";
+        } else if (outcome.status == S::profile_unwritable ||
+                   outcome.status == S::no_home) {
+            std::cout << "    (note) add " << install_dir.string()
+                      << " to your PATH to run `pulp` directly.\n";
+        }
     }
 
     // Hint about the embedded migration notes — the `--notes` surface

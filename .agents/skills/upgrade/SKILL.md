@@ -109,6 +109,17 @@ requirement. If `pulp` is not on PATH, tell the user to install first
 (`curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh`)
 and stop.
 
+Note: a successful `pulp upgrade` now **self-heals PATH** — after the
+binary swap it appends the CLI's own directory to the user's shell
+profile when it isn't already on `$PATH` (honoring `PULP_NO_MODIFY_PATH`).
+This closes the gap where a CLI first installed via a source / SDK-prefix
+install (`cmake --install --prefix ~/pulp-sdk` → `~/pulp-sdk/bin/pulp`)
+could upgrade successfully yet still be "command not found" in a fresh
+shell. So after an upgrade the user may need to restart their shell or
+`source` the named profile, but no longer has to add PATH by hand. See
+the `cli-maintenance` skill for the implementation
+(`upgrade_install::ensure_dir_on_path`).
+
 ### Plugin ↔ CLI skew banner (Slice 6, #551)
 
 Before running any `pulp` command, source the shared skew-check helper
