@@ -31,6 +31,12 @@ clean detached configure/build/install, and runs the installed-SDK `find_package
 smoke configure, but disables tests, examples, and GPU in that clean build so you can
 catch install/export regressions before paying for a full validation run.
 
+For external repo checks beyond the minimal installed-SDK smoke, use the P0.4
+downstream checklist in [Downstream Validation](downstream-validation.md). It records
+the current embed/import consumer repos, the canonical installed-SDK recipe, and the
+commands to run before API, ABI, schema, or generated-bundle refactors are considered
+ready.
+
 ## Repeat Until Fail
 
 When a test or command only fails intermittently, use the repeat helper instead of
