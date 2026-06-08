@@ -37,11 +37,30 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpPlatformConfig.cmake")
 # Linux PkgConfig::* IMPORTED target recreation. No-op on non-Linux.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPkgConfigImports.cmake")
 
+# Expose pulp_link_fontconfig_after_skia() to downstream consumers. The
+# chrome/m144 Skia archive references fontconfig (Fc*) symbols, and GNU ld is
+# single-pass, so a consumer linking libskia.a must re-mention `-lfontconfig`
+# AFTER the archive or the link fails (undefined FcCharSetHasChar, FcInit, …).
+# Pulp's own app targets use this; a foreign consumer (e.g. pulp-view-embed)
+# calls it on its Skia-linking executables on Linux. No-op on non-Linux.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpLinkFontconfig.cmake")
+
 # Pulp::canvas is a static SDK target and its build exports retain
 # LINK_ONLY references to private static dependencies. SheenBidi installs its
 # own package into the same SDK prefix, so load it before PulpTargets.cmake
 # validates referenced imported targets.
 find_dependency(SheenBidi CONFIG)
+
+# Pulp::canvas links system ICU on Linux (UNIX-not-Apple-not-Android): the
+# bundled Skia statically links SkUnicode but does not export ICU's symbols, so
+# core/canvas links ICU::uc/i18n/data. Those are PRIVATE, but a STATIC lib
+# propagates private link deps into its exported interface — so a downstream
+# find_package(Pulp) must re-find ICU or PulpTargets.cmake errors with
+# "target ICU::uc not found". macOS bundles ICU (libicucore) implicitly, so this
+# is Linux-only. (Surfaced building pulp-view-embed against the Linux SDK.)
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    find_dependency(ICU COMPONENTS uc i18n data)
+endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.
 # When a downstream plugin is built in Debug / MinSizeRel / RelWithDebInfo
