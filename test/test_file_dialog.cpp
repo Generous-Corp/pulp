@@ -311,3 +311,38 @@ TEST_CASE("FileDialog backend registration is safe to call on any platform",
     REQUIRE_FALSE(FileDialog::has_backend());
 #endif
 }
+
+#if defined(_WIN32)
+// W5: Windows ships a built-in IFileDialog backend (file_dialog_win.cpp),
+// installed opt-in via install_native_backend() — mirroring the Linux portal
+// backend. We verify the install wiring (has_backend() flips true, idempotent,
+// host backend preserved) WITHOUT calling a native dialog method, since
+// IFileDialog is interactive and would block CI. The COM dialog code itself is
+// compile-verified by the Windows build lanes.
+TEST_CASE("FileDialog Windows: install_native_backend installs the IFileDialog backend",
+          "[platform][file-dialog][windows][issue-301]") {
+    FileDialog::clear_backend();
+    REQUIRE_FALSE(FileDialog::has_backend());
+
+    REQUIRE(FileDialog::install_native_backend());
+    REQUIRE(FileDialog::has_backend());
+    // Idempotent — a second call leaves it installed.
+    REQUIRE(FileDialog::install_native_backend());
+    REQUIRE(FileDialog::has_backend());
+
+    // A host-registered backend is preserved (install must not clobber it).
+    FileDialog::clear_backend();
+    FileDialog::Backend host;
+    host.open_file = [](const std::string&, const std::vector<FileFilter>&,
+                        const std::string&) {
+        return std::optional<std::string>("C:/host/picked.wav");
+    };
+    FileDialog::set_backend(host);
+    REQUIRE(FileDialog::install_native_backend());
+    auto picked = FileDialog::open_file("t", {}, "");  // routes to host, no native dialog
+    REQUIRE(picked.has_value());
+    REQUIRE(*picked == "C:/host/picked.wav");
+
+    FileDialog::clear_backend();
+}
+#endif  // _WIN32
