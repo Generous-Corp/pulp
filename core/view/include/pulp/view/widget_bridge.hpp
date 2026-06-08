@@ -322,6 +322,11 @@ private:
     void register_api();
     void register_accessibility_api();
     void register_dom_api();
+    void register_hover_event_api();
+    void register_pointer_event_api();
+    void register_wheel_event_api();
+    void register_context_menu_event_api();
+    void register_drop_event_api();
     void register_layout_grid_api();
     void register_layout_flex_api();
     void register_layout_query_api();
