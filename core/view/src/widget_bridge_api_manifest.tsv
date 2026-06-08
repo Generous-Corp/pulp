@@ -75,9 +75,9 @@ createCombo	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createProgress	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createScrollView	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createListBox	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
-setListItems	widget_value	function	core/view/src/widget_bridge.cpp
-setListSelected	widget_value	function	core/view/src/widget_bridge.cpp
-setListRowHeight	widget_value	function	core/view/src/widget_bridge.cpp
+setListItems	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setListSelected	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setListRowHeight	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 createTextEditor	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createCanvas	canvas2d	function	core/view/src/widget_bridge.cpp
 setLabel	widget_value	function	core/view/src/widget_bridge.cpp
