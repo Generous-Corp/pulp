@@ -8,6 +8,58 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03780"></a>
+## [0.378.0] - 2026-06-08
+
+- chore(deps): pin choc to fork tag for WebView file drag-and-drop (interim) ([#3620](https://github.com/danielraffel/pulp/pull/3620))
+- ci: fix SIGPIPE (exit 141) in auto-release tag lookup ([#3627](https://github.com/danielraffel/pulp/pull/3627))
+- feat(import): pulp import command + tool-registry importer fields + SPI runner ([#3608](https://github.com/danielraffel/pulp/pull/3608))
+- fix(scripts): apply patch bumps in version_bump apply_bumps (Shipyard#358) ([#3626](https://github.com/danielraffel/pulp/pull/3626))
+- fix(canvas): upload mask/pattern shader images to GPU texture (Graphite) ([#3607](https://github.com/danielraffel/pulp/pull/3607))
+- fix(view): route knob/fader/toggle DOM tags to native widgets in live-JSX path ([#3617](https://github.com/danielraffel/pulp/pull/3617))
+- refactor: split WidgetBridge storage/assets registrar ([#3623](https://github.com/danielraffel/pulp/pull/3623))
+- refactor: split WidgetBridge layout registrar ([#3622](https://github.com/danielraffel/pulp/pull/3622))
+- refactor: split WidgetBridge basic value registrar ([#3621](https://github.com/danielraffel/pulp/pull/3621))
+- feat(view): Windows V8 consumer via clang-cl + Chromium libc++ (__Cr) ([#3603](https://github.com/danielraffel/pulp/pull/3603))
+- feat(ship): Windows installer Start-menu shortcuts + signtool failure contract (W7) ([#3618](https://github.com/danielraffel/pulp/pull/3618))
+- fix(cmake): Linux SDK export — re-find ICU + expose fontconfig link helper ([#3616](https://github.com/danielraffel/pulp/pull/3616))
+- refactor: split WidgetBridge content value registrar ([#3604](https://github.com/danielraffel/pulp/pull/3604))
+- feat(runtime): Windows high-resolution OS timer-queue backend (W9) ([#3605](https://github.com/danielraffel/pulp/pull/3605))
+- deps(skia): migrate Skia/Dawn prebuilt toolchain m149 -> m150 ([#3606](https://github.com/danielraffel/pulp/pull/3606))
+- docs: codify no-Namespace, local-Macs-first macOS CI policy ([#3602](https://github.com/danielraffel/pulp/pull/3602))
+- refactor: split WidgetBridge list value registrar ([#3601](https://github.com/danielraffel/pulp/pull/3601))
+- refactor: split WidgetBridge value control registrar ([#3600](https://github.com/danielraffel/pulp/pull/3600))
+- refactor: split WidgetBridge platform services registrar ([#3599](https://github.com/danielraffel/pulp/pull/3599))
+- feature/refactor widgetbridge metadata registrar ([#3598](https://github.com/danielraffel/pulp/pull/3598))
+- feature/refactor widgetbridge widget assets registrar ([#3597](https://github.com/danielraffel/pulp/pull/3597))
+- feature/refactor widgetbridge shader registrar ([#3596](https://github.com/danielraffel/pulp/pull/3596))
+- feature/refactor widgetbridge factory api clean ([#3595](https://github.com/danielraffel/pulp/pull/3595))
+- feature/refactor widgetbridge theme registrar ([#3594](https://github.com/danielraffel/pulp/pull/3594))
+- feature/refactor widgetbridge widget schema registrar ([#3593](https://github.com/danielraffel/pulp/pull/3593))
+- feature/refactor widgetbridge state binding registrar ([#3592](https://github.com/danielraffel/pulp/pull/3592))
+- feature/refactor widgetbridge tokens registrar ([#3591](https://github.com/danielraffel/pulp/pull/3591))
+- feature/refactor widgetbridge svg registrar ([#3590](https://github.com/danielraffel/pulp/pull/3590))
+- feature/refactor widgetbridge list style registrar ([#3588](https://github.com/danielraffel/pulp/pull/3588))
+- feature/refactor widgetbridge registrar slice ([#3587](https://github.com/danielraffel/pulp/pull/3587))
+- feature/refactor debt inventory ([#3586](https://github.com/danielraffel/pulp/pull/3586))
+- feature/refactor rt safety harness ([#3585](https://github.com/danielraffel/pulp/pull/3585))
+- feature/refactor renderer3d cpu seams ([#3583](https://github.com/danielraffel/pulp/pull/3583))
+- feature/refactor test outliers ([#3582](https://github.com/danielraffel/pulp/pull/3582))
+- feature/refactor local ci contracts ([#3581](https://github.com/danielraffel/pulp/pull/3581))
+- feature/refactor downstream validation ([#3579](https://github.com/danielraffel/pulp/pull/3579))
+- ci/scene coverage tier ([#3577](https://github.com/danielraffel/pulp/pull/3577))
+- test: add WidgetBridge API manifest contract ([#3575](https://github.com/danielraffel/pulp/pull/3575))
+- ci: guard refactor hotspot sizes ([#3574](https://github.com/danielraffel/pulp/pull/3574))
+- test(view): cover ScriptEngine identity pass-throughs ([#3573](https://github.com/danielraffel/pulp/pull/3573))
+- feat(platform): Windows native file dialogs via IFileDialog (W5) ([#3571](https://github.com/danielraffel/pulp/pull/3571))
+- fix(platform): real Win32 clipboard (was fake in-process shadow) ([#3566](https://github.com/danielraffel/pulp/pull/3566))
+- chore(design-import): return the standalone demo knobs to inert (pulp #3562) ([#3565](https://github.com/danielraffel/pulp/pull/3565))
+- fix(design-import): tab-strip glow + digit doubling + dropdown label fit ([#3572](https://github.com/danielraffel/pulp/pull/3572))
+- feat(import): project-import SPI contract + plan/manifest/compat schemas ([#3568](https://github.com/danielraffel/pulp/pull/3568))
+- fix(design-import): skip overlay controls occluded by a later opaque node ([#3567](https://github.com/danielraffel/pulp/pull/3567))
+- feat(ship): Linux AppImage packaging for standalone apps (L8b) ([#3563](https://github.com/danielraffel/pulp/pull/3563))
+- feat(plugin): add claude.send_user_file config + SessionStart injection ([#3554](https://github.com/danielraffel/pulp/pull/3554))
+
 <a id="v03711"></a>
 ## [0.371.1] - 2026-06-08
 
@@ -3843,6 +3895,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.378.0]: https://github.com/danielraffel/pulp/releases/tag/v0.378.0
 [0.371.1]: https://github.com/danielraffel/pulp/releases/tag/v0.371.1
 [0.371.0]: https://github.com/danielraffel/pulp/releases/tag/v0.371.0
 [0.370.1]: https://github.com/danielraffel/pulp/releases/tag/v0.370.1
