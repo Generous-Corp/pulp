@@ -199,7 +199,11 @@ in `tools/shipyard.toml`). It:
    or a `Skill-Update:` trailer.
 2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK,
    Claude plugin, and marketplace versions consistently, honoring any
-   `Version-Bump:` trailers.
+   `Version-Bump:` trailers. This applies `patch`/`minor`/`major` bumps —
+   **including `patch`, which every `fix:` PR gets** (fixed in pulp #3626;
+   before that, patch bumps were silently skipped and `fix:`/`feat:` PRs
+   stranded at the gate, forcing a manual `chore: bump versions` commit — no
+   longer needed).
 3. Runs the no-build source-contract registry gate:
    `tools/import-validation/check-source-contracts.py --strict` plus
    `tools/import-validation/test_source_contracts.py`. This mirrors the
@@ -470,6 +474,7 @@ shipyard cloud run build <branch>         # dispatch the GHA build workflow
 shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
 shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
 shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
+shipyard ship --pr N --base main --adopt-head     # recover "ship state SHA drift" after a force-push (Shipyard #346): adopt the current branch head + re-validate, instead of re-shipping from scratch
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
 shipyard update --check --json            # installed vs latest Shipyard drift report
 shipyard update                           # apply latest stable Shipyard
