@@ -13,6 +13,11 @@
       {"kind": "doc", "path": "docs/reference/compat/react.md"},
       {"kind": "test", "glob": "test/test_widget_bridge*.cpp"}
     ],
+    "core/view/src/widget_bridge/accessibility_api.cpp": [
+      {"kind": "compat-json", "prefix": "html"},
+      {"kind": "doc", "path": "docs/reference/compat/html.md"},
+      {"kind": "test", "glob": "test/test_widget_bridge*.cpp"}
+    ],
     "core/view/include/pulp/view/widget_bridge.hpp": [
       {"kind": "compat-json", "prefix": "*"},
       {"kind": "doc", "path": "docs/reference/compat/{prefix}.md"},

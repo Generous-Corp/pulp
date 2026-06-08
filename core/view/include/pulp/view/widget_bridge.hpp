@@ -307,6 +307,7 @@ private:
     void request_repaint();
 
     void register_api();
+    void register_accessibility_api();
 };
 
 } // namespace pulp::view
