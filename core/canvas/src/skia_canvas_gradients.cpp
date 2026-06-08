@@ -205,6 +205,10 @@ void SkiaCanvas::set_fill_pattern(const std::string& image_src,
         clear_fill_gradient();
         return;
     }
+    // Graphite (live GPU) cannot build a shader from a raster-backed SkImage —
+    // it drops the draw with "Couldn't convert SkImage to a Graphite-backed
+    // representation". Upload to a GPU texture first (no-op on raster canvases).
+    image = ensure_gpu_image(image);
     gradient_shader_ = image->makeShader(to_sk_tile_mode(tile_x),
                                           to_sk_tile_mode(tile_y),
                                           sampling_options_for_image_smoothing(),
@@ -220,6 +224,7 @@ void SkiaCanvas::set_stroke_pattern(const std::string& image_src,
         stroke_shader_ = nullptr;
         return;
     }
+    image = ensure_gpu_image(image);  // GPU-upload — see set_fill_pattern.
     stroke_shader_ = image->makeShader(to_sk_tile_mode(tile_x),
                                         to_sk_tile_mode(tile_y),
                                         sampling_options_for_image_smoothing(),
