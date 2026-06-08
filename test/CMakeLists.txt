@@ -4861,6 +4861,9 @@ pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view)
 # Modal overlay tests
 pulp_add_test_suite(pulp-test-modal LIBRARIES pulp::view)
 
+# ContextMenu (view-drawn popup menu) tests
+pulp_add_test_suite(pulp-test-context-menu LIBRARIES pulp::view)
+
 # Design export tests
 add_executable(pulp-test-design-export test_design_export.cpp)
 target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)

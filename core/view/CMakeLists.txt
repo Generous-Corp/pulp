@@ -347,6 +347,7 @@ target_sources(pulp-view-core PRIVATE
     src/auto_ui.cpp
     src/text_editor.cpp
     src/ui_components.cpp
+    src/context_menu.cpp
     src/scroll_bar.cpp
     src/anchor_strategy.cpp
     src/relative_point.cpp
