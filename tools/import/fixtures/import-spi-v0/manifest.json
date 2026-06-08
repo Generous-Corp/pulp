@@ -1,0 +1,11 @@
+{
+  "schema": "pulp.import.emission_manifest.v0",
+  "files": [
+    { "path": "CMakeLists.txt", "provenance": "pulp-generated" },
+    { "path": "src/PluginProcessor.cpp", "provenance": "pulp-generated" },
+    { "path": "src/DspCore.h", "provenance": "copied-user-file" },
+    { "path": "IMPORT_REPORT.md", "provenance": "report" }
+  ],
+  "migration_status": "unresolved",
+  "verdict": "Builds: yes. Audio parity: partial. UI parity: no. Session compatibility: no."
+}
