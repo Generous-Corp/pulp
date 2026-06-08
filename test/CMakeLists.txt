@@ -5146,6 +5146,19 @@ target_link_libraries(pulp-test-image-view-fill
 catch_discover_tests(pulp-test-image-view-fill
     PROPERTIES LABELS "view")
 
+# GPU regression for the same silhouette fill on the LIVE Graphite path: the
+# url() mask shader must upload its image to a GPU texture or Graphite drops the
+# masked draw every frame (ELYSIUM "shapes don't fill" bug). macOS-only; the
+# offscreen GPU backend soft-skips at runtime when no Dawn adapter is present.
+if(APPLE)
+    add_executable(pulp-test-image-view-fill-gpu
+        test_image_view_fill_gpu.cpp)
+    target_link_libraries(pulp-test-image-view-fill-gpu
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-image-view-fill-gpu
+        PROPERTIES LABELS "view")
+endif()
+
 # DesignFrameView (Plan B / B1) — faithful SVG render + typed interactive knobs.
 add_executable(pulp-test-design-frame-view
     test_design_frame_view.cpp)
