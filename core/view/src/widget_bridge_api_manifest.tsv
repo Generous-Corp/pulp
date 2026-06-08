@@ -124,9 +124,9 @@ setCornerRadius	css_style	function	core/view/src/widget_bridge.cpp
 setBorderColor	css_style	function	core/view/src/widget_bridge.cpp
 setBorderWidth	css_style	function	core/view/src/widget_bridge.cpp
 setBorderStyle	css_style	function	core/view/src/widget_bridge.cpp
-setListStyleType	css_style	function	core/view/src/widget_bridge.cpp
-setListStyleImage	css_style	function	core/view/src/widget_bridge.cpp
-setListStylePosition	css_style	function	core/view/src/widget_bridge.cpp
+setListStyleType	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
+setListStyleImage	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
+setListStylePosition	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
 setOutlineColor	css_style	function	core/view/src/widget_bridge.cpp
 setOutlineOffset	css_style	function	core/view/src/widget_bridge.cpp
 setOutlineStyle	css_style	function	core/view/src/widget_bridge.cpp

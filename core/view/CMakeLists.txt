@@ -405,6 +405,7 @@ target_sources(pulp-view-script PRIVATE
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
     src/widget_bridge/accessibility_api.cpp
+    src/widget_bridge/list_style_api.cpp
     src/widget_bridge_input.cpp
     src/hot_reload.cpp
     src/scripted_ui.cpp
