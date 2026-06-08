@@ -71,7 +71,14 @@ def apply_bumps(
     """Write new versions for surfaces that need a bump and aren't already bumped."""
     edited: list[str] = []
     for v in verdicts:
-        if v.final_level in ("none", "patch"):
+        # Only "none" means no release is owed. patch / minor / major all
+        # need the version file written. Excluding "patch" here stranded
+        # every `fix:` PR (which classifies as patch): apply mode "suggested"
+        # the bump but never wrote it, so `--require-bump-for-fix-feat` then
+        # hard-failed with no `chore: bump versions` marker. See
+        # danielraffel/Shipyard#358. The "already at target" short-circuit
+        # below keeps a repeat apply idempotent.
+        if v.final_level == "none":
             continue
         # Skip if ALL version files are already at the target; otherwise
         # apply to every file (keeps plugin.json and marketplace.json in
