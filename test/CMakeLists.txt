@@ -924,11 +924,11 @@ pulp_add_test_suite(pulp-test-native-core-ffi
     SOURCES test_native_core_ffi.cpp
     LIBRARIES pulp::native-components)
 
-# Seam test: the C++ NativeCoreProcessor adapter driving an in-test C-ABI gain
-# core (no Rust). Proves descriptor/param/automation/audio/state bridging.
+# NativeCoreProcessor seam + RT-safety harnesses; no Rust required.
 pulp_add_test_suite(pulp-test-native-core-processor
-    SOURCES test_native_core_processor.cpp
-    LIBRARIES pulp::format)
+    SOURCES test_native_core_processor.cpp test_rt_safety.cpp $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp> $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::format ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 # Public node ABI (pulp_node_v1) conformance — always built, no Rust. Pins the
 # ABI shape, version negotiation, and a C node's full lifecycle.
@@ -1994,9 +1994,7 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-entry)
 
-    # CLAP inbound/outbound MIDI event coverage — pins the CLAP_EVENT_MIDI,
-    # CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_MIDI2
-    # handlers added alongside feature/clap-midi-cc-coverage.
+    # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #
     # Unlike `pulp-test-clap-entry` above, this test DOES NOT re-compile
     # clap_adapter.cpp into its own TU. The test drives the adapter via
@@ -2008,8 +2006,9 @@ if(PULP_HAS_CLAP)
     # gate reads — avoids the split-TU problem that produced "96% local
     # / 62% CI" reports on PR #627.
     add_executable(pulp-test-clap-midi-events test_clap_midi_events.cpp)
-    target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain)
-    target_compile_definitions(pulp-test-clap-midi-events PRIVATE PULP_CLAP_GUI=1)
+    target_sources(pulp-test-clap-midi-events PRIVATE $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+    target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-test-clap-midi-events PRIVATE PULP_CLAP_GUI=1 $<$<BOOL:${UNIX}>:PULP_CLAP_PROCESS_RT_TRAP_TESTS=1>)
     catch_discover_tests(pulp-test-clap-midi-events)
 
     # Item 3.4 (macOS plan) — pin the CLAP host-facing API contract that

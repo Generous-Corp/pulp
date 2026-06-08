@@ -3,6 +3,7 @@
 
 #include <pulp/format/headless.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 namespace pulp::format {
 
@@ -69,6 +70,7 @@ void HeadlessHost::process(audio::BufferView<float>& output,
         context.num_samples = static_cast<int>(output.num_samples());
     }
     processor_->set_param_events(nullptr);
+    pulp::runtime::ScopedNoAlloc no_alloc_guard;
     processor_->process(output, input, midi_in, midi_out, context);
 }
 
@@ -85,6 +87,7 @@ void HeadlessHost::process(audio::BufferView<float>& output,
         context.num_samples = static_cast<int>(output.num_samples());
     }
     processor_->set_param_events(&param_events);
+    pulp::runtime::ScopedNoAlloc no_alloc_guard;
     processor_->process(output, input, midi_in, midi_out, context);
 }
 

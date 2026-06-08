@@ -34,6 +34,10 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 
+#if PULP_CLAP_PROCESS_RT_TRAP_TESTS
+#include "native_components/rt_test_scope.hpp"
+#endif
+
 #include <clap/ext/preset-load.h>
 
 #include <algorithm>
@@ -485,6 +489,29 @@ TEST_CASE("CLAP zero-frame process block returns without touching processor stat
     REQUIRE(g_capturing->process_count == 0);
     REQUIRE(g_capturing->captured_midi.empty());
 }
+
+#if PULP_CLAP_PROCESS_RT_TRAP_TESTS
+TEST_CASE("CLAP steady-state process path is no-alloc and no-lock",
+          "[clap][process][rt-safety]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    InputEventList warmup;
+    REQUIRE(h.run(warmup) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->process_count == 1);
+
+    InputEventList steady_state;
+    clap_process_status status = CLAP_PROCESS_ERROR;
+    {
+        native_components::test::RtNoAllocScope guard;
+        status = h.run(steady_state);
+    }
+
+    REQUIRE(status == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->process_count == 2);
+}
+#endif
 
 TEST_CASE("CLAP process ignores non-core event namespaces",
           "[clap][events][namespace]") {

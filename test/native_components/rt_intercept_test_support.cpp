@@ -1,8 +1,7 @@
 // RT-safety interception, TEST BUILDS ONLY.
 //
-// This translation unit is linked ONLY into the opt-in Rust FFI test
-// executable (PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS). It must never reach
-// production. It does two things:
+// This translation unit is linked ONLY into test executables. It must never
+// reach production. It does three things:
 //
 //   1. Provides a STRONG pulp_rt_trap_if_no_alloc_scope that aborts when an
 //      allocation is attempted inside a no-alloc scope. This overrides the weak
@@ -10,6 +9,8 @@
 //      allocator (kind=2) and the C++ operator new below (kind=0) call it.
 //   2. Overrides the global C++ operator new/delete so a C++ heap allocation
 //      inside a no-alloc scope is trapped too.
+//   3. Overrides pthread mutex/rwlock lock entry points so a blocking lock
+//      acquisition inside a no-alloc scope is trapped.
 //
 // The trap itself allocates nothing, locks nothing, and only writes a fixed
 // message with write(2) before aborting — safe to call from anywhere,
@@ -25,8 +26,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <atomic>
 #include <new>
 
+#include <dlfcn.h>
+#include <pthread.h>
 #include <unistd.h>  // write, _exit
 
 namespace pulp::native_components::test {
@@ -60,6 +64,23 @@ bool in_no_alloc_scope() noexcept {
     std::abort();
 }
 
+template <typename Fn>
+Fn resolve_next_symbol(const char* name) noexcept {
+    void* symbol = ::dlsym(RTLD_NEXT, name);
+    return reinterpret_cast<Fn>(symbol);
+}
+
+template <typename Fn>
+Fn cached_next_symbol(std::atomic<Fn>& cache, const char* name) noexcept {
+    Fn fn = cache.load(std::memory_order_acquire);
+    if (fn != nullptr) {
+        return fn;
+    }
+    fn = resolve_next_symbol<Fn>(name);
+    cache.store(fn, std::memory_order_release);
+    return fn;
+}
+
 }  // namespace
 
 // Strong override of the contract trap. Called by the Rust checking allocator
@@ -69,6 +90,50 @@ extern "C" void pulp_rt_trap_if_no_alloc_scope(std::int32_t kind,
     if (in_no_alloc_scope()) {
         trap_now(kind);
     }
+}
+
+extern "C" int pthread_mutex_lock(pthread_mutex_t* mutex) {
+    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    using Fn = int (*)(pthread_mutex_t*);
+    static std::atomic<Fn> real{nullptr};
+    Fn fn = cached_next_symbol(real, "pthread_mutex_lock");
+    if (fn == nullptr) {
+        trap_now(3);
+    }
+    return fn(mutex);
+}
+
+extern "C" int pthread_mutex_trylock(pthread_mutex_t* mutex) {
+    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    using Fn = int (*)(pthread_mutex_t*);
+    static std::atomic<Fn> real{nullptr};
+    Fn fn = cached_next_symbol(real, "pthread_mutex_trylock");
+    if (fn == nullptr) {
+        trap_now(3);
+    }
+    return fn(mutex);
+}
+
+extern "C" int pthread_rwlock_rdlock(pthread_rwlock_t* lock) {
+    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    using Fn = int (*)(pthread_rwlock_t*);
+    static std::atomic<Fn> real{nullptr};
+    Fn fn = cached_next_symbol(real, "pthread_rwlock_rdlock");
+    if (fn == nullptr) {
+        trap_now(3);
+    }
+    return fn(lock);
+}
+
+extern "C" int pthread_rwlock_wrlock(pthread_rwlock_t* lock) {
+    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    using Fn = int (*)(pthread_rwlock_t*);
+    static std::atomic<Fn> real{nullptr};
+    Fn fn = cached_next_symbol(real, "pthread_rwlock_wrlock");
+    if (fn == nullptr) {
+        trap_now(3);
+    }
+    return fn(lock);
 }
 
 // Global operator new/delete overrides (kind = 0 == C++ new). Only allocation
