@@ -600,6 +600,7 @@ jobs:
             libfontconfig1-dev \
             libgbm-dev \
             libgl1-mesa-dev \
+            libjack-jackd2-dev \
             libx11-dev \
             libxext-dev \
             libxfixes-dev \
