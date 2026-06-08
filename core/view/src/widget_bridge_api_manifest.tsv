@@ -127,10 +127,10 @@ setBorderStyle	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
 setListStyleType	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
 setListStyleImage	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
 setListStylePosition	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
-setOutlineColor	css_style	function	core/view/src/widget_bridge.cpp
-setOutlineOffset	css_style	function	core/view/src/widget_bridge.cpp
-setOutlineStyle	css_style	function	core/view/src/widget_bridge.cpp
-setOutlineWidth	css_style	function	core/view/src/widget_bridge.cpp
+setOutlineColor	css_style	function	core/view/src/widget_bridge/outline_api.cpp
+setOutlineOffset	css_style	function	core/view/src/widget_bridge/outline_api.cpp
+setOutlineStyle	css_style	function	core/view/src/widget_bridge/outline_api.cpp
+setOutlineWidth	css_style	function	core/view/src/widget_bridge/outline_api.cpp
 setBorderRadius	css_style	function	core/view/src/widget_bridge.cpp
 setBorderTopLeftRadius	css_style	function	core/view/src/widget_bridge.cpp
 setBorderTopRightRadius	css_style	function	core/view/src/widget_bridge.cpp
