@@ -637,9 +637,12 @@ runtime_apis:
     ci_test: pulp-test-clipboard
     notes: >-
       navigator.clipboard.readText/writeText via platform::Clipboard C++ API.
-      macOS/iOS/Windows use native pasteboard APIs. Linux uses
-      xclip/wl-copy — set_text returns false honestly when neither is
-      on PATH. Android routes through a host-registered bridge
+      macOS/iOS/Windows use native pasteboard APIs (text + binary
+      set_data/get_data). Linux uses xclip/wl-copy for text AND binary
+      custom-type data (wl-copy --type / xclip -t, MIME type sanitized;
+      xsel is text-only and honest-fails for binary); set_text/set_data
+      return false honestly when no tool is on PATH or no display is
+      reachable. Android routes through a host-registered bridge
       (Clipboard::set_android_bridge / clear_android_bridge); generated
       app wiring remains pending.
   local_storage:
