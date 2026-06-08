@@ -20,6 +20,10 @@
 #include <pulp/audio/device.hpp>
 #include "../core/audio/platform/linux/jack_device.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <thread>
+
 using namespace pulp::audio;
 using namespace pulp::audio::linux_platform;
 
@@ -71,6 +75,49 @@ TEST_CASE("JACK: default in/out devices mirror the enumerated server",
     REQUIRE(in.id == enumerated.front().id);
     REQUIRE(out.is_default_output);
     REQUIRE(in.is_default_input);
+}
+
+// L5b smoke: open + start + stop a JACK device for real, but ONLY when a JACK
+// server is actually reachable. In CI there is usually no jackd, so this skips
+// cleanly (the build.yml Linux lane installs libjack so the TU still compiles +
+// the enumeration contract above always runs — that is the regression guard for
+// the L5a-class build break). On a JACK-enabled host (e.g. the tartci VM with
+// `jackd -d dummy`) it proves the server drives our process callback.
+TEST_CASE("JACK: open/start/stop round-trip when a server is reachable",
+          "[audio][jack][issue-3327]") {
+    if (!jack_is_available()) {
+        SUCCEED("no JACK server reachable — open smoke skipped");
+        return;
+    }
+
+    JackSystem sys;
+    auto dev = sys.create_device("jack");
+    REQUIRE(dev != nullptr);
+
+    DeviceConfig cfg;
+    cfg.output_channels = 2;
+    cfg.input_channels = 0;  // JACK supplies the real SR + buffer size
+    REQUIRE(dev->open(cfg));
+    REQUIRE(dev->is_open());
+    CHECK(dev->sample_rate() > 0.0);
+    CHECK(dev->buffer_size() > 0);
+
+    std::atomic<int> callbacks{0};
+    REQUIRE(dev->start([&](const BufferView<const float>&,
+                           BufferView<float>& out,
+                           const CallbackContext&) {
+        for (std::size_t ch = 0; ch < out.num_channels(); ++ch)
+            for (float& s : out.channel(ch)) s = 0.0f;  // silence
+        callbacks.fetch_add(1, std::memory_order_relaxed);
+    }));
+    REQUIRE(dev->is_running());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    dev->stop();
+    dev->close();
+    CHECK_FALSE(dev->is_running());
+    CHECK(callbacks.load() > 0);  // the server delivered ≥1 process cycle
 }
 
 #else  // not (Linux && JACK)
