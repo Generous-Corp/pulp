@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/view/drag_drop.hpp>
 #include <pulp/view/view.hpp>
 #include <functional>
 #include <vector>
@@ -8,9 +9,11 @@
 namespace pulp::view {
 
 // ── FileDropZone ────────────────────────────────────────────────────────────
-// Drag-and-drop file target with visual feedback.
+// Drag-and-drop file target with visual feedback. Implements DropReceiver so the
+// native drop-dispatch core (drag_drop.cpp) routes file drops here without
+// knowing the concrete type.
 
-class FileDropZone : public View {
+class FileDropZone : public View, public DropReceiver {
 public:
     FileDropZone();
 
@@ -43,6 +46,13 @@ public:
     void drag_enter(const std::vector<std::string>& paths);
     void drag_leave();
     void drop(const std::vector<std::string>& paths);
+
+    // DropReceiver — the dispatch core drives these; they delegate to the typed
+    // drag_enter/drag_leave/drop above. A FileDropZone consumes file drops in its
+    // region (returns true) and ignores text/custom (lets them bubble).
+    bool accept_drag(const DropData& data, Point local) override;
+    void leave_drag() override;
+    bool accept_drop(const DropData& data, Point local) override;
 
     float intrinsic_height() const override { return 120.0f; }
 

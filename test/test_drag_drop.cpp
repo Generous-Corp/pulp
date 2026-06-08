@@ -310,3 +310,50 @@ TEST_CASE("independent DragSessions do not share hover state", "[view][dnd]") {
     CHECK(za->is_drag_over());
     CHECK_FALSE(zb->is_drag_over());
 }
+
+TEST_CASE("first-handler-wins: a DropReceiver consumes the drop, ancestor "
+          "on_drop does not also fire", "[view][dnd]") {
+    // A FileDropZone nested inside a View with on_drop set: the zone (a
+    // DropReceiver) consumes the file drop, so the ancestor's on_drop must NOT
+    // also fire (no double-dispatch).
+    View root;
+    root.set_bounds({0, 0, 300, 300});
+    int ancestor_fires = 0;
+    root.on_drop = [&](const std::string&, const std::string&, float, float) {
+        ++ancestor_fires;
+    };
+    auto zone_owned = std::make_unique<FileDropZone>();
+    FileDropZone* zone = zone_owned.get();
+    zone->set_bounds({0, 0, 300, 300});
+    int zone_fires = 0;
+    zone->on_drop = [&](const std::vector<std::string>&) { ++zone_fires; };
+    root.add_child(std::move(zone_owned));
+
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_files({"/a.wav"}), {10, 10}));
+    CHECK(zone_fires == 1);
+    CHECK(ancestor_fires == 0);  // consumed by the zone, did not bubble
+}
+
+TEST_CASE("a drop a DropReceiver declines bubbles to View::on_drop",
+          "[view][dnd]") {
+    // FileDropZone declines text drops (accept_drop returns false for non-file),
+    // so a text drop over the zone falls through to the ancestor's on_drop.
+    View root;
+    root.set_bounds({0, 0, 300, 300});
+    std::string got_type;
+    root.on_drop = [&](const std::string& t, const std::string&, float, float) {
+        got_type = t;
+    };
+    auto zone_owned = std::make_unique<FileDropZone>();
+    FileDropZone* zone = zone_owned.get();
+    zone->set_bounds({0, 0, 300, 300});
+    bool zone_fired = false;
+    zone->on_drop = [&](const std::vector<std::string>&) { zone_fired = true; };
+    root.add_child(std::move(zone_owned));
+
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_text("hi"), {10, 10}));
+    CHECK_FALSE(zone_fired);     // zone declines text
+    CHECK(got_type == "text");   // bubbled to the ancestor on_drop
+}

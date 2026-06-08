@@ -54,6 +54,22 @@ void FileDropZone::drop(const std::vector<std::string>& paths) {
     if (!valid.empty() && on_drop) on_drop(valid);
 }
 
+// ── DropReceiver (drop-dispatch core routes through these) ────────────────────
+
+bool FileDropZone::accept_drag(const DropData& data, Point /*local*/) {
+    if (data.type != DropData::Type::files) return false;  // let text/custom bubble
+    drag_enter(data.file_paths);
+    return true;  // claim the hover (drives highlight)
+}
+
+void FileDropZone::leave_drag() { drag_leave(); }
+
+bool FileDropZone::accept_drop(const DropData& data, Point /*local*/) {
+    if (data.type != DropData::Type::files) return false;  // let text/custom bubble
+    drop(data.file_paths);
+    return true;  // the zone owns file drops in its region (consumes the drop)
+}
+
 void FileDropZone::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
