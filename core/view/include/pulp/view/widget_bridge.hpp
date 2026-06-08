@@ -329,6 +329,7 @@ private:
     void register_widget_factory_form_api();
     void register_widget_factory_container_api();
     void register_widget_factory_composite_api();
+    void register_widget_value_list_api();
     void register_widget_factory_text_editor_api();
 };
 
