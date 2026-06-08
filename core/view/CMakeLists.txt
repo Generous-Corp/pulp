@@ -388,6 +388,7 @@ target_sources(pulp-view-core PRIVATE
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
+    src/drag_drop.cpp
     src/split_view.cpp
     src/property_list.cpp
     src/breadcrumb.cpp
@@ -414,11 +415,17 @@ target_sources(pulp-view-script PRIVATE
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
     src/widget_bridge/accessibility_api.cpp
+    src/widget_bridge/animation_api.cpp
     src/widget_bridge/dom_api.cpp
+    src/widget_bridge/event_api.cpp
+    src/widget_bridge/style_storage_api.cpp
+    src/widget_bridge/style_visibility_api.cpp
     src/widget_bridge/layout_api.cpp
     src/widget_bridge/list_style_api.cpp
     src/widget_bridge/metadata_api.cpp
     src/widget_bridge/platform_services_api.cpp
+    src/widget_bridge/runtime_api.cpp
+    src/widget_bridge/runtime_import_api.cpp
     src/widget_bridge/state_binding_api.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
@@ -432,6 +439,11 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/widget_value_basic_api.cpp
     src/widget_bridge/typography_api.cpp
     src/widget_bridge/text_runs_api.cpp
+    src/widget_bridge/border_box_api.cpp
+    src/widget_bridge/outline_api.cpp
+    src/widget_bridge/border_radius_api.cpp
+    src/widget_bridge/border_side_api.cpp
+    src/widget_bridge/canvas2d_api.cpp
     src/widget_bridge/widget_value_list_api.cpp
     src/widget_bridge/widget_value_content_api.cpp
     src/widget_bridge_input.cpp

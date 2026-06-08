@@ -8,6 +8,35 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03810"></a>
+## [0.381.0] - 2026-06-08
+
+- refactor(view): unify drag-drop on DropReceiver + fix header self-containment ([#3647](https://github.com/danielraffel/pulp/pull/3647))
+- refactor: split WidgetBridge typography style registrars ([#3646](https://github.com/danielraffel/pulp/pull/3646))
+
+<a id="v03800"></a>
+## [0.380.0] - 2026-06-08
+
+- feat(view): native drag-drop dispatch core + SDL standalone producer ([#3638](https://github.com/danielraffel/pulp/pull/3638))
+- refactor: split WidgetBridge animation registrar ([#3644](https://github.com/danielraffel/pulp/pull/3644))
+- refactor: split WidgetBridge canvas2d registrar ([#3642](https://github.com/danielraffel/pulp/pull/3642))
+- fix(ci): give Tart ephemeral runners a static name per (host, slot) ([#3632](https://github.com/danielraffel/pulp/pull/3632))
+- feature/refactor widgetbridge runtime registrar ([#3643](https://github.com/danielraffel/pulp/pull/3643))
+- feature/refactor widgetbridge border side registrar ([#3641](https://github.com/danielraffel/pulp/pull/3641))
+- refactor: split WidgetBridge border radius registrar ([#3640](https://github.com/danielraffel/pulp/pull/3640))
+- refactor: split WidgetBridge runtime import registrar ([#3636](https://github.com/danielraffel/pulp/pull/3636))
+- refactor: split WidgetBridge outline registrar ([#3637](https://github.com/danielraffel/pulp/pull/3637))
+- docs(ci-skill): patch bumps auto-apply (#3626) + document --adopt-head SHA-drift recovery ([#3631](https://github.com/danielraffel/pulp/pull/3631))
+- refactor: split WidgetBridge border box registrar ([#3630](https://github.com/danielraffel/pulp/pull/3630))
+
+<a id="v03790"></a>
+## [0.379.0] - 2026-06-08
+
+- feat(view): Pulp-drawn ContextMenu (view-layer GPU popup menu) ([#3628](https://github.com/danielraffel/pulp/pull/3628))
+- refactor: split WidgetBridge DOM registrar ([#3624](https://github.com/danielraffel/pulp/pull/3624))
+- refactor: split WidgetBridge text runs registrar ([#3629](https://github.com/danielraffel/pulp/pull/3629))
+- refactor: split WidgetBridge typography registrar ([#3625](https://github.com/danielraffel/pulp/pull/3625))
+
 <a id="v03780"></a>
 ## [0.378.0] - 2026-06-08
 
@@ -3895,6 +3924,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.381.0]: https://github.com/danielraffel/pulp/releases/tag/v0.381.0
+[0.380.0]: https://github.com/danielraffel/pulp/releases/tag/v0.380.0
+[0.379.0]: https://github.com/danielraffel/pulp/releases/tag/v0.379.0
 [0.378.0]: https://github.com/danielraffel/pulp/releases/tag/v0.378.0
 [0.371.1]: https://github.com/danielraffel/pulp/releases/tag/v0.371.1
 [0.371.0]: https://github.com/danielraffel/pulp/releases/tag/v0.371.0

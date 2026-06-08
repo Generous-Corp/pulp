@@ -322,6 +322,16 @@ private:
     void register_api();
     void register_accessibility_api();
     void register_dom_api();
+    void register_hover_event_api();
+    void register_pointer_event_api();
+    void register_wheel_event_api();
+    void register_context_menu_event_api();
+    void register_drop_event_api();
+    void register_widget_style_background_repeat_api();
+    void register_widget_style_mask_object_api();
+    void register_widget_style_background_subproperty_api();
+    void register_widget_style_visibility_api();
+    void register_widget_style_interaction_api();
     void register_layout_grid_api();
     void register_layout_flex_api();
     void register_layout_query_api();
@@ -356,8 +366,21 @@ private:
     void register_widget_value_label_api();
     void register_widget_value_basic_api();
     void register_widget_typography_api();
+    void register_widget_typography_color_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_typography_decoration_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_typography_overflow_api();
+    void register_widget_typography_extended_api();
+    void register_widget_typography_shadow_shorthand_api();
     void register_widget_value_content_api();
     void register_widget_text_runs_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_border_box_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_outline_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_border_radius_api();
+    void register_widget_border_side_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_runtime_api();
+    void register_animation_api();
+    void register_animation_style_api();
+    void register_canvas2d_api(std::function<canvas::Color(const std::string&)> parse_color);
 };
 
 } // namespace pulp::view

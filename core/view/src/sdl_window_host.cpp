@@ -4,7 +4,10 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/view/drag_drop.hpp>
 #include <SDL3/SDL.h>
+#include <string>
+#include <vector>
 #include <deque>
 #include <iostream>
 #include <memory>
@@ -92,6 +95,55 @@ public:
                     case SDL_EVENT_WINDOW_EXPOSED:
                         needs_repaint_ = true;
                         break;
+                    // Native drag-and-drop. SDL3 abstracts Win OLE / Linux XDND
+                    // (and macOS) into normalized drop events and delivers each
+                    // dropped file as its own SDL_EVENT_DROP_FILE, bracketed by
+                    // BEGIN/COMPLETE. We accumulate the files across the sequence
+                    // and route the batch into the view tree via the shared
+                    // dispatch core (drag_drop.cpp).
+                    case SDL_EVENT_DROP_BEGIN:
+                        pending_drop_files_.clear();
+                        pending_drop_pos_ = window_to_root(event.drop.x, event.drop.y);
+                        break;
+                    case SDL_EVENT_DROP_FILE:
+                        if (event.drop.data) pending_drop_files_.emplace_back(event.drop.data);
+                        pending_drop_pos_ = window_to_root(event.drop.x, event.drop.y);
+                        break;
+                    case SDL_EVENT_DROP_TEXT:
+                        if (event.drop.data) {
+                            DropData d;
+                            d.type = DropData::Type::text;
+                            d.text = event.drop.data;
+                            dispatch_drop(root_, drag_session_, d,
+                                          window_to_root(event.drop.x, event.drop.y));
+                            needs_repaint_ = true;
+                        }
+                        break;
+                    case SDL_EVENT_DROP_POSITION:
+                        // Hover feedback while dragging over the window. The file
+                        // list is only known once DROP_FILE events arrive, so this
+                        // updates highlight state only when we already have paths.
+                        if (!pending_drop_files_.empty()) {
+                            DropData d;
+                            d.type = DropData::Type::files;
+                            d.file_paths = pending_drop_files_;
+                            dispatch_drag_move(root_, drag_session_, d,
+                                               window_to_root(event.drop.x, event.drop.y));
+                            needs_repaint_ = true;
+                        }
+                        break;
+                    case SDL_EVENT_DROP_COMPLETE:
+                        if (!pending_drop_files_.empty()) {
+                            DropData d;
+                            d.type = DropData::Type::files;
+                            d.file_paths = std::move(pending_drop_files_);
+                            dispatch_drop(root_, drag_session_, d, pending_drop_pos_);
+                            pending_drop_files_.clear();
+                            needs_repaint_ = true;
+                        } else {
+                            dispatch_drag_exit(root_, drag_session_);
+                        }
+                        break;
                     default:
                         break;
                 }
@@ -150,6 +202,14 @@ private:
     std::function<void()> close_callback_;
     bool needs_repaint_ = false;
 
+    // Files accumulated across an in-flight native drag-drop sequence
+    // (SDL_EVENT_DROP_BEGIN … DROP_FILE* … DROP_COMPLETE) and the last reported
+    // drop position, both in window coordinates (== root coords here).
+    std::vector<std::string> pending_drop_files_;
+    Point pending_drop_pos_{0, 0};
+    // Per-window drop hover state (owned here, not a process global).
+    DragSession drag_session_;
+
     struct DispatcherQueueState {
         mutable std::mutex mutex;
         std::deque<events::Task> tasks;
@@ -158,6 +218,16 @@ private:
 
     std::shared_ptr<DispatcherQueueState> dispatcher_queue_;
     events::MainThreadDispatcher::Token dispatcher_token_ = 0;
+
+    // Map SDL window coordinates → root-view coordinates. The single chokepoint
+    // for all drop-event coords. render_frame() lays the root tree out at the
+    // full window size with no design-viewport / HiDPI scale, so this is identity
+    // today. When the SDL host gains a design-viewport or per-monitor scale
+    // (W8/L9 HiDPI), apply that inverse transform HERE — and route mouse events
+    // through the same helper — so drops keep landing under the cursor.
+    Point window_to_root(float window_x, float window_y) const {
+        return {window_x, window_y};
+    }
 
     void register_dispatcher() {
         shutdown_dispatcher();
