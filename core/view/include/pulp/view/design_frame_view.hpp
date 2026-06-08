@@ -51,6 +51,15 @@ struct DesignFrameElement {
 bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
                        float tol = 2.0f);
 
+// Remove a filtered group (`<g filter="url(#...)">…</g>`) whose first drawn
+// coordinate falls inside the box [x, x+w] × [y, y+h], returning true if one was
+// erased. Figma bakes the SELECTED tab's digit with a soft glow (a large-blur
+// drop-shadow filter); the live pill moves on click but that baked glow stays
+// stuck on the originally-selected digit. Removing the filtered group at the
+// originally-selected cell lets the live overlay own the digit cleanly. Pure
+// geometry — no per-design data.
+bool suppress_svg_glow_at(std::string& svg, float x, float y, float w, float h);
+
 // Renders a design's own SVG document pixel-faithfully via Canvas::draw_svg
 // (Skia SkSVGDOM), cropped to its panel, and overlays native interaction from a
 // typed element list. This is the faithful-vector design-import lane's view: the

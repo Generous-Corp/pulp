@@ -103,6 +103,53 @@ bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
     return false;
 }
 
+bool suppress_svg_glow_at(std::string& svg, float x, float y, float w, float h) {
+    const float x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    const char* kOpen = "<g filter=\"url(#";
+    std::size_t pos = 0;
+    while ((pos = svg.find(kOpen, pos)) != std::string::npos) {
+        const auto gt = svg.find('>', pos);
+        if (gt == std::string::npos) break;
+        // First drawn coordinate of the group: the "d=\"M x y" of its first path.
+        // A glyph glow's first point sits on the digit, inside the tab cell.
+        float fx = std::numeric_limits<float>::quiet_NaN(), fy = fx;
+        const auto dp = svg.find("d=\"M", gt);
+        if (dp != std::string::npos && dp < gt + 600) {
+            const char* p = svg.c_str() + dp + 4;
+            while (*p == ' ') ++p;
+            char* endp = nullptr;
+            fx = std::strtof(p, &endp);
+            if (endp != p) {
+                p = endp;
+                while (*p == ' ' || *p == ',') ++p;
+                fy = std::strtof(p, &endp);
+                if (endp == p) fy = std::numeric_limits<float>::quiet_NaN();
+            } else {
+                fx = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        if (!std::isnan(fx) && !std::isnan(fy) &&
+            fx >= x0 && fx <= x1 && fy >= y0 && fy <= y1) {
+            // Erase the whole group, depth-matching nested <g>…</g>.
+            std::size_t i = gt + 1;
+            int depth = 1;
+            while (i < svg.size() && depth > 0) {
+                const auto ng = svg.find("<g", i);
+                const auto cg = svg.find("</g>", i);
+                if (cg == std::string::npos) break;
+                if (ng != std::string::npos && ng < cg) { depth++; i = ng + 2; }
+                else { depth--; i = cg + 4; }
+            }
+            if (depth == 0) {
+                svg.erase(pos, i - pos);
+                return true;
+            }
+        }
+        pos = gt + 1;
+    }
+    return false;
+}
+
 DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
                                  float panel_x, float panel_y, float panel_w, float panel_h)
     : svg_(std::move(svg)), elements_(std::move(elements)) {
@@ -130,8 +177,12 @@ DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement
         const int n = static_cast<int>(e.options.size());
         const float slot_w = e.w / static_cast<float>(n);
         const int sel = std::clamp(e.selected_index, 0, n - 1);
-        suppress_svg_rect(svg_, e.x + static_cast<float>(sel) * slot_w, e.y,
-                          slot_w, e.h);
+        const float cell_x = e.x + static_cast<float>(sel) * slot_w;
+        suppress_svg_rect(svg_, cell_x, e.y, slot_w, e.h);
+        // Also drop the baked GLOW the design paints on the selected digit (a
+        // big-blur drop-shadow filter group): the live pill moves on click but
+        // that glow would otherwise stay stuck on the originally-selected number.
+        suppress_svg_glow_at(svg_, cell_x, e.y, slot_w, e.h);
     }
 }
 
