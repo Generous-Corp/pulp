@@ -80,6 +80,27 @@ class VersionBumpApplyTests(GateFixtureTestCase):
         # 0.1.0 → minor bump → 0.2.0.
         self.assertIn("VERSION 0.2.0", new_cmake, msg=new_cmake)
 
+    def test_apply_writes_patch_bump_for_internal_fix(self) -> None:
+        """A `fix:` change to an internal-only SDK path classifies as
+        `patch`; `--mode=apply` must WRITE the version file (0.1.0 → 0.1.1).
+
+        Regression for danielraffel/Shipyard#358: `apply_bumps` skipped
+        `final_level == "patch"` alongside `"none"`, so apply mode only
+        "suggested" the bump and never wrote it — stranding every `fix:`
+        / `feat:`-patch PR at the `--require-bump-for-fix-feat` gate with
+        no `chore: bump versions` marker. Only `feat:` (minor) was covered
+        before, which is why the patch path silently regressed."""
+        self.f.write("core/runtime/src/foo.cpp", "void foo() {}\n")
+        self.f.commit("fix: foo internal tweak")
+        code, out = self.f.run_vbc(["--mode=apply"])
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("bumped", out)
+        self.assertIn(
+            "VERSION 0.1.1",
+            (self.tmp / "CMakeLists.txt").read_text(),
+            msg=out,
+        )
+
     def test_apply_bumps_writes_version_files_only_post_c1(self) -> None:
         # Post-C1 (2026-05): apply_bumps writes version files only.
         # CHANGELOG.md is owned by Shipyard post-tag sync via
