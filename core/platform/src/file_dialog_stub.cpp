@@ -39,6 +39,9 @@ namespace pulp::platform {
 // forces that TU to link (static-lib object files with only static
 // initializers can otherwise be dropped).
 FileDialog::Backend make_linux_portal_backend();
+#elif defined(_WIN32)
+// Defined in platform/win/file_dialog_win.cpp (IFileDialog COM backend).
+FileDialog::Backend make_win_file_dialog_backend();
 #endif
 
 namespace {
@@ -64,6 +67,12 @@ bool FileDialog::install_native_backend() {
     if (g_backend_installed) return true;
     if (!DBus::library_available()) return false;
     g_backend = make_linux_portal_backend();
+    g_backend_installed = true;
+    return true;
+#elif defined(_WIN32)
+    std::lock_guard lock(g_backend_mu);
+    if (g_backend_installed) return true;   // leave a host-set backend in place
+    g_backend = make_win_file_dialog_backend();
     g_backend_installed = true;
     return true;
 #else
