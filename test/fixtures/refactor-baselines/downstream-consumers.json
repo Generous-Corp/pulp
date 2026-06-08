@@ -1,0 +1,353 @@
+{
+  "schema_version": 1,
+  "roadmap_item": "P0.4",
+  "baseline_kind": "downstream_consumer_validation_manifest",
+  "pulp_base_commit": "4be4f50437a5cc045b8b147220c19dd4b2e7dcd5",
+  "captured_at_utc": "2026-06-08T07:31:35Z",
+  "schema_boundary": {
+    "project_ir_is_not_design_ir": true,
+    "design_ir_consumers": [
+      "pulp-view-embed",
+      "pulp-embed-iplug2",
+      "pulp-embed-juce"
+    ],
+    "project_ir_consumers": [
+      "pulp-import-iplug",
+      "pulp-import-juce"
+    ]
+  },
+  "sdk_recipe": {
+    "prefix_env": "PULP_SDK_PREFIX",
+    "source_build_dir": "pulp-build-sdk-$PULP_SHA",
+    "configure_command": "cmake -S \"$PULP_REPO\" -B \"$PULP_BUILD_DIR\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$PULP_SDK_PREFIX\"",
+    "build_command": "cmake --build \"$PULP_BUILD_DIR\" -j",
+    "install_command": "cmake --install \"$PULP_BUILD_DIR\" --prefix \"$PULP_SDK_PREFIX\"",
+    "required_options": [
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_INSTALL_PREFIX=\"$PULP_SDK_PREFIX\""
+    ],
+    "expected_artifacts": [
+      "$PULP_SDK_PREFIX/lib/cmake/Pulp/PulpConfig.cmake",
+      "$PULP_SDK_PREFIX/include",
+      "$PULP_SDK_PREFIX/version.txt"
+    ]
+  },
+  "consumers": [
+    {
+      "repo": "pulp-view-embed",
+      "category": "embed_abi",
+      "remote": "https://github.com/danielraffel/pulp-view-embed.git",
+      "checkout_path_candidates": [
+        "/Volumes/Workshop/Code/pulp-view-embed",
+        "/Users/danielraffel/Code/pulp-view-embed"
+      ],
+      "reviewed_head": "787b2e9b94fc120c0a07e0d13c9ef85a177a6a7d",
+      "live_head": "210836ce46aa63d0c28f2e24661d515863eaee0a",
+      "live_dirty": false,
+      "dependency_surfaces": [
+        "pulp_view_embed.h C ABI",
+        "installed Pulp SDK CMake package",
+        "DesignIR JSON",
+        "scripted UI bundles",
+        "PluginViewHost lifecycle",
+        "render and capture APIs"
+      ],
+      "affected_roadmap_items": [
+        "P0.4",
+        "P2.1",
+        "P2.3",
+        "P2.4"
+      ],
+      "required_commands": [
+        {
+          "id": "configure-static-sdk-smoke",
+          "description": "Configure the embed ABI against an installed Pulp SDK.",
+          "working_dir": "$PULP_VIEW_EMBED_REPO",
+          "command": "cmake -S \"$PULP_VIEW_EMBED_REPO\" -B \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\"",
+          "required_for": [
+            "installed_sdk_export",
+            "pulp_view_embed_abi"
+          ],
+          "expected": {
+            "type": "artifact",
+            "value": "$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA/CMakeCache.txt"
+          }
+        },
+        {
+          "id": "build-and-ctest-static-sdk-smoke",
+          "description": "Build and run the top-level embed ABI smoke tests.",
+          "working_dir": "$PULP_VIEW_EMBED_REPO",
+          "command": "cmake --build \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" -j && ctest --test-dir \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" --output-on-failure",
+          "required_for": [
+            "pulp_view_embed_abi",
+            "host_lifecycle",
+            "render_capture"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "embed-smoke|embed-validate-faithful"
+          }
+        },
+        {
+          "id": "shared-distribution-smoke",
+          "description": "Configure the relocatable shared C ABI distribution path.",
+          "working_dir": "$PULP_VIEW_EMBED_REPO",
+          "command": "cmake -S \"$PULP_VIEW_EMBED_REPO\" -B \"$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DPULP_VIEW_EMBED_SHARED=ON -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" && cmake --build \"$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA\" -j",
+          "required_for": [
+            "pulp_view_embed_abi",
+            "installed_sdk_export"
+          ],
+          "expected": {
+            "type": "artifact",
+            "value": "$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA/libpulp_view_embed.dylib"
+          }
+        }
+      ]
+    },
+    {
+      "repo": "pulp-embed-iplug2",
+      "category": "embed_adapter",
+      "remote": "https://github.com/danielraffel/pulp-embed-iplug2.git",
+      "checkout_path_candidates": [
+        "/Volumes/Workshop/Code/pulp-embed-iplug2",
+        "/Users/danielraffel/Code/pulp-embed-iplug2"
+      ],
+      "reviewed_head": "e7f8c78767adc8141d4434468a305abce47060e6",
+      "live_head": "b11ee4fd358ec0e040bef8e89e220ceae781be95",
+      "live_dirty": false,
+      "dependency_surfaces": [
+        "pulp_view_embed.h C ABI",
+        "installed Pulp SDK CMake package",
+        "iPlug2 editor lifecycle",
+        "host parameter bridge",
+        "VST3 AU CLAP adapter smoke"
+      ],
+      "affected_roadmap_items": [
+        "P0.4",
+        "P2.1",
+        "P2.3",
+        "P4.1"
+      ],
+      "required_commands": [
+        {
+          "id": "compile-link-check",
+          "description": "Build the framework-neutral iPlug2 adapter compile check.",
+          "working_dir": "$PULP_EMBED_IPLUG2_REPO",
+          "command": "cmake -S \"$PULP_EMBED_IPLUG2_REPO\" -B \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" && cmake --build \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" -j && ctest --test-dir \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" --output-on-failure",
+          "required_for": [
+            "pulp_view_embed_abi",
+            "installed_sdk_export"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "compilecheck"
+          }
+        },
+        {
+          "id": "example-all-formats-build",
+          "description": "Build the iPlug2 APP, VST3, AU, and CLAP example formats.",
+          "working_dir": "$PULP_EMBED_IPLUG2_REPO",
+          "command": "cmake -S \"$PULP_EMBED_IPLUG2_REPO/example\" -B \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DIPLUG2_DIR=\"$IPLUG2_DIR\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" && cmake --build \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA\" -j",
+          "required_for": [
+            "host_lifecycle",
+            "parameter_bridge",
+            "format_adapter_smoke"
+          ],
+          "expected": {
+            "type": "artifact",
+            "value": "$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA/out/PulpEmbedIPlug.vst3"
+          }
+        },
+        {
+          "id": "standalone-selfcheck",
+          "description": "Run the iPlug2 standalone editor self-check for live GPU and deterministic captures.",
+          "working_dir": "$PULP_EMBED_IPLUG2_REPO",
+          "command": "PULP_EMBED_SELFCHECK=1 \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA/out/PulpEmbedIPlug.app/Contents/MacOS/PulpEmbedIPlug\"",
+          "required_for": [
+            "host_lifecycle",
+            "render_capture"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "SELFCHECK gpu=1 liveCapture=ok deterministic=ok"
+          }
+        }
+      ]
+    },
+    {
+      "repo": "pulp-embed-juce",
+      "category": "embed_adapter",
+      "remote": "https://github.com/danielraffel/pulp-embed-juce.git",
+      "checkout_path_candidates": [
+        "/Volumes/Workshop/Code/pulp-embed-juce",
+        "/Users/danielraffel/Code/pulp-embed-juce"
+      ],
+      "reviewed_head": "1704f10a74669f894139420bb39d2f7897db0727",
+      "live_head": "3e6363260b31ef23a54a5b6992ea4a68f444da18",
+      "live_dirty": true,
+      "dependency_surfaces": [
+        "pulp_view_embed.h C ABI",
+        "installed Pulp SDK CMake package",
+        "JUCE component lifecycle",
+        "host parameter bridge",
+        "VST3 AU Standalone adapter smoke"
+      ],
+      "affected_roadmap_items": [
+        "P0.4",
+        "P2.1",
+        "P2.3",
+        "P4.1"
+      ],
+      "required_commands": [
+        {
+          "id": "adapter-and-example-build",
+          "description": "Build the JUCE adapter and standalone example against an installed Pulp SDK.",
+          "working_dir": "$PULP_EMBED_JUCE_REPO",
+          "command": "cmake -S \"$PULP_EMBED_JUCE_REPO\" -B \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" -DPULP_EMBED_JUCE_BUILD_EXAMPLE=ON && cmake --build \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" -j",
+          "required_for": [
+            "pulp_view_embed_abi",
+            "installed_sdk_export",
+            "host_lifecycle"
+          ],
+          "expected": {
+            "type": "artifact",
+            "value": "$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA/pulp-embed-juce-demo_artefacts/Release/Pulp Embed (JUCE).app"
+          }
+        },
+        {
+          "id": "plugin-build",
+          "description": "Build the JUCE VST3, AU, and Standalone plugin example.",
+          "working_dir": "$PULP_EMBED_JUCE_REPO",
+          "command": "cmake --build \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" --target PulpEmbedJucePlugin_All -j",
+          "required_for": [
+            "host_lifecycle",
+            "parameter_bridge",
+            "format_adapter_smoke"
+          ],
+          "expected": {
+            "type": "artifact",
+            "value": "$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA/PulpEmbedJucePlugin_artefacts/Release/VST3/PulpEmbedJuce.vst3"
+          }
+        },
+        {
+          "id": "standalone-selfcheck",
+          "description": "Run the JUCE standalone wrapper self-check for live GPU and deterministic captures.",
+          "working_dir": "$PULP_EMBED_JUCE_REPO",
+          "command": "PULP_EMBED_SELFCHECK=1 \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA/PulpEmbedJucePlugin_artefacts/Release/Standalone/PulpEmbedJuce.app/Contents/MacOS/PulpEmbedJuce\"",
+          "required_for": [
+            "host_lifecycle",
+            "render_capture"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "SELFCHECK opened=1 gpu=1 liveCapture=ok deterministic=ok"
+          }
+        }
+      ]
+    },
+    {
+      "repo": "pulp-import-iplug",
+      "category": "project_importer",
+      "remote": "https://github.com/danielraffel/pulp-import-iplug.git",
+      "checkout_path_candidates": [
+        "/Volumes/Workshop/Code/pulp-import-iplug",
+        "/Users/danielraffel/Code/pulp-import-iplug"
+      ],
+      "reviewed_head": "2ba988323ab0869f16f17768dbac0bbdb86ef626",
+      "live_head": "2ba988323ab0869f16f17768dbac0bbdb86ef626",
+      "live_dirty": false,
+      "dependency_surfaces": [
+        "ProjectIR draft schema",
+        "import-spi-v0 detect analyze envelopes",
+        "iPlug2 extractor fixtures",
+        "golden ProjectIR reports"
+      ],
+      "affected_roadmap_items": [
+        "P0.4",
+        "P2.3",
+        "P3.1"
+      ],
+      "required_commands": [
+        {
+          "id": "spike-goldens",
+          "description": "Run the iPlug2 extractor spike and compare ProjectIR goldens.",
+          "working_dir": "$PULP_IMPORT_IPLUG_REPO/spike",
+          "command": "cd \"$PULP_IMPORT_IPLUG_REPO/spike\" && ./run_spike.sh",
+          "required_for": [
+            "project_import_spi",
+            "project_ir_schema"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "=== spike OK ==="
+          }
+        },
+        {
+          "id": "spi-unittest",
+          "description": "Run the iPlug2 JSON-stdio SPI contract tests.",
+          "working_dir": "$PULP_IMPORT_IPLUG_REPO",
+          "command": "cd \"$PULP_IMPORT_IPLUG_REPO\" && python3 -m unittest spike.test_spi",
+          "required_for": [
+            "project_import_spi"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "OK"
+          }
+        }
+      ]
+    },
+    {
+      "repo": "pulp-import-juce",
+      "category": "project_importer",
+      "remote": "https://github.com/danielraffel/pulp-import-juce.git",
+      "checkout_path_candidates": [
+        "/Volumes/Workshop/Code/pulp-import-juce",
+        "/Users/danielraffel/Code/pulp-import-juce"
+      ],
+      "reviewed_head": "e06b04b3953f6bb92e779829b68811d4c4f5efa4",
+      "live_head": "e06b04b3953f6bb92e779829b68811d4c4f5efa4",
+      "live_dirty": false,
+      "dependency_surfaces": [
+        "ProjectIR draft schema",
+        "import-spi-v0 detect analyze envelopes",
+        "JUCE extractor fixtures",
+        "golden ProjectIR reports"
+      ],
+      "affected_roadmap_items": [
+        "P0.4",
+        "P2.3",
+        "P3.1"
+      ],
+      "required_commands": [
+        {
+          "id": "spike-goldens",
+          "description": "Run the JUCE extractor spike and compare ProjectIR goldens.",
+          "working_dir": "$PULP_IMPORT_JUCE_REPO/spike",
+          "command": "cd \"$PULP_IMPORT_JUCE_REPO/spike\" && ./run_spike.sh",
+          "required_for": [
+            "project_import_spi",
+            "project_ir_schema"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "=== spike OK ==="
+          }
+        },
+        {
+          "id": "spi-unittest",
+          "description": "Run the JUCE JSON-stdio SPI contract tests.",
+          "working_dir": "$PULP_IMPORT_JUCE_REPO",
+          "command": "cd \"$PULP_IMPORT_JUCE_REPO\" && python3 -m unittest spike.test_spi",
+          "required_for": [
+            "project_import_spi"
+          ],
+          "expected": {
+            "type": "log",
+            "value": "OK"
+          }
+        }
+      ]
+    }
+  ]
+}
