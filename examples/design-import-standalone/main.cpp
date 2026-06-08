@@ -24,9 +24,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
-#include <algorithm>
 #include <functional>
-#include <tuple>
 
 #include <miniz.h>
 
@@ -107,40 +105,20 @@ std::string read_text_file(const fs::path& p) {
                        std::istreambuf_iterator<char>());
 }
 
-// Generic post-import wiring (NOT baked into the importer): pair each upper
-// illustration shape with its column knob by laid-out x-position, then drive the
-// shape's value-driven silhouette fill from the knob's value. This is exactly
-// the kind of customization an "after-import" step would do — the import only
-// provides the generic ImageView::set_fill_value primitive, and the per-shape
-// gradient (each shape's OWN colors) flows through automatically because the
-// materializer already called set_fill_gradient from the importer-sampled
-// shape_fill_gradient. Requires layout to have run (real bounds).
-void apply_shape_knob_fills(pulp::view::View* root, float design_h) {
-    using namespace pulp::view;
-    std::vector<std::pair<float, Knob*>> knobs;
-    std::vector<std::pair<float, ImageView*>> shapes;
-    std::function<void(View*, float, float)> walk =
-        [&](View* v, float ox, float oy) {
-            const auto bn = v->bounds();
-            const float gx = ox + bn.x, gy = oy + bn.y;
-            if (auto* k = dynamic_cast<Knob*>(v)) {
-                if (bn.width > 45.0f) knobs.emplace_back(gx + bn.width * 0.5f, k);
-            } else if (auto* img = dynamic_cast<ImageView*>(v)) {
-                if (bn.width > 50.0f && bn.height > 50.0f && gy < design_h * 0.45f)
-                    shapes.emplace_back(gx + bn.width * 0.5f, img);
-            }
-            for (std::size_t i = 0; i < v->child_count(); ++i)
-                walk(v->child_at(i), gx, gy);
-        };
-    walk(root, 0.0f, 0.0f);
-    std::sort(knobs.begin(), knobs.end(),
-              [](auto& a, auto& b) { return a.first < b.first; });
-    std::sort(shapes.begin(), shapes.end(),
-              [](auto& a, auto& b) { return a.first < b.first; });
-    const std::size_t n = std::min(knobs.size(), shapes.size());
-    for (std::size_t i = 0; i < n; ++i)
-        shapes[i].second->set_fill_value(knobs[i].second->value());
-}
+// NOTE: the knobs are intentionally INERT with respect to the upper illustration
+// shapes. An earlier demo (apply_shape_knob_fills) drove each shape's
+// value-driven silhouette fill from a column knob, paired by laid-out
+// x-position. That proved the native gradient-fill capability
+// (ImageView::set_fill_value + the canvas url() mask) but drove it the wrong way:
+// the mask was the captured PNG's own alpha (so the fill bled onto the baked
+// drop shadow), the overlay color fought the gradient already baked into the
+// PNG, and the positional knob<->shape pairing was off by one (the header hatch
+// counted as a "shape"). Those are structural to guessing on a flattened,
+// pre-colored raster — not polish bugs. The capability stays; the correct way to
+// drive it is design-authored (recognize the gradient-fill layer + binding,
+// capture an empty-interior outline, clip to the vector outline) — tracked in
+// pulp #3562. Until that lands the knobs simply turn and the shapes render their
+// faithful static captured art.
 
 }  // namespace
 
@@ -271,11 +249,10 @@ int main(int argc, char** argv) {
                 };
             set_knobs(root.get());
         }
-        // Lay out so bounds exist, then wire the shape fills to the knobs (the
-        // generic post-import customization) before rendering.
+        // Lay out so bounds exist before rendering. (Shape fills are inert —
+        // see the note above / pulp #3562.)
         root->set_bounds({0, 0, design_w, design_h});
         root->layout_children();
-        apply_shape_knob_fills(root.get(), design_h);
         apply_demo_state();  // focus search / open dropdown for the capture
         if (pulp::view::render_to_file(
                 *root, static_cast<uint32_t>(design_w),
@@ -310,13 +287,13 @@ int main(int argc, char** argv) {
     window->set_fixed_aspect_ratio(design_w / design_h);
     window->set_close_callback([] {});
 
-    // Item 3 demo: each frame, drive the upper illustration shapes' value-driven
-    // silhouette fills from their column knobs (the generic post-import wiring),
-    // so turning a knob fills/empties its shape through ImageView::set_fill_value.
+    // The knobs turn (sprite indicator) but do NOT drive the shape fills — the
+    // value-driven gradient fill is a proven capability that needs a
+    // design-authored binding to drive it correctly (pulp #3562), not the
+    // raster-guess heuristic this demo used to run each frame.
     int frame_count = 0;
     const bool capture = !screenshot_path.empty();
     window->set_idle_callback([&] {
-        apply_shape_knob_fills(root.get(), design_h);
         if (!capture) return;
         if (++frame_count == 2) apply_demo_state();  // after first layout/paint
         if (frame_count < 6) return;  // let the GPU surface settle
