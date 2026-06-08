@@ -1906,32 +1906,7 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setTextColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto hex = args.get<std::string>(1, "");
-        auto* v = widget(id);
-        if (!v || hex.empty()) return choc::value::Value();
-        auto color = parseHexColor(hex);
-        // issue-969: CSS-style cascade.
-        //   - On a Label: set the Label's own explicit text_color, which
-        //     wins over inheritance and theme tokens.
-        //   - On a container View: store the color on the inheritable
-        //     slot so descendant Labels pick it up. This replaces the
-        //     dom-adapter's manual "walk children and pushdown" hack.
-        if (auto* l = dynamic_cast<Label*>(v)) {
-            l->set_text_color(color);
-        } else {
-            v->set_inheritable_text_color(color);
-        }
-        // Keep the theme-token fallback in sync so widgets that resolve
-        // through `resolve_color("text.primary")` (e.g. Knob/ToggleButton)
-        // also pick up the override on their own subtree — preserves the
-        // pre-#969 behavior for those widgets.
-        auto theme = v->theme();
-        theme.colors["text.primary"] = color;
-        v->set_theme(theme);
-        return choc::value::Value();
-    });
+    register_widget_typography_color_api(parseHexColor);
 
     engine_.register_function("setOverflow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -2026,91 +2001,7 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setTextTransform(id, "uppercase"/"lowercase"/"capitalize"/"none") — CSS text-transform
-    engine_.register_function("setTextTransform", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
-        auto t = args.get<std::string>(1, "none");
-        if (auto* l = dynamic_cast<Label*>(v)) {
-            if (t == "uppercase") l->set_text_transform(Label::TextTransform::uppercase);
-            else if (t == "lowercase") l->set_text_transform(Label::TextTransform::lowercase);
-            else if (t == "capitalize") l->set_text_transform(Label::TextTransform::capitalize);
-            else l->set_text_transform(Label::TextTransform::none);
-        }
-        return choc::value::Value();
-    });
-
-    // setTextDecoration(id, "underline"/"line-through"/"overline"/"none") — CSS text-decoration
-    engine_.register_function("setTextDecoration", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
-        auto d = args.get<std::string>(1, "none");
-        if (auto* l = dynamic_cast<Label*>(v)) {
-            if (d == "underline") l->set_text_decoration(Label::TextDecoration::underline);
-            else if (d == "line-through") l->set_text_decoration(Label::TextDecoration::line_through);
-            else if (d == "overline") l->set_text_decoration(Label::TextDecoration::overline);
-            else l->set_text_decoration(Label::TextDecoration::none);
-        }
-        return choc::value::Value();
-    });
-
-    // pulp #1434 (batch 3) — text-decoration longhands. CSS shorthand
-    // `text-decoration` historically routed through `setTextDecoration`
-    // above (line keyword only). The longhand triplet
-    // `text-decoration-line` / `-color` / `-style` reaches each setter
-    // independently so authors can build the decoration up piece-by-piece
-    // without losing previously-set siblings (mirrors the per-attribute
-    // border-fix from PR #1166 finding #4).
-
-    // setTextDecorationColor(id, "#rrggbb"|color-token)
-    engine_.register_function("setTextDecorationColor",
-        [this, parseHexColor](choc::javascript::ArgumentList args) {
-            auto* v = widget(args.get<std::string>(0, ""));
-            auto hex = args.get<std::string>(1, "");
-            if (auto* l = dynamic_cast<Label*>(v); l && !hex.empty()) {
-                l->set_text_decoration_color(parseHexColor(hex));
-            }
-            return choc::value::Value();
-        });
-
-    // setTextDecorationStyle(id, "solid"|"double"|"dotted"|"dashed"|"wavy")
-    // The paint path renders `solid` regardless today, but the value is
-    // stored on the Label so future paint logic can honor it without an
-    // API break — and so the JS shim's longhand → setter route doesn't
-    // silently drop the property (which was the catalog's `missing`
-    // status before this PR).
-    engine_.register_function("setTextDecorationStyle",
-        [this](choc::javascript::ArgumentList args) {
-            auto* v = widget(args.get<std::string>(0, ""));
-            auto s = args.get<std::string>(1, "solid");
-            if (auto* l = dynamic_cast<Label*>(v)) {
-                if (s == "double") l->set_text_decoration_style(Label::TextDecorationStyle::double_);
-                else if (s == "dotted") l->set_text_decoration_style(Label::TextDecorationStyle::dotted);
-                else if (s == "dashed") l->set_text_decoration_style(Label::TextDecorationStyle::dashed);
-                else if (s == "wavy") l->set_text_decoration_style(Label::TextDecorationStyle::wavy);
-                else l->set_text_decoration_style(Label::TextDecorationStyle::solid);
-            }
-            return choc::value::Value();
-        });
-
-    // ── pulp #1552 — line-clamp + background-repeat ─────────────────────────
-    // CSS `line-clamp` and `-webkit-line-clamp` route through the same
-    // shared case in web-compat-style-decl.js (and the @pulp/react
-    // prop-applier emits both keys via setLineClamp). Numeric only; 0
-    // disables clamping (matches CSS spec, which uses `none`). Wired on
-    // Label only — non-text views ignore the property.
-    engine_.register_function("setLineClamp", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
-        int n = static_cast<int>(args.get<double>(1, 0.0));
-        if (auto* l = dynamic_cast<Label*>(v)) {
-            l->set_line_clamp(n);
-            // line-clamp implies multi-line — without multi_line_, the
-            // paint path takes the single-line branch and the clamp is a
-            // no-op. Setting > 0 implicitly enables wrap; 0 leaves the
-            // existing multi_line_ flag alone (the user may have set it
-            // independently via white-space / setMultiLine).
-            if (n > 0) l->set_multi_line(true);
-        }
-        return choc::value::Value();
-    });
+    register_widget_typography_decoration_api(parseHexColor);
 
     // setBackgroundRepeat(id, kw) — CSS background-repeat keyword. Storage-
     // only on the View (no-op for solid-color backgrounds, which is the
@@ -2132,14 +2023,7 @@ void WidgetBridge::register_api() {
 
     register_animation_style_api();
 
-    // setTextOverflow(id, "ellipsis"|"clip") — CSS text-overflow
-    engine_.register_function("setTextOverflow", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto mode = args.get<std::string>(1, "clip");
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_text_overflow_ellipsis(mode == "ellipsis");
-        return choc::value::Value();
-    });
+    register_widget_typography_overflow_api();
 
     // setCursor(id, "pointer"|"crosshair"|"text"|"default") — CSS cursor
     engine_.register_function("setCursor", [this](choc::javascript::ArgumentList args) {
@@ -2540,97 +2424,7 @@ void WidgetBridge::register_api() {
     // paint, `noop` for accept-and-ignore, `wontfix` for architectural
     // out-of-scope).
 
-    // setTextIndent(id, px) — CSS `text-indent`. Storage-only today;
-    // SkParagraph::setTextIndent integration is the paint-side follow-up.
-    engine_.register_function("setTextIndent",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto v = static_cast<float>(args.get<double>(1, 0.0));
-            auto* w = id.empty() ? &root_ : widget(id);
-            if (w) w->set_text_indent(v);
-            return choc::value::Value();
-        });
-
-    // setVerticalAlign(id, "top"|"middle"|"bottom"|"baseline"|...)
-    // CSS `vertical-align`. Maps the keyword to the existing
-    // canvas::TextVerticalAlign enum on Label; non-Label widgets
-    // silently no-op (the field is per-widget). Length values
-    // (`-2px` etc.) and `sub`/`super` fall back to baseline today.
-    engine_.register_function("setVerticalAlign",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto kw = args.get<std::string>(1, "baseline");
-            using VA = pulp::canvas::TextVerticalAlign;
-            VA mode = VA::baseline;
-            if      (kw == "top")      mode = VA::top;
-            else if (kw == "middle")   mode = VA::center;
-            else if (kw == "center")   mode = VA::center;     // RN-Android textAlignVertical alias for `middle`
-            else if (kw == "bottom")   mode = VA::bottom;
-            else if (kw == "baseline") mode = VA::baseline;
-            else if (kw == "auto")     mode = VA::baseline;   // RN verticalAlign / textAlignVertical default
-            // sub / super / text-top / text-bottom / length percent →
-            // baseline fallback (paint-side gap; future slice can add
-            // dedicated slots).
-            if (auto* l = dynamic_cast<Label*>(widget(id))) {
-                l->set_vertical_align(mode);
-            }
-            return choc::value::Value();
-        });
-
-    // setWordBreak(id, kw) — CSS `word-break` / `overflow-wrap`.
-    // Storage-only today; HarfBuzz line-break feature is deferred.
-    engine_.register_function("setWordBreak",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto kw = args.get<std::string>(1, "normal");
-            auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_word_break(kw);
-            return choc::value::Value();
-        });
-
-    // setFontVariant(id, kw) — CSS / RN `font-variant`. Storage-only;
-    // HarfBuzz feature wiring is deferred. Mirrors the rn-surface
-    // `fontVariant` choice (the same A4 sweep, rn agent).
-    engine_.register_function("setFontVariant",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto kw = args.get<std::string>(1, "normal");
-            auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_font_variant(kw);
-            return choc::value::Value();
-        });
-
-    // pulp #1548 — RN textShadow* per-attribute setters. Storage-only;
-    // SkPaint shadow integration is the deferred paint-time slice. Each
-    // setter writes ONE slot in isolation so a JSX prop diff that touches
-    // one prop doesn't clobber the others (mirrors the per-side border
-    // pattern). The catalog mapsTo cites these names; harness verifier
-    // checks they are registered.
-    engine_.register_function("setTextShadowColor",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto c  = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_text_shadow_color(c);
-            return choc::value::Value();
-        });
-    engine_.register_function("setTextShadowOffset",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto dx = static_cast<float>(args.get<double>(1, 0.0));
-            auto dy = static_cast<float>(args.get<double>(2, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_text_shadow_offset(dx, dy);
-            return choc::value::Value();
-        });
-    engine_.register_function("setTextShadowRadius",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto r  = static_cast<float>(args.get<double>(1, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_text_shadow_radius(r);
-            return choc::value::Value();
-        });
+    register_widget_typography_extended_api();
 
     // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
     // shadow{Color,Offset,Opacity,Radius} per-attribute setters for
@@ -2815,29 +2609,7 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
-    // Wave 5 css.5 — CSS-shorthand setTextShadow(id, dx, dy, blur, color).
-    // The JS shim (web-compat-style-decl.js case textShadow) parses
-    // `<dx>px <dy>px <blur>px <color>` and calls this with 4 packed args.
-    // Pre-Wave-5 the shim's `typeof setTextShadow === "function"` guard
-    // skipped the call because no bridge fn was registered; CSS authors
-    // got a silent no-op. We compose the three existing per-attribute
-    // slots (text_shadow_offset / text_shadow_radius / text_shadow_color)
-    // so React's setTextShadow* fan-out still works unchanged.
-    engine_.register_function("setTextShadow",
-        [this](choc::javascript::ArgumentList args) {
-            auto id = args.get<std::string>(0, "");
-            auto dx = static_cast<float>(args.get<double>(1, 0.0));
-            auto dy = static_cast<float>(args.get<double>(2, 0.0));
-            auto r  = static_cast<float>(args.get<double>(3, 0.0));
-            auto c  = args.get<std::string>(4, "");
-            auto* v = id.empty() ? &root_ : widget(id);
-            if (v) {
-                v->set_text_shadow_offset(dx, dy);
-                v->set_text_shadow_radius(r);
-                v->set_text_shadow_color(c);
-            }
-            return choc::value::Value();
-        });
+    register_widget_typography_shadow_shorthand_api();
 
     // pulp #1517 — background sub-property setters. Storage-only today;
     // see View::set_background_{attachment,clip,origin}() doc for the
