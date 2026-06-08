@@ -56,8 +56,8 @@ createCol	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createModal	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createPanel	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setFlex	layout	function	core/view/src/widget_bridge/layout_api.cpp
-__domAppend	dom	function	core/view/src/widget_bridge.cpp
-__domRemove	dom	function	core/view/src/widget_bridge.cpp
+__domAppend	dom	function	core/view/src/widget_bridge/dom_api.cpp
+__domRemove	dom	function	core/view/src/widget_bridge/dom_api.cpp
 layout	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getLayoutRect	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getLayoutAncestorRects	layout	function	core/view/src/widget_bridge/layout_api.cpp

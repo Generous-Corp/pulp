@@ -321,6 +321,7 @@ private:
 
     void register_api();
     void register_accessibility_api();
+    void register_dom_api();
     void register_layout_grid_api();
     void register_layout_flex_api();
     void register_layout_query_api();
