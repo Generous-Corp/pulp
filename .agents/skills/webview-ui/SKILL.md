@@ -50,6 +50,28 @@ Keep claims narrow:
 - do not describe that as full runtime parity unless the host-level proof is
   actually there
 
+## File drag-and-drop (from `choc::ui::WebView`)
+
+CHOC's WebView layer carries file drag-and-drop, exposed to page JS — no Pulp
+C++ wiring needed, it rides the `choc/gui/choc_WebView.h` we already wrap in
+`core/view/src/web_view.cpp`:
+
+- **Drag a file OUT of the webview:** call `window.chocStartFileDrag(["/abs/path", ...])`
+  from a `pointerdown`/`mousedown` handler.
+- **Drop files INTO the webview:** listen for the `chocfilesdropped` event;
+  `e.detail.paths` is the array of absolute paths.
+
+Platform reality: **macOS (WKWebView) + Linux (WebKitGTK) — both directions.**
+**Windows (WebView2) — inbound only** (outbound is a documented no-op: windowed
+WebView2 can't start a drag from web content without moving to composition
+hosting). The JS call exists on all platforms for parity.
+
+⚠ **Interim source:** this lands via an interim fork pin of CHOC
+(`danielraffel/choc` tag `pulp-webview-dnd-poc1`, the Tracktion/choc#64 PoC) —
+see pulp **#3619**. When #64 merges upstream the pin reverts to Tracktion/choc
+with no API change. The runnable reference lives in the choc repo
+(`examples/webview_drag_and_drop.cpp`), not in Pulp.
+
 ## Choose A Loading Mode
 
 1. Simple inline proof
