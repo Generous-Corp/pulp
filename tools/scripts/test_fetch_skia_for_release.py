@@ -29,6 +29,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).parent / "fetch_skia_for_release.py"
 
@@ -604,6 +605,71 @@ class IdempotencyStamp(unittest.TestCase):
                 lib.is_file(),
                 "a missing library must re-fetch even when the stamp exists",
             )
+
+    def test_missing_stamp_uses_matching_version_doc(self):
+        with _in_tempdir() as td:
+            sha = "a" * 64
+            asset_url = (
+                "https://github.com/danielraffel/skia-builder/releases/download/"
+                "chrome/m149/skia-build-mac-arm64-gpu-release.zip"
+            )
+            _write_manifest(td, asset_url, sha, "mac-arm64")
+
+            lib = td / fetch_skia.expected_library_path("darwin-arm64")
+            lib.parent.mkdir(parents=True)
+            lib.write_bytes(b"legacy-cache")
+            version = td / "external/skia-build/VERSION.md"
+            version.write_text(
+                "\n".join(
+                    [
+                        "## Release Asset Digests",
+                        "| Asset | SHA-256 |",
+                        "|-------|---------|",
+                        f"| `skia-build-mac-arm64-gpu-release.zip` | `{sha}` |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            def _boom(*args, **kwargs):
+                raise AssertionError("matching VERSION.md must skip download")
+
+            out = io.StringIO()
+            with mock.patch.object(
+                fetch_skia.urllib.request, "urlopen", side_effect=_boom
+            ), contextlib.redirect_stdout(out):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "darwin-arm64"]
+                )
+
+            self.assertEqual(rc, 0)
+            stamp = td / "external/skia-build/.skia-asset-sha256"
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha)
+            self.assertIn("VERSION.md records", out.getvalue())
+
+    def test_version_doc_digest_mismatch_refetches(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia.zip"
+            sha = _make_zip(
+                zip_path, {"build/mac-gpu/lib/Release/libskia.a": b"fresh"}
+            )
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+
+            lib = td / fetch_skia.expected_library_path("darwin-arm64")
+            lib.parent.mkdir(parents=True)
+            lib.write_bytes(b"legacy-cache")
+            version = td / "external/skia-build/VERSION.md"
+            version.write_text(
+                "| `skia.zip` | `" + ("0" * 64) + "` |\n",
+                encoding="utf-8",
+            )
+
+            rc = fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64"])
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(lib.read_bytes(), b"fresh")
+            stamp = td / "external/skia-build/.skia-asset-sha256"
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha)
 
 
 if __name__ == "__main__":
