@@ -4537,9 +4537,9 @@ if(TARGET pulp-render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
 
-# Widget bridge — source-level API contract. Keeps JS-native function
-# registrations unique so late registrations cannot silently replace
-# earlier behavior.
+# Widget bridge — source-level API contract. Keeps JS-native registrations
+# unique and matched to the reviewed bridge API manifest so future registrar
+# splits cannot add unclassified bridge entries.
 pulp_add_test_suite(pulp-test-widget-bridge-api-contracts
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 
