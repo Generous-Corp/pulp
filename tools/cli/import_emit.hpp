@@ -25,6 +25,13 @@ namespace pulp::cli::import_emit {
 
 namespace fs = std::filesystem;
 
+// The `schema` marker every EmissionManifest must carry (SPI emit_result).
+// parse_manifest rejects a manifest whose schema is present but differs — the
+// guard against an analyze ProjectIR (or a future incompatible version) being
+// misrouted into the emit path.
+inline constexpr const char* kEmissionManifestSchema =
+    "pulp.import.emission_manifest.v0";
+
 // Provenance vocabulary mirrors the SPI emit_file schema.
 enum class Provenance { Generated, CopiedUserFile, Stub, Unknown };
 

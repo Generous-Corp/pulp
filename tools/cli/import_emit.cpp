@@ -104,6 +104,16 @@ Manifest parse_manifest(const std::string& result_json) {
     }
 
     if (auto v = root.get("schema")) m.schema = v->as_string();
+    // Reject a wrong-schema response before reading any further: an analyze
+    // ProjectIR or a future incompatible emit_result version carries a
+    // different `schema`, and must not be parsed as this manifest. Absent is
+    // tolerated (the file/provenance/content guards below still apply).
+    if (!m.schema.empty() && m.schema != kEmissionManifestSchema) {
+        m.parse_error = "emit result has schema '" + m.schema +
+                        "', expected '" + kEmissionManifestSchema +
+                        "' (wrong verb or incompatible importer?)";
+        return m;
+    }
     if (auto v = root.get("importer_id")) m.importer_id = v->as_string();
     if (auto v = root.get("framework")) m.framework = v->as_string();
     if (auto v = root.get("verdict")) m.verdict = v->as_string();

@@ -126,9 +126,26 @@ TEST_CASE("import emit parses a well-formed manifest", "[cli][import][emit]") {
 }
 
 TEST_CASE("import emit rejects a manifest with no files", "[cli][import][emit]") {
-    auto m = ie::parse_manifest(R"({"schema":"x","files":[]})");
+    auto m = ie::parse_manifest(
+        R"({"schema":"pulp.import.emission_manifest.v0","files":[]})");
     REQUIRE_FALSE(m.ok);
     REQUIRE(m.parse_error.find("no files") != std::string::npos);
+}
+
+TEST_CASE("import emit rejects a wrong-schema (misrouted) response",
+          "[cli][import][emit]") {
+    // An analyze ProjectIR (or a future incompatible emit_result) carries a
+    // different schema marker and must not be parsed as an emission manifest,
+    // even though it might happen to satisfy later structural checks.
+    auto m = ie::parse_manifest(
+        R"({"schema":"pulp.import.project_ir.v0",)"
+        R"("files":[{"path":"a","provenance":"generated","content":"x"}]})");
+    REQUIRE_FALSE(m.ok);
+    REQUIRE(m.parse_error.find("schema") != std::string::npos);
+    // Absent schema stays tolerated — the file/provenance/content guards apply.
+    auto ok = ie::parse_manifest(
+        R"({"files":[{"path":"a","provenance":"generated","content":"x"}]})");
+    REQUIRE(ok.ok);
 }
 
 TEST_CASE("import emit rejects an unknown provenance", "[cli][import][emit]") {
@@ -232,7 +249,7 @@ TEST_CASE("import emit scan ACCEPTS the same content in a copied-user-file",
     // copy_from must be absolute; the scan never reads the source, so a path
     // that need not exist is fine for the pure scan.
     std::string m_json =
-        R"({"schema":"x","files":[)"
+        R"({"schema":"pulp.import.emission_manifest.v0","files":[)"
         R"({"path":"src/Gen.hpp","provenance":"generated","content":"struct Clean {};"},)"
         R"({"path":"src/Core.h","provenance":"copied-user-file",)"
         R"("copy_from":"/abs/Core.h"})"
