@@ -78,6 +78,9 @@
         "tools/scripts/macos_reroute_watcher.py",
         "tools/scripts/node_abi_gate.py",
         "tools/scripts/test_node_abi_gate.py",
+        "tools/scripts/hotspot_size_guard.py",
+        "tools/scripts/hotspot_size_guard.json",
+        "tools/scripts/test_hotspot_size_guard.py",
         "tools/scripts/gates.sh",
         "tools/launchd/**",
         ".githooks/**"

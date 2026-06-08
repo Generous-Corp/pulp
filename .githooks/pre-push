@@ -2,7 +2,7 @@
 # Pulp pre-push hook (agent-agnostic).
 #
 # Runs the versioning + skill-sync + compat-sync + source-contract +
-# deps-audit + diff-coverage gates against origin/main before pushing.
+# hotspot-size + deps-audit + diff-coverage gates against origin/main before pushing.
 # **Enforcing by default** as of
 # pulp #1144 — gate failures block the push locally so contributors don't
 # burn 20-min CI roundtrips on the same problem.
@@ -11,7 +11,7 @@
 #   git config core.hooksPath .githooks
 #
 # Bypass knobs (use sparingly — CI runs the same gates):
-#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/node-ABI/docs-noise/source-contract/deps)
+#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/node-ABI/docs-noise/source-contract/hotspot-size/deps)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
 #
@@ -97,6 +97,8 @@ SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
 DNL="$ROOT/tools/scripts/docs_noise_lint.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
+HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
+HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 SCC="$ROOT/tools/import-validation/check-source-contracts.py"
 SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
@@ -180,6 +182,17 @@ if [ -f "$NAG" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] node_abi_gate: internal error" >&2 ;;
+    esac
+fi
+
+# Hotspot size guard. Freezes known refactor hotspot LOC baselines and warns
+# on newly added large core/tools files before another monolith forms.
+if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
+    "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] hotspot_size_guard: internal error" >&2 ;;
     esac
 fi
 
@@ -296,7 +309,7 @@ if [ "$compat_flip_failed" = "1" ] && [ "$disable_main" = "1" ]; then
 fi
 
 if [ "$fail" = "1" ] && [ "$disable_main" = "1" ]; then
-    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — skill/version/compat/node-ABI/docs-noise/deps gate failures DEMOTED to advisory." >&2
+    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — skill/version/compat/node-ABI/docs-noise/hotspot-size/deps gate failures DEMOTED to advisory." >&2
     fail=0
 fi
 
@@ -307,7 +320,7 @@ fi
 
 echo "[pre-push] gate failure(s) above; blocking push." >&2
 echo "[pre-push] To bypass (use sparingly; CI still runs the same gates):" >&2
-echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/node-ABI/docs-noise/deps/flip" >&2
+echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/node-ABI/docs-noise/hotspot-size/deps/flip" >&2
 echo "[pre-push]   PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push     # demote diff-cover only" >&2
 echo "[pre-push]   PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (emergencies)" >&2
 exit 1

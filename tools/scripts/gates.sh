@@ -12,6 +12,7 @@
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
 #   - compat-sync (when compat.json is touched, requires matching test coverage)
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
+#   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
 #
 # Does NOT run:
@@ -56,6 +57,8 @@ VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
+HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
+HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 
@@ -121,7 +124,16 @@ if [ -f "$NAG" ]; then
     fi
 fi
 
-# ── 5. deps-audit ──────────────────────────────────────────────────────────
+# ── 5. hotspot-size guard ──────────────────────────────────────────────────
+if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
+    echo "" >&2
+    echo "▸ hotspot-size guard" >&2
+    if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 6. deps-audit ──────────────────────────────────────────────────────────
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
     echo "▸ deps-audit (attribution drift)" >&2
