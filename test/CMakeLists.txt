@@ -223,6 +223,14 @@ if(UNIX)
     add_test(NAME check-pulp-cli-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_check_pulp_cli_hook.sh)
     set_tests_properties(check-pulp-cli-hook PROPERTIES TIMEOUT 15)
+
+    # inject-claude-prefs.sh — the SessionStart hook that reads
+    # claude.send_user_file from ~/.pulp/config.toml and injects the
+    # SendUserFile preference. Hermetic: each case points PULP_CONFIG_FILE
+    # at a staged config. Like the cli hook it must always exit 0.
+    add_test(NAME inject-claude-prefs-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_prefs_hook.sh)
+    set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
 endif()
 
 # pulp #2087 (slice 1) — install.sh must install CLI + matching SDK in one

@@ -1403,6 +1403,7 @@ pulp config set update.mode manual
 pulp config set update.check_interval_hours 12
 pulp config set import_design.default_mode baked
 pulp config set import_design.default_emit ir-json
+pulp config set claude.send_user_file off
 pulp config list
 ```
 
@@ -1437,6 +1438,16 @@ Supported import-design keys:
   `--emit`. `PULP_IMPORT_DESIGN_DEFAULT_EMIT` overrides this value for one
   environment/session. If the default mode is `baked` and this key is unset,
   Pulp implies `ir-json`.
+
+Supported Claude Code plugin keys:
+
+- `claude.send_user_file` — `on | off` (default `on`). When `on`, the Pulp
+  Claude Code plugin's `SessionStart` hook injects a preference telling the
+  agent to surface generated image/file artifacts (screenshots, rendered
+  designs, diagrams, build outputs) with the `SendUserFile` tool so they embed
+  in the Claude app, instead of only printing a path. Set `off` to suppress the
+  injection. Read at session start by
+  `hooks/scripts/inject-claude-prefs.sh`.
 
 ### clean
 

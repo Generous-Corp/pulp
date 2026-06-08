@@ -75,6 +75,13 @@ bool is_allowed_key(const std::string& section, const std::string& key) {
     if (section == "import_design") {
         return key == "default_mode" || key == "default_emit";
     }
+    if (section == "claude") {
+        // send_user_file: when on (default), the Claude Code plugin's
+        // SessionStart hook tells the agent to surface generated image /
+        // file artifacts with the SendUserFile tool so they embed in the
+        // Claude app, instead of only printing a path.
+        return key == "send_user_file";
+    }
     return false;
 }
 
@@ -117,6 +124,10 @@ std::string validate_value(const std::string& section,
         if (value == "js" || value == "ir-json" || value == "cpp") return {};
         return "import_design.default_emit must be one of: js, ir-json, cpp";
     }
+    if (section == "claude" && key == "send_user_file") {
+        if (value == "on" || value == "off") return {};
+        return "claude.send_user_file must be one of: on, off";
+    }
     return {};
 }
 
@@ -139,11 +150,16 @@ int usage() {
     std::cout << "  import_design.default_mode    live | baked                  (default: live)\n";
     std::cout << "  import_design.default_emit    js | ir-json | cpp            (default: js)\n";
     std::cout << "                                CLI flags override these; env overrides below.\n";
+    std::cout << "\nSupported keys (claude section):\n";
+    std::cout << "  claude.send_user_file         on | off                      (default: on)\n";
+    std::cout << "                                When on, the Claude Code plugin surfaces generated\n";
+    std::cout << "                                images/files with SendUserFile so they embed in the app.\n";
     std::cout << "\nExamples:\n";
     std::cout << "  pulp config set pr.workflow github\n";
     std::cout << "  pulp config set update.mode manual\n";
     std::cout << "  pulp config set import_design.default_mode baked\n";
     std::cout << "  pulp config set import_design.default_emit ir-json\n";
+    std::cout << "  pulp config set claude.send_user_file off\n";
     std::cout << "  pulp config get update.mode\n";
     std::cout << "\nNotes:\n";
     std::cout << "  Changing update.mode clears the 24h snooze at ~/.pulp/update-snooze\n";
@@ -290,6 +306,7 @@ int cmd_config(const std::vector<std::string>& args) {
         show("update", "bump_projects", "prompt");
         show("import_design", "default_mode", "live");
         show("import_design", "default_emit", "js");
+        show("claude", "send_user_file", "on");
         return 0;
     }
 
