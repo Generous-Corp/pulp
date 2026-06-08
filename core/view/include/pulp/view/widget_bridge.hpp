@@ -314,6 +314,11 @@ private:
     void register_theme_api();
     void register_tokens_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_schema_api();
+    void register_widget_factory_controls_api();
+    void register_widget_factory_form_api();
+    void register_widget_factory_container_api();
+    void register_widget_factory_composite_api();
+    void register_widget_factory_text_editor_api();
 };
 
 } // namespace pulp::view
