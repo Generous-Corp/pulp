@@ -31,7 +31,14 @@ void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
 
 bool is_new_widget_factory_api(choc::javascript::ArgumentList& args) {
     if (args.numArgs <= 2) return true;
-    const auto test = args.get<std::string>(1, "");
+    const auto* second = args[1];
+    if (second == nullptr) return true;
+    if (second->isInt32() || second->isInt64() ||
+        second->isFloat32() || second->isFloat64()) {
+        return false;
+    }
+    if (!second->isString()) return true;
+    const auto test = second->getWithDefault<std::string>("");
     if (test.empty()) return true;
     if (test[0] >= '0' && test[0] <= '9') return false;
     if (test[0] == '-') return false;
@@ -59,7 +66,9 @@ void WidgetBridge::register_widget_factory_controls_api() {
         } else {
             knob->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                              (float)args.get<double>(3,48), (float)args.get<double>(4,48)});
-            widgets_[id] = knob.get();
+            auto* ptr = knob.get();
+            widgets_[id] = ptr;
+            wire_callbacks(id, ptr);
             root_.add_child(std::move(knob));
         }
         return choc::value::createString(id);
@@ -85,7 +94,9 @@ void WidgetBridge::register_widget_factory_controls_api() {
             auto orient = args.get<std::string>(5, "vertical");
             if (orient == "horizontal") fader->set_orientation(Fader::Orientation::horizontal);
             fader->set_label(id);
-            widgets_[id] = fader.get();
+            auto* ptr = fader.get();
+            widgets_[id] = ptr;
+            wire_callbacks(id, ptr);
             root_.add_child(std::move(fader));
         }
         return choc::value::createString(id);
@@ -107,7 +118,9 @@ void WidgetBridge::register_widget_factory_controls_api() {
             toggle->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                                (float)args.get<double>(3,50), (float)args.get<double>(4,30)});
             toggle->set_label(id);
-            widgets_[id] = toggle.get();
+            auto* ptr = toggle.get();
+            widgets_[id] = ptr;
+            wire_callbacks(id, ptr);
             root_.add_child(std::move(toggle));
         }
         return choc::value::createString(id);
