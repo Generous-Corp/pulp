@@ -41,6 +41,7 @@ export interface OverlayNode {
   figma_node_id: string;
   absolute_bounds: { x: number; y: number; w: number; h: number };
   content?: string;            // the node's own text characters, if any
+  opacity?: number;            // node opacity (1 when absent) — for the occlusion guard
   style?: { background_color?: string };
   children: OverlayNode[];
 }
@@ -213,6 +214,51 @@ export function detectOverlayControls(
 
   const out: InteractiveElement[] = [];
 
+  // ── Occlusion guard (lockstep with figma_rest_export.py) ──────────────────
+  // A control fully painted over by a later (higher-z) OPAQUE node is not
+  // visible and must NOT become an overlay (else a buried layer — e.g. a
+  // leftover radio strip under an envelope graph — gets resurfaced). Paint order
+  // = document preorder; only a node painted AFTER the candidate's ENTIRE
+  // subtree can occlude it (so a node's own background rect / descendants never
+  // count). Opaque proxy: the node has a resolved background_color (the
+  // extractor sets this for SOLID and the flat fallback of GRADIENT fills) and
+  // is not itself faded. This mirrors the REST detector's _opaque_cover.
+  function opaqueCover(n: OverlayNode): boolean {
+    if (n.opacity != null && n.opacity < 0.99) return false;
+    return !!(n.style && n.style.background_color);
+  }
+  const paintIndex = new Map<OverlayNode, number>();
+  const subtreeEnd = new Map<OverlayNode, number>();
+  const occluders: Array<[number, number, number, number, number]> = [];
+  let _counter = 0;
+  function scan(n: OverlayNode): number {
+    const idx = _counter++;
+    paintIndex.set(n, idx);
+    const b = n.absolute_bounds;
+    if (b && opaqueCover(n)) occluders.push([idx, b.x, b.y, b.x + b.w, b.y + b.h]);
+    let last = idx;
+    const kids = n.children || [];
+    for (let i = 0; i < kids.length; i++) last = scan(kids[i]);
+    subtreeEnd.set(n, last);
+    return last;
+  }
+  scan(root);
+  function occluded(n: OverlayNode): boolean {
+    const b = n.absolute_bounds;
+    if (!b) return false;
+    const after = subtreeEnd.has(n) ? subtreeEnd.get(n)!
+                                    : (paintIndex.has(n) ? paintIndex.get(n)! : -1);
+    const cx0 = b.x, cy0 = b.y, cx1 = b.x + b.w, cy1 = b.y + b.h, eps = 0.5;
+    for (let i = 0; i < occluders.length; i++) {
+      const o = occluders[i];
+      if (o[0] <= after) continue;
+      if (o[1] - eps <= cx0 && o[2] - eps <= cy0 && o[3] + eps >= cx1 && o[4] + eps >= cy1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // A tab/segmented control = a horizontal row of >=3 container children, each
   // with a short text label, of similar width; the selected tab carries a
   // visible SOLID fill (here: a resolved background_color).
@@ -271,6 +317,9 @@ export function detectOverlayControls(
   }
 
   function visit(n: OverlayNode, parent: OverlayNode | null): void {
+    // Painted-over (occluded) subtrees hold no visible controls — skip the whole
+    // subtree so a buried layer never becomes an interactive overlay.
+    if (occluded(n)) return;
     const name = (n.name || "").toLowerCase();
     const ntype = n.figma_type || "";
     const bb = n.absolute_bounds;
