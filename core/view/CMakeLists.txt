@@ -388,6 +388,7 @@ target_sources(pulp-view-core PRIVATE
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
+    src/drag_drop.cpp
     src/split_view.cpp
     src/property_list.cpp
     src/breadcrumb.cpp
