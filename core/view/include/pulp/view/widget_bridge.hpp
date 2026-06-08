@@ -322,6 +322,9 @@ private:
     void register_platform_services_dialog_api();
     void register_platform_services_clipboard_api();
     void register_state_binding_api();
+    void register_storage_key_value_api();
+    void register_asset_loading_api();
+    void register_font_assets_api();
     void register_svg_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_shader_widget_api();
     void register_shader_canvas_api();

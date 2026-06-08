@@ -321,10 +321,10 @@ canvasSetBlendMode	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasGlobalCompositeOperation	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasSetTransform	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasClip	canvas2d	function	core/view/src/widget_bridge.cpp
-storageGetItem	storage_assets	function	core/view/src/widget_bridge.cpp
-storageSetItem	storage_assets	function	core/view/src/widget_bridge.cpp
-storageRemoveItem	storage_assets	function	core/view/src/widget_bridge.cpp
-__loadAssetSync__	storage_assets	function	core/view/src/widget_bridge.cpp
+storageGetItem	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
+storageSetItem	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
+storageRemoveItem	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
+__loadAssetSync__	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
 canvasDrawImage	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasMeasureText	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasSetLineDash	canvas2d	function	core/view/src/widget_bridge.cpp
@@ -335,8 +335,8 @@ canvasSetShadowOffsetY	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasGetImageData	canvas2d	function	core/view/src/widget_bridge.cpp
 canvasPutImageData	canvas2d	function	core/view/src/widget_bridge.cpp
 registerDrop	events	function	core/view/src/widget_bridge.cpp
-loadFont	storage_assets	function	core/view/src/widget_bridge.cpp
-registerFont	storage_assets	function	core/view/src/widget_bridge.cpp
+loadFont	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
+registerFont	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
 applyShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
 getGPUInfo	gpu	function	core/view/src/widget_bridge.cpp
 navigatorGPU	gpu	host_object	core/view/src/widget_bridge.cpp

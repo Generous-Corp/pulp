@@ -10,7 +10,6 @@
 #include <pulp/view/widgets/svg_rect.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/modal.hpp>
-#include <pulp/view/asset_manager.hpp>
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/design_import.hpp>
 #include "import_validation_bridge.hpp"
@@ -29,8 +28,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
@@ -300,44 +297,6 @@ std::string bridge_base64_encode(const std::vector<uint8_t>& data) {
     return out;
 }
 
-std::string canonical_bridge_asset_mime_type(std::string mime_type) {
-    if (mime_type == "application/json" || mime_type == "text/json") {
-        return "application/json;charset=utf-8";
-    }
-    return mime_type;
-}
-
-std::string guess_bridge_asset_mime_type(const std::string& path) {
-    auto dot = path.find_last_of('.');
-    std::string ext = dot == std::string::npos ? std::string{} : path.substr(dot);
-    for (auto& c : ext) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-
-    if (ext == ".html" || ext == ".htm") return "text/html";
-    if (ext == ".js" || ext == ".mjs") return "text/javascript";
-    if (ext == ".css") return "text/css";
-    if (ext == ".json") return "application/json";
-    if (ext == ".txt" || ext == ".wgsl" || ext == ".sksl") return "text/plain";
-    if (ext == ".svg") return "image/svg+xml";
-    if (ext == ".png") return "image/png";
-    if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
-    if (ext == ".gif") return "image/gif";
-    if (ext == ".webp") return "image/webp";
-    if (ext == ".woff2") return "font/woff2";
-    if (ext == ".woff") return "font/woff";
-    if (ext == ".ttf") return "font/ttf";
-    return "application/octet-stream";
-}
-
-bool bridge_asset_is_text_like(const std::string& mime_type) {
-    return mime_type.rfind("text/", 0) == 0
-        || mime_type.find("json") != std::string::npos
-        || mime_type.find("javascript") != std::string::npos
-        || mime_type.find("xml") != std::string::npos
-        || mime_type.find("svg") != std::string::npos;
-}
-
 View* find_view_by_id(View& node, std::string_view id) {
     if (!id.empty() && node.id() == id) {
         return &node;
@@ -378,82 +337,6 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
     if (!node->id().empty()) {
         widgets.erase(node->id());
     }
-}
-
-std::string strip_leading_slashes(std::string path) {
-    while (!path.empty() && (path.front() == '/' || path.front() == '\\')) {
-        path.erase(path.begin());
-    }
-    return path;
-}
-
-struct BridgeAssetLoad {
-    bool ok = false;
-    int status = 404;
-    std::string resolved_path;
-    std::string mime_type;
-    BlobData blob;
-};
-
-BridgeAssetLoad load_bridge_asset(const std::string& url) {
-    BridgeAssetLoad result;
-    if (url.empty()) {
-        result.status = 400;
-        return result;
-    }
-
-    auto& assets = AssetManager::instance();
-
-    auto load_from_file = [&](std::string path) {
-        if (path.empty()) {
-            return BlobData{};
-        }
-#if defined(_WIN32)
-        if (path.size() > 2 && path[0] == '/' && std::isalpha(static_cast<unsigned char>(path[1])) && path[2] == ':') {
-            path.erase(path.begin());
-        }
-#endif
-        result.resolved_path = path;
-        return assets.load_blob(path);
-    };
-
-    auto load_from_embedded = [&](std::string name) {
-        name = strip_leading_slashes(std::move(name));
-        if (name.empty()) {
-            return BlobData{};
-        }
-        result.resolved_path = name;
-        if (assets.has_embedded(name)) {
-            return assets.load_blob_embedded(name);
-        }
-        return BlobData{};
-    };
-
-    if (url.rfind("pulp://", 0) == 0) {
-        auto ref = url.substr(7);
-        result.blob = load_from_embedded(ref);
-        if (!result.blob.valid()) {
-            result.blob = load_from_file(strip_leading_slashes(ref));
-        }
-    } else if (url.rfind("file://", 0) == 0) {
-        result.blob = load_from_file(url.substr(7));
-    } else {
-        result.blob = load_from_embedded(url);
-        if (!result.blob.valid()) {
-            result.blob = load_from_file(url);
-        }
-    }
-
-    if (!result.blob.valid()) {
-        result.status = 404;
-        return result;
-    }
-
-    result.ok = true;
-    result.status = 200;
-    result.mime_type = canonical_bridge_asset_mime_type(
-        guess_bridge_asset_mime_type(result.resolved_path.empty() ? url : result.resolved_path));
-    return result;
 }
 
 } // namespace
@@ -5621,56 +5504,8 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // P2: localStorage equivalent — file-based key-value in plugin data dir
-    engine_.register_function("storageGetItem", [](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        if (key.empty()) return choc::value::createString("");
-        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
-        auto path = dir / (key + ".dat");
-        if (!std::filesystem::exists(path)) return choc::value::createString("");
-        std::ifstream f(path);
-        std::string val((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        return choc::value::createString(val);
-    });
-
-    engine_.register_function("storageSetItem", [](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        auto val = args.get<std::string>(1, "");
-        if (key.empty()) return choc::value::Value();
-        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
-        std::filesystem::create_directories(dir);
-        std::ofstream f(dir / (key + ".dat"));
-        f << val;
-        return choc::value::Value();
-    });
-
-    engine_.register_function("storageRemoveItem", [](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        if (key.empty()) return choc::value::Value();
-        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
-        std::filesystem::remove(dir / (key + ".dat"));
-        return choc::value::Value();
-    });
-
-    engine_.register_function("__loadAssetSync__", [](choc::javascript::ArgumentList args) {
-        auto url = args.get<std::string>(0, "");
-        auto asset = load_bridge_asset(url);
-
-        auto result = choc::value::createObject("");
-        result.addMember("ok", choc::value::createBool(asset.ok));
-        result.addMember("status", choc::value::createInt32(asset.status));
-        result.addMember("url", choc::value::createString(url));
-        result.addMember("resolvedPath", choc::value::createString(asset.resolved_path));
-        result.addMember("contentType", choc::value::createString(asset.mime_type));
-        result.addMember("base64", choc::value::createString(asset.ok ? bridge_base64_encode(asset.blob.data) : ""));
-        if (asset.ok && bridge_asset_is_text_like(asset.mime_type)) {
-            result.addMember("text", choc::value::createString(
-                std::string(asset.blob.data.begin(), asset.blob.data.end())));
-        } else {
-            result.addMember("text", choc::value::createString(""));
-        }
-        return result;
-    });
+    register_storage_key_value_api();
+    register_asset_loading_api();
 
     // ═══════════════════════════════════════════════════════════════════
     // Final gap closure
@@ -5957,32 +5792,7 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // Font loading: loadFont(path) → success boolean
-    engine_.register_function("loadFont", [](choc::javascript::ArgumentList args) {
-        auto path = args.get<std::string>(0, "");
-        // Font loading is platform-dependent; this registers the font path
-        // for use by canvas.set_font() and Label font_family
-        // Currently a stub that acknowledges the request
-        bool exists = !path.empty() && std::filesystem::exists(path);
-        return choc::value::createBool(exists);
-    });
-
-    // registerFont(family, path) — register a bundled .ttf/.otf with the text
-    // renderer under `family`, so set_font() / Label font_family resolve to the
-    // shipped face instead of a same-named system font (or a generic fallback).
-    // figma-import #43b: codegen emits these from the envelope's
-    // font_family_assets before any setFontFamily.
-    engine_.register_function("registerFont", [](choc::javascript::ArgumentList args) {
-        auto family = args.get<std::string>(0, "");
-        auto path = args.get<std::string>(1, "");
-        if (family.empty() || path.empty()) return choc::value::createBool(false);
-        if (path.rfind("file://", 0) == 0) path = path.substr(7);
-        if (!std::filesystem::exists(path)) return choc::value::createBool(false);
-        // register_font_family decodes the file + registers the typeface with
-        // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
-        AssetManager::instance().register_font_family(family, path);
-        return choc::value::createBool(true);
-    });
+    register_font_assets_api();
 
     register_shader_canvas_api();
 
