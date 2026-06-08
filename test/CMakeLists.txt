@@ -32,8 +32,8 @@ if(Python3_Interpreter_FOUND)
         PROPERTIES
         PASS_REGULAR_EXPRESSION
             "scene3d_cmake_boundary_contract_case=valid-current-${PULP_SCENE3D_CMAKE_EXPECT}.*scene3d_cmake_boundary_contract_case=expect-mismatch.*scene3d_cmake_boundary_contract_case=enabled-missing-build-path.*scene3d_cmake_boundary_contract_case=enabled-missing-link-file.*scene3d_cmake_boundary_contract_case=valid-disabled.*scene3d_cmake_boundary_contract_case=disabled-build-path-present.*scene3d_cmake_boundary_contract_case=disabled-link-file-present.*scene3d_cmake_boundary_contract_case=disabled-target-present.*scene3d_cmake_boundary_contract_verified=true")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/refactor_baseline_tests.cmake")
 endif()
-
 # iOS AUv3 helper configure smoke (macOS host only; skipped when iOS SDK absent).
 # A fresh checkout pays the FetchContent bootstrap cost (~5–7 min on CI macs).
 # Local self-hosted runners can exceed that during cache churn, so leave

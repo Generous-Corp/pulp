@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "roadmap_item": "P0.3",
+  "baseline_kind": "single_translation_unit_rebuild_wall_time",
+  "base_commit": "9c46d101ac984004c9be345f896fd3748eb2f56a",
+  "captured_at_utc": "2026-06-08T06:57:30Z",
+  "build": {
+    "build_type": "Release",
+    "configure_command": "cmake -S . -B build-refactor-baselines -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_SCENE3D=ON",
+    "build_dir": "build-refactor-baselines",
+    "environment": {
+      "host_os": "Darwin",
+      "host_arch": "arm64",
+      "timing_tool": "/usr/bin/time -p"
+    },
+    "verification": {
+      "cmake_cache_build_type": "Release",
+      "required_cxx_flags": [
+        "-O3",
+        "-DNDEBUG"
+      ]
+    }
+  },
+  "hotspots": [
+    {
+      "id": "widget_bridge_cpp",
+      "source": "core/view/src/widget_bridge.cpp",
+      "target": "pulp-view-script",
+      "object_hint": "build-refactor-baselines/core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge.cpp.o",
+      "timing_command": "touch core/view/src/widget_bridge.cpp && CCACHE_DISABLE=1 /usr/bin/time -p cmake --build build-refactor-baselines --target pulp-view-script -j1",
+      "sample_wall_seconds": [
+        14.79,
+        12.69,
+        12.95
+      ],
+      "median_wall_seconds": 12.95
+    },
+    {
+      "id": "renderer3d_cpp",
+      "source": "core/render/src/renderer3d.cpp",
+      "target": "pulp-render",
+      "object_hint": "build-refactor-baselines/core/render/CMakeFiles/pulp-render.dir/src/renderer3d.cpp.o",
+      "timing_command": "touch core/render/src/renderer3d.cpp && CCACHE_DISABLE=1 /usr/bin/time -p cmake --build build-refactor-baselines --target pulp-render -j1",
+      "sample_wall_seconds": [
+        3.0,
+        2.88,
+        2.83
+      ],
+      "median_wall_seconds": 2.88
+    }
+  ],
+  "renderer_golden_gate": {
+    "manifest": "test/fixtures/scene3d/renderer3d-goldens.json",
+    "validator": "tools/scene3d/validate_renderer_golden_manifest.py",
+    "cpp_test": "test/test_renderer3d.cpp",
+    "ctest_manifest": "test/CMakeLists.txt",
+    "required_ctests": [
+      "scene3d-renderer-golden-manifest",
+      "scene3d-renderer-golden-manifest-malformed",
+      "scene3d-renderer-golden-software-adapter-required",
+      "scene3d-renderer-golden-final-adapter-contract"
+    ],
+    "status_allowed": [
+      "interim_default_adapter",
+      "final_software_adapter"
+    ],
+    "interim_requires_final_software_adapter": true
+  }
+}
