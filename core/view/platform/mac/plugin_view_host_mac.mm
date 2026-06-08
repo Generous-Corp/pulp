@@ -244,6 +244,48 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
   }
 }
 
+// Route a keyDown to the currently focused input widget — the embedded analog of
+// the standalone PulpView's key handling (window_host_mac.mm). Without this an
+// embedded TextEditor (e.g. an imported search field) never receives typing: the
+// host NSView is first responder but had no keyDown:, so characters were dropped.
+// A click already sets focus (claim_input_focus in mouseDown). Returns true when
+// a focused input consumed the event, so the caller only falls through to
+// [super keyDown:] (host menu shortcuts etc.) when nothing was focused.
+bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
+  try {
+    if (!root) return false;
+    // Auto-clearing static: cleared by ~View when the focused widget is freed,
+    // so this never derefs freed memory (pulp #1708 rationale).
+    auto* fv = pulp::view::View::focused_input_;
+    if (!fv) return false;
+    pulp::view::KeyEvent ke;
+    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
+    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+    ke.is_down = true;
+    ke.is_repeat = event.isARepeat;
+    fv->on_key_event(ke);  // backspace / arrows / enter (TextEditor handles these)
+    // Printable characters → text insertion. (Full IME / marked-text via
+    // NSTextInputClient is a follow-up; this covers ASCII + most Latin typing.)
+    NSString* chars = event.characters;
+    if (chars.length > 0) {
+        unichar c0 = [chars characterAtIndex:0];
+        if (c0 >= 0x20 && c0 != 0x7f) {
+            pulp::view::TextInputEvent te;
+            te.text = chars.UTF8String;
+            fv->on_text_input(te);
+        }
+    }
+    root->request_repaint();
+    return true;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[plugin-view-host] keyDown handler threw: %s\n", e.what());
+    return true;  // swallow; don't beep/propagate a half-handled key
+  } catch (...) {
+    std::fprintf(stderr, "[plugin-view-host] keyDown handler threw (unknown)\n");
+    return true;
+  }
+}
+
 } // namespace
 
 @implementation PulpPluginView {
@@ -252,6 +294,9 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
 
 - (BOOL)isFlipped { return NO; }
 - (BOOL)acceptsFirstResponder { return YES; }
+- (void)keyDown:(NSEvent*)event {
+    if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
+}
 // Resolve a window-space event into root-view coords, applying the inverse
 // design-viewport transform when set so hit_test runs against design-space
 // coords. Identity when pointTransform is nil.
@@ -656,6 +701,9 @@ private:
 }
 
 - (BOOL)acceptsFirstResponder { return YES; }
+- (void)keyDown:(NSEvent*)event {
+    if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
+}
 // Resolve a window-space event into root-view coords, applying the inverse
 // design-viewport transform when set.
 - (pulp::view::Point)localPoint:(NSEvent*)event {
