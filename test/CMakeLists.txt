@@ -353,6 +353,29 @@ target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-create-shellout)
 
+# CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
+# install-hint path, and the vendor-agnostic source guard. Links the import
+# logic directly (pure functions) and shells out to the built CLI for the
+# install-hint / detect / end-to-end paths.
+add_executable(pulp-test-cli-import
+    test_cli_import.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_detect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
+)
+target_include_directories(pulp-test-cli-import PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-import PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import pulp-cli)
+    target_compile_definitions(pulp-test-cli-import PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+target_compile_definitions(pulp-test-cli-import PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-import
+    PROPERTIES LABELS "parser-import")
+
 # pulp #914 — `pulp run` flag parser unit tests. Pure parser, no I/O,
 # no project resolution. The shell-out CLI behaviour for the same
 # flags lives in test_cli_shellout.cpp.

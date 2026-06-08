@@ -32,6 +32,21 @@ struct ToolDescriptor {
     std::vector<std::string> requires_tools;
     bool managed_by_pulp = true;
     bool bundleable = false;
+
+    // ── Project-importer fields (optional) ──
+    //
+    // Present only on framework-importer tools (vendor-specific add-ons that
+    // drive the JSON-over-stdio import SPI). All runtime DATA — the registry
+    // names frameworks/vendors, the SDK code does not. `spi_min`/`spi_max`
+    // bound the SPI versions the importer speaks; a mismatch fails loudly.
+    // `sdk_min`/`sdk_max` bound the Pulp SDK versions it targets.
+    std::vector<std::string> frameworks;     // framework ids this tool imports
+    int spi_min = 0;                         // 0 when unset (no importer fields)
+    int spi_max = 0;
+    std::string sdk_min;                     // semver string, empty when unset
+    std::string sdk_max;
+    std::vector<std::string> capabilities;   // e.g. "detect", "analyze", "emit"
+    std::string health_check;                // command string to probe the tool
 };
 
 // ── Tool Registry ──

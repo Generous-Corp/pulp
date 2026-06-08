@@ -153,6 +153,49 @@ Do not point new docs at `./build/tools/cli/pulp`; that path was the old
 C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
 debug comparisons.
 
+### `pulp import` — framework-importer substrate
+
+`pulp import` (`tools/cli/cmd_import.cpp` + `import_detect.{hpp,cpp}` +
+`import_spi.{hpp,cpp}`) reads an existing audio-plugin project read-only and
+emits a Pulp migration scaffold. The SDK owns only the *generalized*
+substrate; the framework-specific parsers are **vendor-specific add-on
+tools** in their own private repos, driven over a JSON-over-stdio SPI.
+
+Gotchas / invariants when touching this surface:
+
+- **Vendor-agnostic is enforced.** SDK code, mainline tests, and generic CI
+  name NO vendor or framework. The ONLY place real markers (`.jucer`,
+  `juce_add_plugin`, iPlug `PLUG_NAME`, `Steinberg::Vst::`, …) may appear is
+  the DATA file `tools/import/known-frameworks.json`. Tests use a NEUTRAL id
+  (`example-framework`) and a temp index. `test_cli_import.cpp` has a guard
+  that greps `tools/cli/*import*` for `juce/iplug/steinberg/wdl` — keep new
+  import code clean of those tokens (put markers in the data file).
+- **Detection markers are DATA, not code.** `import_detect.cpp` only knows
+  the *shape* of a marker (`file_glob` / `content_match` + `weight`), never a
+  specific marker. Add a framework by editing the JSON index, not the engine.
+- **The Rust front routes `import` via fallthrough automatically.** `import`
+  is NOT a declared clap subcommand in `experimental/pulp-rs/src/main.rs`, so
+  it hits `ErrorKind::InvalidSubcommand` and `clap_exit_code` delegates to
+  `pulp-cpp`. You still add an `Entry` to `help.rs::COMMANDS` so the usage
+  banner lists it (and the C++ `commands[]` table in `pulp_cli.cpp`).
+- **SPI version is negotiated every call.** `import_spi::check_version`
+  compares the importer's response `spi_version` against the registry's
+  `[spi_min, spi_max]` window and fails loudly ("upgrade Pulp" vs "upgrade
+  the importer"). Never silently proceed on a mismatch.
+- **The SPI request goes in on real stdin.** `import_spi::run` writes the
+  one-line request to a temp file and redirects it into the importer through
+  the shell (`/bin/sh -c '<cmd> < tmp'` / `cmd /c`), because
+  `ChildProcess::run` captures stdout but doesn't feed stdin. Reads the first
+  non-empty stdout line as the response envelope.
+- **Importer fields on `ToolDescriptor` are optional.** `frameworks`,
+  `spi_min`/`spi_max`, `sdk_min`/`sdk_max`, `capabilities`, `health_check`
+  are parsed only when present. Don't add a fake vendor entry to
+  `tool-registry.json`; the loader tolerates their absence.
+- **`emit` is stubbed this slice.** `detect`/`inspect` are fully real;
+  `emit` runs `analyze` to a ProjectIR and prints a "next slice" notice for
+  the plan + file-materialisation step. When you implement emit, the SDK
+  writes the files (provenance-tagged) — the importer only proposes the plan.
+
 ### Binary subcommand delegation
 
 `BinaryCommand` entries in `tools/cli/pulp_cli.cpp` delegate to helper binaries

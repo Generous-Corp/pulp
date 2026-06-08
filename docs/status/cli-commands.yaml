@@ -1143,6 +1143,60 @@ commands:
         description: Unique id / URI to select a specific descriptor in the bundle (LV2 and multi-plugin CLAP)
     docs: reference/cli.md#host
 
+  - name: import
+    status: experimental
+    summary: Read an existing audio-plugin project read-only and emit a Pulp migration scaffold. Framework importers are vendor-specific add-on tools; the SDK owns the discovery index, the JSON-over-stdio SPI, and emission. Vendor-agnostic — framework identity is runtime DATA from tools/import/known-frameworks.json.
+    subcommands:
+      - name: detect
+        summary: Rank known-framework candidates for a project directory (works with no importer installed); prints the install hint for the top match
+        args:
+          - name: dir
+            kind: positional
+            required: true
+            description: Project directory to scan
+      - name: inspect
+        summary: Resolve the importer (tool registry or --importer-cmd) and run its SPI analyze verb to produce a ProjectIR; prints an install hint and exits non-zero when no importer is resolvable
+        args:
+          - name: --from
+            kind: option
+            required: true
+            description: Framework id (see pulp import detect)
+          - name: dir
+            kind: positional
+            required: true
+            description: Project directory
+          - name: --framework-path
+            kind: option
+            description: The user's own framework checkout (read-only; never vendored)
+          - name: --extra-include
+            kind: option
+            description: Extra include directory for the importer (repeatable)
+          - name: -o
+            kind: option
+            description: Write the ProjectIR JSON to a file (alias --output-ir)
+          - name: --report
+            kind: option
+            description: Write a human-readable Markdown report
+          - name: --importer-cmd
+            kind: option
+            description: Override importer resolution with an explicit command string
+      - name: emit
+        summary: analyze the project to a ProjectIR; full scaffold emission (plan + SDK file materialisation) is implemented in a later slice
+        args:
+          - name: --from
+            kind: option
+            required: true
+            description: Framework id
+          - name: dir
+            kind: positional
+            required: true
+            description: Project directory
+          - name: --output
+            kind: option
+            required: true
+            description: Scaffold output directory
+    docs: reference/cli.md#import
+
   - name: tool
     status: usable
     summary: Manage third-party developer tools (validators, formatters, importers) installed under ~/.pulp/tools/. Driven by tools/packages/tool-registry.json.

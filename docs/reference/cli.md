@@ -1332,6 +1332,44 @@ Flags:
 
 Prints plug-in metadata (name, vendor, version, format, parameter count) and the peak output level from a 256-sample synthetic block at 48 kHz. Exit code 0 on success, 1 if the bundle could not be loaded, 2 if `prepare()` failed.
 
+### import
+
+**Status**: experimental
+
+Read an existing audio-plugin project read-only and emit a Pulp migration scaffold. Framework importers are vendor-specific add-on tools that live in their own private repos; the Pulp SDK owns only the generalized substrate — a discovery index of known frameworks, a JSON-over-stdio service-provider interface (SPI) to drive an installed importer, and the emission step (the SDK writes files; the importer only proposes a plan).
+
+The command is **vendor-agnostic**: framework identity is runtime DATA loaded from `tools/import/known-frameworks.json`, the one place real source-framework markers appear. The SDK code names no framework and no vendor.
+
+```bash
+pulp import detect ./MyProject                                  # Rank candidates; print install hint
+pulp import ./MyProject                                         # Alias for detect
+pulp import inspect --from <framework> ./MyProject -o ir.json   # Resolve importer → SPI analyze → ProjectIR
+pulp import inspect --from <framework> ./MyProject --importer-cmd "python3 spi.py"
+pulp import emit --from <framework> ./MyProject --output ./scaffold
+```
+
+Subcommands:
+
+| Subcommand | Description |
+|------------|-------------|
+| `detect <dir>` | Scan the directory against the known-frameworks markers and print ranked candidates (framework id + confidence + evidence) plus the install hint for the top match. Works with **no importer installed**. |
+| `inspect --from <fw> <dir>` | Resolve the importer (tool registry or `--importer-cmd`) and run its SPI `analyze` verb to produce a ProjectIR. When no importer is resolvable, prints the install hint and exits non-zero. |
+| `emit --from <fw> <dir> --output <out>` | Runs `analyze` to a ProjectIR. Full scaffold emission (plan + SDK file materialisation) lands in a later slice; this slice persists the validated ProjectIR. |
+
+`inspect` / `emit` flags:
+
+| Flag | Description |
+|------|-------------|
+| `--from <framework>` | Framework id (see `pulp import detect`) |
+| `--framework-path <path>` | The user's own framework checkout (read-only; never vendored) |
+| `--extra-include <dir>` | Extra include directory passed to the importer (repeatable) |
+| `-o`, `--output-ir <file>` | `inspect`: write the ProjectIR JSON to a file |
+| `--report <file.md>` | `inspect`: write a human-readable report |
+| `--output <dir>` | `emit`: scaffold output directory |
+| `--importer-cmd <cmd>` | Override importer resolution with an explicit command string |
+
+The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
+
 ### identity
 
 **Status**: experimental

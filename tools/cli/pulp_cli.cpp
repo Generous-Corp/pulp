@@ -51,6 +51,7 @@ static const Command commands[] = {
     {"inspect",  "Connect to a running plugin inspector", cmd_inspect},
     {"scan",     "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
+    {"import",   "Detect a framework project and emit a Pulp migration scaffold", cmd_import},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
     {"project",  "Per-project SDK pin: bump, undo", cmd_project},
