@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03790"></a>
+## [0.379.0] - 2026-06-08
+
+- feat(view): Pulp-drawn ContextMenu (view-layer GPU popup menu) ([#3628](https://github.com/danielraffel/pulp/pull/3628))
+- refactor: split WidgetBridge DOM registrar ([#3624](https://github.com/danielraffel/pulp/pull/3624))
+- refactor: split WidgetBridge text runs registrar ([#3629](https://github.com/danielraffel/pulp/pull/3629))
+- refactor: split WidgetBridge typography registrar ([#3625](https://github.com/danielraffel/pulp/pull/3625))
+
 <a id="v03780"></a>
 ## [0.378.0] - 2026-06-08
 
@@ -3895,6 +3903,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.379.0]: https://github.com/danielraffel/pulp/releases/tag/v0.379.0
 [0.378.0]: https://github.com/danielraffel/pulp/releases/tag/v0.378.0
 [0.371.1]: https://github.com/danielraffel/pulp/releases/tag/v0.371.1
 [0.371.0]: https://github.com/danielraffel/pulp/releases/tag/v0.371.0
