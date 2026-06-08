@@ -312,6 +312,10 @@ private:
     void register_metadata_removal_api();
     void register_metadata_source_api();
     void register_metadata_computed_api();
+    void register_platform_services_ai_api();
+    void register_platform_services_exec_api();
+    void register_platform_services_dialog_api();
+    void register_platform_services_clipboard_api();
     void register_state_binding_api();
     void register_svg_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_shader_widget_api();
