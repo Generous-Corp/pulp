@@ -200,3 +200,64 @@ TEST_CASE("upgrade install tolerates archives without a cpp delegate",
     fs::remove_all(extracted);
     fs::remove_all(install);
 }
+
+// ── ensure_dir_on_path: `pulp upgrade` self-heals PATH ──────────────────────
+// Covers the gap where a CLI first installed via a source/SDK-prefix install
+// (e.g. ~/pulp-sdk/bin) upgraded successfully yet still hit "command not found"
+// in a fresh shell because nothing added the dir to a shell profile.
+
+using PS = ui::PathEnsureOutcome::Status;
+
+TEST_CASE("ensure_dir_on_path: appends an export line for a fresh zsh profile",
+          "[cli][upgrade][path]") {
+    auto home = make_tmpdir("path-zsh-home");
+    fs::path dir = "/Users/someone/pulp-sdk/bin";
+    auto r = ui::ensure_dir_on_path(dir, "/usr/bin:/bin", "zsh", home, false);
+    REQUIRE(r.status == PS::added);
+    REQUIRE(r.profile == home / ".zshrc");
+    auto body = read_file(home / ".zshrc");
+    REQUIRE(body.find("export PATH=\"" + dir.string() + ":$PATH\"") != std::string::npos);
+
+    // Idempotent: a second call must not double-add.
+    auto r2 = ui::ensure_dir_on_path(dir, "/usr/bin:/bin", "zsh", home, false);
+    REQUIRE(r2.status == PS::already_in_profile);
+    fs::remove_all(home);
+}
+
+TEST_CASE("ensure_dir_on_path: no-op when the dir is already on PATH",
+          "[cli][upgrade][path]") {
+    auto home = make_tmpdir("path-onpath-home");
+    fs::path dir = "/opt/pulp/bin";
+    auto r = ui::ensure_dir_on_path(dir, "/usr/bin:" + dir.string() + ":/bin",
+                                    "zsh", home, false);
+    REQUIRE(r.status == PS::already_on_path);
+    REQUIRE_FALSE(fs::exists(home / ".zshrc"));
+    fs::remove_all(home);
+}
+
+TEST_CASE("ensure_dir_on_path: PULP_NO_MODIFY_PATH opts out",
+          "[cli][upgrade][path]") {
+    auto home = make_tmpdir("path-optout-home");
+    auto r = ui::ensure_dir_on_path("/opt/pulp/bin", "/usr/bin", "zsh", home, true);
+    REQUIRE(r.status == PS::skipped_opt_out);
+    REQUIRE_FALSE(fs::exists(home / ".zshrc"));
+    fs::remove_all(home);
+}
+
+TEST_CASE("ensure_dir_on_path: bash prefers an existing .bash_profile",
+          "[cli][upgrade][path]") {
+    auto home = make_tmpdir("path-bash-home");
+    write_file(home / ".bash_profile", "# existing\n");
+    auto r = ui::ensure_dir_on_path("/opt/pulp/bin", "/usr/bin", "bash", home, false);
+    REQUIRE(r.status == PS::added);
+    REQUIRE(r.profile == home / ".bash_profile");
+    fs::remove_all(home);
+}
+
+TEST_CASE("ensure_dir_on_path: empty dir and missing HOME are handled",
+          "[cli][upgrade][path]") {
+    auto r_empty = ui::ensure_dir_on_path("", "/usr/bin", "zsh", "/home/x", false);
+    REQUIRE(r_empty.status == PS::empty_dir);
+    auto r_nohome = ui::ensure_dir_on_path("/opt/pulp/bin", "/usr/bin", "zsh", "", false);
+    REQUIRE(r_nohome.status == PS::no_home);
+}

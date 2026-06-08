@@ -524,6 +524,23 @@ and an explicit disabled/not-queried latest-version line instead of probing
 GitHub Releases. Otherwise PR sandbox lanes can fail spuriously when GitHub
 release fetches are blocked or rate-limited.
 
+## `pulp upgrade` self-heals PATH
+
+After a successful self-update, `cmd_upgrade.cpp` calls
+`upgrade_install::ensure_dir_on_path(install_dir, ...)` to append the CLI's own
+directory to the user's shell profile (`.zshrc` / `.bash_profile` / `.bashrc` /
+fish `config.fish` / `.profile`) when it isn't already on `$PATH`. This closes a
+real gap: the curl `install.sh` adds PATH, but a user who first got `pulp` via a
+source / SDK-prefix install (`cmake --install --prefix ~/pulp-sdk` → the binary
+lands at `~/pulp-sdk/bin/pulp`) could `pulp upgrade` successfully yet still hit
+"command not found" in a fresh shell. The helper is pure on its inputs (env
+passed in, not read from globals) so it is unit-tested in
+`test_cli_upgrade_install.cpp` without mutating the process environment. It
+honors `PULP_NO_MODIFY_PATH=1` (same opt-out as `install.sh`) and is idempotent
+(skips when the profile already references the dir). If you change the
+profile-selection logic, keep it in sync with `tools/install/install.sh`'s PATH
+block so the two install surfaces agree.
+
 ## `pulp run --headless / --screenshot / --frames / --watch` (#914)
 
 `tools/cli/cmd_run.cpp` plus the shared parser in
