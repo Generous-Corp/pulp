@@ -574,6 +574,16 @@ node's **own SVG export** pixel-faithfully and overlay native interaction.
 This is the lane that makes an imported frame look identical to the source
 (gradients, multi-layer drop shadows, masks) while staying interactive.
 
+**This lane is the DEFAULT** across every producer (REST exporter, plugin UI,
+headless runner). A plain import yields the faithful frame WITH live overlays
+(knobs, search field, dropdowns, steppers, tab groups). The legacy flat,
+static node-tree export is opt-OUT: `--no-faithful-vector` (REST / headless)
+or `extractScene(nodes, {faithfulVector:false})` (plugin API). Forgetting an
+opt-IN flag was the old failure mode — a fresh import came through static /
+non-interactive — so the default is flipped. When no frame SVG is obtainable
+(e.g. `--node-json` with no token and no `--frame-svg`) the lane degrades
+gracefully to the flat export with a warning.
+
 Pieces, source-of-truth → runtime:
 - **Rendering** — `Canvas::draw_svg` (SkiaCanvas, Skia `SkSVGDOM`, `libsvg.a`)
   renders an SVG document pixel-faithfully. Knob animation = wrap the needle
@@ -588,7 +598,8 @@ Pieces, source-of-truth → runtime:
   hit_radius, svg_patch_d, default_value, source_node_id). These are
   source-side semantics filled by the importer, NOT inferred from the SVG.
   `InteractiveElementKind` is deliberately separate from `AudioWidgetType`.
-- **Producer (REST lane)** — `figma_rest_export.py --faithful-vector` fetches
+- **Producer (REST lane)** — `figma_rest_export.py` (faithful-vector default-on;
+  `--no-faithful-vector` for the legacy flat export) fetches
   the frame's own SVG (`/images?format=svg`, or `--frame-svg FILE` offline),
   embeds it as a `data:image/svg+xml;base64` asset (so the importer always
   resolves it — no dependency on local_path stamping), sets the root's
@@ -604,9 +615,10 @@ Pieces, source-of-truth → runtime:
   bbox), but those carry NO `svg_patch_d` (hit + value, no visual rotation),
   the honest fallback for a knob geometry missed.
 - **Producer (plugin lane)** — the Figma plugin mirrors the REST lane in
-  lockstep: `extractScene(nodes, {faithfulVector:true})` (or headless
-  `run-headless.mjs <node> --faithful-vector`, which injects the
-  `FAITHFUL_VECTOR` global) captures each frame's SVG via
+  lockstep, faithful-vector default-on: `extractScene(nodes)` (defaults
+  `faithfulVector:true`; pass `false` to opt out) or headless
+  `run-headless.mjs <node>` (default; `--no-faithful-vector` opts out, and
+  injects the `FAITHFUL_VECTOR` global) captures each frame's SVG via
   `captureExportedNode(node,"SVG")`, decodes the bytes with `decodeSvgBytes`
   (the sandbox has NO `TextDecoder`), and runs the SAME knob detector
   (`src/faithful-vector.ts`, kept identical to the Python `parse_frame_knobs`).

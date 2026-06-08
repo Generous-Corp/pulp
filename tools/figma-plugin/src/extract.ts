@@ -110,7 +110,11 @@ export async function extractScene(
   const cfg = {
     includeHidden: opts.includeHidden ?? false,
     maxNodes: opts.maxNodes ?? 5000,
-    faithfulVector: opts.faithfulVector ?? false,
+    // Faithful-vector is the DEFAULT import lane (matches the REST exporter's
+    // --faithful-vector default-on): the frame renders its own SVG pixel-
+    // faithfully with auto-detected INTERACTIVE overlays. Pass
+    // `faithfulVector: false` for the legacy flat, static node tree.
+    faithfulVector: opts.faithfulVector ?? true,
   };
   const diagnostics: ExtractedDiagnostic[] = [];
   const assets = new AssetCache();

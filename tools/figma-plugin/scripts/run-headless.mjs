@@ -40,22 +40,25 @@ const root = path.resolve(here, "..");
 
 function usage(code = 2) {
   process.stderr.write(
-    "usage: node scripts/run-headless.mjs <NODE_ID|--selection> [--faithful-vector]\n" +
+    "usage: node scripts/run-headless.mjs <NODE_ID|--selection> [--no-faithful-vector]\n" +
     "\n" +
-    "  NODE_ID            — Figma node id (e.g. '26:3'). Forwarded as TARGET_NODE_ID\n" +
-    "                       to the headless bundle.\n" +
-    "  --selection        — fall back to figma.currentPage.selection inside the\n" +
-    "                       sandbox. Useful when running interactively in Figma\n" +
-    "                       with a frame already selected.\n" +
-    "  --faithful-vector  — faithful-vector lane (Plan B): export each frame's own\n" +
-    "                       SVG + auto-detect interactive knobs (FAITHFUL_VECTOR).\n",
+    "  NODE_ID               — Figma node id (e.g. '26:3'). Forwarded as TARGET_NODE_ID\n" +
+    "                          to the headless bundle.\n" +
+    "  --selection           — fall back to figma.currentPage.selection inside the\n" +
+    "                          sandbox. Useful when running interactively in Figma\n" +
+    "                          with a frame already selected.\n" +
+    "  --faithful-vector     — faithful-vector lane (Plan B). DEFAULT ON: export each\n" +
+    "                          frame's own SVG + auto-detect interactive overlays.\n" +
+    "  --no-faithful-vector  — legacy flat, static node-tree export (opt out).\n",
   );
   process.exit(code);
 }
 
 const argv = process.argv.slice(2);
-const faithfulVector = argv.includes("--faithful-vector");
-const arg = argv.find((a) => a !== "--faithful-vector");
+// Faithful-vector is the default; --no-faithful-vector opts out. --faithful-vector
+// is still accepted (a no-op now) for backward compatibility with old invocations.
+const faithfulVector = !argv.includes("--no-faithful-vector");
+const arg = argv.find((a) => a !== "--faithful-vector" && a !== "--no-faithful-vector");
 if (!arg) usage();
 
 const bundlePath = path.join(root, "dist", "headless.js");
@@ -80,7 +83,7 @@ if (arg === "--selection") {
   // JSON-encode the node id so any quotes/escapes are safe inside the JS string.
   prelude = `const TARGET_NODE_ID = ${JSON.stringify(arg)};`;
 }
-if (faithfulVector) prelude += " const FAITHFUL_VECTOR = true;";
+prelude += ` const FAITHFUL_VECTOR = ${faithfulVector ? "true" : "false"};`;
 
 const tail = "return await globalThis.__pulp_headless_result;";
 

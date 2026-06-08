@@ -391,5 +391,25 @@ class FaithfulVectorTest(unittest.TestCase):
         self.assertEqual(frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0)), [])
 
 
+class FaithfulVectorDefaultTest(unittest.TestCase):
+    """The faithful-vector lane (interactive overlays) must be the DEFAULT — a
+    plain import should produce live widgets, not a static node tree. Opt out
+    with --no-faithful-vector."""
+
+    def test_faithful_vector_defaults_on(self):
+        args = frx.build_argparser().parse_args(["--out", "x.json", "--url", "u"])
+        self.assertTrue(args.faithful_vector)
+
+    def test_no_faithful_vector_opts_out(self):
+        args = frx.build_argparser().parse_args(
+            ["--out", "x.json", "--url", "u", "--no-faithful-vector"])
+        self.assertFalse(args.faithful_vector)
+
+    def test_faithful_vector_explicit_on_still_accepted(self):
+        args = frx.build_argparser().parse_args(
+            ["--out", "x.json", "--url", "u", "--faithful-vector"])
+        self.assertTrue(args.faithful_vector)
+
+
 if __name__ == "__main__":
     unittest.main()

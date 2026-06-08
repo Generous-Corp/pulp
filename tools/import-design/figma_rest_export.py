@@ -893,7 +893,7 @@ def _rewrite_image_fills(node, ref_to_rel):
     for c in node.get("children", []):
         _rewrite_image_fills(c, ref_to_rel)
 
-def main():
+def build_argparser():
     ap = argparse.ArgumentParser(description="Headless Figma REST → Pulp figma-plugin envelope")
     ap.add_argument("--file-key"); ap.add_argument("--node")
     ap.add_argument("--url", help="Figma design URL (extracts --file-key + --node)")
@@ -901,14 +901,29 @@ def main():
     ap.add_argument("--token", help="Figma PAT (else $FIGMA_TOKEN or ~/.config/pulp/figma-token)")
     ap.add_argument("--no-assets", action="store_true", help="skip /images PNG capture (geometry+style only)")
     ap.add_argument("--node-json", help="use a pre-fetched /v1/.../nodes JSON instead of calling REST")
-    ap.add_argument("--faithful-vector", action="store_true",
-                    help="faithful-vector lane (Plan B): capture the frame's own SVG and render it "
-                         "pixel-faithfully via DesignFrameView, with auto-detected interactive knobs")
+    # Faithful-vector is the DEFAULT import lane (Plan B): it captures the frame's
+    # own SVG and renders it pixel-faithfully via DesignFrameView, overlaying the
+    # auto-detected INTERACTIVE controls (knobs, search field, dropdowns, steppers,
+    # tab groups). Without it the importer emits a flat, STATIC node tree with no
+    # live widgets — which is almost never what a plugin UI wants — so it is opt-OUT
+    # (`--no-faithful-vector`) rather than opt-in. When no frame SVG is obtainable
+    # (e.g. --node-json with no token and no --frame-svg) the lane degrades
+    # gracefully to the flat export with a warning.
+    ap.add_argument("--faithful-vector", action=argparse.BooleanOptionalAction, default=True,
+                    help="faithful-vector lane (Plan B, DEFAULT ON): capture the frame's own SVG and "
+                         "render it pixel-faithfully via DesignFrameView, with auto-detected interactive "
+                         "overlays (knobs, search, dropdowns, steppers, tab groups). "
+                         "Use --no-faithful-vector for the legacy flat node-tree export.")
     ap.add_argument("--frame-svg",
                     help="use a pre-fetched frame SVG file instead of calling /images (with --faithful-vector)")
     ap.add_argument("--knob-name", action="append", default=[],
                     help="name-override (repeatable): also treat any node whose name contains this "
                          "substring as a knob, supplementing geometry auto-detect (with --faithful-vector)")
+    return ap
+
+
+def main():
+    ap = build_argparser()
     args = ap.parse_args()
 
     file_key, node_id = args.file_key, args.node
