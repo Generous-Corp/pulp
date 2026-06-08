@@ -1655,6 +1655,12 @@ not provide the same Shipyard state discipline as `shipyard pr`.
 been moved into sibling modules so newer code can import them without
 pulling in the entire 11k-line file.
 
+The authoritative extraction map is
+`tools/local-ci/MODULE_MAP.md`. When touching local-CI extraction
+boundaries, keep that map and `tools/local-ci/test_local_ci_contracts.py`
+in sync so future code-motion PRs preserve the queue/evidence, target
+preflight, source-prep, cleanup, and artifact-publishing contracts.
+
 - `state_paths.py` — owns `state_dir()`, `queue_path()`, `results_dir()`,
   `logs_dir()`, `ensure_state_dirs()`, and the lock-path helpers.
 - `normalize.py` — owns priority/validation/desktop normalization
