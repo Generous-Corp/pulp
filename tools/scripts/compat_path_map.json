@@ -28,6 +28,11 @@
       {"kind": "doc", "path": "docs/reference/compat/rn.md"},
       {"kind": "test", "glob": "test/test_widget_bridge*.cpp"}
     ],
+    "core/view/src/widget_bridge/tokens_api.cpp": [
+      {"kind": "compat-json", "prefix": "css"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"},
+      {"kind": "test", "glob": "test/test_widget_bridge*.cpp"}
+    ],
     "core/view/include/pulp/view/widget_bridge.hpp": [
       {"kind": "compat-json", "prefix": "*"},
       {"kind": "doc", "path": "docs/reference/compat/{prefix}.md"},

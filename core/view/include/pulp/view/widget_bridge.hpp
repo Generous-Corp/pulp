@@ -310,6 +310,7 @@ private:
     void register_accessibility_api();
     void register_list_style_api();
     void register_svg_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_tokens_api(std::function<canvas::Color(const std::string&)> parse_color);
 };
 
 } // namespace pulp::view
