@@ -363,6 +363,8 @@ private:
     void register_widget_border_radius_api();
     void register_widget_border_side_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_runtime_api();
+    void register_animation_api();
+    void register_animation_style_api();
     void register_canvas2d_api(std::function<canvas::Color(const std::string&)> parse_color);
 };
 
