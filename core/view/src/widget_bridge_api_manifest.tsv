@@ -35,7 +35,7 @@ setMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 getMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 setStringToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 getStringToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
-setVisible	css_style	function	core/view/src/widget_bridge.cpp
+setVisible	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 setAccessibilityLabel	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityRole	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityState	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
@@ -62,11 +62,11 @@ layout	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getLayoutRect	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getLayoutAncestorRects	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getRootSize	layout	function	core/view/src/widget_bridge/layout_api.cpp
-setPointerEvents	css_style	function	core/view/src/widget_bridge.cpp
-setBackfaceVisibility	css_style	function	core/view/src/widget_bridge.cpp
-setVisibility	css_style	function	core/view/src/widget_bridge.cpp
-setWhiteSpace	css_style	function	core/view/src/widget_bridge.cpp
-setUserSelect	css_style	function	core/view/src/widget_bridge.cpp
+setPointerEvents	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
+setBackfaceVisibility	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
+setVisibility	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
+setWhiteSpace	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
+setUserSelect	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 createMeter	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createXYPad	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createWaveform	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp

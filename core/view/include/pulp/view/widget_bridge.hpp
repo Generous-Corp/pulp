@@ -327,6 +327,8 @@ private:
     void register_wheel_event_api();
     void register_context_menu_event_api();
     void register_drop_event_api();
+    void register_widget_style_visibility_api();
+    void register_widget_style_interaction_api();
     void register_layout_grid_api();
     void register_layout_flex_api();
     void register_layout_query_api();
