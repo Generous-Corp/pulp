@@ -308,6 +308,11 @@ private:
 
     void register_api();
     void register_accessibility_api();
+    void register_layout_grid_api();
+    void register_layout_flex_api();
+    void register_layout_query_api();
+    void register_layout_box_model_api();
+    void register_layout_position_api();
     void register_list_style_api();
     void register_metadata_removal_api();
     void register_metadata_source_api();
