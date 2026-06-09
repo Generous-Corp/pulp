@@ -2621,25 +2621,14 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
     changed = False
     for job in stale_running_jobs_unlocked(queue):
-        replacement = None
-        for candidate in queue:
-            if candidate.get("status") not in {"pending", "running"}:
-                continue
-            reason = supersedence_reason(candidate, job)
-            if not reason:
-                continue
-            if replacement is None or candidate.get("queued_at", "") > replacement.get("queued_at", ""):
-                replacement = candidate
+        replacement, reason = _queue_orchestrator.find_stale_running_replacement_unlocked(queue, job)
 
         if replacement is not None:
-            supersede_job_unlocked(job, replacement["id"], supersedence_reason(replacement, job) or "newer_sha_queued")
+            supersede_job_unlocked(job, replacement["id"], reason or "newer_sha_queued")
             changed = True
             continue
 
-        job["status"] = "pending"
-        job["requeued_at"] = now_iso()
-        job.pop("started_at", None)
-        job.pop("runner", None)
+        _queue_orchestrator.requeue_stale_running_job_unlocked(job, now_iso_fn=now_iso)
         changed = True
 
     return queue, changed

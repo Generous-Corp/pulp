@@ -170,6 +170,73 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertEqual(canceled["overall"], "canceled")
         self.assertEqual(canceled["canceled_reason"], "operator_canceled")
 
+    def test_stale_running_replacement_prefers_newest_superseding_job(self) -> None:
+        stale = {
+            "id": "stale",
+            "branch": "feature/q",
+            "sha": "a" * 40,
+            "fingerprint": "stale",
+            "targets": ["mac", "windows"],
+            "priority": "normal",
+            "validation": "full",
+            "queued_at": "2026-06-09T00:00:00+00:00",
+            "status": "running",
+        }
+        older_replacement = dict(
+            stale,
+            id="older-replacement",
+            sha="b" * 40,
+            fingerprint="older-replacement",
+            queued_at="2026-06-09T00:01:00+00:00",
+            status="pending",
+        )
+        newer_replacement = dict(
+            stale,
+            id="newer-replacement",
+            sha="c" * 40,
+            fingerprint="newer-replacement",
+            queued_at="2026-06-09T00:02:00+00:00",
+            status="running",
+        )
+        completed_replacement = dict(
+            stale,
+            id="completed-replacement",
+            sha="d" * 40,
+            fingerprint="completed-replacement",
+            queued_at="2026-06-09T00:03:00+00:00",
+            status="completed",
+        )
+
+        replacement, reason = self.mod.find_stale_running_replacement_unlocked(
+            [stale, older_replacement, newer_replacement, completed_replacement],
+            stale,
+        )
+
+        self.assertIs(replacement, newer_replacement)
+        self.assertEqual(reason, "newer_sha_queued")
+
+    def test_requeue_stale_running_job_preserves_progress_snapshot(self) -> None:
+        job = {
+            "id": "stale",
+            "status": "running",
+            "started_at": "2026-06-09T00:00:00+00:00",
+            "runner": {"pid": 123},
+            "active_targets": {"mac": {"status": "running"}},
+            "last_progress_at": "2026-06-09T00:01:00+00:00",
+        }
+
+        self.mod.requeue_stale_running_job_unlocked(
+            job,
+            now_iso_fn=lambda: "2026-06-09T00:02:00+00:00",
+        )
+
+        self.assertEqual(job["status"], "pending")
+        self.assertEqual(job["requeued_at"], "2026-06-09T00:02:00+00:00")
+        self.assertNotIn("started_at", job)
+        self.assertNotIn("runner", job)
+        self.assertEqual(job["active_targets"], {"mac": {"status": "running"}})
+        self.assertEqual(job["last_progress_at"], "2026-06-09T00:01:00+00:00")
+
     def test_terminal_result_completion_updates_job_state(self) -> None:
         job = {
             "id": "old",

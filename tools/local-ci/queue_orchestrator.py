@@ -1,10 +1,10 @@
 """Pure queue policy helpers for local CI.
 
 This module owns job identity, priority ordering, supersedence, cancellation
-result payloads, summaries, runner-info active-target mutation, and
-completed-queue retention. Higher-level queue mutation, locking, runner
-liveness, result persistence, and drain orchestration remain in local_ci.py
-until later extraction slices.
+result payloads, summaries, stale-running replacement/requeue state,
+runner-info active-target mutation, and completed-queue retention. Higher-level
+queue mutation, locking, runner liveness, result persistence, and drain
+orchestration remain in local_ci.py until later extraction slices.
 """
 
 from __future__ import annotations
@@ -244,6 +244,32 @@ def update_runner_info_active_targets(
         info.pop("active_targets", None)
     info["updated_at"] = now_iso_fn()
     return True
+
+
+def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tuple[dict | None, str | None]:
+    replacement = None
+    replacement_reason = None
+    for candidate in queue:
+        if candidate.get("status") not in {"pending", "running"}:
+            continue
+        reason = supersedence_reason(candidate, job)
+        if not reason:
+            continue
+        if replacement is None or candidate.get("queued_at", "") > replacement.get("queued_at", ""):
+            replacement = candidate
+            replacement_reason = reason
+    return replacement, replacement_reason
+
+
+def requeue_stale_running_job_unlocked(
+    job: dict,
+    *,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> None:
+    job["status"] = "pending"
+    job["requeued_at"] = now_iso_fn()
+    job.pop("started_at", None)
+    job.pop("runner", None)
 
 
 def upsert_job_active_targets_unlocked(
