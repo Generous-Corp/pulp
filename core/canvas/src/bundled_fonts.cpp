@@ -36,11 +36,11 @@
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 
-// Platform font manager — paths mirror core/canvas/src/skia_canvas.cpp.
+// Platform font manager — paths mirror core/canvas/src/skia_canvas_fonts.cpp.
 // Needed by the public `register_font` API so plugin authors can register
 // their own .ttf/.otf files without the rest of `pulp::canvas` having to
 // inject a font manager. Keep this matrix in sync with the `get_font_manager()`
-// switch in skia_canvas.cpp.
+// shim in skia_canvas_fonts.cpp.
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)

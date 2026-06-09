@@ -21,6 +21,7 @@
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontStyle.h"
+#include "include/core/SkImageInfo.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkRefCnt.h"
 
@@ -96,7 +97,7 @@ inline sk_sp<SkColorSpace> sk_color_space_from_webgpu_format(const std::string& 
 // works in void methods.
 #define GUARD_CANVAS if (!canvas_) return
 
-// Process-wide platform SkFontMgr. Defined in skia_canvas.cpp.
+// Process-wide platform SkFontMgr. Defined in skia_canvas_fonts.cpp.
 sk_sp<SkFontMgr> get_font_manager();
 
 // Build a stroke SkPaint for the given color + width. Defined in
