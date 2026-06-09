@@ -608,6 +608,33 @@ def _first_text(n):
             return t
     return ""
 
+# A Figma node's auto-generated layer name (the designer never renamed it) carries
+# no semantic meaning — "Ellipse 12", "Rectangle 5", "Frame 41", a bare number, …
+_DEFAULT_NAME_RE = re.compile(
+    r"^(ellipse|rectangle|rect|frame|group|vector|line|polygon|star|component|"
+    r"instance|union|subtract|intersect|exclude|slice|boolean|arrow|image|mask)"
+    r"\s*\d*$", re.IGNORECASE)
+# Structural/kind words that name WHAT a control is, not the parameter it drives —
+# using them as a param name ("Dropdown", "Search") is noise, so drop them too.
+_LABEL_NOISE = {
+    "knob", "dial", "dropdown", "stepper", "tab", "tabs", "tab_group", "tabgroup",
+    "search", "button", "btn", "slider", "fader", "combo", "combobox", "select",
+    "field", "input", "control", "value", "param", "parameter", "widget", "icon",
+}
+
+def _node_label(name):
+    """A human-readable parameter name from a Figma layer name, or '' when the
+    name is auto-generated (Ellipse 12) or a structural/kind word (Dropdown) —
+    i.e. only when the designer named the layer something meaningful. Consumers
+    fall back to the binding key on ''. Conservative on purpose: a wrong name is
+    worse than the synthetic key, so anything ambiguous yields ''."""
+    s = (name or "").strip()
+    if not s or _DEFAULT_NAME_RE.match(s):
+        return ""
+    if s.lower() in _LABEL_NOISE:
+        return ""
+    return s
+
 def _solid_fill_hex(n):
     """The node's first visible SOLID fill as '#RRGGBB', or '' if none."""
     for f in (n.get("fills") or []):
@@ -944,10 +971,56 @@ def apply_faithful_vector(root_node, figma_root, svg, file_key, node_id, out_dir
     elements += _name_override_knobs(figma_root, knob_names, elements)
     elements += detect_overlay_controls(figma_root, root_abs, (px, py))
 
+    _label_elements(elements, figma_root, root_abs)
+
     root_node["render_mode"] = "faithful_svg"
     root_node["svg_asset_id"] = asset_id
     root_node["interactive_elements"] = elements
     return entry
+
+def _label_elements(elements, figma_root, root_abs):
+    """Attach a human-readable `label` (the generated-parameter name) to each
+    interactive element from its source Figma layer name, when meaningful (see
+    _node_label). Overlay controls already carry source_node_id → look the node up
+    directly; geometry-detected knobs have no node link, so match the named node
+    whose frame-local center lands within the knob's hit radius (same coordinate
+    convention as _name_override_knobs). Sets `label` only when non-empty, so an
+    unnamed control keeps falling back to its binding key — no regression."""
+    ox, oy = root_abs
+    # id -> node, and a flat list of (cx_local, cy_local, label) for named leaves.
+    id2node = {}
+    named_pts = []  # (cx, cy, label)
+    def walk(n):
+        nid = n.get("id")
+        if nid:
+            id2node[nid] = n
+        bb = n.get("absoluteBoundingBox")
+        lbl = _node_label(n.get("name", ""))
+        if bb and lbl:
+            cx = bb.get("x", 0.0) - ox + bb.get("width", 0.0) / 2.0
+            cy = bb.get("y", 0.0) - oy + bb.get("height", 0.0) / 2.0
+            named_pts.append((cx, cy, lbl))
+        for c in n.get("children", []) or []:
+            walk(c)
+    walk(figma_root)
+
+    for el in elements:
+        sid = el.get("source_node_id")
+        if sid and sid in id2node:
+            lbl = _node_label(id2node[sid].get("name", ""))
+            if lbl:
+                el["label"] = lbl
+            continue
+        # Geometry knob: nearest named node whose center is within the hit radius.
+        if el.get("kind") == "knob":
+            kx, ky, r = el.get("cx", 0.0), el.get("cy", 0.0), el.get("hit_radius", 0.0)
+            best, bd = None, 1e18
+            for cx, cy, lbl in named_pts:
+                d2 = (cx - kx) ** 2 + (cy - ky) ** 2
+                if d2 <= r * r and d2 < bd:
+                    bd, best = d2, lbl
+            if best:
+                el["label"] = best
 
 def _rewrite_image_fills(node, ref_to_rel):
     """Replace style.background_image 'pending:<ref>' with the resolved relative

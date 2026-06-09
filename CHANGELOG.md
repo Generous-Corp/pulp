@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03860"></a>
+## [0.386.0] - 2026-06-09
+
+- feat(import): IMPORTER_TERMS accept-gate + provenance PR-check ([#3681](https://github.com/danielraffel/pulp/pull/3681))
+- refactor: migrate WidgetBridge style-state registrar to API registry ([#3678](https://github.com/danielraffel/pulp/pull/3678))
+- feat(design-import): IRInteractiveElement.label — caption -> generated-param name ([#3671](https://github.com/danielraffel/pulp/pull/3671))
+- refactor: migrate WidgetBridge value-list registrar to API registry ([#3675](https://github.com/danielraffel/pulp/pull/3675))
+
 <a id="v03850"></a>
 ## [0.385.0] - 2026-06-08
 
@@ -3954,6 +3962,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.386.0]: https://github.com/danielraffel/pulp/releases/tag/v0.386.0
 [0.385.0]: https://github.com/danielraffel/pulp/releases/tag/v0.385.0
 [0.384.0]: https://github.com/danielraffel/pulp/releases/tag/v0.384.0
 [0.383.0]: https://github.com/danielraffel/pulp/releases/tag/v0.383.0

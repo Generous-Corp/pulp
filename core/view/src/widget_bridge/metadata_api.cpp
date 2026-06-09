@@ -1,6 +1,7 @@
 // widget_bridge/metadata_api.cpp - metadata registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -27,8 +28,10 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
 } // namespace
 
 void WidgetBridge::register_metadata_removal_api() {
+    BridgeApiContext api{engine_};
+
     // removeWidget(id)
-    engine_.register_function("removeWidget", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "removeWidget", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         if (auto* w = widget(id)) {
             View* parent = w->parent();
@@ -42,14 +45,16 @@ void WidgetBridge::register_metadata_removal_api() {
 }
 
 void WidgetBridge::register_metadata_source_api() {
-    engine_.register_function("setAnchor", [this](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setAnchor", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto anchor = args.get<std::string>(1, "");
         if (auto* v = widget(id)) v->set_anchor_id(std::move(anchor));
         return choc::value::Value();
     });
 
-    engine_.register_function("setSource", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSource", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto file = args.get<std::string>(1, "");
         auto line = static_cast<int>(args.get<double>(2, 0.0));
@@ -62,8 +67,10 @@ void WidgetBridge::register_metadata_source_api() {
 }
 
 void WidgetBridge::register_metadata_computed_api() {
+    BridgeApiContext api{engine_};
+
     // getComputedValue(id, prop) -> string
-    engine_.register_function("getComputedValue", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getComputedValue", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto prop = args.get<std::string>(1, "");
         auto* v = widget(id);

@@ -1,15 +1,18 @@
 // widget_bridge/shader_api.cpp - shader registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 
 namespace pulp::view {
 
 void WidgetBridge::register_shader_widget_api() {
+    BridgeApiContext api{engine_};
+
     // compileShader(sksl_code) -> {success: bool, error: string}
     // Validates SkSL shader code by actually compiling via SkRuntimeEffect.
-    engine_.register_function("compileShader", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "compileShader", [](choc::javascript::ArgumentList args) {
         auto code = args.get<std::string>(0, "");
         auto result = choc::value::createObject("");
         if (code.empty()) {
@@ -24,7 +27,7 @@ void WidgetBridge::register_shader_widget_api() {
     });
 
     // setWidgetShader(id, skslCode) -> apply custom GPU shader to widget body.
-    engine_.register_function("setWidgetShader", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWidgetShader", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto sksl = args.get<std::string>(1, "");
         auto* v = widget(id);
@@ -37,7 +40,7 @@ void WidgetBridge::register_shader_widget_api() {
     });
 
     // clearWidgetShader(id) -> remove custom shader, restore default paint.
-    engine_.register_function("clearWidgetShader", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "clearWidgetShader", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = widget(id);
         if (!v) return choc::value::Value();
@@ -51,9 +54,11 @@ void WidgetBridge::register_shader_widget_api() {
 }
 
 void WidgetBridge::register_shader_canvas_api() {
+    BridgeApiContext api{engine_};
+
     // WebGPU shader: applyShader(canvasId, skslCode) -> applies a custom shader to canvas.
     // Uses the existing Skia/Dawn pipeline; SkSL shaders compile at runtime.
-    engine_.register_function("applyShader", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "applyShader", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto code = args.get<std::string>(1, "");
         auto* v = widget(id);

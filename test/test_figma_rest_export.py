@@ -462,5 +462,63 @@ class FaithfulVectorDefaultTest(unittest.TestCase):
         self.assertTrue(args.faithful_vector)
 
 
+class ElementLabelTest(unittest.TestCase):
+    """§2.1 importer auto-labeling: an interactive element gets a `label` (the
+    generated-parameter name) from its meaningfully-named source Figma layer, and
+    nothing when the layer name is auto-generated or a structural/kind word."""
+
+    def test_node_label_filters_default_and_noise_names(self):
+        self.assertEqual(frx._node_label("Cutoff"), "Cutoff")
+        self.assertEqual(frx._node_label("  Delay Mode  "), "Delay Mode")
+        for default in ("Ellipse 12", "Rectangle", "Frame 41", "Group 3",
+                        "Vector", "Instance 2", "Boolean"):
+            self.assertEqual(frx._node_label(default), "", default)
+        for noise in ("Knob", "dropdown", "Search", "Value", "field", "Tabs"):
+            self.assertEqual(frx._node_label(noise), "", noise)
+        self.assertEqual(frx._node_label(""), "")
+
+    def test_overlay_label_from_source_node_name(self):
+        figma_root = {
+            "id": "root",
+            "absoluteBoundingBox": {"x": 100, "y": 100, "width": 1000, "height": 600},
+            "children": [
+                {"id": "d1", "name": "Delay Mode",
+                 "absoluteBoundingBox": {"x": 700, "y": 140, "width": 120, "height": 28}},
+                {"id": "s1", "name": "Search",  # structural word → no label
+                 "absoluteBoundingBox": {"x": 140, "y": 200, "width": 280, "height": 32}},
+            ],
+        }
+        elements = [
+            {"kind": "dropdown", "source_node_id": "d1"},
+            {"kind": "text_field", "source_node_id": "s1"},
+        ]
+        frx._label_elements(elements, figma_root, (100.0, 100.0))
+        self.assertEqual(elements[0].get("label"), "Delay Mode")
+        self.assertNotIn("label", elements[1])  # "Search" filtered → key absent
+
+    def test_geometry_knob_label_from_overlapping_named_node(self):
+        # frame origin (100,100); a "Cutoff" node centered at frame-local (60,60),
+        # a default-named ellipse centered at (260,60).
+        figma_root = {
+            "id": "root",
+            "absoluteBoundingBox": {"x": 100, "y": 100, "width": 1000, "height": 600},
+            "children": [
+                {"id": "k1", "name": "Cutoff",
+                 "absoluteBoundingBox": {"x": 140, "y": 140, "width": 40, "height": 40}},
+                {"id": "k2", "name": "Ellipse 7",  # auto-generated → no label
+                 "absoluteBoundingBox": {"x": 340, "y": 140, "width": 40, "height": 40}},
+            ],
+        }
+        elements = [
+            {"kind": "knob", "cx": 60.0, "cy": 60.0, "hit_radius": 30.0},    # over "Cutoff"
+            {"kind": "knob", "cx": 260.0, "cy": 60.0, "hit_radius": 30.0},   # over the ellipse
+            {"kind": "knob", "cx": 900.0, "cy": 500.0, "hit_radius": 30.0},  # over nothing
+        ]
+        frx._label_elements(elements, figma_root, (100.0, 100.0))
+        self.assertEqual(elements[0].get("label"), "Cutoff")
+        self.assertNotIn("label", elements[1])  # default-named node → no label
+        self.assertNotIn("label", elements[2])  # no overlapping named node
+
+
 if __name__ == "__main__":
     unittest.main()

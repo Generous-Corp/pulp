@@ -595,9 +595,21 @@ Pieces, source-of-truth → runtime:
 - **IR** — a node opts in with `render_mode = NodeRenderMode::faithful_svg`,
   points `svg_asset_id` at an `IRAssetManifest` entry (mime `image/svg+xml`),
   and carries `interactive_elements[]` (`IRInteractiveElement`: cx, cy,
-  hit_radius, svg_patch_d, default_value, source_node_id). These are
+  hit_radius, svg_patch_d, default_value, source_node_id, **label**). These are
   source-side semantics filled by the importer, NOT inferred from the SVG.
   `InteractiveElementKind` is deliberately separate from `AudioWidgetType`.
+- **Element labels (§2.1 auto-labeling)** — `label` is the human-readable
+  parameter NAME a host shows (embed ABI v5 `PulpEmbedParamInfo.name`), taken
+  from the control's source Figma **layer name** when meaningful. The REST lane's
+  `_node_label()` is deliberately conservative — it returns `""` (→ consumer
+  falls back to the binding key, no regression) for auto-generated names
+  (`Ellipse 12`, `Frame 41`, bare numbers) AND structural/kind words
+  (`Dropdown`, `Search`, `Knob`, `Value`, …), because a WRONG name is worse than
+  the synthetic key. `_label_elements()` assigns it: overlays resolve via their
+  `source_node_id`; geometry knobs (no node link) match the named node whose
+  frame-local center lands within the knob's hit radius (same coordinate
+  convention as `_name_override_knobs`). unit/range are a follow-up — only the
+  name flows today. Plugin-lane (TS) parity is the remaining lockstep item.
 - **Producer (REST lane)** — `figma_rest_export.py` (faithful-vector default-on;
   `--no-faithful-vector` for the legacy flat export) fetches
   the frame's own SVG (`/images?format=svg`, or `--frame-svg FILE` offline),
