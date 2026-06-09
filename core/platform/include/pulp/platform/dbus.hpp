@@ -48,6 +48,15 @@ public:
     /// when no session bus is reachable. Idempotent (returns true if already
     /// connected).
     bool connect_session();
+
+    /// Connect to the SYSTEM bus. System services (BlueZ / org.bluez, UPower,
+    /// NetworkManager, …) live on the system bus, not the per-login session bus,
+    /// so a client that needs to talk to them connects here instead of
+    /// connect_session(). Returns false off Linux, without libdbus, or when no
+    /// system bus is reachable. Idempotent (returns true if already connected).
+    /// A given DBus connects to exactly one bus — call this XOR connect_session().
+    bool connect_system();
+
     bool connected() const;
 
     /// Switch this DBus over to the desktop accessibility ("a11y") bus.
@@ -259,10 +268,56 @@ public:
                      const std::function<void(Reader&)>& read_reply,
                      int timeout_ms = 5000);
 
+    // ── Signal subscription (broadcast, BYPASSES the object-path vtable) ─────
+    //
+    // D-Bus signals are broadcast messages, not method calls: they never reach
+    // the object-path vtable / trampoline (which only routes method calls).
+    // Receiving them requires (a) an org.freedesktop.DBus match rule so the
+    // broker delivers them to this connection, and (b) a libdbus connection
+    // FILTER that inspects each incoming message. Both are installed here.
+    // Matching signals are routed to handlers during dispatch().
+
+    /// Handler invoked for each matching signal. `args` is a Reader positioned at
+    /// the signal body; it is valid only for the duration of the call.
+    using SignalHandler = std::function<void(const std::string& path,
+                                             const std::string& interface,
+                                             const std::string& member,
+                                             Reader& args)>;
+
+    /// Subscribe to signals matching interface+member (member empty = any member
+    /// of the interface). Adds the org.freedesktop.DBus match rule and routes
+    /// matching signals to `handler` during dispatch(). Returns a token (>0) to
+    /// pass to remove_signal_handler(); returns 0 off Linux / without a connection.
+    unsigned add_signal_handler(const std::string& interface,
+                                const std::string& member,
+                                SignalHandler handler);
+    /// Remove a signal handler previously returned by add_signal_handler().
+    /// Returns false off Linux / for an unknown token. The match rule is left in
+    /// place (harmless extra delivery; removing it precisely would require
+    /// reference-counting identical rules across tokens).
+    bool remove_signal_handler(unsigned token);
+
+    /// Call org.freedesktop.DBus.ObjectManager.GetManagedObjects on
+    /// destination/path and invoke `per_object(object_path, interface_name)` for
+    /// every (object, interface) pair discovered. Property values are skipped
+    /// (callers re-query specific props via call_method as needed). Returns false
+    /// off Linux / on transport error.
+    bool get_managed_objects(const std::string& destination,
+                             const std::string& path,
+                             const std::function<void(const std::string& obj_path,
+                                                      const std::string& interface)>& per_object,
+                             int timeout_ms = 5000);
+
     DBus(const DBus&) = delete;
     DBus& operator=(const DBus&) = delete;
 
 private:
+    /// Shared body of connect_session()/connect_system(): dlopen libdbus, resolve
+    /// symbols, and open a private connection to `bus_type` (DBUS_BUS_SESSION = 0,
+    /// DBUS_BUS_SYSTEM = 1). Idempotent via connected(). Linux-only; the non-Linux
+    /// build never calls it (connect_session/connect_system are no-ops there).
+    bool connect_bus(int bus_type);
+
     struct Impl;
     Impl* impl_ = nullptr;
 };
