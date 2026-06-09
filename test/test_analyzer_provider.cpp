@@ -178,7 +178,7 @@ TEST_CASE("AnalyzerProvider filters package availability and licensing outside R
 TEST_CASE("AnalyzerProvider exposes built-in analysis descriptors",
           "[audio][analysis][provider]") {
     const auto builtins = built_in_analyzer_descriptors();
-    REQUIRE(builtins.size() == 4);
+    REQUIRE(builtins.size() == 5);
 
     AnalyzerProviderRegistry registry;
     for (const auto& descriptor : builtins) {
@@ -196,6 +196,10 @@ TEST_CASE("AnalyzerProvider exposes built-in analysis descriptors",
     REQUIRE(key_descriptors.size() == 1);
     REQUIRE(key_descriptors[0].is_fallback);
     REQUIRE(registry.descriptors_for(AnalyzerCapability::TempoDetection).size() == 1);
+    const auto transient_descriptors =
+        registry.descriptors_for(AnalyzerCapability::TransientClassification);
+    REQUIRE(transient_descriptors.size() == 1);
+    REQUIRE(transient_descriptors[0].is_fallback);
     REQUIRE(registry.descriptors_for(AnalyzerCapability::BeatDetection).empty());
     REQUIRE(std::string_view(analyzer_capability_name(AnalyzerCapability::PitchShift)) ==
             "pitch-shift");

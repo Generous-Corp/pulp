@@ -364,6 +364,11 @@ std::vector<AnalyzerDescriptor> built_in_analyzer_descriptors() {
                              AnalyzerCapability::TempoDetection},
                             AnalyzerExecutionContext::BackgroundThread,
                             true),
+        built_in_descriptor("builtin.transient-classifier",
+                            "Built-in Basic Transient Classifier",
+                            {AnalyzerCapability::TransientClassification},
+                            AnalyzerExecutionContext::BackgroundThread,
+                            true),
     };
 }
 

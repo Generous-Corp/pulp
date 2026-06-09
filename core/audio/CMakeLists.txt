@@ -26,6 +26,7 @@ target_sources(pulp-audio PRIVATE
     src/mmap_reader.cpp
     src/buffer_ops.cpp
     src/built_in_key_tempo_analyzer.cpp
+    src/built_in_transient_classifier.cpp
     src/audio_stream_handoff.cpp
     src/instrument_envelope.cpp
     src/instrument_runtime.cpp
