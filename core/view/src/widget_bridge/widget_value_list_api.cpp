@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_list_api.cpp - list value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <pulp/view/ui_components.hpp>
 
@@ -11,7 +12,9 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_value_list_api() {
-    engine_.register_function("setListItems", [this](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setListItems", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = widget(id); if (!v) return choc::value::Value{};
         if (auto* lb = dynamic_cast<ListBox*>(v)) {
@@ -26,7 +29,7 @@ void WidgetBridge::register_widget_value_list_api() {
         return choc::value::Value{};
     });
 
-    engine_.register_function("setListSelected", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListSelected", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = widget(id); if (!v) return choc::value::Value{};
         if (auto* lb = dynamic_cast<ListBox*>(v)) {
@@ -36,7 +39,7 @@ void WidgetBridge::register_widget_value_list_api() {
         return choc::value::Value{};
     });
 
-    engine_.register_function("setListRowHeight", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListRowHeight", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = widget(id); if (!v) return choc::value::Value{};
         if (auto* lb = dynamic_cast<ListBox*>(v))
