@@ -206,7 +206,7 @@ and the iOS static-only limits.
 |---|---|---|---|---|
 | ParamValue (lock-free atomic float) | stable | [state](modules.md#state) | [modules](modules.md#state) | all |
 | ParamInfo (metadata, range, units) | stable | [state](modules.md#state) | | all |
-| ParamRange (normalize / denormalize) | stable | [state](modules.md#state) | | |
+| ParamRange (normalize / denormalize, linear + skew/symmetric shaped) | stable | [state](modules.md#state) | | |
 | StateStore (centralized parameter registry) | stable | [state](modules.md#state) | | all |
 | Parameter groups | stable | [state](modules.md#state) | | |
 | Binding (reactive UI-parameter link) | stable | [state](modules.md#state) | | |
