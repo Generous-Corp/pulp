@@ -1,11 +1,12 @@
 """Pure queue policy helpers for local CI.
 
 This module owns job identity, enqueue duplicate/priority policy, priority
-ordering, supersedence, cancellation result payloads, summaries, stale-running
-job selection/replacement/requeue state, runner-info active-target mutation,
-completed-job state mutation, and completed-queue retention. Higher-level queue
-mutation, locking, runner liveness, result persistence, and drain orchestration
-remain in local_ci.py until later extraction slices.
+ordering, enqueue supersedence candidate selection, cancellation result
+payloads, summaries, stale-running job selection/replacement/requeue state,
+runner-info active-target mutation, completed-job state mutation, and
+completed-queue retention. Higher-level queue mutation, locking, runner
+liveness, result persistence, and drain orchestration remain in local_ci.py
+until later extraction slices.
 """
 
 from __future__ import annotations
@@ -160,6 +161,17 @@ def supersedence_reason(newer_job: dict, older_job: dict) -> str | None:
     if job_has_narrower_same_identity_scope(newer_job, older_job):
         return "narrower_scope_queued"
     return None
+
+
+def pending_supersedence_candidates_unlocked(queue: list[dict], newer_job: dict) -> list[tuple[dict, str]]:
+    candidates: list[tuple[dict, str]] = []
+    for job in queue:
+        if job.get("status") != "pending":
+            continue
+        reason = supersedence_reason(newer_job, job)
+        if reason:
+            candidates.append((job, reason))
+    return candidates
 
 
 def supersedence_result(

@@ -2549,12 +2549,8 @@ def enqueue_job(
 
         job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
         queue.append(job)
-        for existing in queue:
-            if existing.get("status") != "pending":
-                continue
-            reason = supersedence_reason(job, existing)
-            if reason:
-                supersede_job_unlocked(existing, job["id"], reason)
+        for existing, reason in _queue_orchestrator.pending_supersedence_candidates_unlocked(queue, job):
+            supersede_job_unlocked(existing, job["id"], reason)
         save_queue_unlocked(trim_completed_jobs(queue))
         return job, True
 

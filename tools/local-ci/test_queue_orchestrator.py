@@ -176,6 +176,15 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertEqual(self.mod.supersedence_reason(newer_sha, older), "newer_sha_queued")
         self.assertEqual(self.mod.supersedence_reason(narrower, older), "narrower_scope_queued")
         self.assertIsNone(self.mod.supersedence_reason(older, older))
+        completed_older = dict(older, id="completed", fingerprint="completed", status="completed")
+        older["status"] = "pending"
+        self.assertEqual(
+            self.mod.pending_supersedence_candidates_unlocked(
+                [older, completed_older, newer_sha],
+                newer_sha,
+            ),
+            [(older, "newer_sha_queued")],
+        )
 
         superseded = self.mod.supersedence_result(
             older,
