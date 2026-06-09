@@ -1,5 +1,6 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/signal/multi_channel_meter.hpp>
 #include <pulp/view/buttons.hpp>  // TextButton (momentary Done)
 #include <algorithm>
 #include <cmath>
@@ -10,6 +11,67 @@ namespace pulp::format {
 namespace {
 
 constexpr const char* kInputNotUsedText = "(Not used by this instrument)";
+
+bool rate_matches(double a, double b) {
+    return std::abs(a - b) < 1.0;
+}
+
+void constrain_rates(std::vector<double>& rates, const std::vector<double>& allowed) {
+    if (allowed.empty()) return;
+
+    std::vector<double> filtered;
+    for (double rate : rates) {
+        for (double allowed_rate : allowed) {
+            if (rate_matches(rate, allowed_rate)) {
+                filtered.push_back(allowed_rate);
+                break;
+            }
+        }
+    }
+    if (filtered.empty()) filtered = allowed;
+    std::sort(filtered.begin(), filtered.end());
+    filtered.erase(std::unique(filtered.begin(), filtered.end(),
+                               [](double a, double b) { return rate_matches(a, b); }),
+                   filtered.end());
+    rates = std::move(filtered);
+}
+
+void constrain_buffers(std::vector<int>& buffers, const std::vector<int>& allowed) {
+    if (allowed.empty()) return;
+
+    std::vector<int> filtered;
+    for (int buffer : buffers) {
+        if (std::find(allowed.begin(), allowed.end(), buffer) != allowed.end())
+            filtered.push_back(buffer);
+    }
+    if (filtered.empty()) filtered = allowed;
+    std::sort(filtered.begin(), filtered.end());
+    filtered.erase(std::unique(filtered.begin(), filtered.end()), filtered.end());
+    buffers = std::move(filtered);
+}
+
+signal::MultiChannelMeterData to_multi_channel_meter(const view::MeterData& data) {
+    signal::MultiChannelMeterData out;
+    out.num_channels = std::clamp(data.num_channels, 0, signal::kMaxMeterChannels);
+    for (int ch = 0; ch < out.num_channels; ++ch) {
+        out.channels[static_cast<size_t>(ch)].peak = data.peak[ch];
+        out.channels[static_cast<size_t>(ch)].rms = data.rms[ch];
+        out.channels[static_cast<size_t>(ch)].clipped = data.peak[ch] >= 1.0f;
+    }
+    return out;
+}
+
+void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter) {
+    if (!bridge || !meter) return;
+
+    view::MeterData data;
+    if (!bridge->pop_latest_meter(data)) return;
+
+    auto converted = to_multi_channel_meter(data);
+    meter->set_channel_count(converted.num_channels);
+    meter->update(converted, 1.0f / 30.0f);
+    meter->request_repaint();
+}
 
 }  // namespace
 
@@ -135,6 +197,13 @@ void SettingsPanel::build_audio_tab() {
     meter->set_channel_count(2);
     meter->flex().preferred_height = 24.0f;
     audio_tab->add_child(std::move(meter));
+
+    audio_tab->add_child(make_section_label("Output Level"));
+    auto out_meter = std::make_unique<view::MultiMeter>();
+    output_meter_ = out_meter.get();
+    out_meter->set_channel_count(2);
+    out_meter->flex().preferred_height = 24.0f;
+    audio_tab->add_child(std::move(out_meter));
 
     // Test tone section. Header line: "Test Signal" on the left, the "Sine Tone" switch on
     // the right; the frequency dropdown sits full-width on its own line below so it never
@@ -348,6 +417,8 @@ void SettingsPanel::rebuild_rate_and_buffer_lists() {
         available_rates_ = { 44100, 48000, 88200, 96000, 176400, 192000 };
     if (available_buffers_.empty())
         available_buffers_ = { 64, 128, 256, 512, 1024, 2048, 4096 };
+    constrain_rates(available_rates_, current_config_.allowed_sample_rates);
+    constrain_buffers(available_buffers_, current_config_.allowed_buffer_sizes);
 
     if (sample_rate_combo_) {
         std::vector<std::string> items;
@@ -407,7 +478,7 @@ int SettingsPanel::current_sample_rate_index() const {
     if (available_rates_.empty()) return -1;
 
     for (size_t i = 0; i < available_rates_.size(); ++i) {
-        if (std::abs(available_rates_[i] - current_config_.sample_rate) < 1.0)
+        if (rate_matches(available_rates_[i], current_config_.sample_rate))
             return static_cast<int>(i);
     }
 
@@ -489,15 +560,8 @@ void SettingsPanel::poll() {
     if (midi_changed_.exchange(false, std::memory_order_relaxed))
         rebuild_midi_list();
 
-    // Update input meters
-    if (input_bridge_ && input_meter_) {
-        view::MeterData data;
-        if (input_bridge_->pop_latest_meter(data)) {
-            // Convert to MultiChannelMeterData for MultiMeter::update()
-            // For now, just trigger a repaint — the meter draws from its own ballistics
-            // A future enhancement could feed raw peak/rms into the meter
-        }
-    }
+    update_meter_from_bridge(input_bridge_, input_meter_);
+    update_meter_from_bridge(output_bridge_, output_meter_);
 }
 
 } // namespace pulp::format

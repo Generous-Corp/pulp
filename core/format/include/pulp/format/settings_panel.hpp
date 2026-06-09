@@ -41,6 +41,7 @@ public:
 
     /// Provide an AudioBridge for input level metering.
     void set_input_meter_bridge(view::AudioBridge* bridge) { input_bridge_ = bridge; }
+    void set_output_meter_bridge(view::AudioBridge* bridge) { output_bridge_ = bridge; }
 
     /// Append a plugin-contributed settings tab after the host-owned Audio/MIDI tabs.
     /// Lets a plugin surface its own settings (e.g. a model picker) in one unified panel.
@@ -68,6 +69,7 @@ private:
     audio::AudioSystem* audio_sys_ = nullptr;
     midi::MidiSystem* midi_sys_ = nullptr;
     view::AudioBridge* input_bridge_ = nullptr;
+    view::AudioBridge* output_bridge_ = nullptr;
 
     StandaloneConfig current_config_;
 
@@ -82,6 +84,7 @@ private:
     view::ComboBox* buffer_size_combo_ = nullptr;
     view::Label* latency_label_ = nullptr;
     view::MultiMeter* input_meter_ = nullptr;
+    view::MultiMeter* output_meter_ = nullptr;
     view::Toggle* test_tone_toggle_ = nullptr;
     view::ComboBox* tone_freq_combo_ = nullptr;
 

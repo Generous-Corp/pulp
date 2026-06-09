@@ -130,7 +130,8 @@ private:
         midi::MidiSystem*,
         view::AudioBridge*,
         StandaloneSettingsActions,
-        std::vector<Processor::SettingsSection>);
+        std::vector<Processor::SettingsSection>,
+        view::AudioBridge*);
 
     view::View* window_root_ = nullptr;
     SettingsPanel* settings_panel_ = nullptr;
@@ -146,7 +147,8 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     midi::MidiSystem* midi_system,
     view::AudioBridge* input_bridge,
     StandaloneSettingsActions actions,
-    std::vector<Processor::SettingsSection> plugin_sections = {}) {
+    std::vector<Processor::SettingsSection> plugin_sections = {},
+    view::AudioBridge* output_bridge = nullptr) {
     StandaloneEditorChrome chrome(std::move(editor_root));
     if (!config.show_settings_tab) {
         return chrome;
@@ -157,6 +159,7 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     settings_panel->bind_systems(audio_system, midi_system);
     settings_panel->set_current_config(config);
     settings_panel->set_input_meter_bridge(input_bridge);
+    settings_panel->set_output_meter_bridge(output_bridge);
     settings_panel->set_callbacks(
         make_standalone_settings_callbacks(*settings_panel, std::move(actions)));
 

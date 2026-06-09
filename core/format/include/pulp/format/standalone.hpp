@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace pulp::format {
 
@@ -23,11 +24,20 @@ struct StandaloneConfig {
     int buffer_size = 256;
     int output_channels = 2;
     int input_channels = 0;
+    // Optional host constraints. When non-empty, the standalone settings UI
+    // only offers these values and persisted settings outside the list are
+    // clamped back to the first allowed value.
+    std::vector<double> allowed_sample_rates;
+    std::vector<int> allowed_buffer_sizes;
     // Capability flag for apps/instruments that do not consume audio input.
     // The standalone host derives this from the processor descriptor at
     // startup, and the settings UI uses it to avoid presenting an unusable
     // input-device workflow for instrument-only apps.
     bool supports_audio_input = true;
+    // Effects usually want the test signal as input. Instruments have no
+    // audio input, so their test tone should exercise the selected output
+    // device directly.
+    bool route_test_signal_to_output = false;
     // When true, run_with_editor() avoids showing/activating the native
     // window. Use with screenshot_path for CI/test smoke runs.
     bool headless = false;
@@ -86,6 +96,7 @@ public:
 
     TestSignalSource& test_signal() { return test_signal_; }
     view::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
+    view::AudioBridge& output_meter_bridge() { return output_meter_bridge_; }
     audio::AudioSystem* audio_system() { return audio_system_.get(); }
     midi::MidiSystem* midi_system() { return midi_system_.get(); }
 
@@ -140,11 +151,14 @@ private:
 
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;
+    view::AudioBridge output_meter_bridge_;
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
     audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input
     std::vector<float*> test_ptrs_;           // Pre-allocated channel pointers
+    std::vector<float*> direct_output_ptrs_;  // Pre-allocated for output test signal
     std::vector<const float*> silence_ptrs_;  // Pre-allocated silence channel pointers
     std::vector<const float*> meter_ptrs_;    // Pre-allocated for meter analysis
+    std::vector<const float*> output_meter_ptrs_;
 };
 
 } // namespace pulp::format

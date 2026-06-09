@@ -9,7 +9,9 @@
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <string_view>
 
 // WYSIWYG P6 FIX 5 — the dev inspector (Cmd+I overlay) is gated behind the
@@ -35,6 +37,34 @@
 #include <pulp/runtime/system.hpp>
 
 namespace pulp::format {
+
+namespace {
+
+bool rate_matches(double a, double b) {
+    return std::abs(a - b) < 1.0;
+}
+
+void constrain_audio_config(StandaloneConfig& config) {
+    if (!config.allowed_sample_rates.empty()) {
+        const auto it = std::find_if(config.allowed_sample_rates.begin(),
+                                     config.allowed_sample_rates.end(),
+                                     [&](double allowed) {
+                                         return rate_matches(config.sample_rate, allowed);
+                                     });
+        if (it == config.allowed_sample_rates.end())
+            config.sample_rate = config.allowed_sample_rates.front();
+    }
+
+    if (!config.allowed_buffer_sizes.empty()) {
+        const auto it = std::find(config.allowed_buffer_sizes.begin(),
+                                  config.allowed_buffer_sizes.end(),
+                                  config.buffer_size);
+        if (it == config.allowed_buffer_sizes.end())
+            config.buffer_size = config.allowed_buffer_sizes.front();
+    }
+}
+
+}  // namespace
 
 StandaloneApp::StandaloneApp(ProcessorFactory factory)
     : factory_(factory)
@@ -76,6 +106,7 @@ bool StandaloneApp::start() {
     if (!config_.supports_audio_input) {
         config_.input_channels = 0;
     }
+    constrain_audio_config(config_);
 
     // Set up audio
     audio_system_ = audio::create_audio_system();
@@ -118,6 +149,8 @@ bool StandaloneApp::start() {
     for (int c = 0; c < test_ch; ++c)
         test_ptrs_[static_cast<size_t>(c)] = test_buffer_.view().channel_ptr(static_cast<size_t>(c));
     meter_ptrs_.resize(static_cast<size_t>(std::max(test_ch, config_.input_channels)));
+    direct_output_ptrs_.resize(static_cast<size_t>(std::max(config_.output_channels, 2)));
+    output_meter_ptrs_.resize(static_cast<size_t>(std::max(config_.output_channels, 2)));
 
     // Pre-allocate silence buffer for when no input device is available
     int silence_ch = std::max(config_.output_channels, 2);
@@ -175,6 +208,28 @@ bool StandaloneApp::start() {
                 : 0.0;
         ui_midi_collector_.drain_into(midi_in, block_start_seconds,
                                       ctx.buffer_size, ctx.sample_rate);
+
+        if (test_signal_.is_active() && config_.route_test_signal_to_output) {
+            const size_t out_ch = std::min(output.num_channels(), direct_output_ptrs_.size());
+            for (size_t c = 0; c < out_ch; ++c)
+                direct_output_ptrs_[c] = output.channel_ptr(c);
+            test_signal_.fill(direct_output_ptrs_.data(),
+                              static_cast<int>(out_ch),
+                              ctx.buffer_size);
+            for (size_t c = 0; c < out_ch && c < output_meter_ptrs_.size(); ++c)
+                output_meter_ptrs_[c] = output.channel_ptr(c);
+            if (out_ch > 0) {
+                output_meter_bridge_.analyze_and_push(
+                    output_meter_ptrs_.data(),
+                    static_cast<int>(out_ch),
+                    ctx.buffer_size);
+            }
+            if (config_.transport_playing) {
+                transport_position_samples_.fetch_add(
+                    ctx.buffer_size, std::memory_order_relaxed);
+            }
+            return;
+        }
 
         // Determine actual input: test signal overrides hardware input
         const audio::BufferView<const float>* actual_input = &input;
@@ -248,6 +303,16 @@ bool StandaloneApp::start() {
 
         processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
 
+        const size_t out_ch = std::min(output.num_channels(), output_meter_ptrs_.size());
+        for (size_t c = 0; c < out_ch; ++c)
+            output_meter_ptrs_[c] = output.channel_ptr(c);
+        if (out_ch > 0) {
+            output_meter_bridge_.analyze_and_push(
+                output_meter_ptrs_.data(),
+                static_cast<int>(out_ch),
+                ctx.buffer_size);
+        }
+
         // Advance the rolling sample clock so the next block reads a
         // monotonic timeline. Done after process() so the in-block
         // transport state is consistent with what the plugin saw.
@@ -277,6 +342,7 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     // dangle an editor ViewBridge holding a Processor& (#2693).
     if (was_running) stop_audio_keep_processor();
     config_ = new_config;
+    constrain_audio_config(config_);
     bool ok = true;
     if (was_running) ok = start();
     // Remember the user's device/rate/buffer selection across launches (default on),
@@ -335,7 +401,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto desc = processor_->descriptor();
 
     auto chrome = detail::make_standalone_editor_chrome(
-        std::move(root), effective_config, audio_system_.get(), midi_system_.get(), &input_meter_bridge_,
+        std::move(root), effective_config, audio_system_.get(), midi_system_.get(),
+        &input_meter_bridge_,
         detail::StandaloneSettingsActions{
             .apply_config = [this](const StandaloneConfig& cfg) {
                 return apply_config(cfg);
@@ -354,7 +421,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
                 if (play) test_signal_.play(); else test_signal_.stop();
             },
         },
-        processor_->settings_sections());  // plugin-contributed Settings tabs (e.g. Models)
+        processor_->settings_sections(),  // plugin-contributed Settings tabs (e.g. Models)
+        &output_meter_bridge_);
     auto* settings_ptr = chrome.settings_panel();
     auto& window_root = chrome.window_root();
 

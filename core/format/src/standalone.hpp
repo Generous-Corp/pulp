@@ -10,6 +10,7 @@
 #include <memory>
 #include <atomic>
 #include <string>
+#include <vector>
 
 namespace pulp::format {
 
@@ -21,7 +22,10 @@ struct StandaloneConfig {
     int buffer_size = 256;
     int output_channels = 2;
     int input_channels = 0;       // 0 = no input (instrument mode)
+    std::vector<double> allowed_sample_rates;
+    std::vector<int> allowed_buffer_sizes;
     bool supports_audio_input = true;
+    bool route_test_signal_to_output = false;
     // False = host the editor directly and omit the built-in Settings tab.
     bool show_settings_tab = true;
 };

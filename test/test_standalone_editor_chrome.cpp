@@ -555,6 +555,111 @@ TEST_CASE("SettingsPanel marks audio input unused for instrument-only configs",
     REQUIRE_FALSE(applied.supports_audio_input);
 }
 
+TEST_CASE("SettingsPanel constrains audio choices for fixed-rate instruments",
+          "[standalone][settings][audio]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "builtin-out",
+         .name = "Built-in Output",
+         .max_output_channels = 2,
+         .sample_rates = {44100.0, 48000.0, 96000.0},
+         .buffer_sizes = {64, 128, 256},
+         .is_default_output = true},
+        {.id = "usb-out",
+         .name = "USB Output",
+         .max_output_channels = 2,
+         .sample_rates = {48000.0},
+         .buffer_sizes = {64, 128}},
+    };
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, nullptr);
+
+    StandaloneConfig cfg;
+    cfg.sample_rate = 44100.0;
+    cfg.buffer_size = 256;
+    cfg.allowed_sample_rates = {48000.0};
+    cfg.allowed_buffer_sizes = {64};
+    panel.set_current_config(cfg);
+
+    StandaloneConfig applied;
+    int apply_calls = 0;
+    panel.set_callbacks(SettingsPanelCallbacks{
+        .on_config_apply = [&](const StandaloneConfig& next) {
+            applied = next;
+            ++apply_calls;
+        },
+    });
+
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    REQUIRE(audio_tab != nullptr);
+    auto combos = descendants<ComboBox>(*audio_tab);
+    REQUIRE(combos.size() >= 5);
+
+    REQUIRE(combos[2]->items().size() == 1);
+    REQUIRE(combos[2]->items()[0] == "48000 Hz");
+    REQUIRE(combos[2]->selected() == 0);
+    REQUIRE(combos[3]->items().size() == 1);
+    REQUIRE(combos[3]->items()[0].find("64 samples") == 0);
+    REQUIRE(combos[3]->selected() == 0);
+
+    combos[0]->set_selected(1);
+    REQUIRE(apply_calls == 1);
+    REQUIRE(applied.audio_device_id == "usb-out");
+    REQUIRE(applied.sample_rate == 48000.0);
+    REQUIRE(applied.buffer_size == 64);
+}
+
+TEST_CASE("SettingsPanel updates input and output meters from audio bridges",
+          "[standalone][settings][audio][meter]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "builtin-out",
+         .name = "Built-in Output",
+         .max_output_channels = 2,
+         .sample_rates = {48000.0},
+         .buffer_sizes = {64},
+         .is_default_output = true},
+    };
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, nullptr);
+
+    AudioBridge input_bridge;
+    AudioBridge output_bridge;
+    panel.set_input_meter_bridge(&input_bridge);
+    panel.set_output_meter_bridge(&output_bridge);
+
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    REQUIRE(audio_tab != nullptr);
+    auto meters = descendants<MultiMeter>(*audio_tab);
+    REQUIRE(meters.size() >= 2);
+
+    MeterData input_data;
+    input_data.num_channels = 1;
+    input_data.peak[0] = 0.25f;
+    input_data.rms[0] = 0.125f;
+    input_bridge.push_meter(input_data);
+
+    MeterData output_data;
+    output_data.num_channels = 2;
+    output_data.peak[0] = 0.5f;
+    output_data.peak[1] = 0.75f;
+    output_data.rms[0] = 0.25f;
+    output_data.rms[1] = 0.5f;
+    output_bridge.push_meter(output_data);
+
+    panel.poll();
+
+    REQUIRE(meters[0]->channel_count() == 1);
+    REQUIRE(meters[0]->ballistics().channels[0].display_peak > 0.0f);
+    REQUIRE(meters[1]->channel_count() == 2);
+    REQUIRE(meters[1]->ballistics().channels[0].display_peak > 0.0f);
+    REQUIRE(meters[1]->ballistics().channels[1].display_peak > 0.0f);
+}
+
 TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
           "[standalone][settings][issue-493]") {
     StubAudioSystem audio;
