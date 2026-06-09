@@ -484,7 +484,7 @@ conv.process(input, output, block_size);
 | Polynomial Math | `poly_math.hpp` | Polynomial evaluation and Horner's method for waveshaper transfer functions |
 | Processor Chain | `processor_chain.hpp` | Connect multiple processors in series — automatic prepare/process forwarding |
 | SIMD Buffer | `simd_buffer.hpp` | Aligned memory buffer for SIMD-safe block processing |
-| Smoothed Value | `smoothed_value.hpp` | Linear or exponential parameter smoothing to prevent zipper noise |
+| Smoothed Value | `smoothed_value.hpp` | Linear parameter ramps for zipper-noise reduction; use `log_ramped_value.hpp` for multiplicative/log smoothing |
 | Special Functions | `special_functions.hpp` | sinc, Bessel, dB↔linear, MIDI note↔frequency conversions |
 
 ---
