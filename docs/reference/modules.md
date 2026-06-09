@@ -286,6 +286,22 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 
 *\*Write via optional `pulp add` packages. Permissive (libflac, ALAC) install freely. Copyleft (LAME, fdk-aac) require `--accept-license`.*
 
+### Sampler, looper, and analysis primitives
+
+Reusable low-level pieces for building samplers, generated-audio freeze/loop workflows, waveform displays, and offline/background sample analysis. These are primitives, not a full sampler UI. Callback-safe operations are documented in `rt_safety_contract.hpp`; import/export, analysis, waveform thumbnail build, publication writes, and materialization stay off the audio callback.
+
+| Feature | Headers | Description |
+|---------|---------|-------------|
+| Stream handoff and rolling capture | `audio_stream_handoff.hpp`, `planar_audio_ring_buffer.hpp`, `rolling_audio_capture_buffer.hpp`, `realtime_sample_recorder.hpp` | Bridge generated/live/model audio into host-paced processing, keep bounded rolling history, freeze stable windows, and materialize captures off the audio thread |
+| Sample publication and storage | `published_sample_store.hpp`, `sample_slot_bank.hpp`, `sample_slot_materializer.hpp`, `sample_pool.hpp`, `sample_stream_window.hpp` | Publish captured/imported/rendered samples through generation-safe views, fixed slot banks, stable sample IDs, and resident streaming pages |
+| Looping and playback | `loop_types.hpp`, `loop_reader.hpp`, `loop_renderer.hpp`, `loop_point_analyzer.hpp`, `sample_voice_renderer.hpp`, `voice_sum_mixer.hpp` | Render one-shots, forward/reverse loops, fades/crossfades, loop-point assistance, scalar sample voices, and summed voice scratch buffers |
+| Mapping and instrument policy | `sample_zone_map.hpp`, `sample_key_map.hpp`, `instrument_runtime.hpp`, `instrument_voice_allocator.hpp`, `instrument_envelope.hpp`, `voice_modulation_buffer.hpp` | Represent key/velocity zones, chromatic/fixed-pitch/slice mappings, pool-backed trigger resolution, voice allocation, AHDSR envelopes, and per-voice modulation lanes |
+| Editing, import/export, and bounce metadata | `sample_edit_document.hpp`, `sample_asset_io.hpp`, `wav_metadata.hpp` | Track non-destructive edit intent, import/export policy, drop classification, and WAV metadata/interchange outside realtime paths |
+| Onset, slice, key/tempo, and transient analysis | `onset_detector.hpp`, `slice_point_analyzer.hpp`, `slice_map.hpp`, `analyzer_provider.hpp`, `built_in_key_tempo_analyzer.hpp`, `built_in_transient_classifier.hpp` | Provide package-free fallback analysis plus neutral provider/provenance metadata for future package-backed MIR adapters |
+| Time/pitch extension point | `analyzer_provider.hpp`, `signalsmith_time_pitch_processor.hpp` | Optional package-backed time-stretch/pitch-shift processor contract; availability and licensing stay explicit |
+| Waveform summaries | `audio_thumbnail.hpp` | Build/cache serialized CPU waveform summaries for waveform display and future GPU upload paths |
+| Realtime contract labels | `rt_safety_contract.hpp` | Machine-checkable sampler/looper RT-safety labels for representative hot paths and off-thread helpers |
+
 ### Other audio features
 
 | Feature | Header | Description |
