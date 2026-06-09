@@ -16,6 +16,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace pulp::runtime;
 namespace fs = std::filesystem;
@@ -305,6 +306,60 @@ TEST_CASE("model store: install_model downloads + records, then remove_model del
     fs::remove_all(root);
 }
 
+TEST_CASE("model store: install_model reports no-length progress as indeterminate, then complete",
+          "[runtime][model][download]") {
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-no-length-progress";
+    fs::remove_all(root);
+    fs::create_directories(root / "home");
+    const std::string body(64'000, 'm');
+
+    httplib::Server svr;
+    svr.Get("/weights.bin", [body](const httplib::Request&, httplib::Response& res) {
+        res.set_chunked_content_provider(
+            "application/octet-stream",
+            [body](size_t offset, httplib::DataSink& sink) {
+                if (offset >= body.size()) {
+                    sink.done();
+                    return true;
+                }
+                const size_t remaining = body.size() - offset;
+                const size_t chunk = remaining < 4096 ? remaining : 4096;
+                return sink.write(body.data() + offset, chunk);
+            });
+    });
+    int port = svr.bind_to_any_port("127.0.0.1");
+    std::thread th([&] { svr.listen_after_bind(); });
+    svr.wait_until_ready();
+
+    ModelEntry model{.model_id = "m-no-length", .display_name = "No Length", .backend = "mlx"};
+    model.download_url = "http://127.0.0.1:" + std::to_string(port) + "/weights.bin";
+
+    std::vector<DownloadProgress> progress;
+    auto inst = install_model(
+        model, "magenta",
+        [&](const DownloadProgress& p) {
+            progress.push_back(p);
+            return true;
+        },
+        /*cancel=*/nullptr, /*headers=*/{}, root / "home");
+
+    INFO("install error: " << inst.error);
+    REQUIRE(inst.ok);
+    REQUIRE_FALSE(progress.empty());
+
+    bool saw_indeterminate_bytes = false;
+    for (const auto& p : progress) {
+        if (p.total == 0 && p.downloaded > 0) saw_indeterminate_bytes = true;
+    }
+    REQUIRE(saw_indeterminate_bytes);
+    REQUIRE(progress.back().total == 1'000'000);
+    REQUIRE(progress.back().downloaded == 1'000'000);
+
+    svr.stop();
+    if (th.joinable()) th.join();
+    fs::remove_all(root);
+}
+
 TEST_CASE("model store: install_model fetches every asset of a multi-asset bundle",
           "[runtime][model][download]") {
     const fs::path root = fs::temp_directory_path() / "pulp-mm-multiasset";
@@ -318,10 +373,14 @@ TEST_CASE("model store: install_model fetches every asset of a multi-asset bundl
 
     ModelEntry model{.model_id = "mrt2", .display_name = "MRT2", .backend = "mlx"};
     model.assets = {
-        ModelAsset{.role = "weights", .checkpoint_ref = server.url("/mrt2.mlxfn")},
-        ModelAsset{.role = "state", .checkpoint_ref = server.url("/mrt2_state.safetensors")},
+        ModelAsset{.role = "weights", .checkpoint_ref = server.url("/mrt2.mlxfn"),
+                   .sha256 = sha256_hex(weights)},
+        ModelAsset{.role = "state", .checkpoint_ref = server.url("/mrt2_state.safetensors"),
+                   .sha256 = sha256_hex(state)},
     };
 
+    // Correct per-asset hashes must pass verification (the install must honor them, not
+    // silently skip — see the mismatch test below).
     auto inst = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
                               /*headers=*/{}, home);
     INFO("install error: " << inst.error);
@@ -341,6 +400,65 @@ TEST_CASE("model store: install_model fetches every asset of a multi-asset bundl
     const std::string meta((std::istreambuf_iterator<char>(meta_in)), std::istreambuf_iterator<char>());
     REQUIRE(meta.find("\"weights\"") != std::string::npos);
     REQUIRE(meta.find("\"state\"") != std::string::npos);
+
+    meta_in.close();  // release the handle before remove_all (Windows can't unlink an open file)
+    fs::remove_all(root);
+}
+
+TEST_CASE("model store: install_model verifies each bundle asset's sha256",
+          "[runtime][model][download]") {
+    // A pinned-but-wrong hash on a secondary asset must fail the install — the bundle
+    // path must honor ModelAsset::sha256, not silently skip verification.
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-multiasset-badsha";
+    fs::remove_all(root);
+    fs::create_directories(root / "serve");
+    const std::string weights = make_fixture(root / "serve" / "m.mlxfn", 40'000);
+    make_fixture(root / "serve" / "m_state.safetensors", 20'000);
+
+    LocalServer server(root / "serve");
+    const fs::path home = root / "home";
+
+    ModelEntry model{.model_id = "m", .display_name = "M", .backend = "mlx"};
+    model.assets = {
+        ModelAsset{.role = "weights", .checkpoint_ref = server.url("/m.mlxfn"),
+                   .sha256 = sha256_hex(weights)},
+        ModelAsset{.role = "state", .checkpoint_ref = server.url("/m_state.safetensors"),
+                   .sha256 = std::string(64, 'a')},  // wrong on purpose
+    };
+
+    auto inst = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
+                              /*headers=*/{}, home);
+    REQUIRE_FALSE(inst.ok);
+    REQUIRE(inst.error.find("mismatch") != std::string::npos);
+
+    fs::remove_all(root);
+}
+
+TEST_CASE("model store: install_model rejects a bundle whose assets collide on filename",
+          "[runtime][model][download]") {
+    // Two assets from different paths but the same leaf name would overwrite each other on
+    // disk (destinations are URL basenames so the engine can find sibling files); the install
+    // must fail loudly rather than report success with one file silently clobbered.
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-multiasset-collide";
+    fs::remove_all(root);
+    fs::create_directories(root / "serve" / "a");
+    fs::create_directories(root / "serve" / "b");
+    make_fixture(root / "serve" / "a" / "model.bin", 1'000);
+    make_fixture(root / "serve" / "b" / "model.bin", 1'000);
+
+    LocalServer server(root / "serve");
+    const fs::path home = root / "home";
+
+    ModelEntry model{.model_id = "dup", .display_name = "Dup", .backend = "mlx"};
+    model.assets = {
+        ModelAsset{.role = "weights", .checkpoint_ref = server.url("/a/model.bin")},
+        ModelAsset{.role = "state", .checkpoint_ref = server.url("/b/model.bin")},
+    };
+
+    auto inst = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
+                              /*headers=*/{}, home);
+    REQUIRE_FALSE(inst.ok);
+    REQUIRE(inst.error.find("same file") != std::string::npos);
 
     fs::remove_all(root);
 }

@@ -8,6 +8,194 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03950"></a>
+## [0.395.0] - 2026-06-09
+
+- fix(midi,view): address Codex P2 review on UMP system messages + Linux XDND HiDPI ([#3793](https://github.com/danielraffel/pulp/pull/3793))
+- refactor(local-ci): extract stale-running selection helper ([#3789](https://github.com/danielraffel/pulp/pull/3789))
+- ci(release): stop re-running the unit suite in sign-and-release (not a test gate) ([#3783](https://github.com/danielraffel/pulp/pull/3783))
+- feat(midi): implement WinRT MIDI 2.0 (UMP) backend with device hotplug ([#3781](https://github.com/danielraffel/pulp/pull/3781))
+- fix(view): @pulp/react forwards <img src> to setImageSource (parity-found) ([#3790](https://github.com/danielraffel/pulp/pull/3790))
+- refactor(local-ci): extract job completion helper ([#3788](https://github.com/danielraffel/pulp/pull/3788))
+- refactor(local-ci): extract stale-running queue helpers ([#3787](https://github.com/danielraffel/pulp/pull/3787))
+- refactor(local-ci): extract runner active-target helper ([#3786](https://github.com/danielraffel/pulp/pull/3786))
+
+<a id="v03940"></a>
+## [0.394.0] - 2026-06-09
+
+- feat(view): HiDPI for the Win/Linux plugin-editor host (W8/L9) ([#3774](https://github.com/danielraffel/pulp/pull/3774))
+- refactor(local-ci): extract terminal job completion ([#3784](https://github.com/danielraffel/pulp/pull/3784))
+- refactor(local-ci): extract job claim helper ([#3782](https://github.com/danielraffel/pulp/pull/3782))
+- refactor(local-ci): extract target state helper ([#3779](https://github.com/danielraffel/pulp/pull/3779))
+- refactor(local-ci): extract queue state helpers ([#3777](https://github.com/danielraffel/pulp/pull/3777))
+- refactor(local-ci): extract queue policy helpers ([#3776](https://github.com/danielraffel/pulp/pull/3776))
+- refactor(local-ci): extract Windows remote probes ([#3773](https://github.com/danielraffel/pulp/pull/3773))
+- refactor(local-ci): extract Windows SSH probe helpers ([#3771](https://github.com/danielraffel/pulp/pull/3771))
+
+<a id="v03930"></a>
+## [0.393.0] - 2026-06-09
+
+- feat(view): Linux XDND drag-drop on the plugin-host X11 window (#3645) ([#3770](https://github.com/danielraffel/pulp/pull/3770))
+- fix/ci release toolchain pin ([#3749](https://github.com/danielraffel/pulp/pull/3749))
+- refactor(local-ci): extract desktop reporting helpers ([#3759](https://github.com/danielraffel/pulp/pull/3759))
+- refactor(local-ci): extract desktop artifact layout helpers ([#3755](https://github.com/danielraffel/pulp/pull/3755))
+- refactor(local-ci): move stale validator cleanup helpers ([#3757](https://github.com/danielraffel/pulp/pull/3757))
+
+<a id="v03922"></a>
+## [0.392.2] - 2026-06-09
+
+- refactor(canvas): move Skia font shim to private TU ([#3756](https://github.com/danielraffel/pulp/pull/3756))
+- refactor(local-ci): extract cleanup planning helpers ([#3752](https://github.com/danielraffel/pulp/pull/3752))
+- refactor(local-ci): extract SSH bundle transport helpers ([#3748](https://github.com/danielraffel/pulp/pull/3748))
+- refactor(local-ci): extract evidence index module ([#3747](https://github.com/danielraffel/pulp/pull/3747))
+
+<a id="v03921"></a>
+## [0.392.1] - 2026-06-09
+
+- fix/release build cxx17 aggregate init ([#3745](https://github.com/danielraffel/pulp/pull/3745))
+- refactor: migrate Canvas2D bridge API to registry helper ([#3746](https://github.com/danielraffel/pulp/pull/3746))
+
+<a id="v03920"></a>
+## [0.392.0] - 2026-06-09
+
+- feat(view): Linux AT-SPI Value interface + focus/value/name event signals (L7c) ([#3744](https://github.com/danielraffel/pulp/pull/3744))
+- refactor: migrate GPU bridge API to registry helper ([#3741](https://github.com/danielraffel/pulp/pull/3741))
+- refactor: migrate typography bridge API to registry helper ([#3740](https://github.com/danielraffel/pulp/pull/3740))
+
+<a id="v03910"></a>
+## [0.391.0] - 2026-06-09
+
+- feat(view): per-widget AT-SPI Accessible + Component tree (L7b) ([#3737](https://github.com/danielraffel/pulp/pull/3737))
+- refactor: migrate animation bridge API to registry helper ([#3736](https://github.com/danielraffel/pulp/pull/3736))
+- refactor: migrate layout bridge API to registry helper ([#3735](https://github.com/danielraffel/pulp/pull/3735))
+- refactor: migrate widget factory bridge API to registry helper ([#3734](https://github.com/danielraffel/pulp/pull/3734))
+- refactor: migrate event bridge API to registry helper ([#3733](https://github.com/danielraffel/pulp/pull/3733))
+
+<a id="v03900"></a>
+## [0.390.0] - 2026-06-09
+
+- feat(view): register Linux AT-SPI root over direct D-Bus (L7a-2) ([#3732](https://github.com/danielraffel/pulp/pull/3732))
+- refactor: migrate runtime bridge API to registry helper ([#3731](https://github.com/danielraffel/pulp/pull/3731))
+- refactor: migrate SVG bridge API to registry helper ([#3726](https://github.com/danielraffel/pulp/pull/3726))
+- refactor: migrate platform services bridge API to registry helper ([#3725](https://github.com/danielraffel/pulp/pull/3725))
+- refactor: migrate widget asset bridge API to registry helper ([#3723](https://github.com/danielraffel/pulp/pull/3723))
+- refactor: migrate runtime import bridge API to registry helper ([#3720](https://github.com/danielraffel/pulp/pull/3720))
+- refactor: migrate widget schema bridge API to registry helper ([#3721](https://github.com/danielraffel/pulp/pull/3721))
+- feat(platform): generic D-Bus object-server layer (L7a-1) ([#3698](https://github.com/danielraffel/pulp/pull/3698))
+
+<a id="v03890"></a>
+## [0.389.0] - 2026-06-09
+
+- feat(audio): WASAPI shared low-latency (IAudioClient3) + device-invalidation recovery (W4b) ([#3717](https://github.com/danielraffel/pulp/pull/3717))
+- refactor: migrate RN compatibility bridge API to registry helper ([#3705](https://github.com/danielraffel/pulp/pull/3705))
+- refactor: migrate widget value content bridge API to registry helper ([#3716](https://github.com/danielraffel/pulp/pull/3716))
+
+<a id="v03880"></a>
+## [0.388.0] - 2026-06-09
+
+- feat(audio): WASAPI exclusive-mode output via DeviceConfig::share_mode (W4a) ([#3676](https://github.com/danielraffel/pulp/pull/3676))
+- refactor: migrate style effects bridge API to registry helper ([#3711](https://github.com/danielraffel/pulp/pull/3711))
+
+<a id="v03874"></a>
+## [0.387.4] - 2026-06-09
+
+- fix(runtime): address post-merge review feedback (#3488 sha256/collision + #3492 caret test) ([#3703](https://github.com/danielraffel/pulp/pull/3703))
+- ci(coverage): include importer CLI test targets in the diff-cover lane ([#3707](https://github.com/danielraffel/pulp/pull/3707))
+- refactor: migrate storage asset bridge API to registry helper ([#3706](https://github.com/danielraffel/pulp/pull/3706))
+
+<a id="v03873"></a>
+## [0.387.3] - 2026-06-08
+
+- refactor: migrate WidgetBridge DOM registrar to API registry ([#3687](https://github.com/danielraffel/pulp/pull/3687))
+- refactor: migrate storage style bridge API to registry helper ([#3699](https://github.com/danielraffel/pulp/pull/3699))
+- refactor: migrate value controls bridge API to registry helper ([#3697](https://github.com/danielraffel/pulp/pull/3697))
+- refactor: migrate visual style bridge API to registry helper ([#3696](https://github.com/danielraffel/pulp/pull/3696))
+- feat(import): pulp tool install/uninstall for framework importers ([#3693](https://github.com/danielraffel/pulp/pull/3693))
+- refactor: migrate visibility bridge API to registry helper ([#3695](https://github.com/danielraffel/pulp/pull/3695))
+- refactor: migrate border-box bridge API to registry helper ([#3692](https://github.com/danielraffel/pulp/pull/3692))
+- refactor: migrate basic value bridge API to registry helper ([#3694](https://github.com/danielraffel/pulp/pull/3694))
+
+<a id="v03861"></a>
+## [0.386.1] - 2026-06-08
+
+- refactor: migrate theme bridge API to registry helper ([#3689](https://github.com/danielraffel/pulp/pull/3689))
+- refactor: migrate tokens bridge API to registry helper ([#3688](https://github.com/danielraffel/pulp/pull/3688))
+- refactor: migrate border-side bridge API to registry helper ([#3686](https://github.com/danielraffel/pulp/pull/3686))
+- refactor: migrate border-radius bridge API to registry helper ([#3685](https://github.com/danielraffel/pulp/pull/3685))
+- refactor: migrate outline bridge API to registry helper ([#3684](https://github.com/danielraffel/pulp/pull/3684))
+- refactor: migrate metadata bridge API to registry helper ([#3683](https://github.com/danielraffel/pulp/pull/3683))
+- refactor: migrate shader bridge API to registry helper ([#3682](https://github.com/danielraffel/pulp/pull/3682))
+- refactor: migrate list-style bridge API to registry helper ([#3677](https://github.com/danielraffel/pulp/pull/3677))
+- feat(design-import): auto-label faithful interactive elements from layer names (§2.1) ([#3691](https://github.com/danielraffel/pulp/pull/3691))
+- feat(view): Windows UIA per-widget fragments (a11y Phase 3, W6) ([#3680](https://github.com/danielraffel/pulp/pull/3680))
+
+<a id="v03860"></a>
+## [0.386.0] - 2026-06-09
+
+- feat(import): IMPORTER_TERMS accept-gate + provenance PR-check ([#3681](https://github.com/danielraffel/pulp/pull/3681))
+- refactor: migrate WidgetBridge style-state registrar to API registry ([#3678](https://github.com/danielraffel/pulp/pull/3678))
+- feat(design-import): IRInteractiveElement.label — caption -> generated-param name ([#3671](https://github.com/danielraffel/pulp/pull/3671))
+- refactor: migrate WidgetBridge value-list registrar to API registry ([#3675](https://github.com/danielraffel/pulp/pull/3675))
+
+<a id="v03850"></a>
+## [0.385.0] - 2026-06-08
+
+- refactor(cli): split pulp import SPI-verb orchestration into import_run ([#3673](https://github.com/danielraffel/pulp/pull/3673))
+
+<a id="v03840"></a>
+## [0.384.0] - 2026-06-08
+
+- feat(view): Windows IDropTarget drag-drop on the plugin-host child HWND (#3645) ([#3670](https://github.com/danielraffel/pulp/pull/3670))
+- refactor: migrate WidgetBridge leaf registrars to API registry ([#3672](https://github.com/danielraffel/pulp/pull/3672))
+
+<a id="v03830"></a>
+## [0.383.0] - 2026-06-09
+
+- feat(view): deliver macOS native drops into the dispatch core (#3645) ([#3669](https://github.com/danielraffel/pulp/pull/3669))
+- refactor: split WidgetBridge visual style registrar ([#3661](https://github.com/danielraffel/pulp/pull/3661))
+
+<a id="v03821"></a>
+## [0.382.1] - 2026-06-08
+
+- ci(audio): compile the JACK backend in Linux CI + open/start/stop smoke (L5b) ([#3657](https://github.com/danielraffel/pulp/pull/3657))
+
+<a id="v03820"></a>
+## [0.382.0] - 2026-06-08
+
+- feat(import): materialize pulp import emit into a buildable scaffold + clean-room output scan ([#3634](https://github.com/danielraffel/pulp/pull/3634))
+- refactor: split WidgetBridge storage style registrar ([#3653](https://github.com/danielraffel/pulp/pull/3653))
+- refactor: split WidgetBridge visibility style registrar ([#3652](https://github.com/danielraffel/pulp/pull/3652))
+- refactor: split WidgetBridge event registrar ([#3649](https://github.com/danielraffel/pulp/pull/3649))
+
+<a id="v03810"></a>
+## [0.381.0] - 2026-06-08
+
+- refactor(view): unify drag-drop on DropReceiver + fix header self-containment ([#3647](https://github.com/danielraffel/pulp/pull/3647))
+- refactor: split WidgetBridge typography style registrars ([#3646](https://github.com/danielraffel/pulp/pull/3646))
+
+<a id="v03800"></a>
+## [0.380.0] - 2026-06-08
+
+- feat(view): native drag-drop dispatch core + SDL standalone producer ([#3638](https://github.com/danielraffel/pulp/pull/3638))
+- refactor: split WidgetBridge animation registrar ([#3644](https://github.com/danielraffel/pulp/pull/3644))
+- refactor: split WidgetBridge canvas2d registrar ([#3642](https://github.com/danielraffel/pulp/pull/3642))
+- fix(ci): give Tart ephemeral runners a static name per (host, slot) ([#3632](https://github.com/danielraffel/pulp/pull/3632))
+- feature/refactor widgetbridge runtime registrar ([#3643](https://github.com/danielraffel/pulp/pull/3643))
+- feature/refactor widgetbridge border side registrar ([#3641](https://github.com/danielraffel/pulp/pull/3641))
+- refactor: split WidgetBridge border radius registrar ([#3640](https://github.com/danielraffel/pulp/pull/3640))
+- refactor: split WidgetBridge runtime import registrar ([#3636](https://github.com/danielraffel/pulp/pull/3636))
+- refactor: split WidgetBridge outline registrar ([#3637](https://github.com/danielraffel/pulp/pull/3637))
+- docs(ci-skill): patch bumps auto-apply (#3626) + document --adopt-head SHA-drift recovery ([#3631](https://github.com/danielraffel/pulp/pull/3631))
+- refactor: split WidgetBridge border box registrar ([#3630](https://github.com/danielraffel/pulp/pull/3630))
+
+<a id="v03790"></a>
+## [0.379.0] - 2026-06-08
+
+- feat(view): Pulp-drawn ContextMenu (view-layer GPU popup menu) ([#3628](https://github.com/danielraffel/pulp/pull/3628))
+- refactor: split WidgetBridge DOM registrar ([#3624](https://github.com/danielraffel/pulp/pull/3624))
+- refactor: split WidgetBridge text runs registrar ([#3629](https://github.com/danielraffel/pulp/pull/3629))
+- refactor: split WidgetBridge typography registrar ([#3625](https://github.com/danielraffel/pulp/pull/3625))
+
 <a id="v03780"></a>
 ## [0.378.0] - 2026-06-08
 
@@ -3895,6 +4083,28 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.395.0]: https://github.com/danielraffel/pulp/releases/tag/v0.395.0
+[0.394.0]: https://github.com/danielraffel/pulp/releases/tag/v0.394.0
+[0.393.0]: https://github.com/danielraffel/pulp/releases/tag/v0.393.0
+[0.392.2]: https://github.com/danielraffel/pulp/releases/tag/v0.392.2
+[0.392.1]: https://github.com/danielraffel/pulp/releases/tag/v0.392.1
+[0.392.0]: https://github.com/danielraffel/pulp/releases/tag/v0.392.0
+[0.391.0]: https://github.com/danielraffel/pulp/releases/tag/v0.391.0
+[0.390.0]: https://github.com/danielraffel/pulp/releases/tag/v0.390.0
+[0.389.0]: https://github.com/danielraffel/pulp/releases/tag/v0.389.0
+[0.388.0]: https://github.com/danielraffel/pulp/releases/tag/v0.388.0
+[0.387.4]: https://github.com/danielraffel/pulp/releases/tag/v0.387.4
+[0.387.3]: https://github.com/danielraffel/pulp/releases/tag/v0.387.3
+[0.386.1]: https://github.com/danielraffel/pulp/releases/tag/v0.386.1
+[0.386.0]: https://github.com/danielraffel/pulp/releases/tag/v0.386.0
+[0.385.0]: https://github.com/danielraffel/pulp/releases/tag/v0.385.0
+[0.384.0]: https://github.com/danielraffel/pulp/releases/tag/v0.384.0
+[0.383.0]: https://github.com/danielraffel/pulp/releases/tag/v0.383.0
+[0.382.1]: https://github.com/danielraffel/pulp/releases/tag/v0.382.1
+[0.382.0]: https://github.com/danielraffel/pulp/releases/tag/v0.382.0
+[0.381.0]: https://github.com/danielraffel/pulp/releases/tag/v0.381.0
+[0.380.0]: https://github.com/danielraffel/pulp/releases/tag/v0.380.0
+[0.379.0]: https://github.com/danielraffel/pulp/releases/tag/v0.379.0
 [0.378.0]: https://github.com/danielraffel/pulp/releases/tag/v0.378.0
 [0.371.1]: https://github.com/danielraffel/pulp/releases/tag/v0.371.1
 [0.371.0]: https://github.com/danielraffel/pulp/releases/tag/v0.371.0

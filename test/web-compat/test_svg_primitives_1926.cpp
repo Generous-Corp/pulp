@@ -90,6 +90,80 @@ TEST_CASE("svg-1926: <svg><rect>...</rect></svg> creates an SvgRectWidget",
     REQUIRE(rect_widget->has_fill());                      // fill="#ffffff" applied
 }
 
+TEST_CASE("svg-followup: <rect> live setAttribute after mount updates the widget",
+          "[svg][import][issue-3656]") {
+    // Parity with <path>: pre-fix, only PATH was wired in the live
+    // Element.prototype.setAttribute path, so post-mount mutations of a
+    // <rect>'s geometry / paint were silently dropped. This drives the
+    // RECT live-update branch.
+    TestEnvironment env(400, 200);
+    env.eval(R"JS(
+        var __svg = document.createElement('svg');
+        var __rect = document.createElement('rect');
+        __rect.setAttribute('x', '1');
+        __rect.setAttribute('y', '2');
+        __rect.setAttribute('width', '4');
+        __rect.setAttribute('height', '5');
+        __rect.setAttribute('fill', '#ffffff');
+        __svg.appendChild(__rect);
+        document.body.appendChild(__svg);
+    )JS");
+    env.root.layout_children();
+
+    auto* w = dynamic_cast<SvgRectWidget*>(resolve(env, "__rect"));
+    REQUIRE(w != nullptr);
+    REQUIRE_THAT(w->rect_width(), WithinAbs(4.0f, 0.001f));
+    REQUIRE(w->has_fill());
+
+    // Mutate AFTER mount.
+    env.eval(R"JS(
+        __rect.setAttribute('x', '7');
+        __rect.setAttribute('width', '12');
+        __rect.setAttribute('fill', 'none');
+        __rect.setAttribute('stroke', '#000000');
+        __rect.setAttribute('stroke-width', '3');
+    )JS");
+
+    REQUIRE_THAT(w->rect_x(),      WithinAbs(7.0f,  0.001f));
+    REQUIRE_THAT(w->rect_width(),  WithinAbs(12.0f, 0.001f));
+    REQUIRE_FALSE(w->has_fill());          // fill='none' applied post-mount
+    REQUIRE(w->has_stroke());
+    REQUIRE_THAT(w->stroke_width(), WithinAbs(3.0f, 0.001f));
+}
+
+TEST_CASE("svg-followup: <line> live setAttribute after mount updates the widget",
+          "[svg][import][issue-3656]") {
+    TestEnvironment env(400, 200);
+    env.eval(R"JS(
+        var __svg = document.createElement('svg');
+        var __line = document.createElement('line');
+        __line.setAttribute('x1', '0');
+        __line.setAttribute('y1', '0');
+        __line.setAttribute('x2', '4');
+        __line.setAttribute('y2', '4');
+        __line.setAttribute('stroke', '#000000');
+        __line.setAttribute('stroke-width', '1');
+        __svg.appendChild(__line);
+        document.body.appendChild(__svg);
+    )JS");
+    env.root.layout_children();
+
+    auto* w = dynamic_cast<SvgLineWidget*>(resolve(env, "__line"));
+    REQUIRE(w != nullptr);
+    REQUIRE_THAT(w->x2(), WithinAbs(4.0f, 0.001f));
+
+    // Mutate AFTER mount.
+    env.eval(R"JS(
+        __line.setAttribute('x2', '20');
+        __line.setAttribute('y2', '10');
+        __line.setAttribute('stroke-width', '4');
+    )JS");
+
+    REQUIRE_THAT(w->x2(),           WithinAbs(20.0f, 0.001f));
+    REQUIRE_THAT(w->y2(),           WithinAbs(10.0f, 0.001f));
+    REQUIRE_THAT(w->stroke_width(), WithinAbs(4.0f,  0.001f));
+}
+
 TEST_CASE("svg-1926: <rect> with fill='none' clears the fill",
           "[svg][import][spectr][issue-1926]") {
     // SVG `fill="none"` is the standard way to draw an outlined rect.

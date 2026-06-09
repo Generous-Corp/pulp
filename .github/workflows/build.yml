@@ -600,6 +600,7 @@ jobs:
             libfontconfig1-dev \
             libgbm-dev \
             libgl1-mesa-dev \
+            libjack-jackd2-dev \
             libx11-dev \
             libxext-dev \
             libxfixes-dev \
@@ -1026,6 +1027,67 @@ jobs:
             throw "sdk-staging/lib/pulp-view-core.lib missing"
           }
           python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
+
+  # ── Windows MIDI Services SDK compile-gate (advisory) ────────────────────
+  #
+  # Compile-verifies Pulp's opt-in WinRT MIDI 2.0 backend
+  # (core/midi/platform/win/winrt_midi_device.cpp, gated by
+  # PULP_HAS_WINRT_MIDI). That backend consumes the
+  # Microsoft.Windows.Devices.Midi2 C++/WinRT projection, which ships
+  # out-of-band with the Windows MIDI Services SDK (GitHub-only NuGet, NOT in
+  # the base Windows SDK), so no other lane can compile it. We provision the
+  # projection through Microsoft's official vcpkg port
+  # `microsoft-windows-devices-midi2` (it downloads the SDK NuGet, runs
+  # cppwinrt to generate the projection headers, and exports the
+  # Microsoft::Windows::Devices::Midi2 CMake target). See tools/ci/midi2/.
+  #
+  # ADVISORY + OPT-IN: this is a standalone job, not part of the required
+  # build matrix or any required alias, so it can never block merge — the
+  # default Windows build (which does NOT set PULP_HAS_WINRT_MIDI) is
+  # untouched. windows-latest ships vcpkg with VCPKG_ROOT preset, so no
+  # vcpkg bootstrap is needed. Build-only (no test step): the Windows MIDI
+  # Services runtime is absent in CI, so the backend can compile + link but
+  # cannot exercise a live endpoint — compile-verification is the goal.
+  windows-midi2-gate:
+    needs: classify
+    if: needs.classify.outputs.native_build_required == 'true'
+    runs-on: windows-latest
+    name: Windows MIDI Services SDK compile-gate (advisory)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      # Provision the Midi2 projection via the official vcpkg port, then
+      # configure Pulp with the vcpkg toolchain so
+      # find_package(microsoft-windows-devices-midi2 CONFIG) resolves the
+      # Microsoft::Windows::Devices::Midi2 IMPORTED target. VCPKG_ROOT is
+      # preset on windows-latest. VCPKG_MANIFEST_DIR points at tools/ci/midi2,
+      # which pins the port + baseline (see that dir's README).
+      - name: Configure (PULP_HAS_WINRT_MIDI=ON via vcpkg midi2 projection)
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_ROOT) { $env:VCPKG_ROOT = "C:/vcpkg" }
+          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
+          cmake -S . -B build-midi2 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DPULP_BUILD_TESTS=OFF `
+            -DPULP_BUILD_EXAMPLES=OFF `
+            -DPULP_HAS_WINRT_MIDI=ON `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_MANIFEST_DIR=$($PWD.Path)/tools/ci/midi2" `
+            -DVCPKG_MANIFEST_MODE=ON
+
+      # Build only the pulp-midi target — the WinRT MIDI 2.0 TU lives there and
+      # is the whole point of this gate. Avoids paying for the full tree.
+      - name: Build pulp-midi (compile-verify the WinRT MIDI 2.0 backend)
+        shell: pwsh
+        run: cmake --build build-midi2 --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
   # Branch protection requires a context literally named `macos`. Keep it

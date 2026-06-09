@@ -112,6 +112,7 @@ target_link_libraries(pulp-canvas PUBLIC pulp::runtime)
 if(PULP_HAS_SKIA)
     target_sources(pulp-canvas PRIVATE
         src/skia_canvas.cpp
+        src/skia_canvas_fonts.cpp
         src/skia_canvas_text.cpp
         src/skia_canvas_filter.cpp
         src/skia_canvas_mask.cpp

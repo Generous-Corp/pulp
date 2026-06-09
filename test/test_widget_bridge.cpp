@@ -172,6 +172,56 @@ TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     REQUIRE(dynamic_cast<Knob*>(w) != nullptr);
 }
 
+TEST_CASE("WidgetBridge legacy geometry factories wire widget callbacks",
+          "[view][bridge][legacy-factory-callbacks]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var changes = [];
+        __dispatch__ = function(id, type, value) {
+            changes.push({ id: id, type: type, value: value });
+        };
+        createKnob('legacy_knob', 10, 10, 48, 48);
+        createFader('legacy_fader', 70, 10, 200, 24, 'horizontal');
+        createToggle('legacy_toggle', 10, 70, 50, 30);
+    )JS");
+
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("legacy_knob"));
+    REQUIRE(knob != nullptr);
+    knob->on_mouse_down({24, 40});
+    knob->on_mouse_drag({24, 10});
+    knob->on_mouse_up({24, 10});
+    REQUIRE(engine.evaluate("changes.length").getWithDefault<double>(0) == 1);
+
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("legacy_fader"));
+    REQUIRE(fader != nullptr);
+    fader->on_mouse_down({100, 12});
+    fader->on_mouse_up({100, 12});
+    REQUIRE(engine.evaluate("changes.length").getWithDefault<double>(0) == 2);
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("legacy_toggle"));
+    REQUIRE(toggle != nullptr);
+    toggle->on_mouse_down({10, 10});
+    REQUIRE(engine.evaluate("changes.length").getWithDefault<double>(0) == 3);
+
+    auto count = engine.evaluate("changes.length").getWithDefault<double>(0);
+    REQUIRE(count == 3);
+    auto events = engine.evaluate(
+        "changes.map(function(c){ return c.id + ':' + c.type; }).join(',')")
+        .getWithDefault<std::string>("");
+    REQUIRE(events == "legacy_knob:change,legacy_fader:change,legacy_toggle:toggle");
+    auto knob_value = engine.evaluate("changes[0].value").getWithDefault<double>(0);
+    auto fader_value = engine.evaluate("changes[1].value").getWithDefault<double>(0);
+    auto toggle_value = engine.evaluate("changes[2].value").getWithDefault<double>(0);
+    REQUIRE(knob_value > 0.0);
+    REQUIRE_THAT(fader_value, WithinAbs(0.5, 0.01));
+    REQUIRE(toggle_value == 1.0);
+}
+
 // Phase 0b: setAnchor() bridge call binds an anchor to a live widget so
 // the inspector can key tweaks back to the originating source element.
 TEST_CASE("WidgetBridge setAnchor binds the anchor to the live widget",

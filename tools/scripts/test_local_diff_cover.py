@@ -432,6 +432,88 @@ class TargetedCtestTests(unittest.TestCase):
         )
 
 
+class ImporterCoverageAutoInclusionTests(unittest.TestCase):
+    """Importer CLI test targets are wired into the targeted diff-cover lane.
+
+    The framework-importer SDK CLI helpers (tools/cli/import_*.cpp,
+    importer_install.cpp, tool_registry.cpp) are in the measured diff-coverage
+    surface but are exercised by pure-in-process Catch2 tests whose binaries
+    compile those .cpp files directly. Those cases use lowercase Catch2 titles
+    ("import emit …", "tool registry …", "sha256 …", "install from …") that no
+    `-R Import` regex matches, so a targeted local_diff_cover.sh run narrowed by
+    PULP_DIFF_COVER_CTEST_REGEX silently dropped them and the diff-cover gate
+    reported 0% patch coverage on every importer PR. This locks the auto-
+    inclusion in so the script can't regress back to the 0%-patch state.
+    """
+
+    REQUIRED_TARGETS = (
+        "pulp-test-cli-import",
+        "pulp-test-cli-import-emit",
+        "pulp-test-cli-import-terms",
+        "pulp-test-cli-tool-registry",
+        "pulp-test-cli-importer-install",
+    )
+
+    def test_importer_test_targets_are_named(self) -> None:
+        text = SCRIPT.read_text()
+        for target in self.REQUIRED_TARGETS:
+            self.assertIn(
+                target,
+                text,
+                f"local_diff_cover.sh must name the importer test target "
+                f"{target!r} so a targeted importer build attributes its "
+                f"in-process coverage (otherwise the diff-cover gate reads 0% "
+                f"patch coverage on importer PRs).",
+            )
+
+    def test_importer_paths_trigger_auto_inclusion(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            "IMPORTER_COVERAGE_PATHS_REGEX",
+            text,
+            "local_diff_cover.sh must detect importer CLI source changes to "
+            "decide when to add the importer test targets.",
+        )
+        # The detection must cover the helper TUs the tests actually link.
+        for token in ("import_", "importer_install", "tool_registry"):
+            self.assertIn(
+                token,
+                text,
+                f"importer path-detection regex must include {token!r}.",
+            )
+
+    def test_importer_ctest_pass_is_case_correct(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            "IMPORTER_COVERAGE_CTEST_REGEX",
+            text,
+            "local_diff_cover.sh must define the importer ctest case regex.",
+        )
+        # The Catch2 case titles are lowercase — guard against an uppercase
+        # regex that matches nothing (the original 0%-patch root cause).
+        self.assertIn("import ", text)
+        self.assertIn("tool registry ", text)
+        self.assertIn("sha256 ", text)
+
+    def test_importer_diff_detection_includes_working_tree(self) -> None:
+        # diff-cover measures "<base>...HEAD plus staged and unstaged
+        # changes", so a working-tree-only edit to an importer file (the
+        # common pre-push case) must still trip auto-inclusion. Assert the
+        # script unions a working-tree diff, not only the committed range.
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'git diff --name-only --cached "${COMPARE_BRANCH}"',
+            text,
+            "importer detection must include staged changes.",
+        )
+        self.assertIn(
+            'git diff --name-only "${COMPARE_BRANCH}"',
+            text,
+            "importer detection must include unstaged working-tree changes "
+            "so a pre-push importer edit is detected before it is committed.",
+        )
+
+
 class DiffCoverExcludeContractTests(unittest.TestCase):
     """Locks in the diff_cover_excludes pattern + flag-shape contract.
 

@@ -91,16 +91,12 @@ opt-in, per-note pitch bend across the full ±48 semitone range,
 pressure-driven amplitude, and CC 74 brightness control via a one-pole
 lowpass.
 
-## Status
+## Adapter status
 
-- **Phase 1** — `MpeVoiceTracker` (landed)
-- **Phase 2** — `MpeBuffer` sidecar, `Processor::mpe_input()`, CLAP wiring (landed)
-- **Phase 3** — `MpeSynthVoice`, `MpeVoiceAllocator`, `MpeGlideDetector`, `examples/mpe-synth/` (landed)
-- **Phase 4** — MIDI 2.0 UMP native path (landed)
-
-VST3 and AU adapters will gain the same sidecar wiring in a follow-up
-pass; the API is stable so plugins can opt in today and benefit
-automatically once the other adapters ship.
+The CLAP adapter populates `mpe_input()` and `ump_input()` when the descriptor
+opts in. Other adapters still deliver the standard `MidiBuffer` path only, so
+MPE-aware processors should continue to handle ordinary MIDI input as their
+fallback.
 
 ## MIDI 2.0 UMP sidecar
 

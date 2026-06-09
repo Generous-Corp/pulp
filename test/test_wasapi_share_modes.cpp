@@ -102,43 +102,94 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_SHARED is implemented",
     REQUIRE_FALSE(device->is_open());
 }
 
-TEST_CASE("WASAPI mode coverage: exclusive + low-latency are deferred — "
-          "no public API exposes them",
+TEST_CASE("WASAPI mode coverage: share_mode selector exists; exclusive is a "
+          "ShareMode value; low_latency opts into shared low-latency (W4/W4b)",
           "[audio][wasapi][share-mode][gap-doc][issue-302]") {
-    // The contract under audit: DeviceConfig today is share-mode-agnostic
-    // and the Windows backend hard-codes AUDCLNT_SHAREMODE_SHARED. If a
-    // future change adds an exclusive or shared-low-latency path, it
-    // must (a) extend DeviceConfig with the mode field and (b) update
-    // both this assertion and the wasapi_device.hpp header documentation.
-    //
-    // We pin the "no opt-in" contract by enumerating DeviceConfig's
-    // member set at compile-time-equivalent runtime — there is no
-    // `share_mode`, `exclusive`, or `low_latency` selector today, so the
-    // only mode the WASAPI backend can possibly use is shared.
-    DeviceConfig cfg;
-    cfg.sample_rate = 48000.0;
-    cfg.buffer_size = 256;
-
-    // These static_asserts pin the "no mode field" contract via SFINAE
-    // detection helpers. Adding such a field is the explicit signal to
-    // revisit this audit; the build fails until the assertion is
-    // updated alongside the new API.
+    // W4 added the opt-in: DeviceConfig::share_mode selects shared (default) or
+    // exclusive. There is deliberately no separate `exclusive` bool. W4b added
+    // DeviceConfig::low_latency, the shared-mode IAudioClient3 opt-in.
     using cfg_t = pulp::audio::DeviceConfig;
-    static_assert(!has_share_mode_v<cfg_t>,
-                  "WASAPI gap-doc audit: DeviceConfig::share_mode added "
-                  "— extend the share-mode coverage test alongside the "
-                  "new API surface");
+    static_assert(has_share_mode_v<cfg_t>,
+                  "W4: DeviceConfig::share_mode is the selector");
     static_assert(!has_exclusive_v<cfg_t>,
-                  "WASAPI gap-doc audit: DeviceConfig::exclusive added "
-                  "— extend the share-mode coverage test alongside the "
-                  "new API surface");
-    static_assert(!has_low_latency_v<cfg_t>,
-                  "WASAPI gap-doc audit: DeviceConfig::low_latency added "
-                  "— extend the share-mode coverage test alongside the "
-                  "new API surface");
+                  "exclusive is a ShareMode value, not a bool field");
+    static_assert(has_low_latency_v<cfg_t>,
+                  "W4b: DeviceConfig::low_latency is the shared low-latency "
+                  "(IAudioClient3) opt-in");
 
-    SUCCEED("DeviceConfig exposes no share-mode/exclusive/low-latency "
-            "selector; WASAPI backend uses AUDCLNT_SHAREMODE_SHARED only");
+    DeviceConfig cfg;
+    CHECK(cfg.share_mode == ShareMode::shared);  // default preserved
+    CHECK_FALSE(cfg.low_latency);                 // default off
+    cfg.share_mode = ShareMode::exclusive;
+    CHECK(cfg.share_mode == ShareMode::exclusive);
+    cfg.low_latency = true;
+    CHECK(cfg.low_latency);
+    SUCCEED("DeviceConfig::share_mode opts into AUDCLNT_SHAREMODE_EXCLUSIVE; "
+            "DeviceConfig::low_latency opts into IAudioClient3 shared low-latency");
+}
+
+TEST_CASE("WASAPI mode coverage: shared low-latency open succeeds or honest-"
+          "fails back to standard shared (never half-opens)",
+          "[audio][wasapi][share-mode][gap-doc][issue-302]") {
+    // W4b: DeviceConfig::low_latency on a shared-mode open tries
+    // IAudioClient3::InitializeSharedAudioStream at the engine minimum period.
+    // If IAudioClient3 is unavailable or the call fails, open() honestly
+    // degrades to the standard shared Initialize. Either way the contract is the
+    // same as every other open path: fully open (is_open + positive
+    // rate/buffer) or fully closed — never a half-initialised device.
+    WasapiSystem sys;
+    if (!has_default_render(sys)) {
+        SUCCEED("no default render endpoint on this host; skipping");
+        return;
+    }
+    auto device = sys.create_device("");
+    REQUIRE(device != nullptr);
+
+    DeviceConfig cfg;
+    cfg.output_channels = 2;
+    cfg.share_mode = ShareMode::shared;
+    cfg.low_latency = true;
+
+    // Shared mode always has a viable fallback, so on a real render endpoint
+    // open() must succeed whether or not IAudioClient3 took the low-latency path.
+    REQUIRE(device->open(cfg));
+    CHECK(device->is_open());
+    CHECK(device->buffer_size() > 0);
+    CHECK(device->sample_rate() > 0.0);
+    device->close();
+    CHECK_FALSE(device->is_open());
+}
+
+TEST_CASE("WASAPI mode coverage: exclusive open succeeds or honest-fails "
+          "(never half-opens)",
+          "[audio][wasapi][share-mode][gap-doc][issue-302]") {
+    // Exclusive mode depends on the endpoint allowing it (the device's
+    // "Allow applications to take exclusive control" setting + format support).
+    // We can't guarantee it on an arbitrary CI host, so the contract we pin is:
+    // open() either fully succeeds (is_open + positive rate/buffer) or fully
+    // fails (NOT is_open) — it never leaves a half-initialised device.
+    WasapiSystem sys;
+    if (!has_default_render(sys)) {
+        SUCCEED("no default render endpoint on this host; skipping");
+        return;
+    }
+    auto device = sys.create_device("");
+    REQUIRE(device != nullptr);
+
+    DeviceConfig cfg;
+    cfg.output_channels = 2;
+    cfg.share_mode = ShareMode::exclusive;
+
+    if (device->open(cfg)) {
+        CHECK(device->is_open());
+        CHECK(device->buffer_size() > 0);
+        CHECK(device->sample_rate() > 0.0);
+        device->close();
+        CHECK_FALSE(device->is_open());
+    } else {
+        // Honest-fail path: exclusive disallowed / unsupported format here.
+        CHECK_FALSE(device->is_open());
+    }
 }
 
 TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
@@ -239,25 +290,35 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
 // on every platform — a stray member added on Windows will still trip
 // this test on macOS / Linux CI.
 
-TEST_CASE("WASAPI share-mode coverage: DeviceConfig API surface stays "
-          "share-mode-agnostic (cross-platform compile-time check)",
+TEST_CASE("WASAPI share-mode coverage: DeviceConfig exposes share_mode "
+          "(cross-platform compile-time check)",
           "[audio][wasapi][share-mode][gap-doc][issue-302]") {
     using cfg_t = pulp::audio::DeviceConfig;
-    static_assert(!has_share_mode_v<cfg_t>,
-                  "WASAPI gap-doc audit: DeviceConfig::share_mode added "
-                  "— extend the share-mode coverage test alongside the "
-                  "new API surface");
+    // W4: DeviceConfig::share_mode now exists (shared default + exclusive). The
+    // selector is a single enum field; there is intentionally NO separate
+    // `exclusive` bool — exclusive is a ShareMode value. W4b added
+    // DeviceConfig::low_latency, the shared-mode IAudioClient3 opt-in (default
+    // false). Non-Windows backends ignore both fields.
+    static_assert(has_share_mode_v<cfg_t>,
+                  "WASAPI W4: DeviceConfig::share_mode is the share-mode "
+                  "selector; keep this test in lockstep with the API");
     static_assert(!has_exclusive_v<cfg_t>,
-                  "WASAPI gap-doc audit: DeviceConfig::exclusive added "
-                  "— extend the share-mode coverage test alongside the "
-                  "new API surface");
-    static_assert(!has_low_latency_v<cfg_t>,
-                  "WASAPI gap-doc audit: DeviceConfig::low_latency added "
-                  "— extend the share-mode coverage test alongside the "
-                  "new API surface");
+                  "WASAPI: exclusive is a ShareMode enum value, not a "
+                  "DeviceConfig::exclusive field — do not add a bool");
+    static_assert(has_low_latency_v<cfg_t>,
+                  "WASAPI W4b: DeviceConfig::low_latency is the shared "
+                  "low-latency (IAudioClient3) opt-in; keep this test in "
+                  "lockstep with the API");
+    static_assert(cfg_t{}.share_mode == pulp::audio::ShareMode::shared,
+                  "shared must remain the default so non-Windows backends and "
+                  "existing callers are unaffected");
+    static_assert(cfg_t{}.low_latency == false,
+                  "low_latency must default false so non-Windows backends and "
+                  "existing callers are unaffected");
 
-    SUCCEED("WASAPI runtime probes are Windows-only; DeviceConfig stays "
-            "share-mode-agnostic on every platform (shared mode only)");
+    SUCCEED("DeviceConfig::share_mode defaults to shared and low_latency "
+            "defaults false on every platform; both are honored only by the "
+            "Windows WASAPI backend");
 }
 
 #endif

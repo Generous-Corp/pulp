@@ -449,7 +449,16 @@ bool match_clause(const FingerprintClause& clause, const InputSnapshot& snap) {
             if (clause.path.empty() || clause.value.empty() || snap.html_text.empty())
                 return false;
             try {
-                JsonParser p(snap.html_text);
+                // Brace aggregate-init (NOT parens): JsonParser is an aggregate
+                // with a `const std::string& src` member and no constructor, so
+                // `JsonParser p(snap.html_text)` is *parenthesized* aggregate init,
+                // which needs C++20 P0960. The self-hosted macOS PR lane's clang
+                // supports it, but the GitHub-hosted release runner's older Apple
+                // clang does NOT (even at -std=c++20) — there it fails with "no
+                // matching constructor", which silently broke every GitHub Release
+                // since #3138 (sign-and-release.yml's Build step). Braces are plain
+                // aggregate init — valid on every toolchain.
+                JsonParser p{snap.html_text};
                 auto root = p.parse();
                 const JsonValue* cur = &root;
                 std::string remaining = clause.path;

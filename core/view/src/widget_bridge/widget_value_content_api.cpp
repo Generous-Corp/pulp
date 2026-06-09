@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_content_api.cpp - content value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -12,20 +13,22 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_value_content_api() {
-    engine_.register_function("setProgress", [this](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setProgress", [this](choc::javascript::ArgumentList args) {
         if (auto* p = dynamic_cast<ProgressBar*>(widget(args.get<std::string>(0, ""))))
             p->set_progress(static_cast<float>(args.get<double>(1, 0)));
         return choc::value::Value();
     });
 
-    engine_.register_function("setMeterLevel", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setMeterLevel", [this](choc::javascript::ArgumentList args) {
         if (auto* m = dynamic_cast<Meter*>(widget(args.get<std::string>(0, ""))))
             m->set_level(static_cast<float>(args.get<double>(1, 0)),
                         static_cast<float>(args.get<double>(2, 0)));
         return choc::value::Value();
     });
 
-    engine_.register_function("setXY", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setXY", [this](choc::javascript::ArgumentList args) {
         if (auto* p = dynamic_cast<XYPad*>(widget(args.get<std::string>(0, "")))) {
             p->set_x(static_cast<float>(args.get<double>(1, .5)));
             p->set_y(static_cast<float>(args.get<double>(2, .5)));
@@ -33,7 +36,7 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setWaveformData", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWaveformData", [this](choc::javascript::ArgumentList args) {
         if (auto* w = dynamic_cast<WaveformView*>(widget(args.get<std::string>(0, "")))) {
             if (args.numArgs > 1 && args[1]) {
                 auto& a = *args[1]; std::vector<float> d(a.size());
@@ -44,7 +47,7 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setSpectrumData", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSpectrumData", [this](choc::javascript::ArgumentList args) {
         if (auto* s = dynamic_cast<SpectrumView*>(widget(args.get<std::string>(0, "")))) {
             if (args.numArgs > 1 && args[1]) {
                 auto& a = *args[1]; std::vector<float> d(a.size());
@@ -55,13 +58,13 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setPlaceholder", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setPlaceholder", [this](choc::javascript::ArgumentList args) {
         if (auto* e = dynamic_cast<TextEditor*>(widget(args.get<std::string>(0, ""))))
             e->placeholder = args.get<std::string>(1, "");
         return choc::value::Value();
     });
 
-    engine_.register_function("setText", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setText", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto t = args.get<std::string>(1, "");
         auto* v = widget(id);
         if (auto* e = dynamic_cast<TextEditor*>(v)) e->set_text(t);
@@ -69,14 +72,14 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("getText", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getText", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (auto* e = dynamic_cast<TextEditor*>(v)) return choc::value::createString(e->text());
         if (auto* l = dynamic_cast<Label*>(v)) return choc::value::createString(l->text());
         return choc::value::createString("");
     });
 
-    engine_.register_function("setPanelStyle", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setPanelStyle", [this](choc::javascript::ArgumentList args) {
         if (auto* p = dynamic_cast<Panel*>(widget(args.get<std::string>(0, "")))) {
             if (args.numArgs > 1) p->set_background_token(args.get<std::string>(1, "bg.surface"));
             if (args.numArgs > 2) p->set_border_token(args.get<std::string>(2, "control.border"));
@@ -86,7 +89,7 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setScrollContentSize", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setScrollContentSize", [this](choc::javascript::ArgumentList args) {
         if (auto* s = dynamic_cast<ScrollView*>(widget(args.get<std::string>(0, ""))))
             s->set_content_size({static_cast<float>(args.get<double>(1,0)),
                                 static_cast<float>(args.get<double>(2,0))});

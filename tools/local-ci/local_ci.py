@@ -33,12 +33,8 @@ Queueing model:
 from __future__ import annotations
 
 import argparse
-import base64
 from collections import deque
-from collections import defaultdict
 import fcntl
-import hashlib
-import html
 import json
 import os
 import plistlib
@@ -49,7 +45,6 @@ import shutil
 import statistics
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -59,7 +54,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -84,18 +79,6 @@ WINDOWS_REQUIRED_REMOTE_TOOLS = {
 }
 WINDOWS_OPTIONAL_REMOTE_TOOLS = {
     "gh": {"winget_id": "GitHub.cli", "required": False},
-}
-LINUX_REQUIRED_REMOTE_TOOLS = {
-    "git": {"display_name": "git", "package_hint": "sudo apt-get install -y git"},
-    "git_lfs": {"display_name": "git-lfs", "package_hint": "sudo apt-get install -y git-lfs && git lfs install"},
-    "xvfb_run": {"display_name": "xvfb-run", "package_hint": "sudo apt-get install -y xvfb xauth"},
-    "xauth": {"display_name": "xauth", "package_hint": "sudo apt-get install -y xvfb xauth"},
-    "xdotool": {"display_name": "xdotool", "package_hint": "sudo apt-get install -y xdotool"},
-    "xwininfo": {"display_name": "xwininfo", "package_hint": "sudo apt-get install -y x11-utils"},
-    "import": {"display_name": "import", "package_hint": "sudo apt-get install -y imagemagick"},
-}
-LINUX_OPTIONAL_REMOTE_TOOLS = {
-    "wmctrl": {"display_name": "wmctrl", "package_hint": "sudo apt-get install -y wmctrl"},
 }
 WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = "pulp-validate"
 
@@ -161,101 +144,68 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
     describe_path_for_cleanup,
 )
 
+import cleanup as _cleanup  # noqa: E402
+import desktop_artifacts as _desktop_artifacts  # noqa: E402
+import linux_target as _linux_target  # noqa: E402
+import macos_desktop as _macos_desktop  # noqa: E402
+import queue_orchestrator as _queue_orchestrator  # noqa: E402
+import reporting as _reporting  # noqa: E402
+import source_prep as _source_prep  # noqa: E402
+import ssh_bundle as _ssh_bundle  # noqa: E402
+import target_preflight as _target_preflight  # noqa: E402
+import windows_probe as _windows_probe  # noqa: E402
+import windows_target as _windows_target  # noqa: E402
+
+LINUX_REQUIRED_REMOTE_TOOLS = _linux_target.LINUX_REQUIRED_REMOTE_TOOLS
+LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target.LINUX_OPTIONAL_REMOTE_TOOLS
+
 
 def bundle_ref_name(job_id: str) -> str:
-    return f"refs/pulp-ci-bundles/{job_id}"
+    return _ssh_bundle.bundle_ref_name(job_id)
 
 
 def remote_bundle_name(job_id: str) -> str:
-    return f"pulp-ci-{job_id}.bundle"
+    return _ssh_bundle.remote_bundle_name(job_id)
 
 
 def create_job_bundle(job: dict) -> Path:
-    ensure_state_dirs()
-    bundle_path = bundles_dir() / f"{job['id']}.bundle"
-    bundle_lock_path = Path(f"{bundle_path}.lock")
-
-    with _BUNDLE_BUILD_LOCK:
-        if bundle_path.exists() and bundle_path.stat().st_size > 0:
-            return bundle_path
-
-        bundle_lock_path.unlink(missing_ok=True)
-        bundle_path.unlink(missing_ok=True)
-
-        temp_ref = bundle_ref_name(job["id"])
-        subprocess.run(["git", "update-ref", temp_ref, job["sha"]], cwd=ROOT, check=True)
-        try:
-            subprocess.run(["git", "bundle", "create", str(bundle_path), temp_ref], cwd=ROOT, check=True)
-        finally:
-            subprocess.run(["git", "update-ref", "-d", temp_ref], cwd=ROOT, check=True)
-    return bundle_path
+    return _ssh_bundle.create_job_bundle(
+        job,
+        ensure_state_dirs_fn=ensure_state_dirs,
+        bundles_dir_fn=bundles_dir,
+        bundle_build_lock=_BUNDLE_BUILD_LOCK,
+        root=ROOT,
+        run_fn=subprocess.run,
+    )
 
 
 def config_for_bundle_probe(job: dict, config: dict | None = None) -> dict:
-    if config:
-        return config
-    submission = job.get("submission") or {}
-    config_file = submission.get("config_path")
-    if config_file:
-        try:
-            return load_config_file(config_file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-    optional = load_optional_config()
-    return optional or {"targets": {}}
+    return _ssh_bundle.config_for_bundle_probe(
+        job,
+        config,
+        load_config_file_fn=load_config_file,
+        load_optional_config_fn=load_optional_config,
+    )
 
 
 def sync_job_bundle_to_ssh_host(host: str, job: dict, report_progress=None, config: dict | None = None) -> tuple[str, str]:
-    bundle_path = create_job_bundle(job)
-    remote_name = remote_bundle_name(job["id"])
-    probe_config = config_for_bundle_probe(job, config)
-    try:
-        if report_progress:
-            report_progress(
-                phase="bundle-upload",
-                host=host,
-                bundle=remote_name,
-                last_output_at=now_iso(),
-                transport_mode="bundle",
-            )
-        upload = subprocess.Popen(
-            ["scp", str(bundle_path), f"{host}:{remote_name}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        bundle_size = bundle_path.stat().st_size
-        deadline = time.time() + 300
-        stdout = ""
-        stderr = ""
-        while True:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                upload.kill()
-                stdout, stderr = upload.communicate()
-                raise RuntimeError(
-                    f"failed to upload git bundle to {host}: timed out waiting for scp to finish"
-                )
-            try:
-                stdout, stderr = upload.communicate(timeout=min(5.0, max(1.0, remaining)))
-            except subprocess.TimeoutExpired:
-                remote_size = probe_uploaded_bundle_size(host, remote_name, config=probe_config)
-                if remote_size is not None and remote_size >= bundle_size:
-                    upload.terminate()
-                    try:
-                        upload.communicate(timeout=2.0)
-                    except subprocess.TimeoutExpired:
-                        upload.kill()
-                        upload.communicate()
-                    break
-                continue
-            if upload.returncode != 0:
-                detail = (stderr or stdout or "").strip()
-                raise RuntimeError(f"failed to upload git bundle to {host}: {detail or f'scp exited {upload.returncode}'}")
-            break
-    except OSError as exc:
-        raise RuntimeError(f"failed to upload git bundle to {host}: {exc}") from exc
-    return remote_name, bundle_ref_name(job["id"])
+    return _ssh_bundle.sync_job_bundle_to_ssh_host(
+        host,
+        job,
+        report_progress=report_progress,
+        config=config,
+        create_job_bundle_fn=create_job_bundle,
+        remote_bundle_name_fn=remote_bundle_name,
+        bundle_ref_name_fn=bundle_ref_name,
+        config_for_bundle_probe_fn=config_for_bundle_probe,
+        probe_uploaded_bundle_size_fn=probe_uploaded_bundle_size,
+        now_iso_fn=now_iso,
+        popen_fn=subprocess.Popen,
+        stdout_pipe=subprocess.PIPE,
+        stderr_pipe=subprocess.PIPE,
+        timeout_expired_type=subprocess.TimeoutExpired,
+        time_fn=time.time,
+    )
 
 
 def target_name_for_ssh_host(config: dict, host: str) -> str | None:
@@ -388,6 +338,46 @@ from provenance import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 
+import evidence_index as evidence_index_module  # noqa: E402
+from evidence_index import (  # noqa: E402  -- re-exported for tests and callers
+    collect_evidence_groups_from_index,
+    empty_evidence_index,
+    evidence_entry_key,
+    evidence_record_from_result,
+    load_evidence_index_unlocked,
+    merge_result_into_evidence_index,
+    normalize_evidence_index,
+    rebuild_evidence_index_unlocked,
+    save_evidence_index_unlocked,
+)
+
+
+def load_evidence_index() -> dict:
+    return evidence_index_module.load_evidence_index()
+
+
+def update_evidence_index(result: dict, result_path: Path) -> None:
+    evidence_index_module.update_evidence_index(result, result_path)
+
+
+def collect_evidence_groups(branch: str | None = None, sha: str | None = None) -> dict[str, list[dict]]:
+    return collect_evidence_groups_from_index(load_evidence_index(), branch=branch, sha=sha)
+
+
+def print_evidence_summary(
+    *,
+    branch: str | None = None,
+    sha: str | None = None,
+    limit: int = 3,
+    indent: str = "",
+) -> bool:
+    return evidence_index_module.print_evidence_summary_from_groups(
+        collect_evidence_groups(branch=branch, sha=sha),
+        limit=limit,
+        indent=indent,
+    )
+
+
 def save_config(config: dict) -> None:
     atomic_write_text(config_path(), json.dumps(config, indent=2) + "\n")
 
@@ -512,133 +502,42 @@ def desktop_receipt_for(target_name: str) -> dict | None:
 
 
 def default_windows_session_task_name(target_name: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() else "-" for ch in target_name.strip())
-    cleaned = cleaned.strip("-") or "windows"
-    return f"PulpDesktopAutomationAgent-{cleaned}"
+    return _windows_target.default_windows_session_task_name(target_name)
 
 
 def desktop_target_contract(target_name: str, target: dict) -> dict:
-    adapter = target.get("adapter")
-    if adapter == "windows-session-agent":
-        remote_root = target.get("remote_root") or r"%LOCALAPPDATA%\Pulp\desktop-automation-agent"
-        task_name = target.get("task_name") or default_windows_session_task_name(target_name)
-        return {
-            "kind": "windows-session-agent",
-            "task_name": task_name,
-            "remote_root": remote_root,
-            "jobs_dir": remote_root + r"\jobs",
-            "results_dir": remote_root + r"\results",
-            "logs_dir": remote_root + r"\logs",
-            "script_path": remote_root + r"\agent.ps1",
-        }
-    return {}
+    return _windows_target.desktop_target_contract(target_name, target)
 
 
 def windows_path_join(*parts: str) -> str:
-    cleaned: list[str] = []
-    for index, part in enumerate(parts):
-        if not part:
-            continue
-        piece = str(part)
-        if index == 0:
-            cleaned.append(piece.rstrip('\\'))
-        else:
-            cleaned.append(piece.strip('\\'))
-    return '\\'.join(cleaned)
+    return _windows_target.windows_path_join(*parts)
 
 
 def windows_default_repo_checkout_path(home_dir: str | None) -> str:
-    home = (home_dir or "").strip()
-    if not home:
-        return WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME
-    return windows_path_join(home, WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME)
+    return _windows_target.windows_default_repo_checkout_path(home_dir)
 
 
 def windows_repo_path_is_unsafe(repo_path: str | None, home_dir: str | None = None) -> bool:
-    value = (repo_path or "").strip()
-    if not value:
-        return True
-    repo = PureWindowsPath(value)
-    repo_text = str(repo).rstrip("\\")
-    anchor = repo.anchor.rstrip("\\")
-    if not repo_text or (anchor and repo_text.lower() == anchor.lower()):
-        return True
-
-    home_value = (home_dir or "").strip()
-    if home_value:
-        home = PureWindowsPath(home_value)
-        home_text = str(home).rstrip("\\")
-        if home_text and repo_text.lower() == home_text.lower():
-            return True
-    return False
+    return _windows_target.windows_repo_path_is_unsafe(repo_path, home_dir)
 
 
 def update_target_repo_path(config: dict, target_name: str, repo_path: str) -> None:
-    config.setdefault("targets", {}).setdefault(target_name, {})["repo_path"] = repo_path
-    desktop = config.setdefault("desktop_automation", {})
-    desktop_targets = desktop.setdefault("targets", {})
-    desktop_targets.setdefault(target_name, {})["repo_path"] = repo_path
+    return _windows_target.update_target_repo_path(config, target_name, repo_path)
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
-    raw_repo = repo_path or ""
-    ps_script = f"""
-$RepoRaw = '{ps_literal(raw_repo)}'
-$Repo = if ($RepoRaw) {{ [Environment]::ExpandEnvironmentVariables($RepoRaw) }} else {{ '' }}
-$RepoExists = $false
-$GitDirExists = $false
-$HasOrigin = $false
-$OriginUrl = ''
-$Head = ''
-$HeadExists = $false
-$SetupPath = ''
-$SetupExists = $false
-if ($Repo) {{
-    $RepoExists = [bool](Test-Path $Repo)
-    $SetupPath = [string](Join-Path $Repo 'setup.sh')
-    $SetupExists = [bool](Test-Path $SetupPath)
-}}
-if ($Repo -and (Test-Path (Join-Path $Repo '.git'))) {{
-    $GitDirExists = $true
-    $HasOrigin = [bool]((git -C $Repo remote 2>$null) | Where-Object {{ $_ -eq 'origin' }} | Select-Object -First 1)
-    if ($HasOrigin) {{
-        $OriginUrl = [string]((git -C $Repo remote get-url origin 2>$null) | Select-Object -First 1)
-    }}
-    $Head = [string]((git -C $Repo rev-parse --verify --quiet HEAD 2>$null) | Select-Object -First 1)
-    $HeadExists = -not [string]::IsNullOrWhiteSpace($Head)
-}}
-$result = @{{
-    home_dir = [string]$HOME
-    repo_path_raw = [string]$RepoRaw
-    repo_path = [string]$Repo
-    repo_exists = $RepoExists
-    git_dir_exists = $GitDirExists
-    head = [string]$Head
-    head_exists = $HeadExists
-    setup_path = [string]$SetupPath
-    setup_exists = $SetupExists
-    origin_url = [string]$OriginUrl
-}}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=60)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"repo probe exited {run.returncode}"
-        raise RuntimeError(detail)
-    result = parse_windows_ssh_json(run.stdout)
-    result["repo_path_unsafe"] = windows_repo_path_is_unsafe(result.get("repo_path"), result.get("home_dir"))
-    return result
+    return _windows_probe.probe_windows_repo_checkout(
+        host,
+        repo_path,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        windows_repo_path_is_unsafe_fn=windows_repo_path_is_unsafe,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def windows_repo_checkout_ready(probe: dict | None) -> bool:
-    if not probe:
-        return False
-    return (
-        bool(probe.get("git_dir_exists"))
-        and bool(probe.get("head_exists"))
-        and bool(probe.get("setup_exists"))
-        and not bool(probe.get("repo_path_unsafe"))
-    )
+    return _windows_target.windows_repo_checkout_ready(probe)
 
 
 def ensure_windows_remote_repo_checkout(
@@ -649,96 +548,20 @@ def ensure_windows_remote_repo_checkout(
     bundle_name: str | None = None,
     bundle_ref: str | None = None,
 ) -> dict:
-    probe = probe_windows_repo_checkout(host, repo_path)
-    if not isinstance(probe, dict):
-        raise RuntimeError("Windows repo probe returned no structured payload")
-    effective_repo_path = probe.get("repo_path") or (repo_path or "").strip()
-    home_dir = probe.get("home_dir") or ""
-    if windows_repo_path_is_unsafe(effective_repo_path, home_dir):
-        effective_repo_path = windows_default_repo_checkout_path(home_dir)
-    needs_materialize = not (bool(probe.get("head_exists")) and bool(probe.get("setup_exists")))
-
-    ps_script = f"""
-$ErrorActionPreference = 'Stop'
-$Repo = {windows_contract_expand_expression(effective_repo_path)}
-$RemoteUrl = '{ps_literal(remote_url or "")}'
-$Bundle = '{ps_literal(bundle_name or "")}'
-$BundleRef = '{ps_literal(bundle_ref or "")}'
-$NeedsMaterialize = {"$true" if needs_materialize else "$false"}
-$PreviousLfsSkipSmudge = [Environment]::GetEnvironmentVariable('GIT_LFS_SKIP_SMUDGE', 'Process')
-[Environment]::SetEnvironmentVariable('GIT_LFS_SKIP_SMUDGE', '1', 'Process')
-New-Item -ItemType Directory -Force -Path $Repo | Out-Null
-if (-not (Test-Path (Join-Path $Repo '.git'))) {{
-    & git init $Repo | Out-Null
-    if ($LASTEXITCODE -ne 0) {{
-        throw ('git init failed for ' + $Repo)
-    }}
-}}
-$HasOrigin = [bool]((git -C $Repo remote 2>$null) | Where-Object {{ $_ -eq 'origin' }} | Select-Object -First 1)
-$OriginUrl = ''
-if ($HasOrigin) {{
-    $OriginUrl = [string]((git -C $Repo remote get-url origin 2>$null) | Select-Object -First 1)
-}}
-if (-not $OriginUrl -and $RemoteUrl) {{
-    & git -C $Repo remote add origin $RemoteUrl | Out-Null
-    if ($LASTEXITCODE -ne 0) {{
-        throw ('git remote add origin failed for ' + $Repo)
-    }}
-    $OriginUrl = $RemoteUrl
-}}
-$Head = ''
-$HeadExists = $false
-$SetupPath = [string](Join-Path $Repo 'setup.sh')
-$SetupExists = [bool](Test-Path $SetupPath)
-if ($NeedsMaterialize) {{
-    if ($Bundle -and $BundleRef) {{
-        $BundlePath = Join-Path $HOME $Bundle
-        & git -C $Repo fetch $BundlePath "$BundleRef`:refs/pulp-ci-bundles/source" | Out-Null
-        if ($LASTEXITCODE -ne 0) {{
-            throw ('git fetch bundle failed for ' + $Repo)
-        }}
-        if (Test-Path $BundlePath) {{ Remove-Item -LiteralPath $BundlePath -Force }}
-    }} elseif ($RemoteUrl) {{
-        & git -C $Repo fetch --depth 1 origin main | Out-Null
-        if ($LASTEXITCODE -ne 0) {{
-            throw ('git fetch origin main failed for ' + $Repo)
-        }}
-    }}
-    if (($Bundle -and $BundleRef) -or $RemoteUrl) {{
-        & git -C $Repo checkout --force -B main FETCH_HEAD | Out-Null
-        if ($LASTEXITCODE -ne 0) {{
-            throw ('git checkout main failed for ' + $Repo)
-        }}
-        $SetupExists = [bool](Test-Path $SetupPath)
-    }}
-}}
-[Environment]::SetEnvironmentVariable('GIT_LFS_SKIP_SMUDGE', $PreviousLfsSkipSmudge, 'Process')
-if (Test-Path (Join-Path $Repo '.git')) {{
-    $Head = [string]((git -C $Repo rev-parse --verify --quiet HEAD 2>$null) | Select-Object -First 1)
-    $HeadExists = -not [string]::IsNullOrWhiteSpace($Head)
-}}
-$result = @{{
-    home_dir = [string]$HOME
-    repo_path = [string]$Repo
-    repo_exists = [bool](Test-Path $Repo)
-    git_dir_exists = [bool](Test-Path (Join-Path $Repo '.git'))
-    head = [string]$Head
-    head_exists = $HeadExists
-    setup_path = [string]$SetupPath
-    setup_exists = $SetupExists
-    origin_url = [string]$OriginUrl
-}}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=120)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"repo bootstrap exited {run.returncode}"
-        raise RuntimeError(detail)
-    result = parse_windows_ssh_json(run.stdout)
-    if not isinstance(result, dict):
-        raise RuntimeError("Windows repo bootstrap returned no structured payload")
-    result["repo_path_unsafe"] = windows_repo_path_is_unsafe(result.get("repo_path"), result.get("home_dir"))
-    return result
+    return _windows_probe.ensure_windows_remote_repo_checkout(
+        host,
+        repo_path,
+        remote_url=remote_url,
+        bundle_name=bundle_name,
+        bundle_ref=bundle_ref,
+        probe_windows_repo_checkout_fn=probe_windows_repo_checkout,
+        windows_repo_path_is_unsafe_fn=windows_repo_path_is_unsafe,
+        windows_default_repo_checkout_path_fn=windows_default_repo_checkout_path,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def build_windows_session_agent_request(
@@ -760,62 +583,25 @@ def build_windows_session_agent_request(
     settle_secs: float,
     timeout_secs: float,
 ) -> dict:
-    job_id = uuid.uuid4().hex
-    result_root = windows_path_join(contract["results_dir"], job_id)
-    screenshot_path = windows_path_join(result_root, "screenshots", "window.png")
-    request = {
-        "schema": 1,
-        "job_id": job_id,
-        "target": target_name,
-        "action": action_name,
-        "label": label or default_desktop_label(command),
-        "command": command,
-        "cwd": repo_path,
-        "timeout_secs": timeout_secs,
-        "settle_secs": settle_secs,
-        "outputs": {
-            "result_root": result_root,
-            "screenshot": screenshot_path,
-            "stdout": windows_path_join(result_root, "stdout.log"),
-            "stderr": windows_path_join(result_root, "stderr.log"),
-            "manifest": windows_path_join(result_root, "manifest.json"),
-        },
-        "execution": {
-            "capture_mode": "pulp-app" if pulp_app_automation else "window-capture",
-            "capture_ui_snapshot": bool(capture_ui_snapshot),
-            "capture_before": bool(capture_before),
-        },
-        "interaction": {
-            "click_point": click_point,
-            "view_id": click_view_id,
-            "view_type": click_view_type,
-            "view_text": click_view_text,
-            "view_label": click_view_label,
-        },
-        "env": {
-            "PULP_AUTOMATION_AFTER_OUT": screenshot_path,
-            "PULP_AUTOMATION_DELAY_MS": "1000",
-            "PULP_AUTOMATION_AFTER_DELAY_MS": str(max(0, int(settle_secs * 1000.0))),
-            "PULP_AUTOMATION_EXIT_AFTER": "1",
-        },
-    }
-    if capture_ui_snapshot:
-        request["outputs"]["ui_snapshot"] = windows_path_join(result_root, "ui-tree.json")
-        request["env"]["PULP_VIEW_TREE_OUT"] = request["outputs"]["ui_snapshot"]
-    if capture_before:
-        request["outputs"]["before_screenshot"] = windows_path_join(result_root, "screenshots", "before.png")
-        request["env"]["PULP_AUTOMATION_BEFORE_OUT"] = request["outputs"]["before_screenshot"]
-    if click_point:
-        request["env"]["PULP_AUTOMATION_CLICK_POINT"] = click_point
-    if click_view_id:
-        request["env"]["PULP_AUTOMATION_CLICK_VIEW_ID"] = click_view_id
-    if click_view_type:
-        request["env"]["PULP_AUTOMATION_CLICK_VIEW_TYPE"] = click_view_type
-    if click_view_text:
-        request["env"]["PULP_AUTOMATION_CLICK_VIEW_TEXT"] = click_view_text
-    if click_view_label:
-        request["env"]["PULP_AUTOMATION_CLICK_VIEW_LABEL"] = click_view_label
-    return request
+    return _windows_target.build_windows_session_agent_request(
+        target_name,
+        contract,
+        command,
+        repo_path=repo_path,
+        action_name=action_name,
+        label=label,
+        pulp_app_automation=pulp_app_automation,
+        capture_ui_snapshot=capture_ui_snapshot,
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        capture_before=capture_before,
+        settle_secs=settle_secs,
+        timeout_secs=timeout_secs,
+        default_desktop_label_fn=default_desktop_label,
+    )
 
 
 def resolve_desktop_target(config: dict, target_name: str) -> dict:
@@ -879,213 +665,51 @@ def _check_writable_dir(path: Path) -> tuple[bool, str]:
 
 
 def probe_windows_session_agent(host: str, contract: dict) -> dict:
-    task_name = contract["task_name"]
-    remote_root = contract["remote_root"]
-    script_path = contract.get("script_path") or ""
-    ps_script = f"""
-$TaskName = '{ps_literal(task_name)}'
-$RemoteRootRaw = '{ps_literal(remote_root)}'
-$ScriptPathRaw = '{ps_literal(script_path)}'
-$RemoteRoot = {windows_contract_expand_expression(remote_root)}
-$ScriptPath = {windows_contract_expand_expression(script_path)}
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-$activeUser = ''
-try {{
-    $activeUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
-}} catch {{
-    $activeUser = ''
-}}
-$loggedOnUser = ''
-$loggedOnState = ''
-$sessionRecords = @()
-try {{
-    $quserOutput = quser 2>$null
-    foreach ($line in $quserOutput) {{
-        if ([string]::IsNullOrWhiteSpace($line)) {{ continue }}
-        if ($line -match 'USERNAME\\s+SESSIONNAME') {{ continue }}
-        $match = [regex]::Match($line, '^\\s*>?\\s*(?<username>\\S+)\\s+(?:(?<sessionname>\\S+)\\s+)?(?<id>\\d+)\\s+(?<state>Active|Disc|Disconnected|Conn|Listen|Idle|Down|Init)\\b')
-        if (-not $match.Success) {{ continue }}
-        $record = @{{
-            username = $match.Groups['username'].Value
-            session_name = $match.Groups['sessionname'].Value
-            session_id = $match.Groups['id'].Value
-            state = $match.Groups['state'].Value
-        }}
-        $sessionRecords += $record
-        if (-not $loggedOnUser -and @('Active', 'Disc', 'Disconnected') -contains $record.state) {{
-            $loggedOnUser = $record.username
-            $loggedOnState = $record.state
-        }}
-    }}
-}} catch {{
-}}
-$TaskState = ''
-if ($task) {{
-    $TaskState = [string]$task.State
-}}
-$InteractiveUser = ''
-if ($activeUser) {{
-    $InteractiveUser = $activeUser
-}} elseif ($loggedOnUser) {{
-    $InteractiveUser = $loggedOnUser
-}}
-$result = @{{
-    task_name = $TaskName
-    task_present = [bool]$task
-    task_state = $TaskState
-    active_user = $activeUser
-    logged_on_user = $loggedOnUser
-    session_state = $loggedOnState
-    session_records = $sessionRecords
-    interactive_user = $InteractiveUser
-    remote_root_raw = $RemoteRootRaw
-    remote_root = $RemoteRoot
-    agent_root_exists = Test-Path $RemoteRoot
-    jobs_dir = Join-Path $RemoteRoot 'jobs'
-    jobs_dir_exists = Test-Path (Join-Path $RemoteRoot 'jobs')
-    results_dir = Join-Path $RemoteRoot 'results'
-    results_dir_exists = Test-Path (Join-Path $RemoteRoot 'results')
-    logs_dir = Join-Path $RemoteRoot 'logs'
-    logs_dir_exists = Test-Path (Join-Path $RemoteRoot 'logs')
-    script_path_raw = $ScriptPathRaw
-    script_path = $ScriptPath
-    script_exists = Test-Path $ScriptPath
-}}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=60)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"probe exited {run.returncode}"
-        raise RuntimeError(detail)
-    return parse_windows_ssh_json(run.stdout)
+    return _windows_probe.probe_windows_session_agent(
+        host,
+        contract,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def probe_windows_remote_tooling(host: str) -> dict:
-    ps_script = r"""
-$gitCmd = Get-Command git -ErrorAction SilentlyContinue
-$ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-
-$gitVersion = ''
-if ($gitCmd) {
-    $gitVersion = ((& $gitCmd.Source --version 2>$null) | Select-Object -First 1)
-}
-
-$ghVersion = ''
-$ghAuthReady = $null
-$ghAuthDetail = ''
-if ($ghCmd) {
-    $ghVersion = ((& $ghCmd.Source --version 2>$null) | Select-Object -First 1)
-    $ghAuthOutput = (& $ghCmd.Source auth status 2>&1)
-    $ghAuthReady = ($LASTEXITCODE -eq 0)
-    $ghAuthDetail = (($ghAuthOutput | Select-Object -First 4) -join ' | ')
-}
-
-$wingetVersion = ''
-if ($wingetCmd) {
-    $wingetVersion = ((& $wingetCmd.Source --version 2>$null) | Select-Object -First 1)
-}
-
-$gitPath = ''
-if ($gitCmd) {
-    $gitPath = [string]$gitCmd.Source
-}
-
-$ghPath = ''
-if ($ghCmd) {
-    $ghPath = [string]$ghCmd.Source
-}
-
-$wingetPath = ''
-if ($wingetCmd) {
-    $wingetPath = [string]$wingetCmd.Source
-}
-
-$result = @{
-    git_found = [bool]$gitCmd
-    git_path = $gitPath
-    git_version = [string]$gitVersion
-    gh_found = [bool]$ghCmd
-    gh_path = $ghPath
-    gh_version = [string]$ghVersion
-    gh_auth_ready = $ghAuthReady
-    gh_auth_detail = [string]$ghAuthDetail
-    winget_found = [bool]$wingetCmd
-    winget_path = $wingetPath
-    winget_version = [string]$wingetVersion
-}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=60)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"tooling probe exited {run.returncode}"
-        raise RuntimeError(detail)
-    return parse_windows_ssh_json(run.stdout)
+    return _windows_probe.probe_windows_remote_tooling(
+        host,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+    )
 
 
 def install_windows_remote_tool(host: str, package_id: str, *, timeout: int = 900) -> None:
-    ps_script = f"""
-$Winget = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $Winget) {{
-    throw 'winget not found'
-}}
-& $Winget.Source install --id '{ps_literal(package_id)}' -e --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity
-if ($LASTEXITCODE -ne 0) {{
-    throw ('winget install failed for {ps_literal(package_id)} with exit code ' + $LASTEXITCODE)
-}}
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=timeout)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"winget install exited {run.returncode}"
-        raise RuntimeError(detail)
+    return _windows_probe.install_windows_remote_tool(
+        host,
+        package_id,
+        timeout=timeout,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def ensure_windows_remote_tooling(host: str, *, install_optional: bool = False) -> dict:
-    probe = probe_windows_remote_tooling(host)
-    installed: list[str] = []
-
-    for tool_name, spec in WINDOWS_REQUIRED_REMOTE_TOOLS.items():
-        if probe.get(f"{tool_name}_found"):
-            continue
-        if not probe.get("winget_found"):
-            raise RuntimeError(
-                f"`{tool_name}` is missing on the Windows target and `winget` is unavailable; install it manually, then rerun `pulp ci-local desktop install windows`"
-            )
-        install_windows_remote_tool(host, spec["winget_id"])
-        installed.append(tool_name)
-        probe = probe_windows_remote_tooling(host)
-        if not probe.get(f"{tool_name}_found"):
-            raise RuntimeError(
-                f"`{tool_name}` is still missing after `winget` install; verify PATH on the Windows target, then rerun `pulp ci-local desktop doctor windows`"
-            )
-
-    if install_optional:
-        for tool_name, spec in WINDOWS_OPTIONAL_REMOTE_TOOLS.items():
-            if probe.get(f"{tool_name}_found") or not probe.get("winget_found"):
-                continue
-            try:
-                install_windows_remote_tool(host, spec["winget_id"])
-                installed.append(tool_name)
-                probe = probe_windows_remote_tooling(host)
-            except RuntimeError:
-                # Optional tools are advisory. Keep the required setup path resilient.
-                pass
-
-    return {"probe": probe, "installed": installed}
+    return _windows_probe.ensure_windows_remote_tooling(
+        host,
+        install_optional=install_optional,
+        required_tools=WINDOWS_REQUIRED_REMOTE_TOOLS,
+        optional_tools=WINDOWS_OPTIONAL_REMOTE_TOOLS,
+        probe_windows_remote_tooling_fn=probe_windows_remote_tooling,
+        install_windows_remote_tool_fn=install_windows_remote_tool,
+    )
 
 
 def windows_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
-    if probe.get(f"{tool_name}_found"):
-        version = (probe.get(f"{tool_name}_version") or '').strip()
-        path = probe.get(f"{tool_name}_path") or tool_name
-        return f"{version} ({path})" if version else path
-    if missing_hint:
-        return missing_hint
-    return "missing"
+    return _windows_target.windows_tooling_detail(probe, tool_name, missing_hint=missing_hint)
 
 
 def windows_remote_tooling_ready(probe: dict) -> bool:
-    return all(bool(probe.get(f"{tool_name}_found")) for tool_name in WINDOWS_REQUIRED_REMOTE_TOOLS)
+    return _windows_target.windows_remote_tooling_ready(probe, required_tools=WINDOWS_REQUIRED_REMOTE_TOOLS)
 
 
 def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
@@ -1378,176 +1002,53 @@ def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
 
 
 def desktop_artifact_root(config: dict) -> Path:
-    path = Path(config["desktop_automation"]["artifact_root"]).expanduser()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.desktop_artifact_root(config)
 
 
 def windows_desktop_session_user(probe: dict | None) -> str:
-    if not probe:
-        return ""
-    return str(probe.get("interactive_user") or probe.get("logged_on_user") or "").strip()
+    return _windows_target.windows_desktop_session_user(probe)
 
 
 def windows_desktop_session_state(probe: dict | None) -> str:
-    if not probe:
-        return ""
-    return str(probe.get("session_state") or "").strip()
+    return _windows_target.windows_desktop_session_state(probe)
 
 
 def windows_repo_checkout_detail(probe: dict | None, *, fallback_path: str | None = None) -> str:
-    if not probe:
-        return fallback_path or "missing"
-    repo_path = str(probe.get("repo_path") or fallback_path or "").strip() or "missing"
-    origin_url = str(probe.get("origin_url") or "").strip()
-    detail = f"{repo_path} ({origin_url})" if origin_url else repo_path
-    notes: list[str] = []
-    if probe.get("repo_exists") and not probe.get("git_dir_exists"):
-        notes.append("not a git checkout")
-    elif probe.get("git_dir_exists") and not probe.get("head_exists"):
-        notes.append("empty git repo")
-    elif probe.get("git_dir_exists") and not probe.get("setup_exists"):
-        notes.append("checkout incomplete; setup.sh missing")
-    if notes:
-        detail = f"{detail}; {'; '.join(notes)}"
-    return detail
+    return _windows_target.windows_repo_checkout_detail(probe, fallback_path=fallback_path)
 
 
 def create_desktop_run_bundle(config: dict, target_name: str, action: str) -> Path:
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_id = uuid.uuid4().hex[:8]
-    path = desktop_artifact_root(config) / target_name / action / f"{ts}-{run_id}"
-    (path / "screenshots").mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.create_desktop_run_bundle(config, target_name, action)
 
 
 def desktop_publish_root(config: dict) -> Path:
-    path = desktop_artifact_root(config) / "_published"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.desktop_publish_root(config)
 
 
 def create_desktop_publish_bundle(config: dict) -> Path:
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_id = uuid.uuid4().hex[:8]
-    path = desktop_publish_root(config) / f"{ts}-{run_id}"
-    (path / "assets").mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.create_desktop_publish_bundle(config)
 
 
 def probe_linux_launch_backend(host: str) -> dict:
-    remote_cmd = """if command -v xvfb-run >/dev/null 2>&1; then
-  printf 'mode=xvfb\npath=%s\n' "$(command -v xvfb-run)"
-  exit 0
-fi
-display=''
-for sock in /tmp/.X11-unix/X*; do
-  [ -S "$sock" ] || continue
-  base=$(basename "$sock")
-  display=":${base#X}"
-  break
-done
-xdg_runtime_dir=''
-candidate="/run/user/$(id -u)"
-if [ -d "$candidate" ]; then
-  xdg_runtime_dir="$candidate"
-fi
-if [ -n "$display" ]; then
-  printf 'mode=display\ndisplay=%s\n' "$display"
-  if [ -n "$xdg_runtime_dir" ]; then
-    printf 'xdg_runtime_dir=%s\n' "$xdg_runtime_dir"
-  fi
-else
-  printf 'mode=missing\n'
-fi"""
-    run = ssh_command_result(host, remote_cmd, timeout=30)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"ssh exited {run.returncode}"
-        raise RuntimeError(detail)
-    backend: dict[str, str] = {}
-    for line in run.stdout.splitlines():
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        backend[key.strip()] = value.strip()
-    backend.setdefault("mode", "missing")
-    return backend
+    return _linux_target.probe_linux_launch_backend(
+        host,
+        ssh_command_result_fn=ssh_command_result,
+    )
 
 
 def probe_linux_remote_tooling(host: str) -> dict:
-    remote_cmd = r"""
-probe_tool() {
-  key="$1"
-  cmd="$2"
-  shift 2
-  if command -v "$cmd" >/dev/null 2>&1; then
-    path=$(command -v "$cmd")
-    version=$("$cmd" "$@" 2>&1 | head -n 1 || true)
-    printf '%s_found=true\n' "$key"
-    printf '%s_path=%s\n' "$key" "$path"
-    printf '%s_version=%s\n' "$key" "$version"
-  else
-    printf '%s_found=false\n' "$key"
-  fi
-}
-probe_git_lfs() {
-  if git lfs version >/dev/null 2>&1; then
-    path=$(command -v git-lfs || true)
-    version=$(git lfs version 2>&1 | head -n 1 || true)
-    if [ -z "$path" ]; then
-      path="git lfs"
-    fi
-    printf 'git_lfs_found=true\n'
-    printf 'git_lfs_path=%s\n' "$path"
-    printf 'git_lfs_version=%s\n' "$version"
-  elif [ -x "$HOME/.local/bin/git-lfs" ]; then
-    path="$HOME/.local/bin/git-lfs"
-    version=$("$path" version 2>&1 | head -n 1 || true)
-    printf 'git_lfs_found=false\n'
-    printf 'git_lfs_path=%s\n' "$path"
-    printf 'git_lfs_version=%s\n' "$version"
-    printf 'git_lfs_hint=installed at %s but unavailable to non-interactive shells; add $HOME/.local/bin to PATH or install git-lfs system-wide\n' "$path"
-  else
-    printf 'git_lfs_found=false\n'
-  fi
-}
-probe_tool git git --version
-probe_git_lfs
-probe_tool xvfb_run xvfb-run --help
-probe_tool xauth xauth -V
-probe_tool xdotool xdotool -v
-probe_tool xwininfo xwininfo -version
-probe_tool import import -version
-probe_tool wmctrl wmctrl -V
-"""
-    run = ssh_command_result(host, remote_cmd, timeout=30)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"ssh exited {run.returncode}"
-        raise RuntimeError(detail)
-    result: dict[str, str] = {}
-    for line in run.stdout.splitlines():
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        result[key.strip()] = value.strip()
-    return result
+    return _linux_target.probe_linux_remote_tooling(
+        host,
+        ssh_command_result_fn=ssh_command_result,
+    )
 
 
 def linux_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
-    if probe.get(f"{tool_name}_found"):
-        version = (probe.get(f"{tool_name}_version") or "").strip()
-        path = probe.get(f"{tool_name}_path") or tool_name
-        return f"{version} ({path})" if version else path
-    hint = (probe.get(f"{tool_name}_hint") or "").strip()
-    if hint:
-        return hint
-    if missing_hint:
-        return missing_hint
-    return "missing"
+    return _linux_target.linux_tooling_detail(probe, tool_name, missing_hint=missing_hint)
 
 
 def linux_remote_tooling_ready(probe: dict) -> bool:
-    return all(bool(probe.get(f"{tool_name}_found")) for tool_name in LINUX_REQUIRED_REMOTE_TOOLS)
+    return _linux_target.linux_remote_tooling_ready(probe, required_tools=LINUX_REQUIRED_REMOTE_TOOLS)
 
 
 def normalize_git_remote_for_http(remote_url: str | None) -> str | None:
@@ -1648,134 +1149,49 @@ def _run_git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.Co
 
 
 def publish_report_to_branch(config: dict, report: dict) -> dict:
-    branch = config['desktop_automation']['publish_branch']
-    report_dir = Path(report['output_dir']).expanduser()
-    report_name = report_dir.name
-    publish_root = Path(tempfile.mkdtemp(prefix='pulp-desktop-publish-'))
-    worktree = publish_root / 'worktree'
-    branch_exists = bool(_run_git(['ls-remote', '--heads', 'origin', branch], cwd=ROOT, check=False).stdout.strip())
-    try:
-        if branch_exists:
-            _run_git(['worktree', 'add', '--detach', str(worktree), f'origin/{branch}'], cwd=ROOT)
-            _run_git(['checkout', '-B', branch, f'origin/{branch}'], cwd=worktree)
-        else:
-            _run_git(['worktree', 'add', '--detach', str(worktree), 'HEAD'], cwd=ROOT)
-            _run_git(['checkout', '--orphan', branch], cwd=worktree)
-            _run_git(['rm', '-rf', '--ignore-unmatch', '.'], cwd=worktree, check=False)
-            _clear_directory_contents(worktree)
-        dest_root = worktree / 'desktop-automation'
-        report_dest = dest_root / 'reports' / report_name
-        latest_dest = dest_root / 'latest'
-        shutil.rmtree(report_dest, ignore_errors=True)
-        shutil.rmtree(latest_dest, ignore_errors=True)
-        report_dest.parent.mkdir(parents=True, exist_ok=True)
-        latest_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(report_dir, report_dest)
-        shutil.copytree(report_dir, latest_dest)
-        _run_git(['add', 'desktop-automation'], cwd=worktree)
-        status = _run_git(['status', '--short'], cwd=worktree).stdout.strip()
-        if status:
-            _run_git(['commit', '-m', f'Publish desktop automation report {report_name}'], cwd=worktree)
-            _run_git(['push', 'origin', f'HEAD:{branch}'], cwd=worktree)
-        remote_base = git_origin_http_url(ROOT)
-        published = {
-            'mode': 'branch',
-            'branch': branch,
-            'report_path': f'desktop-automation/reports/{report_name}',
-            'latest_path': 'desktop-automation/latest',
-        }
-        if remote_base:
-            published['branch_url'] = f'{remote_base}/tree/{branch}'
-            published['report_url'] = f'{remote_base}/tree/{branch}/desktop-automation/reports/{report_name}'
-            published['latest_url'] = f'{remote_base}/tree/{branch}/desktop-automation/latest'
-            published['latest_index_json_url'] = f'{remote_base}/blob/{branch}/desktop-automation/latest/index.json'
-            published_runs = []
-            for run in report.get('runs', []):
-                artifact_urls = {}
-                for key, value in (run.get('artifacts') or {}).items():
-                    if isinstance(value, str):
-                        artifact_urls[key] = f'{remote_base}/blob/{branch}/desktop-automation/latest/{value}'
-                published_runs.append({
-                    'label': run.get('label'),
-                    'target': run.get('target'),
-                    'action': run.get('action'),
-                    'artifact_urls': artifact_urls,
-                })
-            published['runs'] = published_runs
-        return published
-    finally:
-        _reset_local_worktree(worktree)
-        shutil.rmtree(publish_root, ignore_errors=True)
+    return _reporting.publish_report_to_branch(
+        config,
+        report,
+        root=ROOT,
+        run_git_fn=_run_git,
+        reset_local_worktree_fn=_reset_local_worktree,
+        clear_directory_contents_fn=_clear_directory_contents,
+        git_origin_http_url_fn=git_origin_http_url,
+    )
 
 
 def make_desktop_source_request(args: argparse.Namespace) -> dict:
-    mode = normalize_desktop_source_mode(getattr(args, "source_mode", "live"))
-    return {
-        "mode": mode,
-        "branch": getattr(args, "branch", None) or current_branch(),
-        "sha": getattr(args, "sha", None) or current_sha(),
-        "prepare_command": (getattr(args, "prepare_command", None) or "").strip() or None,
-        "prepare_timeout_secs": float(getattr(args, "prepare_timeout", 900.0) or 900.0),
-    }
+    return _source_prep.make_desktop_source_request(
+        args,
+        normalize_desktop_source_mode_fn=normalize_desktop_source_mode,
+        current_branch_fn=current_branch,
+        current_sha_fn=current_sha,
+    )
 
 
 def desktop_source_cache_key(source_request: dict) -> str:
-    raw = json.dumps(
-        {
-            "sha": source_request.get("sha"),
-            "prepare_command": source_request.get("prepare_command") or "",
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return _source_prep.desktop_source_cache_key(source_request)
 
 
 def desktop_source_root(target_name: str, source_request: dict) -> Path:
-    return state_dir() / "desktop-source" / target_name / desktop_source_cache_key(source_request)
+    return _source_prep.desktop_source_root(
+        target_name,
+        source_request,
+        state_dir_fn=state_dir,
+    )
 
 
 def _command_path_rewrite_candidate(token: str) -> Path | None:
-    if not token:
-        return None
-    candidate = Path(token).expanduser()
-    if candidate.is_absolute():
-        try:
-            candidate.relative_to(ROOT)
-        except ValueError:
-            return None
-        return candidate
-    if token.startswith("./") or token.startswith("../") or token.startswith(".\\") or token.startswith("..\\"):
-        normalized = Path(token.replace("\\", "/"))
-        return ROOT / normalized
-    return None
+    return _source_prep.command_path_rewrite_candidate(token, root=ROOT)
 
 
 def _rewrite_launch_command_for_mapper(command: str | None, mapper, *, windows: bool = False) -> str | None:
-    if not command:
-        return command
-    try:
-        args = shlex.split(command)
-    except ValueError:
-        return command
-    if args and ("\\" in command or args[0].startswith(".") and "\\" not in args[0] and "\\\\" in command):
-        try:
-            windows_args = shlex.split(command, posix=False)
-        except ValueError:
-            windows_args = []
-        if windows_args:
-            args = windows_args
-    if not args:
-        return command
-    token = args[0]
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}:
-        token = token[1:-1]
-    candidate = _command_path_rewrite_candidate(token)
-    if candidate is not None:
-        rel = candidate.relative_to(ROOT)
-        args[0] = mapper(rel)
-    if windows:
-        return _windows_command_join(args)
-    return " ".join(shlex.quote(part) for part in args)
+    return _source_prep.rewrite_launch_command_for_mapper(
+        command,
+        mapper,
+        root=ROOT,
+        windows=windows,
+    )
 
 
 def _windows_command_join(parts: list[str]) -> str:
@@ -1783,85 +1199,36 @@ def _windows_command_join(parts: list[str]) -> str:
 
 
 def rewrite_launch_command_for_source_root(command: str | None, source_root: Path) -> str | None:
-    return _rewrite_launch_command_for_mapper(command, lambda rel: str(source_root / rel))
+    return _source_prep.rewrite_launch_command_for_source_root(command, source_root, root=ROOT)
 
 
 def rewrite_launch_command_for_posix_root(command: str | None, remote_root: str) -> str | None:
-    return _rewrite_launch_command_for_mapper(command, lambda rel: f"{remote_root}/{rel.as_posix()}")
+    return _source_prep.rewrite_launch_command_for_posix_root(command, remote_root, root=ROOT)
 
 
 def rewrite_launch_command_for_windows_root(command: str | None, remote_root: str) -> str | None:
-    return _rewrite_launch_command_for_mapper(
+    return _source_prep.rewrite_launch_command_for_windows_root(
         command,
-        lambda rel: windows_path_join(remote_root, str(rel).replace("/", "\\")),
-        windows=True,
+        remote_root,
+        root=ROOT,
+        windows_path_join_fn=windows_path_join,
     )
 
 
 def split_windows_prepare_commands(command: str) -> list[str]:
-    parts: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-    for ch in command:
-        if quote is not None:
-            current.append(ch)
-            if ch == quote:
-                quote = None
-            continue
-        if ch in {"'", '"'}:
-            quote = ch
-            current.append(ch)
-            continue
-        if ch in {";", "\n"}:
-            segment = "".join(current).strip()
-            if segment:
-                parts.append(segment)
-            current = []
-            continue
-        current.append(ch)
-    segment = "".join(current).strip()
-    if segment:
-        parts.append(segment)
-    return parts
+    return _source_prep.split_windows_prepare_commands(command)
 
 
 def validate_windows_prepare_commands(commands: list[str]) -> None:
-    suspicious = [cmd for cmd in commands if re.search(r"(^|[\s=])'[^']+'(?=$|[\s&|;])", cmd)]
-    if suspicious:
-        sample = suspicious[0]
-        raise ValueError(
-            "Windows prepare commands run under cmd.exe, where single-quoted tokens are literal text. "
-            "Use double quotes for paths, generator names, and arguments instead. "
-            f"Suspicious command: {sample}"
-        )
+    return _source_prep.validate_windows_prepare_commands(commands)
 
 
 def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | None) -> None:
-    if not source_context:
-        return
-    source_manifest = {
-        "mode": source_context.get("mode", "live"),
-        "branch": source_context.get("branch"),
-        "sha": source_context.get("sha"),
-        "prepare_command": source_context.get("prepare_command"),
-        "prepare_timeout_secs": source_context.get("prepare_timeout_secs"),
-        "prepared_root": source_context.get("prepared_root_display", source_context.get("prepared_root")),
-        "launch_cwd": source_context.get("launch_cwd_display", source_context.get("launch_cwd")),
-    }
-    manifest["source"] = source_manifest
-    prepare_log = source_context.get("prepare_log")
-    if prepare_log:
-        manifest.setdefault("artifacts", {})["prepare_log"] = str(prepare_log)
+    return _source_prep.attach_desktop_source_to_manifest(manifest, source_context)
 
 
 def slugify_token(value: str, *, max_len: int = 48) -> str:
-    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
-    while "--" in cleaned:
-        cleaned = cleaned.replace("--", "-")
-    cleaned = cleaned.strip("-")
-    if not cleaned:
-        return "run"
-    return cleaned[:max_len]
+    return _reporting.slugify_token(value, max_len=max_len)
 
 
 def stage_desktop_publish_report(
@@ -1871,183 +1238,34 @@ def stage_desktop_publish_report(
     output_dir: Path | None = None,
     label: str | None = None,
 ) -> dict:
-    if not manifests:
-        raise ValueError("Desktop publish requires at least one run manifest.")
-
-    publish_dir = output_dir.expanduser() if output_dir else create_desktop_publish_bundle(config)
-    publish_dir.mkdir(parents=True, exist_ok=True)
-    assets_root = publish_dir / "assets"
-    assets_root.mkdir(parents=True, exist_ok=True)
-
-    published_runs: list[dict] = []
-    for index, manifest in enumerate(manifests, start=1):
-        run_slug = "-".join(
-            [
-                f"run-{index:02d}",
-                slugify_token(str(manifest.get("target", "target"))),
-                slugify_token(str(manifest.get("action", "run"))),
-                slugify_token(str(manifest.get("label", "artifact"))),
-            ]
-        )
-        run_dir = assets_root / run_slug
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        copied_artifacts: dict[str, str | dict | None] = {}
-        for key in (
-            "screenshot",
-            "before_screenshot",
-            "diff_screenshot",
-            "ui_snapshot",
-            "stdout",
-            "stderr",
-        ):
-            path_str = manifest.get("artifacts", {}).get(key)
-            if not path_str:
-                continue
-            source = Path(path_str).expanduser()
-            if not source.exists():
-                continue
-            destination = run_dir / source.name
-            shutil.copy2(source, destination)
-            copied_artifacts[key] = str(destination.relative_to(publish_dir))
-
-        bundle_dir = Path(manifest.get("artifacts", {}).get("bundle_dir", "")).expanduser()
-        manifest_path = bundle_dir / "manifest.json"
-        if manifest_path.exists():
-            destination = run_dir / "manifest.json"
-            shutil.copy2(manifest_path, destination)
-            copied_artifacts["manifest"] = str(destination.relative_to(publish_dir))
-
-        if manifest.get("artifacts", {}).get("image_change"):
-            copied_artifacts["image_change"] = manifest["artifacts"]["image_change"]
-
-        published_runs.append(
-            {
-                "target": manifest.get("target"),
-                "action": manifest.get("action"),
-                "label": manifest.get("label"),
-                "completed_at": manifest.get("completed_at"),
-                "bundle_dir": manifest.get("artifacts", {}).get("bundle_dir"),
-                "interaction_mode": (manifest.get("interaction") or {}).get("mode"),
-                "artifacts": copied_artifacts,
-            }
-        )
-
-    index_payload = {
-        "generated_at": now_iso(),
-        "label": label or "desktop-publish",
-        "publish_mode": config["desktop_automation"]["publish_mode"],
-        "publish_branch": config["desktop_automation"]["publish_branch"],
-        "run_count": len(published_runs),
-        "runs": published_runs,
-    }
-
-    index_json = publish_dir / "index.json"
-    atomic_write_text(index_json, json.dumps(index_payload, indent=2) + "\n")
-
-    cards: list[str] = []
-    for run in published_runs:
-        artifacts = run["artifacts"]
-        screenshot = artifacts.get("screenshot")
-        before = artifacts.get("before_screenshot")
-        diff = artifacts.get("diff_screenshot")
-        meta_lines = [
-            f"<div><strong>{html.escape(str(run.get('target') or '?'))}/{html.escape(str(run.get('action') or '?'))}</strong></div>",
-            f"<div>{html.escape(str(run.get('label') or '?'))}</div>",
-        ]
-        if run.get("completed_at"):
-            meta_lines.append(f"<div>{html.escape(str(run['completed_at']))}</div>")
-        if run.get("interaction_mode"):
-            meta_lines.append(f"<div>interaction: {html.escape(str(run['interaction_mode']))}</div>")
-        if artifacts.get("image_change"):
-            meta_lines.append(
-                f"<div>image_change: {html.escape(json.dumps(artifacts['image_change'], sort_keys=True))}</div>"
-            )
-        image_blocks: list[str] = []
-        for title, rel_path in (("before", before), ("after", screenshot), ("diff", diff)):
-            if not rel_path:
-                continue
-            image_blocks.append(
-                "<figure>"
-                f"<figcaption>{html.escape(title)}</figcaption>"
-                f"<img src=\"{html.escape(str(rel_path))}\" alt=\"{html.escape(title)}\" />"
-                "</figure>"
-            )
-        cards.append(
-            "<section class=\"run-card\">"
-            + "".join(meta_lines)
-            + "<div class=\"images\">"
-            + "".join(image_blocks)
-            + "</div></section>"
-        )
-
-    index_html = publish_dir / "index.html"
-    atomic_write_text(
-        index_html,
-        "\n".join(
-            [
-                "<!doctype html>",
-                "<html><head><meta charset=\"utf-8\"><title>Pulp Desktop Automation Report</title>",
-                "<style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:24px;background:#111827;color:#e5e7eb}"
-                " .run-card{border:1px solid #374151;border-radius:12px;padding:16px;margin:0 0 16px;background:#1f2937}"
-                " .images{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}"
-                " figure{margin:0} figcaption{margin-bottom:8px;color:#9ca3af} img{max-width:320px;border-radius:8px;border:1px solid #374151;background:#000}</style>",
-                "</head><body>",
-                f"<h1>{html.escape(index_payload['label'])}</h1>",
-                f"<p>Generated at {html.escape(index_payload['generated_at'])} · runs: {len(published_runs)}</p>",
-                *cards,
-                "</body></html>",
-            ]
-        )
-        + "\n",
+    return _reporting.stage_desktop_publish_report(
+        config,
+        manifests,
+        output_dir=output_dir,
+        label=label,
+        create_desktop_publish_bundle_fn=create_desktop_publish_bundle,
+        now_iso_fn=now_iso,
+        atomic_write_text_fn=atomic_write_text,
+        write_desktop_publish_rollups_fn=write_desktop_publish_rollups,
+        publish_report_to_branch_fn=publish_report_to_branch,
     )
-
-    report = {
-        "generated_at": index_payload["generated_at"],
-        "label": index_payload["label"],
-        "publish_mode": index_payload["publish_mode"],
-        "publish_branch": index_payload["publish_branch"],
-        "output_dir": str(publish_dir),
-        "index_html": str(index_html),
-        "index_json": str(index_json),
-        "run_count": len(published_runs),
-        "runs": published_runs,
-    }
-    write_desktop_publish_rollups(config)
-    if config['desktop_automation']['publish_mode'] == 'branch':
-        report['published'] = publish_report_to_branch(config, report)
-    return report
 
 
 def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:
-    root = desktop_publish_root(config)
-    reports: list[dict] = []
-    for publish_dir in sorted((p for p in root.iterdir() if p.is_dir()), reverse=True):
-        index_json = publish_dir / "index.json"
-        index_html = publish_dir / "index.html"
-        if not index_json.exists():
-            continue
-        try:
-            payload = json.loads(index_json.read_text())
-        except json.JSONDecodeError:
-            continue
-        payload["output_dir"] = str(publish_dir)
-        payload.setdefault("index_json", str(index_json))
-        payload.setdefault("index_html", str(index_html))
-        reports.append(payload)
-    reports.sort(key=lambda item: item.get("generated_at") or "", reverse=True)
-    if limit is not None:
-        reports = reports[:limit]
-    return reports
+    return _reporting.desktop_publish_reports(
+        config,
+        limit=limit,
+        desktop_publish_root_fn=desktop_publish_root,
+    )
 
 
 def write_desktop_publish_rollups(config: dict) -> None:
-    root = desktop_publish_root(config)
-    reports = desktop_publish_reports(config)
-    latest_report = reports[0] if reports else None
-    atomic_write_text(root / "latest-report.json", json.dumps(latest_report, indent=2) + "\n")
-    reports_jsonl = "".join(json.dumps(report, sort_keys=True) + "\n" for report in reports)
-    atomic_write_text(root / "reports.jsonl", reports_jsonl)
+    _reporting.write_desktop_publish_rollups(
+        config,
+        desktop_publish_root_fn=desktop_publish_root,
+        desktop_publish_reports_fn=desktop_publish_reports,
+        atomic_write_text_fn=atomic_write_text,
+    )
 
 
 def wait_for_path(path: Path, timeout_secs: float) -> Path:
@@ -2070,150 +1288,44 @@ def count_view_tree_nodes(node: object) -> int:
 
 
 def detect_macos_app_bundle(command: str | None) -> Path | None:
-    if not command:
-        return None
-    args = shlex.split(command)
-    if not args:
-        return None
-    exec_path = Path(args[0]).expanduser()
-    candidates = [exec_path, *exec_path.parents]
-    for candidate in candidates:
-        if candidate.suffix == ".app":
-            return candidate
-    return None
+    return _macos_desktop.detect_macos_app_bundle(command)
 
 
 def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
-    info_plist = app_path / "Contents" / "Info.plist"
-    if not info_plist.exists():
-        return None
-    try:
-        payload = plistlib.loads(info_plist.read_bytes())
-    except (plistlib.InvalidFileException, OSError):
-        return None
-    bundle_id = payload.get("CFBundleIdentifier")
-    return bundle_id if isinstance(bundle_id, str) and bundle_id else None
+    return _macos_desktop.macos_bundle_id_for_app_path(app_path)
 
 
 def desktop_run_manifests(config: dict, *, target_name: str | None = None, action: str | None = None) -> list[dict]:
-    root = desktop_artifact_root(config)
-    manifests: list[dict] = []
-    target_names = [target_name] if target_name else sorted(p.name for p in root.iterdir() if p.is_dir())
-    for target in target_names:
-        target_dir = root / target
-        if not target_dir.is_dir():
-            continue
-        action_names = [action] if action else sorted(p.name for p in target_dir.iterdir() if p.is_dir())
-        for action_name in action_names:
-            action_dir = target_dir / action_name
-            if not action_dir.is_dir():
-                continue
-            for bundle_dir in sorted((p for p in action_dir.iterdir() if p.is_dir()), reverse=True):
-                manifest_path = bundle_dir / "manifest.json"
-                if not manifest_path.exists():
-                    continue
-                try:
-                    manifest = json.loads(manifest_path.read_text())
-                except json.JSONDecodeError:
-                    continue
-                manifest.setdefault("artifacts", {})
-                manifest["artifacts"].setdefault("bundle_dir", str(bundle_dir))
-                manifests.append(manifest)
-    manifests.sort(key=lambda item: item.get("completed_at") or item.get("started_at") or "", reverse=True)
-    return manifests
+    return _reporting.desktop_run_manifests(
+        config,
+        target_name=target_name,
+        action=action,
+        desktop_artifact_root_fn=desktop_artifact_root,
+    )
 
 
 def normalize_desktop_proof_source_mode(mode: str | None) -> str:
-    value = (mode or "legacy").strip().lower().replace("_", "-")
-    if value not in {"live", "exact-sha", "legacy"}:
-        raise ValueError(f"Invalid desktop proof source mode '{mode}'. Use one of: live, exact-sha, legacy.")
-    return value
+    return _reporting.normalize_desktop_proof_source_mode(mode)
 
 
 def desktop_manifest_adapter(config: dict, manifest: dict) -> str:
-    adapter = str(manifest.get("adapter") or "").strip()
-    if adapter:
-        return adapter
-    target_name = manifest.get("target")
-    targets = config.get("desktop_automation", {}).get("targets", {})
-    target_cfg = targets.get(target_name) if isinstance(targets, dict) else None
-    if isinstance(target_cfg, dict):
-        return str(target_cfg.get("adapter") or "unknown")
-    return "unknown"
+    return _reporting.desktop_manifest_adapter(config, manifest)
 
 
 def desktop_manifest_run_status(manifest: dict) -> str:
-    for key in ("agent_status", "status"):
-        value = str(manifest.get(key) or "").strip()
-        if value:
-            return value.lower()
-    return "pass"
+    return _reporting.desktop_manifest_run_status(manifest)
 
 
 def desktop_manifest_source(manifest: dict) -> dict:
-    raw = manifest.get("source")
-    if not isinstance(raw, dict):
-        return {
-            "mode": "legacy",
-            "branch": None,
-            "sha": None,
-            "prepare_command": None,
-            "prepare_timeout_secs": None,
-            "prepared_root": None,
-            "launch_cwd": None,
-        }
-    mode = raw.get("mode")
-    try:
-        normalized_mode = normalize_desktop_proof_source_mode(mode)
-    except ValueError:
-        normalized_mode = "legacy"
-    return {
-        "mode": normalized_mode,
-        "branch": raw.get("branch"),
-        "sha": raw.get("sha"),
-        "prepare_command": raw.get("prepare_command"),
-        "prepare_timeout_secs": raw.get("prepare_timeout_secs"),
-        "prepared_root": raw.get("prepared_root"),
-        "launch_cwd": raw.get("launch_cwd"),
-    }
+    return _reporting.desktop_manifest_source(manifest)
 
 
 def desktop_proof_scope_for_adapter(adapter: str) -> str:
-    if adapter in {"linux-xvfb", "windows-session-agent"}:
-        return "live-host"
-    if adapter == "macos-local":
-        return "local-session"
-    return "unknown"
+    return _reporting.desktop_proof_scope_for_adapter(adapter)
 
 
 def desktop_run_summary(config: dict, manifest: dict) -> dict:
-    artifacts = manifest.get("artifacts", {})
-    source = desktop_manifest_source(manifest)
-    adapter = desktop_manifest_adapter(config, manifest)
-    summary = {
-        "target": manifest.get("target"),
-        "action": manifest.get("action", "run"),
-        "label": manifest.get("label", manifest.get("action", "run")),
-        "adapter": adapter,
-        "proof_scope": desktop_proof_scope_for_adapter(adapter),
-        "run_status": desktop_manifest_run_status(manifest),
-        "completed_at": manifest.get("completed_at") or manifest.get("started_at") or "?",
-        "interaction_mode": (manifest.get("interaction") or {}).get("mode"),
-        "host": manifest.get("host"),
-        "source": source,
-        "artifacts": {
-            "bundle_dir": artifacts.get("bundle_dir"),
-            "screenshot": artifacts.get("screenshot"),
-            "before_screenshot": artifacts.get("before_screenshot"),
-            "diff_screenshot": artifacts.get("diff_screenshot"),
-            "ui_snapshot": artifacts.get("ui_snapshot"),
-            "stdout": artifacts.get("stdout"),
-            "stderr": artifacts.get("stderr"),
-            "agent_manifest": artifacts.get("agent_manifest"),
-            "image_change": artifacts.get("image_change"),
-        },
-    }
-    return summary
+    return _reporting.desktop_run_summary(config, manifest)
 
 
 def desktop_proof_summaries(
@@ -2226,77 +1338,37 @@ def desktop_proof_summaries(
     branch: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
-    manifests = desktop_run_manifests(config, target_name=target_name, action=action)
-    summaries: dict[tuple[str | None, str, str, str | None], dict] = {}
-    requested_mode = normalize_desktop_proof_source_mode(source_mode) if source_mode else None
-    for manifest in manifests:
-        run_summary = desktop_run_summary(config, manifest)
-        if run_summary["run_status"] != "pass":
-            continue
-        source = run_summary["source"]
-        if requested_mode and source["mode"] != requested_mode:
-            continue
-        if sha and source.get("sha") != sha:
-            continue
-        if branch and source.get("branch") != branch:
-            continue
-        key = (
-            run_summary.get("target"),
-            run_summary.get("action"),
-            source.get("mode", "legacy"),
-            source.get("sha"),
-        )
-        existing = summaries.get(key)
-        if existing is None:
-            summaries[key] = {
-                "key": {
-                    "target": run_summary.get("target"),
-                    "action": run_summary.get("action"),
-                    "source_mode": source.get("mode", "legacy"),
-                    "sha": source.get("sha"),
-                },
-                "target": run_summary.get("target"),
-                "action": run_summary.get("action"),
-                "adapter": run_summary.get("adapter"),
-                "proof_scope": run_summary.get("proof_scope"),
-                "host": run_summary.get("host"),
-                "source": source,
-                "interaction_mode": run_summary.get("interaction_mode"),
-                "run_count": 1,
-                "latest_run": run_summary,
-            }
-            continue
-        existing["run_count"] += 1
-    ordered = sorted(
-        summaries.values(),
-        key=lambda item: item.get("latest_run", {}).get("completed_at") or "",
-        reverse=True,
+    return _reporting.desktop_proof_summaries(
+        config,
+        target_name=target_name,
+        action=action,
+        source_mode=source_mode,
+        sha=sha,
+        branch=branch,
+        limit=limit,
+        desktop_run_manifests_fn=desktop_run_manifests,
+        desktop_run_summary_fn=desktop_run_summary,
     )
-    if limit is not None:
-        ordered = ordered[:limit]
-    return ordered
 
 
 def desktop_rollup_dir(config: dict, target_name: str | None = None) -> Path:
-    root = desktop_artifact_root(config)
-    if target_name:
-        path = root / target_name
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    return root
+    return _reporting.desktop_rollup_dir(
+        config,
+        target_name,
+        desktop_artifact_root_fn=desktop_artifact_root,
+    )
 
 
 def write_desktop_run_rollups(config: dict, *, target_name: str | None = None) -> None:
-    rollup_dir = desktop_rollup_dir(config, target_name)
-    manifests = desktop_run_manifests(config, target_name=target_name)
-    summaries = [desktop_run_summary(config, manifest) for manifest in manifests]
-    latest_run = summaries[0] if summaries else None
-    latest_proof_matches = desktop_proof_summaries(config, target_name=target_name, limit=1)
-    latest_proof = latest_proof_matches[0] if latest_proof_matches else None
-    atomic_write_text(rollup_dir / "latest-run.json", json.dumps(latest_run, indent=2) + "\n")
-    atomic_write_text(rollup_dir / "latest-proof.json", json.dumps(latest_proof, indent=2) + "\n")
-    jsonl_payload = "".join(json.dumps(summary, sort_keys=True) + "\n" for summary in summaries)
-    atomic_write_text(rollup_dir / "runs.jsonl", jsonl_payload)
+    _reporting.write_desktop_run_rollups(
+        config,
+        target_name=target_name,
+        desktop_rollup_dir_fn=desktop_rollup_dir,
+        desktop_run_manifests_fn=desktop_run_manifests,
+        desktop_run_summary_fn=desktop_run_summary,
+        desktop_proof_summaries_fn=desktop_proof_summaries,
+        atomic_write_text_fn=atomic_write_text,
+    )
 
 
 def prune_desktop_run_manifests(
@@ -2306,126 +1378,70 @@ def prune_desktop_run_manifests(
     older_than_days: int | None = None,
     keep_last: int | None = None,
 ) -> list[Path]:
-    manifests = desktop_run_manifests(config, target_name=target_name)
-    if keep_last is not None:
-        manifests = manifests[keep_last:]
-    if older_than_days is not None:
-        cutoff = time.time() - (older_than_days * 86400)
-        filtered: list[dict] = []
-        for manifest in manifests:
-            completed_at = manifest.get("completed_at") or manifest.get("started_at")
-            if not completed_at:
-                continue
-            try:
-                timestamp = datetime.fromisoformat(completed_at.replace("Z", "+00:00")).timestamp()
-            except ValueError:
-                continue
-            if timestamp <= cutoff:
-                filtered.append(manifest)
-        manifests = filtered
-    to_remove: list[Path] = []
-    for manifest in manifests:
-        bundle_dir = Path(manifest.get("artifacts", {}).get("bundle_dir", "")).expanduser()
-        if bundle_dir.is_dir():
-            to_remove.append(bundle_dir)
-    seen: set[Path] = set()
-    ordered: list[Path] = []
-    for path in to_remove:
-        if path in seen:
-            continue
-        seen.add(path)
-        ordered.append(path)
-    return ordered
+    return _reporting.prune_desktop_run_manifests(
+        config,
+        target_name=target_name,
+        older_than_days=older_than_days,
+        keep_last=keep_last,
+        desktop_run_manifests_fn=desktop_run_manifests,
+    )
 
 
 def macos_window_probe_path() -> Path:
-    return SCRIPT_DIR / "macos_window_probe.swift"
+    return _macos_desktop.macos_window_probe_path(SCRIPT_DIR)
 
 
 def macos_window_info_for_pid(pid: int) -> dict:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "window-info", "--pid", str(pid)],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.macos_window_info_for_pid(
+        pid,
+        probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def macos_window_info_for_bundle_id(bundle_id: str) -> dict:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "window-info", "--bundle-id", bundle_id],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.macos_window_info_for_bundle_id(
+        bundle_id,
+        probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def macos_accessibility_trusted() -> bool:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "accessibility-trusted"],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.macos_accessibility_trusted(
+        probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    payload = json.loads(result.stdout)
-    return bool(payload.get("trusted"))
 
 
 def wait_for_macos_window(pid: int, timeout_secs: float) -> dict:
-    deadline = time.time() + timeout_secs
-    last_error = ""
-    while time.time() < deadline:
-        try:
-            payload = macos_window_info_for_pid(pid)
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            last_error = str(exc)
-            time.sleep(0.2)
-            continue
-        windows = payload.get("windows", [])
-        if windows:
-            return windows[0]
-        time.sleep(0.2)
-    raise RuntimeError(last_error or f"timed out waiting for a visible window for pid {pid}")
+    return _macos_desktop.wait_for_macos_window(
+        pid,
+        timeout_secs,
+        macos_window_info_for_pid_fn=macos_window_info_for_pid,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+    )
 
 
 def wait_for_macos_bundle_window(bundle_id: str, timeout_secs: float) -> tuple[int, dict]:
-    deadline = time.time() + timeout_secs
-    last_error = ""
-    while time.time() < deadline:
-        try:
-            payload = macos_window_info_for_bundle_id(bundle_id)
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            last_error = str(exc)
-            time.sleep(0.2)
-            continue
-        windows = payload.get("windows", [])
-        pid = payload.get("pid")
-        if windows and isinstance(pid, int):
-            return pid, windows[0]
-        activation_payload = activate_macos_bundle_id(bundle_id)
-        if activation_payload.get("stderr"):
-            last_error = activation_payload["stderr"]
-        time.sleep(0.2)
-    raise RuntimeError(last_error or f"timed out waiting for a visible window for bundle id {bundle_id}")
+    return _macos_desktop.wait_for_macos_bundle_window(
+        bundle_id,
+        timeout_secs,
+        macos_window_info_for_bundle_id_fn=macos_window_info_for_bundle_id,
+        activate_macos_bundle_id_fn=activate_macos_bundle_id,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+    )
 
 
 def capture_macos_window(window_id: int, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    last_error = ""
-    for attempt in range(5):
-        result = subprocess.run(
-            ["screencapture", "-x", "-l", str(window_id), str(output_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and output_path.exists():
-            return
-        last_error = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
-        if attempt < 4:
-            time.sleep(0.2)
-    raise RuntimeError(f"Could not capture macOS window {window_id}: {last_error}")
+    _macos_desktop.capture_macos_window(
+        window_id,
+        output_path,
+        run_fn=subprocess.run,
+        sleep_fn=time.sleep,
+    )
 
 
 def parse_coordinate_pair(value: str, *, flag_name: str) -> tuple[float, float]:
@@ -2506,95 +1522,49 @@ def screen_point_for_content_point(window: dict, content_size: tuple[float, floa
 
 
 def activate_macos_pid(pid: int) -> dict:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "activate", "--pid", str(pid)],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.activate_macos_pid(
+        pid,
+        probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def activate_macos_bundle_id(bundle_id: str) -> dict:
-    result = subprocess.run(
-        ["osascript", "-e", f'tell application id "{bundle_id}" to activate'],
-        capture_output=True,
-        text=True,
+    return _macos_desktop.activate_macos_bundle_id(
+        bundle_id,
+        run_fn=subprocess.run,
     )
-    return {
-        "activated": result.returncode == 0,
-        "bundle_id": bundle_id,
-        "stdout": result.stdout.strip(),
-        "stderr": result.stderr.strip(),
-        "returncode": result.returncode,
-    }
 
 
 def dispatch_macos_click(screen_x: float, screen_y: float) -> dict:
-    result = subprocess.run(
-        [
-            "swift",
-            str(macos_window_probe_path()),
-            "click",
-            "--x",
-            str(screen_x),
-            "--y",
-            str(screen_y),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.dispatch_macos_click(
+        screen_x,
+        screen_y,
+        probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def terminate_process(proc: subprocess.Popen, timeout_secs: float = 5.0) -> None:
-    if proc.poll() is not None:
-        return
-    proc.terminate()
-    try:
-        proc.wait(timeout=timeout_secs)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=timeout_secs)
+    _macos_desktop.terminate_process(proc, timeout_secs=timeout_secs)
 
 
 def quit_macos_bundle_id(bundle_id: str) -> None:
-    subprocess.run(
-        ["osascript", "-e", f'tell application id "{bundle_id}" to quit'],
-        capture_output=True,
-        text=True,
-        check=False,
+    _macos_desktop.quit_macos_bundle_id(
+        bundle_id,
+        run_fn=subprocess.run,
     )
 
 
 def _local_worktree_matches(path: Path, sha: str) -> bool:
-    if not (path / ".git").exists():
-        return False
-    result = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0 and result.stdout.strip() == sha
+    return _source_prep.local_worktree_matches(path, sha, run_fn=subprocess.run)
 
 
 def _reset_local_worktree(path: Path) -> None:
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(path)],
-        cwd=ROOT,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    shutil.rmtree(path, ignore_errors=True)
-    subprocess.run(
-        ["git", "worktree", "prune"],
-        cwd=ROOT,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    return _source_prep.reset_local_worktree(
+        path,
+        root=ROOT,
+        run_fn=subprocess.run,
     )
 
 
@@ -2604,41 +1574,20 @@ def prepare_macos_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    prepared_root = desktop_source_root(target_name, source_request)
-    prepare_log = bundle_dir / "prepare.log"
-    reused = _local_worktree_matches(prepared_root, source_request["sha"])
-    if not reused:
-        _reset_local_worktree(prepared_root)
-        prepared_root.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git", "worktree", "add", "--detach", str(prepared_root), source_request["sha"]],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    if source_request.get("prepare_command") and not reused:
-        run = run_logged_command(
-            ["bash", "-lc", source_request["prepare_command"]],
-            cwd=prepared_root,
-            timeout=int(source_request.get("prepare_timeout_secs", 900.0)),
-            log_path=prepare_log,
-        )
-        if run["timed_out"]:
-            raise RuntimeError(
-                f"Timed out preparing desktop source for {target_name} after {source_request['prepare_timeout_secs']}s."
-            )
-        if run["returncode"] != 0:
-            detail = tail_lines(prepare_log, limit=40)
-            raise RuntimeError("Desktop source prepare failed:\n" + "".join(detail).strip())
-    return {
-        **source_request,
-        "prepared_root": str(prepared_root),
-        "launch_cwd": str(prepared_root),
-        "launch_command": rewrite_launch_command_for_source_root(command, prepared_root),
-        "prepare_log": str(prepare_log) if prepare_log.exists() else None,
-        "prepared_state": "reused" if reused else "clean",
-    }
+    return _source_prep.prepare_macos_exact_sha_source(
+        bundle_dir,
+        target_name,
+        command,
+        source_request,
+        root=ROOT,
+        desktop_source_root_fn=desktop_source_root,
+        local_worktree_matches_fn=_local_worktree_matches,
+        reset_local_worktree_fn=_reset_local_worktree,
+        run_fn=subprocess.run,
+        run_logged_command_fn=run_logged_command,
+        tail_lines_fn=tail_lines,
+        rewrite_launch_command_for_source_root_fn=rewrite_launch_command_for_source_root,
+    )
 
 
 def prepare_linux_exact_sha_source(
@@ -2648,91 +1597,20 @@ def prepare_linux_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    prepare_log = bundle_dir / "prepare.log"
-    source_job = {"id": uuid.uuid4().hex[:12], "sha": source_request["sha"]}
-    bundle_name, bundle_ref = sync_job_bundle_to_ssh_host(host, source_job)
-    remote_url = git_origin_clone_url(ROOT) or ""
-    home_run = subprocess.run(
-        ["ssh", host, "bash", "-lc", shlex.quote('printf %s "$HOME"')],
-        capture_output=True,
-        text=True,
-        timeout=30,
+    return _source_prep.prepare_linux_exact_sha_source(
+        bundle_dir,
+        target_name,
+        host,
+        command,
+        source_request,
+        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
+        git_origin_clone_url_fn=git_origin_clone_url,
+        desktop_source_cache_key_fn=desktop_source_cache_key,
+        root=ROOT,
+        run_fn=subprocess.run,
+        fetch_ssh_artifact_fn=fetch_ssh_artifact,
+        rewrite_launch_command_for_posix_root_fn=rewrite_launch_command_for_posix_root,
     )
-    if home_run.returncode != 0 or not home_run.stdout.strip():
-        detail = home_run.stderr.strip() or home_run.stdout.strip() or "could not resolve remote home directory"
-        raise RuntimeError(f"Linux exact-SHA prepare failed: {detail}")
-    remote_home = home_run.stdout.strip()
-    prepared_root = f"{remote_home}/.local/state/pulp/desktop-source/{target_name}/{desktop_source_cache_key(source_request)}"
-    prepared_root_display = f"~/.local/state/pulp/desktop-source/{target_name}/{desktop_source_cache_key(source_request)}"
-    remote_prepare_log = prepared_root + "/prepare.log"
-    prepare_stamp = prepared_root + "/.pulp-prepare-ok"
-    prepare_script = [
-        "set -euo pipefail",
-        "export GIT_LFS_SKIP_SMUDGE=1",
-        f"bundle=$HOME/{shlex.quote(bundle_name)}",
-        f"bundle_ref={shlex.quote(bundle_ref)}",
-        f"prepared_root={shlex.quote(prepared_root)}",
-        f"prepare_stamp={shlex.quote(prepare_stamp)}",
-        f"sha={shlex.quote(source_request['sha'])}",
-        f"remote_url={shlex.quote(remote_url)}",
-        "mkdir -p \"$(dirname \\\"$prepared_root\\\")\"",
-        "reused=0",
-        "if [ -d \"$prepared_root/.git\" ] && [ \"$(git -C \"$prepared_root\" rev-parse HEAD 2>/dev/null || true)\" = \"$sha\" ]; then",
-        '  if [ ! -f "$prepare_stamp" ] && [ -n "${PULP_REQUIRE_PREPARE_STAMP:-}" ]; then reused=0; else reused=1; fi',
-        "else",
-        "  rm -rf \"$prepared_root\"",
-        "  mkdir -p \"$prepared_root\"",
-        "  git -C \"$prepared_root\" init --quiet",
-        "  git -C \"$prepared_root\" fetch \"$bundle\" \"$bundle_ref:refs/pulp-ci-bundles/source\" >/dev/null 2>&1",
-        "  git -C \"$prepared_root\" checkout --quiet --detach \"$sha\"",
-        "  if [ -n \"$remote_url\" ]; then",
-        "    if git -C \"$prepared_root\" remote | grep -qx origin; then",
-        "      git -C \"$prepared_root\" remote set-url origin \"$remote_url\"",
-        "    else",
-        "      git -C \"$prepared_root\" remote add origin \"$remote_url\"",
-        "    fi",
-        "  fi",
-        "fi",
-    ]
-    if source_request.get("prepare_command"):
-        quoted_prepare = shlex.quote(source_request["prepare_command"])
-        prepare_script.insert(2, "export PULP_REQUIRE_PREPARE_STAMP=1")
-        prepare_script.extend(
-            [
-                f"if [ \"$reused\" -ne 1 ]; then (cd \"$prepared_root\" && bash -lc {quoted_prepare}) > {shlex.quote(remote_prepare_log)} 2>&1 && printf '%s\\n' \"$sha\" > \"$prepare_stamp\"; fi",
-            ]
-        )
-    prepare_script.extend(
-        [
-            "rm -f \"$bundle\"",
-            "if [ \"$reused\" -eq 1 ]; then echo __PULP_PREPARED__:reused; else echo __PULP_PREPARED__:clean; fi",
-        ]
-    )
-    prepare_cmd = 'export PATH="$HOME/.local/bin:$PATH"\n' + "\n".join(prepare_script)
-    run = subprocess.run(
-        ["ssh", host, "bash", "-lc", shlex.quote(prepare_cmd)],
-        capture_output=True,
-        text=True,
-        timeout=max(60, int(source_request.get("prepare_timeout_secs", 900.0) + 30)),
-    )
-    if source_request.get("prepare_command"):
-        fetch_ssh_artifact(host, remote_prepare_log, prepare_log, optional=True, timeout=60)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"remote command exited {run.returncode}"
-        raise RuntimeError(f"Linux exact-SHA prepare failed: {detail}")
-    return {
-        **source_request,
-        "prepared_root": prepared_root,
-        "prepared_root_display": prepared_root_display,
-        "launch_cwd": prepared_root,
-        "launch_cwd_display": prepared_root_display,
-        "launch_command": rewrite_launch_command_for_posix_root(
-            command,
-            prepared_root,
-        ),
-        "prepare_log": str(prepare_log) if prepare_log.exists() else None,
-        "prepared_state": "reused" if "__PULP_PREPARED__:reused" in run.stdout else "clean",
-    }
 
 
 def prepare_windows_exact_sha_source(
@@ -2742,101 +1620,24 @@ def prepare_windows_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    prepare_log = bundle_dir / "prepare.log"
-    source_job = {"id": uuid.uuid4().hex[:12], "sha": source_request["sha"]}
-    bundle_name, bundle_ref = sync_job_bundle_to_ssh_host(host, source_job)
-    remote_url = git_origin_clone_url(ROOT) or ""
-    cache_key = desktop_source_cache_key(source_request)
-    prepared_root = rf"%LOCALAPPDATA%\Pulp\desktop-source\{target_name}\{cache_key}"
-    remote_prepare_log = prepared_root + r"\prepare.log"
-    prepare_stamp = prepared_root + r"\.pulp-prepare-ok"
-    prepare_script_path = prepared_root + r"\.pulp-prepare.cmd"
-    prepare_lines = [
-        "$ErrorActionPreference = 'Stop'",
-        "$env:GIT_LFS_SKIP_SMUDGE = '1'",
-        f"$Bundle = Join-Path $HOME '{ps_literal(bundle_name)}'",
-        f"$BundleRef = '{ps_literal(bundle_ref)}'",
-        f"$PreparedRoot = {windows_contract_expand_expression(prepared_root)}",
-        f"$RemotePrepareLog = {windows_contract_expand_expression(remote_prepare_log)}",
-        f"$PrepareStamp = {windows_contract_expand_expression(prepare_stamp)}",
-        f"$Sha = '{ps_literal(source_request['sha'])}'",
-        f"$RemoteUrl = '{ps_literal(remote_url)}'",
-        "$Reused = $false",
-        "$PreparedHead = $null",
-        "New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($PreparedRoot)) | Out-Null",
-        "if (Test-Path (Join-Path $PreparedRoot '.git')) {",
-        "  $PreparedHead = git -C $PreparedRoot rev-parse HEAD 2>$null",
-        "  if (($LASTEXITCODE -eq 0) -and $PreparedHead -and ($PreparedHead.Trim() -eq $Sha)) { $Reused = $true }",
-        "}",
-        "if ($Reused -and $env:PULP_REQUIRE_PREPARE_STAMP -and -not (Test-Path $PrepareStamp)) { $Reused = $false }",
-        "if (-not $Reused) {",
-        "  if (Test-Path $PreparedRoot) { cmd.exe /c \"rmdir /s /q \\\"$PreparedRoot\\\"\" | Out-Null }",
-        "  if (Test-Path $PreparedRoot) { Remove-Item -LiteralPath $PreparedRoot -Recurse -Force }",
-        "  New-Item -ItemType Directory -Force -Path $PreparedRoot | Out-Null",
-        "  git -C $PreparedRoot init --quiet | Out-Null",
-        "  git -C $PreparedRoot fetch $Bundle \"$BundleRef`:refs/pulp-ci-bundles/source\" | Out-Null",
-        "  git -C $PreparedRoot checkout --quiet --detach $Sha | Out-Null",
-        "  if ($RemoteUrl) {",
-        "    $HasOrigin = [bool]((git -C $PreparedRoot remote 2>$null) | Where-Object { $_ -eq 'origin' } | Select-Object -First 1)",
-        "    if ($HasOrigin) {",
-        "      git -C $PreparedRoot remote set-url origin $RemoteUrl | Out-Null",
-        "    } else {",
-        "      git -C $PreparedRoot remote add origin $RemoteUrl | Out-Null",
-        "    }",
-        "  }",
-        "}",
-    ]
-    if source_request.get("prepare_command"):
-        prepare_commands = split_windows_prepare_commands(source_request["prepare_command"])
-        validate_windows_prepare_commands(prepare_commands)
-        prepare_lines.insert(1, "$env:PULP_REQUIRE_PREPARE_STAMP = '1'")
-        prepare_lines.extend(
-            [
-                "if (-not $Reused) {",
-                f"  $PrepareScriptPath = {windows_contract_expand_expression(prepare_script_path)}",
-                "  @'",
-                "@echo off",
-                "cd /d \"%~dp0\"",
-            ]
-        )
-        prepare_lines.extend(
-            [
-                "if (Test-Path $RemotePrepareLog) { Remove-Item -LiteralPath $RemotePrepareLog -Force }",
-            ]
-        )
-        for prepare_command in prepare_commands:
-            prepare_lines.append(prepare_command)
-            prepare_lines.append("if errorlevel 1 exit /b %errorlevel%")
-        prepare_lines.extend(
-            [
-                "'@ | Set-Content -LiteralPath $PrepareScriptPath -Encoding UTF8",
-                "  $PrepareCmd = ('\"{0}\" > \"{1}\" 2>&1' -f $PrepareScriptPath, $RemotePrepareLog)",
-                "  try { cmd.exe /c $PrepareCmd | Out-Null } finally { if (Test-Path $PrepareScriptPath) { Remove-Item -LiteralPath $PrepareScriptPath -Force } }",
-                "  if ($LASTEXITCODE -ne 0) { throw 'prepare command failed' }",
-                "  Set-Content -LiteralPath $PrepareStamp -Value $Sha -Encoding UTF8",
-                "}",
-            ]
-        )
-    prepare_lines.extend(
-        [
-            "if (Test-Path $Bundle) { Remove-Item -Path $Bundle -Force }",
-            "if ($Reused) { Write-Output '__PULP_PREPARED__:reused' } else { Write-Output '__PULP_PREPARED__:clean' }",
-        ]
+    return _source_prep.prepare_windows_exact_sha_source(
+        bundle_dir,
+        target_name,
+        host,
+        command,
+        source_request,
+        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
+        git_origin_clone_url_fn=git_origin_clone_url,
+        desktop_source_cache_key_fn=desktop_source_cache_key,
+        root=ROOT,
+        ps_literal_fn=ps_literal,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+        split_windows_prepare_commands_fn=split_windows_prepare_commands,
+        validate_windows_prepare_commands_fn=validate_windows_prepare_commands,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        windows_ssh_fetch_file_fn=windows_ssh_fetch_file,
+        rewrite_launch_command_for_windows_root_fn=rewrite_launch_command_for_windows_root,
     )
-    run = run_windows_ssh_powershell(host, "\n".join(prepare_lines), timeout=max(60, int(source_request.get("prepare_timeout_secs", 900.0) + 30)))
-    if source_request.get("prepare_command"):
-        windows_ssh_fetch_file(host, remote_prepare_log, prepare_log, optional=True, timeout=60)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"remote command exited {run.returncode}"
-        raise RuntimeError(f"Windows exact-SHA prepare failed: {detail}")
-    return {
-        **source_request,
-        "prepared_root": prepared_root,
-        "launch_cwd": prepared_root,
-        "launch_command": rewrite_launch_command_for_windows_root(command, prepared_root),
-        "prepare_log": str(prepare_log) if prepare_log.exists() else None,
-        "prepared_state": "reused" if "__PULP_PREPARED__:reused" in run.stdout else "clean",
-    }
 
 
 def run_macos_local_smoke(
@@ -3119,7 +1920,7 @@ def default_desktop_label(command: str | None, *, bundle_id: str | None = None) 
 
 
 def remote_linux_bundle_relpath(target_name: str, action_name: str, bundle_dir: Path) -> str:
-    return f".local/state/pulp/desktop-automation/remote/{target_name}/{action_name}/{bundle_dir.name}"
+    return _linux_target.remote_linux_bundle_relpath(target_name, action_name, bundle_dir)
 
 
 def fetch_ssh_artifact(host: str, remote_path: str, local_path: Path, *, optional: bool = False, timeout: int = 60) -> bool:
@@ -3161,56 +1962,21 @@ def build_linux_xvfb_remote_command(
     capture_before: bool,
     settle_secs: float,
 ) -> str:
-    remote_bundle_expr = f'$HOME/{remote_bundle_relpath}'
-    launch_cwd_value = launch_cwd or repo_path
-    backend = dict(launch_backend or {})
-    if launch_cwd_value.startswith("$HOME/"):
-        launch_cwd_assignment = f"launch_cwd={launch_cwd_value}"
-    else:
-        launch_cwd_assignment = f"launch_cwd={shlex.quote(launch_cwd_value)}"
-    exports = [
-        f"export PULP_AUTOMATION_AFTER_OUT={shlex.quote(remote_bundle_expr + '/screenshots/window.png')}",
-        f"export PULP_AUTOMATION_DELAY_MS={shlex.quote('1000')}",
-        f"export PULP_AUTOMATION_AFTER_DELAY_MS={shlex.quote(str(max(0, int(settle_secs * 1000.0))))}",
-        f"export PULP_AUTOMATION_EXIT_AFTER={shlex.quote('1')}",
-    ]
-    if capture_ui_snapshot:
-        exports.append(f"export PULP_VIEW_TREE_OUT={shlex.quote(remote_bundle_expr + '/ui-tree.json')}")
-    if capture_before:
-        exports.append(f"export PULP_AUTOMATION_BEFORE_OUT={shlex.quote(remote_bundle_expr + '/screenshots/before.png')}")
-    if click_point:
-        exports.append(f"export PULP_AUTOMATION_CLICK_POINT={shlex.quote(click_point)}")
-    if click_view_id:
-        exports.append(f"export PULP_AUTOMATION_CLICK_VIEW_ID={shlex.quote(click_view_id)}")
-    if click_view_type:
-        exports.append(f"export PULP_AUTOMATION_CLICK_VIEW_TYPE={shlex.quote(click_view_type)}")
-    if click_view_text:
-        exports.append(f"export PULP_AUTOMATION_CLICK_VIEW_TEXT={shlex.quote(click_view_text)}")
-    if click_view_label:
-        exports.append(f"export PULP_AUTOMATION_CLICK_VIEW_LABEL={shlex.quote(click_view_label)}")
-    if backend.get("mode") == "display":
-        exports.append(f"export DISPLAY={shlex.quote(backend.get('display') or ':0')}")
-        if backend.get("xdg_runtime_dir"):
-            exports.append(f"export XDG_RUNTIME_DIR={shlex.quote(backend['xdg_runtime_dir'])}")
-
-    launch_driver = "xvfb-run -a"
-    if backend.get("mode") == "display":
-        launch_driver = ""
-    launch_command = f"bash -lc {shlex.quote(command)}"
-    if launch_driver:
-        launch_command = f"{launch_driver} {launch_command}"
-
-    parts = [
-        "set -euo pipefail",
-        f"repo_path={shlex.quote(repo_path)}",
-        launch_cwd_assignment,
-        f'remote_bundle="$HOME/{remote_bundle_relpath}"',
-        'mkdir -p "$remote_bundle/screenshots"',
-        'cd "$launch_cwd"',
-        *exports,
-        f'{launch_command} > "$remote_bundle/stdout.log" 2> "$remote_bundle/stderr.log"',
-    ]
-    return "; ".join(parts)
+    return _linux_target.build_linux_xvfb_remote_command(
+        repo_path,
+        remote_bundle_relpath,
+        command,
+        launch_backend=launch_backend,
+        launch_cwd=launch_cwd,
+        capture_ui_snapshot=capture_ui_snapshot,
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        capture_before=capture_before,
+        settle_secs=settle_secs,
+    )
 
 
 def build_linux_window_driver_remote_command(
@@ -3224,71 +1990,18 @@ def build_linux_window_driver_remote_command(
     capture_before: bool,
     settle_secs: float,
 ) -> str:
-    backend = dict(launch_backend or {})
-    launch_cwd_value = launch_cwd or repo_path
-    if launch_cwd_value.startswith("$HOME/"):
-        launch_cwd_assignment = f"launch_cwd={launch_cwd_value}"
-    else:
-        launch_cwd_assignment = f"launch_cwd={shlex.quote(launch_cwd_value)}"
+    return _linux_target.build_linux_window_driver_remote_command(
+        repo_path,
+        remote_bundle_relpath,
+        command,
+        launch_backend=launch_backend,
+        launch_cwd=launch_cwd,
+        click_point=click_point,
+        capture_before=capture_before,
+        settle_secs=settle_secs,
+        parse_coordinate_pair_fn=parse_coordinate_pair,
+    )
 
-    click_lines: list[str] = []
-    if click_point:
-        click_x, click_y = parse_coordinate_pair(click_point, flag_name="--click")
-        click_lines.extend([
-            f'xdotool mousemove --window "$window_id" {click_x} {click_y}',
-            'xdotool click 1',
-        ])
-
-    settle_delay = max(0.0, settle_secs)
-    x11_window_scan = "awk '/^[[:space:]]*0x[0-9A-Fa-f]+/ {print $1}'"
-    inner_lines = [
-        'set -euo pipefail',
-        launch_cwd_assignment,
-        f'remote_bundle="$HOME/{remote_bundle_relpath}"',
-        'mkdir -p "$remote_bundle/screenshots"',
-        'cd "$launch_cwd"',
-        f'xwininfo -root -tree 2>/dev/null | {x11_window_scan} > "$remote_bundle/windows.before" || true',
-        f'bash -lc {shlex.quote(command)} > "$remote_bundle/stdout.log" 2> "$remote_bundle/stderr.log" &',
-        'app_pid=$!',
-        'printf "%s\n" "$app_pid" > "$remote_bundle/pid.txt"',
-        'window_id=""',
-        'for _ in $(seq 1 200); do',
-        f'  xwininfo -root -tree 2>/dev/null | {x11_window_scan} > "$remote_bundle/windows.after" || true',
-        '  window_id=$(grep -Fvx -f "$remote_bundle/windows.before" "$remote_bundle/windows.after" 2>/dev/null | head -n1 || true)',
-        '  if [ -n "$window_id" ]; then',
-        '    break',
-        '  fi',
-        '  sleep 0.1',
-        'done',
-        'if [ -z "$window_id" ]; then',
-        '  echo "No top-level X11 window detected for launch command" >&2',
-        '  kill "$app_pid" >/dev/null 2>&1 || true',
-        '  wait "$app_pid" >/dev/null 2>&1 || true',
-        '  exit 21',
-        'fi',
-        'printf "%s\n" "$window_id" > "$remote_bundle/window-id.txt"',
-        'xdotool getwindowname "$window_id" > "$remote_bundle/window-title.txt" 2>/dev/null || true',
-        'xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true',
-        'sleep 0.2',
-    ]
-    if capture_before:
-        inner_lines.append('import -window "$window_id" png:"$remote_bundle/screenshots/before.png"')
-    inner_lines.extend(click_lines)
-    if settle_delay > 0.0:
-        inner_lines.append(f'sleep {settle_delay:.3f}')
-    inner_lines.extend([
-        'import -window "$window_id" png:"$remote_bundle/screenshots/window.png"',
-        'kill "$app_pid" >/dev/null 2>&1 || true',
-        'wait "$app_pid" >/dev/null 2>&1 || true',
-    ])
-    wrapped_script = "\n".join(inner_lines)
-    if backend.get("mode") == "display":
-        prefix_lines = [f'export DISPLAY={shlex.quote(backend.get("display") or ":0")}']
-        if backend.get("xdg_runtime_dir"):
-            prefix_lines.append(f'export XDG_RUNTIME_DIR={shlex.quote(backend["xdg_runtime_dir"])}')
-        wrapped_script = "\n".join(prefix_lines + [wrapped_script])
-        return f"bash -lc {shlex.quote(wrapped_script)}"
-    return f"xvfb-run -a bash -lc {shlex.quote(wrapped_script)}"
 
 def run_linux_xvfb_remote_action(
     config: dict,
@@ -3710,18 +2423,11 @@ def run_windows_session_agent_action(
 
 
 def default_priority_for(command: str, config: dict) -> str:
-    defaults = config.get("defaults", {})
-    if command in {"ship", "check"}:
-        return normalize_priority(defaults.get(f"{command}_priority", "high"))
-    return normalize_priority(defaults.get("priority", "normal"))
+    return _queue_orchestrator.default_priority_for(command, config)
 
 
 def make_fingerprint(branch: str, sha: str, targets: list[str], validation: str) -> str:
-    raw = json.dumps(
-        {"branch": branch, "sha": sha, "targets": sorted(targets), "validation": validation},
-        sort_keys=True,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return _queue_orchestrator.make_fingerprint(branch, sha, targets, validation)
 
 
 def make_job(
@@ -3733,183 +2439,76 @@ def make_job(
     validation: str,
     submission: dict | None = None,
 ) -> dict:
-    normalized_validation = normalize_validation_mode(validation)
-    branch = validate_ci_branch_name(branch)
-    job = {
-        "id": uuid.uuid4().hex[:12],
-        "branch": branch,
-        "sha": sha,
-        "priority": normalize_priority(priority),
-        "targets": sorted(targets),
-        "queued_at": now_iso(),
-        "status": "pending",
-        "fingerprint": make_fingerprint(branch, sha, targets, normalized_validation),
-        "mode": mode,
-        "validation": normalized_validation,
-        "submitted_root": str(ROOT),
-    }
-    if submission:
-        job["submission"] = submission
-        if submission.get("submitted_root"):
-            job["submitted_root"] = submission["submitted_root"]
-        if submission.get("provenance"):
-            job["provenance"] = normalize_provenance(submission.get("provenance"))
-    if "provenance" not in job:
-        job["provenance"] = normalize_provenance()
-    return job
+    return _queue_orchestrator.make_job(
+        branch,
+        sha,
+        priority,
+        targets,
+        mode,
+        validation,
+        submission=submission,
+        now_iso_fn=now_iso,
+        uuid_hex_fn=lambda: uuid.uuid4().hex,
+        root=ROOT,
+        validate_branch_fn=validate_ci_branch_name,
+    )
 
 
 def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
-    return (
-        job.get("branch", ""),
-        tuple(sorted(job.get("targets") or [])),
-        normalize_validation_mode(job.get("validation", "full")),
-    )
+    return _queue_orchestrator.supersedence_key(job)
 
 
 def supersedence_identity_key(job: dict) -> tuple[str, str, str]:
-    return (
-        job.get("branch", ""),
-        job.get("sha", ""),
-        normalize_validation_mode(job.get("validation", "full")),
-    )
+    return _queue_orchestrator.supersedence_identity_key(job)
 
 
 def jobs_share_supersedence_scope(newer_job: dict, older_job: dict) -> bool:
-    return (
-        newer_job.get("id") != older_job.get("id")
-        and newer_job.get("fingerprint") != older_job.get("fingerprint")
-        and supersedence_key(newer_job) == supersedence_key(older_job)
-    )
+    return _queue_orchestrator.jobs_share_supersedence_scope(newer_job, older_job)
 
 
 def job_has_narrower_same_identity_scope(newer_job: dict, older_job: dict) -> bool:
-    if (
-        newer_job.get("id") == older_job.get("id")
-        or newer_job.get("fingerprint") == older_job.get("fingerprint")
-        or supersedence_identity_key(newer_job) != supersedence_identity_key(older_job)
-    ):
-        return False
-
-    newer_targets = set(newer_job.get("targets") or [])
-    older_targets = set(older_job.get("targets") or [])
-    return bool(newer_targets) and newer_targets < older_targets
+    return _queue_orchestrator.job_has_narrower_same_identity_scope(newer_job, older_job)
 
 
 def supersedence_reason(newer_job: dict, older_job: dict) -> str | None:
-    if jobs_share_supersedence_scope(newer_job, older_job):
-        return "newer_sha_queued"
-    if job_has_narrower_same_identity_scope(newer_job, older_job):
-        return "narrower_scope_queued"
-    return None
+    return _queue_orchestrator.supersedence_reason(newer_job, older_job)
 
 
 def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
-    return {
-        "job_id": job["id"],
-        "branch": job["branch"],
-        "sha": job["sha"],
-        "priority": job["priority"],
-        "validation": job.get("validation", "full"),
-        "targets": job.get("targets", []),
-        "queued_at": job.get("queued_at", ""),
-        "completed_at": now_iso(),
-        "provenance": normalize_provenance(job.get("provenance")),
-        "results": [],
-        "overall": "superseded",
-        "superseded_by": superseded_by,
-        "superseded_reason": reason,
-    }
+    return _queue_orchestrator.supersedence_result(job, superseded_by, reason, now_iso_fn=now_iso)
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
     result = supersedence_result(job, superseded_by, reason)
     result_path = save_result(result)
-    job["status"] = "completed"
-    job["completed_at"] = result["completed_at"]
-    job["result_file"] = str(result_path)
-    job["overall"] = "superseded"
-    job["superseded_by"] = superseded_by
-    job["superseded_reason"] = reason
-    job.pop("runner", None)
-    job.pop("active_targets", None)
-    job.pop("last_progress_at", None)
+    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
-    return {
-        "job_id": job["id"],
-        "branch": job["branch"],
-        "sha": job["sha"],
-        "priority": job["priority"],
-        "validation": job.get("validation", "full"),
-        "targets": job.get("targets", []),
-        "queued_at": job.get("queued_at", ""),
-        "completed_at": now_iso(),
-        "provenance": normalize_provenance(job.get("provenance")),
-        "results": [],
-        "overall": "canceled",
-        "canceled_reason": reason,
-    }
+    return _queue_orchestrator.cancellation_result(job, reason, now_iso_fn=now_iso)
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
     result = cancellation_result(job, reason)
     result_path = save_result(result)
-    job["status"] = "completed"
-    job["completed_at"] = result["completed_at"]
-    job["result_file"] = str(result_path)
-    job["overall"] = "canceled"
-    job["canceled_reason"] = reason
-    job.pop("runner", None)
-    job.pop("active_targets", None)
-    job.pop("last_progress_at", None)
+    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
 
 
 def summarize_job(job: dict) -> str:
-    targets = ",".join(job.get("targets") or []) or "none"
-    validation = job.get("validation", "full")
-    validation_suffix = f" validation={validation}" if validation != "full" else ""
-    return (
-        f"[{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))} "
-        f"priority={job.get('priority', 'normal')} targets={targets}{validation_suffix}"
-    )
+    return _queue_orchestrator.summarize_job(job)
 
 
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
-    if not active_targets:
-        return ""
-
-    parts: list[str] = []
-    seen: set[str] = set()
-    for name in preferred_order or []:
-        state = active_targets.get(name)
-        if not state:
-            continue
-        parts.append(f"{name}={state.get('status', '?')}")
-        seen.add(name)
-
-    for name in sorted(active_targets):
-        if name in seen:
-            continue
-        state = active_targets.get(name) or {}
-        parts.append(f"{name}={state.get('status', '?')}")
-
-    return ", ".join(parts)
+    return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
-    for job in queue:
-        if job["id"] != job_id:
-            continue
-        if active_targets:
-            job["active_targets"] = active_targets
-            job["last_progress_at"] = now_iso()
-        else:
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-        return True
-    return False
+    return _queue_orchestrator.upsert_job_active_targets_unlocked(
+        queue,
+        job_id,
+        active_targets,
+        now_iso_fn=now_iso,
+    )
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -3938,62 +2537,44 @@ def enqueue_job(
             save_queue_unlocked(queue)
         fingerprint = make_fingerprint(branch, sha, targets, normalized_validation)
 
-        for job in queue:
-            if job.get("fingerprint") != fingerprint or job.get("status") not in {"pending", "running"}:
-                continue
-
-            changed = False
-            if (
-                job["status"] == "pending"
-                and priority_value(requested_priority) > priority_value(job.get("priority", "normal"))
+        existing = _queue_orchestrator.find_active_job_by_fingerprint_unlocked(queue, fingerprint)
+        if existing is not None:
+            if _queue_orchestrator.bump_pending_job_priority_unlocked(
+                existing,
+                requested_priority,
+                now_iso_fn=now_iso,
             ):
-                job["priority"] = requested_priority
-                job["bumped_at"] = now_iso()
-                changed = True
-
-            if changed:
                 save_queue_unlocked(queue)
-            return normalize_job(job), False
+            return normalize_job(existing), False
 
         job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
         queue.append(job)
-        for existing in queue:
-            if existing.get("status") != "pending":
-                continue
-            reason = supersedence_reason(job, existing)
-            if reason:
-                supersede_job_unlocked(existing, job["id"], reason)
+        for existing, reason in _queue_orchestrator.pending_supersedence_candidates_unlocked(queue, job):
+            supersede_job_unlocked(existing, job["id"], reason)
         save_queue_unlocked(trim_completed_jobs(queue))
         return job, True
 
 
 def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
-    completed = [job for job in queue if job.get("status") == "completed"]
-    if len(completed) <= KEEP_COMPLETED_JOBS:
-        return queue, set()
-
-    completed_by_time = sorted(completed, key=lambda job: job.get("completed_at", job.get("queued_at", "")))
-    remove_ids = {job["id"] for job in completed_by_time[:-KEEP_COMPLETED_JOBS]}
-    return [job for job in queue if job["id"] not in remove_ids], remove_ids
+    return _queue_orchestrator.trim_completed_jobs_with_removed_ids(
+        queue,
+        keep_completed_jobs=KEEP_COMPLETED_JOBS,
+    )
 
 
 def trim_completed_jobs(queue: list[dict]) -> list[dict]:
-    trimmed, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
-    return trimmed
+    return _queue_orchestrator.trim_completed_jobs(
+        queue,
+        keep_completed_jobs=KEEP_COMPLETED_JOBS,
+    )
 
 
 def result_file_job_id(path: Path) -> str | None:
-    if path.suffix != ".json":
-        return None
-    stem = path.stem
-    parts = stem.split("-", 3)
-    if len(parts) < 3:
-        return None
-    return parts[2]
+    return _cleanup.result_file_job_id(path)
 
 
 def artifact_entry_sort_key(entry: dict) -> tuple[float, str]:
-    return (float(entry.get("mtime", 0.0)), str(entry.get("path", "")))
+    return _cleanup.artifact_entry_sort_key(entry)
 
 
 def collect_local_ci_cleanup_plan(
@@ -4004,168 +2585,42 @@ def collect_local_ci_cleanup_plan(
     keep_bundles: int = 0,
     include_prepared: bool = False,
 ) -> dict:
-    keep_results = max(0, int(keep_results))
-    keep_logs = max(0, int(keep_logs))
-    keep_bundles = max(0, int(keep_bundles))
-    retained_job_ids = {job["id"] for job in queue}
-    live_job_ids = {job["id"] for job in queue if job.get("status") in {"pending", "running"}}
-    categories: dict[str, list[dict]] = {
-        "bundles": [],
-        "logs": [],
-        "results": [],
-        "prepared": [],
-    }
-
-    def add_file_entry(category: str, path: Path, job_id: str | None) -> None:
-        try:
-            stat = path.stat()
-        except OSError:
-            return
-        categories[category].append(
-            {
-                "path": path,
-                "job_id": job_id,
-                "size_bytes": int(stat.st_size),
-                "mtime": float(stat.st_mtime),
-            }
-        )
-
-    def add_dir_entry(category: str, path: Path, job_id: str | None) -> None:
-        if not path.exists() or not path.is_dir():
-            return
-        try:
-            stat = path.stat()
-        except OSError:
-            return
-        categories[category].append(
-            {
-                "path": path,
-                "job_id": job_id,
-                "size_bytes": path_size_bytes(path),
-                "mtime": float(stat.st_mtime),
-            }
-        )
-
-    for path in bundles_dir().glob("*.bundle"):
-        add_file_entry("bundles", path, path.stem)
-    log_root = logs_dir()
-    for path in (log_root.iterdir() if log_root.exists() else []):
-        if path.is_dir():
-            add_dir_entry("logs", path, path.name)
-    for path in results_dir().glob("*.json"):
-        add_file_entry("results", path, result_file_job_id(path))
-    if include_prepared and prepared_dir().exists():
-        for target_dir in prepared_dir().iterdir():
-            if not target_dir.is_dir():
-                continue
-            for mode_dir in target_dir.iterdir():
-                if mode_dir.is_dir():
-                    add_dir_entry("prepared", mode_dir, None)
-
-    plan_categories: dict[str, list[dict]] = {
-        "bundles": [],
-        "logs": [],
-        "results": [],
-        "prepared": [],
-    }
-
-    bundle_candidates = [
-        entry for entry in sorted(categories["bundles"], key=artifact_entry_sort_key, reverse=True)
-        if entry.get("job_id") not in live_job_ids
-    ]
-    plan_categories["bundles"] = bundle_candidates[keep_bundles:]
-
-    def select_queue_orphans(entries: list[dict], keep_count: int) -> list[dict]:
-        always_keep = [entry for entry in entries if entry.get("job_id") in retained_job_ids]
-        orphaned = [entry for entry in entries if entry.get("job_id") not in retained_job_ids]
-        orphaned.sort(key=artifact_entry_sort_key, reverse=True)
-        del always_keep  # clarity: retained-job artifacts are never candidates
-        return orphaned[keep_count:]
-
-    plan_categories["logs"] = select_queue_orphans(categories["logs"], keep_logs)
-    plan_categories["results"] = select_queue_orphans(categories["results"], keep_results)
-    plan_categories["prepared"] = sorted(
-        categories["prepared"],
-        key=artifact_entry_sort_key,
-        reverse=True,
+    return _cleanup.collect_local_ci_cleanup_plan(
+        queue,
+        keep_results=keep_results,
+        keep_logs=keep_logs,
+        keep_bundles=keep_bundles,
+        include_prepared=include_prepared,
+        bundles_dir_fn=bundles_dir,
+        logs_dir_fn=logs_dir,
+        results_dir_fn=results_dir,
+        prepared_dir_fn=prepared_dir,
+        path_size_bytes_fn=path_size_bytes,
     )
-
-    total_bytes = sum(
-        int(entry.get("size_bytes", 0))
-        for entries in plan_categories.values()
-        for entry in entries
-    )
-    total_paths = sum(len(entries) for entries in plan_categories.values())
-    return {
-        "categories": plan_categories,
-        "total_bytes": total_bytes,
-        "total_paths": total_paths,
-        "keep_results": keep_results,
-        "keep_logs": keep_logs,
-        "keep_bundles": keep_bundles,
-        "include_prepared": include_prepared,
-    }
 
 
 def apply_local_ci_cleanup_plan(plan: dict) -> dict:
-    removed: list[dict] = []
-    failed: list[dict] = []
-    for category, entries in (plan.get("categories") or {}).items():
-        for entry in entries:
-            path = Path(entry["path"])
-            try:
-                if path.is_dir():
-                    shutil.rmtree(path)
-                else:
-                    path.unlink(missing_ok=True)
-                removed.append(
-                    {
-                        "category": category,
-                        "path": path,
-                        "size_bytes": int(entry.get("size_bytes", 0)),
-                    }
-                )
-            except OSError as exc:
-                failed.append(
-                    {
-                        "category": category,
-                        "path": path,
-                        "error": str(exc),
-                    }
-                )
-    return {
-        "removed": removed,
-        "failed": failed,
-        "removed_bytes": sum(item["size_bytes"] for item in removed),
-    }
+    return _cleanup.apply_local_ci_cleanup_plan(plan)
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
-    return (-priority_value(job.get("priority", "normal")), job.get("queued_at", ""), job["id"])
+    return _queue_orchestrator.job_sort_key(job)
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
     changed = False
-    for job in stale_running_jobs_unlocked(queue):
-        replacement = None
-        for candidate in queue:
-            if candidate.get("status") not in {"pending", "running"}:
-                continue
-            reason = supersedence_reason(candidate, job)
-            if not reason:
-                continue
-            if replacement is None or candidate.get("queued_at", "") > replacement.get("queued_at", ""):
-                replacement = candidate
-
-        if replacement is not None:
-            supersede_job_unlocked(job, replacement["id"], supersedence_reason(replacement, job) or "newer_sha_queued")
+    actions = _queue_orchestrator.stale_running_reconciliation_actions_unlocked(
+        queue,
+        stale_running_jobs_unlocked(queue),
+    )
+    for action in actions:
+        job = action["job"]
+        if action["action"] == "supersede":
+            supersede_job_unlocked(job, action["replacement"]["id"], action["reason"])
             changed = True
             continue
 
-        job["status"] = "pending"
-        job["requeued_at"] = now_iso()
-        job.pop("started_at", None)
-        job.pop("runner", None)
+        _queue_orchestrator.requeue_stale_running_job_unlocked(job, now_iso_fn=now_iso)
         changed = True
 
     return queue, changed
@@ -4214,150 +2669,43 @@ def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
         runner = None
         runner_pid = None
 
-    stale: list[dict] = []
-    for job in queue:
-        if job.get("status") != "running":
-            continue
-        job_runner = job.get("runner") or {}
-        if runner and runner_pid and job_runner.get("pid") == runner_pid:
-            continue
-        stale.append(job)
-    return stale
+    return _queue_orchestrator.stale_running_jobs_for_runner_unlocked(
+        queue,
+        runner_pid if runner else None,
+    )
 
 
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
     with file_lock(queue_lock_path(), blocking=True):
         queue = load_queue_unlocked()
-        job = find_job_unlocked(queue, job_id)
-        if job is None:
-            return
-
-        active_targets = dict(job.get("active_targets") or {})
-        state = dict(active_targets.get(target_name) or {})
-        for key, value in fields.items():
-            if value is None:
-                state.pop(key, None)
-            else:
-                state[key] = value
-
-        if state:
-            active_targets[target_name] = state
-        else:
-            active_targets.pop(target_name, None)
-
-        if active_targets:
-            job["active_targets"] = active_targets
-            job["last_progress_at"] = now_iso()
-        else:
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-
-        save_queue_unlocked(queue)
+        if _queue_orchestrator.update_job_target_state_unlocked(
+            queue,
+            job_id,
+            target_name,
+            fields,
+            now_iso_fn=now_iso,
+        ):
+            save_queue_unlocked(queue)
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
-    candidates: list[dict] = []
-    for job in stale_running_jobs_unlocked(queue):
-        active_targets = job.get("active_targets") or {}
-        state = dict(active_targets.get("windows") or {})
-        host = state.get("host")
-        validator_pid = state.get("validator_pid")
-        validator_started_at = state.get("validator_started_at")
-        if not host or validator_pid is None or not validator_started_at:
-            continue
-        if state.get("cleanup_requested_at"):
-            continue
-
-        state["cleanup_requested_at"] = now_iso()
-        state["cleanup_status"] = "requested"
-        state["cleanup_reason"] = "stale_runner_recovery"
-        active_targets["windows"] = state
-        job["active_targets"] = active_targets
-        job["last_progress_at"] = now_iso()
-        candidates.append(
-            {
-                "job_id": job["id"],
-                "target": "windows",
-                "host": host,
-                "validator_pid": int(validator_pid),
-                "validator_started_at": validator_started_at,
-            }
-        )
-    return candidates
+    return _cleanup.collect_stale_windows_cleanup_candidates_unlocked(
+        queue,
+        stale_running_jobs_fn=stale_running_jobs_unlocked,
+        now_fn=now_iso,
+    )
 
 
 def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dict:
-    ps_script = f"""
-$PidToKill = {pid}
-$ExpectedStart = '{ps_literal(started_at)}'
-
-function Get-DescendantProcessIds {{
-    param([int]$RootPid)
-    $result = New-Object System.Collections.Generic.List[int]
-    $queue = New-Object System.Collections.Generic.Queue[int]
-    $queue.Enqueue($RootPid)
-    while ($queue.Count -gt 0) {{
-        $current = $queue.Dequeue()
-        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $current" -ErrorAction SilentlyContinue)
-        foreach ($child in $children) {{
-            $childPid = [int]$child.ProcessId
-            $result.Add($childPid)
-            $queue.Enqueue($childPid)
-        }}
-    }}
-    return $result
-}}
-
-$result = [ordered]@{{
-    found = $false
-    matched = $false
-    killed = $false
-    pid = $PidToKill
-}}
-
-try {{
-    $proc = Get-Process -Id $PidToKill -ErrorAction SilentlyContinue
-    if ($null -ne $proc) {{
-        $result.found = $true
-        $start = $proc.StartTime.ToUniversalTime().ToString('o')
-        $result.start = $start
-        if ($ExpectedStart -and $start -ne $ExpectedStart) {{
-            $result.matched = $false
-        }} else {{
-            $result.matched = $true
-            $children = @(Get-DescendantProcessIds -RootPid $PidToKill | Sort-Object -Descending -Unique)
-            foreach ($childPid in $children) {{
-                try {{
-                    Stop-Process -Id $childPid -Force -ErrorAction Stop
-                }} catch {{
-                }}
-            }}
-            Stop-Process -Id $PidToKill -Force -ErrorAction Stop
-            $result.killed = $true
-            $result.children = @($children)
-        }}
-    }}
-}} catch {{
-    $result.error = $_.Exception.Message
-}}
-
-$result | ConvertTo-Json -Compress
-""".strip()
-    run = run_logged_command(
-        windows_ssh_powershell_command(host),
-        input_text=ps_script,
-        timeout=120,
+    return _cleanup.cleanup_stale_windows_validator(
+        host,
+        pid,
+        started_at,
+        ps_literal_fn=ps_literal,
+        run_logged_command_fn=run_logged_command,
+        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
+        trim_line_fn=trim_line,
     )
-    lines = [line.strip() for line in run["output"].splitlines() if line.strip()]
-    payload = {}
-    if lines:
-        try:
-            payload = json.loads(lines[-1])
-        except json.JSONDecodeError:
-            payload = {"error": trim_line(lines[-1])}
-    if run["returncode"] != 0:
-        payload.setdefault("error", f"cleanup command exited {run['returncode']}")
-    return payload
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
@@ -4367,34 +2715,13 @@ def reclaim_stale_remote_validators(_config: dict) -> int:
         if candidates:
             save_queue_unlocked(queue)
 
-    for candidate in candidates:
-        result = cleanup_stale_windows_validator(
-            candidate["host"],
-            candidate["validator_pid"],
-            candidate["validator_started_at"],
-        )
-        update_job_target_state(
-            candidate["job_id"],
-            candidate["target"],
-            cleanup_completed_at=now_iso(),
-            cleanup_status=(
-                "killed"
-                if result.get("killed")
-                else "not-found"
-                if not result.get("found", True)
-                else "mismatch"
-                if result.get("found") and not result.get("matched", True)
-                else "error"
-                if result.get("error")
-                else "checked"
-            ),
-            cleanup_result=trim_line(json.dumps(result, sort_keys=True)),
-            validator_pid=None if result.get("killed") or not result.get("found", True) else candidate["validator_pid"],
-            validator_started_at=None
-            if result.get("killed") or not result.get("found", True)
-            else candidate["validator_started_at"],
-        )
-    return len(candidates)
+    return _cleanup.reclaim_stale_remote_validator_candidates(
+        candidates,
+        cleanup_validator_fn=cleanup_stale_windows_validator,
+        update_job_target_state_fn=update_job_target_state,
+        now_fn=now_iso,
+        trim_line_fn=trim_line,
+    )
 
 
 def write_runner_info(info: dict) -> None:
@@ -4403,15 +2730,16 @@ def write_runner_info(info: dict) -> None:
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
     info = current_runner_info()
-    if not info or info.get("active_job_id") != job_id:
+    if not info:
         return
 
-    if active_targets:
-        info["active_targets"] = active_targets
-    else:
-        info.pop("active_targets", None)
-    info["updated_at"] = now_iso()
-    write_runner_info(info)
+    if _queue_orchestrator.update_runner_info_active_targets(
+        info,
+        job_id,
+        active_targets,
+        now_iso_fn=now_iso,
+    ):
+        write_runner_info(info)
 
 
 def clear_runner_info() -> None:
@@ -4419,29 +2747,7 @@ def clear_runner_info() -> None:
 
 
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
-    candidates = queue
-    if statuses is not None:
-        candidates = [job for job in candidates if job.get("status") in statuses]
-
-    for job in candidates:
-        if job["id"] == job_ref:
-            return job
-
-    id_prefix = [job for job in candidates if job["id"].startswith(job_ref)]
-    if len(id_prefix) == 1:
-        return id_prefix[0]
-    if len(id_prefix) > 1:
-        raise ValueError(f"Job reference '{job_ref}' is ambiguous.")
-
-    branch_matches = [job for job in candidates if job.get("branch") == job_ref]
-    if len(branch_matches) == 1:
-        return branch_matches[0]
-    if len(branch_matches) > 1:
-        raise ValueError(
-            f"Multiple jobs match branch '{job_ref}'. Use a job id or unique prefix."
-        )
-
-    return None
+    return _queue_orchestrator.find_job_unlocked(queue, job_ref, statuses)
 
 
 def load_job(job_id: str) -> dict | None:
@@ -4460,45 +2766,29 @@ def claim_next_job() -> dict | None:
         queue, changed = reconcile_running_jobs_unlocked(queue)
         if changed:
             save_queue_unlocked(queue)
-        pending = sorted(
-            [job for job in queue if job.get("status") == "pending"],
-            key=job_sort_key,
+        claimed = _queue_orchestrator.claim_next_job_unlocked(
+            queue,
+            runner={"pid": os.getpid(), "root": str(ROOT)},
+            now_iso_fn=now_iso,
         )
-        if not pending:
+        if claimed is None:
             return None
 
-        selected_id = pending[0]["id"]
-        claimed = None
-        for job in queue:
-            if job["id"] != selected_id:
-                continue
-            job["status"] = "running"
-            job["started_at"] = now_iso()
-            job["runner"] = {"pid": os.getpid(), "root": str(ROOT)}
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-            claimed = normalize_job(job)
-            break
-
         save_queue_unlocked(queue)
-        return claimed
+        return normalize_job(claimed)
 
 
 def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
     retained_queue: list[dict] | None = None
     with file_lock(queue_lock_path(), blocking=True):
         queue = load_queue_unlocked()
-        for job in queue:
-            if job["id"] != job_id:
-                continue
-            job["status"] = "completed"
-            job["completed_at"] = now_iso()
-            job["result_file"] = str(result_path)
-            job["overall"] = result.get("overall")
-            job.pop("runner", None)
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-            break
+        _queue_orchestrator.complete_job_unlocked(
+            queue,
+            job_id,
+            result,
+            result_path,
+            now_iso_fn=now_iso,
+        )
 
         retained_queue, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
         save_queue_unlocked(retained_queue)
@@ -4513,162 +2803,6 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
                 include_prepared=False,
             )
         )
-
-
-def empty_evidence_index() -> dict:
-    return {"version": 3, "entries": {}}
-
-
-def evidence_entry_key(branch: str, sha: str, target: str, validation: str) -> str:
-    return f"{branch}:{sha}:{validation}:{target}"
-
-
-def normalize_evidence_index(index: dict | None) -> dict:
-    if not isinstance(index, dict):
-        return empty_evidence_index()
-    entries = index.get("entries")
-    if not isinstance(entries, dict):
-        entries = {}
-    return {"version": int(index.get("version", 1)), "entries": entries}
-
-
-def evidence_record_from_result(result: dict, item: dict, result_path: Path) -> dict:
-    return {
-        "job_id": result.get("job_id", ""),
-        "branch": result.get("branch", ""),
-        "sha": result.get("sha", ""),
-        "validation": result.get("validation", "full"),
-        "provenance": normalize_provenance(result.get("provenance")),
-        "target": item.get("target", ""),
-        "status": item.get("status", ""),
-        "completed_at": result.get("completed_at", ""),
-        "duration_secs": item.get("duration_secs", 0),
-        "result_file": str(result_path),
-    }
-
-
-def merge_result_into_evidence_index(index: dict, result: dict, result_path: Path) -> bool:
-    changed = False
-    for item in result.get("results", []):
-        if item.get("status") != "pass":
-            continue
-        record = evidence_record_from_result(result, item, result_path)
-        key = evidence_entry_key(
-            record["branch"], record["sha"], record["target"], record["validation"]
-        )
-        existing = index["entries"].get(key)
-        if existing and existing.get("completed_at", "") >= record["completed_at"]:
-            continue
-        index["entries"][key] = record
-        changed = True
-    return changed
-
-
-def rebuild_evidence_index_unlocked() -> dict:
-    index = empty_evidence_index()
-    for path in sorted(results_dir().glob("*.json")):
-        try:
-            result = load_result(path)
-        except (OSError, json.JSONDecodeError):
-            continue
-        merge_result_into_evidence_index(index, result, path)
-    return index
-
-
-def load_evidence_index_unlocked() -> tuple[dict, bool]:
-    path = evidence_path()
-    if not path.exists():
-        return rebuild_evidence_index_unlocked(), True
-
-    try:
-        index = normalize_evidence_index(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return rebuild_evidence_index_unlocked(), True
-    if index.get("version") != empty_evidence_index()["version"]:
-        return rebuild_evidence_index_unlocked(), True
-    return index, False
-
-
-def save_evidence_index_unlocked(index: dict) -> None:
-    atomic_write_text(evidence_path(), json.dumps(index, indent=2) + "\n")
-
-
-def load_evidence_index() -> dict:
-    with file_lock(evidence_lock_path(), blocking=True):
-        index, rebuilt = load_evidence_index_unlocked()
-        if rebuilt:
-            save_evidence_index_unlocked(index)
-        return index
-
-
-def update_evidence_index(result: dict, result_path: Path) -> None:
-    with file_lock(evidence_lock_path(), blocking=True):
-        index, rebuilt = load_evidence_index_unlocked()
-        changed = merge_result_into_evidence_index(index, result, result_path)
-        if rebuilt or changed:
-            save_evidence_index_unlocked(index)
-
-
-def collect_evidence_groups(branch: str | None = None, sha: str | None = None) -> dict[str, list[dict]]:
-    index = load_evidence_index()
-    grouped: dict[str, dict[str, dict]] = defaultdict(dict)
-
-    for record in index.get("entries", {}).values():
-        if branch and record.get("branch") != branch:
-            continue
-        if sha and record.get("sha") != sha:
-            continue
-
-        validation = record.get("validation", "full")
-        sha_value = record.get("sha", "")
-        if not sha_value:
-            continue
-
-        bucket = grouped[validation].setdefault(
-            sha_value,
-            {
-                "sha": sha_value,
-                "branch": record.get("branch", ""),
-                "validation": validation,
-                "completed_at": record.get("completed_at", ""),
-                "targets": {},
-            },
-        )
-        bucket["targets"][record.get("target", "")] = record
-        if record.get("completed_at", "") > bucket.get("completed_at", ""):
-            bucket["completed_at"] = record.get("completed_at", "")
-
-    return {
-        validation: sorted(
-            sha_groups.values(),
-            key=lambda item: (item.get("completed_at", ""), item.get("sha", "")),
-            reverse=True,
-        )
-        for validation, sha_groups in grouped.items()
-    }
-
-
-def print_evidence_summary(
-    *,
-    branch: str | None = None,
-    sha: str | None = None,
-    limit: int = 3,
-    indent: str = "",
-) -> bool:
-    groups = collect_evidence_groups(branch=branch, sha=sha)
-    if not groups:
-        return False
-
-    for validation in sorted(groups):
-        print(f"{indent}{validation}:")
-        for item in groups[validation][:limit]:
-            targets = ", ".join(f"{target}=pass" for target in sorted(item.get("targets", {})))
-            print(
-                f"{indent}  {short_sha(item.get('sha', ''))} [{targets}] "
-                f"last={item.get('completed_at', '?')} "
-                f"via {provenance_summary(item.get('provenance'))}"
-            )
-    return True
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
@@ -4723,211 +2857,94 @@ def notify(message: str) -> None:
 
 
 def ssh_probe(host: str, timeout: int = 5) -> subprocess.CompletedProcess[str]:
-    cmd = ["ssh", "-o", f"ConnectTimeout={timeout}", "-o", "BatchMode=yes", host, "echo", "up"]
-    try:
-        return run_ssh_subprocess(
-            cmd,
-            timeout=max(timeout, 5),
-        )
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(cmd, 124, "", f"SSH probe timed out after {max(timeout, 5)}s")
+    return _target_preflight.ssh_probe(
+        host,
+        timeout,
+        run_ssh_subprocess_fn=run_ssh_subprocess,
+    )
 
 
 def ssh_reachable(host: str, timeout: int = 5) -> bool:
-    return ssh_probe(host, timeout).returncode == 0
+    return _target_preflight.ssh_reachable(
+        host,
+        timeout,
+        ssh_probe_fn=ssh_probe,
+    )
 
 
 def ssh_failure_detail(host: str, timeout: int = 5) -> str:
-    result = ssh_probe(host, timeout)
-    stderr = (result.stderr or "").strip()
-    if "timed out" in stderr.lower():
-        return f"{host} (connection timed out; verify network reachability and SSH service on the target)"
-    if "Connection reset by peer" in stderr or "kex_exchange_identification" in stderr:
-        return f"{host} (SSH service reset during handshake; verify OpenSSH server on the target)"
-    if "Connection refused" in stderr:
-        return f"{host} (connection refused; verify the SSH service is running on the target)"
-    if stderr:
-        first_line = stderr.splitlines()[0].strip()
-        return f"{host} ({first_line})"
-    return f"{host} (unreachable; verify SSH access from this host)"
+    return _target_preflight.ssh_failure_detail(
+        host,
+        timeout,
+        ssh_probe_fn=ssh_probe,
+    )
 
 
 def ssh_command_result(host: str, remote_cmd: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    prefixed_cmd = 'export PATH="$HOME/.local/bin:$PATH"; ' + remote_cmd
-    return run_ssh_subprocess(
-        ["ssh", "-o", f"ConnectTimeout={max(5, min(timeout, 30))}", host, "bash", "-lc", shlex.quote(prefixed_cmd)],
+    return _target_preflight.ssh_command_result(
+        host,
+        remote_cmd,
         timeout=timeout,
+        run_ssh_subprocess_fn=run_ssh_subprocess,
     )
 
 
 def utmctl_vm_status(vm_name: str) -> str | None:
-    result = subprocess.run(["utmctl", "list"], capture_output=True, text=True)
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.splitlines():
-        if vm_name in line:
-            parts = line.split()
-            if len(parts) >= 2:
-                return parts[1]
-    return None
+    return _target_preflight.utmctl_vm_status(
+        vm_name,
+        run_fn=subprocess.run,
+    )
 
 
 def utmctl_start(vm_name: str) -> bool:
-    result = subprocess.run(["utmctl", "start", vm_name], capture_output=True, text=True)
-    return result.returncode == 0
+    return _target_preflight.utmctl_start(
+        vm_name,
+        run_fn=subprocess.run,
+    )
 
 
 def ensure_host_reachable(target_name: str, target_cfg: dict, defaults: dict) -> str | None:
-    host = target_cfg["host"]
-    fallback_host = target_cfg.get("fallback_host")
-    timeout = defaults.get("ssh_timeout_secs", 5)
-
-    print(f"  [{target_name}] Checking ssh {host}...")
-    if ssh_reachable(host, timeout):
-        print(f"  [{target_name}] {host} is up")
-        return host
-
-    if fallback_host:
-        print(f"  [{target_name}] {host} unreachable, trying fallback ssh {fallback_host}...")
-        if ssh_reachable(fallback_host, timeout):
-            print(f"  [{target_name}] {fallback_host} is up")
-            return fallback_host
-
-    fallback = target_cfg.get("utm_fallback")
-    if not fallback:
-        print(f"  [{target_name}] {host} unreachable, no UTM fallback configured")
-        return None
-
-    vm_name = fallback["vm_name"]
-    boot_wait = fallback.get("boot_wait_secs", 30)
-    ssh_retry = fallback.get("ssh_retry_secs", 60)
-
-    print(f"  [{target_name}] {host} unreachable, checking UTM VM '{vm_name}'...")
-    status = utmctl_vm_status(vm_name)
-    if status is None:
-        print(f"  [{target_name}] UTM VM '{vm_name}' not found")
-        return None
-
-    if status != "started":
-        print(f"  [{target_name}] Starting UTM VM '{vm_name}'...")
-        if not utmctl_start(vm_name):
-            print(f"  [{target_name}] Failed to start UTM VM")
-            return None
-        print(f"  [{target_name}] Waiting {boot_wait}s for boot...")
-        time.sleep(boot_wait)
-
-    deadline = time.time() + ssh_retry
-    attempt = 0
-    while time.time() < deadline:
-        attempt += 1
-        if ssh_reachable(host, timeout):
-            print(f"  [{target_name}] {host} up after UTM start (attempt {attempt})")
-            return host
-        time.sleep(5)
-
-    print(f"  [{target_name}] {host} still unreachable after UTM start")
-    return None
+    return _target_preflight.ensure_host_reachable(
+        target_name,
+        target_cfg,
+        defaults,
+        ssh_reachable_fn=ssh_reachable,
+        utmctl_vm_status_fn=utmctl_vm_status,
+        utmctl_start_fn=utmctl_start,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+        print_fn=print,
+    )
 
 
 def config_source_name(path: Path) -> str:
-    override = os.environ.get("PULP_LOCAL_CI_CONFIG")
-    if override:
-        return "env-override"
-    if path == shared_config_path():
-        return "shared-state"
-    return "worktree-local"
+    return _target_preflight.config_source_name(
+        path,
+        environ=os.environ,
+        shared_config_path_fn=shared_config_path,
+    )
 
 
 def config_material_for_targets(config: dict, targets: list[str]) -> dict:
-    material: dict[str, dict] = {}
-    for name in targets:
-        target_cfg = config.get("targets", {}).get(name)
-        if not target_cfg:
-            continue
-        entry = {
-            "type": target_cfg.get("type", "local"),
-            "enabled": bool(target_cfg.get("enabled", True)),
-        }
-        for key in (
-            "host",
-            "fallback_host",
-            "repo_path",
-            "utm_fallback",
-            "cmake_generator",
-            "cmake_platform",
-            "cmake_generator_instance",
-        ):
-            value = target_cfg.get(key)
-            if value not in (None, "", {}):
-                entry[key] = value
-        material[name] = entry
-    return material
+    return _target_preflight.config_material_for_targets(config, targets)
 
 
 def find_material_config_drift(targets: list[str]) -> list[str]:
-    shared_path = shared_config_path()
-    worktree_path = worktree_config_path()
-    if not shared_path.exists() or not worktree_path.exists():
-        return []
-    try:
-        shared_cfg = json.loads(shared_path.read_text())
-        worktree_cfg = json.loads(worktree_path.read_text())
-    except json.JSONDecodeError:
-        return []
-
-    drift: list[str] = []
-    shared_material = config_material_for_targets(shared_cfg, targets)
-    worktree_material = config_material_for_targets(worktree_cfg, targets)
-    for name in targets:
-        shared_entry = shared_material.get(name)
-        worktree_entry = worktree_material.get(name)
-        if shared_entry == worktree_entry:
-            continue
-        drift.append(
-            f"{name}: shared-state {shared_entry or '(missing)'} vs worktree-local {worktree_entry or '(missing)'}"
-        )
-    return drift
+    return _target_preflight.find_material_config_drift(
+        targets,
+        shared_config_path_fn=shared_config_path,
+        worktree_config_path_fn=worktree_config_path,
+        config_material_for_targets_fn=config_material_for_targets,
+    )
 
 
 def preflight_target_host_state(target_name: str, target_cfg: dict, defaults: dict) -> dict:
-    target_type = target_cfg.get("type", "local")
-    if target_type != "ssh":
-        return {"target": target_name, "transport_mode": "local", "status": "local"}
-
-    host = target_cfg.get("host", "")
-    fallback_host = target_cfg.get("fallback_host")
-    timeout = defaults.get("ssh_timeout_secs", 5)
-    state = {
-        "target": target_name,
-        "transport_mode": "bundle",
-        "configured_host": host,
-        "repo_path": target_cfg.get("repo_path"),
-        "status": "unknown",
-    }
-
-    if host and ssh_reachable(host, timeout):
-        state["status"] = "primary-up"
-        state["resolved_host"] = host
-        return state
-
-    if fallback_host and ssh_reachable(fallback_host, timeout):
-        state["status"] = "fallback-up"
-        state["resolved_host"] = fallback_host
-        state["warning"] = f"{target_name}: primary host {host} is down; fallback {fallback_host} is up"
-        return state
-
-    utm_fallback = target_cfg.get("utm_fallback")
-    if utm_fallback:
-        vm_name = utm_fallback.get("vm_name", "(unknown)")
-        state["status"] = "utm-fallback-pending"
-        state["resolved_host"] = host
-        state["warning"] = f"{target_name}: ssh host {host} is down; queued run would need UTM fallback '{vm_name}'"
-        return state
-
-    state["status"] = "unreachable"
-    state["resolved_host"] = host
-    state["error"] = f"{target_name}: ssh host {host} is down and no fallback host or UTM VM is configured"
-    return state
+    return _target_preflight.preflight_target_host_state(
+        target_name,
+        target_cfg,
+        defaults,
+        ssh_reachable_fn=ssh_reachable,
+    )
 
 
 def build_submission_metadata(
@@ -4941,104 +2958,34 @@ def build_submission_metadata(
     allow_root_mismatch: bool,
     allow_unreachable_targets: bool,
 ) -> dict:
-    cwd = Path.cwd().resolve()
-    cwd_git_root = git_root_for(cwd)
-    submission_root = ROOT.resolve()
-
-    if cwd_git_root and cwd_git_root != submission_root and not allow_root_mismatch:
-        raise ValueError(
-            "Invoked from a different git root than the queued worktree. "
-            f"cwd git root={cwd_git_root}, submission root={submission_root}. "
-            "Run the worktree-local tools/local-ci/local_ci.py or pass --allow-root-mismatch."
-        )
-
-    config_file = config_path().resolve()
-    host_preflight: dict[str, dict] = {}
-    warnings: list[str] = []
-    errors: list[str] = []
-    defaults = config.get("defaults", {})
-    for name in targets:
-        state = preflight_target_host_state(name, config.get("targets", {}).get(name, {}), defaults)
-        host_preflight[name] = state
-        if state.get("warning"):
-            warnings.append(state["warning"])
-        if state.get("error"):
-            errors.append(state["error"])
-
-    # Auto-failover unreachable SSH targets to Namespace if configured
-    namespace_failover_targets: list[str] = []
-    failover_cfg = config.get("failover", {})
-    namespace_auto = failover_cfg.get("namespace_auto", True)  # Default enabled
-    ga_defaults = config.get("github_actions", {}).get("defaults", {})
-    default_provider = ga_defaults.get("provider", "github-hosted")
-
-    if errors and namespace_auto and default_provider == "namespace":
-        for name in targets:
-            state = host_preflight.get(name, {})
-            if state.get("status") == "unreachable":
-                namespace_failover_targets.append(name)
-                state["status"] = "namespace-failover"
-                state["warning"] = (
-                    f"{name}: SSH host unreachable — auto-failover to Namespace"
-                )
-                state.pop("error", None)
-                warnings.append(state["warning"])
-        # Clear errors for targets that were failed over
-        errors = [e for e in errors if not any(t in e for t in namespace_failover_targets)]
-
-    if errors and not allow_unreachable_targets:
-        raise ValueError("; ".join(errors) + ". Pass --allow-unreachable-targets to queue anyway.")
-
-    config_drift = [] if os.environ.get("PULP_LOCAL_CI_CONFIG") else find_material_config_drift(targets)
-    if config_drift:
-        warnings.append("config drift detected between shared-state and worktree-local config")
-
-    return {
-        "submitted_root": str(submission_root),
-        "cwd": str(cwd),
-        "cwd_git_root": str(cwd_git_root) if cwd_git_root else "",
-        "config_path": str(config_file),
-        "config_source": config_source_name(config_file),
-        "branch": branch,
-        "sha": sha,
-        "priority": priority,
-        "validation": validation,
-        "targets": targets,
-        "target_hosts": host_preflight,
-        "namespace_failover_targets": namespace_failover_targets,
-        "config_drift": config_drift,
-        "warnings": warnings,
-        "provenance": normalize_provenance(),
-    }
+    return _target_preflight.build_submission_metadata(
+        config,
+        branch,
+        sha,
+        targets,
+        priority,
+        validation,
+        allow_root_mismatch=allow_root_mismatch,
+        allow_unreachable_targets=allow_unreachable_targets,
+        root=ROOT,
+        cwd_fn=Path.cwd,
+        git_root_for_fn=git_root_for,
+        config_path_fn=config_path,
+        config_source_name_fn=config_source_name,
+        preflight_target_host_state_fn=preflight_target_host_state,
+        find_material_config_drift_fn=find_material_config_drift,
+        normalize_provenance_fn=normalize_provenance,
+        environ=os.environ,
+    )
 
 
 def print_submission_metadata(metadata: dict) -> None:
-    print(
-        "Submitting: "
-        f"{metadata['branch']} @ {short_sha(metadata['sha'])} "
-        f"priority={metadata['priority']} targets={','.join(metadata['targets']) or 'none'}"
+    return _target_preflight.print_submission_metadata(
+        metadata,
+        short_sha_fn=short_sha,
+        provenance_summary_fn=provenance_summary,
+        print_fn=print,
     )
-    print(f"  root: {metadata['submitted_root']}")
-    print(f"  cwd: {metadata['cwd']}")
-    if metadata.get("cwd_git_root"):
-        print(f"  cwd git root: {metadata['cwd_git_root']}")
-    print(f"  config: {metadata['config_path']} ({metadata['config_source']})")
-    if metadata.get("provenance"):
-        print(f"  provenance: {provenance_summary(metadata.get('provenance'))}")
-    for drift in metadata.get("config_drift", []):
-        print(f"  config drift: {drift}")
-    for target_name in metadata.get("targets", []):
-        state = metadata.get("target_hosts", {}).get(target_name, {})
-        transport = state.get("transport_mode", "local")
-        if transport == "local":
-            print(f"  {target_name}: local transport")
-            continue
-        resolved = state.get("resolved_host") or state.get("configured_host") or "?"
-        status = state.get("status", "unknown")
-        repo_path = state.get("repo_path") or "?"
-        print(f"  {target_name}: host={resolved} status={status} transport={transport} repo={repo_path}")
-    for warning in metadata.get("warnings", []):
-        print(f"  warning: {warning}")
 
 
 # ── Validation Runners ───────────────────────────────────────────────────────
@@ -5443,93 +3390,48 @@ def run_posix_ssh_validation(
 
 
 def ps_literal(value: str) -> str:
-    return value.replace("'", "''")
-
-
-_SAFE_CI_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+    return _windows_probe.ps_literal(value)
 
 
 def validate_ci_branch_name(branch: str) -> str:
-    normalized = (branch or "").strip()
-    if not normalized:
-        raise ValueError("CI branch name is required")
-    if not _SAFE_CI_BRANCH_RE.fullmatch(normalized):
-        raise ValueError(
-            "Unsupported branch name for local-ci transport. "
-            "Use letters, numbers, dot, underscore, slash, or hyphen only."
-        )
-    return normalized
+    return _queue_orchestrator.validate_ci_branch_name(branch)
 
 
 def windows_ssh_powershell_command(host: str) -> list[str]:
-    # `powershell -Command -` silently no-ops some multi-line try/finally scripts on WinRM/OpenSSH.
-    # Read stdin explicitly and invoke it so complex validation scripts execute reliably.
-    return [
-        "ssh",
-        host,
-        "powershell",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "$script = [Console]::In.ReadToEnd(); Invoke-Expression $script",
-    ]
+    return _windows_probe.windows_ssh_powershell_command(host)
 
 
 def run_windows_ssh_powershell(host: str, ps_script: str, *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
-    return run_ssh_subprocess(
-        windows_ssh_powershell_command(host),
-        input=ps_script,
+    return _windows_probe.run_windows_ssh_powershell(
+        host,
+        ps_script,
         timeout=timeout,
+        run_ssh_subprocess_fn=run_ssh_subprocess,
     )
 
 
 def parse_windows_ssh_json(stdout: str) -> dict:
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            raise RuntimeError("Windows SSH script returned a non-object JSON payload")
-        return payload
-    raise RuntimeError("Windows SSH script returned no JSON payload")
+    return _windows_probe.parse_windows_ssh_json(stdout)
 
 
 def windows_contract_expand_expression(raw_value: str) -> str:
-    return f"[Environment]::ExpandEnvironmentVariables('{ps_literal(raw_value)}')"
+    return _windows_probe.windows_contract_expand_expression(raw_value, ps_literal_fn=ps_literal)
 
 
 def windows_session_agent_template_path() -> Path:
-    return SCRIPT_DIR / "windows_session_agent.ps1"
+    return _windows_probe.windows_session_agent_template_path(SCRIPT_DIR)
 
 
 def windows_ssh_write_text(host: str, remote_path: str, content: str) -> None:
-    payload = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    ps_script = f"""
-$RawPath = '{ps_literal(remote_path)}'
-$ExpandedPath = {windows_contract_expand_expression(remote_path)}
-$Parent = Split-Path -Parent $ExpandedPath
-if ($Parent) {{
-    New-Item -ItemType Directory -Path $Parent -Force | Out-Null
-}}
-$Bytes = [Convert]::FromBase64String('{payload}')
-[System.IO.File]::WriteAllBytes($ExpandedPath, $Bytes)
-$result = @{{
-    path = $ExpandedPath
-    exists = Test-Path $ExpandedPath
-}}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=120)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"write exited {run.returncode}"
-        raise RuntimeError(detail)
-    payload_json = parse_windows_ssh_json(run.stdout)
-    if not payload_json.get("exists"):
-        raise RuntimeError(f"Remote write failed for `{remote_path}`")
+    return _windows_probe.windows_ssh_write_text(
+        host,
+        remote_path,
+        content,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def windows_ssh_fetch_file(
@@ -5540,27 +3442,15 @@ def windows_ssh_fetch_file(
     optional: bool = False,
     timeout: int = 60,
 ) -> bool:
-    ps_script = f"""
-$ExpandedPath = {windows_contract_expand_expression(remote_path)}
-if (-not (Test-Path $ExpandedPath)) {{
-    Write-Output '__PULP_MISSING__'
-    exit 0
-}}
-$Bytes = [System.IO.File]::ReadAllBytes($ExpandedPath)
-[Console]::Out.WriteLine([Convert]::ToBase64String($Bytes))
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=timeout)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"fetch exited {run.returncode}"
-        if optional:
-            return False
-        raise RuntimeError(detail)
-    output = "".join(line.strip() for line in run.stdout.splitlines() if line.strip())
-    if output == "__PULP_MISSING__":
-        return False if optional else (_ for _ in ()).throw(RuntimeError(f"Remote file `{remote_path}` does not exist"))
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    local_path.write_bytes(base64.b64decode(output.encode("ascii")))
-    return True
+    return _windows_probe.windows_ssh_fetch_file(
+        host,
+        remote_path,
+        local_path,
+        optional=optional,
+        timeout=timeout,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+    )
 
 
 def windows_ssh_read_json(
@@ -5570,105 +3460,46 @@ def windows_ssh_read_json(
     timeout: int = 30,
     optional: bool = False,
 ) -> dict | None:
-    ps_script = f"""
-$ExpandedPath = {windows_contract_expand_expression(remote_path)}
-if (-not (Test-Path $ExpandedPath)) {{
-    Write-Output '__PULP_MISSING__'
-    exit 0
-}}
-Get-Content -LiteralPath $ExpandedPath -Raw
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=timeout)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"read exited {run.returncode}"
-        if optional:
-            return None
-        raise RuntimeError(detail)
-    output = run.stdout.strip()
-    if output == "__PULP_MISSING__":
-        return None if optional else (_ for _ in ()).throw(RuntimeError(f"Remote JSON `{remote_path}` does not exist"))
-    return json.loads(output)
+    return _windows_probe.windows_ssh_read_json(
+        host,
+        remote_path,
+        timeout=timeout,
+        optional=optional,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+    )
 
 
 def windows_ssh_remove_path(host: str, remote_path: str) -> None:
-    ps_script = f"""
-$ExpandedPath = {windows_contract_expand_expression(remote_path)}
-if (Test-Path $ExpandedPath) {{
-    Remove-Item -LiteralPath $ExpandedPath -Recurse -Force
-}}
-"""
-    try:
-        run_windows_ssh_powershell(host, ps_script, timeout=30)
-    except Exception:
-        pass
+    return _windows_probe.windows_ssh_remove_path(
+        host,
+        remote_path,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+    )
 
 
 def bootstrap_windows_session_agent(host: str, contract: dict) -> dict:
-    script_path = windows_session_agent_template_path()
-    if not script_path.exists():
-        raise RuntimeError(f"Windows session agent template missing: {script_path}")
-    windows_ssh_write_text(host, contract["script_path"], script_path.read_text())
-    ps_script = f"""
-$TaskName = '{ps_literal(contract["task_name"])}'
-$RemoteRootRaw = '{ps_literal(contract["remote_root"])}'
-$ScriptPathRaw = '{ps_literal(contract["script_path"])}'
-$RemoteRoot = {windows_contract_expand_expression(contract["remote_root"])}
-$ScriptPath = {windows_contract_expand_expression(contract["script_path"])}
-$JobsDir = Join-Path $RemoteRoot 'jobs'
-$ResultsDir = Join-Path $RemoteRoot 'results'
-$LogsDir = Join-Path $RemoteRoot 'logs'
-New-Item -ItemType Directory -Path $RemoteRoot -Force | Out-Null
-New-Item -ItemType Directory -Path $JobsDir -Force | Out-Null
-New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
-New-Item -ItemType Directory -Path $LogsDir -Force | Out-Null
-$Action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "{{0}}" -RemoteRoot "{{1}}"' -f $ScriptPath, $RemoteRootRaw)
-$Trigger = New-ScheduledTaskTrigger -AtLogOn
-$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force | Out-Null
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-$TaskState = ''
-if ($task) {{
-    $TaskState = [string]$task.State
-}}
-$result = @{{
-    task_name = $TaskName
-    task_present = [bool]$task
-    task_state = $TaskState
-    remote_root = $RemoteRoot
-    script_path = $ScriptPath
-    script_exists = Test-Path $ScriptPath
-    jobs_dir = $JobsDir
-    jobs_dir_exists = Test-Path $JobsDir
-    results_dir = $ResultsDir
-    results_dir_exists = Test-Path $ResultsDir
-    logs_dir = $LogsDir
-    logs_dir_exists = Test-Path $LogsDir
-}}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=120)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"bootstrap exited {run.returncode}"
-        raise RuntimeError(detail)
-    return parse_windows_ssh_json(run.stdout)
+    return _windows_probe.bootstrap_windows_session_agent(
+        host,
+        contract,
+        windows_session_agent_template_path_fn=windows_session_agent_template_path,
+        windows_ssh_write_text_fn=windows_ssh_write_text,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+        windows_contract_expand_expression_fn=windows_contract_expand_expression,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def start_windows_session_agent_task(host: str, contract: dict) -> None:
-    ps_script = f"""
-$TaskName = '{ps_literal(contract["task_name"])}'
-Start-ScheduledTask -TaskName $TaskName
-$result = @{{
-    started = $true
-    task_name = $TaskName
-}}
-$result | ConvertTo-Json -Compress
-"""
-    run = run_windows_ssh_powershell(host, ps_script, timeout=30)
-    if run.returncode != 0:
-        detail = run.stderr.strip() or run.stdout.strip() or f"start exited {run.returncode}"
-        raise RuntimeError(detail)
-    parse_windows_ssh_json(run.stdout)
+    return _windows_probe.start_windows_session_agent_task(
+        host,
+        contract,
+        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
+        parse_windows_ssh_json_fn=parse_windows_ssh_json,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def probe_windows_ssh_cmake_settings(
@@ -5677,94 +3508,15 @@ def probe_windows_ssh_cmake_settings(
     cmake_platform: str,
     cmake_generator_instance: str,
 ) -> tuple[str, str]:
-    if cmake_platform and cmake_generator_instance:
-        return cmake_platform, cmake_generator_instance
-
-    ps_script = f"""
-$RequestedPlatform = '{ps_literal(cmake_platform)}'
-$RequestedGeneratorInstance = '{ps_literal(cmake_generator_instance)}'
-$Generator = '{ps_literal(cmake_generator)}'
-
-function Resolve-CMakePlatform {{
-    param([string]$Requested)
-    if ($Requested) {{
-        return $Requested
-    }}
-    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {{
-        return 'ARM64'
-    }}
-    return 'x64'
-}}
-
-function Resolve-VisualStudioInstance {{
-    param([string]$Requested, [string]$Generator)
-    if ($Requested) {{
-        return $Requested
-    }}
-    if (-not $Generator -or -not $Generator.StartsWith('Visual Studio')) {{
-        return ''
-    }}
-    $vswhere = Join-Path ${{env:ProgramFiles(x86)}} 'Microsoft Visual Studio\\Installer\\vswhere.exe'
-    if (-not (Test-Path $vswhere)) {{
-        return ''
-    }}
-    try {{
-        $raw = (& $vswhere -latest -products * -format json) -join "`n"
-        if (-not $raw) {{
-            return ''
-        }}
-        $instances = $raw | ConvertFrom-Json
-        if ($instances -isnot [System.Array]) {{
-            $instances = @($instances)
-        }}
-        $preferred = $instances | Where-Object {{
-            $_.productId -and $_.productId -ne 'Microsoft.VisualStudio.Product.BuildTools'
-        }} | Select-Object -First 1
-        if (-not $preferred) {{
-            $preferred = $instances | Select-Object -First 1
-        }}
-        if ($preferred -and $preferred.installationPath) {{
-            return $preferred.installationPath.Replace('\\', '/')
-        }}
-    }} catch {{
-    }}
-    return ''
-}}
-
-$resolved = @{{
-    platform = Resolve-CMakePlatform $RequestedPlatform
-    generator_instance = Resolve-VisualStudioInstance $RequestedGeneratorInstance $Generator
-}}
-$resolved | ConvertTo-Json -Compress
-"""
-
-    try:
-        run = subprocess.run(
-            windows_ssh_powershell_command(host),
-            input=ps_script,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except (subprocess.SubprocessError, OSError):
-        return cmake_platform, cmake_generator_instance
-
-    if run.returncode != 0:
-        return cmake_platform, cmake_generator_instance
-
-    for line in reversed(run.stdout.splitlines()):
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            resolved = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        return (
-            resolved.get("platform") or cmake_platform,
-            resolved.get("generator_instance") or cmake_generator_instance,
-        )
-    return cmake_platform, cmake_generator_instance
+    return _windows_probe.probe_windows_ssh_cmake_settings(
+        host,
+        cmake_generator,
+        cmake_platform,
+        cmake_generator_instance,
+        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
+        run_fn=subprocess.run,
+        ps_literal_fn=ps_literal,
+    )
 
 
 def run_windows_ssh_validation(
@@ -6863,15 +4615,17 @@ def cmd_bump(args: argparse.Namespace) -> int:
     try:
         with file_lock(queue_lock_path(), blocking=True):
             queue = load_queue_unlocked()
-            job = find_job_unlocked(queue, args.job, statuses={"pending", "running"})
+            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
             if job is None:
                 print(f"No active job matches '{args.job}'.")
                 return 1
-            if job["status"] != "pending":
+            if not _queue_orchestrator.set_pending_job_priority_unlocked(
+                job,
+                requested_priority,
+                now_iso_fn=now_iso,
+            ):
                 print(f"Job is already {job['status']}; only pending jobs can be reprioritized.")
                 return 1
-            job["priority"] = requested_priority
-            job["bumped_at"] = now_iso()
             save_queue_unlocked(queue)
             print(f"Updated priority: {summarize_job(job)}")
             return 0
@@ -6884,7 +4638,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     try:
         with file_lock(queue_lock_path(), blocking=True):
             queue = load_queue_unlocked()
-            job = find_job_unlocked(queue, args.job, statuses={"pending", "running"})
+            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
             if job is None:
                 print(f"No active job matches '{args.job}'.")
                 return 1

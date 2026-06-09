@@ -32,13 +32,14 @@ cmake --build build
 open build/MyPlugin_artefacts/Standalone/MyPlugin.app
 
 # Pulp
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/MyPlugin_artefacts/Standalone/MyPlugin.app
+open build/MyPlugin_artefacts/Standalone/MyPlugin.app
 # Or, with the Pulp CLI:
-pulp run                  # watch + rebuild + relaunch
-pulp dev --run MyPlugin   # same with the standalone host
-pulp build --watch        # incremental
+pulp run                  # build and launch
+pulp run --watch          # rebuild + relaunch
+pulp dev --run MyPlugin   # standalone host
+pulp build --watch        # incremental build
 ```
 
 Watch-mode rebuilds (the equivalent of "save in your IDE, hit
@@ -53,14 +54,15 @@ juce ⏵  install pluginval / clap-validator / auval separately,
         glue them into your CI yaml by hand, hope you remember
         to bump versions in lockstep with the SDK.
 
-pulp ⏵  `pulp validate`. Hard-fails CI if a format validator
-        rejects the bundle. `--strict` for "treat warnings as
-        errors". `--screenshot` for visual diffs.
+pulp ⏵  `pulp validate`. Discovers installed validators, reports
+        missing/broken tools clearly, and hard-fails when a validator
+        rejects the bundle. `--strict` makes missing validators fail CI.
+        `--screenshot` is available for visual diffs.
 ```
 
-`pulp validate` runs **pluginval + clap-validator + auval** on every
-PR, with a validator-discovery preflight that pins the right
-binaries for the host OS. No install step. There is also a *hard*
+`pulp validate` discovers **pluginval + clap-validator + auval** from
+the host environment and reports which validators ran, were missing,
+or were broken. There is also a *hard*
 "no install without validation" policy in `pulp ship` — see
 [plugin-install-policy](../../CLAUDE.md#plugin-install-policy).
 
@@ -83,7 +85,7 @@ The overlay shows:
 * `StateStore` parameter values + recent changes (ring buffer of 100)
 * Console (`log_info` / `log_warn` / `log_error`) live tail
 * Performance snapshot per frame
-* `DirtyTracker::debug_overlay` repaint flash *(slice 6)*
+* `DirtyTracker::debug_overlay` repaint flash
 * Live constants (see below)
 
 It also speaks JSON-RPC over a local TCP port — that's how `pulp inspect`
@@ -144,21 +146,19 @@ for (int s = 0; s < numSamples; ++s) {
     out[s] = in[s] * *params.getRawParameterValue("gain");
 }
 
-// Pulp — block-local snapshot, manual today:
-const float gain = state_store().get_value(kGainId);
+// Pulp — block-local snapshot:
+const float gain = state().get_value(kGainId);
 for (int s = 0; s < n; ++s) {
     out[s] = in[s] * gain;
 }
 ```
 
 Call `get_value()` once per parameter at the top of `process()` and
-read from the local inside the per-sample loop. A
-`StateStore::snapshot(std::array<ParamID, N>)` helper that returns
-all N values at once is the right ergonomic; it lands with the
-follow-up "snapshot helper" slice and this guide will get a one-line
-update when it's in main. See [DSP threading](dsp-threading.md) for
-the full contract. Pulp's `ScopedNoAlloc` debug guard wraps
-`Processor::process` so allocation-on-RT is catchable by hooks.
+read from the local inside the per-sample loop. For several parameters,
+use `state().snapshot(ids)` and keep reading from the returned local
+array. See [DSP threading](dsp-threading.md) for the full contract.
+Pulp's `ScopedNoAlloc` debug guard marks `Processor::process` so
+allocation-on-RT is catchable by debug allocator hooks.
 
 ## macOS AU cache refresh
 
@@ -169,10 +169,12 @@ stale `Info.plist`, you reach for:
 killall -9 AudioComponentRegistrar
 ```
 
-Same trick on Pulp today. A `pulp doctor --au-cache` subcommand
-that runs the killall for you ships in a follow-up slice (planning
-doc Tier A #11); in the meantime, the manual command is still the
-one you want.
+Pulp wraps the same fix:
+
+```
+pulp doctor --au-cache
+pulp doctor --au-cache --dry-run
+```
 
 ## Windows: static MSVC runtime by default
 
@@ -187,23 +189,18 @@ redist installed.
 If you want the dynamic runtime back, override with
 `-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` at configure time.
 
-## What you'll miss from JUCE (briefly)
+## Different defaults from JUCE
 
-* **LookAndFeel.** Pulp doesn't have a LookAndFeel god-object. The
-  visual layer is JS + Skia; restyle by editing the JS bundle (or
-  by using `pulp design` to drive Stitch / Figma / Pencil / v0
-  imports). Most JUCE LookAndFeel patterns map to a CSS theme.
-* **`AudioProcessor::wrapperType_*` constants.** Pulp doesn't expose
-  the host type to the plugin code; the same `Processor` runs in
-  VST3 / AU / CLAP / LV2 / Standalone without the conditional
-  hacks. If you need to detect the host for a quirk, use
-  `descriptor()` fields.
-* **DBG-allocates trick.** Pulp doesn't have a `DBG(...)` macro. Use
-  `pulp::runtime::log_info` / `log_warn` / `log_error` — its
-  formatter doesn't allocate on the audio thread. A name-printing
-  `PULP_DBG_VAR(x, y, z)` macro (sudara tips #26) lands in a
-  follow-up slice (planning doc Tier A #8); this guide will pick it
-  up once it's in main.
+* **Styling.** Pulp's visual layer is JS + Skia. Restyle by editing
+  the JS bundle or by using `pulp design` to drive Stitch / Figma /
+  Pencil / v0 imports. Most JUCE LookAndFeel patterns map to a CSS
+  theme.
+* **Host-specific wrapper checks.** The same `Processor` runs in
+  VST3 / AU / CLAP / LV2 / Standalone. Prefer descriptor fields and
+  framework host-quirk handling over plugin-side `wrapperType_*`
+  conditionals.
+* **Debug logging.** Use `pulp::runtime::log_info` / `log_warn` /
+  `log_error`; the formatter is designed for audio-thread-safe logging.
 
 ## Already ahead of JUCE (you don't have to add these)
 
@@ -220,7 +217,5 @@ If you want the dynamic runtime back, override with
 ## See also
 
 * [DSP threading](dsp-threading.md) — the audio-thread contract.
-* [planning/2026-05-18-rt-safety-and-debug-dx.md](../../planning/2026-05-18-rt-safety-and-debug-dx.md)
-  — the design notes behind every difference above.
 * sudara, *"Big List of JUCE Tips and Tricks"* —
   https://melatonin.dev/blog/the-big-list-of-juce-tips-and-tricks/

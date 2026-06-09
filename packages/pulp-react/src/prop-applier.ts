@@ -231,6 +231,27 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     if (applyTransformProp(id, key, value)) return;
     if (applyEventProp(id, key, value)) return;
 
+    // pulp parity-found (framework-importer #18) — `<img src="…">` /
+    // `<Image src="…">` must forward to the ImageView bridge via
+    // setImageSource, mirroring the non-React web-compat path
+    // (core/view/js/web-compat-element.js, pulp #1658). Before this the
+    // prop-applier created the Image widget (host-config createImage) but
+    // never dispatched `src`, so the emitted bundle had zero
+    // setImageSource calls and every <img> rendered as the empty "IMG"
+    // placeholder. Gate on the Image element types — host-config maps BOTH the
+    // lowercase `'img'` intrinsic (what design-import / the framework importer
+    // emit) AND the `'Image'` component to createImage, so accept both; a stray
+    // `src` on any other widget can't hit the ImageView-only setter. (The #18
+    // parity capture caught that gating on `'Image'` alone silently dropped
+    // every `<img>` — the runtime type is `'img'`.) The path is forwarded
+    // verbatim (already absolute on the design-import / importer path); C++
+    // setImageSource → ImageView::set_image_path resolves the rest, exactly as
+    // the web-compat path does — no JS-side resolution.
+    if ((type === 'img' || type === 'Image') && key === 'src') {
+        call('setImageSource', id, String(value));
+        return;
+    }
+
     // Type-dispatched widget / SVG props — these route on the widget
     // `type`, not purely on the prop key, so they stay in the
     // dispatcher rather than a key-keyed domain module.
@@ -282,6 +303,8 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             return;
         }
         case 'fill':         return call('setSvgFill', id, value as string);
+        case 'fillRule':     return call('setSvgFillRule', id, value as string);
+        case 'fillGradient': return call('setSvgFillGradient', id, value as string);
         case 'stroke':       return call('setSvgStroke', id, value as string);
         case 'strokeWidth':  return call('setSvgStrokeWidth', id, value as number);
 
@@ -507,6 +530,19 @@ export function applyChangedProps(
             if (key === 'textColor') {
                 // Empty string is the bridge-side "use default" sentinel.
                 call('setTextColor', id, '');
+                mutated = true;
+            }
+            // pulp parity-found (#18) — `<Image>` whose `src` is removed
+            // clears the ImageView back to the empty placeholder, matching
+            // the web-compat removeAttribute('src') reset semantics. Empty
+            // string is the bridge-side "no source" sentinel.
+            // `type` is typed as keyof IntrinsicElementMap (which lists 'Image'
+            // but not the lowercase 'img' intrinsic — host-config routes 'img'
+            // through its string-fallback switch). Cast for the 'img' compare so
+            // the clear-on-removal seam matches the same element types as the
+            // set seam above.
+            if (key === 'src' && ((type as string) === 'img' || type === 'Image')) {
+                call('setImageSource', id, '');
                 mutated = true;
             }
             // Other setters: no-op — let the next mount cycle handle it

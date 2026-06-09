@@ -30,6 +30,7 @@ struct RegistrationSite {
     std::string kind;
     std::string source;
     int line = 0;
+    bool registry_backed = false;
 };
 
 bool starts_with(std::string_view text, std::string_view prefix) {
@@ -181,15 +182,29 @@ int line_number_at(std::string_view text, size_t offset) {
 std::vector<RegistrationSite> widget_bridge_registrations(const std::string& source,
                                                           const std::string& source_path) {
     std::vector<RegistrationSite> out;
-    const std::regex pattern(
+    const std::regex direct_pattern(
         "engine_\\s*\\.\\s*register_(function|host_object|promise_function)\\s*\\(\\s*\"([^\"]+)\"");
 
-    for (std::sregex_iterator it(source.begin(), source.end(), pattern), end; it != end; ++it) {
+    for (std::sregex_iterator it(source.begin(), source.end(), direct_pattern), end; it != end; ++it) {
         out.push_back({
             (*it)[2].str(),
             (*it)[1].str(),
             source_path,
             line_number_at(source, static_cast<size_t>((*it).position())),
+            false,
+        });
+    }
+
+    const std::regex registry_pattern(
+        "register_bridge_(function|host_object|promise_function)\\s*\\(\\s*[^,]+,\\s*\"([^\"]+)\"");
+
+    for (std::sregex_iterator it(source.begin(), source.end(), registry_pattern), end; it != end; ++it) {
+        out.push_back({
+            (*it)[2].str(),
+            (*it)[1].str(),
+            source_path,
+            line_number_at(source, static_cast<size_t>((*it).position())),
+            true,
         });
     }
     return out;
@@ -219,6 +234,11 @@ TEST_CASE("WidgetBridge JS native API manifest matches registrar sources",
 
     INFO("WidgetBridge native JS registrations found: " << registrations.size());
     REQUIRE_FALSE(registrations.empty());
+    const auto registry_backed_count = std::count_if(
+        registrations.begin(), registrations.end(),
+        [](const RegistrationSite& site) { return site.registry_backed; });
+    INFO("WidgetBridge registry-backed native JS registrations found: " << registry_backed_count);
+    REQUIRE(registry_backed_count > 0);
 
     std::map<std::string, std::vector<RegistrationSite>> registrations_by_name;
     for (const auto& site : registrations)

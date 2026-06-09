@@ -25,28 +25,26 @@ default.
 `pulp::runtime::ScopedNoAlloc` (debug builds) tracks rule #1 — Pulp
 wraps `View::paint_all` and every adapter's call to
 `Processor::process()` in one, so opt-in debug-allocator hooks can
-shout when rule #1 is violated. Future tooling can read
-`pulp::runtime::is_in_no_alloc_scope()` to flag a violation.
+shout when rule #1 is violated. Tooling can read
+`pulp::runtime::is_in_no_alloc_scope()` to detect the protected region.
 
 ## Read parameters once per block, not per sample
 
-`store.get_value(id)` is a `std::atomic<float>::load(relaxed)` —
-about 1 ns on Apple silicon and similar on x86. Cheap, but not free:
-every load is a memory fence that the CPU has to round-trip
-through the cache hierarchy, and the compiler can't hoist it out of
-your inner loop.
+`store.get_value(id)` is a `std::atomic<float>::load(relaxed)`. Cheap,
+but not free: repeated atomic loads add inner-loop work and prevent the
+compiler from treating the value as an ordinary loop-local scalar.
 
 The right pattern is to **snapshot** the parameters you need at the
 top of `process()`, then read from the snapshot inside the per-sample
 loop:
 
 ```cpp
-// ❌ Don't: re-read atomic per sample. Each call is a fence.
+// Don't: re-read the atomic value per sample.
 for (int s = 0; s < n; ++s) {
     out[s] = in[s] * store.get_value(kGainId);
 }
 
-// ✅ Do: snapshot once, read locals.
+// Do: snapshot once, read locals.
 const float gain = store.get_value(kGainId);
 for (int s = 0; s < n; ++s) {
     out[s] = in[s] * gain;
@@ -66,13 +64,13 @@ void MyPlugin::process(audio::BufferView<float>& out,
                        const audio::BufferView<const float>& in,
                        midi::MidiBuffer&, midi::MidiBuffer&,
                        const ProcessContext&) {
-    const auto p = state_store().snapshot(kIds);
+    const auto p = state().snapshot(kIds);
     const float gain   = p[0];
     const float mix    = p[1];
     const float cutoff = p[2];
 
-    for (int ch = 0; ch < out.num_channels; ++ch) {
-        for (int s = 0; s < out.num_frames; ++s) {
+    for (std::size_t ch = 0; ch < out.num_channels(); ++ch) {
+        for (std::size_t s = 0; s < out.num_samples(); ++s) {
             // ... per-sample DSP using locals ...
         }
     }
@@ -85,12 +83,10 @@ For modulated reads (the CLAP per-voice modulation path), use
 
 ## How parameter changes reach the UI
 
-Format adapters now write host-driven parameter changes via
-`store.set_value_rt()` (CLAP / VST3 / AU / LV2 — see
-[planning/2026-05-18-rt-safety-and-debug-dx.md](../../planning/2026-05-18-rt-safety-and-debug-dx.md)
-Slice 2). The RT path is wait-free + alloc-free: it stores the
-atomic, then pushes a small `(id, value)` event on a bounded SPSC
-queue.
+Format adapters write host-driven parameter changes via
+`store.set_value_rt()` (CLAP / VST3 / AU / LV2). The RT path is
+wait-free + alloc-free: it stores the atomic, then pushes a small
+`(id, value)` event on a bounded SPSC queue.
 
 The UI thread drains the queue by calling `store.pump_listeners()`
 each frame; that's where `ListenerThread::Main` listeners actually
@@ -107,10 +103,16 @@ StateStore in a non-Pulp host.
 ## Block-level vs sample-level changes
 
 If you want the parameter change to take effect *within* a block
-(smooth ramps, automation), snapshot once at the top of the block
-and interpolate. Pulp doesn't ship a smoother — most DSP that needs
-one rolls a tiny `LinearSmoother { current, target, step }`
-manually. Future helper TBD.
+(automation splits, smooth ramps), use the parameter-event helpers
+instead of polling atomics inside the loop:
+
+* `param_events()` exposes the host-delivered `ParameterEventQueue`
+  for the current block.
+* `format::ParamCursor` advances parameter values at sample offsets.
+* `format::for_each_subblock()` slices the audio block at parameter
+  event boundaries so your DSP can render each stable span.
+* `format::ControlRateParamSmoother` follows the parameter's configured
+  `smoothing_ramp_seconds` for control-rate smoothing.
 
 ## Block-scoped runtime contracts
 

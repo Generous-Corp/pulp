@@ -376,6 +376,50 @@ target_compile_definitions(pulp-test-cli-import PRIVATE
 catch_discover_tests(pulp-test-cli-import
     PROPERTIES LABELS "parser-import")
 
+# CLI import EMIT materialisation — manifest parse, write-plan, the clean-room
+# output denylist scan (all pure), plus an end-to-end shell-out through a mock
+# emit responder. Links the pure import-emit logic directly.
+add_executable(pulp-test-cli-import-emit
+    test_cli_import_emit.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_emit.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_emit_scan.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_detect.cpp
+)
+target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-import-emit PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-emit pulp-cli)
+    target_compile_definitions(pulp-test-cli-import-emit PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+target_compile_definitions(pulp-test-cli-import-emit PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-import-emit
+    PROPERTIES LABELS "parser-import")
+
+# CLI import IMPORTER_TERMS accept-gate + provenance PR-check. Links the pure
+# acceptance-store logic directly, shells out to the built CLI for the
+# accept-to-run gate behaviour, and shells out to the Python provenance audit.
+add_executable(pulp-test-cli-import-terms
+    test_cli_import_terms.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_terms.cpp
+)
+target_include_directories(pulp-test-cli-import-terms PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-import-terms PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-terms pulp-cli)
+    target_compile_definitions(pulp-test-cli-import-terms PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+target_compile_definitions(pulp-test-cli-import-terms PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-import-terms
+    PROPERTIES LABELS "parser-import")
+
 # pulp #914 — `pulp run` flag parser unit tests. Pure parser, no I/O,
 # no project resolution. The shell-out CLI behaviour for the same
 # flags lives in test_cli_shellout.cpp.
@@ -713,6 +757,10 @@ add_executable(pulp-test-cli-package-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_search.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_add.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    # cmd_add routes `pulp add <importer>` through the importer install path.
+    ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
 )
 target_include_directories(pulp-test-cli-package-commands PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -768,6 +816,8 @@ catch_discover_tests(pulp-test-cli-import-detect
 add_executable(pulp-test-cli-tool-registry
     test_cli_tool_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
 )
 target_include_directories(pulp-test-cli-tool-registry PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -776,6 +826,23 @@ target_link_libraries(pulp-test-cli-tool-registry PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-tool-registry)
+
+# Importer install mechanism (#19): version-window enforcement, sha256
+# verification, skill install/uninstall, install records, and the `pulp tool
+# install` / `pulp add` alias dispatch. Mock-local-package driven — no network.
+add_executable(pulp-test-cli-importer-install
+    test_cli_importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
+)
+target_include_directories(pulp-test-cli-importer-install PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-importer-install PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-importer-install)
 
 # CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
@@ -1358,19 +1425,19 @@ pulp_add_test_suite(pulp-test-midi-buffer-sysex LIBRARIES pulp::midi)
 # realtime-inside-sysex passthrough (#239), runaway cap, and multi-read
 # accumulator state.
 pulp_add_test_suite(pulp-test-raw-midi-parser LIBRARIES pulp::midi)
-# Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial).
-# Cross-platform — compiles everywhere; Windows-specific cases are
-# guarded behind #ifdef _WIN32.
+# Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial; cross-platform, Win cases #ifdef _WIN32).
 pulp_add_test_suite(pulp-test-winmidi-sysex LIBRARIES pulp::midi)
+# WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).
+pulp_add_test_suite(pulp-test-winrt-midi LIBRARIES pulp::midi)
 # Accessibility provider cross-platform entry (workstream 04 slices 4.1 + 4.2)
 pulp_add_test_suite(pulp-test-accessibility-provider LIBRARIES pulp::view)
 # PluginDescriptor validation (workstream 01 slice 1.9)
 pulp_add_test_suite(pulp-test-descriptor-validation LIBRARIES pulp::format)
 # PluginInfo metadata shape (workstream 03 slice 3.7)
 pulp_add_test_suite(pulp-test-plugin-info-metadata LIBRARIES pulp::host)
-# UIA mapping (workstream 04 slice 4.1a)
+# A11y role mapping tables — UIA (slice 4.1a) + AT-SPI (slice L7a-2)
 pulp_add_test_suite(pulp-test-uia-mapping LIBRARIES pulp::view)
-
+pulp_add_test_suite(pulp-test-atspi-mapping LIBRARIES pulp::view)
 # AudioSystem hotplug base plumbing (workstream 02 slice 2.7)
 pulp_add_test_suite(pulp-test-audio-system-hotplug LIBRARIES pulp::audio)
 
@@ -4021,25 +4088,32 @@ if(APPLE OR PULP_HAS_SKIA)
 endif()
 
 # #3329 — native PluginViewHost factory + headless-capture proof on non-Apple.
-# Built only where core/view actually compiled a platform host: Windows with
-# Skia, or non-Android UNIX with Skia + X11. Mirrors the core/view/CMakeLists
-# conditions. The host degrades to capture-only when no display server is
-# present (headless CI VM), and capture_back_buffer_png() still yields a frame.
+# Built where core/view compiled a platform host: Windows+Skia or non-Android
+# UNIX+Skia+X11. Degrades to capture-only with no display server (headless VM);
+# capture_back_buffer_png() still yields a frame. On Linux+X11 the same binary
+# also runs the XDND synthetic-source handshake under xvfb (#3645): it links
+# Xlib directly to act as an XDND source against the host's child window, gated
+# by PULP_TEST_HAS_X11 so the handshake TEST_CASE is compiled only there.
 if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
     set(_pulp_has_platform_pvh OFF)
+    set(_pulp_pvh_x11 OFF)
     if(WIN32)
         set(_pulp_has_platform_pvh ON)
     elseif(UNIX)
         find_package(X11 QUIET)
         if(X11_FOUND)
             set(_pulp_has_platform_pvh ON)
+            set(_pulp_pvh_x11 ON)
         endif()
     endif()
     if(_pulp_has_platform_pvh)
-        add_executable(pulp-test-plugin-view-host-factory
-            test_plugin_view_host_factory.cpp)
-        target_link_libraries(pulp-test-plugin-view-host-factory
-            PRIVATE pulp::view Catch2::Catch2WithMain)
+        add_executable(pulp-test-plugin-view-host-factory test_plugin_view_host_factory.cpp)
+        target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE pulp::view Catch2::Catch2WithMain)
+        if(_pulp_pvh_x11)
+            target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE ${X11_LIBRARIES})
+            target_include_directories(pulp-test-plugin-view-host-factory PRIVATE ${X11_INCLUDE_DIR})
+            target_compile_definitions(pulp-test-plugin-view-host-factory PRIVATE PULP_TEST_HAS_X11=1)
+        endif()
         catch_discover_tests(pulp-test-plugin-view-host-factory)
     endif()
 endif()
@@ -4068,11 +4142,7 @@ if(APPLE)
     # verify CGContextClearRect actually clears destination pixels.
     # pulp #1524 adds ImageIO for CGImageDestinationCreateWithURL (PNG
     # encode of a pattern fixture) and CoreServices for the public.png UTI.
-    target_link_libraries(pulp-test-canvas PRIVATE
-        "-framework CoreGraphics"
-        "-framework ImageIO"
-        "-framework CoreServices"
-    )
+    target_link_libraries(pulp-test-canvas PRIVATE "-framework CoreGraphics" "-framework ImageIO" "-framework CoreServices")
 endif()
 # pulp #1150 — public font-registration API tests use a bundled .ttf as a
 # fixture. external/fonts/Inter-Regular.ttf is the canonical "always
@@ -4093,11 +4163,7 @@ catch_discover_tests(pulp-test-canvas)
 add_executable(pulp-test-canvas-cg-paths test_canvas_cg_paths.cpp)
 target_link_libraries(pulp-test-canvas-cg-paths PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(APPLE)
-    target_link_libraries(pulp-test-canvas-cg-paths PRIVATE
-        "-framework CoreGraphics"
-        "-framework ImageIO"
-        "-framework CoreServices"
-    )
+    target_link_libraries(pulp-test-canvas-cg-paths PRIVATE "-framework CoreGraphics" "-framework ImageIO" "-framework CoreServices")
 endif()
 catch_discover_tests(pulp-test-canvas-cg-paths)
 
@@ -4859,9 +4925,9 @@ pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
 # GraphEditorView tests
 pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view)
 
-# Modal overlay tests
+# Modal overlay + ContextMenu (view-drawn popup menu) tests
 pulp_add_test_suite(pulp-test-modal LIBRARIES pulp::view)
-
+pulp_add_test_suite(pulp-test-context-menu LIBRARIES pulp::view)
 # Design export tests
 add_executable(pulp-test-design-export test_design_export.cpp)
 target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)

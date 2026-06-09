@@ -155,13 +155,26 @@ debug comparisons.
 
 ### `pulp import` — framework-importer substrate
 
-`pulp import` (`tools/cli/cmd_import.cpp` + `import_detect.{hpp,cpp}` +
-`import_spi.{hpp,cpp}`) reads an existing audio-plugin project read-only and
-emits a Pulp migration scaffold. The SDK owns only the *generalized*
-substrate; the framework-specific parsers are **vendor-specific add-on
-tools** in their own private repos, driven over a JSON-over-stdio SPI.
+`pulp import` (`tools/cli/cmd_import.cpp` + `import_run.{hpp,cpp}` +
+`import_detect.{hpp,cpp}` + `import_spi.{hpp,cpp}` + `import_emit.{hpp,cpp}` +
+`import_emit_scan.{hpp,cpp}`) reads an existing audio-plugin project read-only
+and emits a Pulp migration scaffold. The SDK owns only the *generalized*
+substrate; the framework-specific parsers are **vendor-specific add-on tools**
+in their own private repos, driven over a JSON-over-stdio SPI.
 
 Gotchas / invariants when touching this surface:
+
+- **`cmd_import.cpp` is arg-parse + dispatch only.** The SPI-verb orchestration
+  (`run_detect` / `run_inspect` / `run_emit` and their shared helpers —
+  framework-index + importer resolution, the SPI request/response envelope
+  `run_verb`, the analyze/emit payload builders, the clean-room output gate,
+  and scaffold materialisation) lives in `import_run.{hpp,cpp}` under namespace
+  `pulp::cli::import_run`. `cmd_import.cpp` only parses flags into
+  `import_run::ImportOptions` and calls the three `run_*` entry points. Keep new
+  verb logic in `import_run.cpp`; keep `cmd_import.cpp` small. Both files (and
+  any new `tools/cli/*import*` file) must stay vendor-free — the
+  `pulp-test-cli-import` directory scan asserts no `juce`/`iplug`/`steinberg`/
+  `wdl` token appears in any of them.
 
 - **Vendor-agnostic is enforced.** SDK code, mainline tests, and generic CI
   name NO vendor or framework. The ONLY place real markers (`.jucer`,
@@ -191,10 +204,110 @@ Gotchas / invariants when touching this surface:
   `spi_min`/`spi_max`, `sdk_min`/`sdk_max`, `capabilities`, `health_check`
   are parsed only when present. Don't add a fake vendor entry to
   `tool-registry.json`; the loader tolerates their absence.
-- **`emit` is stubbed this slice.** `detect`/`inspect` are fully real;
-  `emit` runs `analyze` to a ProjectIR and prints a "next slice" notice for
-  the plan + file-materialisation step. When you implement emit, the SDK
-  writes the files (provenance-tagged) — the importer only proposes the plan.
+- **`emit` materialises a real scaffold; the SDK writes + gates the output.**
+  `detect`/`inspect`/`emit` are all real. `emit` runs `analyze` → ProjectIR
+  then the SPI `emit` verb → an **EmissionManifest** (the importer PROPOSES
+  files, never writes them). The SDK then: parses the manifest
+  (`import_emit::parse_manifest`), runs the clean-room **output denylist scan**
+  (`import_emit_scan::scan_manifest`) over every `generated`/`stub` file,
+  computes a write-plan that rejects any path escaping `--output`
+  (`compute_write_plan`), writes each file (inline `content`, or a verbatim
+  `copy_from` copy for `copied-user-file` provenance), and writes
+  `migration_status.json` + `.pulp-import-provenance.json`. Parse / write-plan /
+  scan are **pure functions over structs** so they unit-test without spawning;
+  the spawn/IO is a thin shell in `cmd_import.cpp`.
+- **The output scan is data-driven, not hardcoded.** Keep the clean-room
+  denylist vendor-free: `denylist_from_known_frameworks()` builds it from the
+  known-frameworks index's `content_match` markers (the ONE place real tells
+  live). Do NOT hardcode `juce`/`iplug`/… tokens in `import_emit_scan.cpp` — the
+  vendor guard greps for them. `copied-user-file` provenance is EXEMPT from the
+  scan (it's the user's own DSP); only `generated`/`stub` content is scanned.
+  Watch comment wording too: a literal `.jucer` in a comment trips the `juce`
+  substring guard.
+- **The importer may double-wrap the IR.** When `emit` hands the analyze result
+  back as `project_ir`, an importer that frames analyze as `{"project_ir": IR}`
+  must unwrap its own envelope (the SDK passes the analyze `result` verbatim).
+  If a scaffold comes out with empty formats / pass-through-only DSP, suspect a
+  double-wrapped IR on the importer side, not the SDK.
+- **`inspect`/`emit` are gated by the IMPORTER_TERMS accept-to-run gate**
+  (`import_terms.{hpp,cpp}`, `run_gate`). The terms BODY is vendor DATA carried
+  on the add-on's `ToolDescriptor` (`terms_text`/`terms_version`/`vendor_id`) —
+  the SDK ships no terms body and names no vendor, it only surfaces + hashes the
+  text and records acceptance under `~/.pulp/importer-terms-accepted.json`
+  (honours `$PULP_HOME`), keyed by importer id + an FNV hash of the terms.
+  A changed body → new hash → re-prompt. `--accept-importer-terms` is the
+  non-interactive (CI) path; without a TTY and without the flag the gate returns
+  `NonInteractive` and BLOCKS (exit 1) rather than hanging. Mirrors
+  `pulp add --accept-license` in UX + storage shape. `--importer-cmd` has no
+  registry entry, so `--importer-terms-text`/`--importer-terms-version` supply
+  the body directly (tests + power users). `has_terms()==false` (no body) →
+  the gate passes through transparently. `run_gate` takes injected `GateIo`
+  (in/out/interactive) + a `now_utc` string so it unit-tests deterministically
+  without a real TTY or clock.
+- **Provenance PR-check is `tools/scripts/check_import_provenance.py`** (neutral,
+  vendor-free), the audit that a migrated project landing in a PR was produced
+  clean-room: marker present + well-formed, valid per-file `provenance` values,
+  and no framework-source marker in any file the marker labels `generated`/`stub`
+  (`copied-user-file` is exempt). The content denylist is DATA from the
+  known-frameworks index (`$PULP_KNOWN_FRAMEWORKS` or `tools/import/`); with no
+  index the structural checks still run and the scan reports as skipped. Wired
+  into `gates.sh` as an **opt-in** lane (`PULP_IMPORT_PROVENANCE_DIRS`) so it's a
+  no-op for normal Pulp-repo pushes and only fires on a PR that lands a scaffold.
+
+### `pulp tool install <importer>` — importer add-on packaging
+
+The install-side contract for framework-importer add-ons lives in
+`tools/cli/importer_install.{cpp}` (declarations in `tool_registry.hpp`).
+`pulp tool install <importer>` and the `pulp add <importer>` alias both route
+through it. User-facing contract: `docs/reference/framework-importer-packaging.md`.
+
+Gotchas / invariants when touching this surface:
+
+- **An importer is a tool-registry entry with `category: "importer"`.** The
+  generic binary/python install path is untouched: `cmd_tool`'s `install`/
+  `uninstall` first call `handle_importer_install` / `handle_importer_uninstall`,
+  which return `std::nullopt` for non-importers so the generic path still runs.
+  `try_add_importer_alias` is the `pulp add` entry — it only fires when the id
+  resolves to an importer in `tools/packages/tool-registry.json`.
+- **Three install gates, in order, and they fail/refuse — never warn-and-proceed:**
+  (1) version window — `check_importer_compat` requires the running SDK in
+  `[sdk_min, sdk_max]` AND the importer's `[spi_min, spi_max]` to overlap the
+  SDK's import-SPI window; (2) sha256 — the fetched/`--from` archive must match
+  the registry `sha256`; (3) skill + record. Keep the messages actionable
+  (`upgrade Pulp` vs `upgrade the importer`, `refusing to install`).
+- **SHA-256 is hand-rolled in `importer_install.cpp`, on purpose.** It avoids
+  linking mbedTLS into the lightweight `pulp-test-cli-*` targets (which only link
+  `pulp::platform`). It's validated against FIPS-180-4 known vectors in
+  `test_cli_importer_install.cpp` — if you touch the digest, those vectors are
+  the guard. Do NOT swap it for `pulp::runtime::sha256_hex` without also adding
+  the runtime link to every test target that compiles `importer_install.cpp`.
+- **The SDK version reaches the dispatch via env-var-then-header.** `host_sdk_version()`
+  reads `PULP_SDK_VERSION` (tests set it to drive the window check) and falls
+  back to `PULP_SDK_VERSION_GENERATED` from `<pulp_version_gen.h>`, included via
+  `#if __has_include` so unit-test targets (no generated header) still compile.
+  The pure functions (`install_importer`, `check_importer_compat`) take the SDK
+  version + SPI bounds as PARAMETERS — keep them parameterized so they stay
+  testable without globals.
+- **Skills install to `~/.agents/skills/<skill_name>/` honoring `$PULP_HOME`.**
+  `skills_dir()` maps `$PULP_HOME` → `$PULP_HOME/agents/skills` (tests rely on
+  this); without it, the real `~/.agents/skills`. Records go under
+  `pulp_home()/importers/<id>.json`. Uninstall recovers the skill dir name from
+  the record's `skill_path` so it removes the right directory even if the
+  registry entry changed.
+- **`--from <path|file://>` is importer-only.** Both `pulp tool install` and
+  `pulp add` reject `--from` for non-importers. It's the offline/test source —
+  the checksum + version gates still apply, so a mock local package with a known
+  sha is the unit-test vehicle (build one with `tar -czf`, hash it with
+  `sha256_file_hex`, feed it back into the descriptor).
+- **Producer side is NOT decided in code.** Artifact build/hosting/pinning, the
+  bundled-libclang choice, and signing/notarization are maintainer decisions
+  documented (as open questions) in `docs/reference/framework-importer-packaging.md`.
+  The CLI consumes the contract; don't bake a hosting URL, an LLVM pin, or a
+  signing identity into the SDK.
+- **Two test targets compile `tool_registry.cpp`.** `tool_registry.cpp` now
+  references `importer_install.cpp` + `import_spi.cpp` symbols, so BOTH
+  `pulp-test-cli-tool-registry` and `pulp-test-cli-importer-install` link all
+  three TUs. Adding a symbol used by `cmd_tool` means updating both targets.
 
 ### Binary subcommand delegation
 

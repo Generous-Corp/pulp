@@ -11,8 +11,18 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 10509,
-      "note": "WidgetBridge native JS API registration hotspot"
+      "max_loc": 1202,
+      "note": "WidgetBridge shell after registrar split; keep native JS API registration out"
+    },
+    {
+      "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
+      "max_loc": 1318,
+      "note": "WidgetBridge Canvas2D registrar split hotspot"
+    },
+    {
+      "path": "core/view/src/widget_bridge/gpu_api.cpp",
+      "max_loc": 2283,
+      "note": "WidgetBridge GPU registrar split hotspot"
     },
     {
       "path": "tools/local-ci/local_ci.py",
@@ -21,7 +31,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 5975,
+      "max_loc": 6039,
       "note": "shared test registration hotspot"
     },
     {

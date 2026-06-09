@@ -207,20 +207,20 @@ Generate a Sparkle-compatible appcast:
 
 ```cpp
 #include <pulp/ship/appcast.hpp>
+#include <stdexcept>
 
 pulp::ship::AppcastItem item;
 item.version      = "1.0.1";
 item.download_url = "https://example.com/MyPlugin-1.0.1.dmg";
 item.description  = "Bug fixes and performance improvements.";
 
-// Ed25519 signing: API present but implementation is planned (#295).
-// sign_file_ed25519 returns std::nullopt today, and the CLI refuses
-// to emit `edSignature=""` into an appcast rather than produce a
-// silently-unsigned feed. Until the real impl lands, leave
-// item.ed_signature unset (unsigned appcast) or sign out-of-band.
-if (auto sig = pulp::ship::sign_file_ed25519(local_file_path, private_key_b64)) {
-    item.ed_signature = *sig;
+// Ed25519 signing accepts a Sparkle-style base64 private key: either
+// a 32-byte seed or a 64-byte secret key.
+auto sig = pulp::ship::sign_file_ed25519(local_file_path, private_key_b64);
+if (!sig) {
+    throw std::runtime_error("Ed25519 signing failed");
 }
+item.ed_signature = *sig;
 
 pulp::ship::Appcast feed;
 feed.items.push_back(item);
@@ -235,7 +235,7 @@ The `sign-and-release.yml` workflow runs on version tags (`v*`):
 2. Signs with Developer ID from GitHub Secrets
 3. Notarizes via `notarytool`
 4. Creates PKG installers
-5. Generates appcast.xml (Ed25519 signatures planned — #295)
+5. Generates appcast.xml, including Ed25519 signatures when a signing key is provided
 6. Creates GitHub Release with artifacts
 
 ## Plugin Install Locations (macOS)

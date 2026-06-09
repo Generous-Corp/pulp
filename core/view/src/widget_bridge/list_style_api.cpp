@@ -1,12 +1,15 @@
 // widget_bridge/list_style_api.cpp - list-style CSS registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 
 namespace pulp::view {
 
 void WidgetBridge::register_list_style_api() {
+    BridgeApiContext api{engine_};
+
     // pulp #1514 - list-style cluster (listStyle / listStyleType /
     // listStyleImage / listStylePosition). Pulp doesn't model
     // <li>/<ul>/<ol> semantics, so the bridge stores the values
@@ -24,7 +27,7 @@ void WidgetBridge::register_list_style_api() {
     // on the View::ListStyleType enum today; paint-side glyph rendering
     // is the follow-up (pulp #1514). Unknown keywords fall back to `disc`
     // to match the longstanding default.
-    engine_.register_function("setListStyleType", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListStyleType", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "disc");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -49,7 +52,7 @@ void WidgetBridge::register_list_style_api() {
 
     // setListStyleImage(id, "url(...)" or "none"). Stored verbatim;
     // bullet-image rendering is deferred (same caveat as backgroundImage).
-    engine_.register_function("setListStyleImage", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListStyleImage", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto url = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -60,7 +63,7 @@ void WidgetBridge::register_list_style_api() {
     });
 
     // setListStylePosition(id, "outside"|"inside").
-    engine_.register_function("setListStylePosition", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListStylePosition", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "outside");
         auto* v = id.empty() ? &root_ : widget(id);

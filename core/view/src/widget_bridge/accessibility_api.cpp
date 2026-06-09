@@ -1,6 +1,7 @@
 // widget_bridge/accessibility_api.cpp - accessibility registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 #include <utility>
@@ -8,6 +9,8 @@
 namespace pulp::view {
 
 void WidgetBridge::register_accessibility_api() {
+    BridgeApiContext api{engine_};
+
     // setAccessibilityLabel / setAccessibilityRole are the bridge-side
     // entry points the html-compat layer calls when JS does
     //   el.setAttribute('aria-label', '...')
@@ -30,8 +33,8 @@ void WidgetBridge::register_accessibility_api() {
     // unknown blob, and the JS-author intent ("yes, this is exposed to
     // assistive tech") is preserved. Unknown / empty role clears the
     // role back to AccessRole::none.
-    engine_.register_function("setAccessibilityLabel",
-                              [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAccessibilityLabel",
+                             [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto label = args.get<std::string>(1, "");
         auto it = widgets_.find(id);
@@ -39,8 +42,8 @@ void WidgetBridge::register_accessibility_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setAccessibilityRole",
-                              [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAccessibilityRole",
+                             [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto role = args.get<std::string>(1, "");
         auto it = widgets_.find(id);
@@ -81,8 +84,8 @@ void WidgetBridge::register_accessibility_api() {
     // hands us so platform AT bridges (NSAccessibility today; AT-SPI /
     // UIA when those land per pulp #217) can read it back verbatim.
     // Single bridge fn rather than four; `attr` selects the slot.
-    engine_.register_function("setAccessibilityState",
-                              [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAccessibilityState",
+                             [this](choc::javascript::ArgumentList args) {
         auto id    = args.get<std::string>(0, "");
         auto attr  = args.get<std::string>(1, "");
         auto value = args.get<std::string>(2, "");

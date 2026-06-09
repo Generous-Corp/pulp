@@ -33,9 +33,8 @@ find_dependency(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     # core/canvas: fontconfig — m144 Skia uses it for font enumeration.
     pkg_check_modules(FONTCONFIG QUIET IMPORTED_TARGET fontconfig)
-    # core/view accessibility_linux.cpp — AtkRole + AtkObject bridge.
-    pkg_check_modules(PULP_ATK QUIET IMPORTED_TARGET atk)
-    pkg_check_modules(ATK_BRIDGE QUIET IMPORTED_TARGET atk-bridge-2.0)
+    # core/view accessibility: Linux AT-SPI speaks the wire protocol directly
+    # over libdbus-1 (dlopen'd) — no atk / atk-bridge-2.0 pkg-config probe.
     # core/view WebView (PULP_BUILD_WEBVIEW=ON) — only relevant when
     # the SDK was built with WebView. Probe with QUIET; if the
     # consumer doesn't have the libs, find_package degrades the

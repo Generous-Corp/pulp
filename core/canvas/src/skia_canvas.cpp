@@ -43,7 +43,6 @@
 #endif  // PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
-#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
@@ -67,29 +66,10 @@
 #include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
 #include "webgpu/webgpu_cpp.h"
 
-// Platform font manager
-#ifdef __APPLE__
-#include "include/ports/SkFontMgr_mac_ct.h"
-#elif defined(_WIN32)
-#include "include/ports/SkTypeface_win.h"
-#elif defined(__ANDROID__)
-// Android: use the built-in Android font manager with FreeType scanner
-#include "include/ports/SkFontMgr_android.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#elif defined(__linux__)
-#include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#endif
-
 namespace pulp::canvas {
 
-// pulp #2163 / font v2 Slice 1.1.a — `platform_font_manager()` lives in
-// bundled_fonts.cpp (exported via bundled_fonts.hpp); this TU-local shim
-// stays as `get_font_manager()` for the dozens of internal call sites
-// until the broader caller-migration pass moves them onto the resolver.
-sk_sp<SkFontMgr> get_font_manager() {
-    return platform_font_manager();
-}
+// Compatibility shim defined in skia_canvas_fonts.cpp.
+sk_sp<SkFontMgr> get_font_manager();
 
 static SkColor to_sk_color(Color c) {
     return c.to_argb32();

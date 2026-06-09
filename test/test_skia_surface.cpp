@@ -5,6 +5,7 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/canvas.hpp>  // FillRule + Canvas path API (pulp #3656)
 
 #include <cstring>
 #include <filesystem>
@@ -236,6 +237,21 @@ SkColor replay_top_left(const sk_sp<SkPicture>& picture,
     REQUIRE(bm.tryAllocPixels(info));
     REQUIRE(surface->readPixels(bm, 0, 0));
     return bm.getColor(0, 0);
+}
+
+// Replay a picture into a fresh black raster surface and read back the
+// pixel at (x, y). Used by the fill-rule raster proof below.
+SkColor replay_pixel_at(const sk_sp<SkPicture>& picture,
+                        const SkImageInfo& info, int x, int y) {
+    sk_sp<SkSurface> surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    surface->getCanvas()->drawPicture(picture.get());
+
+    SkBitmap bm;
+    REQUIRE(bm.tryAllocPixels(info));
+    REQUIRE(surface->readPixels(bm, 0, 0));
+    return bm.getColor(x, y);
 }
 
 }  // namespace
@@ -513,6 +529,85 @@ TEST_CASE("SkpFrameCapture preserves embedded-image pixels via fImageProc",
 
     SkImageInfo info = SkImageInfo::MakeN32Premul(8, 8);
     REQUIRE(replay_top_left(restored, info) == SK_ColorGREEN);
+}
+
+// pulp #3656 — end-to-end raster PROOF that fill-rule actually changes the
+// painted pixels (not just that the rule is threaded through the recording
+// canvas, which the SvgPathWidget unit tests already cover). A compound
+// path with two same-winding subpaths (outer + inner square) fills its
+// center under nonzero winding (a solid block) but punches a hole under
+// even-odd — the exact behavior a stroked-ellipse annulus needs. We render
+// the real SkiaCanvas, serialize, replay onto a black raster surface, and
+// sample the center pixel + a ring pixel.
+TEST_CASE("SkiaCanvas fill-rule punches an even-odd hole in compound paths",
+          "[render][skia][issue-3656]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    const SkImageInfo info = SkImageInfo::MakeN32Premul(W, H);
+
+    auto paint_annulus = [&](pulp::canvas::FillRule rule) -> SkColor4f {
+        pulp::render::SkpFrameCapture capture(W, H);
+        REQUIRE(capture.available());
+        auto* canvas = capture.canvas();
+        REQUIRE(canvas != nullptr);
+
+        // Outer + inner square, BOTH wound clockwise (same direction) so the
+        // ONLY thing that changes the center is the winding rule.
+        canvas->begin_path();
+        canvas->move_to(6, 6);   canvas->line_to(42, 6);
+        canvas->line_to(42, 42); canvas->line_to(6, 42);
+        canvas->close_path();
+        canvas->move_to(18, 18); canvas->line_to(30, 18);
+        canvas->line_to(30, 30); canvas->line_to(18, 30);
+        canvas->close_path();
+        canvas->set_fill_color(pulp::canvas::Color{1.0f, 0.0f, 0.0f, 1.0f});  // red
+        canvas->fill_current_path(rule);
+
+        std::string blob;
+        auto result = capture.finish_to_memory(blob);
+        REQUIRE(result.ok);
+        sk_sp<SkPicture> pic =
+            SkPicture::MakeFromData(blob.data(), blob.size());
+        REQUIRE(pic != nullptr);
+        // Center (24,24) is inside BOTH loops; ring (10,24) is between them.
+        return SkColor4f::FromColor(replay_pixel_at(pic, info, 24, 24));
+    };
+    auto ring_sample = [&](pulp::canvas::FillRule rule) -> SkColor4f {
+        pulp::render::SkpFrameCapture capture(W, H);
+        REQUIRE(capture.available());
+        auto* canvas = capture.canvas();
+        canvas->begin_path();
+        canvas->move_to(6, 6);   canvas->line_to(42, 6);
+        canvas->line_to(42, 42); canvas->line_to(6, 42);
+        canvas->close_path();
+        canvas->move_to(18, 18); canvas->line_to(30, 18);
+        canvas->line_to(30, 30); canvas->line_to(18, 30);
+        canvas->close_path();
+        canvas->set_fill_color(pulp::canvas::Color{1.0f, 0.0f, 0.0f, 1.0f});
+        canvas->fill_current_path(rule);
+        std::string blob;
+        REQUIRE(capture.finish_to_memory(blob).ok);
+        sk_sp<SkPicture> pic =
+            SkPicture::MakeFromData(blob.data(), blob.size());
+        REQUIRE(pic != nullptr);
+        return SkColor4f::FromColor(replay_pixel_at(pic, info, 10, 24));
+    };
+
+    // nonzero: both loops same winding → center has winding ±2 → FILLED red.
+    const SkColor4f center_nonzero = paint_annulus(pulp::canvas::FillRule::nonzero);
+    REQUIRE(center_nonzero.fR > 0.5f);
+    REQUIRE(center_nonzero.fG < 0.25f);
+
+    // evenodd: center is inside 2 loops → even → HOLE → stays black background.
+    const SkColor4f center_evenodd = paint_annulus(pulp::canvas::FillRule::evenodd);
+    REQUIRE(center_evenodd.fR < 0.25f);
+    REQUIRE(center_evenodd.fG < 0.25f);
+
+    // The ring (between the two squares) is filled red under BOTH rules —
+    // proving even-odd renders the ring, it doesn't just blank the shape.
+    REQUIRE(ring_sample(pulp::canvas::FillRule::nonzero).fR  > 0.5f);
+    REQUIRE(ring_sample(pulp::canvas::FillRule::evenodd).fR > 0.5f);
+#endif
 }
 
 TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",

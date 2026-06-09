@@ -50,7 +50,7 @@ Fields:
 - `group_id` — for hierarchical organization (0 = ungrouped)
 - `to_string` — optional display formatter
 - `from_string` — optional string parser
-- `rate` — `ControlRate` by default; `AudioRate` opts into future audio-rate graph edges
+- `rate` — `ControlRate` by default; `AudioRate` marks the parameter as audio-rate capable for adapters and graph/modulation integrations
 - `smoothing_ramp_seconds` — optional control-rate smoothing time; `0` means off
 
 ### ParamValue
@@ -126,7 +126,10 @@ state().reset_all_mod();                    // clear all offsets
 float cutoff = state().get_modulated(kCutoff);  // base + offset
 ```
 
-The CLAP adapter handles `CLAP_EVENT_PARAM_MOD` events and calls `set_mod_offset()` / `add_mod_offset()` before each process block.
+The CLAP adapter handles `CLAP_EVENT_PARAM_MOD` events and applies the current
+block's absolute modulation amount with `set_mod_offset()` before process runs.
+`add_mod_offset()` remains available for code that intentionally stacks
+multiple modulation sources in its own processing layer.
 
 ## Sample-Accurate Automation
 

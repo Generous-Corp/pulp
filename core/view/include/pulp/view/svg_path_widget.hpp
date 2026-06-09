@@ -32,7 +32,8 @@ struct SvgPathSegment {
 /// Renders an inline SVG `<path d="...">` icon. Supports the path-data
 /// commands that occur in icon glyphs: M/m, L/l, H/h, V/v, C/c, S/s,
 /// Q/q, T/t, Z/z. Elliptical arcs (A/a) are converted to a chain of
-/// cubic-bezier approximations. Default fill is black, no stroke.
+/// cubic-bezier approximations. Default fill is black (nonzero
+/// winding), no stroke.
 class SvgPathWidget : public View {
 public:
     SvgPathWidget() = default;
@@ -84,6 +85,17 @@ public:
     /// Stroke width in SVG path-coords (i.e. viewBox space). Default 1.
     void set_stroke_width(float w);
 
+    /// pulp #3656 — fill winding rule, mirroring SVG's `fill-rule`
+    /// (`nonzero` | `evenodd`). Default `nonzero` matches the SVG /
+    /// Canvas2D default. `evenodd` is what compound annular paths need:
+    /// frameworks that lower a stroked ellipse to a two-subpath
+    /// `M…Z M…Z` fill (e.g. JUCE's `SVGGraphicsContext` for
+    /// `Graphics::drawEllipse`) only render the ring's hole correctly
+    /// under even-odd winding — under nonzero the inner subpath fills
+    /// solid and the widget paints a disc. Lets a captured editor ship
+    /// those paths verbatim instead of pre-collapsing them.
+    void set_fill_rule(canvas::FillRule rule);
+
     // Accessors used by tests.
     const std::string& path_data() const { return path_data_; }
     const std::vector<SvgPathSegment>& segments() const { return segments_; }
@@ -92,6 +104,7 @@ public:
     canvas::Color fill_color() const { return fill_color_; }
     canvas::Color stroke_color() const { return stroke_color_; }
     float stroke_width() const { return stroke_width_; }
+    canvas::FillRule fill_rule() const { return fill_rule_; }
     float viewbox_width() const { return viewbox_w_; }
     float viewbox_height() const { return viewbox_h_; }
 
@@ -117,6 +130,7 @@ private:
     canvas::Color stroke_color_{0.0f, 0.0f, 0.0f, 1.0f};
     std::string   fill_gradient_;  // pulp #932 — non-empty overrides solid fill
     float stroke_width_ = 1.0f;
+    canvas::FillRule fill_rule_ = canvas::FillRule::nonzero;  // pulp #3656
     float viewbox_w_ = 0.0f;   // 0 means "use widget bounds 1:1"
     float viewbox_h_ = 0.0f;
     bool has_fill_ = true;

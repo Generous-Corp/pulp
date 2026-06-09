@@ -1,14 +1,14 @@
 // test_cli_shellout_loop.cpp — extracted from test_cli_shellout.cpp
 // in the 2026-05 Phase 5 P5-4 refactor.
 //
-// Issue #940 — `pulp loop` shell-out tests. Covers the surface that
+// `pulp loop` shell-out tests. Covers the surface that
 // doesn't depend on a live watch loop (the watch-loop interactions are
 // tested by `pulp dev`'s harness):
 //
 //   * `pulp loop --help` / --status / --off
 //   * `pulp loop --platform=<known|unknown>`
 //   * `pulp loop --no-watch` and related flags
-//   * `pulp loop --watch-issues` / `--ar-swap-from` deferred-slice hints
+//   * `pulp loop --watch-issues` / `--ar-swap-from` compatibility diagnostics
 //
 // All tests run with PULP_HOME pointed at a per-test tmpdir so the
 // developer's real config.toml is never touched.
@@ -19,10 +19,9 @@ using namespace pulp::platform;
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
 
-// Issue #940 Slice 1 — `pulp loop` is the leveraged-prototype focus
-// mode entry point. These tests cover the surface that doesn't depend
-// on a live watch loop (the watch-loop interactions are tested by
-// `pulp dev`'s harness):
+// `pulp loop` is the leveraged-prototype focus mode entry point. These tests
+// cover the surface that doesn't depend on a live watch loop (the watch-loop
+// interactions are tested by `pulp dev`'s harness):
 //
 //   * `pulp loop --help`     exits 0 + advertises focus mode
 //   * `pulp loop --status`   exits 0, reports detected host + focus state
@@ -183,7 +182,7 @@ TEST_CASE("pulp loop validates value options before focus state changes",
     fs::remove_all(tmp_home);
 }
 
-TEST_CASE("pulp loop --watch-issues prints deferred-slice hint",
+TEST_CASE("pulp loop --watch-issues prints compatibility diagnostic",
           "[cli][shellout][loop][issue-940]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
@@ -195,17 +194,15 @@ TEST_CASE("pulp loop --watch-issues prints deferred-slice hint",
     auto r = run_pulp({"loop", "--watch-issues=924,927", "--no-watch"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
-    // Slice 3 deferred — surface the issue number so the user knows
-    // when the helper lands.
     REQUIRE(r.stdout_output.find("--watch-issues=924,927") != std::string::npos);
-    REQUIRE(r.stdout_output.find("deferred") != std::string::npos);
+    REQUIRE(r.stdout_output.find("recognized but not implemented") != std::string::npos);
 
     pulp_unsetenv("PULP_HOME");
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
     fs::remove_all(tmp_home);
 }
 
-TEST_CASE("pulp loop --ar-swap-from prints deferred-slice hint",
+TEST_CASE("pulp loop --ar-swap-from prints compatibility diagnostic",
           "[cli][shellout][loop][issue-940]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
@@ -219,13 +216,14 @@ TEST_CASE("pulp loop --ar-swap-from prints deferred-slice hint",
     REQUIRE_FALSE(r1.timed_out);
     REQUIRE(r1.exit_code == 0);
     REQUIRE(r1.stdout_output.find("--ar-swap-from=feat/fix-x") != std::string::npos);
-    REQUIRE(r1.stdout_output.find("deferred") != std::string::npos);
+    REQUIRE(r1.stdout_output.find("recognized but not implemented") != std::string::npos);
 
     // Equals form
     auto r2 = run_pulp({"loop", "--ar-swap-from=feat/fix-y", "--no-watch"});
     REQUIRE_FALSE(r2.timed_out);
     REQUIRE(r2.exit_code == 0);
     REQUIRE(r2.stdout_output.find("--ar-swap-from=feat/fix-y") != std::string::npos);
+    REQUIRE(r2.stdout_output.find("recognized but not implemented") != std::string::npos);
 
     pulp_unsetenv("PULP_HOME");
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");

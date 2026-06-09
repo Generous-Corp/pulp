@@ -39,11 +39,17 @@
 // WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
 // macros don't collide with std::min/std::max or Skia (#384).
 #include <pulp/platform/win32_sane.hpp>
+#include <ole2.h>        // OleInitialize, RegisterDragDrop, IDropTarget
+#include <shellapi.h>    // DragQueryFileW, HDROP, CF_HDROP
+
+#include <pulp/view/drag_drop.hpp>
 
 #include <atomic>
+#include <cwchar>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace pulp::view {
@@ -81,6 +87,131 @@ ATOM ensure_window_class() {
     return atom;
 }
 
+// UTF-16 → UTF-8 for dropped text / paths.
+std::string wide_to_utf8(const wchar_t* w, int wlen) {
+    if (!w || wlen <= 0) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, wlen, nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return {};
+    std::string out(static_cast<size_t>(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w, wlen, out.data(), n, nullptr, nullptr);
+    return out;
+}
+
+// Pull a DropData out of an OLE IDataObject (files take priority over text,
+// matching the SDL + macOS producers).
+DropData extract_idata_drop(IDataObject* data) {
+    DropData out;
+    if (!data) return out;
+
+    // CF_HDROP — a list of file paths.
+    FORMATETC fmt_files{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM stg{};
+    if (data->GetData(&fmt_files, &stg) == S_OK) {
+        if (auto hdrop = static_cast<HDROP>(GlobalLock(stg.hGlobal))) {
+            const UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+            out.type = DropData::Type::files;
+            for (UINT i = 0; i < count; ++i) {
+                const UINT len = DragQueryFileW(hdrop, i, nullptr, 0);
+                std::wstring buf(len + 1, L'\0');
+                const UINT got = DragQueryFileW(hdrop, i, buf.data(),
+                                                static_cast<UINT>(buf.size()));
+                if (got > 0) out.file_paths.push_back(wide_to_utf8(buf.data(),
+                                                                   static_cast<int>(got)));
+            }
+            GlobalUnlock(stg.hGlobal);
+        }
+        ReleaseStgMedium(&stg);
+        if (!out.file_paths.empty()) return out;
+    }
+
+    // CF_UNICODETEXT — a single text payload.
+    FORMATETC fmt_text{CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM stg_text{};
+    if (data->GetData(&fmt_text, &stg_text) == S_OK) {
+        if (auto* w = static_cast<const wchar_t*>(GlobalLock(stg_text.hGlobal))) {
+            out.type = DropData::Type::text;
+            out.text = wide_to_utf8(w, static_cast<int>(wcslen(w)));
+            GlobalUnlock(stg_text.hGlobal);
+        }
+        ReleaseStgMedium(&stg_text);
+    }
+    return out;
+}
+
+// Minimal IDropTarget that routes OLE drops on the child HWND into the shared
+// cross-platform view-tree dispatch core (drag_drop.cpp) — the same core the SDL
+// and macOS producers use. Owned by WinPluginViewHost; registered via
+// RegisterDragDrop on the child HWND.
+class PulpWinDropTarget : public IDropTarget {
+public:
+    PulpWinDropTarget(View& root, HWND hwnd, std::function<Point(Point)> to_root)
+        : root_(root), hwnd_(hwnd), to_root_(std::move(to_root)) {}
+
+    // Screen POINTL → client → root coordinates (mirrors the mouse path).
+    Point to_root_point(POINTL pt) const {
+        POINT p{pt.x, pt.y};
+        ScreenToClient(hwnd_, &p);
+        Point client{static_cast<float>(p.x), static_cast<float>(p.y)};
+        return to_root_ ? to_root_(client) : client;
+    }
+
+    // ── IUnknown ──────────────────────────────────────────────────────────
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == IID_IUnknown || riid == IID_IDropTarget) {
+            *ppv = static_cast<IDropTarget*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return static_cast<ULONG>(++ref_);
+    }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const long r = --ref_;
+        if (r == 0) delete this;
+        return static_cast<ULONG>(r);
+    }
+
+    // ── IDropTarget ───────────────────────────────────────────────────────
+    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD, POINTL pt,
+                                        DWORD* effect) override {
+        pending_ = extract_idata_drop(data);
+        const bool ok = dispatch_drag_enter(root_, session_, pending_,
+                                            to_root_point(pt));
+        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL pt, DWORD* effect) override {
+        const bool ok = dispatch_drag_enter(root_, session_, pending_,
+                                            to_root_point(pt));
+        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragLeave() override {
+        dispatch_drag_exit(root_, session_);
+        pending_ = {};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL pt,
+                                   DWORD* effect) override {
+        DropData d = extract_idata_drop(data);
+        const bool ok = dispatch_drop(root_, session_, d, to_root_point(pt));
+        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        pending_ = {};
+        return S_OK;
+    }
+
+private:
+    View& root_;
+    HWND hwnd_;
+    std::function<Point(Point)> to_root_;
+    DragSession session_;
+    DropData pending_;  // payload cached between DragEnter and Drop
+    long ref_ = 1;
+};
+
 class WinPluginViewHost : public PluginViewHost {
 public:
     WinPluginViewHost(View& root, Size size) : root_(root), size_(size) {
@@ -99,13 +230,16 @@ public:
             runtime::log_warn("WinPluginViewHost: CreateWindowExW failed");
             return;
         }
+        scale_ = detect_dpi_scale(hwnd_);
 #ifdef PULP_HAS_SKIA
         init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
 #endif
+        init_drag_drop();
     }
 
     ~WinPluginViewHost() override {
         root_.set_plugin_view_host(nullptr);
+        shutdown_drag_drop();
 #ifdef PULP_HAS_SKIA
         skia_surface_.reset();
         gpu_surface_.reset();
@@ -194,13 +328,38 @@ public:
                          static_cast<int>(height), SWP_NOZORDER | SWP_NOMOVE);
         }
 #ifdef PULP_HAS_SKIA
-        if (gpu_surface_) gpu_surface_->resize(width, height);
-        if (skia_surface_) skia_surface_->resize(width, height, 1.0f);
+        // GPU surface is sized at PHYSICAL pixels (logical × scale); SkiaSurface
+        // takes LOGICAL dims + the scale factor and applies the logical→pixel
+        // transform itself at paint (mirrors MacGpuWindowHost).
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
         repaint();
     }
 
     Size get_size() const override { return size_; }
+
+    // ── HiDPI scale seam (W8) ────────────────────────────────────────────
+    float scale_factor() const override { return scale_; }
+
+    void set_scale_factor(float scale) override {
+        if (scale <= 0.0f) return;  // ignore non-positive; keep current scale
+        if (scale == scale_) return;
+        scale_ = scale;
+#ifdef PULP_HAS_SKIA
+        // Re-size surfaces at the new pixel resolution. Logical size is
+        // unchanged, so the view tree layout is untouched.
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
+#endif
+        repaint();
+    }
+
+    // WM_DPICHANGED: derive the new scale from the wParam DPI and rescale.
+    void handle_dpi_changed(uint32_t new_dpi) {
+        if (new_dpi == 0) return;
+        set_scale_factor(static_cast<float>(new_dpi) / 96.0f);
+    }
 
     bool is_gpu_backed() const override {
 #ifdef PULP_HAS_SKIA
@@ -267,7 +426,7 @@ public:
 
 private:
     View& root_;
-    Size size_;
+    Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
     HWND hwnd_ = nullptr;
     std::atomic<bool> attached_{false};
     std::function<void()> idle_callback_;
@@ -276,6 +435,74 @@ private:
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
+    float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor (DPI/96)
+
+    // Physical pixel dimensions = logical × scale (min 1 to avoid 0-sized
+    // surfaces). The GPU surface/swapchain is allocated at this resolution.
+    uint32_t pixel_w() const {
+        const float p = size_.width * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+    uint32_t pixel_h() const {
+        const float p = size_.height * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+
+    // Derive the DPI scale for a window. GetDpiForWindow returns the effective
+    // DPI (96 = 1×, 144 = 1.5×, 192 = 2×). Falls back to 1.0 if it reports 0
+    // (per-monitor-DPI unaware context, or a window with no monitor yet).
+    static float detect_dpi_scale(HWND hwnd) {
+        if (!hwnd) return 1.0f;
+        const UINT dpi = GetDpiForWindow(hwnd);
+        if (dpi == 0) return 1.0f;
+        return static_cast<float>(dpi) / 96.0f;
+    }
+
+    // OLE drag-drop on the child HWND. ole_initialized_ tracks whether THIS host
+    // brought up COM (so we balance OleUninitialize). drop_target_ is ref-counted
+    // by OLE; we hold one reference and Release it on teardown.
+    bool ole_initialized_ = false;
+    PulpWinDropTarget* drop_target_ = nullptr;
+
+    void init_drag_drop() {
+        if (!hwnd_) return;
+        // Drag-drop needs an STA. OleInitialize is per-thread + ref-counted; if
+        // the host thread is already MTA it returns RPC_E_CHANGED_MODE — then we
+        // honest-skip drag-drop rather than fight the apartment model.
+        const HRESULT hr = OleInitialize(nullptr);
+        if (hr != S_OK && hr != S_FALSE) {
+            runtime::log_warn("WinPluginViewHost: OleInitialize failed (0x{:08x}); "
+                              "drag-drop disabled", static_cast<unsigned>(hr));
+            return;
+        }
+        ole_initialized_ = true;
+        // The drop target hands us CLIENT-space coords in PHYSICAL pixels
+        // (ScreenToClient output). Convert pixels→logical (÷ scale) before the
+        // logical-space design-viewport inverse, so HiDPI hit-testing lands on
+        // the right widget.
+        drop_target_ = new PulpWinDropTarget(
+            root_, hwnd_, [this](Point px) {
+                const float s = scale_ > 0.0f ? scale_ : 1.0f;
+                return window_to_root_point({px.x / s, px.y / s});
+            });
+        if (RegisterDragDrop(hwnd_, drop_target_) != S_OK) {
+            runtime::log_warn("WinPluginViewHost: RegisterDragDrop failed");
+            drop_target_->Release();
+            drop_target_ = nullptr;
+        }
+    }
+
+    void shutdown_drag_drop() {
+        if (drop_target_) {
+            if (hwnd_) RevokeDragDrop(hwnd_);
+            drop_target_->Release();
+            drop_target_ = nullptr;
+        }
+        if (ole_initialized_) {
+            OleUninitialize();
+            ole_initialized_ = false;
+        }
+    }
 
 #ifdef PULP_HAS_SKIA
     std::unique_ptr<render::GpuSurface> gpu_surface_;
@@ -288,8 +515,10 @@ private:
             return;
         }
         render::GpuSurface::Config cfg{};
-        cfg.width = static_cast<uint32_t>(width);
-        cfg.height = static_cast<uint32_t>(height);
+        // GPU surface at PHYSICAL pixels (logical × scale) so the swapchain
+        // matches the HiDPI display; the view tree stays in logical units.
+        cfg.width = pixel_w();
+        cfg.height = pixel_h();
         cfg.native_surface_handle = static_cast<void*>(hwnd_);  // HWND
         if (!gpu_surface_->initialize(cfg)) {
             runtime::log_warn("WinPluginViewHost: gpu initialize failed; cpu-capture only");
@@ -297,9 +526,9 @@ private:
             return;
         }
         render::SkiaSurface::Config scfg{};
-        scfg.width = static_cast<uint32_t>(width);
-        scfg.height = static_cast<uint32_t>(height);
-        scfg.scale_factor = 1.0f;
+        scfg.width = static_cast<uint32_t>(width);   // LOGICAL
+        scfg.height = static_cast<uint32_t>(height);  // LOGICAL
+        scfg.scale_factor = scale_;
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
         if (!skia_surface_) {
             runtime::log_warn("WinPluginViewHost: skia surface create failed; cpu-capture only");
@@ -365,9 +594,12 @@ private:
         return cap ? readback_ok : true;
     }
 
-    // Pure-CPU raster capture, GPU-independent — the VM proof path.
+    // Pure-CPU raster capture, GPU-independent — the VM proof path. Sized at
+    // PHYSICAL pixels (logical × scale) with the logical→pixel scale applied as
+    // a canvas transform, so paint_scene keeps working in logical units and the
+    // capture is crisp on HiDPI / matches the GPU surface pixel resolution.
     std::vector<uint8_t> raster_capture_png() {
-        const uint32_t w = size_.width, h = size_.height;
+        const uint32_t w = pixel_w(), h = pixel_h();
         if (w == 0 || h == 0) return {};
         auto cs = SkColorSpace::MakeSRGB();
         SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
@@ -376,6 +608,7 @@ private:
         if (!surface) return {};
         auto* sk_canvas = surface->getCanvas();
         if (!sk_canvas) return {};
+        if (scale_ != 1.0f) sk_canvas->scale(scale_, scale_);
         pulp::canvas::SkiaCanvas canvas(sk_canvas);
         paint_scene(canvas);
         std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4u);
@@ -413,6 +646,14 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (host && msg == WM_PAINT) {
         host->handle_wm_paint();
+        return 0;
+    }
+    if (host && msg == WM_DPICHANGED) {
+        // wParam LOWORD = new DPI (X); HIWORD = Y (identical on Windows). The
+        // view tree stays in logical units — we only rescale the surfaces and
+        // repaint at the new pixel resolution. The DAW owns the window frame,
+        // so we don't apply the suggested lParam RECT ourselves.
+        host->handle_dpi_changed(LOWORD(wp));
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);

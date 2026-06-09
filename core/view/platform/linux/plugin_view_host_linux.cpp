@@ -23,6 +23,9 @@
 
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/drag_drop.hpp>
+
+#include "xdnd_parse.hpp"
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
@@ -41,12 +44,17 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
+#include <X11/Xresource.h>  // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
 
 #include <atomic>
+#include <cstdint>
+#include <cstdlib>  // atof, malloc/free
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace pulp::view {
@@ -76,9 +84,15 @@ public:
             runtime::log_warn("X11PluginViewHost: XCreateSimpleWindow failed");
             return;
         }
-        XSelectInput(display_, child_, ExposureMask | StructureNotifyMask);
+        // PropertyChangeMask is needed so the SelectionNotify path can read
+        // back the XdndSelection property the source writes; StructureNotify +
+        // Exposure keep the existing repaint/reparent behavior.
+        XSelectInput(display_, child_,
+                     ExposureMask | StructureNotifyMask | PropertyChangeMask);
         gc_ = XCreateGC(display_, child_, 0, nullptr);
+        init_xdnd();
         XFlush(display_);
+        scale_ = detect_dpi_scale(display_, screen_);
 #ifdef PULP_HAS_SKIA
         init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
 #endif
@@ -131,6 +145,10 @@ public:
     }
 
     void repaint() override {
+        // Service drag-and-drop on our own X connection. The standalone host
+        // repaints ~each frame, so this is the steady-state XDND pump; a
+        // DAW-embedded driver can also call pump_x_events() directly.
+        pump_x_events();
 #ifdef PULP_HAS_SKIA
         if (gpu_surface_ && skia_surface_) {
             render_frame_gpu(nullptr, nullptr, nullptr);
@@ -150,13 +168,31 @@ public:
             XFlush(display_);
         }
 #ifdef PULP_HAS_SKIA
-        if (gpu_surface_) gpu_surface_->resize(width, height);
-        if (skia_surface_) skia_surface_->resize(width, height, 1.0f);
+        // GPU surface at PHYSICAL pixels (logical × scale); SkiaSurface takes
+        // LOGICAL dims + the scale factor (mirrors MacGpuWindowHost / the Win
+        // host). The X11 child window itself stays at logical size — the DAW
+        // owns its geometry; only the rendered backing is HiDPI.
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
         repaint();
     }
 
     Size get_size() const override { return size_; }
+
+    // ── HiDPI scale seam (L9) ────────────────────────────────────────────
+    float scale_factor() const override { return scale_; }
+
+    void set_scale_factor(float scale) override {
+        if (scale <= 0.0f) return;  // ignore non-positive; keep current scale
+        if (scale == scale_) return;
+        scale_ = scale;
+#ifdef PULP_HAS_SKIA
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
+#endif
+        repaint();
+    }
 
     bool is_gpu_backed() const override {
 #ifdef PULP_HAS_SKIA
@@ -209,6 +245,30 @@ public:
 
     void set_fixed_aspect_ratio(float ratio) override { fixed_aspect_ratio_ = ratio; }
 
+    // Drain pending X events on our own connection and run the XDND target
+    // protocol (drag-and-drop from another X client onto the editor child
+    // window). There is no internal event loop in this host, so a driver must
+    // call this — the standalone Linux GPU host pumps it each frame via
+    // repaint(), and a DAW-embedded host can call it from its editor idle hook.
+    // Honest no-op when display_/child_ are null (headless capture mode).
+    void pump_x_events() override {
+        if (!display_ || !child_) return;
+        while (XPending(display_) > 0) {
+            XEvent ev;
+            XNextEvent(display_, &ev);
+            switch (ev.type) {
+                case ClientMessage:
+                    handle_client_message(ev.xclient);
+                    break;
+                case SelectionNotify:
+                    handle_selection_notify(ev.xselection);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
     Point window_to_root_point(Point pt) const override {
         float sx, sy, tx, ty;
         if (!WindowHost::compute_design_viewport_transform(
@@ -223,7 +283,7 @@ public:
 
 private:
     View& root_;
-    Size size_;
+    Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
     Display* display_ = nullptr;
     int screen_ = 0;
     Window child_ = 0;
@@ -235,6 +295,327 @@ private:
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
+    float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor
+
+    // Physical pixel dimensions = logical × scale (min 1).
+    uint32_t pixel_w() const {
+        const float p = size_.width * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+    uint32_t pixel_h() const {
+        const float p = size_.height * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+
+    // Derive a DPI scale from X11. There is no single canonical source on
+    // X11, so we try, in order:
+    //   1. Xft.dpi from the X resource database (what GTK/Qt/desktops honor) —
+    //      scale = Xft.dpi / 96.
+    //   2. RANDR-free physical-DPI from the screen mm/px geometry — scale =
+    //      (px * 25.4 / mm) / 96, clamped to a sane range.
+    //   3. Fallback 1.0.
+    // A host can always override the result via set_scale_factor().
+    static float detect_dpi_scale(Display* display, int screen) {
+        if (!display) return 1.0f;
+
+        // (1) Xft.dpi — the authoritative cross-toolkit override.
+        if (char* rms = XResourceManagerString(display)) {
+            XrmDatabase db = XrmGetStringDatabase(rms);
+            if (db) {
+                char* type = nullptr;
+                XrmValue val{};
+                float dpi = 0.0f;
+                if (XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &val) &&
+                    val.addr) {
+                    dpi = static_cast<float>(atof(val.addr));
+                }
+                XrmDestroyDatabase(db);
+                if (dpi > 0.0f) return sane_scale(dpi / 96.0f);
+            }
+        }
+
+        // (2) Physical geometry: pixels / millimetres → DPI.
+        const int px_h = DisplayHeight(display, screen);
+        const int mm_h = DisplayHeightMM(display, screen);
+        if (px_h > 0 && mm_h > 0) {
+            const float dpi = static_cast<float>(px_h) * 25.4f /
+                              static_cast<float>(mm_h);
+            if (dpi > 0.0f) return sane_scale(dpi / 96.0f);
+        }
+        return 1.0f;
+    }
+
+    // Clamp auto-detected scale to a reasonable HiDPI band so a bogus EDID
+    // (common on X11) can't produce a 0.2× or 10× surface. Host overrides via
+    // set_scale_factor() are NOT clamped.
+    static float sane_scale(float s) {
+        if (s < 0.5f) return 1.0f;   // implausibly small → assume unset
+        if (s > 4.0f) return 4.0f;   // cap extreme values
+        return s;
+    }
+
+    // ── XDND (X11 drag-and-drop) target state ────────────────────────────
+    // Atoms interned once in init_xdnd(). 0 (None) until interned.
+    Atom xa_XdndAware_ = 0;
+    Atom xa_XdndEnter_ = 0;
+    Atom xa_XdndPosition_ = 0;
+    Atom xa_XdndStatus_ = 0;
+    Atom xa_XdndLeave_ = 0;
+    Atom xa_XdndDrop_ = 0;
+    Atom xa_XdndFinished_ = 0;
+    Atom xa_XdndSelection_ = 0;
+    Atom xa_XdndActionCopy_ = 0;
+    Atom xa_XdndTypeList_ = 0;
+    Atom xa_text_uri_list_ = 0;
+    Atom xa_UTF8_STRING_ = 0;
+    Atom xa_pulp_xdnd_prop_ = 0;  // our property the selection lands in
+
+    // Per-drag hover state owned by this host (one in-flight pointer), routed
+    // through the shared dispatch core — never a process global.
+    DragSession drag_session_;
+
+    // In-flight XDND source/transfer state, valid between XdndEnter and the
+    // XdndFinished we send after a drop. Reset on Leave / after Finished.
+    Window xdnd_source_ = 0;          // the source client's window
+    int xdnd_source_version_ = 0;     // min(our v5, source's advertised version)
+    Atom xdnd_chosen_type_ = 0;       // type we asked the source to convert to
+    int xdnd_drop_root_x_ = 0;        // last XdndPosition pointer (root coords)
+    int xdnd_drop_root_y_ = 0;
+    bool xdnd_drop_pending_ = false;  // awaiting SelectionNotify after XdndDrop
+
+    // Intern the XDND atoms and advertise the child window as an XDND-aware
+    // target (version 5). Safe no-op without display_/child_.
+    void init_xdnd() {
+        if (!display_ || !child_) return;
+        xa_XdndAware_ = XInternAtom(display_, "XdndAware", False);
+        xa_XdndEnter_ = XInternAtom(display_, "XdndEnter", False);
+        xa_XdndPosition_ = XInternAtom(display_, "XdndPosition", False);
+        xa_XdndStatus_ = XInternAtom(display_, "XdndStatus", False);
+        xa_XdndLeave_ = XInternAtom(display_, "XdndLeave", False);
+        xa_XdndDrop_ = XInternAtom(display_, "XdndDrop", False);
+        xa_XdndFinished_ = XInternAtom(display_, "XdndFinished", False);
+        xa_XdndSelection_ = XInternAtom(display_, "XdndSelection", False);
+        xa_XdndActionCopy_ = XInternAtom(display_, "XdndActionCopy", False);
+        xa_XdndTypeList_ = XInternAtom(display_, "XdndTypeList", False);
+        xa_text_uri_list_ = XInternAtom(display_, "text/uri-list", False);
+        xa_UTF8_STRING_ = XInternAtom(display_, "UTF8_STRING", False);
+        xa_pulp_xdnd_prop_ = XInternAtom(display_, "PULP_XDND_SELECTION", False);
+
+        // Advertise XDND v5 support on the child window.
+        const long version = 5;
+        XChangeProperty(display_, child_, xa_XdndAware_, XA_ATOM, 32,
+                        PropModeReplace,
+                        reinterpret_cast<const unsigned char*>(&version), 1);
+    }
+
+    // Read the absolute (root-window) origin of the child window so XdndPosition
+    // root coordinates can be converted to child-local coordinates.
+    void child_root_origin(int& x, int& y) const {
+        x = 0;
+        y = 0;
+        if (!display_ || !child_) return;
+        Window root_win = RootWindow(display_, screen_);
+        Window dummy_child = 0;
+        int rx = 0, ry = 0;
+        if (XTranslateCoordinates(display_, child_, root_win, 0, 0, &rx, &ry,
+                                  &dummy_child)) {
+            x = rx;
+            y = ry;
+        }
+    }
+
+    // Map an XdndPosition root point to the root-view coordinate space the
+    // dispatch core expects: root → child-local (subtract child origin) →
+    // window_to_root_point (design-viewport inverse). Mirrors the mac producer.
+    Point xdnd_root_to_view(int root_x, int root_y) const {
+        int ox = 0, oy = 0;
+        child_root_origin(ox, oy);
+        Point local = xdnd::root_to_child_local(root_x, root_y, ox, oy);
+        // X11 reports physical pixels; window_to_root_point() expects logical
+        // coordinates, so divide by the HiDPI scale first (mirrors the Win
+        // host's ScreenToClient ÷ scale path). At scale 1.0 this is a no-op.
+        const float s = scale_ > 0.0f ? scale_ : 1.0f;
+        return window_to_root_point({local.x / s, local.y / s});
+    }
+
+    // Read the source's offered types. XdndEnter packs up to 3 types inline
+    // (data.l[2..4]); when the low bit of data.l[1] is set, the full list lives
+    // in the XdndTypeList property on the source window.
+    std::vector<Atom> read_offered_types(const XClientMessageEvent& msg) {
+        std::vector<Atom> types;
+        const bool more = (msg.data.l[1] & 1) != 0;
+        if (more) {
+            Window source = static_cast<Window>(msg.data.l[0]);
+            Atom actual_type = 0;
+            int actual_format = 0;
+            unsigned long nitems = 0, bytes_after = 0;
+            unsigned char* prop = nullptr;
+            if (XGetWindowProperty(display_, source, xa_XdndTypeList_, 0, 1024,
+                                   False, XA_ATOM, &actual_type, &actual_format,
+                                   &nitems, &bytes_after, &prop) == Success &&
+                prop) {
+                const Atom* atoms = reinterpret_cast<const Atom*>(prop);
+                for (unsigned long i = 0; i < nitems; ++i) types.push_back(atoms[i]);
+                XFree(prop);
+            }
+        } else {
+            for (int i = 2; i <= 4; ++i) {
+                Atom a = static_cast<Atom>(msg.data.l[i]);
+                if (a != None) types.push_back(a);
+            }
+        }
+        return types;
+    }
+
+    // Pick the best target type from the offered list: prefer files
+    // (text/uri-list), fall back to UTF8 text. None (0) if neither is offered.
+    Atom choose_type(const std::vector<Atom>& offered) const {
+        for (Atom a : offered)
+            if (a == xa_text_uri_list_) return xa_text_uri_list_;
+        for (Atom a : offered)
+            if (a == xa_UTF8_STRING_) return xa_UTF8_STRING_;
+        return None;
+    }
+
+    void send_xdnd_status(Window source, bool accept) {
+        XEvent reply;
+        std::memset(&reply, 0, sizeof(reply));
+        reply.xclient.type = ClientMessage;
+        reply.xclient.display = display_;
+        reply.xclient.window = source;
+        reply.xclient.message_type = xa_XdndStatus_;
+        reply.xclient.format = 32;
+        reply.xclient.data.l[0] = static_cast<long>(child_);
+        // bit0: accept; bit1: send XdndPosition for every motion (we set it so
+        // we keep getting position updates for hover feedback).
+        reply.xclient.data.l[1] = accept ? 3 : 0;
+        reply.xclient.data.l[2] = 0;  // empty rect → always send Position
+        reply.xclient.data.l[3] = 0;
+        reply.xclient.data.l[4] =
+            accept ? static_cast<long>(xa_XdndActionCopy_) : 0;
+        XSendEvent(display_, source, False, NoEventMask, &reply);
+        XFlush(display_);
+    }
+
+    void send_xdnd_finished(Window source, bool accepted) {
+        XEvent reply;
+        std::memset(&reply, 0, sizeof(reply));
+        reply.xclient.type = ClientMessage;
+        reply.xclient.display = display_;
+        reply.xclient.window = source;
+        reply.xclient.message_type = xa_XdndFinished_;
+        reply.xclient.format = 32;
+        reply.xclient.data.l[0] = static_cast<long>(child_);
+        // v5: bit0 = accepted; data.l[2] = action performed.
+        reply.xclient.data.l[1] = accepted ? 1 : 0;
+        reply.xclient.data.l[2] =
+            accepted ? static_cast<long>(xa_XdndActionCopy_) : 0;
+        XSendEvent(display_, source, False, NoEventMask, &reply);
+        XFlush(display_);
+    }
+
+    void reset_xdnd_drag() {
+        xdnd_source_ = 0;
+        xdnd_source_version_ = 0;
+        xdnd_chosen_type_ = 0;
+        xdnd_drop_pending_ = false;
+        dispatch_drag_exit(root_, drag_session_);
+    }
+
+    void handle_client_message(const XClientMessageEvent& msg) {
+        if (msg.message_type == xa_XdndEnter_) {
+            xdnd_source_ = static_cast<Window>(msg.data.l[0]);
+            xdnd_source_version_ =
+                static_cast<int>((msg.data.l[1] >> 24) & 0xff);
+            auto offered = read_offered_types(msg);
+            xdnd_chosen_type_ = choose_type(offered);
+            return;
+        }
+        if (msg.message_type == xa_XdndPosition_) {
+            Window source = static_cast<Window>(msg.data.l[0]);
+            xdnd_drop_root_x_ = static_cast<int>((msg.data.l[2] >> 16) & 0xffff);
+            xdnd_drop_root_y_ = static_cast<int>(msg.data.l[2] & 0xffff);
+            const bool can_accept = xdnd_chosen_type_ != None;
+            if (can_accept) {
+                // Hover feedback through the shared dispatch core. The data's
+                // concrete payload isn't known until the drop, so feed a typed
+                // shell (files vs text) so DropReceivers can highlight.
+                DropData hover;
+                hover.type = (xdnd_chosen_type_ == xa_text_uri_list_)
+                                 ? DropData::Type::files
+                                 : DropData::Type::text;
+                dispatch_drag_move(root_, drag_session_, hover,
+                                   xdnd_root_to_view(xdnd_drop_root_x_,
+                                                     xdnd_drop_root_y_));
+            }
+            send_xdnd_status(source, can_accept);
+            return;
+        }
+        if (msg.message_type == xa_XdndLeave_) {
+            reset_xdnd_drag();
+            return;
+        }
+        if (msg.message_type == xa_XdndDrop_) {
+            Window source = static_cast<Window>(msg.data.l[0]);
+            if (xdnd_chosen_type_ == None) {
+                // Nothing droppable was offered — finish without accepting.
+                send_xdnd_finished(source, false);
+                reset_xdnd_drag();
+                return;
+            }
+            xdnd_drop_pending_ = true;
+            Time t = (xdnd_source_version_ >= 1)
+                         ? static_cast<Time>(msg.data.l[2])
+                         : CurrentTime;
+            // Ask the source to convert the selection to our chosen type; the
+            // payload arrives later as a SelectionNotify.
+            XConvertSelection(display_, xa_XdndSelection_, xdnd_chosen_type_,
+                              xa_pulp_xdnd_prop_, child_, t);
+            XFlush(display_);
+            return;
+        }
+    }
+
+    void handle_selection_notify(const XSelectionEvent& sel) {
+        if (!xdnd_drop_pending_) return;
+        if (sel.property == None) {
+            // Source failed to convert — finish unaccepted.
+            if (xdnd_source_) send_xdnd_finished(xdnd_source_, false);
+            reset_xdnd_drag();
+            return;
+        }
+
+        Atom actual_type = 0;
+        int actual_format = 0;
+        unsigned long nitems = 0, bytes_after = 0;
+        unsigned char* prop = nullptr;
+        std::string payload;
+        if (XGetWindowProperty(display_, child_, sel.property, 0, 0x7fffffff,
+                               True /* delete */, AnyPropertyType, &actual_type,
+                               &actual_format, &nitems, &bytes_after,
+                               &prop) == Success &&
+            prop) {
+            payload.assign(reinterpret_cast<const char*>(prop),
+                           static_cast<size_t>(nitems));
+            XFree(prop);
+        }
+
+        DropData data;
+        if (xdnd_chosen_type_ == xa_text_uri_list_) {
+            data.type = DropData::Type::files;
+            data.file_paths = xdnd::parse_uri_list(payload);
+        } else {
+            data.type = DropData::Type::text;
+            data.text = payload;
+        }
+
+        const bool consumed = dispatch_drop(
+            root_, drag_session_, data,
+            xdnd_root_to_view(xdnd_drop_root_x_, xdnd_drop_root_y_));
+
+        if (xdnd_source_) send_xdnd_finished(xdnd_source_, consumed);
+        reset_xdnd_drag();
+    }
 
 #ifdef PULP_HAS_SKIA
     std::unique_ptr<render::GpuSurface> gpu_surface_;
@@ -251,8 +632,10 @@ private:
         x11_handle_.display = display_;
         x11_handle_.window = static_cast<unsigned long>(child_);
         render::GpuSurface::Config cfg{};
-        cfg.width = static_cast<uint32_t>(width);
-        cfg.height = static_cast<uint32_t>(height);
+        // GPU surface at PHYSICAL pixels (logical × scale); view tree stays
+        // logical.
+        cfg.width = pixel_w();
+        cfg.height = pixel_h();
         cfg.native_surface_handle = &x11_handle_;  // typed X11 handle
         if (!gpu_surface_->initialize(cfg)) {
             runtime::log_warn("X11PluginViewHost: gpu initialize failed; cpu raster only");
@@ -260,9 +643,9 @@ private:
             return;
         }
         render::SkiaSurface::Config scfg{};
-        scfg.width = static_cast<uint32_t>(width);
-        scfg.height = static_cast<uint32_t>(height);
-        scfg.scale_factor = 1.0f;
+        scfg.width = static_cast<uint32_t>(width);   // LOGICAL
+        scfg.height = static_cast<uint32_t>(height);  // LOGICAL
+        scfg.scale_factor = scale_;
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
         if (!skia_surface_) {
             runtime::log_warn("X11PluginViewHost: skia surface create failed; cpu raster only");
@@ -323,10 +706,14 @@ private:
         return true;
     }
 
-    // Render the scene to RGBA via pure Skia raster (no GPU). out_w/out_h get
-    // the pixel dims. Empty on failure.
+    // Render the scene to RGBA via pure Skia raster (no GPU). The buffer is
+    // sized at PHYSICAL pixels (logical × scale) and the logical→pixel scale is
+    // applied as a canvas transform, so paint_scene keeps working in logical
+    // units — the raster fallback / headless capture is crisp on HiDPI and
+    // matches the GPU surface's pixel resolution. out_w/out_h get the pixel
+    // dims. Empty on failure.
     std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
-        const uint32_t w = size_.width, h = size_.height;
+        const uint32_t w = pixel_w(), h = pixel_h();
         if (w == 0 || h == 0) return {};
         if (idle_callback_) idle_callback_();
         auto cs = SkColorSpace::MakeSRGB();
@@ -336,6 +723,7 @@ private:
         if (!surface) return {};
         auto* sk_canvas = surface->getCanvas();
         if (!sk_canvas) return {};
+        if (scale_ != 1.0f) sk_canvas->scale(scale_, scale_);
         pulp::canvas::SkiaCanvas canvas(sk_canvas);
         paint_scene(canvas);
         std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4u);

@@ -13,31 +13,30 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (21 items across 13 capabilities)
+### Known limitations (20 items across 13 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
-| `formats.clap` | Only bus index 0 is routed to process(); multi-bus + sidechain not wired to set_sidechain(). | [link](planning/production-readiness/01-format-adapters.md#1.1) |
-| `formats.clap` | MIDI vocabulary limited to note on/off; CC, pitchbend, aftertouch, sysex, MIDI 2.0/UMP not routed. | [link](planning/production-readiness/01-format-adapters.md#1.1) |
-| `formats.vst3` | Only bus index 0 routed to process(); multi-bus + sidechain not wired. | [link](planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | setBusArrangements forwards without validating channel counts or reading negotiated layout. | [link](planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed. | [link](planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](planning/production-readiness/01-format-adapters.md#1.3) |
-| `formats.au_v2` | MIDI input dead: AUEffectBase has no MIDI routing. | [link](planning/production-readiness/01-format-adapters.md#1.3) |
-| `formats.auv3` | Single input bus; no sidechain support. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
-| `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
-| `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](planning/production-readiness/05-auv3-mobile.md) |
-| `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](planning/production-readiness/01-format-adapters.md#1.5) |
-| `audio_io.wasapi` | Shared mode only; no exclusive mode. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
-| `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
-| `audio_io.alsa` | No input capture path. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
-| `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
-| `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
-| `midi_io.coremidi` | UMP type-4 (MIDI 2.0 channel voice) packets are silently dropped in the input handler. | [link](planning/production-readiness/02-audio-midi-io.md#2.6) |
-| `midi_io.win32_midi` | Legacy mmeapi; no windows.devices.midi2, no hotplug. SysEx input routed via MIM_LONGDATA; WinRT MIDI runtime still pending. | [link](planning/production-readiness/02-audio-midi-io.md#2.4) |
-| `midi_io.alsa_midi` | Running status not handled; timestamps always 0; no hotplug. SysEx input accumulator landed. | [link](planning/production-readiness/02-audio-midi-io.md#2.5) |
-| `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (UIAutomationCore linked, session init wired). | [link](planning/production-readiness/04-accessibility.md#4.1) |
-| `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place). | [link](planning/production-readiness/04-accessibility.md#4.2) |
+| `formats.clap` | Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
+| `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
+| `formats.vst3` | Only bus index 0 routed to process(); multi-bus + sidechain not wired. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | setBusArrangements forwards without validating channel counts or reading negotiated layout. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
+| `formats.au_v2` | MIDI input dead: AUEffectBase has no MIDI routing. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
+| `formats.auv3` | Single input bus; no sidechain support. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
+| `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
+| `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../planning/production-readiness/05-auv3-mobile.md) |
+| `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](../../planning/production-readiness/01-format-adapters.md#1.5) |
+| `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.1) |
+| `audio_io.alsa` | No input capture path. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `midi_io.coremidi` | UMP type-4 (MIDI 2.0 channel voice) packets are silently dropped in the input handler. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.6) |
+| `midi_io.win32_midi` | Legacy mmeapi; no windows.devices.midi2, no hotplug. SysEx input routed via MIM_LONGDATA; WinRT MIDI runtime still pending. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.4) |
+| `midi_io.alsa_midi` | Running status not handled; timestamps always 0; no hotplug. SysEx input accumulator landed. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.5) |
+| `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (UIAutomationCore linked, session init wired). | [link](../../planning/production-readiness/04-accessibility.md#4.1) |
+| `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place). | [link](../../planning/production-readiness/04-accessibility.md#4.2) |
 <!-- generated:end id=limitations -->
 
 ---
@@ -80,12 +79,13 @@ adapter compiles and loads — not that every host-facing feature is wired.
 - **Audio Unit v2** — Outbound parameter changes are not emitted to the host;
   automation read on AU v2 effects only flows host → plugin. Tracked:
   workstream 01.
-- **CLAP** — Only the first input bus and first output bus are routed;
-  declared sidechain or additional buses are ignored. `Processor::set_sidechain`
-  is never called from the CLAP adapter. Tracked: workstream 01.
+- **CLAP** — Bus 0 routes to `Processor::process()` and bus 1 routes to
+  `Processor::set_sidechain()`. Additional input buses and secondary output
+  buses are not exposed through the simple `Processor` process surface. CLAP
+  `PARAM_MOD` note identity fields are accepted but not routed with per-note
+  modulation scope.
 - **LV2** — Atom sysex is ignored; the `run()` loop only promotes 1–3-byte
-  short MIDI messages out of the input atom sequence. Sysex sidecar wiring is
-  tracked under issue #239 (workstream 01).
+  short MIDI messages out of the input atom sequence.
 - **AAX** — Custom editor surface not wired; Pro Tools shows the
   auto-generated parameter strip rather than a Pulp ViewBridge editor.
   AudioSuite role is declared but not exercised end-to-end. Tracked:
@@ -106,7 +106,7 @@ If you hit a limitation not listed, check
 |---|---|---|---|
 | macOS (ARM64) | usable | [platform](modules.md#platform) | Primary development platform |
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
-| Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, .deb packaging, CI |
+| Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
 | Web / WASM | experimental | [platform](modules.md#platform) | WAMv2, WebCLAP, Emscripten pipeline |
 
@@ -206,7 +206,7 @@ and the iOS static-only limits.
 |---|---|---|---|---|
 | ParamValue (lock-free atomic float) | stable | [state](modules.md#state) | [modules](modules.md#state) | all |
 | ParamInfo (metadata, range, units) | stable | [state](modules.md#state) | | all |
-| ParamRange (normalize / denormalize) | stable | [state](modules.md#state) | | |
+| ParamRange (normalize / denormalize, linear + skew/symmetric shaped) | stable | [state](modules.md#state) | | |
 | StateStore (centralized parameter registry) | stable | [state](modules.md#state) | | all |
 | Parameter groups | stable | [state](modules.md#state) | | |
 | Binding (reactive UI-parameter link) | stable | [state](modules.md#state) | | |
@@ -231,7 +231,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Theme system (color/dimension tokens, inheritance) | usable | [view](modules.md#view) | [design-tokens](../guides/design-tokens.md) |
 | JS scripting (QuickJS default, V8 and JavaScriptCore available) | usable | [view](modules.md#view) | [js-bridge](js-bridge.md) |
 | Hot reload | partial | [view](modules.md#view) | Scripted UI live reload is runtime-validated in the standalone macOS lane. Plugin targets can load `UI_SCRIPT`, but live reload is not yet guaranteed across hosts/platforms. |
-| Screenshot capture (headless PNG) | partial | [view](modules.md#view) | Native on mac/iOS; Windows/Linux/Android require a host-registered provider via `set_screenshot_provider` (#299). |
+| Screenshot capture (headless PNG) | partial | [view](modules.md#view) | Native on mac/iOS; Windows/Linux/Android require a host-registered provider via `set_screenshot_provider`. |
 | Component inspector | usable | [view](modules.md#view) | |
 | Animation (FrameClock, ValueAnimation, motion tokens) | usable | [view](modules.md#view) | [animation](../guides/animation.md) |
 | Design export (JSON, SVG) | usable | [view](modules.md#view) | |
@@ -394,7 +394,7 @@ Key header: `pulp/osc/osc.hpp`
 |---|---|---|---|
 | Repo-level MCP server (`pulp-mcp`) | experimental | | Project/repo automation server in `tools/mcp/pulp_mcp.cpp`; not a per-plugin control surface |
 | Plugin CLI harness pattern | usable | [cli](cli.md) | `tools/plugin-cli/plugin_cli.hpp`; usable for batch/headless workflows, but not auto-generated for every plugin |
-| Per-plugin/app MCP control contract | planned | [claim-audit-baseline](claim-audit-baseline.md) | Active follow-up work rather than a shipped default capability |
+| Per-plugin/app MCP control contract | planned | [claim-audit-baseline](claim-audit-baseline.md) | Not a shipped default capability |
 
 ---
 
@@ -443,7 +443,7 @@ The `pulp` CLI wraps common development workflows.
 | Signing identity listing | usable | ship | |
 | Appcast feed generation (Sparkle-compatible) | usable | ship | |
 | Appcast XML parsing | usable | ship | |
-| Ed25519 update signing | planned | ship | API present; CLI hard-fails when invoked until impl lands (#295) |
+| Ed25519 update signing | usable | ship | Sparkle appcast signatures via `sign_file_ed25519()` and `pulp ship appcast --sign-key` |
 | Semantic version comparison | usable | ship | |
 | Windows code signing | partial | ship | Stub exists |
 | Linux packaging | partial | ship | Stub exists |

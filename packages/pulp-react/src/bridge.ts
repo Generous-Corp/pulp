@@ -209,6 +209,12 @@ declare global {
     function setMeterLevel(id: string, level: number): void;
     function setProgress(id: string, fraction: number): void;
     function setValue(id: string, value: number): void;
+    /// pulp parity-found (#18) — `<Image src>` → ImageView::set_image_path.
+    /// Registered C++-side by WidgetBridge::register_widget_assets_api
+    /// (core/view/src/widget_bridge/widget_assets_api.cpp). The path is
+    /// forwarded verbatim; absolute paths come from the design-import /
+    /// framework-importer lane and C++ resolves the rest.
+    function setImageSource(id: string, path: string): void;
 
     // ── Theme ───────────────────────────────────────────────────────
     function setTheme(name: 'dark' | 'light' | 'pro_audio' | string): void;
@@ -352,7 +358,13 @@ export function createMockBridge(): MockBridge {
         // composites back with the requested mode.
         'setMixBlendMode',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
-        'setValue', 'setTheme', 'layout', 'on', 'registerHover',
+        'setValue',
+        // pulp parity-found (#18) — `<Image src>` → ImageView via
+        // setImageSource. The prop-applier created the Image widget but
+        // never dispatched `src`, so every <img> rendered as the empty
+        // "IMG" placeholder. Mock-bridge captures the call for the unit test.
+        'setImageSource',
+        'setTheme', 'layout', 'on', 'registerHover',
         // pulp #1381 — registerPointer arms the bridge's on_pointer_event
         // callback for pointer-down/up/move/cancel events. Wheel goes
         // through a separate registerWheel because the bridge's wheel
@@ -383,7 +395,8 @@ export function createMockBridge(): MockBridge {
         'setClipPath', 'setMaskImage', 'setMask',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
-        'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',
+        'setSvgFill', 'setSvgFillRule', 'setSvgFillGradient',
+        'setSvgStroke', 'setSvgStrokeWidth',
         // pulp #1416 — SvgRect + SvgLine intrinsic surface
         'createSvgRect', 'setSvgRect',
         'createSvgLine', 'setSvgLine',

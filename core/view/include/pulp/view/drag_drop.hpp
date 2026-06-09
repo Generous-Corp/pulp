@@ -8,6 +8,8 @@
 
 namespace pulp::view {
 
+class View;
+
 // ── Drop data types ──────────────────────────────────────────────────────────
 
 struct DropData {
@@ -20,9 +22,52 @@ struct DropData {
     std::vector<std::uint8_t> custom_data; // For custom binary data
 };
 
-// ── Drop target interface ────────────────────────────────────────────────────
+// ── Drop receiver (view-tree drop handler) ───────────────────────────────────
+//
+// The extensible interface a View subclass mixes in to accept native drops
+// routed by the dispatch_* functions below:
+//
+//     class MyZone : public View, public DropReceiver { ... };
+//
+// The dispatch core finds receivers via dynamic_cast as it walks the view tree,
+// so a new drop-aware widget needs NO change to the dispatch core — that is the
+// extension point. This is the rich, typed surface (FileDropZone implements it).
+// For lightweight cases a view can instead set the View::on_drop std::function
+// (the JS-bridge convenience surface). See the dispatch contract below for how
+// the two interact.
+class DropReceiver {
+public:
+    virtual ~DropReceiver() = default;
 
-// Views implement this to accept drops
+    // A drag carrying `data` is hovering at `local` (this receiver's local
+    // coordinates). Return true to claim the hover (drives highlight state).
+    // Called on enter and on each move while over this receiver, so it must be
+    // idempotent. Default: decline.
+    virtual bool accept_drag(const DropData& data, Point local) {
+        (void)data;
+        (void)local;
+        return false;
+    }
+
+    // The drag left this receiver (moved away, exited the window, or dropped).
+    // Clear any highlight set by accept_drag.
+    virtual void leave_drag() {}
+
+    // Commit a drop at `local`. Return true if handled — a true return CONSUMES
+    // the drop (dispatch stops bubbling); false lets it fall through to an outer
+    // receiver / View::on_drop.
+    virtual bool accept_drop(const DropData& data, Point local) = 0;
+};
+
+// ── Legacy platform-registration drop target (macOS NSView) ──────────────────
+//
+// SEPARATE CONCERN from DropReceiver above. This is the platform-side
+// registration layer: register_drop_target() tells a native OS view (today only
+// the macOS NSView path in drag_drop_mac.mm) to advertise dragged types. It does
+// NOT route into the Pulp view tree. When macOS NSDraggingDestination delivery
+// is wired, this layer will feed the dispatch_* functions below and converge
+// with DropReceiver (tracked in the drag-drop hardening follow-up). New code
+// should implement DropReceiver, not DropTarget.
 class DropTarget {
 public:
     virtual ~DropTarget() = default;
@@ -51,8 +96,57 @@ struct DragSource {
 
 // ── Drag-drop registration ──────────────────────────────────────────────────
 
-// Register/unregister a native view for file drops (macOS NSView)
+// Register/unregister a native view for file drops (macOS NSView). See the
+// DropTarget note above — this is the platform-registration layer, not the
+// view-tree dispatch.
 bool register_drop_target(void* native_view, DropTarget& target);
 void unregister_drop_target(void* native_view);
+
+// ── Native → view-tree drop dispatch ─────────────────────────────────────────
+//
+// The bridge a platform drag-drop backend (SDL3 standalone drop events, Windows
+// IDropTarget, Linux XDND, macOS NSDraggingDestination) calls to route a native
+// drop into a Pulp view tree. Each function hit-tests `root` at the given
+// root-space point, then walks from the hit target up to `root` — exactly like
+// View::simulate_click resolves a click target.
+//
+// Dispatch contract (first-handler-wins, no double-dispatch): at each view from
+// the deepest hit up to the root, in order:
+//   1. if the view is a DropReceiver and accept_drop() returns true → consumed.
+//   2. else if the view has a View::on_drop std::function set → fire it,
+//      consumed. on_drop is the JS-bridge convenience surface; `type` is
+//      "file"/"text"/"custom" and a multi-file drop fires it once per path,
+//      with x/y in that view's local coordinates.
+// The first view that consumes the drop ends the walk; a view never receives the
+// drop through both surfaces.
+//
+// Coordinate space: `root_pos` is in `root`'s local (window/root) coordinates;
+// the platform backend owns any window→root viewport transform (e.g. HiDPI /
+// design-viewport scale) before calling in.
+//
+// Threading: UI thread only (mirrors the rest of the view input path).
+//
+// Hover state lives in a DragSession the *caller* owns — one per platform
+// backend / window, NOT a process global — so concurrent drags on separate
+// windows can't corrupt each other and the tracked pointer's lifetime is scoped
+// to the backend that brackets the drag (enter … (move)* … exit|drop).
+
+// Per-drag hover state owned by the platform backend (a member of the window
+// host / drop target). Reset between drags happens automatically via exit/drop.
+struct DragSession {
+    DropReceiver* hover = nullptr;  // receiver currently claiming hover, or null
+};
+
+// Hover lifecycle for visual feedback (DropReceiver highlight). Returns true if a
+// receiver claims the drag, or a View::on_drop handler is under the point.
+bool dispatch_drag_enter(View& root, DragSession& session, const DropData& data,
+                         Point root_pos);
+void dispatch_drag_move(View& root, DragSession& session, const DropData& data,
+                        Point root_pos);
+void dispatch_drag_exit(View& root, DragSession& session);
+
+// Commit a drop. Returns true if a view consumed it. Also clears any hover state.
+bool dispatch_drop(View& root, DragSession& session, const DropData& data,
+                   Point root_pos);
 
 } // namespace pulp::view

@@ -1,6 +1,7 @@
 // widget_bridge/widget_schema_api.cpp - widget schema and style preset registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -12,8 +13,10 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_schema_api() {
+    BridgeApiContext api{engine_};
+
     // setWidgetSchema(id, schemaJSON) -> apply declarative widget schema
-    engine_.register_function("setWidgetSchema", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWidgetSchema", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto json = args.get<std::string>(1, "");
         auto* v = widget(id);
@@ -26,7 +29,7 @@ void WidgetBridge::register_widget_schema_api() {
     });
 
     // setWidgetLottie(id, lottieJSON) -> store Lottie animation JSON on widget
-    engine_.register_function("setWidgetLottie", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWidgetLottie", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto json = args.get<std::string>(1, "");
         auto* v = widget(id);
@@ -40,7 +43,7 @@ void WidgetBridge::register_widget_schema_api() {
     });
 
     // seekWidgetLottie(id, normalizedTime) -> scrub Lottie to position (0-1)
-    engine_.register_function("seekWidgetLottie", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "seekWidgetLottie", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto t = static_cast<float>(args.get<double>(1, 0));
         auto* v = widget(id);
@@ -53,7 +56,7 @@ void WidgetBridge::register_widget_schema_api() {
     });
 
     // clearWidgetSchema(id) -> remove schema, restore default paint
-    engine_.register_function("clearWidgetSchema", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "clearWidgetSchema", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = widget(id);
         if (!v) return choc::value::Value();
@@ -65,7 +68,7 @@ void WidgetBridge::register_widget_schema_api() {
     });
 
     // saveStylePreset(name, object) -> persist style payload as JSON under temp storage
-    engine_.register_function("saveStylePreset", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "saveStylePreset", [](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         if (name.empty() || args.numArgs < 2 || !args[1]) return choc::value::createBool(false);
 
@@ -91,7 +94,7 @@ void WidgetBridge::register_widget_schema_api() {
     });
 
     // loadStylePreset(name) -> load persisted JSON object or null
-    engine_.register_function("loadStylePreset", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "loadStylePreset", [](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         if (name.empty()) return choc::value::Value();
 

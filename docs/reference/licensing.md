@@ -21,11 +21,11 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **Highway** | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | [github.com/google/highway](https://github.com/google/highway) |
 | **Mbed TLS** | Apache-2.0 (dual-licensed; Pulp uses the Apache-2.0 option) | Cryptographic primitives (SHA-256, RSA, AES) | [github.com/Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls) |
 | **miniz** | MIT | ZIP/GZIP compression | [github.com/richgel999/miniz](https://github.com/richgel999/miniz) |
-| **msdfgen** | MIT | Multi-channel SDF glyph generation (planned) | [github.com/Chlumsky/msdfgen](https://github.com/Chlumsky/msdfgen) |
+| **msdfgen** | MIT | Reserved for multi-channel SDF glyph generation | [github.com/Chlumsky/msdfgen](https://github.com/Chlumsky/msdfgen) |
 | **nanosvg** | zlib | SVG parsing and rasterization | [github.com/memononen/nanosvg](https://github.com/memononen/nanosvg) |
 | **pugixml** | MIT | XML parsing and generation | [github.com/zeux/pugixml](https://github.com/zeux/pugixml) |
 | **SheenBidi** | Apache-2.0 | Unicode Bidirectional Algorithm engine for Arabic / Hebrew / mixed-direction text in `core/canvas::BidiAnalyzer` (independent of system ICU) | [github.com/Tehreer/SheenBidi](https://github.com/Tehreer/SheenBidi) |
-| **TweetNaCl** | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures, future v2 license-key payloads | [tweetnacl.cr.yp.to](https://tweetnacl.cr.yp.to/) |
+| **TweetNaCl** | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | [tweetnacl.cr.yp.to](https://tweetnacl.cr.yp.to/) |
 | **yaml-cpp** | MIT | YAML frontmatter parser for the DESIGN.md import pipeline (gated to `--from designmd`) | [github.com/jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp) |
 | **Yoga** | MIT | Layout engine for Flexbox/Grid-style native UI | [github.com/facebook/yoga](https://github.com/facebook/yoga) |
 
@@ -94,7 +94,7 @@ Some optional integrations depend on separately licensed SDKs that Pulp does not
 |------|---------|---------|--------------|
 | **AAX SDK** | Separately licensed by Avid | Optional AAX plugin format support | Developer obtains it independently and points `PULP_AAX_SDK_DIR` at an out-of-tree SDK copy |
 | **ARA SDK** | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains it independently (`https://github.com/Celemony/ARA_SDK`), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
-| **ASIO SDK** | Proprietary (Steinberg) | Optional ASIO device I/O support (planned) | Developer obtains it independently; never bundled or exported by Pulp |
+| **ASIO SDK** | Proprietary (Steinberg) | Optional ASIO device I/O integration | Developer obtains it independently; never bundled or exported by Pulp |
 
 Pulp's MIT license does not grant any rights to these vendor SDKs or to any related Avid/PACE tooling.
 See [AAX Setup](../guides/aax.md) for the supported local workflow.
@@ -149,7 +149,7 @@ Pulp implements or builds on these open standards:
 
 | Project | License | What We Learned |
 |---------|---------|-----------------|
-| [Astral (uv, Ruff, ty)](https://astral.sh/) | Apache-2.0 / MIT | CI/CD security baseline, supply chain hardening, and release process discipline. Pulp adopts several practices from [their open-source security post](https://astral.sh/blog/open-source-security-at-astral). **Already in place:** branch protection on `main`, tag protection on `v*`, default read-only workflow tokens, immutable release identity via tag protection. **In progress / planned:** action SHA pinning via Renovate, immutable release artifacts (UI checkbox), Sigstore release attestations, `zizmor` workflow lint in CI. Tracked in the private `pulp-planning` submodule. |
+| [Astral (uv, Ruff, ty)](https://astral.sh/) | Apache-2.0 / MIT | CI/CD security baseline, supply chain hardening, and release process discipline. Pulp adopts several practices from [their open-source security post](https://astral.sh/blog/open-source-security-at-astral). Already in place: branch protection on `main`, tag protection on `v*`, default read-only workflow tokens, immutable release identity via tag protection. In progress: action SHA pinning via Renovate, immutable release artifacts, Sigstore release attestations, `zizmor` workflow lint in CI. |
 | [AudioKit](https://github.com/AudioKit/AudioKit) | MIT | Swift audio patterns, Apple platform integration |
 | [ELYSIUM by Julian Behrens](https://www.vst-design.com) | [Figma Community](https://www.figma.com/community/file/1476177446001979362) (design; not redistributed) | A real-world plugin UI we used to **harden Pulp's Figma design-importer**: faithful-vector SVG rendering and crop, knob/shape fidelity (indicator erasure, value-driven fills), and the source-detected native interactive overlays (search, dropdown, `< >` stepper, tabs). Used **only** as a private test reference — the design is not vendored, bundled, or shipped in Pulp, and nothing about it is hardcoded; the lessons are generalized. Thanks to Julian Behrens ([vst-design.com](https://www.vst-design.com)) for sharing it on the [Figma Community](https://www.figma.com/community/file/1476177446001979362). |
 | [iPlug2](https://github.com/iPlug2/iPlug2) | zlib-like | Multi-format adapter architecture, graphics abstraction |

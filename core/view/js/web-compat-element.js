@@ -555,6 +555,16 @@ function __replaySvgPathAttributes__(el) {
         }
         setSvgFill(el._id, fillVal);
     }
+    // fill-rule / fillRule — winding rule ("nonzero" | "evenodd").
+    // pulp #3656 — compound annular paths (a stroked ellipse lowered to
+    // `M…Z M…Z` by JUCE's SVGGraphicsContext) only render the hole under
+    // even-odd. Accept either the HTML hyphen spelling or the JSX
+    // camelCase spelling, mirroring stroke-width / strokeWidth above.
+    var fr = a["fill-rule"];
+    if (fr === undefined) fr = a.fillRule;
+    if (fr !== undefined && typeof setSvgFillRule === "function") {
+        setSvgFillRule(el._id, String(fr));
+    }
     // viewBox — inherited from the parent <svg>. The SVG spec attaches
     // viewBox to the outer <svg>, but the SvgPathWidget needs the (w,h)
     // pair to scale path coordinates into widget bounds. Walk up until
@@ -1027,7 +1037,13 @@ Element.prototype.setAttribute = function(name, value) {
     // and is a no-op when the widget isn't created yet — appendChild
     // re-runs the replay once the native node exists.
     else if (name === "width" || name === "height") {
-        if (typeof __replayMediaAttributes__ === "function") {
+        // <rect> uses width/height as geometry — route those to the
+        // SvgRect replay so post-mount resizes reach the native widget.
+        // Other tags (img/video/svg) keep the media-attr reservation path.
+        if (this.tagName === "RECT" &&
+            typeof __replaySvgRectAttributes__ === "function") {
+            __replaySvgRectAttributes__(this);
+        } else if (typeof __replayMediaAttributes__ === "function") {
             __replayMediaAttributes__(this);
         }
     }
@@ -1090,6 +1106,7 @@ Element.prototype.setAttribute = function(name, value) {
     // the replay flush from _attributes for the pre-mount case.
     else if (this.tagName === "PATH" &&
              (name === "d" || name === "stroke" || name === "fill" ||
+              name === "fill-rule" || name === "fillRule" ||
               name === "stroke-width" || name === "strokeWidth")) {
         if (this._nativeCreated) {
             if (name === "d" && typeof setSvgPath === "function") {
@@ -1098,11 +1115,40 @@ Element.prototype.setAttribute = function(name, value) {
                 setSvgStroke(this._id, String(value));
             } else if (name === "fill" && typeof setSvgFill === "function") {
                 setSvgFill(this._id, String(value));
+            } else if ((name === "fill-rule" || name === "fillRule") &&
+                       typeof setSvgFillRule === "function") {
+                // pulp #3656 — live winding-rule update on an existing path.
+                setSvgFillRule(this._id, String(value));
             } else if ((name === "stroke-width" || name === "strokeWidth") &&
                        typeof setSvgStrokeWidth === "function") {
                 var p = parseFloat(value);
                 if (p === p) setSvgStrokeWidth(this._id, p);
             }
+        }
+    }
+    // Raw <rect> / <line> live setAttribute parity with <path>: mount-time
+    // replay already runs from appendChild, but post-mount attribute
+    // mutations (x/y/fill/stroke/... ) were dropped for rect/line because
+    // only PATH was wired here. Re-run the replay helper, which reads the
+    // now-current this._attributes (setAttribute stores it above before
+    // dispatch). width/height for <rect> are handled in the media-attr
+    // branch above.
+    else if (this.tagName === "RECT" &&
+             (name === "x" || name === "y" || name === "fill" ||
+              name === "stroke" || name === "stroke-width" ||
+              name === "strokeWidth")) {
+        if (this._nativeCreated &&
+            typeof __replaySvgRectAttributes__ === "function") {
+            __replaySvgRectAttributes__(this);
+        }
+    }
+    else if (this.tagName === "LINE" &&
+             (name === "x1" || name === "y1" || name === "x2" ||
+              name === "y2" || name === "stroke" ||
+              name === "stroke-width" || name === "strokeWidth")) {
+        if (this._nativeCreated &&
+            typeof __replaySvgLineAttributes__ === "function") {
+            __replaySvgLineAttributes__(this);
         }
     }
 };

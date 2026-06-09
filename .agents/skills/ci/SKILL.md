@@ -81,6 +81,36 @@ Slice 6 (#551).
   build/packaging/appcast-generation regression surfaces BEFORE a real tag.
   Keep it credential-free (notarize/sign stay in the real path) so it can run
   on a schedule without secrets.
+- **Release-runner Xcode must be pinned (C++20 parity).** `sign-and-release.yml`
+  runs on GitHub-hosted `macos-14`, whose DEFAULT Xcode is 15.4 — its Apple clang
+  lacks C++20 **P0960** (parenthesized aggregate init, `Type p(arg)` for a
+  ctor-less aggregate). The self-hosted PR `macos` lane uses a much newer clang
+  that accepts it, so a CLI/import TU compiled on every PR but FAILED only in the
+  release build — silently breaking GitHub Releases v0.372–v0.391 (tags kept
+  being cut; only the release-cadence watchdog noticed). The job now selects the
+  newest installed Xcode 16.x via `xcode-select` (shell, no third-party action so
+  an actions-allowlist can't hold the release hostage), restoring C++20 parity
+  with the PR lane. **When a release/packaging workflow builds C++ on a GitHub-
+  hosted macOS runner, pin a modern Xcode** — the default lags and silently
+  diverges from the PR toolchain. (Code-side defense: always brace aggregate init
+  `Type p{arg}` in CLI/import code — see the import-design skill.)
+- **The release build is NOT a test gate.** `sign-and-release.yml` no longer
+  re-runs the unit suite (`ctest`). By the time a commit is tagged it has already
+  passed the FULL suite on the PR/merge gate (self-hosted lane, real
+  GPU/display/iOS-SDK). Re-running on the HEADLESS GitHub-hosted release runner is
+  redundant and yields false failures from environment-only tests (Skia-raster
+  screenshot → empty, cmake-require-gpu → timeout, cmake-ios-hostapp-links) that
+  pass on real hardware — that blocked Releases AFTER the Xcode-pin let the build
+  through. Principle: tests gate at PR on representative hardware; the release
+  builds + signs + notarizes + packages the validated commit (the Build step is
+  the release-config compile smoke; `validate.yml` gates format validators). The
+  replacement gate is a built-ARTIFACT smoke (the "Smoke built plugins" step):
+  it `nm`-reads each built `build/CLAP/*.clap` and FAILS only if a Mach-O was
+  produced without its `clap_entry` C-ABI export (a real linkage regression),
+  warning-and-passing when no artifact is found (a path/setup miss must never
+  re-block the release). Static symbol read = NO execution, so it's headless-safe
+  — never use dlopen+init (loads GPU/Skia libs the headless runner lacks) or
+  re-run the hardware-dependent ctest suite.
 - `.github/workflows/header-self-contained.yml` (pulp #2576) is a BLOCKING gate
   for the "compiles on Apple Clang, breaks on Linux" transitive-include class
   (e.g. `uint32_t` without `#include <cstdint>` — broke the v0.197.4 release).
@@ -155,6 +185,24 @@ unit tests still pass. It is non-gating by design; do not promote it to
 a required check until a self-hosted Linux runner with pinned osxcross
 + private SDK is provisioned and the matching full-build job lands.
 
+### Advisory compile-gate: `windows-midi2-gate`
+
+`build.yml`'s `windows-midi2-gate` job (`continue-on-error: true`, NOT a
+required check, NOT part of the build matrix) compile-verifies Pulp's
+opt-in WinRT MIDI 2.0 backend (`core/midi/platform/win/winrt_midi_device.cpp`,
+gated by `PULP_HAS_WINRT_MIDI`). That backend consumes the
+`Microsoft.Windows.Devices.Midi2` C++/WinRT projection, which ships
+out-of-band with the Windows MIDI Services SDK — a GitHub-only NuGet, NOT in
+the base Windows SDK, so no other lane can compile it. The job provisions it
+through Microsoft's official **vcpkg port** `microsoft-windows-devices-midi2`
+(it downloads the SDK NuGet, runs cppwinrt to generate the projection headers,
+and exports the `Microsoft::Windows::Devices::Midi2` CMake target). Pins +
+rationale live in `tools/ci/midi2/` (`vcpkg.json` + `README.md`). The default
+Windows build never sets `PULP_HAS_WINRT_MIDI`, so this is purely additive.
+Watch points: the port requires Windows SDK >= 10.0.26100.0 (windows-latest is
+right at that floor), and the drafted backend's API surface may still drift
+from the real `winrt::Microsoft::Windows::Devices::Midi2` namespace.
+
 ## PR Review Thread Hygiene
 
 Before opening a follow-up PR or declaring a phase complete, sweep review
@@ -199,7 +247,11 @@ in `tools/shipyard.toml`). It:
    or a `Skill-Update:` trailer.
 2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK,
    Claude plugin, and marketplace versions consistently, honoring any
-   `Version-Bump:` trailers.
+   `Version-Bump:` trailers. This applies `patch`/`minor`/`major` bumps —
+   **including `patch`, which every `fix:` PR gets** (fixed in pulp #3626;
+   before that, patch bumps were silently skipped and `fix:`/`feat:` PRs
+   stranded at the gate, forcing a manual `chore: bump versions` commit — no
+   longer needed).
 3. Runs the no-build source-contract registry gate:
    `tools/import-validation/check-source-contracts.py --strict` plus
    `tools/import-validation/test_source_contracts.py`. This mirrors the
@@ -470,6 +522,7 @@ shipyard cloud run build <branch>         # dispatch the GHA build workflow
 shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
 shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
 shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
+shipyard ship --pr N --base main --adopt-head     # recover "ship state SHA drift" after a force-push (Shipyard #346): adopt the current branch head + re-validate, instead of re-shipping from scratch
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
 shipyard update --check --json            # installed vs latest Shipyard drift report
 shipyard update                           # apply latest stable Shipyard
@@ -1701,10 +1754,15 @@ preflight, source-prep, cleanup, and artifact-publishing contracts.
   `resolve_workflow_dispatch_defaults`, `summarize_workflow_provider_defaults`,
   `resolve_cli_dispatch_field_values`). Pure resolution — the actual
   subprocess `gh-api` dispatch still lives in `local_ci.py`.
+- `evidence_index.py` — owns the local-CI evidence index: result-to-evidence
+  normalization, latest passing target records, evidence index persistence,
+  branch/SHA grouping, and evidence summaries. Queue mutation, runner state,
+  result creation, and target execution stay out of this module.
 
 All original symbols are re-exported from `local_ci.py`, so any old
 `mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
-`mod.file_lock(...)` / `mod.BUILTIN_GITHUB_WORKFLOWS` test patch keeps
+`mod.file_lock(...)` / `mod.BUILTIN_GITHUB_WORKFLOWS` /
+`mod.collect_evidence_groups(...)` test patch keeps
 working — but new code should import directly from the sibling module
 to avoid the god-module dependency.
 

@@ -23,6 +23,12 @@ struct DeviceInfo {
     bool is_default_output = false;
 };
 
+// WASAPI (Windows) sharing model. `shared` routes through the system audio
+// engine (default — coexists with other apps); `exclusive` takes sole ownership
+// of the endpoint for lower latency. Non-Windows backends (CoreAudio / ALSA /
+// JACK) ignore this and always use their native path.
+enum class ShareMode { shared, exclusive };
+
 // Configuration for opening a device
 struct DeviceConfig {
     std::string device_id;       // Empty = default device
@@ -30,6 +36,17 @@ struct DeviceConfig {
     int buffer_size = 256;
     int input_channels = 0;
     int output_channels = 2;
+    ShareMode share_mode = ShareMode::shared;  // Windows WASAPI only; see above
+
+    // Windows WASAPI only: opt into the shared-mode low-latency path
+    // (IAudioClient3::InitializeSharedAudioStream at the engine's minimum
+    // period). Only honored when `share_mode == ShareMode::shared`; ignored
+    // in exclusive mode (which already drives at the device minimum period)
+    // and on every non-Windows backend. Defaults false so existing callers
+    // and other backends are unaffected. If IAudioClient3 is unavailable or
+    // the low-latency init fails, the backend honestly degrades to the
+    // standard shared-mode Initialize at the requested buffer size.
+    bool low_latency = false;
 };
 
 // Audio callback context — passed to the render function

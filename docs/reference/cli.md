@@ -1250,28 +1250,26 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, and drives the same watch + rebuild + screencap loop as `pulp dev` — but pinned to one platform's toolchain so the slow cross-platform configure paths (Skia/Dawn/threejs FetchContent) can be skipped when other platforms add unrelated cost.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then drives the same watch + rebuild + screencap loop as `pulp dev` using the current project's normal build configuration. Surrounding tooling can read the focus marker when it needs platform-specific behavior.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host
-pulp loop --platform=macos          # Pin to macOS explicitly
-pulp loop --platform=linux --test   # Pin + run tests on every save
+pulp loop --platform=macos          # Mark macOS focus explicitly
+pulp loop --platform=linux --test   # Mark Linux focus + run tests on every save
 pulp loop --status                  # Print the current focus state
 pulp loop --off                     # Restore cross-platform mode
-pulp loop --watch-issues 924,927    # Poll PR state for named issues (deferred)
-pulp loop --ar-swap-from feat/x     # ABI-checked .o swap (deferred)
 ```
 
 Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--platform=<macos\|linux\|windows>` | Override the auto-detected host platform |
+| `--platform=<macos\|linux\|windows>` | Override the auto-detected focus marker |
 | `--off` | Restore cross-platform mode by clearing the focus marker |
 | `--status` | Print the current focus state and exit |
 | `--no-watch` | Persist focus state and exit without entering the watch loop |
-| `--watch-issues N1,N2,...` | Deferred: poll `gh pr list` for state flips on PRs referencing the named issues |
-| `--ar-swap-from <ref>` | Deferred: ABI-checked `.o` swap from another worktree |
+| `--watch-issues N1,N2,...` | Recognized compatibility flag; prints a diagnostic and continues the normal loop unless `--no-watch` is also passed |
+| `--ar-swap-from <ref>` | Recognized compatibility flag; prints a diagnostic and continues the normal loop unless `--no-watch` is also passed |
 | `--test`, `-t` | Run tests after each successful build |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Run quick plugin dlopen validation after build |
@@ -1354,7 +1352,7 @@ Subcommands:
 |------------|-------------|
 | `detect <dir>` | Scan the directory against the known-frameworks markers and print ranked candidates (framework id + confidence + evidence) plus the install hint for the top match. Works with **no importer installed**. |
 | `inspect --from <fw> <dir>` | Resolve the importer (tool registry or `--importer-cmd`) and run its SPI `analyze` verb to produce a ProjectIR. When no importer is resolvable, prints the install hint and exits non-zero. |
-| `emit --from <fw> <dir> --output <out>` | Runs `analyze` to a ProjectIR. Full scaffold emission (plan + SDK file materialisation) lands in a later slice; this slice persists the validated ProjectIR. |
+| `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies carry an absolute `copy_from`); the SDK materialises them, runs a clean-room output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
 
 `inspect` / `emit` flags:
 
@@ -1367,8 +1365,13 @@ Subcommands:
 | `--report <file.md>` | `inspect`: write a human-readable report |
 | `--output <dir>` | `emit`: scaffold output directory |
 | `--importer-cmd <cmd>` | Override importer resolution with an explicit command string |
+| `--accept-importer-terms` | Accept the importer's terms of use non-interactively (CI). The acceptance is still recorded under `~/.pulp`. |
+
+**Accept-to-run terms gate.** Before `inspect` / `emit` drives an importer, the user must give explicit affirmative acceptance of that importer's terms of use (mirrors `pulp add --accept-license`). The terms body is runtime DATA carried by the add-on importer (the SDK names no vendor and ships no terms body of its own); the SDK surfaces it, then records acceptance under `~/.pulp/importer-terms-accepted.json` keyed by importer id + a hash of the terms text. A changed terms version (new hash) re-prompts. Interactively the gate is a type-to-accept prompt; in CI pass `--accept-importer-terms`. Without a terminal and without the flag, the gate blocks with a non-zero exit rather than hanging. An importer that declares no terms passes the gate transparently.
 
 The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
+
+**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + TODO list) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
 
 ### identity
 
@@ -1398,13 +1401,19 @@ pulp tool list                      # Show every registered tool and its install
 pulp tool install clap-validator    # Download and install one tool
 pulp tool install --all             # Install every tool available on the current platform
 pulp tool install <id> --force      # Reinstall even if already present
-pulp tool uninstall <id>            # Remove a pulp-managed tool install
+pulp tool install <importer>        # Install a framework importer add-on (checksummed, version-window-checked)
+pulp tool install <importer> --from <path|file://...>  # Install from a local package (offline / pinned artifact)
+pulp tool uninstall <id>            # Remove a pulp-managed tool, or an importer (also removes its skill)
 pulp tool path <id>                 # Print the absolute path to the installed tool's binary
 pulp tool run <id> [args...]        # Run the installed tool with pass-through arguments
 pulp tool doctor                    # Health check: which tools are installed, which are missing, which are unavailable on this platform
+
+pulp add <importer>                 # Alias for `pulp tool install <importer>`
 ```
 
-Install methods come from the registry — today `binary_download` (pinned release artifact) and `python_pip` (pipx-style isolated install). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+
+**Framework importers.** An importer is a vendor-specific add-on (described in the tool-registry with `category: "importer"`) that drives Pulp's JSON-over-stdio import SPI. Installing one is gated three ways: the importer's `[sdk_min, sdk_max]` must include the running SDK and its `[spi_min, spi_max]` window must overlap the SDK's supported import-SPI window (a mismatch fails loudly with an "upgrade Pulp" / "upgrade the importer" message); the fetched or local package's `sha256` must match the digest pinned in the registry (a mismatch refuses to install); and the importer's bundled `SKILL.md` is installed into `~/.agents/skills/<importer>/` on install and removed on uninstall. Each install is recorded under `~/.pulp/importers/<id>.json` (id, version, sha256, SDK version, SPI window, paths, terms metadata) so uninstall and version checks work, and so the importer-terms accept-gate composes with the same record. `pulp add <importer>` routes to the same install path. Use `--from <path|file://...>` to install from a local package rather than the registry URL (offline installs, pinned artifacts, CI). The producer side — how prebuilt per-platform artifacts are built, hosted, pinned per SDK release, and signed/notarized, and the bundled-libclang choice — is documented in [framework-importer-packaging.md](framework-importer-packaging.md); this CLI consumes that contract, it does not decide it.
 
 ### upgrade
 

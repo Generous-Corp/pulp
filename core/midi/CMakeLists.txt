@@ -66,16 +66,78 @@ elseif(WIN32)
     target_link_libraries(pulp-midi PRIVATE
         winmm
     )
-    # Workstream 02 #245 — opt-in WinRT MIDI 2.0 backend.
-    # Enable with -DPULP_HAS_WINRT_MIDI=ON once Windows 11 SDK 10.0.22621+
-    # and the cppwinrt tool are installed. Linker adds the WinRT import
-    # libs; the TU itself compiles empty unless the flag is set.
+    # Opt-in WinRT MIDI 2.0 (UMP) backend — Windows MIDI Services SDK.
+    #
+    # Enable with -DPULP_HAS_WINRT_MIDI=ON. The backend consumes the
+    # Microsoft.Windows.Devices.Midi2 C++/WinRT projection, which ships
+    # out-of-band with the Windows MIDI Services SDK (NuGet
+    # Microsoft.Windows.Devices.Midi2 — GitHub-only, NOT on nuget.org) — it
+    # is not part of the base Windows SDK. The TU compiles to a single
+    # fallback stub unless the flag is set, so leaving the flag off keeps the
+    # default build free of the out-of-band Midi2 projection dependency.
+    #
+    # Provisioning the projection (the gating dependency). The CI lane uses
+    # the official Microsoft vcpkg port `microsoft-windows-devices-midi2`,
+    # which downloads the SDK NuGet, runs cppwinrt to generate the projection
+    # headers (winrt/Microsoft.Windows.Devices.Midi2*.h) plus the bootstrap
+    # initializer header
+    # (winmidi/init/Microsoft.Windows.Devices.Midi2.Initialization.hpp), and
+    # exports an IMPORTED CMake target Microsoft::Windows::Devices::Midi2.
+    # The port requires Windows SDK >= 10.0.26100.0 and cppwinrt as a host
+    # dependency. See tools/ci/midi2/ for the manifest and the
+    # `windows-midi2-gate` job in .github/workflows/build.yml for the wiring.
+    #
+    # Two consumption modes:
+    #   1. vcpkg (preferred — what CI uses): configure with the vcpkg
+    #      toolchain so find_package(microsoft-windows-devices-midi2 CONFIG)
+    #      resolves the Microsoft::Windows::Devices::Midi2 IMPORTED target,
+    #      which carries the projection include dirs transitively.
+    #   2. Manual: set -DPULP_WINRT_MIDI_INCLUDE=<dir> to a directory that
+    #      already contains winrt/ and winmidi/ projection headers (e.g. a
+    #      hand-run cppwinrt output). Pulp then links the OS umbrella import
+    #      libs directly (WindowsApp + runtimeobject).
     if(PULP_HAS_WINRT_MIDI)
         target_compile_definitions(pulp-midi PRIVATE PULP_HAS_WINRT_MIDI=1)
-        # runtimeobject is the C++/WinRT activation runtime; future work
-        # will add the generated headers dir to the include path here.
-        target_link_libraries(pulp-midi PRIVATE runtimeobject)
-        message(STATUS "Pulp: WinRT MIDI 2.0 backend enabled")
+
+        # Prefer the vcpkg IMPORTED target — the only path that carries the
+        # generated projection headers in one place, matching microsoft/MIDI's
+        # own cpp-winrt-cmake sample.
+        find_package(microsoft-windows-devices-midi2 CONFIG QUIET)
+        if(microsoft-windows-devices-midi2_FOUND
+                AND TARGET Microsoft::Windows::Devices::Midi2)
+            target_link_libraries(pulp-midi PRIVATE
+                Microsoft::Windows::Devices::Midi2)
+            # OneCoreUap.lib is the umbrella import library the SDK sample
+            # links for WinRT activation (init_apartment, activation
+            # factories, event tokens) on desktop. cppwinrt's CONFIG package
+            # adds its fast_forward library during configure, so it is not
+            # listed here.
+            target_link_libraries(pulp-midi PRIVATE OneCoreUap)
+            message(STATUS
+                "Pulp: WinRT MIDI 2.0 backend enabled (vcpkg projection)")
+        elseif(PULP_WINRT_MIDI_INCLUDE)
+            if(NOT EXISTS "${PULP_WINRT_MIDI_INCLUDE}")
+                message(FATAL_ERROR
+                    "PULP_HAS_WINRT_MIDI=ON with PULP_WINRT_MIDI_INCLUDE="
+                    "'${PULP_WINRT_MIDI_INCLUDE}' but that directory does not "
+                    "exist. Point it at a cppwinrt projection output "
+                    "containing winrt/Microsoft.Windows.Devices.Midi2.h and "
+                    "winmidi/init/Microsoft.Windows.Devices.Midi2.Initialization.hpp.")
+            endif()
+            target_include_directories(pulp-midi PRIVATE
+                "${PULP_WINRT_MIDI_INCLUDE}")
+            target_link_libraries(pulp-midi PRIVATE WindowsApp runtimeobject)
+            message(STATUS
+                "Pulp: WinRT MIDI 2.0 backend enabled "
+                "(manual projection: ${PULP_WINRT_MIDI_INCLUDE})")
+        else()
+            message(FATAL_ERROR
+                "PULP_HAS_WINRT_MIDI=ON but the Microsoft.Windows.Devices.Midi2 "
+                "projection was not found. Either configure with the vcpkg "
+                "toolchain and the microsoft-windows-devices-midi2 port "
+                "installed (preferred — see tools/ci/midi2/README.md), or set "
+                "-DPULP_WINRT_MIDI_INCLUDE=<cppwinrt-output-dir>.")
+        endif()
     endif()
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     target_sources(pulp-midi PRIVATE
