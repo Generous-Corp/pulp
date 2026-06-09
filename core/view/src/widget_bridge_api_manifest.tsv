@@ -180,9 +180,9 @@ canvasRestore	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasTranslate	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasScale	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasRotate	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
-setStateStyle	css_style	function	core/view/src/widget_bridge.cpp
-setEnabled	css_style	function	core/view/src/widget_bridge.cpp
-setDebugPaint	css_style	function	core/view/src/widget_bridge.cpp
+setStateStyle	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
+setEnabled	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
+setDebugPaint	css_style	function	core/view/src/widget_bridge/style_state_api.cpp
 setColorToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 setDimensionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 setTextTransform	typography	function	core/view/src/widget_bridge/typography_api.cpp

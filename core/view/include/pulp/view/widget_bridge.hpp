@@ -331,6 +331,7 @@ private:
     void register_widget_style_filter_clip_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_style_blend_api();
     void register_widget_style_rn_compat_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_state_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_style_background_repeat_api();
     void register_widget_style_mask_object_api();
     void register_widget_style_background_subproperty_api();
