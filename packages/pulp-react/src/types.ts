@@ -532,10 +532,20 @@ export interface SvgPathProps extends BaseProps {
     /// two tokens become the (w, h) tuple. Tokens may be space- or
     /// comma-separated.
     viewBox?: [number, number] | string;
-    /// Fill color as hex (`#rrggbb` / `#rrggbbaa`) or `"none"`. Defaults
-    /// to the SvgPathWidget's internal default (transparent + no stroke
-    /// = invisible). Pass `"none"` to clear an inherited fill.
+    /// Fill color as hex (`#rrggbb` / `#rrggbbaa`) or `"none"`. Default
+    /// is opaque black (matches the SVG `<path>` default of
+    /// `fill="black"` — the SvgPathWidget fills with nonzero black when
+    /// no `fill` is set). Pass `"none"` to render the path unfilled
+    /// (stroke-only, or invisible if no stroke is set either).
     fill?: string;
+    /// Fill winding rule, mirroring SVG's `fill-rule`. Defaults to
+    /// `"nonzero"` (SVG / Canvas2D default). Use `"evenodd"` for
+    /// compound annular paths — e.g. a stroked ellipse that a framework
+    /// has lowered to a two-subpath `M…Z M…Z` fill (JUCE's
+    /// `SVGGraphicsContext` does this for `Graphics::drawEllipse`); only
+    /// even-odd winding renders the ring's hole, where nonzero paints a
+    /// solid disc. pulp #3656.
+    fillRule?: 'nonzero' | 'evenodd';
     /// Stroke color as hex or `"none"`.
     stroke?: string;
     /// Stroke width in widget-local units. Defaults to 1.

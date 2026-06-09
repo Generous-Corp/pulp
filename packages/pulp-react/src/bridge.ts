@@ -395,7 +395,7 @@ export function createMockBridge(): MockBridge {
         'setClipPath', 'setMaskImage', 'setMask',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
-        'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',
+        'setSvgFill', 'setSvgFillRule', 'setSvgStroke', 'setSvgStrokeWidth',
         // pulp #1416 — SvgRect + SvgLine intrinsic surface
         'createSvgRect', 'setSvgRect',
         'createSvgLine', 'setSvgLine',

@@ -492,6 +492,15 @@ Spec walk:
 
 The `<SvgPath>` intrinsic surfaces a typed JSX face for
 `createSvgPath` + `setSvgPath` + `setSvgViewBox` + `setSvgFill` +
-`setSvgStroke` + `setSvgStrokeWidth`. Use this for rendered vector
-graphics — inline `<svg>` in DOM-lite (`html/svg`) is a layout-leaf
-placeholder only.
+`setSvgFillRule` + `setSvgStroke` + `setSvgStrokeWidth`. Use this for
+rendered vector graphics — inline `<svg>` in DOM-lite (`html/svg`) is a
+layout-leaf placeholder only.
+
+`fillRule` mirrors SVG's `fill-rule`
+(`nonzero` | `evenodd`). Default `nonzero` matches the SVG / Canvas2D
+default; `evenodd` is required for compound annular paths — e.g. a
+stroked ellipse that a framework lowers to a two-subpath `M…Z M…Z`
+fill (JUCE's `SVGGraphicsContext` does this for
+`Graphics::drawEllipse`) only renders the ring's hole under even-odd
+winding. The raw `<path>` web-compat path also accepts the hyphenated
+`fill-rule` attribute.

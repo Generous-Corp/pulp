@@ -1,9 +1,10 @@
 // Test for pulp #994 — @pulp/react SvgPath intrinsic.
 //
 // The C++ side has shipped SvgPathWidget + bridge handlers (createSvgPath,
-// setSvgPath, setSvgViewBox, setSvgFill, setSvgStroke, setSvgStrokeWidth)
-// since v0.61.0 (#965/#991). This wires the React-side intrinsic so JSX
-// `<SvgPath d="..." viewBox={[w,h]} fill="#fff" stroke="#000" strokeWidth={1} />`
+// setSvgPath, setSvgViewBox, setSvgFill, setSvgFillRule, setSvgStroke,
+// setSvgStrokeWidth) since v0.61.0 (#965/#991; fillRule added in #3656).
+// This wires the React-side intrinsic so JSX
+// `<SvgPath d="..." viewBox={[w,h]} fill="#fff" fillRule="evenodd" stroke="#000" strokeWidth={1} />`
 // reaches the bridge.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -97,6 +98,27 @@ describe('@pulp/react SvgPath intrinsic (pulp #994)', () => {
         expect(fns.sort()).toEqual([
             'setSvgFill', 'setSvgPath', 'setSvgStroke', 'setSvgStrokeWidth', 'setSvgViewBox',
         ]);
+    });
+
+    it('forwards fillRule to setSvgFillRule (pulp #3656)', () => {
+        applyAllProps(instance('icon7b', 'SvgPath', {
+            d: 'M0 0 L10 0 L10 10 Z M2 2 L8 2 L8 8 Z',
+            fillRule: 'evenodd',
+        }));
+        const setFR = bridge.calls.filter((c) => c.fn === 'setSvgFillRule');
+        expect(setFR.length).toBe(1);
+        expect(setFR[0].args).toEqual(['icon7b', 'evenodd']);
+    });
+
+    it('re-applies fillRule on commitUpdate when it changes (pulp #3656)', () => {
+        applyChangedProps(
+            instance('icon7c', 'SvgPath', {}),
+            { d: 'M0 0 L1 1', fillRule: 'nonzero' },
+            { d: 'M0 0 L1 1', fillRule: 'evenodd' },
+        );
+        const setFR = bridge.calls.filter((c) => c.fn === 'setSvgFillRule');
+        expect(setFR.length).toBe(1);
+        expect(setFR[0].args).toEqual(['icon7c', 'evenodd']);
     });
 
     it('commitUpdate replaces only changed props', () => {

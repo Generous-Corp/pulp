@@ -347,6 +347,61 @@ TEST_CASE("SvgPathWidget paint emits stroke_path when stroke is set",
     REQUIRE(stroke_idx >= 0);
 }
 
+TEST_CASE("SvgPathWidget fill-rule defaults to nonzero and round-trips",
+          "[svg_path][issue-3656]") {
+    SvgPathWidget w;
+    REQUIRE(w.fill_rule() == pulp::canvas::FillRule::nonzero);
+    w.set_fill_rule(pulp::canvas::FillRule::evenodd);
+    REQUIRE(w.fill_rule() == pulp::canvas::FillRule::evenodd);
+    w.set_fill_rule(pulp::canvas::FillRule::nonzero);
+    REQUIRE(w.fill_rule() == pulp::canvas::FillRule::nonzero);
+}
+
+TEST_CASE("SvgPathWidget paint threads fill-rule to fill_current_path",
+          "[svg_path][issue-3656]") {
+    // A compound annular path (outer + inner subpath, the shape JUCE's
+    // SVGGraphicsContext emits for a stroked ellipse). Under nonzero the
+    // inner subpath fills solid; under even-odd it cuts the ring's hole.
+    // The widget itself just has to forward the rule — RecordingCanvas
+    // captures it in fill_current_path's f[0] (0 = nonzero, 1 = evenodd).
+    const char* annulus =
+        "M 0 5 A 5 5 0 1 0 10 5 A 5 5 0 1 0 0 5 Z "
+        "M 2 5 A 3 3 0 1 0 8 5 A 3 3 0 1 0 2 5 Z";
+
+    SECTION("default nonzero is forwarded as f[0]==0") {
+        SvgPathWidget w;
+        w.set_bounds({0, 0, 10, 10});
+        w.set_path(annulus);
+        RecordingCanvas rc;
+        w.paint(rc);
+        int fill_idx = -1;
+        for (size_t i = 0; i < rc.commands().size(); ++i) {
+            if (rc.commands()[i].type == DrawCommand::Type::fill_current_path) {
+                fill_idx = static_cast<int>(i);
+            }
+        }
+        REQUIRE(fill_idx >= 0);
+        REQUIRE(rc.commands()[fill_idx].f[0] == 0.0f);
+    }
+
+    SECTION("evenodd is forwarded as f[0]==1") {
+        SvgPathWidget w;
+        w.set_bounds({0, 0, 10, 10});
+        w.set_path(annulus);
+        w.set_fill_rule(pulp::canvas::FillRule::evenodd);
+        RecordingCanvas rc;
+        w.paint(rc);
+        int fill_idx = -1;
+        for (size_t i = 0; i < rc.commands().size(); ++i) {
+            if (rc.commands()[i].type == DrawCommand::Type::fill_current_path) {
+                fill_idx = static_cast<int>(i);
+            }
+        }
+        REQUIRE(fill_idx >= 0);
+        REQUIRE(rc.commands()[fill_idx].f[0] == 1.0f);
+    }
+}
+
 TEST_CASE("SvgPathWidget paint with no path data emits nothing",
           "[svg_path][issue-965]") {
     SvgPathWidget w;

@@ -95,6 +95,22 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
+    // pulp #3656 - fill-rule (nonzero | evenodd) for SvgPathWidget.
+    // JUCE's SVGGraphicsContext lowers a stroked ellipse to a compound
+    // annular `M…Z M…Z` fill that only renders the ring's hole under
+    // even-odd winding; surfacing the prop lets a captured editor ship
+    // those paths verbatim. SvgPath-only - SvgRect / SvgLine have no
+    // compound-fill case, so the bridge fn is a no-op for them.
+    register_bridge_function(api, "setSvgFillRule", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto rule = args.get<std::string>(1, "");
+        if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
+            w->set_fill_rule(rule == "evenodd" ? canvas::FillRule::evenodd
+                                               : canvas::FillRule::nonzero);
+        }
+        return choc::value::Value();
+    });
+
     register_bridge_function(api, "setSvgStroke", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
