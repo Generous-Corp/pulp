@@ -144,6 +144,13 @@ through separate RT-to-control queues with explicit drop counters. The queue
 primitive does not mutate `SignalGraph` directly; graph v2 and adapter
 migration code consume these commands against their active snapshot policy.
 
+`pulp::host::GraphRuntimePlan` is the control-thread topology compiler for
+graph v2 work. It turns sparse node IDs into dense node/connection arrays,
+precomputes inbound/outbound connection ranges, rejects over-limit graphs,
+validates ports, and refuses cycles unless a connection is explicitly marked as
+feedback. Build or rebuild plans off the audio thread, then publish immutable
+snapshots to realtime code.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -156,5 +163,7 @@ migration code consume these commands against their active snapshot policy.
   — the deterministic multi-block render harness.
 * [`core/host/include/pulp/host/graph_runtime_queue.hpp`](../../core/host/include/pulp/host/graph_runtime_queue.hpp)
   — the graph command/event/MIDI handoff queues.
+* [`core/host/include/pulp/host/graph_runtime_plan.hpp`](../../core/host/include/pulp/host/graph_runtime_plan.hpp)
+  — dense graph topology plans and bounded validation.
 * sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
   and #29 (don't deref atomics per sample).

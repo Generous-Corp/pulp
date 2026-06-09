@@ -10,6 +10,7 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
+    src/graph_runtime_plan.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
     src/scan_blacklist.cpp
