@@ -48,6 +48,7 @@ graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
 bool GraphRuntimeSnapshot::reset(
     graph::GraphRuntimePlan plan,
     std::span<const GraphRuntimeNodeBinding> bindings) {
+    clear();
     if (bindings.size() != plan.nodes.size()) return false;
     if (plan.processing_order_indices.size() != plan.nodes.size()) return false;
     for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {

@@ -266,6 +266,29 @@ TEST_CASE("GraphRuntimeSnapshot validates binding node identity",
     REQUIRE(snapshot.node_count() == 0);
 }
 
+TEST_CASE("GraphRuntimeSnapshot clears stale state after failed reset",
+          "[format][graph-runtime][executor]") {
+    const std::array nodes = {
+        node(10, 0, 0),
+    };
+    const std::array valid_bindings = {
+        GraphRuntimeNodeBinding{10, record_visit, nullptr, true},
+    };
+    auto snapshot = make_snapshot(nodes, {}, valid_bindings);
+    REQUIRE(snapshot.node_count() == 1);
+
+    auto plan = pulp::graph::build_graph_runtime_plan(nodes, {});
+    REQUIRE(plan.ok());
+    const std::array invalid_bindings = {
+        GraphRuntimeNodeBinding{99, record_visit, nullptr, true},
+    };
+
+    REQUIRE_FALSE(snapshot.reset(std::move(plan.plan), invalid_bindings));
+    REQUIRE(snapshot.valid());
+    REQUIRE(snapshot.node_count() == 0);
+    REQUIRE(snapshot.bindings().empty());
+}
+
 TEST_CASE("GraphRuntimeExecutor distinguishes optional and required missing processors",
           "[format][graph-runtime][executor]") {
     const std::array nodes = {
