@@ -39,11 +39,17 @@
 // WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
 // macros don't collide with std::min/std::max or Skia (#384).
 #include <pulp/platform/win32_sane.hpp>
+#include <ole2.h>        // OleInitialize, RegisterDragDrop, IDropTarget
+#include <shellapi.h>    // DragQueryFileW, HDROP, CF_HDROP
+
+#include <pulp/view/drag_drop.hpp>
 
 #include <atomic>
+#include <cwchar>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace pulp::view {
@@ -81,6 +87,131 @@ ATOM ensure_window_class() {
     return atom;
 }
 
+// UTF-16 → UTF-8 for dropped text / paths.
+std::string wide_to_utf8(const wchar_t* w, int wlen) {
+    if (!w || wlen <= 0) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, wlen, nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return {};
+    std::string out(static_cast<size_t>(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w, wlen, out.data(), n, nullptr, nullptr);
+    return out;
+}
+
+// Pull a DropData out of an OLE IDataObject (files take priority over text,
+// matching the SDL + macOS producers).
+DropData extract_idata_drop(IDataObject* data) {
+    DropData out;
+    if (!data) return out;
+
+    // CF_HDROP — a list of file paths.
+    FORMATETC fmt_files{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM stg{};
+    if (data->GetData(&fmt_files, &stg) == S_OK) {
+        if (auto hdrop = static_cast<HDROP>(GlobalLock(stg.hGlobal))) {
+            const UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+            out.type = DropData::Type::files;
+            for (UINT i = 0; i < count; ++i) {
+                const UINT len = DragQueryFileW(hdrop, i, nullptr, 0);
+                std::wstring buf(len + 1, L'\0');
+                const UINT got = DragQueryFileW(hdrop, i, buf.data(),
+                                                static_cast<UINT>(buf.size()));
+                if (got > 0) out.file_paths.push_back(wide_to_utf8(buf.data(),
+                                                                   static_cast<int>(got)));
+            }
+            GlobalUnlock(stg.hGlobal);
+        }
+        ReleaseStgMedium(&stg);
+        if (!out.file_paths.empty()) return out;
+    }
+
+    // CF_UNICODETEXT — a single text payload.
+    FORMATETC fmt_text{CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM stg_text{};
+    if (data->GetData(&fmt_text, &stg_text) == S_OK) {
+        if (auto* w = static_cast<const wchar_t*>(GlobalLock(stg_text.hGlobal))) {
+            out.type = DropData::Type::text;
+            out.text = wide_to_utf8(w, static_cast<int>(wcslen(w)));
+            GlobalUnlock(stg_text.hGlobal);
+        }
+        ReleaseStgMedium(&stg_text);
+    }
+    return out;
+}
+
+// Minimal IDropTarget that routes OLE drops on the child HWND into the shared
+// cross-platform view-tree dispatch core (drag_drop.cpp) — the same core the SDL
+// and macOS producers use. Owned by WinPluginViewHost; registered via
+// RegisterDragDrop on the child HWND.
+class PulpWinDropTarget : public IDropTarget {
+public:
+    PulpWinDropTarget(View& root, HWND hwnd, std::function<Point(Point)> to_root)
+        : root_(root), hwnd_(hwnd), to_root_(std::move(to_root)) {}
+
+    // Screen POINTL → client → root coordinates (mirrors the mouse path).
+    Point to_root_point(POINTL pt) const {
+        POINT p{pt.x, pt.y};
+        ScreenToClient(hwnd_, &p);
+        Point client{static_cast<float>(p.x), static_cast<float>(p.y)};
+        return to_root_ ? to_root_(client) : client;
+    }
+
+    // ── IUnknown ──────────────────────────────────────────────────────────
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == IID_IUnknown || riid == IID_IDropTarget) {
+            *ppv = static_cast<IDropTarget*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return static_cast<ULONG>(++ref_);
+    }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const long r = --ref_;
+        if (r == 0) delete this;
+        return static_cast<ULONG>(r);
+    }
+
+    // ── IDropTarget ───────────────────────────────────────────────────────
+    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD, POINTL pt,
+                                        DWORD* effect) override {
+        pending_ = extract_idata_drop(data);
+        const bool ok = dispatch_drag_enter(root_, session_, pending_,
+                                            to_root_point(pt));
+        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL pt, DWORD* effect) override {
+        const bool ok = dispatch_drag_enter(root_, session_, pending_,
+                                            to_root_point(pt));
+        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragLeave() override {
+        dispatch_drag_exit(root_, session_);
+        pending_ = {};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL pt,
+                                   DWORD* effect) override {
+        DropData d = extract_idata_drop(data);
+        const bool ok = dispatch_drop(root_, session_, d, to_root_point(pt));
+        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        pending_ = {};
+        return S_OK;
+    }
+
+private:
+    View& root_;
+    HWND hwnd_;
+    std::function<Point(Point)> to_root_;
+    DragSession session_;
+    DropData pending_;  // payload cached between DragEnter and Drop
+    long ref_ = 1;
+};
+
 class WinPluginViewHost : public PluginViewHost {
 public:
     WinPluginViewHost(View& root, Size size) : root_(root), size_(size) {
@@ -102,10 +233,12 @@ public:
 #ifdef PULP_HAS_SKIA
         init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
 #endif
+        init_drag_drop();
     }
 
     ~WinPluginViewHost() override {
         root_.set_plugin_view_host(nullptr);
+        shutdown_drag_drop();
 #ifdef PULP_HAS_SKIA
         skia_surface_.reset();
         gpu_surface_.reset();
@@ -276,6 +409,45 @@ private:
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
+
+    // OLE drag-drop on the child HWND. ole_initialized_ tracks whether THIS host
+    // brought up COM (so we balance OleUninitialize). drop_target_ is ref-counted
+    // by OLE; we hold one reference and Release it on teardown.
+    bool ole_initialized_ = false;
+    PulpWinDropTarget* drop_target_ = nullptr;
+
+    void init_drag_drop() {
+        if (!hwnd_) return;
+        // Drag-drop needs an STA. OleInitialize is per-thread + ref-counted; if
+        // the host thread is already MTA it returns RPC_E_CHANGED_MODE — then we
+        // honest-skip drag-drop rather than fight the apartment model.
+        const HRESULT hr = OleInitialize(nullptr);
+        if (hr != S_OK && hr != S_FALSE) {
+            runtime::log_warn("WinPluginViewHost: OleInitialize failed (0x{:08x}); "
+                              "drag-drop disabled", static_cast<unsigned>(hr));
+            return;
+        }
+        ole_initialized_ = true;
+        drop_target_ = new PulpWinDropTarget(
+            root_, hwnd_, [this](Point p) { return window_to_root_point(p); });
+        if (RegisterDragDrop(hwnd_, drop_target_) != S_OK) {
+            runtime::log_warn("WinPluginViewHost: RegisterDragDrop failed");
+            drop_target_->Release();
+            drop_target_ = nullptr;
+        }
+    }
+
+    void shutdown_drag_drop() {
+        if (drop_target_) {
+            if (hwnd_) RevokeDragDrop(hwnd_);
+            drop_target_->Release();
+            drop_target_ = nullptr;
+        }
+        if (ole_initialized_) {
+            OleUninitialize();
+            ole_initialized_ = false;
+        }
+    }
 
 #ifdef PULP_HAS_SKIA
     std::unique_ptr<render::GpuSurface> gpu_surface_;

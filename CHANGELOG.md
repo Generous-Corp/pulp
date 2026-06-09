@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03840"></a>
+## [0.384.0] - 2026-06-08
+
+- feat(view): Windows IDropTarget drag-drop on the plugin-host child HWND (#3645) ([#3670](https://github.com/danielraffel/pulp/pull/3670))
+- refactor: migrate WidgetBridge leaf registrars to API registry ([#3672](https://github.com/danielraffel/pulp/pull/3672))
+
 <a id="v03830"></a>
 ## [0.383.0] - 2026-06-09
 
@@ -3943,6 +3949,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.384.0]: https://github.com/danielraffel/pulp/releases/tag/v0.384.0
 [0.383.0]: https://github.com/danielraffel/pulp/releases/tag/v0.383.0
 [0.382.1]: https://github.com/danielraffel/pulp/releases/tag/v0.382.1
 [0.382.0]: https://github.com/danielraffel/pulp/releases/tag/v0.382.0
