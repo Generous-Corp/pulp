@@ -160,6 +160,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
     describe_path_for_cleanup,
 )
 
+import cleanup as _cleanup  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 
 
@@ -3976,17 +3977,11 @@ def trim_completed_jobs(queue: list[dict]) -> list[dict]:
 
 
 def result_file_job_id(path: Path) -> str | None:
-    if path.suffix != ".json":
-        return None
-    stem = path.stem
-    parts = stem.split("-", 3)
-    if len(parts) < 3:
-        return None
-    return parts[2]
+    return _cleanup.result_file_job_id(path)
 
 
 def artifact_entry_sort_key(entry: dict) -> tuple[float, str]:
-    return (float(entry.get("mtime", 0.0)), str(entry.get("path", "")))
+    return _cleanup.artifact_entry_sort_key(entry)
 
 
 def collect_local_ci_cleanup_plan(
@@ -3997,140 +3992,22 @@ def collect_local_ci_cleanup_plan(
     keep_bundles: int = 0,
     include_prepared: bool = False,
 ) -> dict:
-    keep_results = max(0, int(keep_results))
-    keep_logs = max(0, int(keep_logs))
-    keep_bundles = max(0, int(keep_bundles))
-    retained_job_ids = {job["id"] for job in queue}
-    live_job_ids = {job["id"] for job in queue if job.get("status") in {"pending", "running"}}
-    categories: dict[str, list[dict]] = {
-        "bundles": [],
-        "logs": [],
-        "results": [],
-        "prepared": [],
-    }
-
-    def add_file_entry(category: str, path: Path, job_id: str | None) -> None:
-        try:
-            stat = path.stat()
-        except OSError:
-            return
-        categories[category].append(
-            {
-                "path": path,
-                "job_id": job_id,
-                "size_bytes": int(stat.st_size),
-                "mtime": float(stat.st_mtime),
-            }
-        )
-
-    def add_dir_entry(category: str, path: Path, job_id: str | None) -> None:
-        if not path.exists() or not path.is_dir():
-            return
-        try:
-            stat = path.stat()
-        except OSError:
-            return
-        categories[category].append(
-            {
-                "path": path,
-                "job_id": job_id,
-                "size_bytes": path_size_bytes(path),
-                "mtime": float(stat.st_mtime),
-            }
-        )
-
-    for path in bundles_dir().glob("*.bundle"):
-        add_file_entry("bundles", path, path.stem)
-    log_root = logs_dir()
-    for path in (log_root.iterdir() if log_root.exists() else []):
-        if path.is_dir():
-            add_dir_entry("logs", path, path.name)
-    for path in results_dir().glob("*.json"):
-        add_file_entry("results", path, result_file_job_id(path))
-    if include_prepared and prepared_dir().exists():
-        for target_dir in prepared_dir().iterdir():
-            if not target_dir.is_dir():
-                continue
-            for mode_dir in target_dir.iterdir():
-                if mode_dir.is_dir():
-                    add_dir_entry("prepared", mode_dir, None)
-
-    plan_categories: dict[str, list[dict]] = {
-        "bundles": [],
-        "logs": [],
-        "results": [],
-        "prepared": [],
-    }
-
-    bundle_candidates = [
-        entry for entry in sorted(categories["bundles"], key=artifact_entry_sort_key, reverse=True)
-        if entry.get("job_id") not in live_job_ids
-    ]
-    plan_categories["bundles"] = bundle_candidates[keep_bundles:]
-
-    def select_queue_orphans(entries: list[dict], keep_count: int) -> list[dict]:
-        always_keep = [entry for entry in entries if entry.get("job_id") in retained_job_ids]
-        orphaned = [entry for entry in entries if entry.get("job_id") not in retained_job_ids]
-        orphaned.sort(key=artifact_entry_sort_key, reverse=True)
-        del always_keep  # clarity: retained-job artifacts are never candidates
-        return orphaned[keep_count:]
-
-    plan_categories["logs"] = select_queue_orphans(categories["logs"], keep_logs)
-    plan_categories["results"] = select_queue_orphans(categories["results"], keep_results)
-    plan_categories["prepared"] = sorted(
-        categories["prepared"],
-        key=artifact_entry_sort_key,
-        reverse=True,
+    return _cleanup.collect_local_ci_cleanup_plan(
+        queue,
+        keep_results=keep_results,
+        keep_logs=keep_logs,
+        keep_bundles=keep_bundles,
+        include_prepared=include_prepared,
+        bundles_dir_fn=bundles_dir,
+        logs_dir_fn=logs_dir,
+        results_dir_fn=results_dir,
+        prepared_dir_fn=prepared_dir,
+        path_size_bytes_fn=path_size_bytes,
     )
-
-    total_bytes = sum(
-        int(entry.get("size_bytes", 0))
-        for entries in plan_categories.values()
-        for entry in entries
-    )
-    total_paths = sum(len(entries) for entries in plan_categories.values())
-    return {
-        "categories": plan_categories,
-        "total_bytes": total_bytes,
-        "total_paths": total_paths,
-        "keep_results": keep_results,
-        "keep_logs": keep_logs,
-        "keep_bundles": keep_bundles,
-        "include_prepared": include_prepared,
-    }
 
 
 def apply_local_ci_cleanup_plan(plan: dict) -> dict:
-    removed: list[dict] = []
-    failed: list[dict] = []
-    for category, entries in (plan.get("categories") or {}).items():
-        for entry in entries:
-            path = Path(entry["path"])
-            try:
-                if path.is_dir():
-                    shutil.rmtree(path)
-                else:
-                    path.unlink(missing_ok=True)
-                removed.append(
-                    {
-                        "category": category,
-                        "path": path,
-                        "size_bytes": int(entry.get("size_bytes", 0)),
-                    }
-                )
-            except OSError as exc:
-                failed.append(
-                    {
-                        "category": category,
-                        "path": path,
-                        "error": str(exc),
-                    }
-                )
-    return {
-        "removed": removed,
-        "failed": failed,
-        "removed_bytes": sum(item["size_bytes"] for item in removed),
-    }
+    return _cleanup.apply_local_ci_cleanup_plan(plan)
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
