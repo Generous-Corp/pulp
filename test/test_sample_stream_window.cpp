@@ -298,6 +298,8 @@ TEST_CASE("SampleStreamWindow gates ready-page reuse through retire generations"
     publish_page(window, 0, 1, 0, source, 4);
 
     REQUIRE_FALSE(window.begin_fill_page(0));
+    REQUIRE_FALSE(window.retire_page(0, 0));
+    REQUIRE(window.page_state(0) == SampleStreamPageState::Ready);
     REQUIRE(window.retire_page(0, 9));
     REQUIRE_FALSE(window.retire_page(0, 0));
     REQUIRE(window.page_state(0) == SampleStreamPageState::Retired);

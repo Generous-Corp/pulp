@@ -112,6 +112,8 @@ public:
     bool publish_page(std::uint32_t page_index,
                       const SampleStreamPageDescriptor& descriptor) noexcept;
     bool cancel_fill_page(std::uint32_t page_index) noexcept;
+    // retire_after_audio_generation must be nonzero; use reset_when_quiescent()
+    // for offline teardown instead of retiring a live page with no audio epoch.
     bool retire_page(std::uint32_t page_index,
                      std::uint64_t retire_after_audio_generation) noexcept;
 

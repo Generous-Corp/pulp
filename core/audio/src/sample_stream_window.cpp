@@ -299,6 +299,7 @@ bool SampleStreamWindow::retire_page(
     std::uint32_t page_index,
     std::uint64_t retire_after_audio_generation) noexcept {
     if (!valid_page(page_index)) return false;
+    if (retire_after_audio_generation == 0) return false;
     auto expected = encode_state(SampleStreamPageState::Ready);
     if (!states_[page_index].compare_exchange_strong(
             expected,
