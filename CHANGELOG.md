@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03873"></a>
+## [0.387.3] - 2026-06-08
+
+- refactor: migrate WidgetBridge DOM registrar to API registry ([#3687](https://github.com/danielraffel/pulp/pull/3687))
+- refactor: migrate storage style bridge API to registry helper ([#3699](https://github.com/danielraffel/pulp/pull/3699))
+- refactor: migrate value controls bridge API to registry helper ([#3697](https://github.com/danielraffel/pulp/pull/3697))
+- refactor: migrate visual style bridge API to registry helper ([#3696](https://github.com/danielraffel/pulp/pull/3696))
+- feat(import): pulp tool install/uninstall for framework importers ([#3693](https://github.com/danielraffel/pulp/pull/3693))
+- refactor: migrate visibility bridge API to registry helper ([#3695](https://github.com/danielraffel/pulp/pull/3695))
+- refactor: migrate border-box bridge API to registry helper ([#3692](https://github.com/danielraffel/pulp/pull/3692))
+- refactor: migrate basic value bridge API to registry helper ([#3694](https://github.com/danielraffel/pulp/pull/3694))
+
 <a id="v03861"></a>
 ## [0.386.1] - 2026-06-08
 
@@ -3976,6 +3988,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.387.3]: https://github.com/danielraffel/pulp/releases/tag/v0.387.3
 [0.386.1]: https://github.com/danielraffel/pulp/releases/tag/v0.386.1
 [0.386.0]: https://github.com/danielraffel/pulp/releases/tag/v0.386.0
 [0.385.0]: https://github.com/danielraffel/pulp/releases/tag/v0.385.0
