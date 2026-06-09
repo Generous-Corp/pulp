@@ -39,46 +39,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  resolve-runner:
-    runs-on: ubuntu-latest
-    outputs:
-      runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
-      route: ${{ steps.resolve.outputs.route }}
-    steps:
-      - id: resolve
-        env:
-          RUNNER_CHOICE: ${{ inputs.runner }}
-          LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
-          NAMESPACE_MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
-        run: |
-          set -euo pipefail
-          case "$RUNNER_CHOICE" in
-            local)
-              SELECTOR='["self-hosted","macOS","ARM64","pulp-build-vm"]'
-              ;;
-            namespace)
-              if [ -z "${NAMESPACE_MACOS_RUNS_ON_JSON:-}" ]; then
-                echo "::error::PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is not set; cannot route to namespace." >&2
-                exit 1
-              fi
-              SELECTOR="$NAMESPACE_MACOS_RUNS_ON_JSON"
-              ;;
-            github-hosted)
-              SELECTOR='"macos-15"'
-              ;;
-            *)
-              echo "::error::Unknown runner choice: $RUNNER_CHOICE" >&2
-              exit 1
-              ;;
-          esac
-          echo "runs_on_json=$SELECTOR" >> "$GITHUB_OUTPUT"
-          echo "route=$RUNNER_CHOICE" >> "$GITHUB_OUTPUT"
-          echo "resolve-runner: macOS retarget route = $RUNNER_CHOICE; selector = $SELECTOR"
-
   build-test:
-    needs: resolve-runner
-    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
-    name: macOS retarget build (${{ needs.resolve-runner.outputs.route }})
+    runs-on: [self-hosted, macOS, ARM64, pulp-build-vm]
+    name: macOS retarget build (pulp-build-vm)
     env:
       # Use a distinct build dir from build.yml's matrix so caches don't
       # collide if both run concurrently on the same self-hosted host.
@@ -88,27 +51,7 @@ jobs:
         with:
           lfs: false
           ref: ${{ inputs.target_ref || github.ref }}
-          # Self-hosted runner reuses its workspace across runs so ccache /
-          # FetchContent / CMake configure persist between PRs.
-          clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
-
-      # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
-      # Persist brew + ccache + Pulp FetchContent across runs on the
-      # same workspace. This workflow's resolve-runner emits a
-      # structured `route` output that's always one of {local,
-      # namespace, github-hosted} — use the route directly rather
-      # than a substring on runs_on_json. Codex P2 on #2399 flagged
-      # that `runs_on_json` can contain direct nscloud-* labels that
-      # don't include "namespace" literally; gating on `route` avoids
-      # that whole class of misses.
-      - name: Namespace cache (brew + ccache + Pulp FetchContent)
-        if: needs.resolve-runner.outputs.route == 'namespace'
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: brew
-          path: |
-            ~/Library/Caches/ccache
-            ~/Library/Caches/Pulp/fetchcontent-src
+          clean: false
 
       - name: Install ccache
         run: |
@@ -163,25 +106,3 @@ jobs:
         # exclude keeps auval/pluginval out (they require codesign on the
         # local runner) — same as the matrix leg.
         run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
-
-  macos:
-    # Stable required-check name. Branch protection on `main` requires a
-    # context literally named `macos`. When this workflow runs, its `macos`
-    # check supersedes the same-named check from build.yml's matrix leg.
-    needs: build-test
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Gate on retarget build
-        run: |
-          set -euo pipefail
-          case "${{ needs.build-test.result }}" in
-            success)
-              echo "macOS retarget build green — macos gate ✓"
-              exit 0
-              ;;
-            *)
-              echo "macOS retarget build ${{ needs.build-test.result }} — blocking macos gate"
-              exit 1
-              ;;
-          esac
