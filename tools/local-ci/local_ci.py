@@ -2518,17 +2518,12 @@ def summarize_active_targets(active_targets: dict | None, preferred_order: list[
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
-    for job in queue:
-        if job["id"] != job_id:
-            continue
-        if active_targets:
-            job["active_targets"] = active_targets
-            job["last_progress_at"] = now_iso()
-        else:
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-        return True
-    return False
+    return _queue_orchestrator.upsert_job_active_targets_unlocked(
+        queue,
+        job_id,
+        active_targets,
+        now_iso_fn=now_iso,
+    )
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -2807,29 +2802,7 @@ def clear_runner_info() -> None:
 
 
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
-    candidates = queue
-    if statuses is not None:
-        candidates = [job for job in candidates if job.get("status") in statuses]
-
-    for job in candidates:
-        if job["id"] == job_ref:
-            return job
-
-    id_prefix = [job for job in candidates if job["id"].startswith(job_ref)]
-    if len(id_prefix) == 1:
-        return id_prefix[0]
-    if len(id_prefix) > 1:
-        raise ValueError(f"Job reference '{job_ref}' is ambiguous.")
-
-    branch_matches = [job for job in candidates if job.get("branch") == job_ref]
-    if len(branch_matches) == 1:
-        return branch_matches[0]
-    if len(branch_matches) > 1:
-        raise ValueError(
-            f"Multiple jobs match branch '{job_ref}'. Use a job id or unique prefix."
-        )
-
-    return None
+    return _queue_orchestrator.find_job_unlocked(queue, job_ref, statuses)
 
 
 def load_job(job_id: str) -> dict | None:

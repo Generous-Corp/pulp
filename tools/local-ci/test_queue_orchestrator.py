@@ -145,6 +145,38 @@ class QueueOrchestratorTests(unittest.TestCase):
             trimmed,
         )
 
+    def test_job_lookup_and_active_target_updates(self) -> None:
+        queue = [
+            {"id": "abc111", "branch": "feature/a", "status": "pending"},
+            {"id": "abc222", "branch": "feature/a", "status": "completed"},
+            {"id": "def333", "branch": "feature/b", "status": "running"},
+        ]
+
+        self.assertEqual(self.mod.find_job_unlocked(queue, "def333")["branch"], "feature/b")
+        self.assertEqual(self.mod.find_job_unlocked(queue, "def")["id"], "def333")
+        self.assertEqual(self.mod.find_job_unlocked(queue, "feature/a", {"pending"})["id"], "abc111")
+        self.assertIsNone(self.mod.find_job_unlocked(queue, "missing"))
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            self.mod.find_job_unlocked(queue, "abc")
+        with self.assertRaisesRegex(ValueError, "Multiple jobs match branch"):
+            self.mod.find_job_unlocked(queue, "feature/a")
+
+        updated = self.mod.upsert_job_active_targets_unlocked(
+            queue,
+            "def333",
+            {"mac": {"status": "running"}},
+            now_iso_fn=lambda: "2026-06-09T00:03:00+00:00",
+        )
+        self.assertTrue(updated)
+        self.assertEqual(queue[2]["active_targets"]["mac"]["status"], "running")
+        self.assertEqual(queue[2]["last_progress_at"], "2026-06-09T00:03:00+00:00")
+
+        cleared = self.mod.upsert_job_active_targets_unlocked(queue, "def333", None)
+        self.assertTrue(cleared)
+        self.assertNotIn("active_targets", queue[2])
+        self.assertNotIn("last_progress_at", queue[2])
+        self.assertFalse(self.mod.upsert_job_active_targets_unlocked(queue, "unknown", {}))
+
 
 if __name__ == "__main__":
     unittest.main()
