@@ -178,6 +178,13 @@ audio thread, then publish immutable snapshots to realtime code. The hot
 `ZoneSelector` path is allocation-free and owns no sample storage; zones only
 reference `PublishedSampleView` metadata from the publication layer.
 
+`pulp::audio::SamplePool` is the prepared lookup layer for instruments that
+need more than one published sample. It maps stable sample IDs to borrowed
+`PublishedSampleStore` views and resolves channel pointers without allocation.
+Build the pool off the audio thread, keep the borrowed stores alive while
+realtime code can read from it, and publish whole-pool snapshots rather than
+mutating an active pool in place.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -185,6 +192,7 @@ reference `PublishedSampleView` metadata from the publication layer.
   `pump_listeners()`.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
+* [`core/audio/include/pulp/audio/sample_pool.hpp`](../../core/audio/include/pulp/audio/sample_pool.hpp)
 * [`core/audio/include/pulp/audio/sample_zone_map.hpp`](../../core/audio/include/pulp/audio/sample_zone_map.hpp)
   — the no-allocation contract.
 * [`core/format/include/pulp/format/offline_render_host.hpp`](../../core/format/include/pulp/format/offline_render_host.hpp)
