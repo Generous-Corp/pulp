@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Tests for queue_orchestrator policy helpers."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import unittest
+from pathlib import Path
+
+
+MODULE_PATH = Path(__file__).with_name("queue_orchestrator.py")
+
+
+def load_module():
+    script_dir = str(MODULE_PATH.parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    spec = importlib.util.spec_from_file_location("pulp_queue_orchestrator", MODULE_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class QueueOrchestratorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mod = load_module()
+
+    def test_make_job_normalizes_identity_and_submission(self) -> None:
+        job = self.mod.make_job(
+            " feature/queue-policy ",
+            "a" * 40,
+            " HIGH ",
+            ["windows", "mac"],
+            "run",
+            " smoke ",
+            submission={
+                "submitted_root": "/tmp/submitted",
+                "provenance": {
+                    "execution_kind": "hosted",
+                    "hosted_orchestrator": "github-actions",
+                    "runner_provider": "github-hosted",
+                },
+            },
+            now_iso_fn=lambda: "2026-06-09T00:00:00+00:00",
+            uuid_hex_fn=lambda: "1234567890abcdef",
+            root="/tmp/root",
+        )
+
+        self.assertEqual(job["id"], "1234567890ab")
+        self.assertEqual(job["branch"], "feature/queue-policy")
+        self.assertEqual(job["priority"], "high")
+        self.assertEqual(job["targets"], ["mac", "windows"])
+        self.assertEqual(job["validation"], "smoke")
+        self.assertEqual(job["queued_at"], "2026-06-09T00:00:00+00:00")
+        self.assertEqual(job["submitted_root"], "/tmp/submitted")
+        self.assertEqual(job["provenance"]["execution_kind"], "hosted")
+        self.assertEqual(
+            job["fingerprint"],
+            self.mod.make_fingerprint("feature/queue-policy", "a" * 40, ["windows", "mac"], "smoke"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unsupported branch"):
+            self.mod.make_job("feature/bad;rm", "a" * 40, "normal", ["mac"], "run", "full")
+
+    def test_priority_summary_and_sorting_helpers(self) -> None:
+        self.assertEqual(self.mod.default_priority_for("ship", {"defaults": {}}), "high")
+        self.assertEqual(
+            self.mod.default_priority_for("run", {"defaults": {"priority": "low"}}),
+            "low",
+        )
+        self.assertEqual(
+            self.mod.summarize_job(
+                {
+                    "id": "job123",
+                    "branch": "feature/q",
+                    "sha": "abcdef1234567890",
+                    "priority": "normal",
+                    "targets": ["mac"],
+                    "validation": "smoke",
+                }
+            ),
+            "[job123] feature/q @ abcdef123456 priority=normal targets=mac validation=smoke",
+        )
+        self.assertEqual(
+            self.mod.summarize_active_targets(
+                {"windows": {"status": "running"}, "mac": {"status": "pass"}},
+                preferred_order=["mac"],
+            ),
+            "mac=pass, windows=running",
+        )
+        self.assertLess(
+            self.mod.job_sort_key({"id": "high", "priority": "high", "queued_at": "2"}),
+            self.mod.job_sort_key({"id": "low", "priority": "low", "queued_at": "1"}),
+        )
+
+    def test_supersedence_and_terminal_result_payloads(self) -> None:
+        older = {
+            "id": "older",
+            "branch": "feature/q",
+            "sha": "a" * 40,
+            "fingerprint": "old",
+            "targets": ["mac", "windows"],
+            "priority": "normal",
+            "validation": "full",
+            "queued_at": "2026-06-09T00:00:00+00:00",
+        }
+        newer_sha = dict(older, id="newer", sha="b" * 40, fingerprint="new")
+        narrower = dict(older, id="narrow", fingerprint="narrow", targets=["mac"])
+
+        self.assertEqual(self.mod.supersedence_reason(newer_sha, older), "newer_sha_queued")
+        self.assertEqual(self.mod.supersedence_reason(narrower, older), "narrower_scope_queued")
+        self.assertIsNone(self.mod.supersedence_reason(older, older))
+
+        superseded = self.mod.supersedence_result(
+            older,
+            "newer",
+            "newer_sha_queued",
+            now_iso_fn=lambda: "2026-06-09T00:01:00+00:00",
+        )
+        self.assertEqual(superseded["overall"], "superseded")
+        self.assertEqual(superseded["completed_at"], "2026-06-09T00:01:00+00:00")
+
+        canceled = self.mod.cancellation_result(
+            older,
+            "operator_canceled",
+            now_iso_fn=lambda: "2026-06-09T00:02:00+00:00",
+        )
+        self.assertEqual(canceled["overall"], "canceled")
+        self.assertEqual(canceled["canceled_reason"], "operator_canceled")
+
+    def test_completed_queue_trimming_keeps_newest_completed_and_running(self) -> None:
+        queue = [
+            {"id": "old", "status": "completed", "completed_at": "2026-06-09T00:00:00+00:00"},
+            {"id": "new", "status": "completed", "completed_at": "2026-06-09T00:01:00+00:00"},
+            {"id": "running", "status": "running"},
+        ]
+
+        trimmed, removed = self.mod.trim_completed_jobs_with_removed_ids(queue, keep_completed_jobs=1)
+        self.assertEqual({job["id"] for job in trimmed}, {"new", "running"})
+        self.assertEqual(removed, {"old"})
+        self.assertEqual(
+            self.mod.trim_completed_jobs(queue, keep_completed_jobs=1),
+            trimmed,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
