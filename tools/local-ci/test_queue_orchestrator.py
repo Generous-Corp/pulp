@@ -95,6 +95,30 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.job_sort_key({"id": "low", "priority": "low", "queued_at": "1"}),
         )
 
+    def test_enqueue_duplicate_lookup_and_priority_bump_helpers(self) -> None:
+        queue = [
+            {"id": "completed", "fingerprint": "same", "status": "completed", "priority": "low"},
+            {"id": "pending", "fingerprint": "same", "status": "pending", "priority": "normal"},
+            {"id": "running", "fingerprint": "other", "status": "running", "priority": "low"},
+        ]
+
+        existing = self.mod.find_active_job_by_fingerprint_unlocked(queue, "same")
+        self.assertIs(existing, queue[1])
+        self.assertIs(self.mod.find_active_job_by_fingerprint_unlocked(queue, "missing"), None)
+
+        bumped = self.mod.bump_pending_job_priority_unlocked(
+            existing,
+            "high",
+            now_iso_fn=lambda: "2026-06-09T00:01:00+00:00",
+        )
+        self.assertTrue(bumped)
+        self.assertEqual(existing["priority"], "high")
+        self.assertEqual(existing["bumped_at"], "2026-06-09T00:01:00+00:00")
+
+        self.assertFalse(self.mod.bump_pending_job_priority_unlocked(existing, "normal"))
+        self.assertFalse(self.mod.bump_pending_job_priority_unlocked(queue[2], "high"))
+        self.assertNotIn("bumped_at", queue[2])
+
     def test_runner_info_active_target_update_matches_active_job_only(self) -> None:
         info = {
             "active_job_id": "job123",

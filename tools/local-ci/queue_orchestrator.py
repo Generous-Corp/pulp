@@ -1,11 +1,11 @@
 """Pure queue policy helpers for local CI.
 
-This module owns job identity, priority ordering, supersedence, cancellation
-result payloads, summaries, stale-running job selection/replacement/requeue
-state, runner-info active-target mutation, completed-job state mutation, and
-completed-queue retention. Higher-level queue mutation, locking, runner
-liveness, result persistence, and drain orchestration remain in local_ci.py
-until later extraction slices.
+This module owns job identity, enqueue duplicate/priority policy, priority
+ordering, supersedence, cancellation result payloads, summaries, stale-running
+job selection/replacement/requeue state, runner-info active-target mutation,
+completed-job state mutation, and completed-queue retention. Higher-level queue
+mutation, locking, runner liveness, result persistence, and drain orchestration
+remain in local_ci.py until later extraction slices.
 """
 
 from __future__ import annotations
@@ -91,6 +91,30 @@ def make_job(
     if "provenance" not in job:
         job["provenance"] = normalize_provenance()
     return job
+
+
+def find_active_job_by_fingerprint_unlocked(queue: list[dict], fingerprint: str) -> dict | None:
+    for job in queue:
+        if job.get("fingerprint") == fingerprint and job.get("status") in {"pending", "running"}:
+            return job
+    return None
+
+
+def bump_pending_job_priority_unlocked(
+    job: dict,
+    requested_priority: str,
+    *,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> bool:
+    requested_priority = normalize_priority(requested_priority)
+    if job.get("status") != "pending":
+        return False
+    if priority_value(requested_priority) <= priority_value(job.get("priority", "normal")):
+        return False
+
+    job["priority"] = requested_priority
+    job["bumped_at"] = now_iso_fn()
+    return True
 
 
 def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:

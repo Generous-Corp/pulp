@@ -2537,22 +2537,15 @@ def enqueue_job(
             save_queue_unlocked(queue)
         fingerprint = make_fingerprint(branch, sha, targets, normalized_validation)
 
-        for job in queue:
-            if job.get("fingerprint") != fingerprint or job.get("status") not in {"pending", "running"}:
-                continue
-
-            changed = False
-            if (
-                job["status"] == "pending"
-                and priority_value(requested_priority) > priority_value(job.get("priority", "normal"))
+        existing = _queue_orchestrator.find_active_job_by_fingerprint_unlocked(queue, fingerprint)
+        if existing is not None:
+            if _queue_orchestrator.bump_pending_job_priority_unlocked(
+                existing,
+                requested_priority,
+                now_iso_fn=now_iso,
             ):
-                job["priority"] = requested_priority
-                job["bumped_at"] = now_iso()
-                changed = True
-
-            if changed:
                 save_queue_unlocked(queue)
-            return normalize_job(job), False
+            return normalize_job(existing), False
 
         job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
         queue.append(job)
