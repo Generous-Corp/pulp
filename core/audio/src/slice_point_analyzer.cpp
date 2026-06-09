@@ -103,9 +103,56 @@ void append_marker_provenance(SlicePointAnalysisResult& result,
     }
 }
 
+bool nearest_marker_index_for_classification(
+    const SlicePointAnalysisResult& result,
+    const TransientClassification& classification,
+    std::uint64_t match_radius_frames,
+    std::size_t& marker_index_out) noexcept {
+    std::size_t best_index = 0;
+    auto best_distance = std::numeric_limits<std::uint64_t>::max();
+    for (std::size_t marker_index = 0; marker_index < result.map.markers.size();
+         ++marker_index) {
+        const auto distance =
+            frame_distance(classification.frame, result.map.markers[marker_index].frame);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = marker_index;
+        }
+    }
+    if (best_distance > match_radius_frames ||
+        best_index > std::numeric_limits<std::uint32_t>::max()) {
+        return false;
+    }
+    marker_index_out = best_index;
+    return true;
+}
+
+bool mapped_marker_index_for_classification(
+    const TransientClassification& classification,
+    std::span<const std::uint32_t> candidate_marker_indices,
+    std::size_t marker_count,
+    std::size_t& marker_index_out) noexcept {
+    if (!classification.has_candidate_index || candidate_marker_indices.empty()) return false;
+    if (classification.candidate_index >= candidate_marker_indices.size()) return false;
+
+    const auto marker_index = candidate_marker_indices[classification.candidate_index];
+    if (marker_index == kUnmappedTransientCandidateMarkerIndex) return false;
+    if (marker_index >= marker_count) return false;
+
+    marker_index_out = static_cast<std::size_t>(marker_index);
+    return true;
+}
+
+bool classification_has_explicit_candidate_mapping(
+    const TransientClassification& classification,
+    std::span<const std::uint32_t> candidate_marker_indices) noexcept {
+    return classification.has_candidate_index && !candidate_marker_indices.empty();
+}
+
 void append_marker_classifications(
     SlicePointAnalysisResult& result,
     std::span<const TransientClassification> classifications,
+    std::span<const std::uint32_t> candidate_marker_indices,
     std::uint64_t match_radius_frames) {
     if (classifications.empty() || result.map.markers.empty()) return;
 
@@ -119,31 +166,33 @@ void append_marker_classifications(
             continue;
         }
 
-        std::size_t best_index = 0;
-        auto best_distance = std::numeric_limits<std::uint64_t>::max();
-        for (std::size_t marker_index = 0; marker_index < result.map.markers.size();
-             ++marker_index) {
-            const auto distance =
-                frame_distance(classification.frame, result.map.markers[marker_index].frame);
-            if (distance < best_distance) {
-                best_distance = distance;
-                best_index = marker_index;
-            }
-        }
-        if (best_distance > match_radius_frames ||
-            best_index > std::numeric_limits<std::uint32_t>::max()) {
+        std::size_t marker_index = 0;
+        const auto has_mapping = classification_has_explicit_candidate_mapping(
+            classification,
+            candidate_marker_indices);
+        const auto resolved_by_mapping = mapped_marker_index_for_classification(
+            classification,
+            candidate_marker_indices,
+            result.map.markers.size(),
+            marker_index);
+        if (has_mapping && !resolved_by_mapping) continue;
+        if (!resolved_by_mapping &&
+            !nearest_marker_index_for_classification(result,
+                                                     classification,
+                                                     match_radius_frames,
+                                                     marker_index)) {
             continue;
         }
 
         auto candidate = SliceMarkerClassification{};
-        candidate.marker_index = static_cast<std::uint32_t>(best_index);
+        candidate.marker_index = static_cast<std::uint32_t>(marker_index);
         candidate.transient_class = classification.transient_class;
         candidate.confidence = classification.confidence;
         candidate.provenance = classification.provenance;
 
-        if (!have[best_index] || candidate.confidence > best[best_index].confidence) {
-            best[best_index] = std::move(candidate);
-            have[best_index] = true;
+        if (!have[marker_index] || candidate.confidence > best[marker_index].confidence) {
+            best[marker_index] = std::move(candidate);
+            have[marker_index] = true;
         }
     }
 
@@ -234,6 +283,7 @@ SlicePointAnalysisResult SlicePointAnalyzer::analyze(
         result.map.regions.push_back(region);
         append_marker_classifications(result,
                                       config.transient_classifications,
+                                      config.transient_candidate_marker_indices,
                                       config.transient_match_radius_frames);
         result.ok = validate_slice_map(result.map) &&
                     validate_analyzer_marker_provenance(result.map.markers.size(),
@@ -258,6 +308,7 @@ SlicePointAnalysisResult SlicePointAnalyzer::analyze(
 
     append_marker_classifications(result,
                                   config.transient_classifications,
+                                  config.transient_candidate_marker_indices,
                                   config.transient_match_radius_frames);
     result.ok = validate_slice_map(result.map) &&
                 validate_analyzer_marker_provenance(result.map.markers.size(),

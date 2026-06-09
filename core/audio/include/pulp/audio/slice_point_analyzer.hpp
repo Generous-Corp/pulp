@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -10,6 +11,9 @@
 #include <pulp/audio/slice_map.hpp>
 
 namespace pulp::audio {
+
+inline constexpr std::uint32_t kUnmappedTransientCandidateMarkerIndex =
+    std::numeric_limits<std::uint32_t>::max();
 
 struct SliceMarkerClassification {
     std::uint32_t marker_index = 0;
@@ -30,6 +34,13 @@ struct SlicePointAnalysisConfig {
     std::span<const AnalyzerMarkerProvenance> onset_provenance{};
     // Optional control-thread classifier output associated with final markers.
     std::span<const TransientClassification> transient_classifications{};
+    // Optional authoritative map from TransientClassification::candidate_index
+    // to final SliceMap marker index for the same analysis generation. Use
+    // kUnmappedTransientCandidateMarkerIndex for candidate frames that do not
+    // have a surviving marker. When empty, classifications fall back to
+    // nearest-frame matching. When present, classifications with explicit but
+    // unresolvable candidate identity are dropped instead of falling back.
+    std::span<const std::uint32_t> transient_candidate_marker_indices{};
     std::uint64_t transient_match_radius_frames = 256;
 };
 

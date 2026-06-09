@@ -30,6 +30,7 @@ using pulp::audio::SlicePointAnalysisConfig;
 using pulp::audio::SlicePointAnalyzer;
 using pulp::audio::TransientClass;
 using pulp::audio::TransientClassification;
+using pulp::audio::kUnmappedTransientCandidateMarkerIndex;
 using pulp::audio::validate_slice_map;
 
 namespace {
@@ -285,6 +286,112 @@ TEST_CASE("SlicePointAnalyzer attaches transient classifications to nearest mark
     REQUIRE(result.marker_classifications[0].provenance.analysis_id == "snare-high");
     REQUIRE(result.marker_classifications[1].marker_index == 2);
     REQUIRE(result.marker_classifications[1].transient_class == TransientClass::Hat);
+}
+
+TEST_CASE("SlicePointAnalyzer maps transient classifications by candidate identity",
+          "[audio][onset][slice][provider]") {
+    Buffer<float> source(1, 4096);
+    std::vector<const float*> ptrs;
+    const auto view = const_view(source, ptrs);
+
+    std::vector<OnsetMarker> onsets = {
+        {1000, 0.8, OnsetDetectionMethod::EnergyFlux},
+        {2500, 0.7, OnsetDetectionMethod::EnergyFlux},
+    };
+    auto provenance = package_provenance("package.test.transient", "identity-map");
+    std::vector<TransientClassification> classifications(5);
+    classifications[0].frame = 1000;
+    classifications[0].confidence = 0.70;
+    classifications[0].transient_class = TransientClass::Kick;
+    classifications[0].provenance = provenance;
+    classifications[0].candidate_index = 0;
+    classifications[0].has_candidate_index = true;
+    classifications[1].frame = 1000;
+    classifications[1].confidence = 0.80;
+    classifications[1].transient_class = TransientClass::Hat;
+    classifications[1].provenance = provenance;
+    classifications[1].candidate_index = 1;
+    classifications[1].has_candidate_index = true;
+    classifications[2].frame = 2500;
+    classifications[2].confidence = 0.99;
+    classifications[2].transient_class = TransientClass::Vocal;
+    classifications[2].provenance = provenance;
+    classifications[2].candidate_index = 2;
+    classifications[2].has_candidate_index = true;
+    classifications[3].frame = 1000;
+    classifications[3].confidence = 0.98;
+    classifications[3].transient_class = TransientClass::Snare;
+    classifications[3].provenance = provenance;
+    classifications[3].candidate_index = 3;
+    classifications[3].has_candidate_index = true;
+    classifications[4].frame = 2500;
+    classifications[4].confidence = 0.97;
+    classifications[4].transient_class = TransientClass::Clap;
+    classifications[4].provenance = provenance;
+    classifications[4].candidate_index = 99;
+    classifications[4].has_candidate_index = true;
+    std::vector<std::uint32_t> candidate_marker_indices = {
+        1,
+        2,
+        kUnmappedTransientCandidateMarkerIndex,
+        99,
+    };
+
+    SlicePointAnalysisConfig config;
+    config.source_generation = 21;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 256;
+    config.snap_to_zero_crossing = false;
+    config.transient_classifications = std::span<const TransientClassification>(
+        classifications.data(), classifications.size());
+    config.transient_candidate_marker_indices = std::span<const std::uint32_t>(
+        candidate_marker_indices.data(), candidate_marker_indices.size());
+    config.transient_match_radius_frames = 32;
+
+    SlicePointAnalyzer analyzer;
+    const auto result = analyzer.analyze(view, onsets, config);
+    REQUIRE(result.ok);
+    REQUIRE(validate_slice_map(result.map));
+    REQUIRE(result.marker_classifications.size() == 2);
+    REQUIRE(result.marker_classifications[0].marker_index == 1);
+    REQUIRE(result.marker_classifications[0].transient_class == TransientClass::Kick);
+    REQUIRE(result.marker_classifications[1].marker_index == 2);
+    REQUIRE(result.marker_classifications[1].transient_class == TransientClass::Hat);
+}
+
+TEST_CASE("SlicePointAnalyzer nearest-matches transient classifications without candidate identity",
+          "[audio][onset][slice][provider]") {
+    Buffer<float> source(1, 2048);
+    std::vector<const float*> ptrs;
+    const auto view = const_view(source, ptrs);
+
+    std::vector<OnsetMarker> onsets = {
+        {1000, 0.8, OnsetDetectionMethod::EnergyFlux},
+    };
+    std::vector<TransientClassification> classifications = {
+        {1008, 0.70, TransientClass::Kick,
+         package_provenance("package.test.transient", "no-candidate-id")},
+    };
+    std::vector<std::uint32_t> candidate_marker_indices = {1};
+
+    SlicePointAnalysisConfig config;
+    config.source_generation = 22;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 256;
+    config.snap_to_zero_crossing = false;
+    config.transient_classifications = std::span<const TransientClassification>(
+        classifications.data(), classifications.size());
+    config.transient_candidate_marker_indices = std::span<const std::uint32_t>(
+        candidate_marker_indices.data(), candidate_marker_indices.size());
+    config.transient_match_radius_frames = 32;
+
+    SlicePointAnalyzer analyzer;
+    const auto result = analyzer.analyze(view, onsets, config);
+    REQUIRE(result.ok);
+    REQUIRE(validate_slice_map(result.map));
+    REQUIRE(result.marker_classifications.size() == 1);
+    REQUIRE(result.marker_classifications[0].marker_index == 1);
+    REQUIRE(result.marker_classifications[0].transient_class == TransientClass::Kick);
 }
 
 TEST_CASE("SlicePointAnalyzer ignores invalid marker confidences before sorting",

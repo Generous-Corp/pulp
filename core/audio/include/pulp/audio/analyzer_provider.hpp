@@ -194,6 +194,10 @@ struct TransientClassification {
     double confidence = 0.0;
     TransientClass transient_class = TransientClass::Unknown;
     AnalyzerProvenance provenance;
+    // When present, this is the zero-based index into the candidate_frames span
+    // passed to TransientClassifier::classify(), not the filtered result index.
+    std::uint32_t candidate_index = 0;
+    bool has_candidate_index = false;
 };
 
 struct TimePitchPrepareConfig {

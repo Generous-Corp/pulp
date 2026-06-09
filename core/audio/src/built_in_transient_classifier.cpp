@@ -7,6 +7,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::audio {
@@ -176,7 +177,9 @@ std::vector<TransientClassification> BuiltInTransientClassifier::classify(
                                                                 "builtin-transient");
 
     const auto source_frames = static_cast<std::uint64_t>(source.num_samples());
-    for (const auto frame : candidate_frames) {
+    for (std::size_t candidate_index = 0; candidate_index < candidate_frames.size();
+         ++candidate_index) {
+        const auto frame = candidate_frames[candidate_index];
         if (frame >= source_frames) continue;
         const auto features = analyze_window(source, frame, fft, mono, spectrum);
         const auto transient_class = classify_features(features);
@@ -190,6 +193,10 @@ std::vector<TransientClassification> BuiltInTransientClassifier::classify(
         classification.transient_class = transient_class;
         classification.confidence = confidence;
         classification.provenance = provenance;
+        if (candidate_index <= std::numeric_limits<std::uint32_t>::max()) {
+            classification.candidate_index = static_cast<std::uint32_t>(candidate_index);
+            classification.has_candidate_index = true;
+        }
         classifications.push_back(std::move(classification));
     }
     return classifications;

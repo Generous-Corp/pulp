@@ -101,17 +101,21 @@ TEST_CASE("BuiltInTransientClassifier classifies simple low and high transients"
     REQUIRE(result[0].transient_class == TransientClass::Kick);
     REQUIRE(result[0].confidence > 0.0);
     REQUIRE(result[0].provenance.provider_id == classifier.descriptor().id);
+    REQUIRE(result[0].has_candidate_index);
+    REQUIRE(result[0].candidate_index == 0);
     REQUIRE(result[1].frame == 2600);
     REQUIRE((result[1].transient_class == TransientClass::Hat ||
              result[1].transient_class == TransientClass::Noise));
     REQUIRE(result[1].confidence > 0.0);
+    REQUIRE(result[1].has_candidate_index);
+    REQUIRE(result[1].candidate_index == 1);
 }
 
 TEST_CASE("BuiltInTransientClassifier skips invalid or silent candidates",
           "[audio][analysis][transient]") {
-    Buffer<float> source(1, 2048);
-    source.channel(0)[512] = 0.5f;
-    std::vector<std::uint64_t> candidates = {512, 4096};
+    Buffer<float> source(1, 4096);
+    add_decay(source, 2048, 2.0 / 1024.0, 180.0, 1.0);
+    std::vector<std::uint64_t> candidates = {256, 2048, 8192};
     std::vector<const float*> ptrs;
 
     BuiltInTransientClassifier classifier;
@@ -120,7 +124,9 @@ TEST_CASE("BuiltInTransientClassifier skips invalid or silent candidates",
         std::span<const std::uint64_t>(candidates.data(), candidates.size()));
 
     REQUIRE(result.size() == 1);
-    REQUIRE(result[0].frame == 512);
+    REQUIRE(result[0].frame == 2048);
+    REQUIRE(result[0].has_candidate_index);
+    REQUIRE(result[0].candidate_index == 1);
 }
 
 TEST_CASE("BuiltInTransientClassifier suppresses zero-evidence classifications",
