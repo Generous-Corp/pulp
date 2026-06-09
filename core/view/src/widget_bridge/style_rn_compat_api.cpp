@@ -1,6 +1,7 @@
 // widget_bridge/style_rn_compat_api.cpp - RN/CSS compatibility style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -11,6 +12,7 @@ namespace pulp::view {
 
 void WidgetBridge::register_widget_style_rn_compat_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
     // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
@@ -22,7 +24,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // upstream RN's surface, especially for code carrying iOS-legacy
     // styling. Each setter mutates one field of View::shadow_ and
     // flips has_shadow_ on, mirroring how text-shadow longhand works.
-    engine_.register_function("setShadowColor",
+    register_bridge_function(api, "setShadowColor",
         [this, parseHexColor](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto hex = args.get<std::string>(1, "");
@@ -30,7 +32,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             if (v) v->set_box_shadow_color(parseHexColor(hex));
             return choc::value::Value();
         });
-    engine_.register_function("setShadowOffset",
+    register_bridge_function(api, "setShadowOffset",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto dx = static_cast<float>(args.get<double>(1, 0.0));
@@ -39,7 +41,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             if (v) v->set_box_shadow_offset(dx, dy);
             return choc::value::Value();
         });
-    engine_.register_function("setShadowOpacity",
+    register_bridge_function(api, "setShadowOpacity",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto a  = static_cast<float>(args.get<double>(1, 1.0));
@@ -47,7 +49,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             if (v) v->set_box_shadow_opacity(a);
             return choc::value::Value();
         });
-    engine_.register_function("setShadowRadius",
+    register_bridge_function(api, "setShadowRadius",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto r  = static_cast<float>(args.get<double>(1, 0.0));
@@ -76,7 +78,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // accepted, single consistent behavior produced, honest catalog
     // claim of "supported as a CSS-spec subset where Pulp's behavior
     // matches the dominant author intent".
-    engine_.register_function("setIncludeFontPadding",
+    register_bridge_function(api, "setIncludeFontPadding",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto v  = id.empty() ? &root_ : widget(id);
@@ -94,7 +96,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // 1.528 and flatter kappa 0.85). Visible difference on large-radius
     // cards (24px+); subtle below 12px. See view.cpp's
     // build_continuous_corner_rounded_rect_path for the path math.
-    engine_.register_function("setBorderCurve",
+    register_bridge_function(api, "setBorderCurve",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "circular");
@@ -124,7 +126,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // the isolation contract. Same CSS-subset pattern as
     // overscrollBehavior, includeFontPadding, scrollBehavior from
     // earlier this session.
-    engine_.register_function("setIsolation",
+    register_bridge_function(api, "setIsolation",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "auto");
@@ -153,7 +155,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // matches Material's umbra-shadow opacity curve well enough to be
     // recognizable; the catalog notes call out the single-shadow
     // approximation honestly.
-    engine_.register_function("setElevation",
+    register_bridge_function(api, "setElevation",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto e  = static_cast<float>(args.get<double>(1, 0.0));
@@ -179,7 +181,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // (Pulp already clamps at content bounds and doesn't scroll-chain
     // to parents, so all three keywords [auto/contain/none] behave as
     // CSS `contain` — a valid subset of the spec).
-    engine_.register_function("setScrollBehavior",
+    register_bridge_function(api, "setScrollBehavior",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "smooth");
@@ -187,7 +189,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             if (v) v->set_scroll_behavior(kw);
             return choc::value::Value();
         });
-    engine_.register_function("setOverscrollBehavior",
+    register_bridge_function(api, "setOverscrollBehavior",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "auto");
