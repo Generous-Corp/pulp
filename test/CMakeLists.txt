@@ -1936,6 +1936,9 @@ pulp_add_test_suite(pulp-test-dsp-runtime-no-alloc
 # Deterministic multi-block offline rendering over HeadlessHost.
 pulp_add_test_suite(pulp-test-offline-render-host LIBRARIES pulp::format)
 
+# Portable host/runtime matrix for automation, buses, events, state, latency, and offline bounce.
+pulp_add_test_suite(pulp-test-host-runtime-matrix LIBRARIES pulp::format)
+
 # Offline bounce-to-sample policy and sample-slot publication.
 pulp_add_test_suite(pulp-test-offline-sample-bounce LIBRARIES pulp::format)
 
