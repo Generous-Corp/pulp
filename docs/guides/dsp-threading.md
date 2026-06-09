@@ -171,6 +171,19 @@ Processor sidecar pointers, and preserves the distinction between no EventBlock
 and an EventBlock with an empty parameter queue. It does not change the
 Processor vtable.
 
+`pulp::audio::rt_safety_contract.hpp` is the machine-checkable sampler/looper
+RT-safety label table. It classifies representative public DSP helpers as
+audio-callback safe, safe only after `prepare()`, safe only with immutable or
+generation-pinned inputs, telemetry-only, control-thread only, background-thread
+only, or offline-only. Treat the table as a callback boundary contract: anything
+marked audio-callback allowed must not allocate, lock, block, call hosts, do file
+I/O, or run package analysis. Import/export, waveform thumbnails, onset/slice
+analysis, loop search, publication writes, and materialization stay outside the
+audio callback even when their low-level copying helpers are allocation-free.
+When adding sampler/looper DSP helpers, add or update a contract row and prefer
+conservative `may_allocate`, `may_lock`, and `may_block` flags unless the
+implementation and its callees have been audited.
+
 `pulp::audio::SampleZoneMap` is the prepared sampler mapping primitive for
 key zones, velocity zones, fixed-pitch triggers, chromatic keytracking,
 round-robin groups, slices, and loop metadata. Build or rebuild maps off the
@@ -225,6 +238,8 @@ modulation, and SIMD voice summing remain separate slices.
 * [`core/audio/include/pulp/audio/instrument_envelope.hpp`](../../core/audio/include/pulp/audio/instrument_envelope.hpp)
 * [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)
 * [`core/audio/include/pulp/audio/instrument_voice_allocator.hpp`](../../core/audio/include/pulp/audio/instrument_voice_allocator.hpp)
+* [`core/audio/include/pulp/audio/rt_safety_contract.hpp`](../../core/audio/include/pulp/audio/rt_safety_contract.hpp)
+  — machine-checkable sampler/looper callback-boundary labels.
 * [`core/audio/include/pulp/audio/sample_pool.hpp`](../../core/audio/include/pulp/audio/sample_pool.hpp)
 * [`core/audio/include/pulp/audio/sample_voice_renderer.hpp`](../../core/audio/include/pulp/audio/sample_voice_renderer.hpp)
 * [`core/audio/include/pulp/audio/sample_zone_map.hpp`](../../core/audio/include/pulp/audio/sample_zone_map.hpp)

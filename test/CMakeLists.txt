@@ -1986,6 +1986,9 @@ pulp_add_test_suite(pulp-test-audio-thumbnail LIBRARIES pulp::audio pulp::view)
 # Backend-neutral waveform GPU/static-layer planning over AudioThumbnail data.
 pulp_add_test_suite(pulp-test-waveform-gpu-primitives LIBRARIES pulp::view)
 
+# Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
+pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
+
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
 pulp_add_test_suite(pulp-test-planar-audio-ring-buffer LIBRARIES pulp::audio)
