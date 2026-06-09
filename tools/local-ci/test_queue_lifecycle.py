@@ -204,6 +204,118 @@ class QueueLifecycleTests(unittest.TestCase):
             ],
         )
 
+    def test_wait_for_job_returns_error_when_job_missing(self) -> None:
+        messages: list[str] = []
+
+        result = self.mod.wait_for_job_completion(
+            "missing",
+            {},
+            load_job_fn=lambda job_id: None,
+            load_result_fn=lambda path: self.fail(f"unexpected load_result({path})"),
+            drain_pending_jobs_fn=lambda config, *, blocking: self.fail("unexpected drain"),
+            current_runner_info_fn=lambda: self.fail("unexpected runner lookup"),
+            sleep_fn=lambda seconds: self.fail(f"unexpected sleep({seconds})"),
+            poll_secs=0.25,
+            print_fn=messages.append,
+        )
+
+        self.assertEqual(result, (None, 1))
+        self.assertEqual(messages, ["Job not found: missing"])
+
+    def test_wait_for_job_loads_completed_result_and_exit_status(self) -> None:
+        loaded_paths: list[Path] = []
+
+        result = self.mod.wait_for_job_completion(
+            "job1",
+            {"targets": ["macos"]},
+            load_job_fn=lambda job_id: {
+                "id": job_id,
+                "status": "completed",
+                "result_file": "result.json",
+            },
+            load_result_fn=lambda path: (loaded_paths.append(path) or {"overall": "pass"}),
+            drain_pending_jobs_fn=lambda config, *, blocking: self.fail("unexpected drain"),
+            current_runner_info_fn=lambda: self.fail("unexpected runner lookup"),
+            sleep_fn=lambda seconds: self.fail(f"unexpected sleep({seconds})"),
+            poll_secs=0.25,
+            print_fn=lambda message: self.fail(f"unexpected print({message})"),
+        )
+
+        self.assertEqual(result, ({"overall": "pass"}, 0))
+        self.assertEqual(loaded_paths, [Path("result.json")])
+
+    def test_wait_for_job_reports_completed_job_without_result_file(self) -> None:
+        messages: list[str] = []
+
+        result = self.mod.wait_for_job_completion(
+            "job1",
+            {},
+            load_job_fn=lambda job_id: {"id": job_id, "status": "completed"},
+            load_result_fn=lambda path: self.fail(f"unexpected load_result({path})"),
+            drain_pending_jobs_fn=lambda config, *, blocking: self.fail("unexpected drain"),
+            current_runner_info_fn=lambda: self.fail("unexpected runner lookup"),
+            sleep_fn=lambda seconds: self.fail(f"unexpected sleep({seconds})"),
+            poll_secs=0.25,
+            print_fn=messages.append,
+        )
+
+        self.assertEqual(result, (None, 1))
+        self.assertEqual(messages, ["Job completed without a result file: job1"])
+
+    def test_wait_for_job_continues_immediately_when_drain_acquired(self) -> None:
+        jobs = [
+            {"id": "job1", "status": "pending"},
+            {"id": "job1", "status": "completed", "result_file": "result.json"},
+        ]
+        drain_calls: list[tuple[dict, bool]] = []
+
+        result = self.mod.wait_for_job_completion(
+            "job1",
+            {"config": True},
+            load_job_fn=lambda job_id: jobs.pop(0),
+            load_result_fn=lambda path: {"overall": "fail"},
+            drain_pending_jobs_fn=lambda config, *, blocking: drain_calls.append((config, blocking))
+            or (True, False),
+            current_runner_info_fn=lambda: self.fail("unexpected runner lookup"),
+            sleep_fn=lambda seconds: self.fail(f"unexpected sleep({seconds})"),
+            poll_secs=0.25,
+            print_fn=lambda message: self.fail(f"unexpected print({message})"),
+        )
+
+        self.assertEqual(result, ({"overall": "fail"}, 1))
+        self.assertEqual(drain_calls, [({"config": True}, False)])
+
+    def test_wait_for_job_waits_with_active_runner_message_once(self) -> None:
+        jobs = [
+            {"id": "job1", "status": "pending"},
+            {"id": "job1", "status": "pending"},
+            {"id": "job1", "status": "completed", "result_file": "result.json"},
+        ]
+        messages: list[str] = []
+        sleeps: list[float] = []
+
+        result = self.mod.wait_for_job_completion(
+            "job1",
+            {},
+            load_job_fn=lambda job_id: jobs.pop(0),
+            load_result_fn=lambda path: {"overall": "pass"},
+            drain_pending_jobs_fn=lambda config, *, blocking: (False, False),
+            current_runner_info_fn=lambda: {
+                "active_job_id": "runner-job",
+                "active_branch": "feature/queue",
+            },
+            sleep_fn=sleeps.append,
+            poll_secs=0.25,
+            print_fn=messages.append,
+        )
+
+        self.assertEqual(result, ({"overall": "pass"}, 0))
+        self.assertEqual(sleeps, [0.25, 0.25])
+        self.assertEqual(
+            messages,
+            ["Another local CI runner is active [runner-job] feature/queue; waiting for job1..."],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

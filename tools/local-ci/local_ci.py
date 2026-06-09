@@ -2789,39 +2789,16 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
-    announced_wait = False
-
-    while True:
-        job = load_job(job_id)
-        if job is None:
-            print(f"Job not found: {job_id}")
-            return None, 1
-
-        if job.get("status") == "completed":
-            result_file = job.get("result_file")
-            if not result_file:
-                print(f"Job completed without a result file: {job_id}")
-                return None, 1
-            result = load_result(Path(result_file))
-            return result, 0 if result.get("overall") == "pass" else 1
-
-        acquired, _ = drain_pending_jobs(config, blocking=False)
-        if acquired:
-            continue
-
-        runner = current_runner_info()
-        if runner and not announced_wait:
-            active_job = runner.get("active_job_id")
-            active_branch = runner.get("active_branch")
-            if active_job and active_branch:
-                print(
-                    f"Another local CI runner is active [{active_job}] {active_branch}; waiting for {job_id}..."
-                )
-            else:
-                print("Another local CI runner is active; waiting for queued job completion...")
-            announced_wait = True
-
-        time.sleep(WAIT_POLL_SECS)
+    return _queue_lifecycle.wait_for_job_completion(
+        job_id,
+        config,
+        load_job_fn=load_job,
+        load_result_fn=load_result,
+        drain_pending_jobs_fn=drain_pending_jobs,
+        current_runner_info_fn=current_runner_info,
+        sleep_fn=time.sleep,
+        poll_secs=WAIT_POLL_SECS,
+    )
 
 
 def notify(message: str) -> None:
