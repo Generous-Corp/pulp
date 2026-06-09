@@ -1,6 +1,7 @@
 // widget_bridge/layout_api.cpp - layout-related registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include "../import_validation_bridge.hpp"
 
@@ -16,9 +17,10 @@
 namespace pulp::view {
 
 void WidgetBridge::register_layout_grid_api() {
+    BridgeApiContext api{engine_};
 
     // createGrid(id, parentId) — creates a grid container (CSS display: grid)
-    engine_.register_function("createGrid", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createGrid", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto v = std::make_unique<View>();
@@ -31,7 +33,7 @@ void WidgetBridge::register_layout_grid_api() {
 
 
     // setGrid(id, property, value) — set grid container properties
-    engine_.register_function("setGrid", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setGrid", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto key = args.get<std::string>(1, "");
         auto* v = widget(id);
@@ -104,8 +106,9 @@ void WidgetBridge::register_layout_grid_api() {
 }
 
 void WidgetBridge::register_layout_flex_api() {
+    BridgeApiContext api{engine_};
 
-    engine_.register_function("setFlex", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setFlex", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto key = args.get<std::string>(1, "");
         View* v = id.empty() ? &root_ : widget(id);
@@ -681,8 +684,9 @@ void WidgetBridge::register_layout_flex_api() {
 }
 
 void WidgetBridge::register_layout_query_api() {
+    BridgeApiContext api{engine_};
 
-    engine_.register_function("layout", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "layout", [this](choc::javascript::ArgumentList) {
         root_.clear_layout_dirty();
         root_.layout_children();
         request_repaint();
@@ -703,7 +707,7 @@ void WidgetBridge::register_layout_query_api() {
     // bail at getBoundingClientRect == 0). Forcing layout here closes
     // that timing gap. Layout is internally idempotent if nothing has
     // changed, so the cost is bounded to one tree walk per call.
-    engine_.register_function("getLayoutRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getLayoutRect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         root_.layout_children();
         View* v = id.empty() ? &root_ : widget(id);
@@ -714,7 +718,7 @@ void WidgetBridge::register_layout_query_api() {
     // getLayoutAncestorRects(id) -> [{id, bounds}, ...]
     // Same coordinate space as getLayoutRect(), but with the native View
     // parent chain included so validation can localize coordinate drift.
-    engine_.register_function("getLayoutAncestorRects", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getLayoutAncestorRects", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         root_.layout_children();
         View* v = id.empty() ? &root_ : widget(id);
@@ -723,7 +727,7 @@ void WidgetBridge::register_layout_query_api() {
 
 
     // getRootSize() -> {width, height} — actual root view dimensions for vw/vh/matchMedia
-    engine_.register_function("getRootSize", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "getRootSize", [this](choc::javascript::ArgumentList) {
         auto b = root_.bounds();
         auto r = choc::value::createObject("");
         r.addMember("width", choc::value::createFloat64(b.width));
@@ -733,13 +737,14 @@ void WidgetBridge::register_layout_query_api() {
 }
 
 void WidgetBridge::register_layout_box_model_api() {
+    BridgeApiContext api{engine_};
 
     // pulp #1516 — CSS box-sizing keyword. Yoga 3.x's
     // `YGNodeStyleSetBoxSizing` honors the spec, so we just record the
     // enum on FlexStyle and let `build_yoga_subtree` route it through.
     // Default `content-box` matches the CSS spec; web designs typically
     // reset to `border-box` via `* { box-sizing: border-box }`.
-    engine_.register_function("setBoxSizing", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBoxSizing", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "content-box");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -758,6 +763,7 @@ void WidgetBridge::register_layout_box_model_api() {
 }
 
 void WidgetBridge::register_layout_position_api() {
+    BridgeApiContext api{engine_};
 
     // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
     // pulp-internal #70 — instrument under PULP_DEBUG_FLEX_THRASH so we
@@ -765,7 +771,7 @@ void WidgetBridge::register_layout_position_api() {
     // the bridge (it has been observed missing for runtime-React
     // imports, which makes inline absolute children render at the
     // wrong place).
-    engine_.register_function("setPosition", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setPosition", [this](choc::javascript::ArgumentList args) {
         static const bool flex_thrash_log = std::getenv("PULP_DEBUG_FLEX_THRASH") != nullptr;
         if (flex_thrash_log) {
             std::fprintf(stderr, "[flex-thrash] setPosition id=%s pos=%s\n",
@@ -793,7 +799,7 @@ void WidgetBridge::register_layout_position_api() {
     // bridge boundary; Yoga's YGNodeStyleSetPositionPercent path is reached
     // via View::top_unit_ / etc. in yoga_layout.cpp. Mirrors the
     // FlexStyle::dim_width pattern from pulp #1423 (PR #1426) for width/height.
-    engine_.register_function("setTop", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTop", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
@@ -809,7 +815,7 @@ void WidgetBridge::register_layout_position_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setRight", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setRight", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
@@ -825,7 +831,7 @@ void WidgetBridge::register_layout_position_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setBottom", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBottom", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
@@ -841,7 +847,7 @@ void WidgetBridge::register_layout_position_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setLeft", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setLeft", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
@@ -859,7 +865,7 @@ void WidgetBridge::register_layout_position_api() {
 
 
     // setZIndex(id, n) — CSS z-index
-    engine_.register_function("setZIndex", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setZIndex", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         if (v) v->set_z_index(static_cast<int>(args.get<double>(1, 0)));
         return choc::value::Value();
