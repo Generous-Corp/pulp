@@ -81,6 +81,145 @@ class WindowsProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "no JSON"):
             self.mod.parse_windows_ssh_json("noise\nnull\n")
 
+    def test_repo_probe_and_bootstrap_use_callbacks(self) -> None:
+        scripts: list[dict] = []
+        unsafe_calls: list[tuple[str | None, str | None]] = []
+
+        def fake_run(_host, script, *, timeout=0):
+            scripts.append({"script": script, "timeout": timeout})
+            return completed(
+                stdout='{"home_dir":"C:\\\\Users\\\\dev","repo_path":"C:\\\\Pulp","head_exists":true,"setup_exists":true}\n'
+            )
+
+        def fake_unsafe(repo_path, home_dir):
+            unsafe_calls.append((repo_path, home_dir))
+            return repo_path == r"C:\Users\dev"
+
+        probe = self.mod.probe_windows_repo_checkout(
+            "win",
+            "Owner's Repo",
+            run_windows_ssh_powershell_fn=fake_run,
+            windows_repo_path_is_unsafe_fn=fake_unsafe,
+        )
+
+        self.assertFalse(probe["repo_path_unsafe"])
+        self.assertIn("$RepoRaw = 'Owner''s Repo'", scripts[0]["script"])
+        self.assertIn("git -C $Repo remote 2>$null", scripts[0]["script"])
+        self.assertIn("Where-Object { $_ -eq 'origin' }", scripts[0]["script"])
+        self.assertEqual(scripts[0]["timeout"], 60)
+        self.assertEqual(unsafe_calls, [(r"C:\Pulp", r"C:\Users\dev")])
+
+        bootstrap_scripts: list[dict] = []
+
+        def fake_bootstrap_run(_host, script, *, timeout=0):
+            bootstrap_scripts.append({"script": script, "timeout": timeout})
+            return completed(
+                stdout=(
+                    '{"home_dir":"C:\\\\Users\\\\dev",'
+                    '"repo_path":"C:\\\\Users\\\\dev\\\\pulp-validate",'
+                    '"head_exists":true,"setup_exists":true}\n'
+                )
+            )
+
+        ensured = self.mod.ensure_windows_remote_repo_checkout(
+            "win",
+            r"C:\Users\dev",
+            remote_url="https://example.invalid/pulp.git",
+            bundle_name="bundle.git",
+            bundle_ref="refs/pulp/source",
+            probe_windows_repo_checkout_fn=lambda _host, _repo_path: {
+                "home_dir": r"C:\Users\dev",
+                "repo_path": r"C:\Users\dev",
+                "head_exists": False,
+                "setup_exists": False,
+            },
+            windows_repo_path_is_unsafe_fn=fake_unsafe,
+            windows_default_repo_checkout_path_fn=lambda home: home + r"\pulp-validate",
+            run_windows_ssh_powershell_fn=fake_bootstrap_run,
+        )
+        self.assertEqual(ensured["repo_path"], r"C:\Users\dev\pulp-validate")
+        self.assertIn("& git -C $Repo fetch $BundlePath", bootstrap_scripts[0]["script"])
+        self.assertIn(r"C:\Users\dev\pulp-validate", bootstrap_scripts[0]["script"])
+        self.assertEqual(bootstrap_scripts[0]["timeout"], 120)
+
+    def test_session_tooling_and_install_helpers_use_callbacks(self) -> None:
+        scripts: list[dict] = []
+
+        def fake_run(_host, script, *, timeout=0):
+            scripts.append({"script": script, "timeout": timeout})
+            if "Get-ScheduledTask" in script:
+                return completed(stdout='{"task_present":true,"interactive_user":"dev"}\n')
+            if "Get-Command git" in script:
+                return completed(stdout='{"git_found":true,"winget_found":true}\n')
+            return completed(returncode=7, stdout="out", stderr="err")
+
+        session = self.mod.probe_windows_session_agent(
+            "win",
+            {
+                "task_name": "PulpTask",
+                "remote_root": r"%LOCALAPPDATA%\Pulp",
+                "script_path": r"%LOCALAPPDATA%\Pulp\agent.ps1",
+            },
+            run_windows_ssh_powershell_fn=fake_run,
+        )
+        self.assertTrue(session["task_present"])
+        self.assertEqual(session["interactive_user"], "dev")
+        self.assertIn("Get-ScheduledTask", scripts[-1]["script"])
+        self.assertIn("quser", scripts[-1]["script"])
+
+        tooling = self.mod.probe_windows_remote_tooling("win", run_windows_ssh_powershell_fn=fake_run)
+        self.assertTrue(tooling["git_found"])
+        self.assertIn("Get-Command git", scripts[-1]["script"])
+        self.assertIn("auth status", scripts[-1]["script"])
+
+        with self.assertRaisesRegex(RuntimeError, "err"):
+            self.mod.install_windows_remote_tool(
+                "win",
+                "Git.Git",
+                timeout=5,
+                run_windows_ssh_powershell_fn=fake_run,
+            )
+        self.assertIn("$PackageId = 'Git.Git'", scripts[-1]["script"])
+        self.assertIn("'--id'", scripts[-1]["script"])
+        self.assertIn("& $Winget.Source @InstallArgs", scripts[-1]["script"])
+        self.assertEqual(scripts[-1]["timeout"], 5)
+
+    def test_ensure_remote_tooling_required_and_optional_install_flow(self) -> None:
+        probes = iter(
+            [
+                {"git_found": False, "winget_found": True},
+                {"git_found": True, "gh_found": False, "winget_found": True},
+                {"git_found": True, "gh_found": False, "winget_found": True},
+            ]
+        )
+        installs: list[str] = []
+
+        def fake_install(_host, package_id):
+            installs.append(package_id)
+            if package_id == "GitHub.cli":
+                raise RuntimeError("optional failed")
+
+        ensured = self.mod.ensure_windows_remote_tooling(
+            "win",
+            install_optional=True,
+            required_tools={"git": {"winget_id": "Git.Git", "required": True}},
+            optional_tools={"gh": {"winget_id": "GitHub.cli", "required": False}},
+            probe_windows_remote_tooling_fn=lambda _host: next(probes),
+            install_windows_remote_tool_fn=fake_install,
+        )
+        self.assertEqual(installs, ["Git.Git", "GitHub.cli"])
+        self.assertEqual(ensured["installed"], ["git"])
+
+        with self.assertRaisesRegex(RuntimeError, "winget.*unavailable"):
+            self.mod.ensure_windows_remote_tooling(
+                "win",
+                install_optional=False,
+                required_tools={"git": {"winget_id": "Git.Git", "required": True}},
+                optional_tools={},
+                probe_windows_remote_tooling_fn=lambda _host: {"git_found": False, "winget_found": False},
+                install_windows_remote_tool_fn=fake_install,
+            )
+
     def test_remote_file_helpers_use_callbacks(self) -> None:
         scripts: list[str] = []
 

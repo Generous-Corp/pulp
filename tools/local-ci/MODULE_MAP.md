@@ -28,7 +28,7 @@ and the matching contract tests in the same change.
 | `linux_target.py` | Linux desktop launch backend probes, remote tooling probes/readiness details, remote bundle paths, and remote command builders. | SSH execution orchestration, artifact fetch/cleanup, queue orchestration, or manifest writing. |
 | `macos_desktop.py` | macOS app bundle detection, Swift window-probe wrappers, window wait/capture/activation/click helpers, app quit, and process termination. | Desktop action orchestration, artifact manifest writing, source preparation, or queue orchestration. |
 | `windows_target.py` | Windows desktop target contracts, path safety, session-agent request payloads, and probe result formatting/readiness helpers. | SSH/PowerShell execution, desktop action execution, queue orchestration, or artifact layout. |
-| `windows_probe.py` | Windows SSH/PowerShell command execution helpers, remote file transfer/read/remove helpers, session-agent bootstrap/start, and CMake generator probing. | Windows target contract formatting, desktop action orchestration, queue orchestration, or artifact layout. |
+| `windows_probe.py` | Windows SSH/PowerShell command execution helpers, remote file transfer/read/remove helpers, repo/session/tooling probes, remote tool installation, session-agent bootstrap/start, and CMake generator probing. | Windows target contract formatting, desktop action orchestration, queue orchestration, or artifact layout. |
 
 ## Remaining `local_ci.py` Clusters
 
