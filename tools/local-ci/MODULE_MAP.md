@@ -23,6 +23,7 @@ and the matching contract tests in the same change.
 | `cleanup.py` | Local-CI artifact cleanup planning/deletion and stale Windows validator cleanup mechanics. | Lock acquisition, runner ownership, or user-facing cleanup command output. |
 | `desktop_artifacts.py` | Desktop automation artifact roots and run/publish bundle directory layout. | Report staging, rollup generation, pruning policy, or target execution. |
 | `reporting.py` | Desktop automation report staging, run/publish rollups, manifest scanning, proof summaries, and pruning selection. | Artifact directory layout, target execution, source preparation, or CLI output. |
+| `source_prep.py` | Exact-SHA desktop source requests, cache keys, launch-command rewriting, prepare manifests, and macOS/Linux/Windows prepared source materialization. | Desktop artifact layout, target execution, queue orchestration, or target probes. |
 
 ## Remaining `local_ci.py` Clusters
 
@@ -32,7 +33,6 @@ behind the contracts added in this slice.
 
 | Cluster | Current responsibility | Extraction target |
 | --- | --- | --- |
-| Desktop source preparation | Exact-SHA local/macOS, Linux, and Windows source preparation; command rewriting; prepare stamps. | `source_prep.py` |
 | Desktop target probes | macOS/Linux/Windows desktop tool probes, launch backends, and automation adapters. | `macos_desktop.py`, `linux_target.py`, `windows_target.py` |
 | Queue orchestration | Locking, enqueue/dedupe/supersede, stale-running requeue, runner info, target state updates. | `queue_orchestrator.py` |
 | Target preflight | SSH primary/fallback/UTM/Namespace failover checks and submission metadata warnings. | `target_preflight.py` |
