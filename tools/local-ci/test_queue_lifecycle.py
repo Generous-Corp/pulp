@@ -204,6 +204,79 @@ class QueueLifecycleTests(unittest.TestCase):
         self.assertEqual(saved, [[new_job]])
         self.assertEqual(queue, [{**old_job, "status": "completed"}, new_job])
 
+    def test_update_job_active_targets_saves_only_when_changed(self) -> None:
+        queue = [{"id": "job1", "active_targets": {}}]
+        saved: list[list[dict]] = []
+
+        def upsert(loaded_queue, job_id, active_targets):
+            self.assertEqual(job_id, "job1")
+            self.assertEqual(active_targets, {"mac": {"status": "running"}})
+            loaded_queue[0]["active_targets"] = active_targets
+            return True
+
+        self.mod.update_job_active_targets_locked(
+            "job1",
+            {"mac": {"status": "running"}},
+            queue_lock_path_fn=lambda: Path("queue.lock"),
+            file_lock_fn=fake_lock,
+            load_queue_unlocked_fn=lambda: queue,
+            upsert_job_active_targets_unlocked_fn=upsert,
+            save_queue_unlocked_fn=lambda saved_queue: saved.append([dict(job) for job in saved_queue]),
+        )
+
+        self.assertEqual(saved, [[{"id": "job1", "active_targets": {"mac": {"status": "running"}}}]])
+
+        self.mod.update_job_active_targets_locked(
+            "job1",
+            None,
+            queue_lock_path_fn=lambda: Path("queue.lock"),
+            file_lock_fn=fake_lock,
+            load_queue_unlocked_fn=lambda: queue,
+            upsert_job_active_targets_unlocked_fn=lambda loaded_queue, job_id, active_targets: False,
+            save_queue_unlocked_fn=lambda saved_queue: saved.append(saved_queue),
+        )
+
+        self.assertEqual(len(saved), 1)
+
+    def test_update_job_target_state_saves_only_when_changed(self) -> None:
+        queue = [{"id": "job1", "target_state": {}}]
+        saved: list[list[dict]] = []
+
+        def update(loaded_queue, job_id, target_name, fields):
+            self.assertEqual((job_id, target_name), ("job1", "windows"))
+            self.assertEqual(fields, {"status": "pass", "detail": "ok"})
+            loaded_queue[0]["target_state"] = {target_name: dict(fields)}
+            return True
+
+        self.mod.update_job_target_state_locked(
+            "job1",
+            "windows",
+            {"status": "pass", "detail": "ok"},
+            queue_lock_path_fn=lambda: Path("queue.lock"),
+            file_lock_fn=fake_lock,
+            load_queue_unlocked_fn=lambda: queue,
+            update_job_target_state_unlocked_fn=update,
+            save_queue_unlocked_fn=lambda saved_queue: saved.append([dict(job) for job in saved_queue]),
+        )
+
+        self.assertEqual(
+            saved,
+            [[{"id": "job1", "target_state": {"windows": {"status": "pass", "detail": "ok"}}}]],
+        )
+
+        self.mod.update_job_target_state_locked(
+            "job1",
+            "windows",
+            {"status": "pass"},
+            queue_lock_path_fn=lambda: Path("queue.lock"),
+            file_lock_fn=fake_lock,
+            load_queue_unlocked_fn=lambda: queue,
+            update_job_target_state_unlocked_fn=lambda loaded_queue, job_id, target_name, fields: False,
+            save_queue_unlocked_fn=lambda saved_queue: saved.append(saved_queue),
+        )
+
+        self.assertEqual(len(saved), 1)
+
     def test_load_job_reconciles_saves_and_normalizes_match(self) -> None:
         queue = [{"id": "job1", "status": "running"}]
         saved: list[list[dict]] = []

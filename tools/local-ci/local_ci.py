@@ -2514,10 +2514,15 @@ def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_ta
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        if upsert_job_active_targets_unlocked(queue, job_id, active_targets):
-            save_queue_unlocked(queue)
+    _queue_lifecycle.update_job_active_targets_locked(
+        job_id,
+        active_targets,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        upsert_job_active_targets_unlocked_fn=upsert_job_active_targets_unlocked,
+        save_queue_unlocked_fn=save_queue_unlocked,
+    )
 
 
 def enqueue_job(
@@ -2659,16 +2664,22 @@ def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
 
 
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        if _queue_orchestrator.update_job_target_state_unlocked(
+    _queue_lifecycle.update_job_target_state_locked(
+        job_id,
+        target_name,
+        fields,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        update_job_target_state_unlocked_fn=lambda queue, current_job_id, current_target_name, current_fields: _queue_orchestrator.update_job_target_state_unlocked(
             queue,
-            job_id,
-            target_name,
-            fields,
+            current_job_id,
+            current_target_name,
+            current_fields,
             now_iso_fn=now_iso,
-        ):
-            save_queue_unlocked(queue)
+        ),
+        save_queue_unlocked_fn=save_queue_unlocked,
+    )
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
