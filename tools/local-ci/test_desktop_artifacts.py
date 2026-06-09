@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""No-network tests for local-ci desktop artifact path helpers."""
+
+from __future__ import annotations
+
+from datetime import datetime
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+
+
+MODULE_PATH = pathlib.Path(__file__).with_name("desktop_artifacts.py")
+
+
+def load_module():
+    spec = importlib.util.spec_from_file_location("desktop_artifacts_under_test", MODULE_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class DesktopArtifactsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mod = load_module()
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmpdir.name)
+        self.config = {"desktop_automation": {"artifact_root": str(self.root / "desktop-artifacts")}}
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def test_desktop_artifact_root_expands_and_creates_directory(self) -> None:
+        root = self.mod.desktop_artifact_root(self.config)
+
+        self.assertEqual(root, self.root / "desktop-artifacts")
+        self.assertTrue(root.is_dir())
+
+    def test_create_desktop_run_bundle_uses_stable_layout(self) -> None:
+        bundle = self.mod.create_desktop_run_bundle(
+            self.config,
+            "mac",
+            "smoke",
+            now_fn=lambda: datetime(2026, 6, 9, 12, 0, 0),
+            uuid_hex_fn=lambda: "abcdef1234567890",
+        )
+
+        self.assertEqual(
+            bundle,
+            self.root / "desktop-artifacts" / "mac" / "smoke" / "20260609-120000-abcdef12",
+        )
+        self.assertTrue((bundle / "screenshots").is_dir())
+
+    def test_create_desktop_publish_bundle_uses_stable_layout(self) -> None:
+        bundle = self.mod.create_desktop_publish_bundle(
+            self.config,
+            now_fn=lambda: datetime(2026, 6, 9, 12, 0, 0),
+            uuid_hex_fn=lambda: "fedcba9876543210",
+        )
+
+        self.assertEqual(
+            bundle,
+            self.root / "desktop-artifacts" / "_published" / "20260609-120000-fedcba98",
+        )
+        self.assertTrue((bundle / "assets").is_dir())
+
+
+if __name__ == "__main__":
+    unittest.main()
