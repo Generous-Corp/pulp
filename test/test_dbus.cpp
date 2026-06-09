@@ -18,10 +18,13 @@
 #include <pulp/platform/dbus.hpp>
 #include <pulp/platform/file_dialog.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #if defined(__linux__)
 #include <dlfcn.h>
@@ -73,6 +76,44 @@ TEST_CASE("DBus availability + connect honest-fail contract", "[platform][dbus][
     REQUIRE_FALSE(connected);
     REQUIRE_FALSE(bus.connected());
 #endif
+}
+
+TEST_CASE("DBus connect_system honest-fail contract",
+          "[platform][dbus][system][issue-3801]") {
+    const bool avail = DBus::library_available();
+
+    DBus bus;
+    REQUIRE_FALSE(bus.connected());
+    const bool connected = bus.connect_system();
+
+#if defined(__linux__)
+    // On Linux connect_system can only succeed if libdbus loaded; it may still
+    // fail (no system bus reachable in a bare CI container), which is fine.
+    if (connected) {
+        REQUIRE(avail);
+        REQUIRE(bus.connected());
+        REQUIRE(bus.connect_system());  // idempotent
+    } else {
+        REQUIRE_FALSE(bus.connected());
+    }
+#else
+    // Off Linux every call is an honest no-op.
+    REQUIRE_FALSE(avail);
+    REQUIRE_FALSE(connected);
+    REQUIRE_FALSE(bus.connected());
+#endif
+}
+
+TEST_CASE("DBus signal subscription honest-fails without a bus",
+          "[platform][dbus][system][signal][issue-3801]") {
+    DBus bus;  // never connected
+    REQUIRE_FALSE(bus.connected());
+    REQUIRE(bus.add_signal_handler("pulp.Test", "Pinged",
+                                   [](const std::string&, const std::string&,
+                                      const std::string&, DBus::Reader&) {}) == 0u);
+    REQUIRE_FALSE(bus.remove_signal_handler(1u));
+    REQUIRE_FALSE(bus.get_managed_objects(
+        "org.example", "/", [](const std::string&, const std::string&) {}));
 }
 
 TEST_CASE("FileDialog::install_native_backend honest-fail + idempotency",
@@ -355,6 +396,187 @@ TEST_CASE("DBus object-server loopback round-trips a method call",
 #endif
 
 #if defined(__linux__)
+// Signal subscription loopback (PR1 / #3801): one DBus emits a signal, a SECOND
+// DBus subscribed to the same interface+member receives it via the connection
+// filter during dispatch(). Two connections on the same session bus prove the
+// broker actually delivers the broadcast (a same-connection self-signal is not
+// guaranteed to loop back). Runs under `dbus-run-session -- ctest`.
+TEST_CASE("DBus signal subscription receives a matching broadcast",
+          "[platform][dbus][system][signal][issue-3801][linux]") {
+    if (!DBus::library_available()) {
+        SUCCEED("skipped: libdbus not available");
+        return;
+    }
+
+    DBus subscriber;
+    DBus emitter;
+    if (!subscriber.connect_session() || !emitter.connect_session()) {
+        SUCCEED("skipped: no session bus (run under dbus-run-session)");
+        return;
+    }
+    REQUIRE(subscriber.connected());
+    REQUIRE(emitter.connected());
+
+    std::atomic<bool> fired{false};
+    std::string got_path, got_iface, got_member, got_arg;
+    int got_int = 0;
+
+    const unsigned token = subscriber.add_signal_handler(
+        "pulp.Test.Signal", "Pinged",
+        [&](const std::string& path, const std::string& iface,
+            const std::string& member, DBus::Reader& args) {
+            got_path = path;
+            got_iface = iface;
+            got_member = member;
+            std::string s;
+            if (args.read_string(s)) got_arg = s;
+            int n = 0;
+            if (args.read_int32(n)) got_int = n;
+            fired = true;
+        });
+    REQUIRE(token != 0u);
+
+    // A non-matching subscription on the same interface (different member) must
+    // NOT fire for the Pinged signal.
+    std::atomic<bool> wrong_member_fired{false};
+    const unsigned token2 = subscriber.add_signal_handler(
+        "pulp.Test.Signal", "Ponged",
+        [&](const std::string&, const std::string&, const std::string&,
+            DBus::Reader&) { wrong_member_fired = true; });
+    REQUIRE(token2 != 0u);
+
+    REQUIRE(emitter.emit_signal(
+        "/pulp/test/signal", "pulp.Test.Signal", "Pinged",
+        [](DBus::Writer& w) { w.append_string("hi"); w.append_int32(42); }));
+
+    // Pump the subscriber until the signal is observed (bounded so a wedge fails
+    // the test instead of hanging).
+    for (int i = 0; i < 200 && !fired.load(); ++i) {
+        subscriber.dispatch(25);
+    }
+
+    REQUIRE(fired.load());
+    REQUIRE(got_path == "/pulp/test/signal");
+    REQUIRE(got_iface == "pulp.Test.Signal");
+    REQUIRE(got_member == "Pinged");
+    REQUIRE(got_arg == "hi");
+    REQUIRE(got_int == 42);
+    REQUIRE_FALSE(wrong_member_fired.load());
+
+    REQUIRE(subscriber.remove_signal_handler(token));
+    REQUIRE(subscriber.remove_signal_handler(token2));
+    REQUIRE_FALSE(subscriber.remove_signal_handler(token));  // already removed
+
+    // After removal a fresh broadcast is no longer routed to the handler.
+    fired = false;
+    REQUIRE(emitter.emit_signal(
+        "/pulp/test/signal", "pulp.Test.Signal", "Pinged",
+        [](DBus::Writer& w) { w.append_string("again"); w.append_int32(7); }));
+    for (int i = 0; i < 40; ++i) subscriber.dispatch(25);
+    REQUIRE_FALSE(fired.load());
+}
+
+// get_managed_objects shape (PR1 / #3801): export a mock ObjectManager that
+// answers GetManagedObjects()->a{oa{sa{sv}}}, then drive get_managed_objects()
+// from a SECOND connection and assert every (object, interface) pair is reported
+// and that property values are correctly skipped during the walk.
+TEST_CASE("DBus get_managed_objects walks a mock ObjectManager reply",
+          "[platform][dbus][system][objectmanager][issue-3801][linux]") {
+    if (!DBus::library_available()) {
+        SUCCEED("skipped: libdbus not available");
+        return;
+    }
+
+    DBus server;
+    DBus client;
+    if (!server.connect_session() || !client.connect_session()) {
+        SUCCEED("skipped: no session bus (run under dbus-run-session)");
+        return;
+    }
+    const std::string server_name = server.unique_name();
+    REQUIRE_FALSE(server_name.empty());
+
+    // Export /pulp/om answering ObjectManager.GetManagedObjects with two objects:
+    //   /pulp/om/dev1 → { "pulp.Device": { "Name": <string "alpha"> },
+    //                     "pulp.Battery": {} }
+    //   /pulp/om/dev2 → { "pulp.Device": {} }
+    REQUIRE(server.register_object(
+        "/pulp/om", [&](DBus::CallContext& ctx) -> bool {
+            if (ctx.interface() != "org.freedesktop.DBus.ObjectManager" ||
+                ctx.member() != "GetManagedObjects") {
+                return false;
+            }
+            DBus::Writer w = ctx.reply();
+            // a{oa{sa{sv}}}
+            auto objs = w.open_array("{oa{sa{sv}}}");
+            DBus::Writer ow = w.sub(objs);
+
+            auto add_object =
+                [&](const char* path,
+                    const std::vector<std::pair<std::string, bool>>& ifaces) {
+                    auto oe = ow.open_dict_entry();
+                    DBus::Writer oew = ow.sub(oe);
+                    oew.append_object_path(path);
+                    auto ifarr = oew.open_array("{sa{sv}}");
+                    DBus::Writer iw = oew.sub(ifarr);
+                    for (const auto& [iface, with_prop] : ifaces) {
+                        auto ie = iw.open_dict_entry();
+                        DBus::Writer iew = iw.sub(ie);
+                        iew.append_string(iface);
+                        auto props = iew.open_array("{sv}");
+                        DBus::Writer pw = iew.sub(props);
+                        if (with_prop) {
+                            auto pe = pw.open_dict_entry();
+                            DBus::Writer pew = pw.sub(pe);
+                            pew.append_string("Name");
+                            auto var = pew.open_variant("s");
+                            pew.sub(var).append_string("alpha");
+                            pew.close_container(var);
+                            pw.close_container(pe);
+                        }
+                        iew.close_container(props);
+                        iw.close_container(ie);
+                    }
+                    oew.close_container(ifarr);
+                    ow.close_container(oe);
+                };
+
+            add_object("/pulp/om/dev1",
+                       {{"pulp.Device", true}, {"pulp.Battery", false}});
+            add_object("/pulp/om/dev2", {{"pulp.Device", false}});
+
+            w.close_container(objs);
+            return true;
+        }));
+
+    std::vector<std::pair<std::string, std::string>> pairs;
+    std::atomic<bool> call_done{false};
+    std::atomic<bool> call_ok{false};
+    std::thread worker([&] {
+        call_ok = client.get_managed_objects(
+            server_name, "/pulp/om",
+            [&](const std::string& obj, const std::string& iface) {
+                pairs.emplace_back(obj, iface);
+            });
+        call_done = true;
+    });
+    for (int i = 0; i < 200 && !call_done.load(); ++i) server.dispatch(25);
+    worker.join();
+
+    REQUIRE(call_ok.load());
+    // Three (object, interface) pairs, properties skipped without disrupting the walk.
+    REQUIRE(pairs.size() == 3u);
+    auto has = [&](const std::string& o, const std::string& i) {
+        return std::find(pairs.begin(), pairs.end(),
+                         std::make_pair(o, i)) != pairs.end();
+    };
+    REQUIRE(has("/pulp/om/dev1", "pulp.Device"));
+    REQUIRE(has("/pulp/om/dev1", "pulp.Battery"));
+    REQUIRE(has("/pulp/om/dev2", "pulp.Device"));
+
+    REQUIRE(server.unregister_object("/pulp/om"));
+}
+
 TEST_CASE("Linux portal backend honest-fails when no portal is running",
           "[platform][dbus][file-dialog][issue-301][linux]") {
     // Gated on PULP_TEST_LINUX_PORTAL_ABSENT so we never raise a real (blocking)
