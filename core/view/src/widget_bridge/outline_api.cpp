@@ -1,6 +1,7 @@
 // widget_bridge/outline_api.cpp - outline style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <cctype>
 #include <functional>
@@ -10,6 +11,7 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
     // pulp #1519 - CSS / RN outline cluster. Outline is paint-time only:
@@ -25,7 +27,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
     // setBackground / setBorderColor (#hex / rgb() / named), plus the
     // CSS `currentColor` keyword which resolves to the View's text
     // color via the inheritable cascade (#1710).
-    engine_.register_function("setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -58,7 +60,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
     });
 
     // setOutlineOffset(id, px) - gap between border-box edge and outline.
-    engine_.register_function("setOutlineOffset", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineOffset", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto offset = static_cast<float>(args.get<double>(1, 0.0));
         auto* v = id.empty() ? &root_ : widget(id);
@@ -69,7 +71,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
     // setOutlineStyle(id, "solid"|"dashed"|...) - same keyword set as
     // setBorderStyle. Reuses View::BorderStyle since the CSS spec lists
     // the same line-style values for both properties.
-    engine_.register_function("setOutlineStyle", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "solid");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -89,7 +91,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
 
     // setOutlineWidth(id, px) - outline stroke thickness. width<=0 or
     // outline_style==none/hidden short-circuits the paint.
-    engine_.register_function("setOutlineWidth", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineWidth", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto width = static_cast<float>(args.get<double>(1, 0.0));
         auto* v = id.empty() ? &root_ : widget(id);
