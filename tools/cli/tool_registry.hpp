@@ -47,6 +47,16 @@ struct ToolDescriptor {
     std::string sdk_max;
     std::vector<std::string> capabilities;   // e.g. "detect", "analyze", "emit"
     std::string health_check;                // command string to probe the tool
+
+    // ── IMPORTER_TERMS fields (optional, DATA) ──
+    //
+    // The accept-to-run terms body an importer presents before it runs, plus
+    // its version and an opaque vendor id for the audit trail. The terms text
+    // is vendor-supplied DATA; the SDK only surfaces it, hashes it, and records
+    // acceptance. Absent on tools that declare no terms (the gate passes).
+    std::string terms_text;
+    std::string terms_version;
+    std::string vendor_id;
 };
 
 // ── Tool Registry ──

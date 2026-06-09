@@ -128,6 +128,11 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("capabilities")) tool.capabilities = v->as_string_array();
             if (auto v = val.get("health_check")) tool.health_check = v->as_string();
 
+            // IMPORTER_TERMS DATA (vendor-supplied; surfaced by the accept gate).
+            if (auto v = val.get("terms_text")) tool.terms_text = v->as_string();
+            if (auto v = val.get("terms_version")) tool.terms_version = v->as_string();
+            if (auto v = val.get("vendor_id")) tool.vendor_id = v->as_string();
+
             if (auto bs = val.get("binary_sources"); bs && bs->type == JsonValue::Object) {
                 for (auto& [platform, src] : bs->obj()) {
                     BinarySource s;

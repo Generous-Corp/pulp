@@ -47,7 +47,8 @@ void print_usage() {
         "  -o, --output-ir <file>       inspect: write ProjectIR JSON to <file>\n"
         "  --report <file.md>           inspect: write a human report\n"
         "  --output <dir>               emit: scaffold output directory\n"
-        "  --importer-cmd <cmd>         Override importer resolution with a command\n";
+        "  --importer-cmd <cmd>         Override importer resolution with a command\n"
+        "  --accept-importer-terms      Accept the importer's terms non-interactively (CI)\n";
 }
 
 }  // namespace
@@ -93,6 +94,11 @@ int cmd_import(const std::vector<std::string>& args) {
         else if (a == "--report") o.report = need("--report");
         else if (a == "--output") o.output = need("--output");
         else if (a == "--importer-cmd") o.importer_cmd = need("--importer-cmd");
+        else if (a == "--accept-importer-terms") o.accept_importer_terms = true;
+        // Terms-text override (paired with --importer-cmd, which has no registry
+        // entry to carry the terms). Mostly for tests + power users.
+        else if (a == "--importer-terms-text") o.terms_text = need("--importer-terms-text");
+        else if (a == "--importer-terms-version") o.terms_version = need("--importer-terms-version");
         else if (!a.empty() && a[0] == '-') {
             std::cerr << "pulp import: unknown option '" << a << "'\n";
             return 2;
