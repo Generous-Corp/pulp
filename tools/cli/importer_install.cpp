@@ -484,7 +484,7 @@ ImporterInstallResult install_importer(const ToolDescriptor& tool,
         << "  \"install_dir\": \"" << json_escape(install_dir.string()) << "\",\n"
         << "  \"skill_path\": \"" << json_escape(installed_skill.string()) << "\",\n"
         << "  \"terms_version\": \"" << json_escape(tool.terms_version) << "\",\n"
-        << "  \"terms_vendor_id\": \"" << json_escape(tool.terms_vendor_id) << "\"\n"
+        << "  \"terms_vendor_id\": \"" << json_escape(tool.vendor_id) << "\"\n"
         << "}\n";
     if (!write_text(record_path, rec.str())) {
         result.error = "failed to write install record for importer '" + tool.id + "'";

@@ -144,7 +144,7 @@ ToolDescriptor make_importer(const std::string& sha,
     t.skill_source = "SKILL.md";
     t.skill_name = "framework-x-importer";
     t.terms_version = "2026-06-07";
-    t.terms_vendor_id = "framework-x";
+    t.vendor_id = "framework-x";
     ImporterArtifact a;
     a.archive_format = "tar.gz";
     a.sha256 = sha;
@@ -368,7 +368,7 @@ fs::path write_repo_registry(const fs::path& repo, const std::string& sha,
       "skill_source": "SKILL.md",
       "skill_name": "framework-x-importer",
       "terms_version": "2026-06-07",
-      "terms_vendor_id": "framework-x",
+      "vendor_id": "framework-x",
       "importer_artifacts": {
         ")") + platform + R"(": {
           "url_template": "file://)" + pkg.string() + R"(",

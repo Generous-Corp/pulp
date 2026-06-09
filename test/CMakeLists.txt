@@ -399,6 +399,27 @@ target_compile_definitions(pulp-test-cli-import-emit PRIVATE
 catch_discover_tests(pulp-test-cli-import-emit
     PROPERTIES LABELS "parser-import")
 
+# CLI import IMPORTER_TERMS accept-gate + provenance PR-check. Links the pure
+# acceptance-store logic directly, shells out to the built CLI for the
+# accept-to-run gate behaviour, and shells out to the Python provenance audit.
+add_executable(pulp-test-cli-import-terms
+    test_cli_import_terms.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_terms.cpp
+)
+target_include_directories(pulp-test-cli-import-terms PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-import-terms PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-terms pulp-cli)
+    target_compile_definitions(pulp-test-cli-import-terms PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+target_compile_definitions(pulp-test-cli-import-terms PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-import-terms
+    PROPERTIES LABELS "parser-import")
+
 # pulp #914 — `pulp run` flag parser unit tests. Pure parser, no I/O,
 # no project resolution. The shell-out CLI behaviour for the same
 # flags lives in test_cli_shellout.cpp.

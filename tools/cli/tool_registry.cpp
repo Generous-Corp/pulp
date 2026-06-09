@@ -129,8 +129,6 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("health_check")) tool.health_check = v->as_string();
             if (auto v = val.get("skill_source")) tool.skill_source = v->as_string();
             if (auto v = val.get("skill_name")) tool.skill_name = v->as_string();
-            if (auto v = val.get("terms_version")) tool.terms_version = v->as_string();
-            if (auto v = val.get("terms_vendor_id")) tool.terms_vendor_id = v->as_string();
 
             // Checksummed per-platform importer artifacts (#19).
             if (auto ia = val.get("importer_artifacts");
@@ -143,6 +141,11 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
                     tool.importer_artifacts[platform] = a;
                 }
             }
+
+            // IMPORTER_TERMS DATA (vendor-supplied; surfaced by the accept gate).
+            if (auto v = val.get("terms_text")) tool.terms_text = v->as_string();
+            if (auto v = val.get("terms_version")) tool.terms_version = v->as_string();
+            if (auto v = val.get("vendor_id")) tool.vendor_id = v->as_string();
 
             if (auto bs = val.get("binary_sources"); bs && bs->type == JsonValue::Object) {
                 for (auto& [platform, src] : bs->obj()) {

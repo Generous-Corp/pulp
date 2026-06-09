@@ -1183,6 +1183,9 @@ commands:
           - name: --importer-cmd
             kind: option
             description: Override importer resolution with an explicit command string
+          - name: --accept-importer-terms
+            kind: flag
+            description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
       - name: emit
         summary: Resolve the importer, run its SPI analyze then emit verbs to get an EmissionManifest, then the SDK writes a buildable migration scaffold under --output. Every generated file passes a clean-room output denylist scan (framework source is rejected; copied-user-file DSP is exempt); a .pulp-import-provenance.json marker and migration_status.json are written by the SDK.
         args:
@@ -1201,6 +1204,9 @@ commands:
           - name: --importer-cmd
             kind: option
             description: Override importer resolution with an explicit command string
+          - name: --accept-importer-terms
+            kind: flag
+            description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
     docs: reference/cli.md#import
 
   - name: tool

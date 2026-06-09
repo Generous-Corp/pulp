@@ -48,7 +48,7 @@ runtime DATA carried by the descriptor.
 
     // Accept-gate metadata (composes with the importer-terms gate).
     "terms_version": "2026-06-07",
-    "terms_vendor_id": "framework-x",
+    "vendor_id": "framework-x",
 
     // Checksummed, per-platform artifacts.
     "importer_artifacts": {

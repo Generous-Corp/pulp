@@ -30,6 +30,14 @@ struct ImportOptions {
     std::string framework_path;
     std::vector<std::string> extra_includes;
     std::string importer_cmd;
+    bool accept_importer_terms = false;  // non-interactive IMPORTER_TERMS accept
+
+    // Terms text override for `--importer-cmd` / test use: when no tool-registry
+    // entry carries the terms (e.g. an explicit importer command), this supplies
+    // the gate body directly. Empty in the normal registry-resolved path.
+    std::string terms_text;
+    std::string terms_version;
+    std::string vendor_id;
 };
 
 // `pulp import detect <dir>` — rank known-framework candidates for a project.
