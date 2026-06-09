@@ -1,6 +1,7 @@
 // widget_bridge/state_binding_api.cpp - parameter state registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <cstddef>
 #include <string>
@@ -8,8 +9,10 @@
 namespace pulp::view {
 
 void WidgetBridge::register_state_binding_api() {
+    BridgeApiContext api{engine_};
+
     // getParam(name) -> get parameter value from store (normalized)
-    engine_.register_function("getParam", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getParam", [this](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
 
         for (size_t i = 0; i < store_.param_count(); ++i) {
@@ -22,7 +25,7 @@ void WidgetBridge::register_state_binding_api() {
     });
 
     // setParam(name, normalized_value) -> set parameter in store
-    engine_.register_function("setParam", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setParam", [this](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto value = args.get<double>(1, 0);
 

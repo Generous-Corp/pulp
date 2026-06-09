@@ -1,14 +1,17 @@
 // widget_bridge/style_cursor_api.cpp - cursor and direction style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 
 namespace pulp::view {
 
 void WidgetBridge::register_widget_style_cursor_direction_api() {
+    BridgeApiContext api{engine_};
+
     // setCursor(id, "pointer"|"crosshair"|"text"|"default") - CSS cursor
-    engine_.register_function("setCursor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setCursor", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto c = args.get<std::string>(1, "default");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -71,7 +74,7 @@ void WidgetBridge::register_widget_style_cursor_direction_api() {
     // shape time. Logical-edge mapping in the @pulp/react prop-applier
     // currently stays LTR-only (per #1497 fast-path note); a future
     // slice will make it direction-aware via a shared resolver.
-    engine_.register_function("setDirection", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setDirection", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto d = args.get<std::string>(1, "ltr");
         auto* v = id.empty() ? &root_ : widget(id);

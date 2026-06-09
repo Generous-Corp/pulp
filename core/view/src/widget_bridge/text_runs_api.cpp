@@ -1,6 +1,7 @@
 // widget_bridge/text_runs_api.cpp - text-run typography registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <pulp/canvas/attributed_string.hpp>
 
@@ -14,6 +15,7 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
     // setTextRuns(id, [{start,end,fontWeight?,fontSize?,color?,fontStyle?,
@@ -22,7 +24,7 @@ void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(con
     // offsets) so single-line mixed text renders each run with its own style
     // (the native equivalent of the web nested-<span> path). The dominant style
     // is read from the Label (codegen emits the single-style setters first).
-    engine_.register_function("setTextRuns", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTextRuns", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* l = dynamic_cast<Label*>(widget(id));
         if (!l || args.numArgs < 2 || !args[1] || !args[1]->isArray())
