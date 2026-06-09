@@ -54,8 +54,22 @@ RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 
 
-class SignAndReleaseTestStep(unittest.TestCase):
-    """sign-and-release.yml must skip validation-labeled tests."""
+class SignAndReleaseNoTestGate(unittest.TestCase):
+    """sign-and-release.yml must NOT re-run the unit-test suite.
+
+    Supersedes the original #720 design (run ctest minus the `validation`
+    label). The release-artifact build is NOT a test gate: a tagged commit has
+    already passed the FULL suite on the PR/merge gate (self-hosted lane with
+    real GPU/display/iOS-SDK). Re-running ctest on a HEADLESS GitHub-hosted
+    runner is redundant AND fails on environment-only tests that pass on real
+    hardware — #720 already carved out the auval `validation` label for exactly
+    this reason, then more hardware-dependent tests (Skia-raster screenshot,
+    cmake-require-gpu, cmake-ios-hostapp-links) kept silently breaking Releases
+    (v0.372–v0.391). Excluding labels one-by-one is unbounded whack-a-mole; the
+    correct invariant is "don't run the suite here at all." The Build step is the
+    release-config compile smoke, validate.yml gates the format validators on PR,
+    and a headless-safe built-artifact smoke is the recommended replacement gate.
+    """
 
     def setUp(self) -> None:
         self.assertTrue(
@@ -64,53 +78,25 @@ class SignAndReleaseTestStep(unittest.TestCase):
         )
         self.text = SIGN_AND_RELEASE.read_text()
 
-    def _find_test_step_run(self) -> str:
-        """Return the shell text under the `name: Test` step."""
-        # Match the Test step block: `name: Test` followed by an optional
-        # comment block, then `run:`. The run can be a single line
-        # (`run: ctest ...`) or a literal block (`run: |`).
+    def test_no_ctest_unit_run_step(self) -> None:
+        """Guard against re-introducing a `name: Test` step that runs ctest —
+        the headless whack-a-mole that blocked GitHub Releases v0.372–v0.391."""
         pattern = re.compile(
-            r"-\s*name:\s*Test\s*\n"            # step header
-            r"(?:\s*#[^\n]*\n)*"               # optional comment lines
+            r"-\s*name:\s*Test\s*\n"
+            r"(?:\s*#[^\n]*\n)*"
             r"\s*run:\s*(.+?)(?=\n\s*-\s*name:|\Z)",
             re.DOTALL,
         )
         match = pattern.search(self.text)
-        self.assertIsNotNone(
-            match,
-            "could not locate the `name: Test` step in sign-and-release.yml",
-        )
-        return match.group(1)
-
-    def test_test_step_invokes_ctest(self) -> None:
-        run_block = self._find_test_step_run()
-        self.assertIn(
-            "ctest",
-            run_block,
-            "sign-and-release Test step should still invoke ctest",
-        )
-
-    def test_test_step_excludes_validation_label(self) -> None:
-        """Regression for #720.
-
-        The Test step must pass `-LE validation` to ctest (or otherwise
-        explicitly skip the validation label) so auval / pluginval /
-        clap-validator failures on hosted GH runners do not silently
-        break the sign-and-release pipeline.
-        """
-        run_block = self._find_test_step_run()
-        # Accept either the short `-LE validation` form or the long
-        # `--label-exclude validation` form so future edits have
-        # flexibility.
-        has_short = re.search(r"-LE\s+validation", run_block)
-        has_long = re.search(r"--label-exclude\s+validation", run_block)
-        self.assertTrue(
-            has_short or has_long,
-            "sign-and-release Test step must exclude the `validation` ctest "
-            "label (issue #720). Without `-LE validation`, auval failures on "
-            "hosted GitHub macOS runners break the entire release pipeline. "
-            f"Found run block:\n{run_block}",
-        )
+        if match and "ctest" in match.group(1):
+            self.fail(
+                "sign-and-release.yml re-introduced a `name: Test` step that "
+                "runs ctest. The release build is not a test gate — tests gate "
+                "at PR on real hardware; re-running the suite on the headless "
+                "release runner manufactures environment-only failures that "
+                "silently block Releases. Smoke the built ARTIFACT instead.\n"
+                f"Found run block:\n{match.group(1)}"
+            )
 
 
 class ReleaseCliLinuxNoWebView(unittest.TestCase):

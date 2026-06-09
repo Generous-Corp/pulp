@@ -94,6 +94,18 @@ Slice 6 (#551).
   hosted macOS runner, pin a modern Xcode** — the default lags and silently
   diverges from the PR toolchain. (Code-side defense: always brace aggregate init
   `Type p{arg}` in CLI/import code — see the import-design skill.)
+- **The release build is NOT a test gate.** `sign-and-release.yml` no longer
+  re-runs the unit suite (`ctest`). By the time a commit is tagged it has already
+  passed the FULL suite on the PR/merge gate (self-hosted lane, real
+  GPU/display/iOS-SDK). Re-running on the HEADLESS GitHub-hosted release runner is
+  redundant and yields false failures from environment-only tests (Skia-raster
+  screenshot → empty, cmake-require-gpu → timeout, cmake-ios-hostapp-links) that
+  pass on real hardware — that blocked Releases AFTER the Xcode-pin let the build
+  through. Principle: tests gate at PR on representative hardware; the release
+  builds + signs + notarizes + packages the validated commit (the Build step is
+  the release-config compile smoke; `validate.yml` gates format validators). If a
+  release smoke is wanted, smoke the built ARTIFACT (dlopen the signed `.clap` /
+  load a plugin) — headless-safe — never re-run the hardware-dependent suite.
 - `.github/workflows/header-self-contained.yml` (pulp #2576) is a BLOCKING gate
   for the "compiles on Apple Clang, breaks on Linux" transitive-include class
   (e.g. `uint32_t` without `#include <cstdint>` — broke the v0.197.4 release).
