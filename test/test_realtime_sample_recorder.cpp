@@ -437,7 +437,7 @@ TEST_CASE("RealtimeSampleRecorder reports queue-full through metrics only",
     REQUIRE(recorder.stats().dropped_events > 0);
 }
 
-TEST_CASE("RealtimeSampleRecorder queued reset clears captured storage",
+TEST_CASE("RealtimeSampleRecorder queued reset invalidates without clearing captured storage",
           "[audio][sampler][recorder]") {
     RealtimeSampleRecorder recorder;
     REQUIRE(recorder.prepare(RealtimeSampleRecorderConfig{1, 8, 48000.0}));
@@ -464,8 +464,10 @@ TEST_CASE("RealtimeSampleRecorder queued reset clears captured storage",
 
     REQUIRE(recorder.state() == RealtimeSampleRecorderState::Idle);
     REQUIRE(recorder.frames_recorded() == 0);
-    REQUIRE(recorder.channel_data(0)[0] == 0.0f);
-    REQUIRE(recorder.channel_data(0)[1] == 0.0f);
+    // Live Reset runs on the audio thread, so it invalidates the logical
+    // recording without clearing the whole preallocated storage buffer.
+    REQUIRE(recorder.channel_data(0)[0] == 1.0f);
+    REQUIRE(recorder.channel_data(0)[1] == 2.0f);
 }
 
 TEST_CASE("RealtimeSampleRecorder drains commands on zero-frame callbacks",

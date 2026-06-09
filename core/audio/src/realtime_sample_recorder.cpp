@@ -267,7 +267,6 @@ void RealtimeSampleRecorder::apply_command(const RealtimeSampleRecorderCommand& 
             cancel_recording(command.sequence_id, block_offset);
             break;
         case RealtimeSampleRecorderCommandType::Reset:
-            clear_storage();
             set_state(RealtimeSampleRecorderState::Idle);
             frames_recorded_ = 0;
             active_sequence_id_ = 0;
