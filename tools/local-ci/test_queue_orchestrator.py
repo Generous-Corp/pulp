@@ -215,6 +215,33 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertIs(replacement, newer_replacement)
         self.assertEqual(reason, "newer_sha_queued")
 
+    def test_stale_running_jobs_for_runner_skips_current_runner_pid(self) -> None:
+        current = {"id": "current", "status": "running", "runner": {"pid": 123}}
+        other = {"id": "other", "status": "running", "runner": {"pid": 456}}
+        missing_runner = {"id": "missing-runner", "status": "running"}
+        pending = {"id": "pending", "status": "pending", "runner": {"pid": 456}}
+
+        self.assertEqual(
+            self.mod.stale_running_jobs_for_runner_unlocked(
+                [current, other, missing_runner, pending],
+                123,
+            ),
+            [other, missing_runner],
+        )
+
+    def test_stale_running_jobs_for_runner_marks_all_running_without_runner_pid(self) -> None:
+        running = {"id": "running", "status": "running", "runner": {"pid": 123}}
+        running_without_pid = {"id": "running-without-pid", "status": "running", "runner": {}}
+        completed = {"id": "completed", "status": "completed", "runner": {"pid": 123}}
+
+        self.assertEqual(
+            self.mod.stale_running_jobs_for_runner_unlocked(
+                [running, running_without_pid, completed],
+                None,
+            ),
+            [running, running_without_pid],
+        )
+
     def test_requeue_stale_running_job_preserves_progress_snapshot(self) -> None:
         job = {
             "id": "stale",

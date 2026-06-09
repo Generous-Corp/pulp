@@ -2677,15 +2677,10 @@ def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
         runner = None
         runner_pid = None
 
-    stale: list[dict] = []
-    for job in queue:
-        if job.get("status") != "running":
-            continue
-        job_runner = job.get("runner") or {}
-        if runner and runner_pid and job_runner.get("pid") == runner_pid:
-            continue
-        stale.append(job)
-    return stale
+    return _queue_orchestrator.stale_running_jobs_for_runner_unlocked(
+        queue,
+        runner_pid if runner else None,
+    )
 
 
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:

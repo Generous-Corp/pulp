@@ -1,8 +1,8 @@
 """Pure queue policy helpers for local CI.
 
 This module owns job identity, priority ordering, supersedence, cancellation
-result payloads, summaries, stale-running replacement/requeue state,
-runner-info active-target mutation, completed-job state mutation, and
+result payloads, summaries, stale-running job selection/replacement/requeue
+state, runner-info active-target mutation, completed-job state mutation, and
 completed-queue retention. Higher-level queue mutation, locking, runner
 liveness, result persistence, and drain orchestration remain in local_ci.py
 until later extraction slices.
@@ -260,6 +260,18 @@ def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tup
             replacement = candidate
             replacement_reason = reason
     return replacement, replacement_reason
+
+
+def stale_running_jobs_for_runner_unlocked(queue: list[dict], runner_pid: int | None) -> list[dict]:
+    stale: list[dict] = []
+    for job in queue:
+        if job.get("status") != "running":
+            continue
+        job_runner = job.get("runner") or {}
+        if runner_pid and job_runner.get("pid") == runner_pid:
+            continue
+        stale.append(job)
+    return stale
 
 
 def requeue_stale_running_job_unlocked(
