@@ -392,6 +392,7 @@ private:
     void register_animation_api();
     void register_animation_style_api();
     void register_canvas2d_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_gpu_api();
 };
 
 } // namespace pulp::view
