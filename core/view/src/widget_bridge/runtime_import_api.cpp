@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/design_import.hpp>
+#include "api_registry.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -42,6 +43,7 @@ void WidgetBridge::install_runtime_import_handlers() {
     // reconstructed at the same address skipped registration silently).
     if (runtime_import_installed_) return;
     runtime_import_installed_ = true;
+    BridgeApiContext api{engine_};
 
     // The bundled-React asset evaluation can throw arbitrary JS errors
     // when the sandbox is missing a host primitive (DecompressionStream,
@@ -85,7 +87,7 @@ void WidgetBridge::install_runtime_import_handlers() {
     // Crucially does NOT call buildDom or walkDomJson: the runtime path
     // is reconciler-owned (the JS-side ReactDOM capture shim catches
     // the React element directly).
-    engine_.register_function("__pulpRuntimeImport__",
+    register_bridge_function(api, "__pulpRuntimeImport__",
         [this, set_err, clear_err](choc::javascript::ArgumentList args) -> choc::value::Value {
             clear_err();
             auto html = args.get<std::string>(0, "");
@@ -212,7 +214,7 @@ void WidgetBridge::install_runtime_import_handlers() {
     // Pump the bridge's message loop + service_frame_callbacks the
     // requested number of times. Used by the JS shim to drain
     // useEffect callbacks, rAF queues, and timers after React commits.
-    engine_.register_function("__pulpRuntimeSettle__",
+    register_bridge_function(api, "__pulpRuntimeSettle__",
         [this](choc::javascript::ArgumentList args) -> choc::value::Value {
             int rounds = static_cast<int>(args.get<double>(0, 8.0));
             if (rounds < 1) rounds = 1;
