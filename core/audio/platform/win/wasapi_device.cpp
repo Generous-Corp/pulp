@@ -78,19 +78,26 @@ bool WasapiDevice::open(const DeviceConfig& config) {
         return false;
     }
 
-    // Initialize audio client in shared mode with event-driven buffering
-    hr = audio_client_->Initialize(
-        AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
-        requested_duration,
-        0,  // periodicity (must be 0 for shared mode)
-        mix_format,
-        nullptr);  // session GUID
+    // Initialize: shared (system mixer) or exclusive (sole endpoint owner) per
+    // DeviceConfig::share_mode. Both run event-driven at the mix format.
+    if (config_.share_mode == ShareMode::exclusive) {
+        hr = initialize_exclusive_(mix_format);
+    } else {
+        hr = audio_client_->Initialize(
+            AUDCLNT_SHAREMODE_SHARED,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+            requested_duration,
+            0,  // periodicity (must be 0 for shared mode)
+            mix_format,
+            nullptr);  // session GUID
+    }
 
     CoTaskMemFree(mix_format);
 
     if (FAILED(hr)) {
-        runtime::log_error("WASAPI: could not initialize audio client (0x{:08x})", static_cast<unsigned>(hr));
+        runtime::log_error("WASAPI: could not initialize audio client ({} mode, 0x{:08x})",
+                           config_.share_mode == ShareMode::exclusive ? "exclusive" : "shared",
+                           static_cast<unsigned>(hr));
         close();
         return false;
     }
@@ -153,6 +160,53 @@ bool WasapiDevice::open(const DeviceConfig& config) {
         flow_ == eCapture ? "capture" : "render",
         info().name, config_.sample_rate, buffer_frames_, actual_channels_);
     return true;
+}
+
+HRESULT WasapiDevice::initialize_exclusive_(WAVEFORMATEX* fmt) {
+    // The device must accept this exact format exclusively (S_OK). A closest-
+    // match (S_FALSE) or unsupported result means the mix format can't be taken
+    // exclusively here — honest-fail so the caller can fall back to shared.
+    HRESULT hr = audio_client_->IsFormatSupported(
+        AUDCLNT_SHAREMODE_EXCLUSIVE, fmt, nullptr);
+    if (hr != S_OK) {
+        runtime::log_warn("WASAPI: mix format unsupported in exclusive mode "
+                          "(0x{:08x}); use shared mode", static_cast<unsigned>(hr));
+        return FAILED(hr) ? hr : AUDCLNT_E_UNSUPPORTED_FORMAT;
+    }
+
+    // Drive at the device's MINIMUM period for the lowest exclusive latency.
+    REFERENCE_TIME default_period = 0, min_period = 0;
+    hr = audio_client_->GetDevicePeriod(&default_period, &min_period);
+    if (FAILED(hr)) return hr;
+
+    REFERENCE_TIME period = min_period;
+    hr = audio_client_->Initialize(
+        AUDCLNT_SHAREMODE_EXCLUSIVE,
+        AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+        period, period, fmt, nullptr);
+
+    // MSDN-documented retry: an unaligned buffer size means we must read back
+    // the aligned frame count, recompute the period, and re-Activate a FRESH
+    // client (the failed one cannot be reused for a second Initialize).
+    if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
+        UINT32 aligned_frames = 0;
+        if (SUCCEEDED(audio_client_->GetBufferSize(&aligned_frames)) &&
+            aligned_frames > 0 && fmt->nSamplesPerSec > 0) {
+            period = static_cast<REFERENCE_TIME>(
+                static_cast<double>(REFTIMES_PER_SEC) / fmt->nSamplesPerSec *
+                    aligned_frames + 0.5);
+            audio_client_->Release();
+            audio_client_ = nullptr;
+            hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                   reinterpret_cast<void**>(&audio_client_));
+            if (FAILED(hr)) return hr;
+            hr = audio_client_->Initialize(
+                AUDCLNT_SHAREMODE_EXCLUSIVE,
+                AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+                period, period, fmt, nullptr);
+        }
+    }
+    return hr;
 }
 
 void WasapiDevice::close() {

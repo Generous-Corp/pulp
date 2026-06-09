@@ -37,21 +37,18 @@ namespace pulp::audio::win {
 // Windows audio engine mixes; buffer size is requested in REFERENCE_TIME
 // units and rounded up to the engine's period.
 //
-// Modes **not** implemented today (intentionally deferred — see
-// planning/2026-05-24-reference-framework-gap-analysis.md row #302):
+// `AUDCLNT_SHAREMODE_EXCLUSIVE` is now also supported (W4), selected via
+// `DeviceConfig::share_mode == ShareMode::exclusive`: the endpoint is taken
+// exclusively at the device mix format (so the render/capture threads' existing
+// planar↔interleaved conversion still applies), driven at the device's minimum
+// period for low latency, with the documented AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED
+// re-activation retry. Shared mode stays the default.
 //
+// Still deferred (W4b follow-up):
 //   * `AUDCLNT_SHAREMODE_SHARED` low-latency variant
-//       (RATEADJUST + small periodicity via `IAudioClient3::InitializeSharedAudioStream`
-//        or AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM + AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY).
-//   * `AUDCLNT_SHAREMODE_EXCLUSIVE`
-//       (bypasses the engine; requires explicit format negotiation, lower
-//        latency, but conflicts with other applications and DAW workflows).
-//
-// Adding either mode means new public API surface
-// (`DeviceConfig::share_mode`, `DeviceConfig::exclusive`, etc.) and is
-// out of scope for the gap-doc audit slice. The fixture below pins the
-// current contract so a future "we added exclusive" change is forced to
-// update both code and tests in lockstep.
+//       (IAudioClient3::InitializeSharedAudioStream at the engine min period).
+//   * Transparent sample-rate-change / AUDCLNT_E_DEVICE_INVALIDATED recovery
+//       (today an invalidated stream stops cleanly; the host re-opens).
 class WasapiDevice : public AudioDevice {
 public:
     explicit WasapiDevice(IMMDevice* device, EDataFlow flow = eRender);
@@ -78,6 +75,12 @@ public:
 private:
     void render_thread_func();
     void capture_thread_func();
+
+    // Exclusive-mode Initialize on audio_client_ at `fmt`, driven at the device
+    // minimum period. Handles the AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED dance
+    // (re-Activate audio_client_ with the aligned period). Returns the final
+    // HRESULT; on success audio_client_ is initialized and event-driven.
+    HRESULT initialize_exclusive_(WAVEFORMATEX* fmt);
 
     IMMDevice*           device_         = nullptr;
     EDataFlow            flow_           = eRender;
