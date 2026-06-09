@@ -1,6 +1,7 @@
 // widget_bridge/style_state_api.cpp - state and debug style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <functional>
 #include <string>
@@ -10,11 +11,12 @@ namespace pulp::view {
 
 void WidgetBridge::register_widget_style_state_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseColor = std::move(parse_color);
 
     // setStateStyle(id, state, property, value) - declarative state-driven styling.
     // Replaces manual hover callback wiring. States: hover, active, focus, disabled.
-    engine_.register_function("setStateStyle", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setStateStyle", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto state = args.get<std::string>(1, "hover");
         auto prop = args.get<std::string>(2, "");
@@ -68,7 +70,7 @@ void WidgetBridge::register_widget_style_state_api(
     });
 
     // setEnabled(id, bool) - CSS :disabled equivalent.
-    engine_.register_function("setEnabled", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setEnabled", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto enabled = args.get<double>(1, 1) > 0.5;
         auto* v = id.empty() ? &root_ : widget(id);
@@ -77,7 +79,7 @@ void WidgetBridge::register_widget_style_state_api(
     });
 
     // setDebugPaint(bool) - draw bounding box outlines on all views.
-    engine_.register_function("setDebugPaint", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setDebugPaint", [this](choc::javascript::ArgumentList args) {
         auto on = args.get<double>(0, 0) > 0.5;
         // Store as a dimension token on root theme.
         auto theme = root_.theme();
