@@ -19,6 +19,7 @@ and the matching contract tests in the same change.
 | `cloud.py` | GitHub/Namespace cloud-run records, cost/history helpers, dispatch wrappers, and formatting. | Local/SSH validation execution. |
 | `footprint.py` | Local-CI state-size accounting and cleanup entry descriptions. | Cleanup candidate selection or deletion. |
 | `evidence_index.py` | Result-to-evidence normalization, latest passing target evidence, evidence index persistence, and evidence summaries. | Queue mutation, runner state, result creation, or target execution. |
+| `ssh_bundle.py` | Git bundle naming, local bundle creation, and SSH upload/progress/probe mechanics. | Target validation execution or queue orchestration. |
 
 ## Remaining `local_ci.py` Clusters
 
@@ -28,7 +29,6 @@ behind the contracts added in this slice.
 
 | Cluster | Current responsibility | Extraction target |
 | --- | --- | --- |
-| Bundle transport | Build git bundles, upload/reuse them on SSH targets, and track bundle refs. | `ssh_bundle.py` |
 | Desktop artifact layout | Create run/publish bundles, desktop artifact roots, receipts, screenshots, and reports. | `desktop_artifacts.py` |
 | Desktop source preparation | Exact-SHA local/macOS, Linux, and Windows source preparation; command rewriting; prepare stamps. | `source_prep.py` |
 | Desktop target probes | macOS/Linux/Windows desktop tool probes, launch backends, and automation adapters. | `macos_desktop.py`, `linux_target.py`, `windows_target.py` |

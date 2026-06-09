@@ -160,101 +160,55 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
     describe_path_for_cleanup,
 )
 
+import ssh_bundle as _ssh_bundle  # noqa: E402
+
 
 def bundle_ref_name(job_id: str) -> str:
-    return f"refs/pulp-ci-bundles/{job_id}"
+    return _ssh_bundle.bundle_ref_name(job_id)
 
 
 def remote_bundle_name(job_id: str) -> str:
-    return f"pulp-ci-{job_id}.bundle"
+    return _ssh_bundle.remote_bundle_name(job_id)
 
 
 def create_job_bundle(job: dict) -> Path:
-    ensure_state_dirs()
-    bundle_path = bundles_dir() / f"{job['id']}.bundle"
-    bundle_lock_path = Path(f"{bundle_path}.lock")
-
-    with _BUNDLE_BUILD_LOCK:
-        if bundle_path.exists() and bundle_path.stat().st_size > 0:
-            return bundle_path
-
-        bundle_lock_path.unlink(missing_ok=True)
-        bundle_path.unlink(missing_ok=True)
-
-        temp_ref = bundle_ref_name(job["id"])
-        subprocess.run(["git", "update-ref", temp_ref, job["sha"]], cwd=ROOT, check=True)
-        try:
-            subprocess.run(["git", "bundle", "create", str(bundle_path), temp_ref], cwd=ROOT, check=True)
-        finally:
-            subprocess.run(["git", "update-ref", "-d", temp_ref], cwd=ROOT, check=True)
-    return bundle_path
+    return _ssh_bundle.create_job_bundle(
+        job,
+        ensure_state_dirs_fn=ensure_state_dirs,
+        bundles_dir_fn=bundles_dir,
+        bundle_build_lock=_BUNDLE_BUILD_LOCK,
+        root=ROOT,
+        run_fn=subprocess.run,
+    )
 
 
 def config_for_bundle_probe(job: dict, config: dict | None = None) -> dict:
-    if config:
-        return config
-    submission = job.get("submission") or {}
-    config_file = submission.get("config_path")
-    if config_file:
-        try:
-            return load_config_file(config_file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-    optional = load_optional_config()
-    return optional or {"targets": {}}
+    return _ssh_bundle.config_for_bundle_probe(
+        job,
+        config,
+        load_config_file_fn=load_config_file,
+        load_optional_config_fn=load_optional_config,
+    )
 
 
 def sync_job_bundle_to_ssh_host(host: str, job: dict, report_progress=None, config: dict | None = None) -> tuple[str, str]:
-    bundle_path = create_job_bundle(job)
-    remote_name = remote_bundle_name(job["id"])
-    probe_config = config_for_bundle_probe(job, config)
-    try:
-        if report_progress:
-            report_progress(
-                phase="bundle-upload",
-                host=host,
-                bundle=remote_name,
-                last_output_at=now_iso(),
-                transport_mode="bundle",
-            )
-        upload = subprocess.Popen(
-            ["scp", str(bundle_path), f"{host}:{remote_name}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        bundle_size = bundle_path.stat().st_size
-        deadline = time.time() + 300
-        stdout = ""
-        stderr = ""
-        while True:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                upload.kill()
-                stdout, stderr = upload.communicate()
-                raise RuntimeError(
-                    f"failed to upload git bundle to {host}: timed out waiting for scp to finish"
-                )
-            try:
-                stdout, stderr = upload.communicate(timeout=min(5.0, max(1.0, remaining)))
-            except subprocess.TimeoutExpired:
-                remote_size = probe_uploaded_bundle_size(host, remote_name, config=probe_config)
-                if remote_size is not None and remote_size >= bundle_size:
-                    upload.terminate()
-                    try:
-                        upload.communicate(timeout=2.0)
-                    except subprocess.TimeoutExpired:
-                        upload.kill()
-                        upload.communicate()
-                    break
-                continue
-            if upload.returncode != 0:
-                detail = (stderr or stdout or "").strip()
-                raise RuntimeError(f"failed to upload git bundle to {host}: {detail or f'scp exited {upload.returncode}'}")
-            break
-    except OSError as exc:
-        raise RuntimeError(f"failed to upload git bundle to {host}: {exc}") from exc
-    return remote_name, bundle_ref_name(job["id"])
+    return _ssh_bundle.sync_job_bundle_to_ssh_host(
+        host,
+        job,
+        report_progress=report_progress,
+        config=config,
+        create_job_bundle_fn=create_job_bundle,
+        remote_bundle_name_fn=remote_bundle_name,
+        bundle_ref_name_fn=bundle_ref_name,
+        config_for_bundle_probe_fn=config_for_bundle_probe,
+        probe_uploaded_bundle_size_fn=probe_uploaded_bundle_size,
+        now_iso_fn=now_iso,
+        popen_fn=subprocess.Popen,
+        stdout_pipe=subprocess.PIPE,
+        stderr_pipe=subprocess.PIPE,
+        timeout_expired_type=subprocess.TimeoutExpired,
+        time_fn=time.time,
+    )
 
 
 def target_name_for_ssh_host(config: dict, host: str) -> str | None:
