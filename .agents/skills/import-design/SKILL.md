@@ -364,6 +364,18 @@ so codegen lowers it like any other path. Key facts / gotchas:
   **MSVC gotcha:** the polygon/star angle math must NOT use `M_PI` — MSVC does
   not define it without `_USE_MATH_DEFINES`, which broke the Windows CLI build
   (and the whole release pipeline) once. Use the local `kSynthPi` constant.
+- **Release-runner toolchain gotcha (C++20 P0960):** the GitHub-hosted macOS
+  *release* runner's Apple clang is OLDER than the self-hosted PR-lane clang and
+  does NOT implement **parenthesized aggregate initialization** (`Type p(arg)` for
+  a ctor-less aggregate), even at `-std=c++20`. So `JsonParser p(snap.html_text)`
+  in `import_detect.cpp` compiled on PR CI but **failed the release build** ("no
+  matching constructor"), silently breaking every GitHub Release from ~v0.371 to
+  v0.391 (the tag-triggered `sign-and-release.yml` / `release-cli.yml` Build step
+  died; tags kept getting created so the breakage was invisible until the
+  release-cadence watchdog flagged the tags-without-Releases). **Always brace
+  aggregate init** (`Type p{arg}`) in CLI/import code — it's valid on every
+  toolchain. (PR CI cannot catch this class; it only surfaces on the older
+  release runner.)
 - **`polyline` is intentionally NOT synthesized** — it is an open run of explicit
   points that geometry alone can't reconstruct; it stays `codegen: missing`
   (carry `path_data` or rasterize at export).
