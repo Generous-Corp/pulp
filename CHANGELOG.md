@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03910"></a>
+## [0.391.0] - 2026-06-09
+
+- feat(view): per-widget AT-SPI Accessible + Component tree (L7b) ([#3737](https://github.com/danielraffel/pulp/pull/3737))
+- refactor: migrate animation bridge API to registry helper ([#3736](https://github.com/danielraffel/pulp/pull/3736))
+- refactor: migrate layout bridge API to registry helper ([#3735](https://github.com/danielraffel/pulp/pull/3735))
+- refactor: migrate widget factory bridge API to registry helper ([#3734](https://github.com/danielraffel/pulp/pull/3734))
+- refactor: migrate event bridge API to registry helper ([#3733](https://github.com/danielraffel/pulp/pull/3733))
+
 <a id="v03900"></a>
 ## [0.390.0] - 2026-06-09
 
@@ -4020,6 +4029,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.391.0]: https://github.com/danielraffel/pulp/releases/tag/v0.391.0
 [0.390.0]: https://github.com/danielraffel/pulp/releases/tag/v0.390.0
 [0.389.0]: https://github.com/danielraffel/pulp/releases/tag/v0.389.0
 [0.388.0]: https://github.com/danielraffel/pulp/releases/tag/v0.388.0
