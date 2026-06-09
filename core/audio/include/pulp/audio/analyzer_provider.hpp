@@ -63,12 +63,32 @@ enum class AnalyzerDescriptorStatus : std::uint8_t {
     duplicate_id,
 };
 
+enum class TimePitchPrepareStatus : std::uint8_t {
+    ok,
+    unavailable,
+    invalid_config,
+    allocation_failed,
+    setup_failed,
+};
+
+enum class TimePitchProcessStatus : std::uint8_t {
+    ok,
+    unavailable,
+    invalid_config,
+    not_prepared,
+    channel_mismatch,
+    frame_budget_exceeded,
+    processing_failed,
+};
+
 [[nodiscard]] const char* analyzer_capability_name(AnalyzerCapability capability) noexcept;
 [[nodiscard]] const char* analyzer_backend_name(AnalyzerBackend backend) noexcept;
 [[nodiscard]] const char* analyzer_availability_name(AnalyzerAvailability availability) noexcept;
 [[nodiscard]] const char* analyzer_license_policy_name(AnalyzerLicensePolicy policy) noexcept;
 [[nodiscard]] const char* analyzer_execution_context_name(AnalyzerExecutionContext context) noexcept;
 [[nodiscard]] const char* analyzer_descriptor_status_name(AnalyzerDescriptorStatus status) noexcept;
+[[nodiscard]] const char* time_pitch_prepare_status_name(TimePitchPrepareStatus status) noexcept;
+[[nodiscard]] const char* time_pitch_process_status_name(TimePitchProcessStatus status) noexcept;
 
 struct AnalyzerDescriptor {
     std::string id;
@@ -173,6 +193,13 @@ struct TransientClassification {
     AnalyzerProvenance provenance;
 };
 
+struct TimePitchPrepareConfig {
+    double sample_rate = 0.0;
+    std::uint32_t channels = 0;
+    std::uint64_t max_input_frames = 0;
+    std::uint64_t max_output_frames = 0;
+};
+
 struct TimePitchProcessSpec {
     double source_sample_rate = 0.0;
     double time_ratio = 1.0;
@@ -181,8 +208,15 @@ struct TimePitchProcessSpec {
     std::uint64_t max_output_frames = 0;
 };
 
+struct TimePitchPrepareResult {
+    bool ok = false;
+    TimePitchPrepareStatus status = TimePitchPrepareStatus::setup_failed;
+    AnalyzerProvenance provenance;
+};
+
 struct TimePitchProcessResult {
     bool ok = false;
+    TimePitchProcessStatus status = TimePitchProcessStatus::processing_failed;
     std::uint64_t input_frames_consumed = 0;
     std::uint64_t output_frames_produced = 0;
     AnalyzerProvenance provenance;
@@ -212,6 +246,16 @@ class TimePitchProcessor {
 public:
     virtual ~TimePitchProcessor() = default;
     [[nodiscard]] virtual const AnalyzerDescriptor& descriptor() const noexcept = 0;
+    // Control/background-thread preparation for implementations that need
+    // fixed scratch or package-owned state before processing.
+    [[nodiscard]] virtual TimePitchPrepareResult prepare(
+        const TimePitchPrepareConfig& config) = 0;
+    // Control/background-thread teardown. After release(), callers must prepare()
+    // again before process() can succeed.
+    virtual void release() noexcept = 0;
+    // Stateful processors treat repeated process() calls between prepare() and
+    // release() as one stream. Independent offline jobs should prepare a fresh
+    // processor state until explicit stream-boundary/flush controls land.
     [[nodiscard]] virtual TimePitchProcessResult process(
         BufferView<const float> input,
         BufferView<float> output,

@@ -171,6 +171,42 @@ const char* analyzer_descriptor_status_name(AnalyzerDescriptorStatus status) noe
     return "unknown";
 }
 
+const char* time_pitch_prepare_status_name(TimePitchPrepareStatus status) noexcept {
+    switch (status) {
+        case TimePitchPrepareStatus::ok:
+            return "ok";
+        case TimePitchPrepareStatus::unavailable:
+            return "unavailable";
+        case TimePitchPrepareStatus::invalid_config:
+            return "invalid-config";
+        case TimePitchPrepareStatus::allocation_failed:
+            return "allocation-failed";
+        case TimePitchPrepareStatus::setup_failed:
+            return "setup-failed";
+    }
+    return "unknown";
+}
+
+const char* time_pitch_process_status_name(TimePitchProcessStatus status) noexcept {
+    switch (status) {
+        case TimePitchProcessStatus::ok:
+            return "ok";
+        case TimePitchProcessStatus::unavailable:
+            return "unavailable";
+        case TimePitchProcessStatus::invalid_config:
+            return "invalid-config";
+        case TimePitchProcessStatus::not_prepared:
+            return "not-prepared";
+        case TimePitchProcessStatus::channel_mismatch:
+            return "channel-mismatch";
+        case TimePitchProcessStatus::frame_budget_exceeded:
+            return "frame-budget-exceeded";
+        case TimePitchProcessStatus::processing_failed:
+            return "processing-failed";
+    }
+    return "unknown";
+}
+
 bool analyzer_descriptor_has_capability(const AnalyzerDescriptor& descriptor,
                                         AnalyzerCapability capability) noexcept {
     return std::find(descriptor.capabilities.begin(),

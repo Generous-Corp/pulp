@@ -50,6 +50,7 @@ target_sources(pulp-audio PRIVATE
     src/sampler_looper_metrics.cpp
     src/slice_map.cpp
     src/slice_point_analyzer.cpp
+    src/signalsmith_time_pitch_processor.cpp
     src/audio_thumbnail_build.cpp
     src/audio_thumbnail_cache.cpp
     src/audio_thumbnail_serialization.cpp
@@ -90,6 +91,12 @@ if(TARGET alac)
     target_link_libraries(pulp-audio PRIVATE alac)
     target_compile_definitions(pulp-audio PRIVATE PULP_HAS_ALAC=1)
     message(STATUS "Pulp: ALAC write enabled (Apple ALAC — Apache 2.0)")
+endif()
+
+if(TARGET signalsmith-stretch)
+    target_link_libraries(pulp-audio PRIVATE signalsmith-stretch)
+    target_compile_definitions(pulp-audio PUBLIC PULP_HAS_SIGNALSMITH_STRETCH=1)
+    message(STATUS "Pulp: Signalsmith Stretch time/pitch processor enabled")
 endif()
 
 target_link_libraries(pulp-audio PUBLIC pulp::runtime pulp::midi pulp::state pulp::signal)
