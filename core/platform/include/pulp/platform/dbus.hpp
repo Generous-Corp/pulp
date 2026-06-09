@@ -129,6 +129,9 @@ public:
         bool read_int32(int& out);
         bool read_uint32(unsigned& out);
         bool read_double(double& out);
+        /// Read a byte ('y') at the cursor into `out` and advance. Needed to
+        /// walk an 'ay' byte array such as BlueZ GattCharacteristic1.Value.
+        bool read_byte(unsigned char& out);
         /// Current argument's D-Bus type code, or 0 ('\0') when exhausted.
         int arg_type() const;
         /// Advance to the next argument. Returns false when there is no next.
@@ -163,6 +166,9 @@ public:
         bool append_int32(int v);
         bool append_uint32(unsigned v);
         bool append_double(double v);
+        /// Append a byte ('y'). Needed to build an 'ay' byte array such as the
+        /// value passed to BlueZ GattCharacteristic1.WriteValue.
+        bool append_byte(unsigned char v);
 
         /// A nested container being built. `iter` is the sub-iterator; pass it to
         /// the matching close_container().

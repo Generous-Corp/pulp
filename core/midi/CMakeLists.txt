@@ -29,9 +29,14 @@ target_sources(pulp-midi PRIVATE
     src/ump_session.cpp
     # BLE MIDI — Apple BLE-MIDI 1.0 transport. The packet codec is
     # cross-platform; create_ble_midi_central() resolves to either the
-    # CoreBluetooth backend on Apple or the safe-no-op stub on other
-    # platforms (see ble_midi_stub.cpp below).
+    # CoreBluetooth backend on Apple, the BlueZ D-Bus backend on Linux, or
+    # the safe-no-op stub on other platforms (see the per-platform branch).
     src/ble_midi_packet.cpp
+    # Process-wide registry that bridges a connected BLE peripheral into the
+    # platform MidiSystem's port list (the off-Apple analog of CoreMIDI
+    # auto-exposing OS-paired BLE peripherals as endpoints). Empty + inert on
+    # platforms whose central never registers anything (the stub central).
+    src/ble_midi_registry.cpp
 )
 
 if(APPLE AND NOT IOS)
@@ -152,13 +157,16 @@ elseif(WIN32)
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     target_sources(pulp-midi PRIVATE
         platform/linux/alsa_midi_device.cpp
-        # BLE MIDI scaffold — BlueZ D-Bus glue not yet wired; the stub
-        # central reports is_available() == false until the BlueZ
-        # GattCharacteristic1 backend lands.
-        src/ble_midi_stub.cpp
+        # BLE MIDI — BlueZ (org.bluez) over the runtime-dlopened libdbus client
+        # in core/platform. No new library is linked: BlueZ is a system daemon,
+        # libdbus is loaded at runtime. Replaces the former no-op stub.
+        platform/linux/ble_midi_linux.cpp
     )
     find_package(ALSA REQUIRED)
     target_link_libraries(pulp-midi PRIVATE ALSA::ALSA)
+    # pulp::platform carries the DBus client (system-bus BlueZ access) and the
+    # ALSA MidiSystem's registry merge. PUBLIC include dirs come transitively.
+    target_link_libraries(pulp-midi PRIVATE pulp::platform)
 # Android MIDI wired via PulpAndroid.cmake → pulp_wire_android_sources()
 # BLE MIDI on Android: BluetoothLeScanner + BluetoothGatt notification
 # via the existing JNI bridge — scaffold only; the stub central is

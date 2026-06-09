@@ -43,6 +43,7 @@ namespace pulp::platform {
 
 namespace {
 // D-Bus type codes + bus type (avoid the build-time dbus header).
+constexpr int kTypeByte    = 'y';
 constexpr int kTypeString  = 's';
 constexpr int kTypeObjPath = 'o';
 constexpr int kTypeBool    = 'b';
@@ -414,6 +415,12 @@ bool DBus::Reader::read_double(double& out) {
     if (d.iter_get_arg_type(iter_) != kTypeDouble) return false;
     double v = 0; d.iter_get_basic(iter_, &v); out = v; d.iter_next(iter_); return true;
 }
+bool DBus::Reader::read_byte(unsigned char& out) {
+    if (!owner_ || !owner_->impl_ || !iter_) return false;
+    auto& d = *owner_->impl_;
+    if (d.iter_get_arg_type(iter_) != kTypeByte) return false;
+    unsigned char v = 0; d.iter_get_basic(iter_, &v); out = v; d.iter_next(iter_); return true;
+}
 int DBus::Reader::arg_type() const {
     if (!owner_ || !owner_->impl_ || !iter_) return kTypeInvalid;
     return owner_->impl_->iter_get_arg_type(iter_);
@@ -465,6 +472,10 @@ bool DBus::Writer::append_uint32(unsigned v) {
 bool DBus::Writer::append_double(double v) {
     if (!owner_ || !owner_->impl_ || !iter_) return false;
     return owner_->impl_->iter_append_basic(iter_, kTypeDouble, &v) != 0;
+}
+bool DBus::Writer::append_byte(unsigned char v) {
+    if (!owner_ || !owner_->impl_ || !iter_) return false;
+    return owner_->impl_->iter_append_basic(iter_, kTypeByte, &v) != 0;
 }
 DBus::Writer::Container DBus::Writer::open_array(const std::string& element_signature) {
     Container c;
@@ -996,6 +1007,7 @@ bool DBus::Reader::read_string(std::string&) { return false; }
 bool DBus::Reader::read_int32(int&) { return false; }
 bool DBus::Reader::read_uint32(unsigned&) { return false; }
 bool DBus::Reader::read_double(double&) { return false; }
+bool DBus::Reader::read_byte(unsigned char&) { return false; }
 int  DBus::Reader::arg_type() const { return 0; }
 bool DBus::Reader::next() { return false; }
 bool DBus::Reader::recurse(Reader&) { return false; }
@@ -1006,6 +1018,7 @@ bool DBus::Writer::append_bool(bool) { return false; }
 bool DBus::Writer::append_int32(int) { return false; }
 bool DBus::Writer::append_uint32(unsigned) { return false; }
 bool DBus::Writer::append_double(double) { return false; }
+bool DBus::Writer::append_byte(unsigned char) { return false; }
 DBus::Writer::Container DBus::Writer::open_array(const std::string&) { return {}; }
 DBus::Writer::Container DBus::Writer::open_struct() { return {}; }
 DBus::Writer::Container DBus::Writer::open_variant(const std::string&) { return {}; }
