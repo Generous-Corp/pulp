@@ -150,6 +150,7 @@ import linux_target as _linux_target  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import reporting as _reporting  # noqa: E402
+import runner_state as _runner_state  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
@@ -2627,36 +2628,15 @@ def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool
 
 
 def read_runner_info() -> dict | None:
-    path = runner_info_path()
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
+    return _runner_state.read_runner_info()
 
 
 def pid_alive(pid: int | None) -> bool:
-    if not pid or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+    return _runner_state.pid_alive(pid)
 
 
 def current_runner_info() -> dict | None:
-    info = read_runner_info()
-    if not info:
-        return None
-
-    if pid_alive(info.get("pid")):
-        return info
-
-    try:
-        with file_lock(drain_lock_path(), blocking=False):
-            runner_info_path().unlink(missing_ok=True)
-            return None
-    except LockBusyError:
-        return info
+    return _runner_state.current_runner_info()
 
 
 def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
@@ -2665,7 +2645,7 @@ def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
     runner_alive = pid_alive(runner_pid)
 
     if runner and not runner_alive:
-        runner_info_path().unlink(missing_ok=True)
+        clear_runner_info()
         runner = None
         runner_pid = None
 
@@ -2725,7 +2705,7 @@ def reclaim_stale_remote_validators(_config: dict) -> int:
 
 
 def write_runner_info(info: dict) -> None:
-    atomic_write_text(runner_info_path(), json.dumps(info, indent=2) + "\n")
+    _runner_state.write_runner_info(info)
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -2743,7 +2723,7 @@ def update_runner_active_targets(job_id: str, active_targets: dict | None) -> No
 
 
 def clear_runner_info() -> None:
-    runner_info_path().unlink(missing_ok=True)
+    _runner_state.clear_runner_info()
 
 
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
