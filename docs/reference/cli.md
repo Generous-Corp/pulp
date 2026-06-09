@@ -1250,28 +1250,26 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, and drives the same watch + rebuild + screencap loop as `pulp dev` — but pinned to one platform's toolchain so the slow cross-platform configure paths (Skia/Dawn/threejs FetchContent) can be skipped when other platforms add unrelated cost.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then drives the same watch + rebuild + screencap loop as `pulp dev` using the current project's normal build configuration. Surrounding tooling can read the focus marker when it needs platform-specific behavior.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host
-pulp loop --platform=macos          # Pin to macOS explicitly
-pulp loop --platform=linux --test   # Pin + run tests on every save
+pulp loop --platform=macos          # Mark macOS focus explicitly
+pulp loop --platform=linux --test   # Mark Linux focus + run tests on every save
 pulp loop --status                  # Print the current focus state
 pulp loop --off                     # Restore cross-platform mode
-pulp loop --watch-issues 924,927    # Poll PR state for named issues (deferred)
-pulp loop --ar-swap-from feat/x     # ABI-checked .o swap (deferred)
 ```
 
 Flags:
 
 | Flag | Description |
 |------|-------------|
-| `--platform=<macos\|linux\|windows>` | Override the auto-detected host platform |
+| `--platform=<macos\|linux\|windows>` | Override the auto-detected focus marker |
 | `--off` | Restore cross-platform mode by clearing the focus marker |
 | `--status` | Print the current focus state and exit |
 | `--no-watch` | Persist focus state and exit without entering the watch loop |
-| `--watch-issues N1,N2,...` | Deferred: poll `gh pr list` for state flips on PRs referencing the named issues |
-| `--ar-swap-from <ref>` | Deferred: ABI-checked `.o` swap from another worktree |
+| `--watch-issues N1,N2,...` | Recognized compatibility flag; prints a diagnostic and continues the normal loop unless `--no-watch` is also passed |
+| `--ar-swap-from <ref>` | Recognized compatibility flag; prints a diagnostic and continues the normal loop unless `--no-watch` is also passed |
 | `--test`, `-t` | Run tests after each successful build |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Run quick plugin dlopen validation after build |

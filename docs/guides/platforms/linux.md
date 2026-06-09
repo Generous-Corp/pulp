@@ -136,37 +136,28 @@ CLAP plugins are built as `.so` files. Install locations:
 
 ### LV2
 
-LV2 format adapter is planned for Phase 16. LV2 plugins would install to:
+LV2 plugins are built as `.lv2/` bundles when the LV2 headers are available
+at configure time. Install locations:
+
 - **System-wide**: `/usr/lib/lv2/`
 - **Per-user**: `~/.lv2/`
 
 ### No AU on Linux
 
-Audio Units are macOS/iOS only. Linux builds produce VST3 and CLAP formats.
+Audio Units are macOS/iOS only. Linux builds produce VST3, CLAP, and LV2
+formats when their SDK/header dependencies are enabled.
 
 ## Packaging
 
-### .deb Package
+### Linux Packages
 
-```bash
-pulp ship package --version 1.0.0 --format deb
-```
-
-Creates a `.deb` installer that puts:
-- VST3 plugins in `/usr/lib/vst3/`
-- CLAP plugins in `/usr/lib/clap/`
-
-### .tar.gz Archive
-
-```bash
-pulp ship package --version 1.0.0 --format tar
-```
-
-Creates a portable archive the user can extract and install manually.
+`pulp ship package` does not currently provide `.deb`, `.tar.gz`, or AppImage
+generation on Linux. Build artifacts are produced by CMake; package them with
+your distribution tooling or archive the format bundles directly.
 
 ### AppImage
 
-AppImage support is planned for standalone applications (not plugin formats).
+Pulp does not currently generate AppImage bundles.
 
 ## CI/CD (GitHub Actions)
 

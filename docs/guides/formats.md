@@ -38,7 +38,11 @@ The plugin descriptor (id, name, vendor, version, features) is derived automatic
 
 ### Parameter Sync
 
-**Host to plugin:** During `clap_process()`, the adapter iterates `in_events`, looking for `CLAP_EVENT_PARAM_VALUE` events. Each one writes to `StateStore::set_value()`. Gesture events (`CLAP_EVENT_PARAM_GESTURE_BEGIN` / `END`) are forwarded to `StateStore::begin_gesture()` / `end_gesture()`.
+**Host to plugin:** During `clap_process()`, the adapter iterates `in_events`,
+looking for `CLAP_EVENT_PARAM_VALUE` events. Each one is pushed into the
+per-block `ParameterEventQueue` and written with `StateStore::set_value_rt()`.
+Gesture events (`CLAP_EVENT_PARAM_GESTURE_BEGIN` / `END`) are forwarded to
+`StateStore::begin_gesture()` / `end_gesture()`.
 
 The `params_flush()` extension callback handles the same events outside of `process()` (e.g., when the plugin is bypassed).
 
@@ -50,10 +54,18 @@ The adapter handles `CLAP_EVENT_PARAM_MOD` events. At the start of each process 
 
 ### MIDI Routing
 
-Note events are converted between CLAP's `clap_event_note_t` format and Pulp's `MidiEvent`:
+CLAP note and MIDI events are converted into Pulp's block event surfaces:
 
 - `CLAP_EVENT_NOTE_ON` becomes `MidiEvent::note_on(channel, key, velocity * 127)`
 - `CLAP_EVENT_NOTE_OFF` becomes `MidiEvent::note_off(channel, key, velocity * 127)`
+- `CLAP_EVENT_NOTE_CHOKE` becomes a zero-velocity note-off
+- `CLAP_EVENT_MIDI` carries raw MIDI 1.0 channel messages such as CC, pitch
+  bend, channel pressure, poly pressure, and program change
+- `CLAP_EVENT_MIDI_SYSEX` is routed through `MidiBuffer`'s SysEx sidecar
+- `CLAP_EVENT_MIDI2` is routed through `ump_input()` when the plugin opts into
+  UMP
+- `CLAP_EVENT_NOTE_EXPRESSION` feeds the MPE sidecar when the plugin opts into
+  MPE
 - `sample_offset` is set from `hdr->time` for sample-accurate timing
 
 Note port declaration is driven by `descriptor().accepts_midi` and `descriptor().produces_midi`. Ports support both `CLAP_NOTE_DIALECT_CLAP` and `CLAP_NOTE_DIALECT_MIDI`, preferring CLAP dialect.
@@ -78,7 +90,10 @@ Audio port count and info come from `descriptor().input_buses` and `descriptor()
 - Port type: `CLAP_PORT_MONO` for 1 channel, `CLAP_PORT_STEREO` otherwise
 - `in_place_pair` set to `CLAP_INVALID_ID`
 
-The process callback currently routes the first input and first output bus. Additional buses are declared but not yet routed to `Processor::process()`.
+The process callback routes bus 0 as the main input/output and routes input bus
+1 to `Processor::sidechain_input()` when present. Additional input buses and
+secondary output buses require a richer process surface than the current simple
+`Processor::process()` signature.
 
 ### Latency and Tail
 
@@ -87,9 +102,12 @@ The process callback currently routes the first input and first output bus. Addi
 
 ### Known Limitations
 
-- Only the first input and output bus are passed to `process()`. Sidechain buses are declared to the host but not yet routed.
+- Bus 0 and one sidechain input are routed. Additional input buses and
+  secondary output buses are not exposed through the simple `Processor`
+  callback.
 - No GUI extension is wired.
-- Per-note modulation (`note_id`, `port_index`, `channel`, `key` fields in param mod events) is accepted but not per-note routed.
+- Per-note modulation (`note_id`, `port_index`, `channel`, `key` fields in
+  param mod events) is accepted but not per-note routed.
 
 ---
 
@@ -391,7 +409,7 @@ object plus one or more `.ttl` files that describe ports and metadata.
 ### Known Limitations
 
 - Atom sysex events are ignored — only 1–3-byte short MIDI messages are
-  routed. Sysex sidecar wiring is tracked under issue #239.
+  routed through the LV2 atom input sequence.
 - No `state:interface` implementation yet; host-side preset save/restore
   works, but Pulp's own `StateStore` binary state is not exposed through
   the LV2 state extension.
@@ -428,7 +446,7 @@ PULP_AAX_PLUGIN(my_namespace::create_my_processor)
 [`docs/status/support-matrix.yaml`](../status/support-matrix.yaml). AAX is
 intentionally opt-in: the adapter compiles and loads in Pro Tools, but
 custom editor surface, AudioSuite role exercise, and public-CI coverage
-are follow-up work. The SDK is developer-supplied and never bundled or
+remain incomplete. The SDK is developer-supplied and never bundled or
 shipped by Pulp.
 
 ### Build Requirements

@@ -11,7 +11,7 @@ platforms:
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
   linux:
     status: experimental
-    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), .deb packaging via `pulp ship package`. CI enabled.
+    notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), LV2. CI enabled.
   ios:
     status: experimental
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
@@ -99,8 +99,8 @@ format_limitations:
   au_v2:
     - "Outbound MIDI from AU v2 effects is not wired yet — HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
   clap:
-    - "Only the first input bus and first output bus are routed; declared sidechain or additional buses are ignored (workstream 01)."
-    - "Processor::set_sidechain is never called from the CLAP adapter — sidechain inputs land on the primary bus (workstream 01)."
+    - "Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface."
+    - "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
   lv2:
     - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring remains part of format-adapter production-readiness work."
   aax:
@@ -842,9 +842,9 @@ subsystems:
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
   formats.clap:
-    - text: "Only bus index 0 is routed to process(); multi-bus + sidechain not wired to set_sidechain()."
+    - text: "Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
-    - text: "MIDI vocabulary limited to note on/off; CC, pitchbend, aftertouch, sysex, MIDI 2.0/UMP not routed."
+    - text: "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
   formats.vst3:
     - text: "Only bus index 0 routed to process(); multi-bus + sidechain not wired."

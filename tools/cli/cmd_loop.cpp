@@ -1,29 +1,13 @@
 // cmd_loop.cpp — pulp loop: leveraged-prototype focus mode.
 //
-// Issue #940 — Codify the leveraged-prototype dev loop.
-//
 // `pulp loop` is the explicit "I'm in single-platform iteration mode"
 // switch. It records the focus platform in ~/.pulp/config.toml under
 // the [loop] section so the user can leave the mode and return to
-// cross-platform iteration deliberately, and then drives the same
-// watch + rebuild + screencap loop as `pulp dev` — but pinned to one
-// platform's toolchain so the slow cross-platform configure paths
-// (Skia/Dawn/threejs FetchContent) can be skipped when other platforms
-// add unrelated cost.
-//
-// This is Slice 1 of #940: the CLI surface, the focus state, and the
-// watch loop. Three follow-up slices land separately:
-//
-//   * Slice 2 (#946): ar-swap helper that validates header/library ABI
-//     before swapping a built `.o` from another worktree into a pinned
-//     SDK static archive.
-//   * Slice 3 (#947): PR-state monitor that polls `gh pr list` for
-//     state flips on PRs referencing the named issues. The flag is
-//     parsed here so the surface is forward-compatible; today it
-//     prints a "deferred" hint.
-//   * Slice 4 (#948): lift `@pulp/css-adapt`, `pulp-css-analyze`, and
-//     `extract-html-bundle` from Spectr's tree into Pulp's
-//     tools/packages/.
+// cross-platform iteration deliberately, and then drives the same watch
+// loop as `pulp dev`. Surrounding tooling may consult the focus marker;
+// this command itself uses the current project's normal build configuration.
+// Compatibility flags for PR polling and object swapping are accepted so old
+// scripts fail gently, but they only print diagnostics today.
 
 #include "cli_common.hpp"
 
@@ -36,8 +20,8 @@ namespace {
 
 // The set of platform names accepted by --platform. The local autodetect
 // produces values like "darwin-arm64" / "windows-x64"; the focus-mode
-// surface accepts the short umbrella names from issue #940 ("macos",
-// "linux", "windows") and normalizes everything down to the umbrella.
+// surface accepts the short umbrella names ("macos", "linux", "windows")
+// and normalizes everything down to the umbrella.
 const char* kFocusPlatforms[] = {"macos", "linux", "windows"};
 
 bool is_known_focus_platform(const std::string& name) {
@@ -48,7 +32,7 @@ bool is_known_focus_platform(const std::string& name) {
 }
 
 // Map detect_platform()'s "darwin-arm64" / "linux-x64" / "windows-arm64"
-// strings to the umbrella names #940 uses. Any unknown host degrades
+// strings to the umbrella names used by the focus-mode surface. Any unknown host degrades
 // to an empty string so the caller can warn.
 std::string umbrella_from_detected(const std::string& detected) {
     if (detected.rfind("darwin", 0) == 0) return "macos";
@@ -59,18 +43,17 @@ std::string umbrella_from_detected(const std::string& detected) {
 
 void print_help() {
     std::cout <<
-        "pulp loop — leveraged-prototype focus mode (issue #940)\n\n"
+        "pulp loop — leveraged-prototype focus mode\n\n"
         "Usage: pulp loop [options] [-- launch-args...]\n\n"
-        "Single-platform watch + rebuild + screencap loop. Pin one platform's\n"
-        "toolchain so cross-platform configure paths (Skia/Dawn/threejs\n"
-        "FetchContent) don't gate fast iteration. Pair with `shipyard pr` /\n"
+        "Single-platform iteration marker plus the normal watch + rebuild loop.\n"
+        "Pair with `shipyard pr` /\n"
         "`pulp pr` at land time to restore full cross-platform validation.\n\n"
         "Options:\n"
         "  --platform=<macos|linux|windows>  Override the auto-detected host platform\n"
         "  --off                             Restore cross-platform mode (clear focus)\n"
         "  --status                          Print the current focus state and exit\n"
-        "  --watch-issues N1,N2,...          (Slice 3, #947) PR-state monitor — deferred\n"
-        "  --ar-swap-from <ref>              (Slice 2, #946) ABI-checked .o swap — deferred\n"
+        "  --watch-issues N1,N2,...          Recognized; prints a not-implemented diagnostic\n"
+        "  --ar-swap-from <ref>              Recognized; prints a not-implemented diagnostic\n"
         "  --test, -t                        Run tests after each successful build\n"
         "  --test-filter=PATTERN             Run only tests matching PATTERN (implies --test)\n"
         "  --validate                        Run quick plugin dlopen validation after build\n"
@@ -84,7 +67,7 @@ void print_help() {
         "  pulp loop --platform=macos --test # Pin to macOS + run tests on every save\n"
         "  pulp loop --status                # Print current focus state\n"
         "  pulp loop --off                   # Restore cross-platform mode\n"
-        "  pulp loop --watch-issues 924,927  # (deferred — see issue #947)\n";
+        "  pulp loop --watch-issues 924,927 --no-watch\n";
 }
 
 // Persist focus state. `platform` empty clears the marker.
@@ -124,8 +107,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool after_separator = false;
     std::string test_filter;
     std::string launch_target;
-    std::string watch_issues;     // deferred Slice 3
-    std::string ar_swap_from;     // deferred Slice 2
+    std::string watch_issues;     // recognized compatibility flag
+    std::string ar_swap_from;     // recognized compatibility flag
     std::vector<std::string> launch_args;
     std::vector<std::string> build_args;
 
@@ -258,23 +241,22 @@ int cmd_loop(const std::vector<std::string>& args) {
     }
 
     std::cout << "pulp loop: focus mode active on " << focus_platform << ".\n";
-    std::cout << "  Cross-platform configure paths skipped on this host.\n";
+    std::cout << "  Focus marker persisted; build/watch uses the current project configuration.\n";
     std::cout << "  Run `pulp loop --off` to restore cross-platform mode\n"
                  "  before landing the consumer-side PR.\n";
 
-    // Surface deferred-slice hints early so users know what's available
-    // and what's coming. These are forward-compatible no-ops at the
-    // CLI level today.
+    // Surface recognized-but-not-implemented flags early. They continue into
+    // the normal loop unless the caller also passed --no-watch.
     if (!watch_issues.empty()) {
         std::cout << "\npulp loop: --watch-issues=" << watch_issues
-                  << " is deferred — see issue #947 (Slice 3).\n"
-                     "  In the meantime, run `gh pr list --search \"" << watch_issues
+                  << " is recognized but not implemented.\n"
+                     "  Run `gh pr list --search \"" << watch_issues
                   << "\"` manually.\n";
     }
     if (!ar_swap_from.empty()) {
         std::cout << "\npulp loop: --ar-swap-from=" << ar_swap_from
-                  << " is deferred — see issue #946 (Slice 2).\n"
-                     "  Header/library ABI verification is the gating piece — coming next.\n";
+                  << " is recognized but not implemented.\n"
+                     "  Build and validate the alternate SDK manually before swapping artifacts.\n";
     }
 
     // If --no-watch was passed (or there's no project to watch), exit
@@ -299,8 +281,8 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
 
-    // Ensure configured. Reuse cmd_build's bootstrap path; the cross-platform
-    // skip is applied via build_args / env vars elsewhere when relevant.
+    // Ensure configured. Reuse cmd_build's bootstrap path and the current
+    // project's normal build configuration.
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
         std::cout << "Project not configured. Configuring + building first...\n";
         std::vector<std::string> bootstrap_args;

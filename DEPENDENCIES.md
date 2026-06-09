@@ -39,7 +39,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | mkdocs-awesome-pages-plugin | >=2.9,<3 | MIT | MkDocs plugin for nav ordering; build-time only | docs | 2026-04-22 |
 | mkdocs-git-revision-date-localized-plugin | >=1.2,<2 | MIT | MkDocs plugin for git-revision dates; build-time only | docs | 2026-04-22 |
 | mkdocs-material | >=9.5,<10 | MIT | MkDocs Material theme. CSS, JS, SVG icons, and search worker from this theme are redistributed in the generated docs site (generouscorp.com/pulp/) | docs | 2026-04-22 |
-| msdfgen | 1.12 | MIT | Multi-channel SDF glyph generation (planned, FetchContent) | pulp-canvas | 2026-04-12 |
+| msdfgen | 1.12 | MIT | Reserved for multi-channel SDF glyph generation (FetchContent) | pulp-canvas | 2026-04-12 |
 | nanosvg | vendored-snapshot | zlib | SVG parsing and rasterization | pulp-canvas | 2026-03-25 |
 | node-addon-api | 8.x | MIT | Node.js bindings via Node-API (optional, npm install) | bindings/nodejs | 2026-03-25 |
 | Noto Color Emoji | noto-emoji main @ 2026-05-17 | SIL OFL 1.1 | Embedded color-emoji typeface (NotoColorEmoji.ttf, SHA-256 `0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2`). Bundled only when `PULP_BUNDLE_NOTO_COLOR_EMOJI=ON` (defaults ON for Linux/Android/headless, OFF on macOS/Windows where the platform color-emoji typeface is preferred). Provides the cross-platform fallback for emoji clusters in Canvas2D text. | pulp-canvas | 2026-05-17 |
@@ -56,7 +56,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | simdjson | v3.12.3 | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | pulp-scene | 2026-06-03 |
 | Skia | chrome/m150 | BSD-3-Clause | GPU 2D rendering engine. Pre-built via [danielraffel/skia-builder](https://github.com/danielraffel/skia-builder) fork (adds iOS device/simulator, visionOS, mac-x86_64, and `Skia.xcframework` slices that upstream `olilarkin/skia-builder` doesn't ship). The fork tracks Skia's `chrome/m150` tag and is the active dependency until upstream publishes those slices. Call sites use the `SkShaders::*` gradient namespace + the 3-arg `ParagraphBuilder::make(..., SkUnicode)` signature; m150 also moves `SkRegion::setRects` to an `SkSpan` parameter and changes the `SkStrikeRef` accessor used by the text shaper. The m150 release does not ship a linux-arm64 slice. | pulp-canvas, pulp-render | 2026-06-05 |
 | three.js | 077dd13c0e86 | MIT | Native WebGPU bridge demos and tests (optional, fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON) | pulp-render | 2026-04-21 |
-| TweetNaCl | 20140427 | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures, future v2 license-key payloads | pulp-runtime | 2026-05-25 |
+| TweetNaCl | 20140427 | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | pulp-runtime | 2026-05-25 |
 | V8 | v8-15.1.27 | BSD-3-Clause | JIT JavaScript engine backend (optional, selected with `PULP_JS_ENGINE=v8`; default is QuickJS, JSC on Apple). Sealed prebuilt `libv8` (exports only `v8::`/`cppgc::`; bundles ICU/zlib/Abseil internally) via the [danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) per-platform releases; fetched by `tools/scripts/fetch_v8_for_release.py` into `external/v8-build/`. iOS is JSC-only (V8 needs JIT). See NOTICE.md for bundled ICU/zlib/Abseil attribution. | pulp-view | 2026-06-06 |
 | VST3 SDK | v3.7.12_build_20 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
@@ -82,4 +82,4 @@ These SDKs are not part of Pulp's redistributed dependency chain. Pulp may integ
 |-----|---------|----------|---------------|
 | AAX SDK | Separately licensed by Avid | Optional AAX format integration | Developer obtains independently, keeps it out-of-tree, and points `PULP_AAX_SDK_DIR` at it |
 | ARA SDK | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains independently (https://github.com/Celemony/ARA_SDK), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
-| ASIO SDK | Proprietary (Steinberg) | ASIO audio I/O (planned) | Developer obtains independently; never bundled or exported by Pulp |
+| ASIO SDK | Proprietary (Steinberg) | Optional ASIO device I/O integration | Developer obtains independently; never bundled or exported by Pulp |
