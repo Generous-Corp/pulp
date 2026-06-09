@@ -206,6 +206,45 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.update_job_target_state_unlocked(queue, "unknown", "mac", {"status": "running"})
         )
 
+    def test_complete_job_marks_terminal_state_and_clears_runner_progress(self) -> None:
+        queue = [
+            {
+                "id": "running",
+                "branch": "feature/running",
+                "status": "running",
+                "runner": {"pid": 123},
+                "active_targets": {"mac": {"status": "running"}},
+                "last_progress_at": "2026-06-09T00:04:00+00:00",
+            },
+            {"id": "pending", "branch": "feature/pending", "status": "pending"},
+        ]
+
+        completed = self.mod.complete_job_unlocked(
+            queue,
+            "running",
+            {"overall": "pass"},
+            Path("/tmp/local-ci/results/running.json"),
+            now_iso_fn=lambda: "2026-06-09T00:05:00+00:00",
+        )
+
+        self.assertTrue(completed)
+        self.assertEqual(queue[0]["status"], "completed")
+        self.assertEqual(queue[0]["completed_at"], "2026-06-09T00:05:00+00:00")
+        self.assertEqual(queue[0]["result_file"], "/tmp/local-ci/results/running.json")
+        self.assertEqual(queue[0]["overall"], "pass")
+        self.assertNotIn("runner", queue[0])
+        self.assertNotIn("active_targets", queue[0])
+        self.assertNotIn("last_progress_at", queue[0])
+        self.assertEqual(queue[1]["status"], "pending")
+        self.assertFalse(
+            self.mod.complete_job_unlocked(
+                queue,
+                "missing",
+                {"overall": "fail"},
+                "/tmp/missing.json",
+            )
+        )
+
     def test_claim_next_job_marks_highest_priority_pending_running(self) -> None:
         queue = [
             {

@@ -1,9 +1,10 @@
 """Pure queue policy helpers for local CI.
 
 This module owns job identity, priority ordering, supersedence, cancellation
-result payloads, summaries, and completed-queue retention. Higher-level queue
-mutation, locking, runner liveness, result persistence, and drain orchestration
-remain in local_ci.py until later extraction slices.
+result payloads, summaries, completed-job state mutation, and completed-queue
+retention. Higher-level queue mutation, locking, runner liveness, result
+persistence, and drain orchestration remain in local_ci.py until later
+extraction slices.
 """
 
 from __future__ import annotations
@@ -266,6 +267,28 @@ def update_job_target_state_unlocked(
         now_iso_fn=now_iso_fn,
     )
     return True
+
+
+def complete_job_unlocked(
+    queue: list[dict],
+    job_id: str,
+    result: dict,
+    result_path: Path | str,
+    *,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> bool:
+    for job in queue:
+        if job["id"] != job_id:
+            continue
+        job["status"] = "completed"
+        job["completed_at"] = now_iso_fn()
+        job["result_file"] = str(result_path)
+        job["overall"] = result.get("overall")
+        job.pop("runner", None)
+        job.pop("active_targets", None)
+        job.pop("last_progress_at", None)
+        return True
+    return False
 
 
 def trim_completed_jobs_with_removed_ids(

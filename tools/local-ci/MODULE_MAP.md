@@ -25,7 +25,7 @@ and the matching contract tests in the same change.
 | `reporting.py` | Desktop automation report staging, run/publish rollups, manifest scanning, proof summaries, and pruning selection. | Artifact directory layout, target execution, source preparation, or CLI output. |
 | `source_prep.py` | Exact-SHA desktop source requests, cache keys, launch-command rewriting, prepare manifests, and macOS/Linux/Windows prepared source materialization. | Desktop artifact layout, target execution, queue orchestration, or target probes. |
 | `target_preflight.py` | SSH primary/fallback/UTM/Namespace failover checks, material config drift detection, and submission metadata formatting. | Queue mutation, target validation execution, or desktop automation adapters. |
-| `queue_orchestrator.py` | Queue policy and in-memory queue helpers: branch validation, default priorities, job fingerprints/records, supersedence and cancellation result payloads, job summaries, retention trimming, priority sort keys, job lookup, active-target upserts, target-state updates, and job claiming. | Queue file locking, runner liveness, result persistence, drain orchestration, target execution, or user-facing CLI output. |
+| `queue_orchestrator.py` | Queue policy and in-memory queue helpers: branch validation, default priorities, job fingerprints/records, supersedence and cancellation result payloads, job summaries, retention trimming, priority sort keys, job lookup, active-target upserts, target-state updates, job claiming, and completed-job state mutation. | Queue file locking, runner liveness, result persistence, drain orchestration, target execution, or user-facing CLI output. |
 | `linux_target.py` | Linux desktop launch backend probes, remote tooling probes/readiness details, remote bundle paths, and remote command builders. | SSH execution orchestration, artifact fetch/cleanup, queue orchestration, or manifest writing. |
 | `macos_desktop.py` | macOS app bundle detection, Swift window-probe wrappers, window wait/capture/activation/click helpers, app quit, and process termination. | Desktop action orchestration, artifact manifest writing, source preparation, or queue orchestration. |
 | `windows_target.py` | Windows desktop target contracts, path safety, session-agent request payloads, and probe result formatting/readiness helpers. | SSH/PowerShell execution, desktop action execution, queue orchestration, or artifact layout. |
@@ -40,7 +40,7 @@ behind the contracts added in this slice.
 | Cluster | Current responsibility | Extraction target |
 | --- | --- | --- |
 | Desktop target probes | Desktop doctor orchestration, launch adapters, and automation adapters. | later `execution.py` |
-| Queue orchestration | Locking, queue mutation, stale-running requeue, runner info, target state updates, drain/wait loops, and CLI-facing queue updates. | later `queue_orchestrator.py` |
+| Queue orchestration | Locking, queue mutation around extracted helpers, stale-running requeue, runner info, drain/wait loops, and CLI-facing queue updates. | later `queue_orchestrator.py` |
 | Validation execution | Local, SSH, Windows, Linux, smoke/full validation commands and target status reporting. | `execution.py` |
 | CLI dispatch | Argument parser, subcommand routing, and user-facing command output. | `cli.py` or retained thin entrypoint |
 

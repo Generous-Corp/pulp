@@ -2820,17 +2820,13 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
     retained_queue: list[dict] | None = None
     with file_lock(queue_lock_path(), blocking=True):
         queue = load_queue_unlocked()
-        for job in queue:
-            if job["id"] != job_id:
-                continue
-            job["status"] = "completed"
-            job["completed_at"] = now_iso()
-            job["result_file"] = str(result_path)
-            job["overall"] = result.get("overall")
-            job.pop("runner", None)
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-            break
+        _queue_orchestrator.complete_job_unlocked(
+            queue,
+            job_id,
+            result,
+            result_path,
+            now_iso_fn=now_iso,
+        )
 
         retained_queue, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
         save_queue_unlocked(retained_queue)
