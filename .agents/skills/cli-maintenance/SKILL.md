@@ -230,6 +230,61 @@ Gotchas / invariants when touching this surface:
   If a scaffold comes out with empty formats / pass-through-only DSP, suspect a
   double-wrapped IR on the importer side, not the SDK.
 
+### `pulp tool install <importer>` — importer add-on packaging
+
+The install-side contract for framework-importer add-ons lives in
+`tools/cli/importer_install.{cpp}` (declarations in `tool_registry.hpp`).
+`pulp tool install <importer>` and the `pulp add <importer>` alias both route
+through it. User-facing contract: `docs/reference/framework-importer-packaging.md`.
+
+Gotchas / invariants when touching this surface:
+
+- **An importer is a tool-registry entry with `category: "importer"`.** The
+  generic binary/python install path is untouched: `cmd_tool`'s `install`/
+  `uninstall` first call `handle_importer_install` / `handle_importer_uninstall`,
+  which return `std::nullopt` for non-importers so the generic path still runs.
+  `try_add_importer_alias` is the `pulp add` entry — it only fires when the id
+  resolves to an importer in `tools/packages/tool-registry.json`.
+- **Three install gates, in order, and they fail/refuse — never warn-and-proceed:**
+  (1) version window — `check_importer_compat` requires the running SDK in
+  `[sdk_min, sdk_max]` AND the importer's `[spi_min, spi_max]` to overlap the
+  SDK's import-SPI window; (2) sha256 — the fetched/`--from` archive must match
+  the registry `sha256`; (3) skill + record. Keep the messages actionable
+  (`upgrade Pulp` vs `upgrade the importer`, `refusing to install`).
+- **SHA-256 is hand-rolled in `importer_install.cpp`, on purpose.** It avoids
+  linking mbedTLS into the lightweight `pulp-test-cli-*` targets (which only link
+  `pulp::platform`). It's validated against FIPS-180-4 known vectors in
+  `test_cli_importer_install.cpp` — if you touch the digest, those vectors are
+  the guard. Do NOT swap it for `pulp::runtime::sha256_hex` without also adding
+  the runtime link to every test target that compiles `importer_install.cpp`.
+- **The SDK version reaches the dispatch via env-var-then-header.** `host_sdk_version()`
+  reads `PULP_SDK_VERSION` (tests set it to drive the window check) and falls
+  back to `PULP_SDK_VERSION_GENERATED` from `<pulp_version_gen.h>`, included via
+  `#if __has_include` so unit-test targets (no generated header) still compile.
+  The pure functions (`install_importer`, `check_importer_compat`) take the SDK
+  version + SPI bounds as PARAMETERS — keep them parameterized so they stay
+  testable without globals.
+- **Skills install to `~/.agents/skills/<skill_name>/` honoring `$PULP_HOME`.**
+  `skills_dir()` maps `$PULP_HOME` → `$PULP_HOME/agents/skills` (tests rely on
+  this); without it, the real `~/.agents/skills`. Records go under
+  `pulp_home()/importers/<id>.json`. Uninstall recovers the skill dir name from
+  the record's `skill_path` so it removes the right directory even if the
+  registry entry changed.
+- **`--from <path|file://>` is importer-only.** Both `pulp tool install` and
+  `pulp add` reject `--from` for non-importers. It's the offline/test source —
+  the checksum + version gates still apply, so a mock local package with a known
+  sha is the unit-test vehicle (build one with `tar -czf`, hash it with
+  `sha256_file_hex`, feed it back into the descriptor).
+- **Producer side is NOT decided in code.** Artifact build/hosting/pinning, the
+  bundled-libclang choice, and signing/notarization are maintainer decisions
+  documented (as open questions) in `docs/reference/framework-importer-packaging.md`.
+  The CLI consumes the contract; don't bake a hosting URL, an LLVM pin, or a
+  signing identity into the SDK.
+- **Two test targets compile `tool_registry.cpp`.** `tool_registry.cpp` now
+  references `importer_install.cpp` + `import_spi.cpp` symbols, so BOTH
+  `pulp-test-cli-tool-registry` and `pulp-test-cli-importer-install` link all
+  three TUs. Adding a symbol used by `cmd_tool` means updating both targets.
+
 ### Binary subcommand delegation
 
 `BinaryCommand` entries in `tools/cli/pulp_cli.cpp` delegate to helper binaries

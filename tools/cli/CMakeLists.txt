@@ -82,6 +82,7 @@ add_executable(pulp-cli
     package_commands_search.cpp
     package_commands_add.cpp
     tool_registry.cpp
+    importer_install.cpp
     version_diag.cpp
     projects_registry.cpp
     fetchcontent_cache.cpp

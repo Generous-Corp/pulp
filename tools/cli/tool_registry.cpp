@@ -127,6 +127,22 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("sdk_max")) tool.sdk_max = v->as_string();
             if (auto v = val.get("capabilities")) tool.capabilities = v->as_string_array();
             if (auto v = val.get("health_check")) tool.health_check = v->as_string();
+            if (auto v = val.get("skill_source")) tool.skill_source = v->as_string();
+            if (auto v = val.get("skill_name")) tool.skill_name = v->as_string();
+            if (auto v = val.get("terms_version")) tool.terms_version = v->as_string();
+            if (auto v = val.get("terms_vendor_id")) tool.terms_vendor_id = v->as_string();
+
+            // Checksummed per-platform importer artifacts (#19).
+            if (auto ia = val.get("importer_artifacts");
+                ia && ia->type == JsonValue::Object) {
+                for (auto& [platform, src] : ia->obj()) {
+                    ImporterArtifact a;
+                    if (auto v = src.get("url_template")) a.url_template = v->as_string();
+                    if (auto v = src.get("archive_format")) a.archive_format = v->as_string();
+                    if (auto v = src.get("sha256")) a.sha256 = v->as_string();
+                    tool.importer_artifacts[platform] = a;
+                }
+            }
 
             if (auto bs = val.get("binary_sources"); bs && bs->type == JsonValue::Object) {
                 for (auto& [platform, src] : bs->obj()) {
@@ -474,7 +490,7 @@ bool uninstall_tool(const std::string& tool_id) {
 
 // ── CLI Command: pulp tool ──
 
-static fs::path find_tool_registry() {
+fs::path find_tool_registry_path() {
     auto cwd = fs::current_path();
     while (true) {
         auto p = cwd / "tools" / "packages" / "tool-registry.json";
@@ -486,21 +502,36 @@ static fs::path find_tool_registry() {
     return {};
 }
 
+std::optional<int> try_add_importer_alias(const std::string& id,
+                                          const std::string& from_override,
+                                          bool force) {
+    auto reg_path = find_tool_registry_path();
+    if (reg_path.empty()) return std::nullopt;
+    auto [reg, err] = load_tool_registry(reg_path);
+    if (!err.empty()) return std::nullopt;
+    auto it = reg.tools.find(id);
+    if (it == reg.tools.end() || it->second.category != "importer")
+        return std::nullopt;
+    return handle_importer_install(reg, id, from_override, force);
+}
+
 int cmd_tool(const std::vector<std::string>& args) {
     if (args.empty()) {
         std::cout << "Usage: pulp tool <command> [options]\n\n"
                   << "Commands:\n"
                   << "  list                    Show available and installed tools\n"
                   << "  install <tool>          Download and install a tool\n"
+                  << "  install <importer>      Install a framework importer (checksummed,\n"
+                  << "                          SDK/SPI-window-checked; --from <path> for local)\n"
                   << "  install --all           Install all tools for current platform\n"
-                  << "  uninstall <tool>        Remove a pulp-managed tool\n"
+                  << "  uninstall <tool>        Remove a pulp-managed tool or importer\n"
                   << "  path <tool>             Print path to a tool's binary\n"
                   << "  run <tool> [args]       Run a tool with arguments\n"
                   << "  doctor                  Check tool health\n";
         return 0;
     }
 
-    auto reg_path = find_tool_registry();
+    auto reg_path = find_tool_registry_path();
     if (reg_path.empty()) {
         print_fail("Tool registry not found at tools/packages/tool-registry.json");
         return 1;
@@ -546,10 +577,30 @@ int cmd_tool(const std::vector<std::string>& args) {
         bool force = false;
         bool all = false;
         std::string tool_id;
+        std::string from_override;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--force") force = true;
             else if (args[i] == "--all") all = true;
+            else if (args[i] == "--from") {
+                if (i + 1 >= args.size()) {
+                    print_fail("--from requires a path or file:// URL");
+                    return 1;
+                }
+                from_override = args[++i];
+            }
             else tool_id = args[i];
+        }
+
+        // Importer add-ons (#19) install via the checksummed, version-window
+        // path. handle_importer_install returns nullopt for non-importers so we
+        // fall through to the generic binary/python install below.
+        if (!all && !tool_id.empty()) {
+            if (auto rc = handle_importer_install(reg, tool_id, from_override, force))
+                return *rc;
+        }
+        if (!from_override.empty()) {
+            print_fail("--from is only valid for importer add-ons");
+            return 1;
         }
 
         auto install_one = [&](const std::string& id) -> int {
@@ -613,6 +664,9 @@ int cmd_tool(const std::vector<std::string>& args) {
             print_fail("Usage: pulp tool uninstall <tool-id>");
             return 1;
         }
+        // Importer add-ons remove their skill + install record + tree.
+        if (auto rc = handle_importer_uninstall(reg, args[1]))
+            return *rc;
         if (uninstall_tool(args[1])) {
             print_ok("Uninstalled " + args[1]);
             return 0;

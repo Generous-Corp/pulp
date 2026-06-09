@@ -736,6 +736,10 @@ add_executable(pulp-test-cli-package-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_search.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_add.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    # cmd_add routes `pulp add <importer>` through the importer install path.
+    ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
 )
 target_include_directories(pulp-test-cli-package-commands PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -791,6 +795,8 @@ catch_discover_tests(pulp-test-cli-import-detect
 add_executable(pulp-test-cli-tool-registry
     test_cli_tool_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
 )
 target_include_directories(pulp-test-cli-tool-registry PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -799,6 +805,23 @@ target_link_libraries(pulp-test-cli-tool-registry PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-tool-registry)
+
+# Importer install mechanism (#19): version-window enforcement, sha256
+# verification, skill install/uninstall, install records, and the `pulp tool
+# install` / `pulp add` alias dispatch. Mock-local-package driven — no network.
+add_executable(pulp-test-cli-importer-install
+    test_cli_importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
+)
+target_include_directories(pulp-test-cli-importer-install PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-importer-install PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-importer-install)
 
 # CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /

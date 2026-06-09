@@ -1400,13 +1400,19 @@ pulp tool list                      # Show every registered tool and its install
 pulp tool install clap-validator    # Download and install one tool
 pulp tool install --all             # Install every tool available on the current platform
 pulp tool install <id> --force      # Reinstall even if already present
-pulp tool uninstall <id>            # Remove a pulp-managed tool install
+pulp tool install <importer>        # Install a framework importer add-on (checksummed, version-window-checked)
+pulp tool install <importer> --from <path|file://...>  # Install from a local package (offline / pinned artifact)
+pulp tool uninstall <id>            # Remove a pulp-managed tool, or an importer (also removes its skill)
 pulp tool path <id>                 # Print the absolute path to the installed tool's binary
 pulp tool run <id> [args...]        # Run the installed tool with pass-through arguments
 pulp tool doctor                    # Health check: which tools are installed, which are missing, which are unavailable on this platform
+
+pulp add <importer>                 # Alias for `pulp tool install <importer>`
 ```
 
-Install methods come from the registry — today `binary_download` (pinned release artifact) and `python_pip` (pipx-style isolated install). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+
+**Framework importers.** An importer is a vendor-specific add-on (described in the tool-registry with `category: "importer"`) that drives Pulp's JSON-over-stdio import SPI. Installing one is gated three ways: the importer's `[sdk_min, sdk_max]` must include the running SDK and its `[spi_min, spi_max]` window must overlap the SDK's supported import-SPI window (a mismatch fails loudly with an "upgrade Pulp" / "upgrade the importer" message); the fetched or local package's `sha256` must match the digest pinned in the registry (a mismatch refuses to install); and the importer's bundled `SKILL.md` is installed into `~/.agents/skills/<importer>/` on install and removed on uninstall. Each install is recorded under `~/.pulp/importers/<id>.json` (id, version, sha256, SDK version, SPI window, paths, terms metadata) so uninstall and version checks work, and so the importer-terms accept-gate composes with the same record. `pulp add <importer>` routes to the same install path. Use `--from <path|file://...>` to install from a local package rather than the registry URL (offline installs, pinned artifacts, CI). The producer side — how prebuilt per-platform artifacts are built, hosted, pinned per SDK release, and signed/notarized, and the bundled-libclang choice — is documented in [framework-importer-packaging.md](framework-importer-packaging.md); this CLI consumes that contract, it does not decide it.
 
 ### upgrade
 

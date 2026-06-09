@@ -895,12 +895,12 @@ commands:
 
   - name: add
     status: usable
-    summary: Add a third-party package from the registry. License check, platform check, CMake wiring, metadata updates.
+    summary: "Add a third-party package from the registry. License check, platform check, CMake wiring, metadata updates. When the id names a framework importer (category: importer) in the tool-registry, routes to `pulp tool install <importer>` instead (checksummed, SDK/SPI-window-checked add-on install)."
     args:
       - name: package
         kind: positional
         required: true
-        description: Package slug from tools/packages/registry.json
+        description: Package slug from tools/packages/registry.json, or an importer id from tools/packages/tool-registry.json
       - name: --license-override
         kind: option
         description: "Accept a rejected license (value: commercial)"
@@ -910,6 +910,9 @@ commands:
       - name: --no-cmake
         kind: flag
         description: Skip CMake wiring (metadata only)
+      - name: --from
+        kind: option
+        description: "Importer alias only: install from a local path or file:// URL instead of the registry artifact"
     docs: reference/cli.md#add
 
   - name: remove
@@ -1207,7 +1210,7 @@ commands:
       - name: list
         summary: Show every registered tool and its install state
       - name: install
-        summary: Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present
+        summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present. For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
         args:
           - name: --force
             kind: flag
@@ -1215,8 +1218,12 @@ commands:
           - name: --all
             kind: flag
             required: false
+          - name: --from
+            kind: option
+            required: false
+            description: Install an importer add-on from a local path or file:// URL instead of the registry URL (offline / pinned artifact)
       - name: uninstall
-        summary: Remove a pulp-managed tool install
+        summary: Remove a pulp-managed tool install; for an importer, also removes its installed skill and install record
       - name: path
         summary: Print the absolute path to the installed tool's binary
       - name: run

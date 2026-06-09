@@ -16,6 +16,7 @@
 #include "package_commands.hpp"
 #include "package_commands_internal.hpp"
 #include "package_registry.hpp"
+#include "tool_registry.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -41,9 +42,21 @@ int cmd_add(const std::vector<std::string>& args) {
     std::string accepted_license;
     bool platform_guard = false;
     bool no_cmake = false;
+    // Importer-alias options (#19): forwarded to `pulp tool install` when the
+    // id names a framework importer in the tool-registry.
+    std::string importer_from;
+    bool importer_force = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--accept-license") {
+        if (args[i] == "--from") {
+            if (missing_option_value(args, i)) {
+                print_fail("--from requires a path or file:// URL");
+                return 2;
+            }
+            importer_from = args[++i];
+        } else if (args[i] == "--force") {
+            importer_force = true;
+        } else if (args[i] == "--accept-license") {
             if (missing_option_value(args, i)) {
                 print_fail("--accept-license requires a value");
                 return 2;
@@ -77,6 +90,18 @@ int cmd_add(const std::vector<std::string>& args) {
     if (package_id.empty()) {
         print_fail("No package specified");
         return 1;
+    }
+
+    // `pulp add <importer>` is an alias for `pulp tool install <importer>`.
+    // If the id names a framework importer in the tool-registry, route there
+    // (checksummed, SDK/SPI-window-checked install). Non-importer ids fall
+    // through to normal audio-package resolution below.
+    if (auto rc = pulp::cli::tools::try_add_importer_alias(
+            package_id, importer_from, importer_force))
+        return *rc;
+    if (!importer_from.empty()) {
+        print_fail("--from is only valid when adding a framework importer");
+        return 2;
     }
 
     auto root = find_project_root();
