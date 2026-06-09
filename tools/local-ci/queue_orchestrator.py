@@ -3,10 +3,10 @@
 This module owns job identity, enqueue duplicate/priority policy, priority
 ordering, enqueue supersedence candidate selection, cancellation result
 payloads, summaries, stale-running job selection/replacement/requeue state,
-runner-info active-target mutation, completed-job state mutation, and
-completed-queue retention. Higher-level queue mutation, locking, runner
-liveness, result persistence, and drain orchestration remain in local_ci.py
-until later extraction slices.
+stale-running reconciliation action selection, runner-info active-target
+mutation, completed-job state mutation, and completed-queue retention.
+Higher-level queue mutation, locking, runner liveness, result persistence, and
+drain orchestration remain in local_ci.py until later extraction slices.
 """
 
 from __future__ import annotations
@@ -296,6 +296,24 @@ def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tup
             replacement = candidate
             replacement_reason = reason
     return replacement, replacement_reason
+
+
+def stale_running_reconciliation_actions_unlocked(queue: list[dict], stale_jobs: list[dict]) -> list[dict]:
+    actions: list[dict] = []
+    for job in stale_jobs:
+        replacement, reason = find_stale_running_replacement_unlocked(queue, job)
+        if replacement is not None:
+            actions.append(
+                {
+                    "action": "supersede",
+                    "job": job,
+                    "replacement": replacement,
+                    "reason": reason or "newer_sha_queued",
+                }
+            )
+        else:
+            actions.append({"action": "requeue", "job": job})
+    return actions
 
 
 def stale_running_jobs_for_runner_unlocked(queue: list[dict], runner_pid: int | None) -> list[dict]:

@@ -248,6 +248,24 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertIs(replacement, newer_replacement)
         self.assertEqual(reason, "newer_sha_queued")
 
+        requeue_only = dict(
+            stale,
+            id="requeue-only",
+            branch="feature/other",
+            fingerprint="requeue-only",
+            queued_at="2026-06-09T00:04:00+00:00",
+        )
+        actions = self.mod.stale_running_reconciliation_actions_unlocked(
+            [stale, older_replacement, newer_replacement, completed_replacement, requeue_only],
+            [stale, requeue_only],
+        )
+
+        self.assertEqual(actions[0]["action"], "supersede")
+        self.assertIs(actions[0]["job"], stale)
+        self.assertIs(actions[0]["replacement"], newer_replacement)
+        self.assertEqual(actions[0]["reason"], "newer_sha_queued")
+        self.assertEqual(actions[1], {"action": "requeue", "job": requeue_only})
+
     def test_stale_running_jobs_for_runner_skips_current_runner_pid(self) -> None:
         current = {"id": "current", "status": "running", "runner": {"pid": 123}}
         other = {"id": "other", "status": "running", "runner": {"pid": 456}}

@@ -2609,11 +2609,14 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
     changed = False
-    for job in stale_running_jobs_unlocked(queue):
-        replacement, reason = _queue_orchestrator.find_stale_running_replacement_unlocked(queue, job)
-
-        if replacement is not None:
-            supersede_job_unlocked(job, replacement["id"], reason or "newer_sha_queued")
+    actions = _queue_orchestrator.stale_running_reconciliation_actions_unlocked(
+        queue,
+        stale_running_jobs_unlocked(queue),
+    )
+    for action in actions:
+        job = action["job"]
+        if action["action"] == "supersede":
+            supersede_job_unlocked(job, action["replacement"]["id"], action["reason"])
             changed = True
             continue
 
