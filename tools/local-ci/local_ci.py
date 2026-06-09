@@ -161,6 +161,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 import cleanup as _cleanup  # noqa: E402
+import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 
 
@@ -1372,9 +1373,7 @@ def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
 
 
 def desktop_artifact_root(config: dict) -> Path:
-    path = Path(config["desktop_automation"]["artifact_root"]).expanduser()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.desktop_artifact_root(config)
 
 
 def windows_desktop_session_user(probe: dict | None) -> str:
@@ -1408,25 +1407,15 @@ def windows_repo_checkout_detail(probe: dict | None, *, fallback_path: str | Non
 
 
 def create_desktop_run_bundle(config: dict, target_name: str, action: str) -> Path:
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_id = uuid.uuid4().hex[:8]
-    path = desktop_artifact_root(config) / target_name / action / f"{ts}-{run_id}"
-    (path / "screenshots").mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.create_desktop_run_bundle(config, target_name, action)
 
 
 def desktop_publish_root(config: dict) -> Path:
-    path = desktop_artifact_root(config) / "_published"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.desktop_publish_root(config)
 
 
 def create_desktop_publish_bundle(config: dict) -> Path:
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_id = uuid.uuid4().hex[:8]
-    path = desktop_publish_root(config) / f"{ts}-{run_id}"
-    (path / "assets").mkdir(parents=True, exist_ok=True)
-    return path
+    return _desktop_artifacts.create_desktop_publish_bundle(config)
 
 
 def probe_linux_launch_backend(host: str) -> dict:
