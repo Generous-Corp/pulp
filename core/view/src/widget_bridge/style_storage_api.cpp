@@ -1,12 +1,15 @@
 // widget_bridge/style_storage_api.cpp - storage-only CSS style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 
 namespace pulp::view {
 
 void WidgetBridge::register_widget_style_background_repeat_api() {
+    BridgeApiContext api{engine_};
+
     // setBackgroundRepeat(id, kw) - CSS background-repeat keyword. Storage-
     // only on the View (no-op for solid-color backgrounds, which is the
     // only currently rendered case). Future paint work for
@@ -16,7 +19,7 @@ void WidgetBridge::register_widget_style_background_repeat_api() {
     // Accepts: `repeat` / `repeat-x` / `repeat-y` / `no-repeat` /
     // `space` / `round`. Unknown / empty resets to "" (paint defaults to
     // CSS initial `repeat`).
-    engine_.register_function("setBackgroundRepeat", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBackgroundRepeat", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -26,12 +29,14 @@ void WidgetBridge::register_widget_style_background_repeat_api() {
 }
 
 void WidgetBridge::register_widget_style_mask_object_api() {
+    BridgeApiContext api{engine_};
+
     // setMaskImage(id, value) - CSS `mask-image` (pulp #1515).
     // Storage-only today; the saveLayer + SkBlendMode::kDstIn shader
     // composite is a follow-up paint slice. The slot round-trips
     // through View::mask_image() so harness tests can assert the
     // bridge accepted the value.
-    engine_.register_function("setMaskImage",
+    register_bridge_function(api, "setMaskImage",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -44,7 +49,7 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // Stores the verbatim shorthand on the View; the JS shim
     // (web-compat-style-decl.js) is responsible for fanning out into
     // the maskImage longhand. Storage-only today.
-    engine_.register_function("setMask",
+    register_bridge_function(api, "setMask",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -56,7 +61,7 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // setMaskSize(id, value) - CSS `mask-size`, pairs with mask-image
     // (pulp #1515 followup). Storage-only; consumed by the same
     // future paint slice that wires the mask shader.
-    engine_.register_function("setMaskSize",
+    register_bridge_function(api, "setMaskSize",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -71,7 +76,7 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // every Pulp View regardless of what the slot says. The slot
     // exists so authors who set `appearance: none` for reset-style
     // consistency see a no-op (not an unsupported drop).
-    engine_.register_function("setAppearance",
+    register_bridge_function(api, "setAppearance",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -83,7 +88,7 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // setObjectFit(id, value) - CSS `object-fit`. Storage-only today;
     // the ImageView paint slice that consumes this needs access to
     // the decoded image's natural size (planned follow-up).
-    engine_.register_function("setObjectFit",
+    register_bridge_function(api, "setObjectFit",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -94,7 +99,7 @@ void WidgetBridge::register_widget_style_mask_object_api() {
 
     // setObjectPosition(id, value) - CSS `object-position`. Pairs
     // with object-fit. Storage-only today.
-    engine_.register_function("setObjectPosition",
+    register_bridge_function(api, "setObjectPosition",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -105,12 +110,14 @@ void WidgetBridge::register_widget_style_mask_object_api() {
 }
 
 void WidgetBridge::register_widget_style_background_subproperty_api() {
+    BridgeApiContext api{engine_};
+
     // pulp #1517 - background sub-property setters. Storage-only today;
     // see View::set_background_{attachment,clip,origin}() doc for the
     // partial-vs-noop semantics. Wiring them here unblocks the JS shim
     // path and lets the catalog honestly report `noop` / `partial`
     // instead of `missing`.
-    engine_.register_function("setBackgroundAttachment",
+    register_bridge_function(api, "setBackgroundAttachment",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
@@ -118,7 +125,7 @@ void WidgetBridge::register_widget_style_background_subproperty_api() {
             if (v) v->set_background_attachment(kw);
             return choc::value::Value();
         });
-    engine_.register_function("setBackgroundClip",
+    register_bridge_function(api, "setBackgroundClip",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
@@ -126,7 +133,7 @@ void WidgetBridge::register_widget_style_background_subproperty_api() {
             if (v) v->set_background_clip(kw);
             return choc::value::Value();
         });
-    engine_.register_function("setBackgroundOrigin",
+    register_bridge_function(api, "setBackgroundOrigin",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
@@ -144,7 +151,7 @@ void WidgetBridge::register_widget_style_background_subproperty_api() {
     // -> View slot -> get_attribute pulls it back) and unblocks a future
     // raster background-image paint slice - see View::set_background_*
     // doc for the architectural caveat.
-    engine_.register_function("setBackgroundPosition",
+    register_bridge_function(api, "setBackgroundPosition",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
@@ -152,7 +159,7 @@ void WidgetBridge::register_widget_style_background_subproperty_api() {
             if (v) v->set_background_position(kw);
             return choc::value::Value();
         });
-    engine_.register_function("setBackgroundSize",
+    register_bridge_function(api, "setBackgroundSize",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
