@@ -13,9 +13,11 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/signal/oversampling.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <span>
 #include <utility>
@@ -126,6 +128,10 @@ ProcessBlock valid_graph_block() {
     block.frame_count = 64;
     block.render_speed = 1.0;
     return block;
+}
+
+float soft_clip(float sample) noexcept {
+    return std::tanh(sample * 1.5f);
 }
 
 }  // namespace
@@ -250,6 +256,31 @@ TEST_CASE("GraphRuntimeExecutor queue drain hot path does not allocate",
     REQUIRE(popped_first);
     REQUIRE(popped_second);
     REQUIRE_FALSE(popped_third);
+}
+
+TEST_CASE("Polyphase oversampler hot path with function-pointer callback does not allocate",
+          "[signal][oversampling][rt-safety][no-alloc]") {
+    pulp::signal::Oversampler oversampler;
+    oversampler.set_kind(pulp::signal::Oversampler::Kind::polyphase_iir);
+    oversampler.set_factor(pulp::signal::Oversampler::Factor::x4);
+    oversampler.set_sample_rate(48000.0f);
+
+    for (int i = 0; i < 16; ++i) {
+        static_cast<void>(oversampler.process(0.05f * static_cast<float>(i), soft_clip));
+    }
+
+    float sum = 0.0f;
+    AllocationSnapshot allocations;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 64; ++i) {
+            sum += oversampler.process(0.01f * static_cast<float>(i - 32), soft_clip);
+        }
+        allocations = snapshot_allocations(probe);
+    }
+
+    require_no_alloc(allocations);
+    REQUIRE(std::isfinite(sum));
 }
 
 TEST_CASE("Sampler handoff and loop render hot paths do not allocate",

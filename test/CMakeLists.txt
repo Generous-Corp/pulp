@@ -1931,7 +1931,7 @@ pulp_add_test_suite(pulp-test-process-block LIBRARIES pulp::format)
 # Release-safe no-allocation probes for graph/event/sampler DSP hot paths.
 pulp_add_test_suite(pulp-test-dsp-runtime-no-alloc
     SOURCES test_dsp_runtime_no_alloc.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::format pulp::audio pulp::graph pulp::midi pulp::state)
+    LIBRARIES pulp::format pulp::audio pulp::graph pulp::midi pulp::state pulp::signal)
 
 # Deterministic multi-block offline rendering over HeadlessHost.
 pulp_add_test_suite(pulp-test-offline-render-host LIBRARIES pulp::format)
