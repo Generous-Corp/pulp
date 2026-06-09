@@ -29,9 +29,9 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
-LineMap = dict[str, set[int] | None]
+LineMap = dict[str, Optional[set[int]]]
 
 DEFAULT_SCAN_GLOBS = (
     "docs/reference/**/*.md",
@@ -224,7 +224,7 @@ def _merge_line_map(target: LineMap, source: LineMap) -> None:
 
 def _parse_unified_zero_diff(text: str) -> LineMap:
     result: LineMap = {}
-    current: str | None = None
+    current: Optional[str] = None
     for line in text.splitlines():
         if line.startswith("+++ b/"):
             current = line[6:]
@@ -277,7 +277,7 @@ def _git_untracked_line_map(root: Path) -> LineMap:
     return {line.strip(): None for line in out.stdout.splitlines() if line.strip()}
 
 
-def _git_changed_line_map(root: Path, base: str, head: str) -> LineMap | None:
+def _git_changed_line_map(root: Path, base: str, head: str) -> Optional[LineMap]:
     """Return added-line map, or None when `root` is not a git repo.
 
     Committed branch diffs are combined with staged, unstaged, and untracked
@@ -339,7 +339,7 @@ def _is_yaml_description_line(line: str) -> bool:
 def scan_file(
     path: Path,
     root: Path,
-    allowed_lines: set[int] | None = None,
+    allowed_lines: Optional[set[int]] = None,
 ) -> list[Finding]:
     rel = _norm_path(path, root)
     findings: list[Finding] = []
@@ -380,7 +380,7 @@ def scan(
     head: str,
     scan_all: bool,
 ) -> list[Finding]:
-    line_map: LineMap | None = None
+    line_map: Optional[LineMap] = None
     if paths:
         files = _iter_explicit_files(root, paths)
     elif scan_all:
