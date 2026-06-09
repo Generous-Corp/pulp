@@ -170,6 +170,31 @@ TEST_CASE("OfflineRenderHost prepares and steps deterministic blocks",
     REQUIRE(result.audio.num_samples() == 100);
 }
 
+TEST_CASE("OfflineRenderHost supports zero-input instruments",
+          "[format][offline-render][instrument]") {
+    pulp::format::OfflineRenderHost host(create_offline_probe);
+    pulp::format::OfflineRenderConfig config;
+    config.max_block_frames = 16;
+    config.input_channels = 0;
+    config.output_channels = 2;
+
+    REQUIRE(host.prepare(config));
+    auto* processor = OfflineProbeProcessor::last;
+    REQUIRE(processor != nullptr);
+    REQUIRE(processor->last_prepare_context.input_channels == 0);
+    REQUIRE(processor->last_prepare_context.output_channels == 2);
+
+    pulp::format::OfflineRenderOptions options;
+    options.frame_count = 32;
+    options.block_frames = 16;
+    auto result = host.render(options);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.stats.frames_rendered == 32);
+    REQUIRE(result.audio.num_channels() == 2);
+    REQUIRE(result.audio.num_samples() == 32);
+}
+
 TEST_CASE("OfflineRenderHost copies input and returns rendered audio",
           "[format][offline-render]") {
     pulp::format::OfflineRenderHost host(create_offline_probe);

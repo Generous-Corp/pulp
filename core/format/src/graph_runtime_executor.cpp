@@ -108,6 +108,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
         if (command_requires_node(command.command.type) &&
             !contains_node(plan, command.command.node_id)) {
             status = GraphRuntimeCommandStatus::Rejected;
+        } else if (command_handler.apply && command.block_offset != 0) {
+            status = GraphRuntimeCommandStatus::Rejected;
         } else if (command_handler.apply) {
             status = command_handler.apply(block, plan, command, command_handler.user_data);
         }

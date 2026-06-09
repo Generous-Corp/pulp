@@ -51,6 +51,9 @@ using GraphRuntimeCommandApplyFn = GraphRuntimeCommandStatus (*)(
     void* user_data) noexcept;
 
 struct GraphRuntimeCommandHandler {
+    // Block-level side effects are applied before node processing, so this
+    // handler is only invoked for block_offset == 0 commands until the executor
+    // grows block-splitting/sample-accurate command application.
     GraphRuntimeCommandApplyFn apply = nullptr;
     void* user_data = nullptr;
 };

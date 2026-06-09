@@ -13,7 +13,6 @@ bool valid_config(const OfflineRenderConfig& config) {
            std::isfinite(config.tempo_bpm) && config.tempo_bpm > 0.0 &&
            config.max_block_frames > 0 &&
            config.max_block_frames <= static_cast<std::uint32_t>(std::numeric_limits<int>::max()) &&
-           config.input_channels > 0 &&
            config.input_channels <= static_cast<std::uint32_t>(std::numeric_limits<int>::max()) &&
            config.output_channels > 0 &&
            config.output_channels <= static_cast<std::uint32_t>(std::numeric_limits<int>::max()) &&

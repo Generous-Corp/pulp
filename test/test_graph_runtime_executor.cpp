@@ -101,6 +101,15 @@ GraphRuntimeCommandStatus reject_commands(ProcessBlock&,
     return GraphRuntimeCommandStatus::Rejected;
 }
 
+GraphRuntimeCommandStatus count_applied_commands(ProcessBlock&,
+                                                 const pulp::graph::GraphRuntimePlan&,
+                                                 const GraphTimedCommand&,
+                                                 void* user_data) noexcept {
+    auto* count = static_cast<std::uint32_t*>(user_data);
+    ++(*count);
+    return GraphRuntimeCommandStatus::Accepted;
+}
+
 GraphRuntimeSnapshot make_snapshot(std::span<const GraphRuntimeNodeSpec> nodes,
                                    std::span<const GraphRuntimeConnectionSpec> connections,
                                    std::span<const GraphRuntimeNodeBinding> bindings) {
@@ -219,6 +228,42 @@ TEST_CASE("GraphRuntimeExecutor reports handler-rejected command decisions",
     REQUIRE(queues.pop_event(event));
     REQUIRE(event.sequence_id == 1);
     REQUIRE(event.type == pulp::graph::GraphEventType::CommandRejected);
+}
+
+TEST_CASE("GraphRuntimeExecutor does not apply nonzero block-offset commands at block start",
+          "[format][graph-runtime][executor][queue]") {
+    const std::array nodes = {
+        node(10, 0, 0),
+    };
+    VisitLog log;
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{10, record_visit, &log, true},
+    };
+    auto snapshot = make_snapshot(nodes, {}, bindings);
+
+    GraphRuntimeQueues<2, 2, 2> queues;
+    REQUIRE(queues.enqueue_command(command(1, 10, 7)));
+
+    std::uint32_t applied = 0;
+    GraphRuntimeExecutor executor;
+    auto block = valid_block();
+    const auto result = executor.process(
+        block,
+        snapshot,
+        queues,
+        GraphRuntimeCommandHandler{count_applied_commands, &applied});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.commands_drained == 1);
+    REQUIRE(result.commands_accepted == 0);
+    REQUIRE(result.commands_rejected == 1);
+    REQUIRE(applied == 0);
+
+    pulp::graph::GraphEvent event;
+    REQUIRE(queues.pop_event(event));
+    REQUIRE(event.sequence_id == 1);
+    REQUIRE(event.type == pulp::graph::GraphEventType::CommandRejected);
+    REQUIRE(event.block_offset == 7);
 }
 
 TEST_CASE("GraphRuntimeExecutor leaves queued commands intact for invalid blocks",
