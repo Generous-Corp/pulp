@@ -4223,72 +4223,24 @@ def print_result(result: dict, result_path: Path | None = None) -> None:
 
 
 def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
-    acquired = False
-    try:
-        with file_lock(drain_lock_path(), blocking=blocking):
-            acquired = True
-            runner_info = {
-                "pid": os.getpid(),
-                "root": str(ROOT),
-                "started_at": now_iso(),
-                "active_job_id": None,
-                "active_branch": None,
-            }
-            write_runner_info(runner_info)
-            any_failure = False
-
-            while True:
-                reclaim_stale_remote_validators(config)
-                job = claim_next_job()
-                if job is None:
-                    break
-
-                runner_info.update(
-                    {
-                        "active_job_id": job["id"],
-                        "active_branch": job["branch"],
-                        "updated_at": now_iso(),
-                    }
-                )
-                write_runner_info(runner_info)
-
-                try:
-                    result = process_job(job, config)
-                except Exception as exc:
-                    result = {
-                        "job_id": job["id"],
-                        "branch": job["branch"],
-                        "sha": job["sha"],
-                        "priority": job["priority"],
-                        "validation": job.get("validation", "full"),
-                        "targets": job.get("targets", []),
-                        "queued_at": job.get("queued_at", ""),
-                        "completed_at": now_iso(),
-                        "results": [
-                            {
-                                "target": "scheduler",
-                                "status": "error",
-                                "exit_code": -1,
-                                "duration_secs": 0,
-                                "stdout_tail": "",
-                                "stderr_tail": str(exc),
-                            }
-                        ],
-                        "overall": "fail",
-                    }
-
-                result_path = save_result(result)
-                finalize_job(job["id"], result, result_path)
-                print_result(result, result_path)
-                if result["overall"] != "pass":
-                    any_failure = True
-
-            return True, any_failure
-    except LockBusyError:
-        return False, False
-    finally:
-        if acquired:
-            clear_runner_info()
+    return _queue_lifecycle.drain_pending_jobs_locked(
+        config,
+        blocking=blocking,
+        root=ROOT,
+        drain_lock_path_fn=drain_lock_path,
+        file_lock_fn=file_lock,
+        lock_busy_error_cls=LockBusyError,
+        write_runner_info_fn=write_runner_info,
+        clear_runner_info_fn=clear_runner_info,
+        reclaim_stale_remote_validators_fn=reclaim_stale_remote_validators,
+        claim_next_job_fn=claim_next_job,
+        process_job_fn=process_job,
+        save_result_fn=save_result,
+        finalize_job_fn=finalize_job,
+        print_result_fn=print_result,
+        now_fn=now_iso,
+        pid_fn=os.getpid,
+    )
 
 
 # ── GitHub Helpers ───────────────────────────────────────────────────────────
