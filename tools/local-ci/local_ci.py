@@ -2529,32 +2529,34 @@ def enqueue_job(
     validation: str,
     submission: dict | None = None,
 ) -> tuple[dict, bool]:
-    requested_priority = normalize_priority(priority)
-    normalized_validation = normalize_validation_mode(validation)
-
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        queue, changed = reconcile_running_jobs_unlocked(queue)
-        if changed:
-            save_queue_unlocked(queue)
-        fingerprint = make_fingerprint(branch, sha, targets, normalized_validation)
-
-        existing = _queue_orchestrator.find_active_job_by_fingerprint_unlocked(queue, fingerprint)
-        if existing is not None:
-            if _queue_orchestrator.bump_pending_job_priority_unlocked(
-                existing,
-                requested_priority,
-                now_iso_fn=now_iso,
-            ):
-                save_queue_unlocked(queue)
-            return normalize_job(existing), False
-
-        job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
-        queue.append(job)
-        for existing, reason in _queue_orchestrator.pending_supersedence_candidates_unlocked(queue, job):
-            supersede_job_unlocked(existing, job["id"], reason)
-        save_queue_unlocked(trim_completed_jobs(queue))
-        return job, True
+    return _queue_lifecycle.enqueue_job_locked(
+        branch,
+        sha,
+        priority,
+        targets,
+        mode,
+        validation,
+        submission=submission,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        normalize_priority_fn=normalize_priority,
+        normalize_validation_mode_fn=normalize_validation_mode,
+        make_fingerprint_fn=make_fingerprint,
+        find_active_job_by_fingerprint_unlocked_fn=_queue_orchestrator.find_active_job_by_fingerprint_unlocked,
+        bump_pending_job_priority_unlocked_fn=lambda existing, requested_priority: _queue_orchestrator.bump_pending_job_priority_unlocked(
+            existing,
+            requested_priority,
+            now_iso_fn=now_iso,
+        ),
+        make_job_fn=make_job,
+        pending_supersedence_candidates_unlocked_fn=_queue_orchestrator.pending_supersedence_candidates_unlocked,
+        supersede_job_unlocked_fn=supersede_job_unlocked,
+        trim_completed_jobs_fn=trim_completed_jobs,
+        normalize_job_fn=normalize_job,
+    )
 
 
 def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
