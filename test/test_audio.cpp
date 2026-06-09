@@ -3,6 +3,9 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/channel_set.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+#include "../core/audio/platform/mac/coreaudio_device.hpp"
+#endif
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -1033,5 +1036,29 @@ TEST_CASE("CoreAudio render sine wave", "[audio][coreaudio]") {
         SKIP("CoreAudio callback never fired in this environment");
     }
     REQUIRE(callbacks_received > 0);
+}
+
+TEST_CASE("CoreAudio output-only open falls back to DefaultOutput when HAL device binding fails",
+          "[audio][coreaudio][standalone]") {
+    auto system = create_audio_system();
+    auto info = require_coreaudio_default_output(*system);
+
+    pulp::audio::mac::CoreAudioDevice device(kAudioObjectSystemObject);
+
+    DeviceConfig config;
+    config.sample_rate = info.sample_rates.empty() ? 48000.0 : info.sample_rates.front();
+    config.buffer_size = info.buffer_sizes.empty() ? 256 : info.buffer_sizes.front();
+    config.output_channels = std::max(1, std::min(2, info.max_output_channels));
+    config.input_channels = 0;
+
+    if (!device.open(config)) {
+        SKIP("CoreAudio DefaultOutput fallback could not be opened in this environment");
+    }
+
+    REQUIRE(device.is_open());
+    REQUIRE(device.info().max_output_channels > 0);
+    REQUIRE(device.sample_rate() > 0.0);
+    REQUIRE(device.buffer_size() > 0);
+    device.close();
 }
 #endif

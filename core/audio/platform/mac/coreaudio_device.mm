@@ -125,6 +125,13 @@ void CoreAudioDevice::query_callback_workgroup() {
 
 bool CoreAudioDevice::open(const DeviceConfig& config) {
     config_ = config;
+    if (device_id_ == kAudioObjectUnknown) {
+        device_id_ = CoreAudioSystem::get_default_device(false);
+        if (device_id_ == kAudioObjectUnknown) {
+            runtime::log_error("CoreAudio: no default output device is available");
+            return false;
+        }
+    }
 
     // Create output audio unit (AUHAL)
     AudioComponentDescription desc{};
@@ -144,15 +151,55 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         return false;
     }
 
-    // Set the device
+    // Set the device. Some output-only standalone apps can still play through
+    // the system default even when AUHAL refuses kAudioOutputUnitProperty_
+    // CurrentDevice for the selected/default device (for example, virtual or
+    // interface-routed outputs). In that case fall back to DefaultOutput before
+    // treating startup as fatal. Input-capable configs stay on AUHAL because
+    // DefaultOutput has no input bus.
     status = AudioUnitSetProperty(audio_unit_,
         kAudioOutputUnitProperty_CurrentDevice,
         kAudioUnitScope_Global, 0,
         &device_id_, sizeof(device_id_));
     if (status != noErr) {
-        runtime::log_error("CoreAudio: could not set device ({})", static_cast<int>(status));
-        close();
-        return false;
+        const auto set_device_status = status;
+        if (config_.input_channels > 0) {
+            runtime::log_error("CoreAudio: could not set device ({})",
+                static_cast<int>(set_device_status));
+            close();
+            return false;
+        }
+
+        runtime::log_warn(
+            "CoreAudio: could not bind HAL output to device {} ({}); using system default output unit",
+            static_cast<unsigned>(device_id_),
+            static_cast<int>(set_device_status));
+        AudioComponentInstanceDispose(audio_unit_);
+        audio_unit_ = nullptr;
+
+        desc.componentSubType = kAudioUnitSubType_DefaultOutput;
+        component = AudioComponentFindNext(nullptr, &desc);
+        if (!component) {
+            runtime::log_error("CoreAudio: could not find DefaultOutput component after HAL failure ({})",
+                static_cast<int>(set_device_status));
+            return false;
+        }
+
+        status = AudioComponentInstanceNew(component, &audio_unit_);
+        if (status != noErr) {
+            runtime::log_error(
+                "CoreAudio: could not create DefaultOutput audio unit after HAL failure (set device {}, create {})",
+                static_cast<int>(set_device_status),
+                static_cast<int>(status));
+            return false;
+        }
+        device_id_ = CoreAudioSystem::get_default_device(false);
+        if (device_id_ == kAudioObjectUnknown) {
+            runtime::log_error("CoreAudio: no default output device is available after HAL failure ({})",
+                static_cast<int>(set_device_status));
+            close();
+            return false;
+        }
     }
 
     double actual_rate = 0.0;
