@@ -1,6 +1,7 @@
 // widget_bridge/event_api.cpp - event registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <pulp/platform/popup_menu.hpp>
 
@@ -50,8 +51,10 @@ void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
 } // namespace
 
 void WidgetBridge::register_hover_event_api() {
+    BridgeApiContext api{engine_};
+
     // registerHover(id) - enables "mouseenter"/"mouseleave" JS callbacks (CSS :hover).
-    engine_.register_function("registerHover", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerHover", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
@@ -69,8 +72,10 @@ void WidgetBridge::register_hover_event_api() {
 }
 
 void WidgetBridge::register_pointer_event_api() {
+    BridgeApiContext api{engine_};
+
     // registerClick(id) - enables "click" event dispatch for any widget.
-    engine_.register_function("registerClick", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerClick", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
@@ -84,7 +89,7 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // claimOverlay(id) / releaseOverlay(id) - generalized overlay click routing.
-    engine_.register_function("claimOverlay", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "claimOverlay", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = widgets_.find(id);
         if (it != widgets_.end() && it->second) {
@@ -100,7 +105,7 @@ void WidgetBridge::register_pointer_event_api() {
         }
         return choc::value::Value();
     });
-    engine_.register_function("releaseOverlay", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "releaseOverlay", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = widgets_.find(id);
         if (it != widgets_.end() && it->second) {
@@ -113,7 +118,7 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // registerPointer(id) - enables pointer event dispatch for a widget.
-    engine_.register_function("registerPointer", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerPointer", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         // Idempotency: re-renders re-issue registerPointer for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
@@ -240,7 +245,7 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // registerGesture(id) - enables gesture event dispatch for a widget.
-    engine_.register_function("registerGesture", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerGesture", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
@@ -267,7 +272,7 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // nativeSetPointerCapture(id, pointerId).
-    engine_.register_function("nativeSetPointerCapture", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "nativeSetPointerCapture", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pointerId = static_cast<int>(args.get<double>(1, 0));
         auto it = widgets_.find(id);
@@ -279,7 +284,7 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // nativeReleasePointerCapture(id, pointerId).
-    engine_.register_function("nativeReleasePointerCapture", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "nativeReleasePointerCapture", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pointerId = static_cast<int>(args.get<double>(1, 0));
         auto it = widgets_.find(id);
@@ -291,7 +296,7 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // enableInspectClick() - sets up Cmd+click detection on all registered widgets.
-    engine_.register_function("enableInspectClick", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "enableInspectClick", [this](choc::javascript::ArgumentList) {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         root_.on_global_click = [alive, engine](const std::string& id, uint16_t mods) {
@@ -305,8 +310,10 @@ void WidgetBridge::register_pointer_event_api() {
 }
 
 void WidgetBridge::register_wheel_event_api() {
+    BridgeApiContext api{engine_};
+
     // registerWheel(id) - enable wheel event dispatch for scroll/zoom.
-    engine_.register_function("registerWheel", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerWheel", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         // Idempotency: re-renders re-issue registerWheel for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
@@ -341,8 +348,10 @@ void WidgetBridge::register_wheel_event_api() {
 }
 
 void WidgetBridge::register_context_menu_event_api() {
+    BridgeApiContext api{engine_};
+
     // registerContextMenu(id, callbackName)
-    engine_.register_function("registerContextMenu", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerContextMenu", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto cb = args.get<std::string>(1, "");
         auto* v = widget(id);
@@ -359,7 +368,7 @@ void WidgetBridge::register_context_menu_event_api() {
     });
 
     // showContextMenu(itemsJSON, x, y) -> selected id or -1.
-    engine_.register_function("showContextMenu", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "showContextMenu", [](choc::javascript::ArgumentList args) {
         auto json = args.get<std::string>(0, "");
         auto x = args.get<double>(1, 0);
         auto y = args.get<double>(2, 0);
@@ -393,7 +402,7 @@ void WidgetBridge::register_context_menu_event_api() {
     });
 
     // registerShortcut(key, modifiers, callbackName)
-    engine_.register_function("registerShortcut", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerShortcut", [this](choc::javascript::ArgumentList args) {
         auto key = args.get<int>(0, 0);
         auto mods = args.get<int>(1, 0);
         auto cb = args.get<std::string>(2, "");
@@ -406,8 +415,10 @@ void WidgetBridge::register_context_menu_event_api() {
 }
 
 void WidgetBridge::register_drop_event_api() {
+    BridgeApiContext api{engine_};
+
     // Drag-and-drop: register JS callback for file/text drops.
-    engine_.register_function("registerDrop", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerDrop", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto cb = args.get<std::string>(1, "");
         auto* v = widget(id);
