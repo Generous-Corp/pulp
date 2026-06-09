@@ -1979,6 +1979,9 @@ pulp_add_test_suite(pulp-test-sample-zone-map LIBRARIES pulp::audio)
 # Scalar sample voice rendering from sample-pool resolutions.
 pulp_add_test_suite(pulp-test-sample-voice-renderer LIBRARIES pulp::audio)
 
+# Prepared per-voice modulation lane storage for sampler/instrument renderers.
+pulp_add_test_suite(pulp-test-voice-modulation-buffer LIBRARIES pulp::audio)
+
 # Pool-backed instrument trigger resolver over sample zones.
 pulp_add_test_suite(pulp-test-instrument-runtime LIBRARIES pulp::audio)
 

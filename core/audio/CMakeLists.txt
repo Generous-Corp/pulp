@@ -20,6 +20,7 @@ target_sources(pulp-audio PRIVATE
     src/channel_set.cpp
     src/offline_processor.cpp
     src/streaming_writer.cpp
+    src/voice_modulation_buffer.cpp
     src/mmap_reader.cpp
     src/buffer_ops.cpp
     src/audio_stream_handoff.cpp
