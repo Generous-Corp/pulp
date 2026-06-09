@@ -177,6 +177,35 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertNotIn("last_progress_at", queue[2])
         self.assertFalse(self.mod.upsert_job_active_targets_unlocked(queue, "unknown", {}))
 
+        target_updated = self.mod.update_job_target_state_unlocked(
+            queue,
+            "def333",
+            "windows",
+            {"status": "running", "pid": 42},
+            now_iso_fn=lambda: "2026-06-09T00:04:00+00:00",
+        )
+        self.assertTrue(target_updated)
+        self.assertEqual(queue[2]["active_targets"]["windows"]["status"], "running")
+        self.assertEqual(queue[2]["active_targets"]["windows"]["pid"], 42)
+        self.assertEqual(queue[2]["last_progress_at"], "2026-06-09T00:04:00+00:00")
+
+        self.mod.update_job_target_state_unlocked(
+            queue,
+            "def333",
+            "windows",
+            {"status": "pass", "pid": None},
+            now_iso_fn=lambda: "2026-06-09T00:05:00+00:00",
+        )
+        self.assertEqual(queue[2]["active_targets"]["windows"], {"status": "pass"})
+        self.assertEqual(queue[2]["last_progress_at"], "2026-06-09T00:05:00+00:00")
+
+        self.mod.update_job_target_state_unlocked(queue, "def333", "windows", {"status": None})
+        self.assertNotIn("active_targets", queue[2])
+        self.assertNotIn("last_progress_at", queue[2])
+        self.assertFalse(
+            self.mod.update_job_target_state_unlocked(queue, "unknown", "mac", {"status": "running"})
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

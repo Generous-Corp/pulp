@@ -234,6 +234,40 @@ def upsert_job_active_targets_unlocked(
     return False
 
 
+def update_job_target_state_unlocked(
+    queue: list[dict],
+    job_id: str,
+    target_name: str,
+    fields: dict,
+    *,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> bool:
+    job = find_job_unlocked(queue, job_id)
+    if job is None:
+        return False
+
+    active_targets = dict(job.get("active_targets") or {})
+    state = dict(active_targets.get(target_name) or {})
+    for key, value in fields.items():
+        if value is None:
+            state.pop(key, None)
+        else:
+            state[key] = value
+
+    if state:
+        active_targets[target_name] = state
+    else:
+        active_targets.pop(target_name, None)
+
+    upsert_job_active_targets_unlocked(
+        queue,
+        job["id"],
+        active_targets if active_targets else None,
+        now_iso_fn=now_iso_fn,
+    )
+    return True
+
+
 def trim_completed_jobs_with_removed_ids(
     queue: list[dict],
     *,

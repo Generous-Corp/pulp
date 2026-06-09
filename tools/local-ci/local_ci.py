@@ -2717,31 +2717,14 @@ def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
     with file_lock(queue_lock_path(), blocking=True):
         queue = load_queue_unlocked()
-        job = find_job_unlocked(queue, job_id)
-        if job is None:
-            return
-
-        active_targets = dict(job.get("active_targets") or {})
-        state = dict(active_targets.get(target_name) or {})
-        for key, value in fields.items():
-            if value is None:
-                state.pop(key, None)
-            else:
-                state[key] = value
-
-        if state:
-            active_targets[target_name] = state
-        else:
-            active_targets.pop(target_name, None)
-
-        if active_targets:
-            job["active_targets"] = active_targets
-            job["last_progress_at"] = now_iso()
-        else:
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-
-        save_queue_unlocked(queue)
+        if _queue_orchestrator.update_job_target_state_unlocked(
+            queue,
+            job_id,
+            target_name,
+            fields,
+            now_iso_fn=now_iso,
+        ):
+            save_queue_unlocked(queue)
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
