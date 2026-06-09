@@ -155,14 +155,26 @@ debug comparisons.
 
 ### `pulp import` — framework-importer substrate
 
-`pulp import` (`tools/cli/cmd_import.cpp` + `import_detect.{hpp,cpp}` +
-`import_spi.{hpp,cpp}` + `import_emit.{hpp,cpp}` + `import_emit_scan.{hpp,cpp}`)
-reads an existing audio-plugin project read-only and emits a Pulp migration
-scaffold. The SDK owns only the *generalized* substrate; the framework-specific
-parsers are **vendor-specific add-on tools** in their own private repos, driven
-over a JSON-over-stdio SPI.
+`pulp import` (`tools/cli/cmd_import.cpp` + `import_run.{hpp,cpp}` +
+`import_detect.{hpp,cpp}` + `import_spi.{hpp,cpp}` + `import_emit.{hpp,cpp}` +
+`import_emit_scan.{hpp,cpp}`) reads an existing audio-plugin project read-only
+and emits a Pulp migration scaffold. The SDK owns only the *generalized*
+substrate; the framework-specific parsers are **vendor-specific add-on tools**
+in their own private repos, driven over a JSON-over-stdio SPI.
 
 Gotchas / invariants when touching this surface:
+
+- **`cmd_import.cpp` is arg-parse + dispatch only.** The SPI-verb orchestration
+  (`run_detect` / `run_inspect` / `run_emit` and their shared helpers —
+  framework-index + importer resolution, the SPI request/response envelope
+  `run_verb`, the analyze/emit payload builders, the clean-room output gate,
+  and scaffold materialisation) lives in `import_run.{hpp,cpp}` under namespace
+  `pulp::cli::import_run`. `cmd_import.cpp` only parses flags into
+  `import_run::ImportOptions` and calls the three `run_*` entry points. Keep new
+  verb logic in `import_run.cpp`; keep `cmd_import.cpp` small. Both files (and
+  any new `tools/cli/*import*` file) must stay vendor-free — the
+  `pulp-test-cli-import` directory scan asserts no `juce`/`iplug`/`steinberg`/
+  `wdl` token appears in any of them.
 
 - **Vendor-agnostic is enforced.** SDK code, mainline tests, and generic CI
   name NO vendor or framework. The ONLY place real markers (`.jucer`,
