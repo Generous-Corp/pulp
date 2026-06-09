@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03920"></a>
+## [0.392.0] - 2026-06-09
+
+- feat(view): Linux AT-SPI Value interface + focus/value/name event signals (L7c) ([#3744](https://github.com/danielraffel/pulp/pull/3744))
+- refactor: migrate GPU bridge API to registry helper ([#3741](https://github.com/danielraffel/pulp/pull/3741))
+- refactor: migrate typography bridge API to registry helper ([#3740](https://github.com/danielraffel/pulp/pull/3740))
+
 <a id="v03910"></a>
 ## [0.391.0] - 2026-06-09
 
@@ -4029,6 +4036,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.392.0]: https://github.com/danielraffel/pulp/releases/tag/v0.392.0
 [0.391.0]: https://github.com/danielraffel/pulp/releases/tag/v0.391.0
 [0.390.0]: https://github.com/danielraffel/pulp/releases/tag/v0.390.0
 [0.389.0]: https://github.com/danielraffel/pulp/releases/tag/v0.389.0
