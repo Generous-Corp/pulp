@@ -2050,6 +2050,10 @@ if(TARGET pulp-host)
         LIBRARIES pulp::host)
 endif()
 
+# Additive ProcessBlock graph executor/snapshot primitive for runtime v2.
+pulp_add_test_suite(pulp-test-graph-runtime-executor
+    LIBRARIES pulp::format)
+
 # .pulpset render/replay harness (G4)
 pulp_add_test_suite(pulp-test-pulpset-replay SOURCES test_pulpset_replay.cpp LIBRARIES pulp::format)
 

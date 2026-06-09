@@ -153,6 +153,16 @@ snapshots to realtime code. The old `pulp::host` graph-runtime headers remain
 compatibility aliases, but the platform-neutral `pulp::graph` module is the
 canonical owner.
 
+`pulp::format::GraphRuntimeSnapshot` and `GraphRuntimeExecutor` are the first
+`ProcessBlock`-based graph execution seam. Build immutable snapshots off the
+audio thread by binding one process callback per dense graph node, then pass the
+active snapshot into each executor call. Do not reset or clear a snapshot while
+any realtime call may still reference it. The executor validates the block,
+drains graph queues without heap allocation, emits bounded command
+accepted/rejected events, and visits nodes in plan order. Snapshot
+publication/lifetime policy, audio-buffer routing, feedback delay storage, and
+`SignalGraph` mutation belong to later graph-runtime migration slices.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -167,5 +177,7 @@ canonical owner.
   — the graph command/event/MIDI handoff queues.
 * [`core/graph/include/pulp/graph/graph_runtime_plan.hpp`](../../core/graph/include/pulp/graph/graph_runtime_plan.hpp)
   — dense graph topology plans and bounded validation.
+* [`core/format/include/pulp/format/graph_runtime_executor.hpp`](../../core/format/include/pulp/format/graph_runtime_executor.hpp)
+  — `ProcessBlock` graph snapshot/executor seam.
 * sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
   and #29 (don't deref atomics per sample).
