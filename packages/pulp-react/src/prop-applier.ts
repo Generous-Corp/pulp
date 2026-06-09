@@ -238,12 +238,16 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     // prop-applier created the Image widget (host-config createImage) but
     // never dispatched `src`, so the emitted bundle had zero
     // setImageSource calls and every <img> rendered as the empty "IMG"
-    // placeholder. Gate on `type === 'Image'` so a stray `src` on a
-    // non-image widget can't hit the ImageView-only setter. The path is
-    // forwarded verbatim (already absolute on the design-import / importer
-    // path); C++ setImageSource → ImageView::set_image_path resolves the
-    // rest, exactly as the web-compat path does — no JS-side resolution.
-    if (type === 'Image' && key === 'src') {
+    // placeholder. Gate on the Image element types — host-config maps BOTH the
+    // lowercase `'img'` intrinsic (what design-import / the framework importer
+    // emit) AND the `'Image'` component to createImage, so accept both; a stray
+    // `src` on any other widget can't hit the ImageView-only setter. (The #18
+    // parity capture caught that gating on `'Image'` alone silently dropped
+    // every `<img>` — the runtime type is `'img'`.) The path is forwarded
+    // verbatim (already absolute on the design-import / importer path); C++
+    // setImageSource → ImageView::set_image_path resolves the rest, exactly as
+    // the web-compat path does — no JS-side resolution.
+    if ((type === 'img' || type === 'Image') && key === 'src') {
         call('setImageSource', id, String(value));
         return;
     }
@@ -530,7 +534,12 @@ export function applyChangedProps(
             // clears the ImageView back to the empty placeholder, matching
             // the web-compat removeAttribute('src') reset semantics. Empty
             // string is the bridge-side "no source" sentinel.
-            if (key === 'src' && type === 'Image') {
+            // `type` is typed as keyof IntrinsicElementMap (which lists 'Image'
+            // but not the lowercase 'img' intrinsic — host-config routes 'img'
+            // through its string-fallback switch). Cast for the 'img' compare so
+            // the clear-on-removal seam matches the same element types as the
+            // set seam above.
+            if (key === 'src' && ((type as string) === 'img' || type === 'Image')) {
                 call('setImageSource', id, '');
                 mutated = true;
             }

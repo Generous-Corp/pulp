@@ -41,7 +41,7 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
     });
 
     it('applyAllProps dispatches setImageSource for an Image with src', () => {
-        applyAllProps(instance('img1', 'Image', { src: '/abs/path/logo.png' }));
+        applyAllProps(instance('img1', 'img', { src: '/abs/path/logo.png' }));
         const calls = imageSourceCalls(bridge);
         expect(calls).toHaveLength(1);
         expect(calls[0].args).toEqual(['img1', '/abs/path/logo.png']);
@@ -49,15 +49,15 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
 
     it('forwards an absolute path verbatim (design-import / importer convention)', () => {
         const abs = '/Volumes/Workshop/assets/cover.png';
-        applyAllProps(instance('img2', 'Image', { src: abs }));
+        applyAllProps(instance('img2', 'img', { src: abs }));
         const calls = imageSourceCalls(bridge);
         expect(calls).toHaveLength(1);
         expect(calls[0].args).toEqual(['img2', abs]);
     });
 
     it('forwards file:// and bare-path forms unchanged', () => {
-        applyAllProps(instance('img3', 'Image', { src: 'file:///x/y.png' }));
-        applyAllProps(instance('img4', 'Image', { src: 'assets/icon.png' }));
+        applyAllProps(instance('img3', 'img', { src: 'file:///x/y.png' }));
+        applyAllProps(instance('img4', 'img', { src: 'assets/icon.png' }));
         const calls = imageSourceCalls(bridge);
         expect(calls).toHaveLength(2);
         expect(calls[0].args).toEqual(['img3', 'file:///x/y.png']);
@@ -65,7 +65,7 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
     });
 
     it('re-dispatches setImageSource when src changes (commitUpdate)', () => {
-        const inst = instance('img5', 'Image', {});
+        const inst = instance('img5', 'img', {});
         const mutated = applyChangedProps(
             inst,
             { src: '/abs/old.png' },
@@ -79,7 +79,7 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
 
     it('does not re-dispatch when src is unchanged', () => {
         applyChangedProps(
-            instance('img6', 'Image', {}),
+            instance('img6', 'img', {}),
             { src: '/abs/same.png' },
             { src: '/abs/same.png' },
         );
@@ -88,7 +88,7 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
 
     it('clears the ImageView (empty-string sentinel) when src is removed', () => {
         const mutated = applyChangedProps(
-            instance('img7', 'Image', {}),
+            instance('img7', 'img', {}),
             { src: '/abs/gone.png' },
             {},
         );
@@ -101,5 +101,18 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
     it('ignores src on a non-Image widget (type gate)', () => {
         applyAllProps(instance('btn1', 'Button', { src: '/abs/should-not-fire.png' }));
         expect(imageSourceCalls(bridge)).toHaveLength(0);
+    });
+
+    // host-config maps BOTH the lowercase `<img>` intrinsic AND the `<Image>`
+    // component to createImage, so the prop-applier must accept both element
+    // types. The #18 parity capture proved gating on `'Image'` alone dropped
+    // every real `<img>` (runtime type `'img'`).
+    it('dispatches setImageSource for both the img intrinsic and the Image component', () => {
+        applyAllProps(instance('imgLower', 'img', { src: '/abs/a.png' }));
+        applyAllProps(instance('imgUpper', 'Image', { src: '/abs/b.png' }));
+        const calls = imageSourceCalls(bridge);
+        expect(calls).toHaveLength(2);
+        expect(calls[0].args).toEqual(['imgLower', '/abs/a.png']);
+        expect(calls[1].args).toEqual(['imgUpper', '/abs/b.png']);
     });
 });
