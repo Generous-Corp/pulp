@@ -171,6 +171,13 @@ Processor sidecar pointers, and preserves the distinction between no EventBlock
 and an EventBlock with an empty parameter queue. It does not change the
 Processor vtable.
 
+`pulp::audio::SampleZoneMap` is the prepared sampler mapping primitive for
+key zones, velocity zones, fixed-pitch triggers, chromatic keytracking,
+round-robin groups, slices, and loop metadata. Build or rebuild maps off the
+audio thread, then publish immutable snapshots to realtime code. The hot
+`ZoneSelector` path is allocation-free and owns no sample storage; zones only
+reference `PublishedSampleView` metadata from the publication layer.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -178,6 +185,7 @@ Processor vtable.
   `pump_listeners()`.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
+* [`core/audio/include/pulp/audio/sample_zone_map.hpp`](../../core/audio/include/pulp/audio/sample_zone_map.hpp)
   — the no-allocation contract.
 * [`core/format/include/pulp/format/offline_render_host.hpp`](../../core/format/include/pulp/format/offline_render_host.hpp)
   — the deterministic multi-block render harness.

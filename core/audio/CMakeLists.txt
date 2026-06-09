@@ -33,6 +33,7 @@ target_sources(pulp-audio PRIVATE
     src/realtime_sample_recorder.cpp
     src/rolling_audio_capture_buffer.cpp
     src/sample_key_map.cpp
+    src/sample_zone_map.cpp
     src/sample_slot_materializer.cpp
     src/sample_slot_bank.cpp
     src/sampler_looper_metrics.cpp

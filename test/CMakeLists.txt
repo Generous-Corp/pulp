@@ -1970,6 +1970,9 @@ pulp_add_test_suite(pulp-test-audio-stream-handoff LIBRARIES pulp::audio)
 # Sampler key/pitch/slice mapping policy kept out of renderers and slot storage.
 pulp_add_test_suite(pulp-test-sample-key-map LIBRARIES pulp::audio)
 
+# Sampler zone selection policy for key/velocity ranges, round-robin, slices, and keytracking.
+pulp_add_test_suite(pulp-test-sample-zone-map LIBRARIES pulp::audio)
+
 # Loop metadata validation and off-RT loop candidate analysis.
 pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
 
