@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03850"></a>
+## [0.385.0] - 2026-06-08
+
+- refactor(cli): split pulp import SPI-verb orchestration into import_run ([#3673](https://github.com/danielraffel/pulp/pull/3673))
+
 <a id="v03840"></a>
 ## [0.384.0] - 2026-06-08
 
@@ -3949,6 +3954,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.385.0]: https://github.com/danielraffel/pulp/releases/tag/v0.385.0
 [0.384.0]: https://github.com/danielraffel/pulp/releases/tag/v0.384.0
 [0.383.0]: https://github.com/danielraffel/pulp/releases/tag/v0.383.0
 [0.382.1]: https://github.com/danielraffel/pulp/releases/tag/v0.382.1
