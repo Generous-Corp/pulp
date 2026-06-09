@@ -8,6 +8,20 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03861"></a>
+## [0.386.1] - 2026-06-08
+
+- refactor: migrate theme bridge API to registry helper ([#3689](https://github.com/danielraffel/pulp/pull/3689))
+- refactor: migrate tokens bridge API to registry helper ([#3688](https://github.com/danielraffel/pulp/pull/3688))
+- refactor: migrate border-side bridge API to registry helper ([#3686](https://github.com/danielraffel/pulp/pull/3686))
+- refactor: migrate border-radius bridge API to registry helper ([#3685](https://github.com/danielraffel/pulp/pull/3685))
+- refactor: migrate outline bridge API to registry helper ([#3684](https://github.com/danielraffel/pulp/pull/3684))
+- refactor: migrate metadata bridge API to registry helper ([#3683](https://github.com/danielraffel/pulp/pull/3683))
+- refactor: migrate shader bridge API to registry helper ([#3682](https://github.com/danielraffel/pulp/pull/3682))
+- refactor: migrate list-style bridge API to registry helper ([#3677](https://github.com/danielraffel/pulp/pull/3677))
+- feat(design-import): auto-label faithful interactive elements from layer names (§2.1) ([#3691](https://github.com/danielraffel/pulp/pull/3691))
+- feat(view): Windows UIA per-widget fragments (a11y Phase 3, W6) ([#3680](https://github.com/danielraffel/pulp/pull/3680))
+
 <a id="v03860"></a>
 ## [0.386.0] - 2026-06-09
 
@@ -3962,6 +3976,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.386.1]: https://github.com/danielraffel/pulp/releases/tag/v0.386.1
 [0.386.0]: https://github.com/danielraffel/pulp/releases/tag/v0.386.0
 [0.385.0]: https://github.com/danielraffel/pulp/releases/tag/v0.385.0
 [0.384.0]: https://github.com/danielraffel/pulp/releases/tag/v0.384.0
