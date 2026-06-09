@@ -4,6 +4,7 @@
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
+#include "api_registry.hpp"
 
 #include <functional>
 #include <memory>
@@ -13,6 +14,7 @@
 namespace pulp::view {
 
 void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
     // pulp #965 - SvgPathWidget bridge. Mirrors the API surface of
@@ -20,7 +22,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
     // widget and pushes its path-data + paint attributes; the native
     // widget parses path-data once on set_path() and replays as Canvas2D
     // path commands inside paint().
-    engine_.register_function("createSvgPath", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createSvgPath", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto w = std::make_unique<SvgPathWidget>();
@@ -30,7 +32,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::createString(id);
     });
 
-    engine_.register_function("setSvgPath", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgPath", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto data = args.get<std::string>(1, "");
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
@@ -39,7 +41,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    engine_.register_function("setSvgViewBox", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgViewBox", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vw = args.get<double>(1, 0.0);
         auto vh = args.get<double>(2, 0.0);
@@ -54,7 +56,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
     // a uniform fill/stroke surface. SvgPathWidget is the legacy path
     // (#965 / #994); SvgRectWidget and SvgLineWidget mirror the API with
     // the same hex / "none" / strokeWidth semantics.
-    engine_.register_function("setSvgFill", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgFill", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         const bool clear = hex.empty() || hex == "none";
@@ -81,7 +83,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
     // stops={...}>` + `<SvgPath fill="url(#g)" .../>`; prop-applier
     // resolves the gradient JSX to a CSS string and calls this fn.
     // Direct C++ consumers can also call it for testing.
-    engine_.register_function("setSvgFillGradient", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgFillGradient", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto value = args.get<std::string>(1, "");
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
@@ -93,7 +95,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    engine_.register_function("setSvgStroke", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgStroke", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         const bool clear = hex.empty() || hex == "none";
@@ -110,7 +112,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    engine_.register_function("setSvgStrokeWidth", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgStrokeWidth", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto width = args.get<double>(1, 1.0);
         const float fw = static_cast<float>(width);
@@ -128,7 +130,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
     // setSvgPath. Geometry is local to the widget origin (not
     // bounds()-translated). x/y default to 0, w/h default to 0 so an
     // unset rect is invisible by default.
-    engine_.register_function("createSvgRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createSvgRect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto w = std::make_unique<SvgRectWidget>();
@@ -138,7 +140,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::createString(id);
     });
 
-    engine_.register_function("setSvgRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgRect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto x = args.get<double>(1, 0.0);
         auto y = args.get<double>(2, 0.0);
@@ -153,7 +155,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
 
     // pulp #1416 - SvgLineWidget bridge. Mirrors createSvgPath /
     // setSvgRect. Endpoints are local to the widget origin.
-    engine_.register_function("createSvgLine", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createSvgLine", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto w = std::make_unique<SvgLineWidget>();
@@ -163,7 +165,7 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::createString(id);
     });
 
-    engine_.register_function("setSvgLine", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSvgLine", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto x1 = args.get<double>(1, 0.0);
         auto y1 = args.get<double>(2, 0.0);
