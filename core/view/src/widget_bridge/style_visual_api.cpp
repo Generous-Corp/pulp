@@ -1,5 +1,6 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include "api_registry.hpp"
 
 #include <algorithm>
 #include <string>
@@ -8,7 +9,9 @@ namespace pulp::view {
 
 void WidgetBridge::register_widget_style_background_color_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
-    engine_.register_function("setBackground", [this, parse_color](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setBackground", [this, parse_color](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -19,11 +22,13 @@ void WidgetBridge::register_widget_style_background_color_api(
 
 void WidgetBridge::register_widget_style_shadow_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
+
     // pulp #1026 - RN-shaped shadow primitive. RN's View style-prop names
     // are { shadowColor, shadowOffset: {x,y}, shadowOpacity, shadowRadius }
     // and do not carry spread or inset. Lower these onto the existing pulp
     // #925 box-shadow primitive while leaving setBoxShadow unchanged.
-    engine_.register_function("setShadow", [this, parse_color](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setShadow", [this, parse_color](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "#000000ff");
         auto ox = static_cast<float>(args.get<double>(2, 0.0));
@@ -42,7 +47,9 @@ void WidgetBridge::register_widget_style_shadow_api(
 }
 
 void WidgetBridge::register_widget_style_opacity_api() {
-    engine_.register_function("setOpacity", [this](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setOpacity", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto alpha = args.get<double>(1, 1.0);
         auto* v = id.empty() ? &root_ : widget(id);
@@ -52,7 +59,9 @@ void WidgetBridge::register_widget_style_opacity_api() {
 }
 
 void WidgetBridge::register_widget_style_overflow_api() {
-    engine_.register_function("setOverflow", [this](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setOverflow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "hidden");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -66,7 +75,9 @@ void WidgetBridge::register_widget_style_overflow_api() {
 
 void WidgetBridge::register_widget_style_background_gradient_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
-    engine_.register_function("setBackgroundGradient", [this, parse_color](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setBackgroundGradient", [this, parse_color](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto gradient = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -79,7 +90,9 @@ void WidgetBridge::register_widget_style_background_gradient_api(
 
 void WidgetBridge::register_widget_style_box_shadow_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
-    engine_.register_function("setBoxShadow", [this, parse_color](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "setBoxShadow", [this, parse_color](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ox = static_cast<float>(args.get<double>(1, 0));
         auto oy = static_cast<float>(args.get<double>(2, 2));
@@ -102,7 +115,7 @@ void WidgetBridge::register_widget_style_box_shadow_api(
         return choc::value::Value();
     });
 
-    engine_.register_function("clearBoxShadow", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "clearBoxShadow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (v) v->clear_box_shadow();
