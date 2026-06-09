@@ -26,6 +26,7 @@ and the matching contract tests in the same change.
 | `source_prep.py` | Exact-SHA desktop source requests, cache keys, launch-command rewriting, prepare manifests, and macOS/Linux/Windows prepared source materialization. | Desktop artifact layout, target execution, queue orchestration, or target probes. |
 | `target_preflight.py` | SSH primary/fallback/UTM/Namespace failover checks, material config drift detection, and submission metadata formatting. | Queue mutation, target validation execution, or desktop automation adapters. |
 | `linux_target.py` | Linux desktop launch backend probes, remote tooling probes/readiness details, remote bundle paths, and remote command builders. | SSH execution orchestration, artifact fetch/cleanup, queue orchestration, or manifest writing. |
+| `macos_desktop.py` | macOS app bundle detection, Swift window-probe wrappers, window wait/capture/activation/click helpers, app quit, and process termination. | Desktop action orchestration, artifact manifest writing, source preparation, or queue orchestration. |
 | `windows_target.py` | Windows desktop target contracts, path safety, session-agent request payloads, and probe result formatting/readiness helpers. | SSH/PowerShell execution, desktop action execution, queue orchestration, or artifact layout. |
 
 ## Remaining `local_ci.py` Clusters
@@ -36,7 +37,7 @@ behind the contracts added in this slice.
 
 | Cluster | Current responsibility | Extraction target |
 | --- | --- | --- |
-| Desktop target probes | macOS desktop tool probes, Windows SSH/PowerShell probe execution, launch adapters, and automation adapters. | `macos_desktop.py`, later `windows_probe.py` |
+| Desktop target probes | Desktop doctor orchestration, Windows SSH/PowerShell probe execution, launch adapters, and automation adapters. | later `windows_probe.py`, `execution.py` |
 | Queue orchestration | Locking, enqueue/dedupe/supersede, stale-running requeue, runner info, target state updates. | `queue_orchestrator.py` |
 | Validation execution | Local, SSH, Windows, Linux, smoke/full validation commands and target status reporting. | `execution.py` |
 | CLI dispatch | Argument parser, subcommand routing, and user-facing command output. | `cli.py` or retained thin entrypoint |
