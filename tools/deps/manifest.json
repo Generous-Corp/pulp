@@ -655,7 +655,7 @@
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m150 release does not ship a linux-arm64 slice (m149 did); Linux arm64 stays on the m149 asset or rebuilds from source via tools/build-skia.sh until the fork republishes it. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m150 release ships all platform slices including linux-arm64 (the linux-arm64 slice was republished after an initial m150 gap that hard-failed release-cli.yml's linux-arm64 leg under PULP_REQUIRE_GPU_FOR_SDK and stalled CLI/SDK publishing). Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "determinism": {
         "skia_branch": "chrome/m150",
         "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
@@ -668,6 +668,10 @@
           "ios-simulator-arm64-x86_64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
             "sha256": "86a60cf963b41da8d30a46e98bb69d24a8bc7f102d8c0908087c9a8be3aa6a75"
+          },
+          "linux-arm64": {
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-linux-arm64-gpu-release.zip",
+            "sha256": "4420a7a0dd040d6e4f07332aea3966d5d7b35cf23b02cb4501b5a877ca305aac"
           },
           "linux-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-linux-x64-gpu-release.zip",

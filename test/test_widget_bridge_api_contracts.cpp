@@ -22,6 +22,7 @@ struct ManifestEntry {
     std::string category;
     std::string kind;
     std::string source;
+    std::string jsx;  // optional 5th column — @pulp/react reachability tag
     int line = 0;
 };
 
@@ -117,7 +118,10 @@ std::vector<ManifestEntry> read_manifest(const std::filesystem::path& path) {
 
         const auto fields = split_fields(cleaned);
         if (!saw_header) {
-            const std::vector<std::string> expected_header = {"name", "category", "kind", "source"};
+            // The `jsx` column (5th) is optional per-row but declared in the
+            // header so the schema is self-documenting (pulp #3656 follow-up).
+            const std::vector<std::string> expected_header =
+                {"name", "category", "kind", "source", "jsx"};
             INFO("Invalid WidgetBridge API manifest header at line " << line_number);
             REQUIRE(fields == expected_header);
             saw_header = true;
@@ -125,8 +129,10 @@ std::vector<ManifestEntry> read_manifest(const std::filesystem::path& path) {
         }
 
         INFO("Invalid WidgetBridge API manifest row at line " << line_number << ": " << line);
-        REQUIRE(fields.size() == 4);
-        out.push_back({fields[0], fields[1], fields[2], fields[3], line_number});
+        // 4 fields = no jsx tag; 5 = with the optional @pulp/react tag.
+        REQUIRE((fields.size() == 4 || fields.size() == 5));
+        out.push_back({fields[0], fields[1], fields[2], fields[3],
+                       fields.size() == 5 ? fields[4] : std::string{}, line_number});
     }
 
     REQUIRE(saw_header);
@@ -273,6 +279,22 @@ TEST_CASE("WidgetBridge JS native API manifest matches registrar sources",
         if (scanned_sources.find(entry.source) == scanned_sources.end()) {
             invalid_manifest_entries << entry.name << " line " << entry.line
                                      << " owns unscanned source '" << entry.source << "'\n";
+        }
+        // pulp #3656 follow-up — when the optional `jsx` tag is present it
+        // must start with a known @pulp/react-reachability prefix so the
+        // vitest jsx-parity contract can classify it. The full prop/factory/
+        // geometry ↔ @pulp/react wiring is checked TS-side in
+        // packages/pulp-react/test/widget-bridge-jsx-contract.test.ts.
+        if (!entry.jsx.empty()) {
+            static const std::vector<std::string> kJsxPrefixes = {
+                "prop:", "factory:", "geometry:", "event:", "internal"};
+            const bool ok = std::any_of(
+                kJsxPrefixes.begin(), kJsxPrefixes.end(),
+                [&](const std::string& p) { return starts_with(entry.jsx, p); });
+            if (!ok) {
+                invalid_manifest_entries << entry.name << " line " << entry.line
+                    << " has unknown jsx tag '" << entry.jsx << "'\n";
+            }
         }
 
         manifest_by_name.emplace(entry.name, entry);

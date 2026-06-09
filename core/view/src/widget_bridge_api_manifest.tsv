@@ -1,7 +1,7 @@
 # WidgetBridge native JS API manifest.
-# Columns: name<TAB>category<TAB>kind<TAB>source
+# Columns: name<TAB>category<TAB>kind<TAB>source<TAB>jsx (jsx optional: @pulp/react reachability tag — prop:Type.name | factory:Type | geometry:Type.fields | event:names | internal)
 # category must be one of the allowlist in test_widget_bridge_api_contracts.cpp.
-name	category	kind	source
+name	category	kind	source	jsx
 __pulpRuntimeImport__	runtime_import	function	core/view/src/widget_bridge/runtime_import_api.cpp
 __pulpRuntimeSettle__	runtime_import	function	core/view/src/widget_bridge/runtime_import_api.cpp
 createKnob	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
@@ -107,18 +107,18 @@ setPanelStyle	widget_value	function	core/view/src/widget_bridge/widget_value_con
 setScrollContentSize	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setTextRuns	typography	function	core/view/src/widget_bridge/text_runs_api.cpp
 setBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
-createSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgViewBox	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgFill	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgFillGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgFillRule	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgStroke	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgStrokeWidth	svg	function	core/view/src/widget_bridge/svg_api.cpp
-createSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp
-createSvgLine	svg	function	core/view/src/widget_bridge/svg_api.cpp
-setSvgLine	svg	function	core/view/src/widget_bridge/svg_api.cpp
+createSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgPath
+setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.d
+setSvgViewBox	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.viewBox
+setSvgFill	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fill
+setSvgFillGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillGradient
+setSvgFillRule	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillRule
+setSvgStroke	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.stroke
+setSvgStrokeWidth	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.strokeWidth
+createSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgRect
+setSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp	geometry:SvgRect.x,y,width,height
+createSvgLine	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgLine
+setSvgLine	svg	function	core/view/src/widget_bridge/svg_api.cpp	geometry:SvgLine.x1,y1,x2,y2
 setBorder	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
 setBorderSide	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
 setCornerRadius	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
