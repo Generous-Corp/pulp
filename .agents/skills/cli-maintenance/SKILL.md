@@ -309,6 +309,27 @@ Gotchas / invariants when touching this surface:
   `pulp-test-cli-tool-registry` and `pulp-test-cli-importer-install` link all
   three TUs. Adding a symbol used by `cmd_tool` means updating both targets.
 
+### Package suggestion and analyzer metadata commands
+
+Package search/suggestion code (`tools/cli/package_commands_search.cpp`) is a
+user-facing CLI surface even when the change is "just output shaping." Keep the
+plain-text and `--format json` lanes semantically aligned:
+
+- JSON output must escape strings through the shared helper, not by hand-writing
+  raw descriptor fields into JSON.
+- `pulp suggest` filters license-gated packages by default; the
+  `--include-license-gated` flag is the explicit inspection path for packages
+  whose license is rejected or needs review. When changing this lane, keep the
+  omission counts and human hints in sync with JSON fields so automation and
+  terminal output tell the same story.
+- Analyzer descriptor plumbing in `package_analyzer_descriptors.{hpp,cpp}` is
+  metadata-only. It maps package `provides` tokens into
+  `pulp::audio::AnalyzerDescriptor` records for UI/control-thread discovery.
+  It must not install packages, fetch network state, launch tools, or enter
+  realtime paths. If a new analyzer capability token lands in package metadata,
+  update the mapping, CLI build list, package command tests, and any package
+  docs/skills that describe discoverable analyzer providers in the same PR.
+
 ### Binary subcommand delegation
 
 `BinaryCommand` entries in `tools/cli/pulp_cli.cpp` delegate to helper binaries
