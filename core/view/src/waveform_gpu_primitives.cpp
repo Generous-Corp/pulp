@@ -96,8 +96,8 @@ bool read_peak(const pulp::audio::ThumbnailLevel& level,
 } // namespace
 
 bool WaveformGpuUploadKey::valid() const noexcept {
-    return samples_per_peak > 0 && peak_count > 0 && visible_length > 0 &&
-           target_width_px > 0 && target_height_px > 0;
+    return source_generation != 0 && samples_per_peak > 0 && peak_count > 0 &&
+           visible_length > 0 && target_width_px > 0 && target_height_px > 0;
 }
 
 bool operator==(const WaveformGpuUploadKey& a,
@@ -129,6 +129,8 @@ WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
     const WaveformGpuLayerConfig& config) {
     WaveformGpuStaticLayerPlan plan;
     plan.prefer_gpu = config.prefer_gpu;
+
+    if (config.source_generation == 0) return plan;
 
     const auto info = thumbnail.info();
     if (thumbnail.empty() || info.num_source_frames == 0 ||
@@ -251,7 +253,7 @@ std::size_t fill_waveform_peak_vertices(
 }
 
 bool WaveformGpuResourceRecord::valid() const noexcept {
-    return resource_id != 0 && key.valid();
+    return resource_id != 0 && backend_generation != 0 && key.valid();
 }
 
 WaveformGpuResourceCache::WaveformGpuResourceCache(std::size_t capacity) {
@@ -261,21 +263,23 @@ WaveformGpuResourceCache::WaveformGpuResourceCache(std::size_t capacity) {
 bool WaveformGpuResourceCache::prepare(
     std::size_t capacity,
     std::vector<WaveformGpuResourceRecord>* evicted_records) {
-    capacity_ = capacity;
-    if (capacity_ == 0) {
+    if (capacity < records_.size() && evicted_records == nullptr) return false;
+
+    if (capacity == 0) {
         if (evicted_records) {
             evicted_records->insert(evicted_records->end(), records_.begin(), records_.end());
         }
+        capacity_ = 0;
         evictions_ += records_.size();
         records_.clear();
         return true;
     }
     try {
-        records_.reserve(capacity_);
+        records_.reserve(capacity);
     } catch (...) {
-        capacity_ = records_.capacity();
         return false;
     }
+    capacity_ = capacity;
     while (records_.size() > capacity_) {
         auto victim = std::min_element(records_.begin(), records_.end(), [](const auto& a, const auto& b) {
             return a.last_used < b.last_used;
@@ -288,39 +292,40 @@ bool WaveformGpuResourceCache::prepare(
     return true;
 }
 
-void WaveformGpuResourceCache::clear() noexcept {
-    records_.clear();
-}
-
 std::vector<WaveformGpuResourceRecord> WaveformGpuResourceCache::clear_and_return_records() {
-    auto removed = std::move(records_);
-    records_.clear();
-    records_.reserve(capacity_);
+    std::vector<WaveformGpuResourceRecord> removed;
+    records_.swap(removed);
     return removed;
 }
 
 WaveformGpuResourcePutResult WaveformGpuResourceCache::put(
     const WaveformGpuUploadKey& key,
     std::uint64_t resource_id,
-    std::size_t bytes) {
+    std::size_t bytes,
+    std::uint64_t backend_generation) {
     WaveformGpuResourcePutResult result;
-    if (!key.valid() || resource_id == 0 || capacity_ == 0) return result;
+    if (!key.valid() || resource_id == 0 || bytes == 0 || backend_generation == 0 ||
+        capacity_ == 0) {
+        return result;
+    }
 
     const auto stamp = ++clock_;
     for (auto& record : records_) {
         if (record.key == key) {
+            if (backend_generation < record.backend_generation) return result;
             result.ok = true;
             result.replaced = true;
             result.replaced_record = record;
             record.resource_id = resource_id;
             record.bytes = bytes;
+            record.backend_generation = backend_generation;
             record.last_used = stamp;
             return result;
         }
     }
 
     if (records_.size() < capacity_) {
-        records_.push_back({key, resource_id, bytes, stamp});
+        records_.push_back({key, resource_id, bytes, backend_generation, stamp});
         result.ok = true;
         return result;
     }
@@ -332,7 +337,7 @@ WaveformGpuResourcePutResult WaveformGpuResourceCache::put(
     result.ok = true;
     result.evicted = true;
     result.evicted_record = *victim;
-    *victim = {key, resource_id, bytes, stamp};
+    *victim = {key, resource_id, bytes, backend_generation, stamp};
     ++evictions_;
     return result;
 }
@@ -350,14 +355,32 @@ const WaveformGpuResourceRecord* WaveformGpuResourceCache::find(
     return nullptr;
 }
 
+const WaveformGpuResourceRecord* WaveformGpuResourceCache::find(
+    const WaveformGpuUploadKey& key,
+    std::uint64_t backend_generation) noexcept {
+    if (backend_generation == 0) {
+        ++misses_;
+        return nullptr;
+    }
+    for (auto& record : records_) {
+        if (record.key == key && record.backend_generation == backend_generation) {
+            record.last_used = ++clock_;
+            ++hits_;
+            return &record;
+        }
+    }
+    ++misses_;
+    return nullptr;
+}
+
 bool WaveformGpuResourceCache::erase(
     const WaveformGpuUploadKey& key,
-    WaveformGpuResourceRecord* removed_record) noexcept {
+    WaveformGpuResourceRecord& removed_record) noexcept {
     const auto it = std::find_if(records_.begin(), records_.end(), [&](const auto& record) {
         return record.key == key;
     });
     if (it == records_.end()) return false;
-    if (removed_record) *removed_record = *it;
+    removed_record = *it;
     records_.erase(it);
     return true;
 }

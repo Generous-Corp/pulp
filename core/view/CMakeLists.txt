@@ -379,6 +379,7 @@ target_sources(pulp-view-core PRIVATE
     src/visualization_bridge.cpp
     src/waveform_editor_primitives.cpp
     src/waveform_gpu_primitives.cpp
+    src/waveform_gpu_render_controller.cpp
     src/frame_clock.cpp
     src/motion.cpp
     src/motion_geometry.cpp

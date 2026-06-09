@@ -50,6 +50,12 @@ WaveformGpuUploadKey shifted_key(WaveformGpuUploadKey key, std::uint32_t first_p
     return key;
 }
 
+WaveformGpuLayerConfig make_config(std::uint64_t source_generation = 1) {
+    WaveformGpuLayerConfig config;
+    config.source_generation = source_generation;
+    return config;
+}
+
 } // namespace
 
 TEST_CASE("Waveform GPU static layer plan keys thumbnail LOD ranges",
@@ -91,12 +97,13 @@ TEST_CASE("Waveform GPU upload keys include baked viewport geometry",
         10);
     auto base_viewport = make_viewport();
     base_viewport.set_visible_range(100, 178);
-    const auto base = build_waveform_gpu_static_layer_plan(thumbnail, base_viewport);
+    const auto config = make_config();
+    const auto base = build_waveform_gpu_static_layer_plan(thumbnail, base_viewport, config);
     REQUIRE(base.valid);
 
     auto panned = base_viewport;
     panned.set_visible_range(101, 178);
-    const auto panned_plan = build_waveform_gpu_static_layer_plan(thumbnail, panned);
+    const auto panned_plan = build_waveform_gpu_static_layer_plan(thumbnail, panned, config);
     REQUIRE(panned_plan.valid);
     REQUIRE(panned_plan.upload_key.first_peak == base.upload_key.first_peak);
     REQUIRE(panned_plan.upload_key.peak_count == base.upload_key.peak_count);
@@ -104,7 +111,7 @@ TEST_CASE("Waveform GPU upload keys include baked viewport geometry",
 
     auto moved = base_viewport;
     moved.set_bounds({5.0f, 7.0f, 120.0f, 80.0f});
-    const auto moved_plan = build_waveform_gpu_static_layer_plan(thumbnail, moved);
+    const auto moved_plan = build_waveform_gpu_static_layer_plan(thumbnail, moved, config);
     REQUIRE(moved_plan.valid);
     REQUIRE(moved_plan.upload_key.first_peak == base.upload_key.first_peak);
     REQUIRE(moved_plan.upload_key.peak_count == base.upload_key.peak_count);
@@ -153,7 +160,10 @@ TEST_CASE("Waveform GPU vertex fill provides CPU fallback upload data",
     const auto thumbnail = AudioThumbnail::build_from_buffer(
         make_sine(48000, 1000, 2, 110.0),
         10);
-    const auto plan = build_waveform_gpu_static_layer_plan(thumbnail, make_viewport());
+    const auto plan = build_waveform_gpu_static_layer_plan(
+        thumbnail,
+        make_viewport(),
+        make_config());
     REQUIRE(plan.valid);
 
     std::vector<WaveformPeakVertex> vertices(plan.vertex_count);
@@ -188,10 +198,14 @@ TEST_CASE("Waveform GPU primitive rejects invalid source or viewport state",
         10);
     auto empty_view = make_viewport();
     empty_view.set_bounds({0.0f, 0.0f, 0.0f, 80.0f});
-    const auto invalid_view = build_waveform_gpu_static_layer_plan(thumbnail, empty_view);
+    const auto invalid_view = build_waveform_gpu_static_layer_plan(
+        thumbnail,
+        empty_view,
+        make_config());
     REQUIRE_FALSE(invalid_view.valid);
 
     WaveformGpuLayerConfig invalid_channel;
+    invalid_channel.source_generation = 1;
     invalid_channel.channel = 4;
     const auto invalid_channel_plan = build_waveform_gpu_static_layer_plan(
         thumbnail,
@@ -208,7 +222,10 @@ TEST_CASE("Waveform GPU resource cache tracks opaque backend handles with LRU ev
     const auto thumbnail = AudioThumbnail::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
-    const auto base_plan = build_waveform_gpu_static_layer_plan(thumbnail, make_viewport());
+    const auto base_plan = build_waveform_gpu_static_layer_plan(
+        thumbnail,
+        make_viewport(),
+        make_config());
     REQUIRE(base_plan.valid);
 
     auto key_a = base_plan.upload_key;
@@ -252,9 +269,13 @@ TEST_CASE("Waveform GPU resource cache rejects invalid records and can shrink",
     const auto thumbnail = AudioThumbnail::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
-    const auto plan = build_waveform_gpu_static_layer_plan(thumbnail, make_viewport());
+    const auto plan = build_waveform_gpu_static_layer_plan(
+        thumbnail,
+        make_viewport(),
+        make_config());
     REQUIRE(plan.valid);
     REQUIRE_FALSE(cache.put(plan.upload_key, 0, 16).ok);
+    REQUIRE_FALSE(cache.put(plan.upload_key, 10, 0).ok);
     REQUIRE(cache.put(plan.upload_key, 10, 16).ok);
     const auto replaced = cache.put(plan.upload_key, 11, 24);
     REQUIRE(replaced.ok);
@@ -264,12 +285,14 @@ TEST_CASE("Waveform GPU resource cache rejects invalid records and can shrink",
     REQUIRE(cache.size() == 1);
 
     WaveformGpuResourceRecord removed;
-    REQUIRE(cache.erase(plan.upload_key, &removed));
+    REQUIRE(cache.erase(plan.upload_key, removed));
     REQUIRE(removed.resource_id == 11);
     REQUIRE(cache.size() == 0);
 
     REQUIRE(cache.put(plan.upload_key, 12, 32).ok);
     std::vector<WaveformGpuResourceRecord> evicted;
+    REQUIRE_FALSE(cache.prepare(0));
+    REQUIRE(cache.size() == 1);
     REQUIRE(cache.prepare(0, &evicted));
     REQUIRE(evicted.size() == 1);
     REQUIRE(evicted[0].resource_id == 12);
@@ -278,3 +301,45 @@ TEST_CASE("Waveform GPU resource cache rejects invalid records and can shrink",
     REQUIRE_FALSE(cache.put(plan.upload_key, 13, 16).ok);
 }
 
+TEST_CASE("Waveform GPU upload plans require explicit source generation",
+          "[view][waveform][gpu]") {
+    const auto thumbnail = AudioThumbnail::build_from_buffer(
+        make_sine(48000, 1000, 1, 440.0),
+        10);
+
+    const auto implicit = build_waveform_gpu_static_layer_plan(thumbnail, make_viewport());
+    REQUIRE_FALSE(implicit.valid);
+    REQUIRE_FALSE(implicit.upload_key.valid());
+
+    const auto explicit_plan = build_waveform_gpu_static_layer_plan(
+        thumbnail,
+        make_viewport(),
+        make_config(9));
+    REQUIRE(explicit_plan.valid);
+    REQUIRE(explicit_plan.upload_key.valid());
+    REQUIRE(explicit_plan.upload_key.source_generation == 9);
+}
+
+TEST_CASE("Waveform GPU resource cache returns records for release-safe clearing",
+          "[view][waveform][gpu]") {
+    const auto thumbnail = AudioThumbnail::build_from_buffer(
+        make_sine(48000, 1000, 1, 440.0),
+        10);
+    const auto plan = build_waveform_gpu_static_layer_plan(
+        thumbnail,
+        make_viewport(),
+        make_config());
+    REQUIRE(plan.valid);
+
+    WaveformGpuResourceCache cache(2);
+    REQUIRE(cache.put(plan.upload_key, 20, 64).ok);
+    auto second_key = shifted_key(plan.upload_key, plan.upload_key.first_peak + 1);
+    REQUIRE(cache.put(second_key, 21, 64).ok);
+
+    auto removed = cache.clear_and_return_records();
+    REQUIRE(removed.size() == 2);
+    REQUIRE(removed[0].resource_id == 20);
+    REQUIRE(removed[1].resource_id == 21);
+    REQUIRE(cache.size() == 0);
+    REQUIRE(cache.capacity() == 2);
+}

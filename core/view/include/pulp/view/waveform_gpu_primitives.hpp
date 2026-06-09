@@ -51,6 +51,8 @@ struct WaveformGpuUploadKey {
                               const WaveformGpuUploadKey& b) noexcept;
 
 struct WaveformGpuLayerConfig {
+    // Required cache identity supplied by the source/editor owner. Increment
+    // whenever thumbnail content changes; 0 produces an invalid GPU plan.
     std::uint64_t source_generation = 0;
     std::uint32_t channel = pulp::audio::AudioThumbnail::kAllChannels;
     std::uint32_t max_columns = 0;
@@ -98,6 +100,7 @@ struct WaveformGpuResourceRecord {
     WaveformGpuUploadKey key{};
     std::uint64_t resource_id = 0;
     std::size_t bytes = 0;
+    std::uint64_t backend_generation = 0;
     std::uint64_t last_used = 0;
 
     [[nodiscard]] bool valid() const noexcept;
@@ -124,21 +127,25 @@ struct WaveformGpuResourcePutResult {
 /// stable keys and opaque resource IDs; platform renderers own the real GPU
 /// buffers/textures and may use resource_id however they choose. Any operation
 /// that removes a record can report it so the backend can release resources.
+/// Not thread-safe; async backend completions should marshal cache updates back
+/// to the owning render/control thread or use external synchronization.
 class WaveformGpuResourceCache {
 public:
     explicit WaveformGpuResourceCache(std::size_t capacity = 8);
 
     bool prepare(std::size_t capacity,
                  std::vector<WaveformGpuResourceRecord>* evicted_records = nullptr);
-    void clear() noexcept;
     [[nodiscard]] std::vector<WaveformGpuResourceRecord> clear_and_return_records();
 
     [[nodiscard]] WaveformGpuResourcePutResult put(const WaveformGpuUploadKey& key,
                                                    std::uint64_t resource_id,
-                                                   std::size_t bytes);
+                                                   std::size_t bytes,
+                                                   std::uint64_t backend_generation = 1);
     const WaveformGpuResourceRecord* find(const WaveformGpuUploadKey& key) noexcept;
+    const WaveformGpuResourceRecord* find(const WaveformGpuUploadKey& key,
+                                          std::uint64_t backend_generation) noexcept;
     bool erase(const WaveformGpuUploadKey& key,
-               WaveformGpuResourceRecord* removed_record = nullptr) noexcept;
+               WaveformGpuResourceRecord& removed_record) noexcept;
 
     [[nodiscard]] WaveformGpuResourceCacheStats stats() const noexcept;
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
