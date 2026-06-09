@@ -174,6 +174,13 @@ target_link_libraries(pulp-runtime PRIVATE hwy)
 # crypto.cpp, independent of HTTP).
 if(TARGET mbedcrypto)
     target_link_libraries(pulp-runtime PRIVATE mbedcrypto mbedx509 mbedtls)
+    if(APPLE)
+        # Static SDK consumers need these link items in pulp-runtime's exported
+        # link interface because model_download.cpp compiles httplib's macOS
+        # trust-anchor helper into libpulp-runtime.a.
+        target_link_libraries(pulp-runtime PRIVATE
+            "-framework Security" "-framework CoreFoundation")
+    endif()
     target_include_directories(pulp-runtime PRIVATE
         ${mbedtls_SOURCE_DIR}/include
     )
