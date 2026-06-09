@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03940"></a>
+## [0.394.0] - 2026-06-09
+
+- feat(view): HiDPI for the Win/Linux plugin-editor host (W8/L9) ([#3774](https://github.com/danielraffel/pulp/pull/3774))
+- refactor(local-ci): extract terminal job completion ([#3784](https://github.com/danielraffel/pulp/pull/3784))
+- refactor(local-ci): extract job claim helper ([#3782](https://github.com/danielraffel/pulp/pull/3782))
+- refactor(local-ci): extract target state helper ([#3779](https://github.com/danielraffel/pulp/pull/3779))
+- refactor(local-ci): extract queue state helpers ([#3777](https://github.com/danielraffel/pulp/pull/3777))
+- refactor(local-ci): extract queue policy helpers ([#3776](https://github.com/danielraffel/pulp/pull/3776))
+- refactor(local-ci): extract Windows remote probes ([#3773](https://github.com/danielraffel/pulp/pull/3773))
+- refactor(local-ci): extract Windows SSH probe helpers ([#3771](https://github.com/danielraffel/pulp/pull/3771))
+
 <a id="v03930"></a>
 ## [0.393.0] - 2026-06-09
 
@@ -4059,6 +4071,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.394.0]: https://github.com/danielraffel/pulp/releases/tag/v0.394.0
 [0.393.0]: https://github.com/danielraffel/pulp/releases/tag/v0.393.0
 [0.392.2]: https://github.com/danielraffel/pulp/releases/tag/v0.392.2
 [0.392.1]: https://github.com/danielraffel/pulp/releases/tag/v0.392.1
