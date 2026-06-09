@@ -455,7 +455,7 @@ conv.process(input, output, block_size);
 | Ballistics Filter | `ballistics_filter.hpp` | Envelope follower with configurable attack/release for meter and dynamics |
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
-| Gain | `gain.hpp` | Smoothed gain stage that ramps between values to avoid clicks |
+| Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
 | Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |
 
 #### Generators and analysis
