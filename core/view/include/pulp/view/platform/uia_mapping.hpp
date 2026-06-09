@@ -88,4 +88,73 @@ constexpr PatternSet patterns_for_role(View::AccessRole role) {
     return s;
 }
 
+/// True if a role's pattern set advertises the RangeValue pattern, i.e.
+/// the per-widget fragment should expose IRangeValueProvider (slider /
+/// meter today). Pure helper so the COM provider and the offline test
+/// agree on which fragments are range widgets.
+constexpr bool role_supports_range_value(View::AccessRole role) {
+    const PatternSet pats = patterns_for_role(role);
+    for (int i = 0; i < pats.count; ++i) {
+        if (pats.ids[i] == kPatternRangeValue) return true;
+    }
+    return false;
+}
+
+/// True if a role advertises the Value pattern (IValueProvider). A
+/// slider exposes both Value and RangeValue per Win UIA convention so a
+/// reader can announce either a string ("-6 dB") or the normalized
+/// fraction. Meter is read-only progress and exposes RangeValue only.
+constexpr bool role_supports_value(View::AccessRole role) {
+    const PatternSet pats = patterns_for_role(role);
+    for (int i = 0; i < pats.count; ++i) {
+        if (pats.ids[i] == kPatternValue) return true;
+    }
+    return false;
+}
+
+// ── Per-widget fragment runtime IDs (Phase 3) ────────────────────────
+//
+// Every UIA fragment must return a process-stable runtime ID so clients
+// can compare element identity across calls. The first element of a
+// runtime ID array is conventionally UiaAppendRuntimeId (3) for
+// provider-supplied fragments; the remainder is a provider-chosen
+// unique key. We derive the key from the fragment's depth-first index
+// in the View tree, which is stable for the lifetime of the tree the
+// provider was built against (the provider is rebuilt on structural
+// change, which also raises StructureChanged so clients re-query).
+//
+// UiaAppendRuntimeId is documented as the integer constant 3; named
+// here so the COM TU and the offline test share one definition without
+// pulling in UIAutomationCore.h.
+inline constexpr int32_t kUiaAppendRuntimeId = 3;
+
+/// Build the two-element runtime-id key for the fragment at `index`
+/// (its depth-first position among accessible fragments, root excluded).
+/// Returns {UiaAppendRuntimeId, 1 + index}: the +1 keeps every key
+/// strictly positive and distinct from a bare append-id sentinel.
+struct RuntimeId {
+    std::array<int32_t, 2> ids{};
+    static constexpr int count = 2;
+};
+
+constexpr RuntimeId runtime_id_for_index(int index) {
+    RuntimeId rid{};
+    rid.ids[0] = kUiaAppendRuntimeId;
+    rid.ids[1] = 1 + index;
+    return rid;
+}
+
+/// Clamp a raw value into [lo, hi] then map to the [0, 1] fraction UIA's
+/// Value pattern reports for a range control when no value-string is
+/// available. Degenerate ranges (hi <= lo) report 0. Pure arithmetic so
+/// the COM IValueProvider path stays trivial and is covered offline.
+constexpr double normalized_value_fraction(double current,
+                                           double lo,
+                                           double hi) {
+    if (!(hi > lo)) return 0.0;
+    if (current <= lo) return 0.0;
+    if (current >= hi) return 1.0;
+    return (current - lo) / (hi - lo);
+}
+
 }  // namespace pulp::view::uia
