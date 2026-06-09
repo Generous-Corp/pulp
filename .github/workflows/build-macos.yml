@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           case "$RUNNER_CHOICE" in
             local)
-              SELECTOR="${LOCAL_MACOS_RUNS_ON_JSON:-[\"self-hosted\",\"sanitizer\"]}"
+              SELECTOR='["self-hosted","macOS","ARM64","pulp-build-vm"]'
               ;;
             namespace)
               if [ -z "${NAMESPACE_MACOS_RUNS_ON_JSON:-}" ]; then
