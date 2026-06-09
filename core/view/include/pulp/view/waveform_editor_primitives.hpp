@@ -40,6 +40,7 @@ struct WaveformViewport {
     [[nodiscard]] bool empty() const { return total_samples <= 0 || visible_length <= 0; }
     [[nodiscard]] int64_t visible_end() const;
     [[nodiscard]] bool sample_visible(int64_t sample) const;
+    [[nodiscard]] bool sample_point_visible(int64_t sample) const;
     [[nodiscard]] int64_t clamp_sample(int64_t sample) const;
     [[nodiscard]] double samples_per_pixel() const;
     [[nodiscard]] double pixels_per_sample() const;
@@ -251,6 +252,90 @@ private:
     int64_t anchor_sample_ = 0;
     WaveformSampleRange initial_selection_{};
     int64_t initial_playhead_sample_ = 0;
+};
+
+struct WaveformEditorSurfaceSnapshot {
+    WaveformViewport viewport{};
+    WaveformHandleModel handles{};
+    WaveformPlayheadOverlay playhead{};
+    bool edit_active = false;
+    WaveformHandleKind edit_kind = WaveformHandleKind::none;
+    int edit_id = -1;
+};
+
+struct WaveformEditorSurfaceEditResult {
+    WaveformHandleKind kind = WaveformHandleKind::none;
+    int id = -1;
+    bool active = false;
+    bool committed = false;
+    bool cancelled = false;
+    WaveformSnapResult snap{};
+    WaveformHandleModel handles{};
+};
+
+/// View-layer editing surface that composes waveform primitives without owning audio or painting.
+class WaveformEditorSurface {
+public:
+    void set_total_samples(int64_t samples);
+    void set_bounds(Rect bounds);
+    void set_visible_range(int64_t start, int64_t length);
+    void zoom_to_fit();
+    void scroll(int64_t delta_samples);
+
+    [[nodiscard]] const WaveformViewport& viewport() const { return viewport_; }
+    [[nodiscard]] const WaveformHandleModel& handles() const { return handles_; }
+
+    void set_snap_settings(WaveformSnapSettings settings);
+    [[nodiscard]] const WaveformSnapSettings& snap_settings() const { return snap_settings_; }
+
+    void set_selection(int64_t start, int64_t end);
+    void clear_selection();
+    void set_trim(int64_t start, int64_t end);
+    void clear_trim();
+    void set_loop(int64_t start, int64_t end);
+    void clear_loop();
+    void set_fade_in(int64_t end_sample);
+    void clear_fade_in();
+    void set_fade_out(int64_t start_sample);
+    void clear_fade_out();
+    void set_playhead(int64_t sample);
+    void clear_playhead();
+    void set_slice_markers(std::vector<int64_t> markers);
+
+    [[nodiscard]] WaveformEditorSurfaceSnapshot snapshot() const;
+    [[nodiscard]] WaveformRenderPlan render_plan(int max_spans = 0) const;
+    [[nodiscard]] WaveformHitResult hit_test(float x, float tolerance_px) const;
+
+    [[nodiscard]] bool begin_selection_edit(int64_t anchor_sample);
+    [[nodiscard]] bool begin_handle_edit(WaveformHandleKind kind, int id = -1);
+    [[nodiscard]] bool begin_handle_edit(const WaveformHitResult& hit);
+    [[nodiscard]] WaveformEditorSurfaceEditResult update_edit(int64_t sample);
+    [[nodiscard]] WaveformEditorSurfaceEditResult commit_edit(int64_t sample);
+    [[nodiscard]] WaveformEditorSurfaceEditResult cancel_edit();
+
+    [[nodiscard]] bool edit_active() const { return edit_active_; }
+    [[nodiscard]] WaveformHandleKind edit_kind() const { return edit_kind_; }
+    [[nodiscard]] int edit_id() const { return edit_id_; }
+
+private:
+    [[nodiscard]] bool can_edit(WaveformHandleKind kind, int id) const;
+    [[nodiscard]] WaveformEditorSurfaceEditResult edit_result_for_sample(int64_t sample,
+                                                                         bool committed,
+                                                                         bool cancelled) const;
+    static void apply_edit(WaveformHandleModel& model,
+                           WaveformHandleKind kind,
+                           int id,
+                           int64_t anchor_sample,
+                           int64_t sample);
+
+    WaveformViewport viewport_{};
+    WaveformHandleModel handles_{};
+    WaveformSnapSettings snap_settings_{};
+    WaveformHandleModel edit_initial_handles_{};
+    bool edit_active_ = false;
+    WaveformHandleKind edit_kind_ = WaveformHandleKind::none;
+    int edit_id_ = -1;
+    int64_t edit_anchor_sample_ = 0;
 };
 
 } // namespace pulp::view

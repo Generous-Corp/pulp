@@ -41,6 +41,70 @@ int source_priority(WaveformSnapSource source) {
     return 3;
 }
 
+bool scalar_handle_id_valid(int id) {
+    return id == -1 || id == 0;
+}
+
+int normalized_surface_edit_id(WaveformHandleKind kind, int id) {
+    return kind == WaveformHandleKind::slice_marker ? id : 0;
+}
+
+void set_selection_or_clear(WaveformHandleModel& model, int64_t start, int64_t end) {
+    const auto range = clamp_range({start, end}, model.total_samples);
+    if (range.empty()) {
+        model.clear_selection();
+    } else {
+        model.set_selection(range.start, range.end);
+    }
+}
+
+bool edits_selection(WaveformHandleKind kind) {
+    return kind == WaveformHandleKind::none ||
+           kind == WaveformHandleKind::selection_start ||
+           kind == WaveformHandleKind::selection_end;
+}
+
+bool edits_trim(WaveformHandleKind kind) {
+    return kind == WaveformHandleKind::trim_start || kind == WaveformHandleKind::trim_end;
+}
+
+bool edits_loop(WaveformHandleKind kind) {
+    return kind == WaveformHandleKind::loop_start || kind == WaveformHandleKind::loop_end;
+}
+
+void merge_unrelated_live_handle_state(WaveformHandleModel& base,
+                                       const WaveformHandleModel& live,
+                                       WaveformHandleKind edit_kind) {
+    base.total_samples = live.total_samples;
+    if (!edits_selection(edit_kind)) {
+        base.has_selection = live.has_selection;
+        base.selection = live.selection;
+    }
+    if (!edits_trim(edit_kind)) {
+        base.has_trim = live.has_trim;
+        base.trim = live.trim;
+    }
+    if (edit_kind != WaveformHandleKind::fade_in) {
+        base.has_fade_in = live.has_fade_in;
+        base.fade_in_end = live.fade_in_end;
+    }
+    if (edit_kind != WaveformHandleKind::fade_out) {
+        base.has_fade_out = live.has_fade_out;
+        base.fade_out_start = live.fade_out_start;
+    }
+    if (!edits_loop(edit_kind)) {
+        base.has_loop = live.has_loop;
+        base.loop = live.loop;
+    }
+    if (edit_kind != WaveformHandleKind::slice_marker) {
+        base.slice_markers = live.slice_markers;
+    }
+    if (edit_kind != WaveformHandleKind::playhead) {
+        base.has_playhead = live.has_playhead;
+        base.playhead = live.playhead;
+    }
+}
+
 } // namespace
 
 WaveformSampleRange WaveformSampleRange::normalized() const {
@@ -121,6 +185,10 @@ int64_t WaveformViewport::visible_end() const {
 
 bool WaveformViewport::sample_visible(int64_t sample) const {
     return !empty() && sample >= visible_start && sample < visible_end();
+}
+
+bool WaveformViewport::sample_point_visible(int64_t sample) const {
+    return !empty() && sample >= visible_start && sample <= visible_end();
 }
 
 int64_t WaveformViewport::clamp_sample(int64_t sample) const {
@@ -300,7 +368,7 @@ WaveformHitResult hit_test_waveform_handles(const WaveformViewport& viewport,
     auto best_distance = std::numeric_limits<float>::max();
 
     model.for_each_handle([&](const WaveformHandle& handle) {
-        if (!handle.enabled || !viewport.sample_visible(handle.sample)) {
+        if (!handle.enabled || !viewport.sample_point_visible(handle.sample)) {
             return;
         }
 
@@ -332,7 +400,9 @@ WaveformSnapResult resolve_waveform_snap(int64_t sample,
     auto best_distance = std::numeric_limits<int64_t>::max();
 
     auto consider = [&](int64_t candidate, WaveformSnapSource source) {
-        candidate = clamp_to_total(candidate, total_samples);
+        if (candidate < 0 || candidate > total_samples) {
+            return;
+        }
         const auto distance = std::llabs(candidate - clamped_sample);
         if (distance > tolerance) {
             return;
@@ -355,8 +425,11 @@ WaveformSnapResult resolve_waveform_snap(int64_t sample,
 
     if (settings.grid_interval_samples > 0) {
         const auto grid = settings.grid_interval_samples;
-        const auto quotient = (clamped_sample + grid / 2) / grid;
-        consider(quotient * grid, WaveformSnapSource::grid);
+        const auto lower = (clamped_sample / grid) * grid;
+        consider(lower, WaveformSnapSource::grid);
+        if (lower <= total_samples - grid) {
+            consider(lower + grid, WaveformSnapSource::grid);
+        }
     }
 
     return best;
@@ -366,7 +439,7 @@ WaveformPlayheadOverlay build_waveform_playhead_overlay(const WaveformViewport& 
                                                         int64_t playhead_sample) {
     WaveformPlayheadOverlay overlay;
     overlay.sample = viewport.clamp_sample(playhead_sample);
-    overlay.visible = viewport.sample_visible(overlay.sample);
+    overlay.visible = viewport.sample_point_visible(overlay.sample);
     overlay.x = overlay.visible ? viewport.sample_to_x(overlay.sample) : viewport.bounds.x;
     return overlay;
 }
@@ -438,6 +511,280 @@ WaveformEditorTransactionResult WaveformEditorTransaction::result_for_sample(int
     }
 
     return result;
+}
+
+void WaveformEditorSurface::set_total_samples(int64_t samples) {
+    viewport_.set_total_samples(samples);
+    handles_.set_total_samples(viewport_.total_samples);
+    if (handles_.has_selection && handles_.selection.empty()) {
+        handles_.clear_selection();
+    }
+    if (edit_active_) {
+        edit_initial_handles_.set_total_samples(viewport_.total_samples);
+        if (edit_initial_handles_.has_selection && edit_initial_handles_.selection.empty()) {
+            edit_initial_handles_.clear_selection();
+        }
+        edit_anchor_sample_ = viewport_.clamp_sample(edit_anchor_sample_);
+    }
+}
+
+void WaveformEditorSurface::set_bounds(Rect bounds) {
+    viewport_.set_bounds(bounds);
+}
+
+void WaveformEditorSurface::set_visible_range(int64_t start, int64_t length) {
+    viewport_.set_visible_range(start, length);
+}
+
+void WaveformEditorSurface::zoom_to_fit() {
+    viewport_.zoom_to_fit();
+}
+
+void WaveformEditorSurface::scroll(int64_t delta_samples) {
+    viewport_.scroll(delta_samples);
+}
+
+void WaveformEditorSurface::set_snap_settings(WaveformSnapSettings settings) {
+    snap_settings_ = std::move(settings);
+}
+
+void WaveformEditorSurface::set_selection(int64_t start, int64_t end) {
+    set_selection_or_clear(handles_, start, end);
+}
+
+void WaveformEditorSurface::clear_selection() {
+    handles_.clear_selection();
+}
+
+void WaveformEditorSurface::set_trim(int64_t start, int64_t end) {
+    handles_.set_trim(start, end);
+}
+
+void WaveformEditorSurface::clear_trim() {
+    handles_.clear_trim();
+}
+
+void WaveformEditorSurface::set_loop(int64_t start, int64_t end) {
+    handles_.set_loop(start, end);
+}
+
+void WaveformEditorSurface::clear_loop() {
+    handles_.clear_loop();
+}
+
+void WaveformEditorSurface::set_fade_in(int64_t end_sample) {
+    handles_.set_fade_in(end_sample);
+}
+
+void WaveformEditorSurface::clear_fade_in() {
+    handles_.clear_fade_in();
+}
+
+void WaveformEditorSurface::set_fade_out(int64_t start_sample) {
+    handles_.set_fade_out(start_sample);
+}
+
+void WaveformEditorSurface::clear_fade_out() {
+    handles_.clear_fade_out();
+}
+
+void WaveformEditorSurface::set_playhead(int64_t sample) {
+    handles_.set_playhead(sample);
+}
+
+void WaveformEditorSurface::clear_playhead() {
+    handles_.clear_playhead();
+}
+
+void WaveformEditorSurface::set_slice_markers(std::vector<int64_t> markers) {
+    handles_.set_slice_markers(std::move(markers));
+}
+
+WaveformEditorSurfaceSnapshot WaveformEditorSurface::snapshot() const {
+    WaveformEditorSurfaceSnapshot out;
+    out.viewport = viewport_;
+    out.handles = handles_;
+    out.playhead = handles_.has_playhead
+        ? build_waveform_playhead_overlay(viewport_, handles_.playhead)
+        : WaveformPlayheadOverlay{};
+    out.edit_active = edit_active_;
+    out.edit_kind = edit_kind_;
+    out.edit_id = edit_id_;
+    return out;
+}
+
+WaveformRenderPlan WaveformEditorSurface::render_plan(int max_spans) const {
+    return build_waveform_render_plan(viewport_, max_spans);
+}
+
+WaveformHitResult WaveformEditorSurface::hit_test(float x, float tolerance_px) const {
+    return hit_test_waveform_handles(viewport_, handles_, x, tolerance_px);
+}
+
+bool WaveformEditorSurface::begin_selection_edit(int64_t anchor_sample) {
+    if (viewport_.total_samples <= 0) return false;
+    if (edit_active_) return false;
+    edit_initial_handles_ = handles_;
+    edit_active_ = true;
+    edit_kind_ = WaveformHandleKind::none;
+    edit_id_ = -1;
+    edit_anchor_sample_ = viewport_.clamp_sample(anchor_sample);
+    return true;
+}
+
+bool WaveformEditorSurface::begin_handle_edit(WaveformHandleKind kind, int id) {
+    if (viewport_.total_samples <= 0) return false;
+    if (edit_active_) return false;
+    if (!can_edit(kind, id)) return false;
+    const auto normalized_id = normalized_surface_edit_id(kind, id);
+    edit_initial_handles_ = handles_;
+    edit_active_ = true;
+    edit_kind_ = kind;
+    edit_id_ = normalized_id;
+
+    auto anchor = int64_t{0};
+    edit_initial_handles_.for_each_handle([&](const WaveformHandle& handle) {
+        if (handle.kind == kind && handle.id == normalized_id) {
+            anchor = handle.sample;
+        }
+    });
+    edit_anchor_sample_ = viewport_.clamp_sample(anchor);
+    return true;
+}
+
+bool WaveformEditorSurface::begin_handle_edit(const WaveformHitResult& hit) {
+    if (!hit) return false;
+    return begin_handle_edit(hit.kind, hit.id);
+}
+
+WaveformEditorSurfaceEditResult WaveformEditorSurface::update_edit(int64_t sample) {
+    auto result = edit_result_for_sample(sample, false, false);
+    if (result.active) handles_ = result.handles;
+    return result;
+}
+
+WaveformEditorSurfaceEditResult WaveformEditorSurface::commit_edit(int64_t sample) {
+    auto result = edit_result_for_sample(sample, true, false);
+    if (result.active) handles_ = result.handles;
+    edit_active_ = false;
+    edit_kind_ = WaveformHandleKind::none;
+    edit_id_ = -1;
+    return result;
+}
+
+WaveformEditorSurfaceEditResult WaveformEditorSurface::cancel_edit() {
+    auto result = edit_result_for_sample(edit_anchor_sample_, false, true);
+    if (result.active) {
+        handles_ = result.handles;
+    }
+    edit_active_ = false;
+    edit_kind_ = WaveformHandleKind::none;
+    edit_id_ = -1;
+    return result;
+}
+
+bool WaveformEditorSurface::can_edit(WaveformHandleKind kind, int id) const {
+    switch (kind) {
+        case WaveformHandleKind::selection_start:
+        case WaveformHandleKind::selection_end:
+            return handles_.has_selection && scalar_handle_id_valid(id);
+        case WaveformHandleKind::trim_start:
+        case WaveformHandleKind::trim_end:
+            return handles_.has_trim && scalar_handle_id_valid(id);
+        case WaveformHandleKind::fade_in:
+            return handles_.has_fade_in && scalar_handle_id_valid(id);
+        case WaveformHandleKind::fade_out:
+            return handles_.has_fade_out && scalar_handle_id_valid(id);
+        case WaveformHandleKind::loop_start:
+        case WaveformHandleKind::loop_end:
+            return handles_.has_loop && scalar_handle_id_valid(id);
+        case WaveformHandleKind::slice_marker:
+            return id >= 0 && static_cast<std::size_t>(id) < handles_.slice_markers.size();
+        case WaveformHandleKind::playhead:
+            return handles_.has_playhead && scalar_handle_id_valid(id);
+        case WaveformHandleKind::none:
+            return false;
+    }
+    return false;
+}
+
+WaveformEditorSurfaceEditResult WaveformEditorSurface::edit_result_for_sample(int64_t sample,
+                                                                               bool committed,
+                                                                               bool cancelled) const {
+    WaveformEditorSurfaceEditResult result;
+    result.kind = edit_kind_;
+    result.id = edit_id_;
+    result.active = edit_active_;
+    result.committed = committed && edit_active_;
+    result.cancelled = cancelled && edit_active_;
+    result.handles = handles_;
+
+    if (!edit_active_) {
+        result.snap = resolve_waveform_snap(sample, viewport_.total_samples, snap_settings_);
+        return result;
+    }
+
+    result.snap = resolve_waveform_snap(sample, viewport_.total_samples, snap_settings_);
+    result.handles = edit_initial_handles_;
+    merge_unrelated_live_handle_state(result.handles, handles_, edit_kind_);
+    if (!cancelled) {
+        apply_edit(result.handles, edit_kind_, edit_id_, edit_anchor_sample_, result.snap.sample);
+    }
+    return result;
+}
+
+void WaveformEditorSurface::apply_edit(WaveformHandleModel& model,
+                                       WaveformHandleKind kind,
+                                       int id,
+                                       int64_t anchor_sample,
+                                       int64_t sample) {
+    switch (kind) {
+        case WaveformHandleKind::none:
+            set_selection_or_clear(model, anchor_sample, sample);
+            break;
+        case WaveformHandleKind::selection_start:
+            if (!model.has_selection) {
+                model.clear_selection();
+                break;
+            }
+            set_selection_or_clear(model, sample, model.selection.end);
+            break;
+        case WaveformHandleKind::selection_end:
+            if (!model.has_selection) {
+                model.clear_selection();
+                break;
+            }
+            set_selection_or_clear(model, model.selection.start, sample);
+            break;
+        case WaveformHandleKind::trim_start:
+            model.set_trim(std::min(sample, model.trim.end), model.trim.end);
+            break;
+        case WaveformHandleKind::trim_end:
+            model.set_trim(model.trim.start, std::max(sample, model.trim.start));
+            break;
+        case WaveformHandleKind::fade_in:
+            model.set_fade_in(sample);
+            break;
+        case WaveformHandleKind::fade_out:
+            model.set_fade_out(sample);
+            break;
+        case WaveformHandleKind::loop_start:
+            model.set_loop(std::min(sample, model.loop.end), model.loop.end);
+            break;
+        case WaveformHandleKind::loop_end:
+            model.set_loop(model.loop.start, std::max(sample, model.loop.start));
+            break;
+        case WaveformHandleKind::slice_marker:
+            if (id >= 0 && static_cast<std::size_t>(id) < model.slice_markers.size()) {
+                auto markers = model.slice_markers;
+                markers[static_cast<std::size_t>(id)] = sample;
+                model.set_slice_markers(std::move(markers));
+            }
+            break;
+        case WaveformHandleKind::playhead:
+            model.set_playhead(sample);
+            break;
+    }
 }
 
 } // namespace pulp::view

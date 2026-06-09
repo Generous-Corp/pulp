@@ -538,6 +538,34 @@ TEST_CASE("WaveformPlayheadOverlay reports visibility from viewport", "[view][wa
     REQUIRE(hidden.x == Catch::Approx(0.0f));
 }
 
+TEST_CASE("Waveform point handles are visible and hittable at the right edge", "[view][waveform_editor][primitives]") {
+    WaveformViewport viewport;
+    viewport.set_bounds({0, 0, 100, 40});
+    viewport.set_total_samples(1000);
+    viewport.set_visible_range(100, 400);
+
+    REQUIRE(viewport.visible_end() == 500);
+    REQUIRE_FALSE(viewport.sample_visible(500));
+    REQUIRE(viewport.sample_point_visible(500));
+
+    WaveformHandleModel model;
+    model.set_total_samples(1000);
+    model.set_loop(200, 500);
+
+    auto hit = hit_test_waveform_handles(viewport, model, 100.0f, 0.1f);
+    REQUIRE(hit.kind == WaveformHandleKind::loop_end);
+    REQUIRE(hit.sample == 500);
+
+    auto playhead = build_waveform_playhead_overlay(viewport, 500);
+    REQUIRE(playhead.visible);
+    REQUIRE(playhead.x == Catch::Approx(100.0f));
+
+    viewport.set_visible_range(984, 16);
+    auto final_playhead = build_waveform_playhead_overlay(viewport, 1000);
+    REQUIRE(final_playhead.visible);
+    REQUIRE(final_playhead.x == Catch::Approx(100.0f));
+}
+
 TEST_CASE("WaveformEditorTransaction keeps semantic edit state outside input events", "[view][waveform_editor][primitives]") {
     WaveformEditorTransaction tx;
     tx.begin(WaveformEditorOperationKind::create_selection, 300);
@@ -567,4 +595,280 @@ TEST_CASE("WaveformEditorTransaction keeps semantic edit state outside input eve
     tx.begin(WaveformEditorOperationKind::move_playhead, 0, {}, 120);
     auto moved = tx.commit(480);
     REQUIRE(moved.playhead_sample == 480);
+}
+
+TEST_CASE("WaveformEditorSurface composes viewport handles render plan and playhead", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(100, 400);
+    surface.set_selection(120, 180);
+    surface.set_trim(50, 900);
+    surface.set_loop(200, 800);
+    surface.set_fade_in(150);
+    surface.set_fade_out(850);
+    surface.set_slice_markers({250, 250, 490});
+    surface.set_playhead(200);
+
+    const auto snapshot = surface.snapshot();
+    REQUIRE(snapshot.viewport.visible_start == 100);
+    REQUIRE(snapshot.viewport.visible_length == 400);
+    REQUIRE(snapshot.handles.has_trim);
+    REQUIRE(snapshot.handles.has_loop);
+    REQUIRE(snapshot.handles.slice_markers.size() == 2);
+    REQUIRE(snapshot.playhead.visible);
+    REQUIRE(snapshot.playhead.x == Catch::Approx(25.0f));
+
+    const auto plan = surface.render_plan(4);
+    REQUIRE(plan.spans.size() == 4);
+    REQUIRE(plan.spans.front().sample_start == 100);
+    REQUIRE(plan.spans.front().sample_end == 200);
+    REQUIRE(plan.spans.back().sample_start == 400);
+    REQUIRE(plan.spans.back().sample_end == 500);
+
+    const auto hit = surface.hit_test(25.0f, 0.1f);
+    REQUIRE(hit.kind == WaveformHandleKind::loop_start);
+    REQUIRE(hit.sample == 200);
+}
+
+TEST_CASE("WaveformEditorSurface edits sampler handles with snapping", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+
+    WaveformSnapSettings snap;
+    snap.grid_interval_samples = 50;
+    snap.tolerance_samples = 20;
+    surface.set_snap_settings(snap);
+
+    surface.set_trim(100, 900);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::trim_start));
+    auto trim_update = surface.update_edit(138);
+    REQUIRE(trim_update.snap.snapped);
+    REQUIRE(trim_update.snap.sample == 150);
+    REQUIRE(surface.handles().trim.start == 150);
+    auto trim_commit = surface.commit_edit(180);
+    REQUIRE(trim_commit.committed);
+    REQUIRE(surface.handles().trim.start == 200);
+    REQUIRE(surface.handles().trim.end == 900);
+
+    surface.set_loop(200, 800);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::loop_end));
+    auto loop_commit = surface.commit_edit(752);
+    REQUIRE(loop_commit.snap.sample == 750);
+    REQUIRE(surface.handles().loop.start == 200);
+    REQUIRE(surface.handles().loop.end == 750);
+
+    surface.set_fade_in(100);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::fade_in));
+    const auto fade_in_commit = surface.commit_edit(138);
+    REQUIRE(fade_in_commit.committed);
+    REQUIRE(surface.handles().fade_in_end == 150);
+
+    surface.set_fade_out(900);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::fade_out));
+    const auto fade_out_commit = surface.commit_edit(861);
+    REQUIRE(fade_out_commit.committed);
+    REQUIRE(surface.handles().fade_out_start == 850);
+
+    surface.set_slice_markers({200, 600});
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::slice_marker, 1));
+    const auto slice_commit = surface.commit_edit(638);
+    REQUIRE(slice_commit.committed);
+    REQUIRE(surface.handles().slice_markers.size() == 2);
+    REQUIRE(surface.handles().slice_markers[0] == 200);
+    REQUIRE(surface.handles().slice_markers[1] == 650);
+
+    surface.set_playhead(0);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::playhead));
+    const auto playhead_commit = surface.commit_edit(901);
+    REQUIRE(playhead_commit.committed);
+    REQUIRE(surface.handles().has_playhead);
+    REQUIRE(surface.handles().playhead == 900);
+
+    REQUIRE(surface.begin_selection_edit(123));
+    const auto selection_commit = surface.commit_edit(288);
+    REQUIRE(selection_commit.committed);
+    REQUIRE(surface.handles().selection.start == 123);
+    REQUIRE(surface.handles().selection.end == 300);
+
+    REQUIRE(surface.begin_selection_edit(250));
+    const auto empty_selection = surface.commit_edit(250);
+    REQUIRE(empty_selection.committed);
+    REQUIRE_FALSE(surface.handles().has_selection);
+}
+
+TEST_CASE("WaveformEditorSurface direct selection setters keep empty selections hidden", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+
+    surface.set_selection(250, 250);
+    REQUIRE_FALSE(surface.handles().has_selection);
+    REQUIRE_FALSE(surface.snapshot().handles.has_selection);
+
+    surface.set_selection(-200, -100);
+    REQUIRE_FALSE(surface.handles().has_selection);
+    surface.set_selection(1200, 1400);
+    REQUIRE_FALSE(surface.handles().has_selection);
+
+    surface.set_selection(700, 950);
+    REQUIRE(surface.handles().has_selection);
+    surface.set_total_samples(400);
+    REQUIRE_FALSE(surface.handles().has_selection);
+    REQUIRE_FALSE(surface.snapshot().handles.has_selection);
+}
+
+TEST_CASE("WaveformEditorSurface selection handle edits stay cleared after sample shrink", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+    surface.set_selection(700, 950);
+
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::selection_start));
+    surface.set_total_samples(400);
+    REQUIRE_FALSE(surface.handles().has_selection);
+
+    const auto update = surface.update_edit(300);
+    REQUIRE(update.active);
+    REQUIRE_FALSE(update.handles.has_selection);
+    REQUIRE_FALSE(surface.handles().has_selection);
+
+    const auto commit = surface.commit_edit(300);
+    REQUIRE(commit.committed);
+    REQUIRE_FALSE(surface.handles().has_selection);
+}
+
+TEST_CASE("WaveformEditorSurface rejects invalid edits and cancel restores initial handles", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface empty;
+    REQUIRE_FALSE(empty.begin_selection_edit(10));
+    REQUIRE_FALSE(empty.begin_handle_edit(WaveformHandleKind::playhead));
+
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+    surface.set_loop(200, 700);
+    surface.set_slice_markers({100});
+
+    REQUIRE_FALSE(surface.begin_handle_edit(WaveformHandleKind::playhead));
+    REQUIRE_FALSE(surface.begin_handle_edit(WaveformHandleKind::trim_start));
+    REQUIRE_FALSE(surface.begin_handle_edit(WaveformHandleKind::slice_marker, 3));
+
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::loop_start));
+    const auto loop_update = surface.update_edit(450);
+    REQUIRE(loop_update.active);
+    REQUIRE(surface.handles().loop.start == 450);
+    REQUIRE_FALSE(surface.begin_handle_edit(WaveformHandleKind::loop_end));
+    REQUIRE_FALSE(surface.begin_selection_edit(300));
+
+    auto cancelled = surface.cancel_edit();
+    REQUIRE(cancelled.cancelled);
+    REQUIRE_FALSE(surface.edit_active());
+    REQUIRE(surface.handles().loop.start == 200);
+    REQUIRE(surface.handles().loop.end == 700);
+
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::loop_end, 0));
+    const auto second_cancel = surface.cancel_edit();
+    REQUIRE(second_cancel.cancelled);
+    REQUIRE_FALSE(surface.begin_handle_edit(WaveformHandleKind::loop_start, 999));
+}
+
+TEST_CASE("WaveformEditorSurface preserves unrelated live state during active edits", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+    surface.set_loop(200, 800);
+    surface.set_playhead(100);
+
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::loop_start));
+    surface.set_playhead(500);
+    const auto update = surface.update_edit(300);
+    REQUIRE(update.active);
+    REQUIRE(surface.handles().loop.start == 300);
+    REQUIRE(surface.handles().loop.end == 800);
+    REQUIRE(surface.handles().playhead == 500);
+
+    const auto cancel = surface.cancel_edit();
+    REQUIRE(cancel.cancelled);
+    REQUIRE(surface.handles().loop.start == 200);
+    REQUIRE(surface.handles().loop.end == 800);
+    REQUIRE(surface.handles().playhead == 500);
+}
+
+TEST_CASE("WaveformEditorSurface trim and loop handles do not cross endpoints", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+
+    surface.set_trim(100, 400);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::trim_start));
+    const auto trim_commit = surface.commit_edit(500);
+    REQUIRE(trim_commit.committed);
+    REQUIRE(surface.handles().trim.start == 400);
+    REQUIRE(surface.handles().trim.end == 400);
+
+    surface.set_loop(200, 700);
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::loop_end));
+    const auto loop_commit = surface.commit_edit(100);
+    REQUIRE(loop_commit.committed);
+    REQUIRE(surface.handles().loop.start == 200);
+    REQUIRE(surface.handles().loop.end == 200);
+}
+
+TEST_CASE("WaveformEditorSurface slice marker ids are transient sorted indices", "[view][waveform_editor][surface]") {
+    WaveformEditorSurface surface;
+    surface.set_total_samples(1000);
+    surface.set_bounds({0, 0, 100, 40});
+    surface.set_visible_range(0, 1000);
+    surface.set_slice_markers({200, 600, 800});
+
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::slice_marker, 1));
+    const auto cross_commit = surface.commit_edit(850);
+    REQUIRE(cross_commit.committed);
+    REQUIRE(surface.handles().slice_markers.size() == 3);
+    REQUIRE(surface.handles().slice_markers[0] == 200);
+    REQUIRE(surface.handles().slice_markers[1] == 800);
+    REQUIRE(surface.handles().slice_markers[2] == 850);
+
+    REQUIRE(surface.begin_handle_edit(WaveformHandleKind::slice_marker, 2));
+    const auto duplicate_commit = surface.commit_edit(800);
+    REQUIRE(duplicate_commit.committed);
+    REQUIRE(surface.handles().slice_markers.size() == 2);
+    REQUIRE(surface.handles().slice_markers[0] == 200);
+    REQUIRE(surface.handles().slice_markers[1] == 800);
+}
+
+TEST_CASE("WaveformSnapResolver rejects implicit boundary snaps from out-of-range candidates", "[view][waveform_editor][primitives]") {
+    WaveformSnapSettings settings;
+    settings.snap_to_bounds = false;
+    settings.tolerance_samples = 50;
+    settings.candidates = {-100, 2000};
+
+    auto candidate = resolve_waveform_snap(990, 1000, settings);
+    REQUIRE_FALSE(candidate.snapped);
+    REQUIRE(candidate.sample == 990);
+
+    settings.grid_interval_samples = 600;
+    auto grid = resolve_waveform_snap(990, 1000, settings);
+    REQUIRE_FALSE(grid.snapped);
+    REQUIRE(grid.sample == 990);
+
+    settings.tolerance_samples = 500;
+    auto lower_grid = resolve_waveform_snap(990, 1000, settings);
+    REQUIRE(lower_grid.snapped);
+    REQUIRE(lower_grid.source == WaveformSnapSource::grid);
+    REQUIRE(lower_grid.sample == 600);
+
+    settings.tolerance_samples = 50;
+    settings.candidates = {960};
+    auto valid = resolve_waveform_snap(990, 1000, settings);
+    REQUIRE(valid.snapped);
+    REQUIRE(valid.source == WaveformSnapSource::candidate);
+    REQUIRE(valid.sample == 960);
 }
