@@ -194,9 +194,79 @@ fi
 
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
+# ── Importer CLI coverage auto-inclusion ────────────────────────────────────
+# The framework-importer SDK CLI helpers (tools/cli/import_*.cpp,
+# importer_install.cpp, tool_registry.cpp, cmd_import.cpp) are in the measured
+# diff-coverage surface (NOT excluded in coverage_config.json), but they are
+# exercised by pure-in-process Catch2 tests whose binaries COMPILE those .cpp
+# files directly (parse_manifest / compute_write_plan / scan / detection /
+# sha256 / version-window / terms-store). Those test cases use lowercase
+# Catch2 titles ("import emit …", "tool registry …", "sha256 …", "install
+# from …") that no obvious `-R Import` regex matches, so a targeted
+# `local_diff_cover.sh` invocation (the path the pre-push hook and
+# `pulp coverage diff` use) silently skipped them — the diff-cover gate then
+# saw 0% patch coverage on every importer PR and was admin-bypassed even
+# though the code IS tested. Wire the canonical importer test targets + their
+# ctest case regex in here so any diff touching the importer CLI source builds
+# and runs them, and the gate measures the importer code legitimately.
+#
+# The five targets each link the relevant import helper TU directly:
+#   pulp-test-cli-import            ← import_detect.cpp, import_spi.cpp
+#   pulp-test-cli-import-emit       ← import_emit.cpp, import_emit_scan.cpp, import_detect.cpp
+#   pulp-test-cli-import-terms      ← import_terms.cpp
+#   pulp-test-cli-tool-registry     ← tool_registry.cpp, importer_install.cpp, import_spi.cpp
+#   pulp-test-cli-importer-install  ← importer_install.cpp, tool_registry.cpp, import_spi.cpp
+# (cmd_import.cpp / import_run.cpp are dispatcher/orchestrator TUs only
+# reached via a CLI shell-out, so they are NOT attributable to these
+# in-process tests; their lines stay measured-but-shell-out-covered.)
+IMPORTER_COVERAGE_TARGETS=(
+    pulp-test-cli-import
+    pulp-test-cli-import-emit
+    pulp-test-cli-import-terms
+    pulp-test-cli-tool-registry
+    pulp-test-cli-importer-install
+)
+# Catch2 case titles for the targets above. These titles are lowercase, so the
+# regex is lowercase too — the extra ctest pass below runs them regardless of
+# the caller-supplied PULP_DIFF_COVER_CTEST_REGEX (which an `-R Import`-style
+# uppercase value would never have matched — the original 0%-patch root cause).
+IMPORTER_COVERAGE_CTEST_REGEX='import |tool registry |tool lookup |tool install |tool uninstall |tool command |sha256 |install from |install refuses |uninstall removes |pulp tool |pulp add '
+# Source paths whose coverage these targets attribute. A diff touching any of
+# them auto-includes the importer targets in a targeted build.
+IMPORTER_COVERAGE_PATHS_REGEX='^tools/cli/(import_|importer_install\.cpp|tool_registry\.cpp|cmd_import\.cpp)'
+
+# Match the SAME change set diff-cover measures: the merge-base diff PLUS
+# staged and unstaged working-tree changes. `diff-cover` reports over
+# "<base>...HEAD, staged and unstaged changes", so a working-tree-only edit to
+# an importer file (the common pre-push case) must still trip auto-inclusion.
+# Union three name-only diffs: committed (merge-base), staged, and unstaged.
+importer_diff_touched=0
+changed_for_importer="$(
+    {
+        git diff --name-only "${COMPARE_BRANCH}...HEAD" 2>/dev/null
+        git diff --name-only "${COMPARE_BRANCH}" 2>/dev/null
+        git diff --name-only --cached "${COMPARE_BRANCH}" 2>/dev/null
+    } | sort -u
+)"
+if echo "${changed_for_importer}" | grep -qE "${IMPORTER_COVERAGE_PATHS_REGEX}"; then
+    importer_diff_touched=1
+fi
+
 if [ "$#" -gt 0 ]; then
-    echo "=== Building targets: $* ==="
-    cmake --build "${BUILD_DIR}" -j"${JOBS}" --target "$@"
+    BUILD_TARGETS=("$@")
+    # Targeted build that touches importer CLI source: ensure the importer
+    # test binaries are built so their in-process coverage is attributable.
+    if [ "${importer_diff_touched}" -eq 1 ]; then
+        for t in "${IMPORTER_COVERAGE_TARGETS[@]}"; do
+            case " ${BUILD_TARGETS[*]} " in
+                *" ${t} "*) ;;
+                *) BUILD_TARGETS+=("${t}") ;;
+            esac
+        done
+        echo "[local_diff_cover] importer CLI source changed — added importer test targets to the build set" >&2
+    fi
+    echo "=== Building targets: ${BUILD_TARGETS[*]} ==="
+    cmake --build "${BUILD_DIR}" -j"${JOBS}" --target "${BUILD_TARGETS[@]}"
 else
     echo "=== Building all targets (slow) ==="
     cmake --build "${BUILD_DIR}" -j"${JOBS}"
@@ -215,6 +285,21 @@ if [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
 fi
 ctest "${CTEST_ARGS[@]}" || \
     echo "[local_diff_cover] WARN: ctest exited non-zero — generating partial report" >&2
+
+# Second ctest pass for the importer CLI cases. ctest's `-R` takes a single
+# regex, so when the run above was narrowed by PULP_DIFF_COVER_CTEST_REGEX the
+# lowercase importer titles would be filtered out — leaving the importer .cpp
+# coverage maps present (the binaries link them) but unexecuted, i.e. 0%
+# patch coverage. Run the importer cases case-insensitively into the SAME
+# profraw dir so their hits merge with the rest before export. Only fires
+# when the diff touched importer CLI source AND the run above was narrowed;
+# an un-narrowed full run already covers these.
+if [ "${importer_diff_touched}" -eq 1 ] && [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
+    echo "[local_diff_cover] running importer CLI ctest cases so their in-process coverage is attributed" >&2
+    ctest --test-dir "${BUILD_DIR}" --output-on-failure \
+        -R "${IMPORTER_COVERAGE_CTEST_REGEX}" \
+        || echo "[local_diff_cover] WARN: importer ctest pass exited non-zero — continuing with partial report" >&2
+fi
 
 # ── Merge profiles ──────────────────────────────────────────────────────────
 PROFDATA="${BUILD_DIR}/coverage/pulp.profdata"
