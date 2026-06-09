@@ -2804,28 +2804,16 @@ def claim_next_job() -> dict | None:
         queue, changed = reconcile_running_jobs_unlocked(queue)
         if changed:
             save_queue_unlocked(queue)
-        pending = sorted(
-            [job for job in queue if job.get("status") == "pending"],
-            key=job_sort_key,
+        claimed = _queue_orchestrator.claim_next_job_unlocked(
+            queue,
+            runner={"pid": os.getpid(), "root": str(ROOT)},
+            now_iso_fn=now_iso,
         )
-        if not pending:
+        if claimed is None:
             return None
 
-        selected_id = pending[0]["id"]
-        claimed = None
-        for job in queue:
-            if job["id"] != selected_id:
-                continue
-            job["status"] = "running"
-            job["started_at"] = now_iso()
-            job["runner"] = {"pid": os.getpid(), "root": str(ROOT)}
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-            claimed = normalize_job(job)
-            break
-
         save_queue_unlocked(queue)
-        return claimed
+        return normalize_job(claimed)
 
 
 def finalize_job(job_id: str, result: dict, result_path: Path) -> None:

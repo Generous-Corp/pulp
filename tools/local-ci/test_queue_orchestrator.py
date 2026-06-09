@@ -206,6 +206,52 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.update_job_target_state_unlocked(queue, "unknown", "mac", {"status": "running"})
         )
 
+    def test_claim_next_job_marks_highest_priority_pending_running(self) -> None:
+        queue = [
+            {
+                "id": "low",
+                "branch": "feature/low",
+                "status": "pending",
+                "priority": "low",
+                "queued_at": "2026-06-09T00:00:00+00:00",
+            },
+            {"id": "running", "branch": "feature/running", "status": "running"},
+            {
+                "id": "high",
+                "branch": "feature/high",
+                "status": "pending",
+                "priority": "high",
+                "queued_at": "2026-06-09T00:01:00+00:00",
+                "active_targets": {"mac": {"status": "stale"}},
+                "last_progress_at": "2026-06-09T00:02:00+00:00",
+            },
+        ]
+
+        claimed = self.mod.claim_next_job_unlocked(
+            queue,
+            runner={"pid": 123, "root": "/tmp/pulp"},
+            now_iso_fn=lambda: "2026-06-09T00:03:00+00:00",
+        )
+        self.assertEqual(claimed["id"], "high")
+        self.assertEqual(queue[2]["status"], "running")
+        self.assertEqual(queue[2]["started_at"], "2026-06-09T00:03:00+00:00")
+        self.assertEqual(queue[2]["runner"], {"pid": 123, "root": "/tmp/pulp"})
+        self.assertNotIn("active_targets", queue[2])
+        self.assertNotIn("last_progress_at", queue[2])
+
+        next_claimed = self.mod.claim_next_job_unlocked(
+            queue,
+            runner={"pid": 124, "root": "/tmp/pulp"},
+            now_iso_fn=lambda: "2026-06-09T00:04:00+00:00",
+        )
+        self.assertEqual(next_claimed["id"], "low")
+        self.assertIsNone(
+            self.mod.claim_next_job_unlocked(
+                queue,
+                runner={"pid": 125, "root": "/tmp/pulp"},
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
