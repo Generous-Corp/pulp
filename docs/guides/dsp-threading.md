@@ -175,8 +175,9 @@ Processor vtable.
 key zones, velocity zones, fixed-pitch triggers, chromatic keytracking,
 round-robin groups, slices, and loop metadata. Build or rebuild maps off the
 audio thread, then publish immutable snapshots to realtime code. The hot
-`ZoneSelector` path is allocation-free and owns no sample storage; zones only
-reference `PublishedSampleView` metadata from the publication layer.
+`ZoneSelector` path is allocation-free and owns no sample storage. Zones may
+carry direct `PublishedSampleView` metadata for simple selection paths, or a
+stable sample ID for pool-backed instrument runtime paths.
 
 `pulp::audio::SamplePool` is the prepared lookup layer for instruments that
 need more than one published sample. It maps stable sample IDs to borrowed
@@ -185,6 +186,13 @@ Build the pool off the audio thread, keep the borrowed stores alive while
 realtime code can read from it, and publish whole-pool snapshots rather than
 mutating an active pool in place.
 
+`pulp::audio::InstrumentRuntime` is currently the RT trigger-resolution join
+between `SampleZoneMap` and `SamplePool`: it chooses a pool-backed zone,
+resolves the zone's stable sample ID, and computes the playback rate from pitch
+policy plus the resolved sample rate. It intentionally does not allocate
+voices, enforce choke groups, stream sample tails, apply modulation, or render
+audio.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -192,6 +200,7 @@ mutating an active pool in place.
   `pump_listeners()`.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
+* [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)
 * [`core/audio/include/pulp/audio/sample_pool.hpp`](../../core/audio/include/pulp/audio/sample_pool.hpp)
 * [`core/audio/include/pulp/audio/sample_zone_map.hpp`](../../core/audio/include/pulp/audio/sample_zone_map.hpp)
   — the no-allocation contract.

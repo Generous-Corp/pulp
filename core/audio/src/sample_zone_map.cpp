@@ -50,7 +50,9 @@ bool matches_configured_zone(const SampleZone& zone,
 }  // namespace
 
 bool SampleZoneMap::zone_valid(const SampleZone& zone) noexcept {
-    if (!valid_sample_view(zone.sample)) return false;
+    const auto has_direct_sample = valid_sample_view(zone.sample);
+    const auto has_sample_id = zone.sample_id != kInvalidSampleId;
+    if (!has_direct_sample && !has_sample_id) return false;
     if (!note_in_range(zone.root_note) ||
         !note_in_range(zone.lowest_note) ||
         !note_in_range(zone.highest_note)) {
@@ -68,8 +70,16 @@ bool SampleZoneMap::zone_valid(const SampleZone& zone) noexcept {
         !std::isfinite(zone.tune_semitones)) {
         return false;
     }
+    // Pool-backed slice/loop validation needs a resolved pool sample's frame
+    // count; keep that out of the zone-only validator for this slice.
+    if (zone.slice_index != kNoSampleSliceIndex && !has_direct_sample) {
+        return false;
+    }
     if (zone.slice_index != kNoSampleSliceIndex &&
         !valid_slice_region(zone.slice_region, zone.sample.num_frames)) {
+        return false;
+    }
+    if (zone.has_loop && !has_direct_sample) {
         return false;
     }
     if (zone.has_loop &&
@@ -128,6 +138,7 @@ double ZoneSelector::playback_rate_for_zone(const SampleZone& zone,
                                             int note,
                                             double host_sample_rate) noexcept {
     if (!positive_finite(host_sample_rate) ||
+        !valid_sample_view(zone.sample) ||
         !positive_finite(zone.sample.sample_rate)) {
         return 0.0;
     }

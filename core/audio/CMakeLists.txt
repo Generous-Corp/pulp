@@ -23,6 +23,7 @@ target_sources(pulp-audio PRIVATE
     src/mmap_reader.cpp
     src/buffer_ops.cpp
     src/audio_stream_handoff.cpp
+    src/instrument_runtime.cpp
     src/loop_point_analyzer.cpp
     src/loop_reader.cpp
     src/loop_renderer.cpp

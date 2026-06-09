@@ -7,11 +7,12 @@
 #include <vector>
 
 #include <pulp/audio/published_sample_store.hpp>
+#include <pulp/audio/sample_identity.hpp>
 
 namespace pulp::audio {
 
 inline constexpr std::uint32_t kInvalidSamplePoolId =
-    std::numeric_limits<std::uint32_t>::max();
+    kInvalidSampleId;
 
 struct SamplePoolEntry {
     std::uint32_t sample_id = kInvalidSamplePoolId;

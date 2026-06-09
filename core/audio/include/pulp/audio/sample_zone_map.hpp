@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <pulp/audio/loop_types.hpp>
+#include <pulp/audio/sample_identity.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/audio/slice_map.hpp>
 
@@ -15,6 +16,7 @@ inline constexpr std::uint32_t kNoSampleSliceIndex =
     static_cast<std::uint32_t>(-1);
 
 struct SampleZone {
+    std::uint32_t sample_id = kInvalidSampleId;
     PublishedSampleView sample{};
 
     int root_note = 60;

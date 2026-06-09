@@ -1976,6 +1976,9 @@ pulp_add_test_suite(pulp-test-sample-pool LIBRARIES pulp::audio)
 # Sampler zone selection policy for key/velocity ranges, round-robin, slices, and keytracking.
 pulp_add_test_suite(pulp-test-sample-zone-map LIBRARIES pulp::audio)
 
+# Pool-backed instrument trigger resolver over sample zones.
+pulp_add_test_suite(pulp-test-instrument-runtime LIBRARIES pulp::audio)
+
 # Loop metadata validation and off-RT loop candidate analysis.
 pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
 
