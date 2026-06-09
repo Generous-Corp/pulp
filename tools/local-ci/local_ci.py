@@ -35,7 +35,6 @@ from __future__ import annotations
 import argparse
 from collections import deque
 import fcntl
-import hashlib
 import json
 import os
 import plistlib
@@ -149,6 +148,7 @@ import cleanup as _cleanup  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
+import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import reporting as _reporting  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
@@ -2423,18 +2423,11 @@ def run_windows_session_agent_action(
 
 
 def default_priority_for(command: str, config: dict) -> str:
-    defaults = config.get("defaults", {})
-    if command in {"ship", "check"}:
-        return normalize_priority(defaults.get(f"{command}_priority", "high"))
-    return normalize_priority(defaults.get("priority", "normal"))
+    return _queue_orchestrator.default_priority_for(command, config)
 
 
 def make_fingerprint(branch: str, sha: str, targets: list[str], validation: str) -> str:
-    raw = json.dumps(
-        {"branch": branch, "sha": sha, "targets": sorted(targets), "validation": validation},
-        sort_keys=True,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return _queue_orchestrator.make_fingerprint(branch, sha, targets, validation)
 
 
 def make_job(
@@ -2446,93 +2439,43 @@ def make_job(
     validation: str,
     submission: dict | None = None,
 ) -> dict:
-    normalized_validation = normalize_validation_mode(validation)
-    branch = validate_ci_branch_name(branch)
-    job = {
-        "id": uuid.uuid4().hex[:12],
-        "branch": branch,
-        "sha": sha,
-        "priority": normalize_priority(priority),
-        "targets": sorted(targets),
-        "queued_at": now_iso(),
-        "status": "pending",
-        "fingerprint": make_fingerprint(branch, sha, targets, normalized_validation),
-        "mode": mode,
-        "validation": normalized_validation,
-        "submitted_root": str(ROOT),
-    }
-    if submission:
-        job["submission"] = submission
-        if submission.get("submitted_root"):
-            job["submitted_root"] = submission["submitted_root"]
-        if submission.get("provenance"):
-            job["provenance"] = normalize_provenance(submission.get("provenance"))
-    if "provenance" not in job:
-        job["provenance"] = normalize_provenance()
-    return job
+    return _queue_orchestrator.make_job(
+        branch,
+        sha,
+        priority,
+        targets,
+        mode,
+        validation,
+        submission=submission,
+        now_iso_fn=now_iso,
+        uuid_hex_fn=lambda: uuid.uuid4().hex,
+        root=ROOT,
+        validate_branch_fn=validate_ci_branch_name,
+    )
 
 
 def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
-    return (
-        job.get("branch", ""),
-        tuple(sorted(job.get("targets") or [])),
-        normalize_validation_mode(job.get("validation", "full")),
-    )
+    return _queue_orchestrator.supersedence_key(job)
 
 
 def supersedence_identity_key(job: dict) -> tuple[str, str, str]:
-    return (
-        job.get("branch", ""),
-        job.get("sha", ""),
-        normalize_validation_mode(job.get("validation", "full")),
-    )
+    return _queue_orchestrator.supersedence_identity_key(job)
 
 
 def jobs_share_supersedence_scope(newer_job: dict, older_job: dict) -> bool:
-    return (
-        newer_job.get("id") != older_job.get("id")
-        and newer_job.get("fingerprint") != older_job.get("fingerprint")
-        and supersedence_key(newer_job) == supersedence_key(older_job)
-    )
+    return _queue_orchestrator.jobs_share_supersedence_scope(newer_job, older_job)
 
 
 def job_has_narrower_same_identity_scope(newer_job: dict, older_job: dict) -> bool:
-    if (
-        newer_job.get("id") == older_job.get("id")
-        or newer_job.get("fingerprint") == older_job.get("fingerprint")
-        or supersedence_identity_key(newer_job) != supersedence_identity_key(older_job)
-    ):
-        return False
-
-    newer_targets = set(newer_job.get("targets") or [])
-    older_targets = set(older_job.get("targets") or [])
-    return bool(newer_targets) and newer_targets < older_targets
+    return _queue_orchestrator.job_has_narrower_same_identity_scope(newer_job, older_job)
 
 
 def supersedence_reason(newer_job: dict, older_job: dict) -> str | None:
-    if jobs_share_supersedence_scope(newer_job, older_job):
-        return "newer_sha_queued"
-    if job_has_narrower_same_identity_scope(newer_job, older_job):
-        return "narrower_scope_queued"
-    return None
+    return _queue_orchestrator.supersedence_reason(newer_job, older_job)
 
 
 def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
-    return {
-        "job_id": job["id"],
-        "branch": job["branch"],
-        "sha": job["sha"],
-        "priority": job["priority"],
-        "validation": job.get("validation", "full"),
-        "targets": job.get("targets", []),
-        "queued_at": job.get("queued_at", ""),
-        "completed_at": now_iso(),
-        "provenance": normalize_provenance(job.get("provenance")),
-        "results": [],
-        "overall": "superseded",
-        "superseded_by": superseded_by,
-        "superseded_reason": reason,
-    }
+    return _queue_orchestrator.supersedence_result(job, superseded_by, reason, now_iso_fn=now_iso)
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
@@ -2550,20 +2493,7 @@ def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
-    return {
-        "job_id": job["id"],
-        "branch": job["branch"],
-        "sha": job["sha"],
-        "priority": job["priority"],
-        "validation": job.get("validation", "full"),
-        "targets": job.get("targets", []),
-        "queued_at": job.get("queued_at", ""),
-        "completed_at": now_iso(),
-        "provenance": normalize_provenance(job.get("provenance")),
-        "results": [],
-        "overall": "canceled",
-        "canceled_reason": reason,
-    }
+    return _queue_orchestrator.cancellation_result(job, reason, now_iso_fn=now_iso)
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
@@ -2580,35 +2510,11 @@ def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
 
 
 def summarize_job(job: dict) -> str:
-    targets = ",".join(job.get("targets") or []) or "none"
-    validation = job.get("validation", "full")
-    validation_suffix = f" validation={validation}" if validation != "full" else ""
-    return (
-        f"[{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))} "
-        f"priority={job.get('priority', 'normal')} targets={targets}{validation_suffix}"
-    )
+    return _queue_orchestrator.summarize_job(job)
 
 
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
-    if not active_targets:
-        return ""
-
-    parts: list[str] = []
-    seen: set[str] = set()
-    for name in preferred_order or []:
-        state = active_targets.get(name)
-        if not state:
-            continue
-        parts.append(f"{name}={state.get('status', '?')}")
-        seen.add(name)
-
-    for name in sorted(active_targets):
-        if name in seen:
-            continue
-        state = active_targets.get(name) or {}
-        parts.append(f"{name}={state.get('status', '?')}")
-
-    return ", ".join(parts)
+    return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
@@ -2681,18 +2587,17 @@ def enqueue_job(
 
 
 def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
-    completed = [job for job in queue if job.get("status") == "completed"]
-    if len(completed) <= KEEP_COMPLETED_JOBS:
-        return queue, set()
-
-    completed_by_time = sorted(completed, key=lambda job: job.get("completed_at", job.get("queued_at", "")))
-    remove_ids = {job["id"] for job in completed_by_time[:-KEEP_COMPLETED_JOBS]}
-    return [job for job in queue if job["id"] not in remove_ids], remove_ids
+    return _queue_orchestrator.trim_completed_jobs_with_removed_ids(
+        queue,
+        keep_completed_jobs=KEEP_COMPLETED_JOBS,
+    )
 
 
 def trim_completed_jobs(queue: list[dict]) -> list[dict]:
-    trimmed, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
-    return trimmed
+    return _queue_orchestrator.trim_completed_jobs(
+        queue,
+        keep_completed_jobs=KEEP_COMPLETED_JOBS,
+    )
 
 
 def result_file_job_id(path: Path) -> str | None:
@@ -2730,7 +2635,7 @@ def apply_local_ci_cleanup_plan(plan: dict) -> dict:
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
-    return (-priority_value(job.get("priority", "normal")), job.get("queued_at", ""), job["id"])
+    return _queue_orchestrator.job_sort_key(job)
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
@@ -3587,7 +3492,7 @@ def ps_literal(value: str) -> str:
 
 
 def validate_ci_branch_name(branch: str) -> str:
-    return _windows_probe.validate_ci_branch_name(branch)
+    return _queue_orchestrator.validate_ci_branch_name(branch)
 
 
 def windows_ssh_powershell_command(host: str) -> list[str]:
