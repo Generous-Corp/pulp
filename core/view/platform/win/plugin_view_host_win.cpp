@@ -230,6 +230,7 @@ public:
             runtime::log_warn("WinPluginViewHost: CreateWindowExW failed");
             return;
         }
+        scale_ = detect_dpi_scale(hwnd_);
 #ifdef PULP_HAS_SKIA
         init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
 #endif
@@ -327,13 +328,38 @@ public:
                          static_cast<int>(height), SWP_NOZORDER | SWP_NOMOVE);
         }
 #ifdef PULP_HAS_SKIA
-        if (gpu_surface_) gpu_surface_->resize(width, height);
-        if (skia_surface_) skia_surface_->resize(width, height, 1.0f);
+        // GPU surface is sized at PHYSICAL pixels (logical × scale); SkiaSurface
+        // takes LOGICAL dims + the scale factor and applies the logical→pixel
+        // transform itself at paint (mirrors MacGpuWindowHost).
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
         repaint();
     }
 
     Size get_size() const override { return size_; }
+
+    // ── HiDPI scale seam (W8) ────────────────────────────────────────────
+    float scale_factor() const override { return scale_; }
+
+    void set_scale_factor(float scale) override {
+        if (scale <= 0.0f) return;  // ignore non-positive; keep current scale
+        if (scale == scale_) return;
+        scale_ = scale;
+#ifdef PULP_HAS_SKIA
+        // Re-size surfaces at the new pixel resolution. Logical size is
+        // unchanged, so the view tree layout is untouched.
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
+#endif
+        repaint();
+    }
+
+    // WM_DPICHANGED: derive the new scale from the wParam DPI and rescale.
+    void handle_dpi_changed(uint32_t new_dpi) {
+        if (new_dpi == 0) return;
+        set_scale_factor(static_cast<float>(new_dpi) / 96.0f);
+    }
 
     bool is_gpu_backed() const override {
 #ifdef PULP_HAS_SKIA
@@ -400,7 +426,7 @@ public:
 
 private:
     View& root_;
-    Size size_;
+    Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
     HWND hwnd_ = nullptr;
     std::atomic<bool> attached_{false};
     std::function<void()> idle_callback_;
@@ -409,6 +435,28 @@ private:
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
+    float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor (DPI/96)
+
+    // Physical pixel dimensions = logical × scale (min 1 to avoid 0-sized
+    // surfaces). The GPU surface/swapchain is allocated at this resolution.
+    uint32_t pixel_w() const {
+        const float p = size_.width * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+    uint32_t pixel_h() const {
+        const float p = size_.height * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+
+    // Derive the DPI scale for a window. GetDpiForWindow returns the effective
+    // DPI (96 = 1×, 144 = 1.5×, 192 = 2×). Falls back to 1.0 if it reports 0
+    // (per-monitor-DPI unaware context, or a window with no monitor yet).
+    static float detect_dpi_scale(HWND hwnd) {
+        if (!hwnd) return 1.0f;
+        const UINT dpi = GetDpiForWindow(hwnd);
+        if (dpi == 0) return 1.0f;
+        return static_cast<float>(dpi) / 96.0f;
+    }
 
     // OLE drag-drop on the child HWND. ole_initialized_ tracks whether THIS host
     // brought up COM (so we balance OleUninitialize). drop_target_ is ref-counted
@@ -428,8 +476,15 @@ private:
             return;
         }
         ole_initialized_ = true;
+        // The drop target hands us CLIENT-space coords in PHYSICAL pixels
+        // (ScreenToClient output). Convert pixels→logical (÷ scale) before the
+        // logical-space design-viewport inverse, so HiDPI hit-testing lands on
+        // the right widget.
         drop_target_ = new PulpWinDropTarget(
-            root_, hwnd_, [this](Point p) { return window_to_root_point(p); });
+            root_, hwnd_, [this](Point px) {
+                const float s = scale_ > 0.0f ? scale_ : 1.0f;
+                return window_to_root_point({px.x / s, px.y / s});
+            });
         if (RegisterDragDrop(hwnd_, drop_target_) != S_OK) {
             runtime::log_warn("WinPluginViewHost: RegisterDragDrop failed");
             drop_target_->Release();
@@ -460,8 +515,10 @@ private:
             return;
         }
         render::GpuSurface::Config cfg{};
-        cfg.width = static_cast<uint32_t>(width);
-        cfg.height = static_cast<uint32_t>(height);
+        // GPU surface at PHYSICAL pixels (logical × scale) so the swapchain
+        // matches the HiDPI display; the view tree stays in logical units.
+        cfg.width = pixel_w();
+        cfg.height = pixel_h();
         cfg.native_surface_handle = static_cast<void*>(hwnd_);  // HWND
         if (!gpu_surface_->initialize(cfg)) {
             runtime::log_warn("WinPluginViewHost: gpu initialize failed; cpu-capture only");
@@ -469,9 +526,9 @@ private:
             return;
         }
         render::SkiaSurface::Config scfg{};
-        scfg.width = static_cast<uint32_t>(width);
-        scfg.height = static_cast<uint32_t>(height);
-        scfg.scale_factor = 1.0f;
+        scfg.width = static_cast<uint32_t>(width);   // LOGICAL
+        scfg.height = static_cast<uint32_t>(height);  // LOGICAL
+        scfg.scale_factor = scale_;
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
         if (!skia_surface_) {
             runtime::log_warn("WinPluginViewHost: skia surface create failed; cpu-capture only");
@@ -537,9 +594,12 @@ private:
         return cap ? readback_ok : true;
     }
 
-    // Pure-CPU raster capture, GPU-independent — the VM proof path.
+    // Pure-CPU raster capture, GPU-independent — the VM proof path. Sized at
+    // PHYSICAL pixels (logical × scale) with the logical→pixel scale applied as
+    // a canvas transform, so paint_scene keeps working in logical units and the
+    // capture is crisp on HiDPI / matches the GPU surface pixel resolution.
     std::vector<uint8_t> raster_capture_png() {
-        const uint32_t w = size_.width, h = size_.height;
+        const uint32_t w = pixel_w(), h = pixel_h();
         if (w == 0 || h == 0) return {};
         auto cs = SkColorSpace::MakeSRGB();
         SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
@@ -548,6 +608,7 @@ private:
         if (!surface) return {};
         auto* sk_canvas = surface->getCanvas();
         if (!sk_canvas) return {};
+        if (scale_ != 1.0f) sk_canvas->scale(scale_, scale_);
         pulp::canvas::SkiaCanvas canvas(sk_canvas);
         paint_scene(canvas);
         std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4u);
@@ -585,6 +646,14 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (host && msg == WM_PAINT) {
         host->handle_wm_paint();
+        return 0;
+    }
+    if (host && msg == WM_DPICHANGED) {
+        // wParam LOWORD = new DPI (X); HIWORD = Y (identical on Windows). The
+        // view tree stays in logical units — we only rescale the surfaces and
+        // repaint at the new pixel resolution. The DAW owns the window frame,
+        // so we don't apply the suggested lParam RECT ourselves.
+        host->handle_dpi_changed(LOWORD(wp));
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);

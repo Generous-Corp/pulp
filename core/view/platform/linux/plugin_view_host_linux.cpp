@@ -45,9 +45,11 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/Xresource.h>  // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>  // atof, malloc/free
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -90,6 +92,7 @@ public:
         gc_ = XCreateGC(display_, child_, 0, nullptr);
         init_xdnd();
         XFlush(display_);
+        scale_ = detect_dpi_scale(display_, screen_);
 #ifdef PULP_HAS_SKIA
         init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
 #endif
@@ -165,13 +168,31 @@ public:
             XFlush(display_);
         }
 #ifdef PULP_HAS_SKIA
-        if (gpu_surface_) gpu_surface_->resize(width, height);
-        if (skia_surface_) skia_surface_->resize(width, height, 1.0f);
+        // GPU surface at PHYSICAL pixels (logical × scale); SkiaSurface takes
+        // LOGICAL dims + the scale factor (mirrors MacGpuWindowHost / the Win
+        // host). The X11 child window itself stays at logical size — the DAW
+        // owns its geometry; only the rendered backing is HiDPI.
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
         repaint();
     }
 
     Size get_size() const override { return size_; }
+
+    // ── HiDPI scale seam (L9) ────────────────────────────────────────────
+    float scale_factor() const override { return scale_; }
+
+    void set_scale_factor(float scale) override {
+        if (scale <= 0.0f) return;  // ignore non-positive; keep current scale
+        if (scale == scale_) return;
+        scale_ = scale;
+#ifdef PULP_HAS_SKIA
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
+#endif
+        repaint();
+    }
 
     bool is_gpu_backed() const override {
 #ifdef PULP_HAS_SKIA
@@ -262,7 +283,7 @@ public:
 
 private:
     View& root_;
-    Size size_;
+    Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
     Display* display_ = nullptr;
     int screen_ = 0;
     Window child_ = 0;
@@ -274,6 +295,64 @@ private:
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
+    float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor
+
+    // Physical pixel dimensions = logical × scale (min 1).
+    uint32_t pixel_w() const {
+        const float p = size_.width * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+    uint32_t pixel_h() const {
+        const float p = size_.height * scale_;
+        return static_cast<uint32_t>(p < 1.0f ? 1.0f : p);
+    }
+
+    // Derive a DPI scale from X11. There is no single canonical source on
+    // X11, so we try, in order:
+    //   1. Xft.dpi from the X resource database (what GTK/Qt/desktops honor) —
+    //      scale = Xft.dpi / 96.
+    //   2. RANDR-free physical-DPI from the screen mm/px geometry — scale =
+    //      (px * 25.4 / mm) / 96, clamped to a sane range.
+    //   3. Fallback 1.0.
+    // A host can always override the result via set_scale_factor().
+    static float detect_dpi_scale(Display* display, int screen) {
+        if (!display) return 1.0f;
+
+        // (1) Xft.dpi — the authoritative cross-toolkit override.
+        if (char* rms = XResourceManagerString(display)) {
+            XrmDatabase db = XrmGetStringDatabase(rms);
+            if (db) {
+                char* type = nullptr;
+                XrmValue val{};
+                float dpi = 0.0f;
+                if (XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &val) &&
+                    val.addr) {
+                    dpi = static_cast<float>(atof(val.addr));
+                }
+                XrmDestroyDatabase(db);
+                if (dpi > 0.0f) return sane_scale(dpi / 96.0f);
+            }
+        }
+
+        // (2) Physical geometry: pixels / millimetres → DPI.
+        const int px_h = DisplayHeight(display, screen);
+        const int mm_h = DisplayHeightMM(display, screen);
+        if (px_h > 0 && mm_h > 0) {
+            const float dpi = static_cast<float>(px_h) * 25.4f /
+                              static_cast<float>(mm_h);
+            if (dpi > 0.0f) return sane_scale(dpi / 96.0f);
+        }
+        return 1.0f;
+    }
+
+    // Clamp auto-detected scale to a reasonable HiDPI band so a bogus EDID
+    // (common on X11) can't produce a 0.2× or 10× surface. Host overrides via
+    // set_scale_factor() are NOT clamped.
+    static float sane_scale(float s) {
+        if (s < 0.5f) return 1.0f;   // implausibly small → assume unset
+        if (s > 4.0f) return 4.0f;   // cap extreme values
+        return s;
+    }
 
     // ── XDND (X11 drag-and-drop) target state ────────────────────────────
     // Atoms interned once in init_xdnd(). 0 (None) until interned.
@@ -549,8 +628,10 @@ private:
         x11_handle_.display = display_;
         x11_handle_.window = static_cast<unsigned long>(child_);
         render::GpuSurface::Config cfg{};
-        cfg.width = static_cast<uint32_t>(width);
-        cfg.height = static_cast<uint32_t>(height);
+        // GPU surface at PHYSICAL pixels (logical × scale); view tree stays
+        // logical.
+        cfg.width = pixel_w();
+        cfg.height = pixel_h();
         cfg.native_surface_handle = &x11_handle_;  // typed X11 handle
         if (!gpu_surface_->initialize(cfg)) {
             runtime::log_warn("X11PluginViewHost: gpu initialize failed; cpu raster only");
@@ -558,9 +639,9 @@ private:
             return;
         }
         render::SkiaSurface::Config scfg{};
-        scfg.width = static_cast<uint32_t>(width);
-        scfg.height = static_cast<uint32_t>(height);
-        scfg.scale_factor = 1.0f;
+        scfg.width = static_cast<uint32_t>(width);   // LOGICAL
+        scfg.height = static_cast<uint32_t>(height);  // LOGICAL
+        scfg.scale_factor = scale_;
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
         if (!skia_surface_) {
             runtime::log_warn("X11PluginViewHost: skia surface create failed; cpu raster only");
@@ -621,10 +702,14 @@ private:
         return true;
     }
 
-    // Render the scene to RGBA via pure Skia raster (no GPU). out_w/out_h get
-    // the pixel dims. Empty on failure.
+    // Render the scene to RGBA via pure Skia raster (no GPU). The buffer is
+    // sized at PHYSICAL pixels (logical × scale) and the logical→pixel scale is
+    // applied as a canvas transform, so paint_scene keeps working in logical
+    // units — the raster fallback / headless capture is crisp on HiDPI and
+    // matches the GPU surface's pixel resolution. out_w/out_h get the pixel
+    // dims. Empty on failure.
     std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
-        const uint32_t w = size_.width, h = size_.height;
+        const uint32_t w = pixel_w(), h = pixel_h();
         if (w == 0 || h == 0) return {};
         if (idle_callback_) idle_callback_();
         auto cs = SkColorSpace::MakeSRGB();
@@ -634,6 +719,7 @@ private:
         if (!surface) return {};
         auto* sk_canvas = surface->getCanvas();
         if (!sk_canvas) return {};
+        if (scale_ != 1.0f) sk_canvas->scale(scale_, scale_);
         pulp::canvas::SkiaCanvas canvas(sk_canvas);
         paint_scene(canvas);
         std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4u);

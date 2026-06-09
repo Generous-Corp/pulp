@@ -233,7 +233,31 @@ public:
     // native event handlers AND unit tests can exercise the same
     // inverse-transform path without needing AppKit / UIKit event
     // delivery.
+    //
+    // The input is in host *logical* coordinates (DPI-independent points),
+    // matching the view tree's coordinate space. Platforms whose OS delivers
+    // input in physical pixels (Windows/Linux) divide by scale_factor() before
+    // calling this, so the design-viewport math stays purely logical and
+    // composes with HiDPI scale without double-counting it.
     virtual Point window_to_root_point(Point pt) const { return pt; }
+
+    // ── HiDPI scale (W8 Windows / L9 Linux) ─────────────────────────────
+    //
+    // The DPI scale that maps host *logical* coordinates to physical pixels:
+    // the editor's view tree is laid out in logical units (a 100pt knob), the
+    // GPU/Skia surface is sized at logical × scale physical pixels, and the
+    // SkiaSurface applies this factor as a canvas transform at paint so the UI
+    // renders crisply on HiDPI displays instead of at 1× (small/blurry).
+    //
+    // Platform hosts auto-detect the scale from the OS (Windows:
+    // GetDpiForWindow; Linux: Xft.dpi / RANDR) and react to live DPI changes
+    // (WM_DPICHANGED). set_scale_factor() lets a DAW/host override the detected
+    // value (e.g. a per-editor zoom, or when the host owns DPI policy) and
+    // makes the scale plumbing testable without a real display. Passing a
+    // non-positive value is ignored. Default impl is a no-op getter returning
+    // 1.0 (CPU/stub hosts that do not scale).
+    virtual void set_scale_factor(float scale) { (void)scale; }
+    virtual float scale_factor() const { return 1.0f; }
 };
 
 // Install the built-in platform PluginViewHost factory (and matching headless
