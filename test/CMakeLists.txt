@@ -4087,25 +4087,32 @@ if(APPLE OR PULP_HAS_SKIA)
 endif()
 
 # #3329 — native PluginViewHost factory + headless-capture proof on non-Apple.
-# Built only where core/view actually compiled a platform host: Windows with
-# Skia, or non-Android UNIX with Skia + X11. Mirrors the core/view/CMakeLists
-# conditions. The host degrades to capture-only when no display server is
-# present (headless CI VM), and capture_back_buffer_png() still yields a frame.
+# Built where core/view compiled a platform host: Windows+Skia or non-Android
+# UNIX+Skia+X11. Degrades to capture-only with no display server (headless VM);
+# capture_back_buffer_png() still yields a frame. On Linux+X11 the same binary
+# also runs the XDND synthetic-source handshake under xvfb (#3645): it links
+# Xlib directly to act as an XDND source against the host's child window, gated
+# by PULP_TEST_HAS_X11 so the handshake TEST_CASE is compiled only there.
 if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
     set(_pulp_has_platform_pvh OFF)
+    set(_pulp_pvh_x11 OFF)
     if(WIN32)
         set(_pulp_has_platform_pvh ON)
     elseif(UNIX)
         find_package(X11 QUIET)
         if(X11_FOUND)
             set(_pulp_has_platform_pvh ON)
+            set(_pulp_pvh_x11 ON)
         endif()
     endif()
     if(_pulp_has_platform_pvh)
-        add_executable(pulp-test-plugin-view-host-factory
-            test_plugin_view_host_factory.cpp)
-        target_link_libraries(pulp-test-plugin-view-host-factory
-            PRIVATE pulp::view Catch2::Catch2WithMain)
+        add_executable(pulp-test-plugin-view-host-factory test_plugin_view_host_factory.cpp)
+        target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE pulp::view Catch2::Catch2WithMain)
+        if(_pulp_pvh_x11)
+            target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE ${X11_LIBRARIES})
+            target_include_directories(pulp-test-plugin-view-host-factory PRIVATE ${X11_INCLUDE_DIR})
+            target_compile_definitions(pulp-test-plugin-view-host-factory PRIVATE PULP_TEST_HAS_X11=1)
+        endif()
         catch_discover_tests(pulp-test-plugin-view-host-factory)
     endif()
 endif()
@@ -4134,11 +4141,7 @@ if(APPLE)
     # verify CGContextClearRect actually clears destination pixels.
     # pulp #1524 adds ImageIO for CGImageDestinationCreateWithURL (PNG
     # encode of a pattern fixture) and CoreServices for the public.png UTI.
-    target_link_libraries(pulp-test-canvas PRIVATE
-        "-framework CoreGraphics"
-        "-framework ImageIO"
-        "-framework CoreServices"
-    )
+    target_link_libraries(pulp-test-canvas PRIVATE "-framework CoreGraphics" "-framework ImageIO" "-framework CoreServices")
 endif()
 # pulp #1150 — public font-registration API tests use a bundled .ttf as a
 # fixture. external/fonts/Inter-Regular.ttf is the canonical "always
@@ -4159,11 +4162,7 @@ catch_discover_tests(pulp-test-canvas)
 add_executable(pulp-test-canvas-cg-paths test_canvas_cg_paths.cpp)
 target_link_libraries(pulp-test-canvas-cg-paths PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(APPLE)
-    target_link_libraries(pulp-test-canvas-cg-paths PRIVATE
-        "-framework CoreGraphics"
-        "-framework ImageIO"
-        "-framework CoreServices"
-    )
+    target_link_libraries(pulp-test-canvas-cg-paths PRIVATE "-framework CoreGraphics" "-framework ImageIO" "-framework CoreServices")
 endif()
 catch_discover_tests(pulp-test-canvas-cg-paths)
 
