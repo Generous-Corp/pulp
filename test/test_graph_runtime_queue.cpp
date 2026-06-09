@@ -1,8 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/graph/graph_runtime_queue.hpp>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 
 namespace {
 
@@ -165,6 +169,182 @@ TEST_CASE("GraphRuntimeQueues publish realtime MIDI output separately from graph
     const auto stats = queues.stats();
     REQUIRE(stats.midi_outputs_enqueued == 2);
     REQUIRE(stats.dropped_midi_outputs == 1);
+}
+
+// Keep `Concurrent` and `Race` in this title: sanitizers.yml selects
+// TSan-focused tests by CTest name, not by lowercase Catch2 tags.
+TEST_CASE("GraphRuntimeQueues Concurrent control/realtime handoff is Race clean",
+          "[graph][graph-runtime][queue][concurrent][race]") {
+    using namespace std::chrono_literals;
+
+    constexpr std::uint32_t kBlockFrames = 64;
+    constexpr std::uint64_t kCommands = 256;
+    constexpr std::uint64_t kWindow = 8;
+    constexpr auto kTimeout = 2s;
+
+    pulp::graph::GraphRuntimeQueues<32, 32, 32> queues;
+    std::atomic<bool> start{false};
+    std::atomic<bool> command_phase_done{false};
+    std::atomic<bool> stop_requested{false};
+    std::atomic<std::uint64_t> realtime_processed{0};
+    std::atomic<std::uint64_t> realtime_sequence_sum{0};
+    std::atomic<std::uint64_t> realtime_push_failures{0};
+
+    struct RealtimeJoinGuard {
+        std::thread& thread;
+        std::atomic<bool>& command_phase_done;
+        std::atomic<bool>& stop_requested;
+
+        ~RealtimeJoinGuard() {
+            command_phase_done.store(true, std::memory_order_release);
+            stop_requested.store(true, std::memory_order_release);
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    };
+
+    std::thread realtime([&] {
+        while (!start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+
+        std::array<pulp::graph::GraphTimedCommand, kWindow> drained{};
+        while (!stop_requested.load(std::memory_order_acquire) &&
+               (!command_phase_done.load(std::memory_order_acquire) ||
+                realtime_processed.load(std::memory_order_acquire) < kCommands)) {
+            const auto count = queues.drain_commands_for_block(drained, kBlockFrames);
+            if (count == 0) {
+                std::this_thread::yield();
+                continue;
+            }
+
+            for (std::uint32_t i = 0; i < count; ++i) {
+                const auto& timed = drained[i];
+                pulp::graph::GraphEvent event;
+                event.sequence_id = timed.command.sequence_id;
+                event.type = pulp::graph::GraphEventType::CommandAccepted;
+                event.node_id = timed.command.node_id;
+                event.block_offset = timed.block_offset;
+                event.value = timed.command.value;
+                if (!queues.push_event_from_realtime(event)) {
+                    realtime_push_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+
+                pulp::graph::GraphMidiOutputEvent midi_event;
+                midi_event.sequence_id = timed.command.sequence_id;
+                midi_event.node_id = timed.command.node_id;
+                midi_event.block_offset = timed.block_offset;
+                midi_event.event = pulp::midi::MidiEvent::note_on(
+                    0,
+                    static_cast<std::uint8_t>(60 + (timed.command.sequence_id % 12)),
+                    100);
+                if (!queues.push_midi_output_from_realtime(midi_event)) {
+                    realtime_push_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+
+                realtime_sequence_sum.fetch_add(timed.command.sequence_id,
+                                                std::memory_order_relaxed);
+                realtime_processed.fetch_add(1, std::memory_order_release);
+            }
+        }
+    });
+    RealtimeJoinGuard realtime_join_guard{
+        realtime,
+        command_phase_done,
+        stop_requested,
+    };
+
+    start.store(true, std::memory_order_release);
+
+    std::array<bool, kCommands + 1> event_sequences_seen{};
+    std::array<bool, kCommands + 1> midi_sequences_seen{};
+    std::uint64_t expected_sequence_sum = 0;
+    std::uint64_t events_seen = 0;
+    std::uint64_t event_sequence_sum = 0;
+    std::uint64_t midi_seen = 0;
+    std::uint64_t midi_sequence_sum = 0;
+    bool timed_out = false;
+
+    for (std::uint64_t first = 1; first <= kCommands; first += kWindow) {
+        const auto last = std::min<std::uint64_t>(kCommands, first + kWindow - 1);
+        for (std::uint64_t sequence = first; sequence <= last; ++sequence) {
+            REQUIRE(queues.enqueue_command(command(
+                sequence,
+                at(static_cast<std::uint32_t>(sequence - first)),
+                static_cast<pulp::graph::NodeId>(sequence % 8))));
+            expected_sequence_sum += sequence;
+        }
+
+        const auto target_count = last;
+        const auto deadline = std::chrono::steady_clock::now() + kTimeout;
+        while ((events_seen < target_count || midi_seen < target_count) &&
+               std::chrono::steady_clock::now() < deadline) {
+            pulp::graph::GraphEvent event;
+            if (queues.pop_event(event)) {
+                REQUIRE(event.type == pulp::graph::GraphEventType::CommandAccepted);
+                REQUIRE(event.sequence_id == events_seen + 1);
+                REQUIRE(event.sequence_id >= first);
+                REQUIRE(event.sequence_id <= last);
+                REQUIRE_FALSE(event_sequences_seen[event.sequence_id]);
+                event_sequences_seen[event.sequence_id] = true;
+                ++events_seen;
+                event_sequence_sum += event.sequence_id;
+            }
+
+            pulp::graph::GraphMidiOutputEvent midi_event;
+            if (queues.pop_midi_output(midi_event)) {
+                REQUIRE(midi_event.event.is_note_on());
+                REQUIRE(midi_event.sequence_id == midi_seen + 1);
+                REQUIRE(midi_event.sequence_id >= first);
+                REQUIRE(midi_event.sequence_id <= last);
+                REQUIRE_FALSE(midi_sequences_seen[midi_event.sequence_id]);
+                midi_sequences_seen[midi_event.sequence_id] = true;
+                ++midi_seen;
+                midi_sequence_sum += midi_event.sequence_id;
+            }
+
+            if (events_seen < target_count || midi_seen < target_count) {
+                std::this_thread::yield();
+            }
+        }
+
+        if (events_seen < target_count || midi_seen < target_count) {
+            timed_out = true;
+            break;
+        }
+    }
+
+    command_phase_done.store(true, std::memory_order_release);
+    if (timed_out) {
+        stop_requested.store(true, std::memory_order_release);
+    }
+    realtime.join();
+
+    INFO("events_seen=" << events_seen << " midi_seen=" << midi_seen
+         << " realtime_processed=" << realtime_processed.load()
+         << " push_failures=" << realtime_push_failures.load());
+    REQUIRE_FALSE(timed_out);
+    REQUIRE(realtime_push_failures.load() == 0);
+    REQUIRE(realtime_processed.load() == kCommands);
+    REQUIRE(realtime_sequence_sum.load() == expected_sequence_sum);
+    REQUIRE(events_seen == kCommands);
+    REQUIRE(event_sequence_sum == expected_sequence_sum);
+    REQUIRE(midi_seen == kCommands);
+    REQUIRE(midi_sequence_sum == expected_sequence_sum);
+    for (std::uint64_t sequence = 1; sequence <= kCommands; ++sequence) {
+        REQUIRE(event_sequences_seen[sequence]);
+        REQUIRE(midi_sequences_seen[sequence]);
+    }
+
+    const auto stats = queues.stats();
+    REQUIRE(stats.commands_enqueued == kCommands);
+    REQUIRE(stats.commands_drained == kCommands);
+    REQUIRE(stats.events_enqueued == kCommands);
+    REQUIRE(stats.midi_outputs_enqueued == kCommands);
+    REQUIRE(stats.dropped_commands == 0);
+    REQUIRE(stats.dropped_events == 0);
+    REQUIRE(stats.dropped_midi_outputs == 0);
 }
 
 TEST_CASE("GraphRuntimeQueues reset offline queues and counters",
