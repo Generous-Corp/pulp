@@ -660,6 +660,24 @@ now include it. When bumping Skia, run `nm -D` on the new `libskia.a`
 and grep for `Fc[A-Z]\|Hb[a-z]\|FT_` — any new symbol class means
 a matching system package needs to be added to the apt step.
 
+**A Skia series can DROP a platform slice.** chrome/m150 stopped
+publishing the `linux-arm64` slice that m149 shipped. The release
+pipeline degrades gracefully for this *if* two pieces agree:
+`fetch_skia_for_release.py` correctly *skips* the fetch for a
+matrix platform with no published `release_assets` entry in
+`tools/deps/manifest.json` (printing "no Skia release asset for
+matrix=… skipping fetch"), AND `release-cli.yml` does **not** force
+`PULP_REQUIRE_GPU_FOR_SDK=ON` for that platform. If only the first is
+true, the configure step FATALs with "Skia not found at
+external/skia-build" and the whole SDK release stays a **draft**
+(release-cli.yml never promotes it to non-draft "Latest"). This kept
+v0.395.0 a draft until linux-arm64 was dropped from the `REQUIRE_GPU=ON`
+cases in *both* the CLI configure and the Linux SDK-build configure in
+`release-cli.yml` (it now builds GPU-OFF, like windows-*). When the
+skia-builder fork republishes the m150 linux-arm64 slice (and a
+matching `release_assets` entry lands in the manifest), re-add
+`linux-arm64` to both `case` blocks so the GPU path is required again.
+
 ### Backfilling a stuck release tag
 
 `auto-release.yml` creates the tag immediately on merge, but
