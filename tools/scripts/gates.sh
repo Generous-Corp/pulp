@@ -61,6 +61,7 @@ HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
+IMPORT_PROV="$ROOT/tools/scripts/check_import_provenance.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -142,6 +143,20 @@ if [ -f "$DEPS_AUDIT" ]; then
         fail=1
     else
         echo "  deps-audit: ok" >&2
+    fi
+fi
+
+# ── 7. import-provenance (opt-in) ──────────────────────────────────────────
+# Audits that any emitted/migrated project carries a well-formed clean-room
+# provenance marker. No-op for normal Pulp-repo pushes; set
+# PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands
+# a migrated project to enforce it here.
+if [ -f "$IMPORT_PROV" ] && [ -n "${PULP_IMPORT_PROVENANCE_DIRS:-}" ]; then
+    echo "" >&2
+    echo "▸ import-provenance check" >&2
+    # shellcheck disable=SC2086
+    if ! "$PYTHON" "$IMPORT_PROV" $PULP_IMPORT_PROVENANCE_DIRS; then
+        fail=1
     fi
 fi
 

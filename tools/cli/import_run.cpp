@@ -16,6 +16,7 @@
 #include "import_emit.hpp"
 #include "import_emit_scan.hpp"
 #include "import_spi.hpp"
+#include "import_terms.hpp"
 #include "tool_registry.hpp"
 
 #include <chrono>
@@ -363,6 +364,104 @@ std::string build_provenance_marker(const ie::Manifest& m,
     return j;
 }
 
+// ── IMPORTER_TERMS accept-to-run gate ──
+//
+// The terms body is DATA the add-on importer carries on its tool-registry
+// descriptor. Resolve it for `o.from`; an explicit --importer-cmd has no
+// registry entry, so a --importer-terms-text override supplies the body there.
+
+namespace terms = pulp::cli::import_terms;
+
+// Find the tool-registry path by walking up from the cwd (mirrors the search in
+// resolve_importer; kept tiny + local).
+fs::path find_tool_registry() {
+    fs::path cwd = fs::current_path();
+    while (true) {
+        auto p = cwd / "tools" / "packages" / "tool-registry.json";
+        if (fs::exists(p)) return p;
+        if (cwd.has_parent_path() && cwd.parent_path() != cwd)
+            cwd = cwd.parent_path();
+        else break;
+    }
+    return {};
+}
+
+// Build the TermsDescriptor for `o.from`. Priority: an explicit
+// --importer-terms-text override, else the resolved tool-registry descriptor.
+// `importer_id` is the importer tool id (the acceptance store key), falling back
+// to the framework id when no tool is resolvable.
+terms::TermsDescriptor resolve_terms(const ImportOptions& o,
+                                     const det::FrameworkEntry* fw_entry) {
+    terms::TermsDescriptor td;
+    td.importer_id =
+        fw_entry && !fw_entry->importer_tool_id.empty()
+            ? fw_entry->importer_tool_id
+            : o.from;
+
+    if (!o.terms_text.empty()) {
+        td.terms_text = o.terms_text;
+        td.terms_version = o.terms_version;
+        return td;
+    }
+
+    auto reg_path = find_tool_registry();
+    if (reg_path.empty()) return td;
+    auto [reg, err] = pulp::cli::tools::load_tool_registry(reg_path);
+    if (!err.empty()) return td;
+
+    const pulp::cli::tools::ToolDescriptor* chosen = nullptr;
+    for (auto& [id, tool] : reg.tools)
+        for (auto& f : tool.frameworks)
+            if (f == o.from) { chosen = &tool; break; }
+    if (!chosen && fw_entry && !fw_entry->importer_tool_id.empty()) {
+        auto it = reg.tools.find(fw_entry->importer_tool_id);
+        if (it != reg.tools.end()) chosen = &it->second;
+    }
+    if (chosen) {
+        td.importer_id = chosen->id;
+        td.terms_text = chosen->terms_text;
+        td.terms_version = chosen->terms_version;
+        td.vendor_id = chosen->vendor_id;
+    }
+    return td;
+}
+
+// Enforce the accept-to-run gate before any importer is driven. Returns true to
+// proceed; on a hard stop prints a clear message and the caller returns nonzero.
+bool ensure_terms_accepted(const ImportOptions& o, const det::KnownFrameworks& kf,
+                           const char* subcommand) {
+    const det::FrameworkEntry* fw = find_framework(kf, o.from);
+    terms::TermsDescriptor td = resolve_terms(o, fw);
+
+    terms::GateIo io{std::cin, std::cout, is_tty()};
+    auto result = terms::run_gate(td, terms::acceptance_store_path(),
+                                  o.accept_importer_terms, iso_utc_now(), io);
+
+    switch (result) {
+        case terms::GateResult::Accepted:
+        case terms::GateResult::NoTermsToAccept:
+            return true;
+        case terms::GateResult::Declined:
+            std::cerr << "pulp import " << subcommand
+                      << ": importer terms were not accepted. Aborting.\n";
+            return false;
+        case terms::GateResult::NonInteractive:
+            std::cerr << "pulp import " << subcommand
+                      << ": importer '" << td.importer_id
+                      << "' requires accepting its terms of use, but no terminal is\n"
+                         "available to prompt. Re-run with --accept-importer-terms to\n"
+                         "accept them non-interactively (e.g. in CI).\n";
+            return false;
+        case terms::GateResult::StoreError:
+            std::cerr << "pulp import " << subcommand
+                      << ": could not record terms acceptance under "
+                      << terms::acceptance_store_path().string()
+                      << " (check permissions / $PULP_HOME).\n";
+            return false;
+    }
+    return false;
+}
+
 }  // namespace
 
 // ── detect ──
@@ -428,6 +527,9 @@ int run_inspect(const ImportOptions& o) {
         return 1;
     }
 
+    // Accept-to-run IMPORTER_TERMS gate (before any importer is driven).
+    if (!ensure_terms_accepted(o, kf, "inspect")) return 1;
+
     auto ir = run_analyze(o, kf);
     if (!ir) return 1;  // resolution / transport / importer failure (hint printed)
 
@@ -478,6 +580,9 @@ int run_emit(const ImportOptions& o) {
         std::cerr << "pulp import emit: " << kf.error << "\n";
         return 1;
     }
+
+    // Accept-to-run IMPORTER_TERMS gate (before any importer is driven).
+    if (!ensure_terms_accepted(o, kf, "emit")) return 1;
 
     auto resolved = resolve_for(o, kf);
     if (!resolved) return 1;  // install hint already printed

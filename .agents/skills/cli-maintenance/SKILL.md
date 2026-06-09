@@ -229,6 +229,30 @@ Gotchas / invariants when touching this surface:
   must unwrap its own envelope (the SDK passes the analyze `result` verbatim).
   If a scaffold comes out with empty formats / pass-through-only DSP, suspect a
   double-wrapped IR on the importer side, not the SDK.
+- **`inspect`/`emit` are gated by the IMPORTER_TERMS accept-to-run gate**
+  (`import_terms.{hpp,cpp}`, `run_gate`). The terms BODY is vendor DATA carried
+  on the add-on's `ToolDescriptor` (`terms_text`/`terms_version`/`vendor_id`) —
+  the SDK ships no terms body and names no vendor, it only surfaces + hashes the
+  text and records acceptance under `~/.pulp/importer-terms-accepted.json`
+  (honours `$PULP_HOME`), keyed by importer id + an FNV hash of the terms.
+  A changed body → new hash → re-prompt. `--accept-importer-terms` is the
+  non-interactive (CI) path; without a TTY and without the flag the gate returns
+  `NonInteractive` and BLOCKS (exit 1) rather than hanging. Mirrors
+  `pulp add --accept-license` in UX + storage shape. `--importer-cmd` has no
+  registry entry, so `--importer-terms-text`/`--importer-terms-version` supply
+  the body directly (tests + power users). `has_terms()==false` (no body) →
+  the gate passes through transparently. `run_gate` takes injected `GateIo`
+  (in/out/interactive) + a `now_utc` string so it unit-tests deterministically
+  without a real TTY or clock.
+- **Provenance PR-check is `tools/scripts/check_import_provenance.py`** (neutral,
+  vendor-free), the audit that a migrated project landing in a PR was produced
+  clean-room: marker present + well-formed, valid per-file `provenance` values,
+  and no framework-source marker in any file the marker labels `generated`/`stub`
+  (`copied-user-file` is exempt). The content denylist is DATA from the
+  known-frameworks index (`$PULP_KNOWN_FRAMEWORKS` or `tools/import/`); with no
+  index the structural checks still run and the scan reports as skipped. Wired
+  into `gates.sh` as an **opt-in** lane (`PULP_IMPORT_PROVENANCE_DIRS`) so it's a
+  no-op for normal Pulp-repo pushes and only fires on a PR that lands a scaffold.
 
 ### Binary subcommand delegation
 

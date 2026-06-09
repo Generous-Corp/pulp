@@ -1367,6 +1367,9 @@ Subcommands:
 | `--report <file.md>` | `inspect`: write a human-readable report |
 | `--output <dir>` | `emit`: scaffold output directory |
 | `--importer-cmd <cmd>` | Override importer resolution with an explicit command string |
+| `--accept-importer-terms` | Accept the importer's terms of use non-interactively (CI). The acceptance is still recorded under `~/.pulp`. |
+
+**Accept-to-run terms gate.** Before `inspect` / `emit` drives an importer, the user must give explicit affirmative acceptance of that importer's terms of use (mirrors `pulp add --accept-license`). The terms body is runtime DATA carried by the add-on importer (the SDK names no vendor and ships no terms body of its own); the SDK surfaces it, then records acceptance under `~/.pulp/importer-terms-accepted.json` keyed by importer id + a hash of the terms text. A changed terms version (new hash) re-prompts. Interactively the gate is a type-to-accept prompt; in CI pass `--accept-importer-terms`. Without a terminal and without the flag, the gate blocks with a non-zero exit rather than hanging. An importer that declares no terms passes the gate transparently.
 
 The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
 
