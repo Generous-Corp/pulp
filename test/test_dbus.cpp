@@ -18,8 +18,14 @@
 #include <pulp/platform/dbus.hpp>
 #include <pulp/platform/file_dialog.hpp>
 
+#include <atomic>
 #include <cstdlib>
 #include <string>
+#include <thread>
+
+#if defined(__linux__)
+#include <dlfcn.h>
+#endif
 
 using pulp::platform::DBus;
 using pulp::platform::FileDialog;
@@ -120,6 +126,196 @@ TEST_CASE("FileDialog::install_native_backend preserves a host-set backend",
     FileDialog::clear_backend();
 }
 #endif // !defined(__APPLE__)
+
+// ── Object-server layer (L7a-1) ─────────────────────────────────────────────
+//
+// Generic, AT-SPI-agnostic D-Bus object server. The CI-verifiable proof is a
+// same-process loopback: register an object that answers Echo(s)->s, then make a
+// blocking method call to our OWN unique bus name + path, dispatch() to service
+// the incoming call, and assert the reply round-tripped. Runs under
+// `dbus-run-session -- ctest` (ephemeral private session bus, headless). Off
+// Linux / without a bus, every object-server method honest-fails (false/empty).
+
+TEST_CASE("DBus object-server honest-fails without a bus",
+          "[platform][dbus][objectserver][issue-L7a1]") {
+    DBus bus;  // never connected
+    REQUIRE_FALSE(bus.connected());
+    REQUIRE(bus.unique_name().empty());
+    REQUIRE_FALSE(bus.register_object("/pulp/test", [](DBus::CallContext&) { return true; }));
+    REQUIRE_FALSE(bus.unregister_object("/pulp/test"));
+    REQUIRE_FALSE(bus.emit_signal("/pulp/test", "pulp.Test", "Ping",
+                                  [](DBus::Writer&) {}));
+    REQUIRE_FALSE(bus.dispatch(0));
+}
+
+#if defined(__linux__)
+namespace {
+// Minimal raw-libdbus client used ONLY by the loopback test to issue a blocking
+// Echo(s)->s call at an arbitrary bus name. The production DBus facade exposes
+// only the object-SERVER surface for L7a-1 (a generic client call is a later
+// concern), so the test drives the client half through dlopen'd libdbus
+// directly — proving a genuine cross-connection round-trip over the session bus.
+struct RawClient {
+    void* h = nullptr;
+    void* (*bus_get_private)(int, void*) = nullptr;
+    void (*conn_close)(void*) = nullptr;
+    void (*conn_unref)(void*) = nullptr;
+    void (*set_exit)(void*, unsigned) = nullptr;
+    void (*error_init)(void*) = nullptr;
+    void (*error_free)(void*) = nullptr;
+    unsigned (*error_is_set)(void*) = nullptr;
+    void* (*new_call)(const char*, const char*, const char*, const char*) = nullptr;
+    void (*msg_unref)(void*) = nullptr;
+    void (*iter_init_append)(void*, void*) = nullptr;
+    unsigned (*iter_append)(void*, int, const void*) = nullptr;
+    unsigned (*iter_init)(void*, void*) = nullptr;
+    int (*iter_argtype)(void*) = nullptr;
+    void (*iter_getbasic)(void*, void*) = nullptr;
+    void* (*send_block)(void*, void*, int, void*) = nullptr;
+
+    template <typename Fn> Fn sym(const char* n) { return reinterpret_cast<Fn>(dlsym(h, n)); }
+
+    bool load() {
+        h = dlopen("libdbus-1.so.3", RTLD_LAZY | RTLD_LOCAL);
+        if (!h) h = dlopen("libdbus-1.so", RTLD_LAZY | RTLD_LOCAL);
+        if (!h) return false;
+        bus_get_private = sym<decltype(bus_get_private)>("dbus_bus_get_private");
+        conn_close = sym<decltype(conn_close)>("dbus_connection_close");
+        conn_unref = sym<decltype(conn_unref)>("dbus_connection_unref");
+        set_exit = sym<decltype(set_exit)>("dbus_connection_set_exit_on_disconnect");
+        error_init = sym<decltype(error_init)>("dbus_error_init");
+        error_free = sym<decltype(error_free)>("dbus_error_free");
+        error_is_set = sym<decltype(error_is_set)>("dbus_error_is_set");
+        new_call = sym<decltype(new_call)>("dbus_message_new_method_call");
+        msg_unref = sym<decltype(msg_unref)>("dbus_message_unref");
+        iter_init_append = sym<decltype(iter_init_append)>("dbus_message_iter_init_append");
+        iter_append = sym<decltype(iter_append)>("dbus_message_iter_append_basic");
+        iter_init = sym<decltype(iter_init)>("dbus_message_iter_init");
+        iter_argtype = sym<decltype(iter_argtype)>("dbus_message_iter_get_arg_type");
+        iter_getbasic = sym<decltype(iter_getbasic)>("dbus_message_iter_get_basic");
+        send_block = sym<decltype(send_block)>("dbus_connection_send_with_reply_and_block");
+        return bus_get_private && conn_close && conn_unref && set_exit && error_init &&
+               error_free && error_is_set && new_call && msg_unref && iter_init_append &&
+               iter_append && iter_init && iter_argtype && iter_getbasic && send_block;
+    }
+};
+}  // namespace
+
+TEST_CASE("DBus object-server loopback round-trips a method call",
+          "[platform][dbus][objectserver][issue-L7a1][linux]") {
+    if (!DBus::library_available()) {
+        SUCCEED("skipped: libdbus not available");
+        return;
+    }
+
+    // Server connection: exports /pulp/test answering Echo(s)->s and Fail()->error.
+    DBus server;
+    if (!server.connect_session()) {
+        SUCCEED("skipped: no session bus (run under dbus-run-session)");
+        return;
+    }
+    REQUIRE(server.connected());
+    const std::string server_name = server.unique_name();
+    REQUIRE_FALSE(server_name.empty());
+
+    std::atomic<bool> handler_saw_call{false};
+    REQUIRE(server.register_object(
+        "/pulp/test",
+        [&](DBus::CallContext& ctx) -> bool {
+            handler_saw_call = true;
+            if (ctx.member() == "Echo") {
+                std::string in;
+                if (!ctx.args().read_string(in)) {
+                    ctx.error("org.freedesktop.DBus.Error.InvalidArgs", "expected s");
+                    return true;
+                }
+                DBus::Writer w = ctx.reply();
+                w.append_string(in + ":echoed");
+                return true;
+            }
+            if (ctx.member() == "Fail") {
+                ctx.error("pulp.Test.Error.Boom", "kaboom");
+                return true;
+            }
+            return false;  // decline → server replies UnknownMethod
+        }));
+
+    // emit_signal builds + sends (no subscriber needed to prove marshalling).
+    REQUIRE(server.emit_signal(
+        "/pulp/test", "pulp.Test", "Pinged",
+        [](DBus::Writer& w) { w.append_string("hello"); }));
+
+    RawClient rc;
+    REQUIRE(rc.load());
+
+    // The blocking call (worker thread) and the server dispatcher (main thread)
+    // run concurrently: send_with_reply_and_block pumps only the CLIENT
+    // connection, so the SERVER connection must dispatch() to route + answer the
+    // incoming call. Without the concurrent dispatch the call would time out.
+    std::string echoed;
+    std::atomic<bool> call_done{false};
+    std::atomic<bool> call_ok{false};
+
+    std::thread worker([&] {
+        unsigned char errbuf[64];
+        unsigned char itbuf[128];
+        rc.error_init(errbuf);
+        void* conn = rc.bus_get_private(/*DBUS_BUS_SESSION*/ 0, errbuf);
+        if (!conn || rc.error_is_set(errbuf)) {
+            if (conn) { rc.conn_close(conn); rc.conn_unref(conn); }
+            rc.error_free(errbuf);
+            call_done = true;
+            return;
+        }
+        rc.set_exit(conn, 0u);
+
+        void* msg = rc.new_call(server_name.c_str(), "/pulp/test",
+                                "pulp.Test", "Echo");
+        const char* arg = "ping";
+        rc.iter_init_append(msg, itbuf);
+        rc.iter_append(itbuf, /*'s'*/ 's', &arg);
+
+        rc.error_init(errbuf);
+        void* reply = rc.send_block(conn, msg, 5000, errbuf);
+        rc.msg_unref(msg);
+        if (reply && !rc.error_is_set(errbuf)) {
+            unsigned char rit[128];
+            if (rc.iter_init(reply, rit) && rc.iter_argtype(rit) == /*'s'*/ 's') {
+                const char* s = nullptr;
+                rc.iter_getbasic(rit, &s);
+                if (s) { echoed = s; call_ok = true; }
+            }
+        }
+        if (reply) rc.msg_unref(reply);
+        rc.error_free(errbuf);
+        rc.conn_close(conn);
+        rc.conn_unref(conn);
+        call_done = true;
+    });
+
+    // Service the incoming call on the server connection until the worker
+    // observes its reply (bounded so a wedge fails the test instead of hanging).
+    for (int i = 0; i < 200 && !call_done.load(); ++i) {
+        server.dispatch(25);
+    }
+    worker.join();
+
+    REQUIRE(call_ok.load());
+    REQUIRE(echoed == "ping:echoed");
+    REQUIRE(handler_saw_call.load());
+
+    REQUIRE(server.unregister_object("/pulp/test"));
+    // Re-registration after teardown works (handler-replace contract).
+    REQUIRE(server.register_object("/pulp/test",
+                                   [](DBus::CallContext&) { return true; }));
+    REQUIRE(server.unregister_object("/pulp/test"));
+}
+#else  // ── object-server loopback: Linux-only runtime; stub elsewhere ────────
+TEST_CASE("DBus object-server loopback round-trips a method call",
+          "[platform][dbus][objectserver][issue-L7a1]") {
+    SUCCEED("D-Bus object server is a Linux-only runtime backend");
+}
+#endif
 
 #if defined(__linux__)
 TEST_CASE("Linux portal backend honest-fails when no portal is running",
