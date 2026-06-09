@@ -327,6 +327,12 @@ private:
     void register_wheel_event_api();
     void register_context_menu_event_api();
     void register_drop_event_api();
+    void register_widget_style_background_color_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_shadow_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_opacity_api();
+    void register_widget_style_overflow_api();
+    void register_widget_style_background_gradient_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_box_shadow_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_style_cursor_direction_api();
     void register_widget_style_filter_clip_api(std::function<canvas::Color(const std::string&)> parse_color);
     void register_widget_style_blend_api();
