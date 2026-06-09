@@ -112,12 +112,28 @@ and interpolate. Pulp doesn't ship a smoother — most DSP that needs
 one rolls a tiny `LinearSmoother { current, target, step }`
 manually. Future helper TBD.
 
+## Block-scoped runtime contracts
+
+`pulp::format::ProcessBlock` is the additive runtime contract for
+new graph, offline-render, sampler, and generated-audio paths. It does
+not replace `Processor::process()` yet. It packages the existing
+`ProcessContext` with fixed-capacity `BusBufferSet`, non-owning
+`EventBlock`, caller-owned `BlockScratch`, explicit `ProcessMode`,
+render speed, and reset/bypass/tail/transport-jump flags.
+
+The contract is deliberately non-owning: bus audio is borrowed from the
+host or renderer, event containers are owned by adapters, and scratch
+memory is provided before the callback. This keeps the same hard
+real-time rule as `Processor::process()`: no hidden allocation, locks,
+file I/O, logging, package work, or host calls in the audio callback.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
   — `snapshot()`, `snapshot_modulated()`, `set_value_rt()`,
   `pump_listeners()`.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
+* [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
   — the no-allocation contract.
 * sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
   and #29 (don't deref atomics per sample).

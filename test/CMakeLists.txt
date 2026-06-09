@@ -1902,6 +1902,9 @@ pulp_add_test_suite(pulp-test-environment LIBRARIES pulp::platform)
 # Runtime tests
 pulp_add_test_suite(pulp-test-runtime LIBRARIES pulp::runtime)
 
+# Additive process-block contract for graph/offline/sampler runtime slices.
+pulp_add_test_suite(pulp-test-process-block LIBRARIES pulp::format)
+
 # AbstractFifo (index-pair SPSC FIFO management)
 pulp_add_test_suite(pulp-test-abstract-fifo LIBRARIES pulp::runtime)
 
