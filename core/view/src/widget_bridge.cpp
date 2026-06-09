@@ -1371,13 +1371,7 @@ void WidgetBridge::register_api() {
 
     register_widget_text_runs_api(parseHexColor);
 
-    engine_.register_function("setBackground", [this, parseHexColor](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (v && !hex.empty()) v->set_background_color(parseHexColor(hex));
-        return choc::value::Value();
-    });
+    register_widget_style_background_color_api(parseHexColor);
 
     register_svg_api(parseHexColor);
 
@@ -1391,62 +1385,15 @@ void WidgetBridge::register_api() {
 
     register_widget_border_side_api(parseHexColor);
 
-    // pulp #1026 — RN-shaped shadow primitive. RN's View style-prop names
-    // are { shadowColor, shadowOffset: {x,y}, shadowOpacity, shadowRadius }
-    // — none of which carries spread or inset. We lower these onto the
-    // existing pulp #925 box-shadow primitive (which carries spread+inset
-    // for CSS parity) by:
-    //   - hex carrying alpha 1.0 ('#RRGGBBff')
-    //   - composing shadowOpacity into the alpha channel (0..1)
-    //   - using shadowRadius as the blur, spread = 0, inset = false.
-    // The underlying setBoxShadow is left unchanged so CSS-style consumers
-    // keep working unaltered.
-    engine_.register_function("setShadow", [this, parseHexColor](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto hex = args.get<std::string>(1, "#000000ff");
-        auto ox = static_cast<float>(args.get<double>(2, 0.0));
-        auto oy = static_cast<float>(args.get<double>(3, 0.0));
-        auto opacity = static_cast<float>(args.get<double>(4, 1.0));
-        auto radius = static_cast<float>(args.get<double>(5, 0.0));
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (!v) return choc::value::Value();
-        auto color = parseHexColor(hex);
-        opacity = std::clamp(opacity, 0.0f, 1.0f);
-        // RN composes opacity multiplicatively with whatever alpha came
-        // from shadowColor. Default shadowColor is opaque black, so
-        // opacity alone drives the final alpha for 99% of call sites.
-        color.a *= opacity;
-        v->set_box_shadow(ox, oy, /*blur=*/radius, /*spread=*/0.0f,
-                          color, /*inset=*/false);
-        return choc::value::Value();
-    });
+    register_widget_style_shadow_api(parseHexColor);
 
     register_wheel_event_api();
 
-    engine_.register_function("setOpacity", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto alpha = args.get<double>(1, 1.0);
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_opacity((float)alpha);
-        return choc::value::Value();
-    });
+    register_widget_style_opacity_api();
 
     register_widget_typography_color_api(parseHexColor);
 
-    engine_.register_function("setOverflow", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto mode = args.get<std::string>(1, "hidden");
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (!v) return choc::value::Value();
-        // pulp DIVERGE→PASS sweep — accept all 3 CSS overflow keywords
-        // (visible / hidden / scroll). `scroll` clips painted pixels
-        // like `hidden` (no scrollbar layer yet) but propagates through
-        // Yoga so the layout engine knows about the clipping context.
-        if (mode == "visible")      v->set_overflow(View::Overflow::visible);
-        else if (mode == "scroll")  v->set_overflow(View::Overflow::scroll);
-        else                        v->set_overflow(View::Overflow::hidden);
-        return choc::value::Value();
-    });
+    register_widget_style_overflow_api();
     register_layout_box_model_api();
 
     register_canvas2d_api(parseColor);
@@ -1486,56 +1433,8 @@ void WidgetBridge::register_api() {
 
     register_widget_style_background_subproperty_api();
 
-    // setBackgroundGradient(id, "linear-gradient(to right, #ff0000, #0000ff)")
-    engine_.register_function("setBackgroundGradient", [this, parseColor](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto gradient = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (!v || gradient.empty()) return choc::value::Value();
-
-        // CSS gradient parsing lives in the shared helper (css_gradient.cpp)
-        // so the JS bridge, the native design-import materializer, and baked
-        // C++ codegen resolve gradients identically. parseColor is threaded
-        // through because the bridge's parser also resolves named colors.
-        apply_css_background_gradient(*v, gradient, parseColor);
-        return choc::value::Value();
-    });
-
-    // setBoxShadow(id, offsetX, offsetY, blur, spread, color, inset)
-    //   inset is optional; truthy values (true / "inset" / 1) flip the
-    //   shadow to render inside the box. Issue-925.
-    engine_.register_function("setBoxShadow", [this, parseHexColor](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto ox = static_cast<float>(args.get<double>(1, 0));
-        auto oy = static_cast<float>(args.get<double>(2, 2));
-        auto blur = static_cast<float>(args.get<double>(3, 4));
-        auto spread = static_cast<float>(args.get<double>(4, 0));
-        auto hex = args.get<std::string>(5, "#00000050");
-        bool inset = false;
-        if (args.numArgs > 6 && args[6] != nullptr) {
-            const auto& v6 = *args[6];
-            if (v6.isBool()) inset = v6.getBool();
-            else if (v6.isInt32() || v6.isInt64()) inset = v6.getInt64() != 0;
-            else if (v6.isFloat32() || v6.isFloat64()) inset = v6.getFloat64() != 0.0;
-            else if (v6.isString()) {
-                auto s = std::string(v6.getString());
-                inset = (s == "inset" || s == "true" || s == "1");
-            }
-        }
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_box_shadow(ox, oy, blur, spread, parseHexColor(hex), inset);
-        return choc::value::Value();
-    });
-
-    // clearBoxShadow(id) — companion of setBoxShadow; lets React's diff
-    // reconciler remove a shadow when the prop is dropped without having
-    // to recreate the widget. Issue-925.
-    engine_.register_function("clearBoxShadow", [this](choc::javascript::ArgumentList args) {
-        auto id = args.get<std::string>(0, "");
-        auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->clear_box_shadow();
-        return choc::value::Value();
-    });
+    register_widget_style_background_gradient_api(parseColor);
+    register_widget_style_box_shadow_api(parseHexColor);
 
 
     register_shader_widget_api();

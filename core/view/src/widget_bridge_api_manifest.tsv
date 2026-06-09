@@ -106,7 +106,7 @@ getText	widget_value	function	core/view/src/widget_bridge/widget_value_content_a
 setPanelStyle	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setScrollContentSize	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setTextRuns	typography	function	core/view/src/widget_bridge/text_runs_api.cpp
-setBackground	css_style	function	core/view/src/widget_bridge.cpp
+setBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 createSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgViewBox	svg	function	core/view/src/widget_bridge/svg_api.cpp
@@ -144,11 +144,11 @@ setBorderTopWidth	css_style	function	core/view/src/widget_bridge/border_side_api
 setBorderRightWidth	css_style	function	core/view/src/widget_bridge/border_side_api.cpp
 setBorderBottomWidth	css_style	function	core/view/src/widget_bridge/border_side_api.cpp
 setBorderLeftWidth	css_style	function	core/view/src/widget_bridge/border_side_api.cpp
-setShadow	css_style	function	core/view/src/widget_bridge.cpp
+setShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 registerWheel	events	function	core/view/src/widget_bridge/event_api.cpp
-setOpacity	css_style	function	core/view/src/widget_bridge.cpp
+setOpacity	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 setTextColor	typography	function	core/view/src/widget_bridge/typography_api.cpp
-setOverflow	css_style	function	core/view/src/widget_bridge.cpp
+setOverflow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 setBoxSizing	layout	function	core/view/src/widget_bridge/layout_api.cpp
 canvasClear	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasRect	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
@@ -247,9 +247,9 @@ setBackgroundClip	css_style	function	core/view/src/widget_bridge/style_storage_a
 setBackgroundOrigin	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setBackgroundPosition	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setBackgroundSize	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
-setBackgroundGradient	css_style	function	core/view/src/widget_bridge.cpp
-setBoxShadow	css_style	function	core/view/src/widget_bridge.cpp
-clearBoxShadow	css_style	function	core/view/src/widget_bridge.cpp
+setBackgroundGradient	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
+setBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
+clearBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 beginPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 drawPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 compileShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
