@@ -92,6 +92,10 @@ void SampleSlotBank::reset() noexcept {
     published_.write({});
 }
 
+void SampleSlotBank::release() noexcept {
+    clear_unprepared();
+}
+
 bool SampleSlotBank::valid_slot(std::uint32_t slot_index) const noexcept {
     return slot_index < slot_count_;
 }

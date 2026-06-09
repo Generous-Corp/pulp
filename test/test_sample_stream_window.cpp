@@ -8,6 +8,7 @@
 
 using Catch::Matchers::WithinAbs;
 using pulp::audio::Buffer;
+using pulp::audio::BufferView;
 using pulp::audio::SampleStreamPageDescriptor;
 using pulp::audio::SampleStreamPageState;
 using pulp::audio::SampleStreamWindow;
@@ -282,6 +283,37 @@ TEST_CASE("SampleStreamWindow rejects stale generations and overlapping ready pa
                                     .start_frame = 2,
                                     .valid_frames = 4,
                                 }));
+}
+
+TEST_CASE("SampleStreamWindow rejects malformed channel pointers",
+          "[audio][sampler][stream-window][edge]") {
+    SampleStreamWindow window;
+    REQUIRE(window.prepare(SampleStreamWindowConfig{
+        .channels = 1,
+        .page_count = 1,
+        .page_frames = 4,
+    }));
+
+    float* missing_channel[] = {nullptr};
+    BufferView<float> malformed(missing_channel, 1, 4);
+    REQUIRE(window.begin_fill_page(0));
+    REQUIRE_FALSE(window.copy_to_filling_page(0, malformed, 4));
+    REQUIRE(window.cancel_fill_page(0));
+
+    Buffer<float> source(1, 4);
+    fill_channel(source, 0, 1.0f);
+    publish_page(window, 0, 8, 0, source, 4);
+
+    const auto result = window.read_frames(
+        malformed,
+        SampleStreamWindowReadRequest{
+            .stream_generation = 8,
+            .start_frame = 0,
+            .frames = 4,
+        });
+    REQUIRE(result.requested_frames == 0);
+    REQUIRE(result.copied_frames == 0);
+    REQUIRE(result.missed_frames == 0);
 }
 
 TEST_CASE("SampleStreamWindow gates ready-page reuse through retire generations",

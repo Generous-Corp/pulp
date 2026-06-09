@@ -25,7 +25,7 @@ bool PublishedSampleStore::prepare(const PublishedSampleStoreConfig& config) {
 
 void PublishedSampleStore::release() noexcept {
     std::lock_guard<std::mutex> lock(load_mutex_);
-    slots_.reset();
+    slots_.release();
     std::vector<float>().swap(load_scratch_);
     config_ = {};
     storage_ready_ = false;
@@ -38,6 +38,7 @@ bool PublishedSampleStore::ensure_capacity(
         if (slots_.slot_count() >= config.slot_count &&
             slots_.max_channels() >= config.max_channels &&
             slots_.max_frames_per_slot() >= config.max_frames_per_slot) {
+            slots_.reset();
             config_ = config;
             return true;
         }

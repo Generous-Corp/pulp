@@ -215,12 +215,9 @@ bool SampleStreamWindow::copy_to_filling_page_impl(
         auto* destination = mutable_page_channel(page_index, channel);
         if (destination == nullptr) return false;
 
-        if (channel < source.num_channels()) {
-            const auto* input = source.channel_ptr(channel);
-            std::copy_n(input, frame_count, destination);
-        } else {
-            std::fill_n(destination, frame_count, 0.0f);
-        }
+        const auto* input = source.channel_ptr(channel);
+        if (input == nullptr) return false;
+        std::copy_n(input, frame_count, destination);
     }
     return true;
 }
@@ -402,6 +399,9 @@ SampleStreamWindowReadResult SampleStreamWindow::read_frames(
     const SampleStreamWindowReadRequest& request) noexcept {
     SampleStreamWindowReadResult result;
     if (!prepared_ || destination.empty() || request.frames == 0) return result;
+    for (std::size_t channel = 0; channel < destination.num_channels(); ++channel) {
+        if (destination.channel_ptr(channel) == nullptr) return result;
+    }
 
     result.requested_frames = std::min<std::uint64_t>(
         request.frames,

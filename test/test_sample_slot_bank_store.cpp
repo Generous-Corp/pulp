@@ -162,7 +162,9 @@ TEST_CASE("SampleSlotBank publishes buffers through high-level helper",
     const auto published_c = bank.read_published_view();
     REQUIRE(published_c.valid);
     REQUIRE(published_c.generation == 3);
-    REQUIRE(bank.slot_state(published_a.slot_index) == SampleSlotState::Published);
+    REQUIRE(published_c.slot_index == published_a.slot_index);
+    REQUIRE(bank.slot_state(published_c.slot_index) == SampleSlotState::Published);
+    REQUIRE_FALSE(bank.slot_view_valid(published_a));
     REQUIRE(bank.slot_state(published_b.slot_index) == SampleSlotState::Retired);
     REQUIRE(bank.slot_view_valid(published_b));
     REQUIRE(bank.acknowledge_audio_generation(published_c.generation));
@@ -256,6 +258,15 @@ TEST_CASE("PublishedSampleStore enforces fixed publication capacity",
     REQUIRE(store.populate_channel_ptrs(replacement_view, replacement_out, 1));
     REQUIRE(replacement_out[0][0] == 20.0f);
     REQUIRE(replacement_out[0][2] == 22.0f);
+
+    REQUIRE(store.prepare(PublishedSampleStoreConfig{2, 1, 4}));
+    REQUIRE_FALSE(store.has_sample());
+
+    store.release();
+    REQUIRE_FALSE(store.prepared());
+    REQUIRE(store.slot_count() == 0);
+    REQUIRE(store.prepare(PublishedSampleStoreConfig{3, 1, 4}));
+    REQUIRE(store.slot_count() == 3);
 }
 
 TEST_CASE("SampleSlotBank rejects frame-count mismatches on one-shot writes",

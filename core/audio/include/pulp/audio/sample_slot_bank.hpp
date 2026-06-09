@@ -45,6 +45,8 @@ public:
                  std::uint64_t max_frames_per_slot);
     // Offline/quiescent only; not safe while audio readers or publishers are live.
     void reset() noexcept;
+    // Offline/quiescent only; releases storage and clears the capacity contract.
+    void release() noexcept;
 
     std::uint32_t slot_count() const noexcept { return slot_count_; }
     std::uint32_t max_channels() const noexcept { return max_channels_; }
