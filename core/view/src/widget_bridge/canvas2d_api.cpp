@@ -1,6 +1,7 @@
 // widget_bridge/canvas2d_api.cpp - Canvas2D registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/runtime/base64.hpp>
 
@@ -42,9 +43,9 @@ std::string bridge_base64_encode(const std::vector<uint8_t>& data) {
 } // namespace
 
 void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseColor = std::move(parse_color);
-
-    engine_.register_function("createCanvas", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createCanvas", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto c = std::make_unique<CanvasWidget>(); c->set_id(id);
         c->set_native_gpu_texture_provider([this, id]() {
@@ -55,12 +56,11 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Canvas drawing
-    engine_.register_function("canvasClear", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClear", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, ""))))
             c->clear_commands();
         return choc::value::Value();
     });
-
     // Canvas 2D API — full CanvasRenderingContext2D equivalent
     // pulp #964 — Two registered names for the same handler:
     //   * `canvasRect`     — legacy direct-bridge name used by hand-written
@@ -98,10 +98,10 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         }
         return choc::value::Value();
     };
-    engine_.register_function("canvasRect", canvasRectHandler);
-    engine_.register_function("canvasFillRect", canvasRectHandler);
+    register_bridge_function(api, "canvasRect", canvasRectHandler);
+    register_bridge_function(api, "canvasFillRect", canvasRectHandler);
 
-    engine_.register_function("canvasStrokeRect", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasStrokeRect", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -120,7 +120,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasFillCircle", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasFillCircle", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_circle;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -131,7 +131,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasStrokeLine", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasStrokeLine", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_line;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -143,7 +143,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasFillText", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasFillText", [this, parseColor](choc::javascript::ArgumentList args) {
         auto cid = args.get<std::string>(0, "");
         auto* c = dynamic_cast<CanvasWidget*>(widget(cid));
         if (!c) return choc::value::Value();
@@ -261,7 +261,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // Args: (id, text, x, y, fontSize, color, maxWidth?). Color carries
     // strokeStyle; lineWidth is set ahead of the call by the JS shim's
     // _syncStrokeState path (canvasSetLineWidth + canvasSetStrokeColor).
-    engine_.register_function("canvasStrokeText", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasStrokeText", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_text;
             cmd.text = args.get<std::string>(1, "");
@@ -274,7 +274,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetFillColor", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetFillColor", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_color;
             cmd.color = parseColor(args.get<std::string>(1, "#fff"));
@@ -283,7 +283,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetStrokeColor", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetStrokeColor", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_color;
             cmd.color = parseColor(args.get<std::string>(1, "#fff"));
@@ -292,7 +292,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetLineWidth", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetLineWidth", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_width;
             cmd.extra = (float)args.get<double>(1, 1);
@@ -301,7 +301,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetFont", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetFont", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_font;
             cmd.text = args.get<std::string>(1, "Inter");
@@ -320,7 +320,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // `Canvas::set_font_full` on replay; Skia honours weight/slant via
     // `make_font(family, size, weight, slant)`. CG falls through to the
     // base default (family+size only).
-    engine_.register_function("canvasSetFontFull", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetFontFull", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_font_full;
             cmd.text  = args.get<std::string>(1, "Inter");
@@ -334,14 +334,14 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Path operations
-    engine_.register_function("canvasBeginPath", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasBeginPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::begin_path; c->add_command(cmd);
         }
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasMoveTo", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasMoveTo", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::move_to;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -350,7 +350,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasLineTo", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasLineTo", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::line_to;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -359,7 +359,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasQuadTo", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasQuadTo", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::quad_to;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -369,7 +369,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasCubicTo", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasCubicTo", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::cubic_to;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -380,14 +380,14 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasClosePath", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClosePath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::close_path; c->add_command(cmd);
         }
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasFillPath", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasFillPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             // pulp DIVERGE→PASS sweep — read the optional fillRule int
             // (0 = nonzero, 1 = evenodd) so the spec arg actually
@@ -403,7 +403,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasStrokePath", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasStrokePath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_path; c->add_command(cmd);
         }
@@ -420,7 +420,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     //   canvasPathRoundRect(id, x, y, w, h,
     //                       tl_x, tl_y, tr_x, tr_y,
     //                       br_x, br_y, bl_x, bl_y)
-    engine_.register_function("canvasPathArc", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasPathArc", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_arc;
             cmd.x     = (float)args.get<double>(1, 0);
@@ -434,7 +434,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasPathArcTo", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasPathArcTo", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_arc_to;
             cmd.x     = (float)args.get<double>(1, 0);
@@ -447,7 +447,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasPathEllipse", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasPathEllipse", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_ellipse;
             cmd.x     = (float)args.get<double>(1, 0);   // cx
@@ -463,7 +463,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasPathRoundRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasPathRoundRect", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_round_rect;
             cmd.x = (float)args.get<double>(1, 0);
@@ -482,14 +482,14 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // State
-    engine_.register_function("canvasSave", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSave", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::save; c->add_command(cmd);
         }
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasRestore", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasRestore", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::restore; c->add_command(cmd);
         }
@@ -497,7 +497,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Transform
-    engine_.register_function("canvasTranslate", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasTranslate", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::translate;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -506,7 +506,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasScale", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasScale", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::scale;
             cmd.x=(float)args.get<double>(1,1); cmd.y=(float)args.get<double>(2,1);
@@ -515,7 +515,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasRotate", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasRotate", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::rotate;
             cmd.extra=(float)args.get<double>(1,0);
@@ -525,14 +525,14 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Path builder API from JS
-    engine_.register_function("beginPath", [](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "beginPath", [](choc::javascript::ArgumentList) {
         // Store path commands for deferred rendering via CanvasWidget
         return choc::value::Value();
     });
 
     // drawPath(canvasId, commands) — draw a path on a CanvasWidget
     // Commands: "M x y" (move), "L x y" (line), "Q cx cy x y" (quad), "C c1x c1y c2x c2y x y" (cubic), "Z" (close)
-    engine_.register_function("drawPath", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "drawPath", [](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pathStr = args.get<std::string>(1, "");
         auto fillHex = args.get<std::string>(2, "");
@@ -544,7 +544,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // measureText(text, fontSize) → {width, ascent, descent, lineHeight}
-    engine_.register_function("measureText", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "measureText", [](choc::javascript::ArgumentList args) {
         auto text = args.get<std::string>(0, "");
         auto size = static_cast<float>(args.get<double>(1, 14.0));
         // Return approximate metrics (exact when Skia canvas is available)
@@ -561,7 +561,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P1: Canvas gradient fills
-    engine_.register_function("canvasSetLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
@@ -576,7 +576,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetRadialGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetRadialGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_gradient_radial;
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
@@ -596,7 +596,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // single-circle bridge silently dropped (x0, y0, r0) which broke
     // offset / sized inner-circle gradients on both backends).
     // Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, color2, pos2, ...)
-    engine_.register_function("canvasSetRadialGradientTwoCircles",
+    register_bridge_function(api, "canvasSetRadialGradientTwoCircles",
             [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd;
@@ -618,7 +618,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasClearGradient", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClearGradient", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_fill_gradient;
             c->add_command(cmd);
@@ -634,7 +634,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // crashing. Stops are color/position pairs starting at arg index 5,
     // matching the fill counterpart so the JS shim shares its packing
     // logic.
-    engine_.register_function("canvasSetStrokeLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetStrokeLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_linear;
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
@@ -649,7 +649,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Single-circle radial. Args: (id, cx, cy, radius, color1, pos1, ...).
-    engine_.register_function("canvasSetStrokeRadialGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetStrokeRadialGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_radial;
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
@@ -664,7 +664,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Two-circle radial. Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, ...).
-    engine_.register_function("canvasSetStrokeRadialGradientTwoCircles",
+    register_bridge_function(api, "canvasSetStrokeRadialGradientTwoCircles",
             [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd;
@@ -685,7 +685,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Conic / sweep. Args: (id, cx, cy, startAngle, color1, pos1, ...).
-    engine_.register_function("canvasSetStrokeConicGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetStrokeConicGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_conic;
             cmd.x = (float)args.get<double>(1, 0);
@@ -701,7 +701,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // Reset stroke shader → solid stroke colour.
-    engine_.register_function("canvasClearStrokeGradient", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClearStrokeGradient", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_stroke_gradient;
             c->add_command(cmd);
@@ -713,7 +713,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // already exposes set_fill_gradient_conic via SkGradientShader::MakeSweep
     // (skia_canvas.cpp line ~917); CG degrades to the first-stop colour.
     // Args: (id, cx, cy, startAngle, color1, pos1, color2, pos2, ...)
-    engine_.register_function("canvasSetConicGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetConicGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_gradient_conic;
             cmd.x = (float)args.get<double>(1, 0);   // cx
@@ -738,7 +738,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     //   src      — image source (file path, "data:" URL, or "" for clear)
     //   tile_x   — "repeat" | "no-repeat"
     //   tile_y   — "repeat" | "no-repeat"
-    engine_.register_function("canvasSetFillPattern", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetFillPattern", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_pattern;
             cmd.text = args.get<std::string>(1, "");          // image source
@@ -758,7 +758,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // Stroke counterpart — same shape, different command type. Routes
     // through set_stroke_pattern on the live canvas; CG falls back to
     // solid stroke colour.
-    engine_.register_function("canvasSetStrokePattern", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetStrokePattern", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_pattern;
             cmd.text = args.get<std::string>(1, "");
@@ -777,7 +777,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // CGContextSetMiterLimit (CG). Spec: non-positive / non-finite
     // values are silently ignored — backends do the clamp.
     // Args: (id, limit)
-    engine_.register_function("canvasSetMiterLimit", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetMiterLimit", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_miter_limit;
             cmd.extra = (float)args.get<double>(1, 10.0); // spec default = 10
@@ -791,7 +791,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // drawImage. Skia translates to SkSamplingOptions, CG to
     // CGContextSetInterpolationQuality.
     // Args: (id, enabled[, quality]) where quality ∈ "low" | "medium" | "high".
-    engine_.register_function("canvasSetImageSmoothing", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetImageSmoothing", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_image_smoothing;
             cmd.int_val = args.get<bool>(1, true) ? 1 : 0;
@@ -810,7 +810,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // / strokeText. The shim coerces unknown strings to "ltr" before
     // hitting the bridge, so we accept the resolved enum directly.
     // Args: (id, enumVal) where enumVal ∈ 0=ltr | 1=rtl | 2=inherit.
-    engine_.register_function("canvasSetDirection", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetDirection", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_direction;
             int v = static_cast<int>(args.get<double>(1, 0.0));
@@ -829,7 +829,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // a follow-up wires the parser through (#1503 owns the View-side
     // parser; canvas2d shares it as it lands).
     // Args: (id, cssFilterString) — "none" disables.
-    engine_.register_function("canvasSetFilter", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetFilter", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_filter;
             cmd.text = args.get<std::string>(1, "none");
@@ -839,7 +839,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P1: Canvas arc — for pie charts, circular progress, arcs
-    engine_.register_function("canvasArc", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasArc", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_arc;
             cmd.x = (float)args.get<double>(1, 0);     // cx
@@ -855,7 +855,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P1: Canvas textAlign / textBaseline
-    engine_.register_function("canvasSetTextAlign", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetTextAlign", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_text_align;
             auto align = args.get<std::string>(1, "left");
@@ -865,7 +865,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetTextBaseline", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetTextBaseline", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_text_baseline;
             auto bl = args.get<std::string>(1, "top");
@@ -876,7 +876,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P1: Canvas clearRect
-    engine_.register_function("canvasClearRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClearRect", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_rect;
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
@@ -887,7 +887,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P1: Canvas clipRect (was in enum but never registered)
-    engine_.register_function("canvasClipRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClipRect", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip_rect;
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
@@ -898,7 +898,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P2: Canvas fillRoundedRect / strokeRoundedRect / strokeCircle (existed in C++ but no JS bridge)
-    engine_.register_function("canvasFillRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasFillRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rounded_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -910,7 +910,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasStrokeRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasStrokeRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_rounded_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -923,7 +923,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasStrokeCircle", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasStrokeCircle", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_circle;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -936,7 +936,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P2: Canvas globalAlpha
-    engine_.register_function("canvasSetGlobalAlpha", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetGlobalAlpha", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_global_alpha;
             cmd.extra = (float)args.get<double>(1, 1.0);
@@ -946,7 +946,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // P2: Canvas lineCap / lineJoin
-    engine_.register_function("canvasSetLineCap", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetLineCap", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_cap;
             auto cap = args.get<std::string>(1, "butt");
@@ -956,7 +956,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetLineJoin", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetLineJoin", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_join;
             auto join = args.get<std::string>(1, "miter");
@@ -1001,7 +1001,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     };
 
     // P3: Canvas globalCompositeOperation (blend mode) — back-compat alias
-    engine_.register_function("canvasSetBlendMode", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetBlendMode", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             auto mode = args.get<std::string>(1, "source-over");
             int idx = cssCompositeOpToBlendModeIndex(mode);
@@ -1016,7 +1016,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // canvasGlobalCompositeOperation — full CanvasRenderingContext2D
     // globalCompositeOperation surface (issue-896). Accepts every standard
     // CSS string and falls back to no-op on unknown values.
-    engine_.register_function("canvasGlobalCompositeOperation", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasGlobalCompositeOperation", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             auto mode = args.get<std::string>(1, "source-over");
             int idx = cssCompositeOpToBlendModeIndex(mode);
@@ -1031,7 +1031,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // canvasSetTransform(id, a, b, c, d, e, f) — replace current transform
     // with the affine matrix (issue-896). Used for devicePixelRatio scaling
     // (ctx.setTransform(scale, 0, 0, scale, 0, 0)) and Spectr FilterBank.
-    engine_.register_function("canvasSetTransform", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetTransform", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_transform;
             cmd.x  = (float)args.get<double>(1, 1.0); // a (scaleX)
@@ -1048,7 +1048,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // canvasClip(id, fillRule?) — intersect clip region with current path (issue-896).
     // pulp DIVERGE→PASS sweep — also threads optional fillRule int (0 =
     // nonzero, 1 = evenodd). Same as canvasFillPath above.
-    engine_.register_function("canvasClip", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasClip", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip;
             cmd.int_val = static_cast<int>(args.get<double>(1, 0));
@@ -1067,7 +1067,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // source-rect 9-arg form. Bridge stashes it in x2/y2/x3/y3 + sets
     // has_source_rect; the canvas_widget renderer routes through the
     // _rect overload so the source sub-rectangle lands on the dst rect.
-    engine_.register_function("canvasDrawImage", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasDrawImage", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::draw_image;
             cmd.text = args.get<std::string>(1, ""); // image source path
@@ -1105,7 +1105,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // CG fallback) we return font-size estimates so JS callers always get
     // a populated TextMetrics object with non-zero width for non-empty
     // text. (HTML5 spec — TextMetrics never has missing fields.)
-    engine_.register_function("canvasMeasureText", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasMeasureText", [this](choc::javascript::ArgumentList args) {
         auto text = args.get<std::string>(1, "");
         auto family = args.get<std::string>(2, "Inter");
         float size = static_cast<float>(args.get<double>(3, 14.0));
@@ -1155,7 +1155,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // Pattern is an HTML5-style array; an odd-length array is
     // duplicated to even per the spec — the JS prelude handles that
     // before calling here.
-    engine_.register_function("canvasSetLineDash", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetLineDash", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_dash;
             cmd.extra = static_cast<float>(args.get<double>(2, 0.0)); // phase
@@ -1206,7 +1206,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // by `canvasSetFillStyle` etc., so all the CSS color forms
     // (`#rgb`, `#rrggbb`, `rgba(...)`, `hsl(...)`, `transparent`,
     // `red`, …) work uniformly.
-    engine_.register_function("canvasSetShadowColor", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetShadowColor", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_color;
             cmd.color = parseColor(args.get<std::string>(1, "rgba(0,0,0,0)"));
@@ -1215,7 +1215,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetShadowBlur", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetShadowBlur", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_blur;
             // HTML5 spec: shadowBlur must be non-negative finite; reject
@@ -1228,7 +1228,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetShadowOffsetX", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetShadowOffsetX", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_offset_x;
             cmd.extra = static_cast<float>(args.get<double>(1, 0.0));
@@ -1237,7 +1237,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasSetShadowOffsetY", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasSetShadowOffsetY", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_offset_y;
             cmd.extra = static_cast<float>(args.get<double>(1, 0.0));
@@ -1255,7 +1255,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // "not available" and fall back to whatever they'd do with a stub
     // 1×1 placeholder. The base64 wrapping keeps the result usable
     // across QuickJS / JSC / V8 without a Uint8ClampedArray bridge.
-    engine_.register_function("canvasGetImageData", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasGetImageData", [this](choc::javascript::ArgumentList args) {
         int w = static_cast<int>(args.get<double>(3, 0.0));
         int h = static_cast<int>(args.get<double>(4, 0.0));
         if (w < 0) w = 0;
@@ -1287,7 +1287,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // records a put_image_data command. The widget's paint() pass
     // applies it via Canvas::write_pixels() — currently only Skia
     // implements that end-to-end; other backends are a no-op.
-    engine_.register_function("canvasPutImageData", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "canvasPutImageData", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             auto b64 = args.get<std::string>(1, "");
             int width  = static_cast<int>(args.get<double>(2, 0.0));
