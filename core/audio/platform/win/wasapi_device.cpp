@@ -83,13 +83,32 @@ bool WasapiDevice::open(const DeviceConfig& config) {
     if (config_.share_mode == ShareMode::exclusive) {
         hr = initialize_exclusive_(mix_format);
     } else {
-        hr = audio_client_->Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
-            requested_duration,
-            0,  // periodicity (must be 0 for shared mode)
-            mix_format,
-            nullptr);  // session GUID
+        // Shared mode. When the caller opted into low latency, try the
+        // IAudioClient3 engine-minimum-period path first (W4b); if it can't be
+        // taken (no IAudioClient3, unsupported format/period, or the call
+        // fails), honestly degrade to the standard shared Initialize below.
+        bool low_latency_ok = false;
+        if (config_.low_latency) {
+            HRESULT ll_hr = initialize_shared_low_latency_(mix_format);
+            if (SUCCEEDED(ll_hr)) {
+                low_latency_ok = true;
+                hr = ll_hr;
+            } else {
+                runtime::log_warn(
+                    "WASAPI: shared low-latency (IAudioClient3) unavailable "
+                    "(0x{:08x}); falling back to standard shared init",
+                    static_cast<unsigned>(ll_hr));
+            }
+        }
+        if (!low_latency_ok) {
+            hr = audio_client_->Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+                requested_duration,
+                0,  // periodicity (must be 0 for shared mode)
+                mix_format,
+                nullptr);  // session GUID
+        }
     }
 
     CoTaskMemFree(mix_format);
@@ -209,6 +228,55 @@ HRESULT WasapiDevice::initialize_exclusive_(WAVEFORMATEX* fmt) {
     return hr;
 }
 
+HRESULT WasapiDevice::initialize_shared_low_latency_(WAVEFORMATEX* fmt) {
+    // IAudioClient3 (Win10+) exposes the engine's glitch-free period range for a
+    // given shared-mode format. We drive the stream at the MINIMUM period so the
+    // shared engine buffer is as small as the driver permits. If the interface
+    // or any of its calls is unavailable, the caller falls back to the standard
+    // shared Initialize.
+    IAudioClient3* client3 = nullptr;
+    HRESULT hr = audio_client_->QueryInterface(
+        __uuidof(IAudioClient3), reinterpret_cast<void**>(&client3));
+    if (FAILED(hr) || client3 == nullptr) {
+        return FAILED(hr) ? hr : E_NOINTERFACE;
+    }
+
+    // Query the supported shared-mode engine period range for this format.
+    // Periods are expressed in frames at the format's sample rate.
+    UINT32 default_period = 0, fundamental = 0, min_period = 0, max_period = 0;
+    hr = client3->GetSharedModeEnginePeriod(
+        fmt, &default_period, &fundamental, &min_period, &max_period);
+    if (FAILED(hr)) {
+        client3->Release();
+        return hr;
+    }
+
+    // InitializeSharedAudioStream requires the requested period to be a valid
+    // value in [min_period, max_period]. We want the lowest latency, so use the
+    // minimum the engine reported. AUTOCONVERTPCM is NOT set: we already opened
+    // at the device mix format, so no resampling is required.
+    hr = client3->InitializeSharedAudioStream(
+        AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+        min_period,
+        fmt,
+        nullptr);  // session GUID
+
+    client3->Release();  // audio_client_ still holds the initialized stream
+    return hr;
+}
+
+void WasapiDevice::on_device_invalidated_() {
+    runtime::log_warn(
+        "WASAPI: device invalidated ({} stream); stopping and notifying host",
+        flow_ == eCapture ? "capture" : "render");
+    // Stop the loop. The thread is about to break; stop()/close() called from
+    // the host (in response to the notification) will join us and release COM.
+    is_running_.store(false, std::memory_order_release);
+    // Notify the host so it can re-open the device. We do NOT attempt a
+    // transparent in-place reopen — clean-stop + notify is the contract.
+    if (owner_) owner_->fire_device_change();
+}
+
 void WasapiDevice::close() {
     if (render_client_)  { render_client_->Release();  render_client_  = nullptr; }
     if (capture_client_) { capture_client_->Release(); capture_client_ = nullptr; }
@@ -308,6 +376,7 @@ void WasapiDevice::render_thread_func() {
         // How many frames are available in the buffer?
         UINT32 padding = 0;
         HRESULT hr = audio_client_->GetCurrentPadding(&padding);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
         if (FAILED(hr)) continue;
 
         UINT32 available = buffer_frames_ - padding;
@@ -316,6 +385,7 @@ void WasapiDevice::render_thread_func() {
         // Get the output buffer from WASAPI
         BYTE* data = nullptr;
         hr = render_client_->GetBuffer(available, &data);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
         if (FAILED(hr)) continue;
 
         auto* interleaved = reinterpret_cast<float*>(data);
@@ -390,6 +460,7 @@ void WasapiDevice::capture_thread_func() {
         // GetNextPacketSize == 0.
         UINT32 packet_frames = 0;
         HRESULT hr = capture_client_->GetNextPacketSize(&packet_frames);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
         if (FAILED(hr)) continue;
 
         while (packet_frames > 0 && is_running_.load(std::memory_order_relaxed)) {
@@ -398,6 +469,7 @@ void WasapiDevice::capture_thread_func() {
             DWORD  flags        = 0;
 
             hr = capture_client_->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
             if (FAILED(hr) || frames == 0) {
                 if (SUCCEEDED(hr)) capture_client_->ReleaseBuffer(frames);
                 break;
@@ -458,6 +530,7 @@ void WasapiDevice::capture_thread_func() {
             sample_position_ += frames;
 
             hr = capture_client_->GetNextPacketSize(&packet_frames);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { on_device_invalidated_(); break; }
             if (FAILED(hr)) break;
         }
     }
@@ -717,7 +790,13 @@ std::unique_ptr<AudioDevice> WasapiSystem::create_device(const std::string& devi
         endpoint->Release();
     }
 
-    return std::make_unique<WasapiDevice>(device, flow);
+    auto wasapi_device = std::make_unique<WasapiDevice>(device, flow);
+    // Wire the back-pointer so the I/O thread can fire device-change on
+    // AUDCLNT_E_DEVICE_INVALIDATED (W4b). WasapiSystem outlives the devices it
+    // creates in normal usage; the device clears nothing on its side, it just
+    // calls fire_device_change() through this pointer.
+    wasapi_device->set_owner(this);
+    return wasapi_device;
 }
 
 DeviceInfo WasapiSystem::default_output_device() {

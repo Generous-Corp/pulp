@@ -61,14 +61,17 @@ cmake --build build
 
 ## Audio I/O (WASAPI)
 
-Pulp uses WASAPI (Windows Audio Session API) for low-latency audio on Windows. The implementation uses shared mode with event-driven buffering.
+Pulp uses WASAPI (Windows Audio Session API) for low-latency audio on Windows. The implementation defaults to shared mode with event-driven buffering, and also supports exclusive mode and a shared low-latency path.
 
 ### How It Works
 
-- **Shared mode**: audio is mixed with other applications (no exclusive device lock)
+- **Shared mode** (default): audio is mixed with other applications (no exclusive device lock)
+- **Exclusive mode**: `DeviceConfig::share_mode = ShareMode::exclusive` takes sole ownership of the endpoint and drives it at the device's minimum period for the lowest latency. If the endpoint disallows exclusive access or the mix format is unsupported there, `open()` honest-fails so the caller can fall back to shared.
+- **Shared low-latency**: `DeviceConfig::low_latency = true` (shared mode only) uses `IAudioClient3::InitializeSharedAudioStream` at the engine's minimum period. If `IAudioClient3` is unavailable or the call fails, Pulp degrades to the standard shared `Initialize` at the requested buffer size — never a half-open stream.
 - **Event-driven**: a background thread waits on buffer events, minimizing latency
 - **Float32 non-interleaved**: Pulp's callback receives per-channel buffers; interleaving to/from WASAPI's format is handled internally
 - **Thread priority**: the render thread runs at `THREAD_PRIORITY_TIME_CRITICAL`
+- **Device-invalidation recovery**: if the endpoint is removed or its sample rate / mix format changes (`AUDCLNT_E_DEVICE_INVALIDATED`), the I/O thread stops the stream cleanly and fires the `AudioSystem` device-change notification so the host can re-open at the new format. Pulp does not attempt a transparent in-place reopen.
 
 ### Device Enumeration
 

@@ -37,6 +37,16 @@ struct DeviceConfig {
     int input_channels = 0;
     int output_channels = 2;
     ShareMode share_mode = ShareMode::shared;  // Windows WASAPI only; see above
+
+    // Windows WASAPI only: opt into the shared-mode low-latency path
+    // (IAudioClient3::InitializeSharedAudioStream at the engine's minimum
+    // period). Only honored when `share_mode == ShareMode::shared`; ignored
+    // in exclusive mode (which already drives at the device minimum period)
+    // and on every non-Windows backend. Defaults false so existing callers
+    // and other backends are unaffected. If IAudioClient3 is unavailable or
+    // the low-latency init fails, the backend honestly degrades to the
+    // standard shared-mode Initialize at the requested buffer size.
+    bool low_latency = false;
 };
 
 // Audio callback context — passed to the render function
