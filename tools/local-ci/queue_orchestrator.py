@@ -182,6 +182,19 @@ def cancellation_result(
     }
 
 
+def complete_job_with_result_unlocked(job: dict, result: dict, result_path: Path | str) -> None:
+    job["status"] = "completed"
+    job["completed_at"] = result["completed_at"]
+    job["result_file"] = str(result_path)
+    job["overall"] = result.get("overall")
+    for key in ("superseded_by", "superseded_reason", "canceled_reason"):
+        if key in result:
+            job[key] = result[key]
+    job.pop("runner", None)
+    job.pop("active_targets", None)
+    job.pop("last_progress_at", None)
+
+
 def summarize_job(job: dict) -> str:
     targets = ",".join(job.get("targets") or []) or "none"
     validation = job.get("validation", "full")

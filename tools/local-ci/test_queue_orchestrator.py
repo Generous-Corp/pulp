@@ -130,6 +130,38 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertEqual(canceled["overall"], "canceled")
         self.assertEqual(canceled["canceled_reason"], "operator_canceled")
 
+    def test_terminal_result_completion_updates_job_state(self) -> None:
+        job = {
+            "id": "old",
+            "branch": "feature/q",
+            "sha": "a" * 40,
+            "priority": "normal",
+            "targets": ["mac"],
+            "queued_at": "2026-06-09T00:00:00+00:00",
+            "status": "running",
+            "runner": {"pid": 123},
+            "active_targets": {"mac": {"status": "running"}},
+            "last_progress_at": "2026-06-09T00:00:30+00:00",
+        }
+        result = self.mod.supersedence_result(
+            job,
+            "newer",
+            "newer_sha_queued",
+            now_iso_fn=lambda: "2026-06-09T00:01:00+00:00",
+        )
+
+        self.mod.complete_job_with_result_unlocked(job, result, "/tmp/result.json")
+
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["completed_at"], "2026-06-09T00:01:00+00:00")
+        self.assertEqual(job["result_file"], "/tmp/result.json")
+        self.assertEqual(job["overall"], "superseded")
+        self.assertEqual(job["superseded_by"], "newer")
+        self.assertEqual(job["superseded_reason"], "newer_sha_queued")
+        self.assertNotIn("runner", job)
+        self.assertNotIn("active_targets", job)
+        self.assertNotIn("last_progress_at", job)
+
     def test_completed_queue_trimming_keeps_newest_completed_and_running(self) -> None:
         queue = [
             {"id": "old", "status": "completed", "completed_at": "2026-06-09T00:00:00+00:00"},
