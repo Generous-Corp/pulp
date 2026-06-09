@@ -44,15 +44,35 @@ namespace pulp::audio::win {
 // period for low latency, with the documented AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED
 // re-activation retry. Shared mode stays the default.
 //
-// Still deferred (W4b follow-up):
-//   * `AUDCLNT_SHAREMODE_SHARED` low-latency variant
-//       (IAudioClient3::InitializeSharedAudioStream at the engine min period).
-//   * Transparent sample-rate-change / AUDCLNT_E_DEVICE_INVALIDATED recovery
-//       (today an invalidated stream stops cleanly; the host re-opens).
+// `AUDCLNT_SHAREMODE_SHARED` low-latency (W4b) is supported via IAudioClient3:
+// when `DeviceConfig::low_latency` is set on a shared-mode open we query
+// `GetSharedModeEnginePeriod` and call `InitializeSharedAudioStream` at the
+// engine's MINIMUM period (so the engine glitch-free buffer is as small as the
+// driver allows). If IAudioClient3 cannot be obtained, the format is rejected
+// by `IsFormatSupported`, the min period is out of the supported range, or
+// `InitializeSharedAudioStream` fails for any reason, we honestly degrade to
+// the standard shared-mode `Initialize` at the requested buffer size — never a
+// half-open stream.
+//
+// Device-invalidation / sample-rate-change recovery (W4b): the render/capture
+// threads watch for `AUDCLNT_E_DEVICE_INVALIDATED` (the HRESULT WASAPI returns
+// from GetBuffer / GetCurrentPadding / GetNextPacketSize when the endpoint
+// disappears, is reconfigured, or its mix format / sample rate changes under
+// us). On that error the thread stops cleanly (sets is_running_ false, breaks
+// its loop) and fires the AudioSystem device-change notification so the host
+// can re-open the device at the new format. Transparent in-place reopen is
+// deliberately NOT attempted — clean-stop + notify is the contract, matching
+// the hotplug notifier (issue #243).
 class WasapiDevice : public AudioDevice {
 public:
     explicit WasapiDevice(IMMDevice* device, EDataFlow flow = eRender);
     ~WasapiDevice() override;
+
+    // Set the owning AudioSystem so the I/O thread can fire device-change
+    // notifications on AUDCLNT_E_DEVICE_INVALIDATED (W4b). WasapiSystem wires
+    // this in create_device(). May be nullptr; if so, invalidation still stops
+    // the stream cleanly but no notification is dispatched.
+    void set_owner(AudioSystem* owner) { owner_ = owner; }
 
     bool open(const DeviceConfig& config) override;
     void close() override;
@@ -82,8 +102,23 @@ private:
     // HRESULT; on success audio_client_ is initialized and event-driven.
     HRESULT initialize_exclusive_(WAVEFORMATEX* fmt);
 
+    // Shared-mode low-latency Initialize via IAudioClient3 (W4b). Queries
+    // GetSharedModeEnginePeriod and calls InitializeSharedAudioStream at the
+    // engine's minimum supported period. Returns the HRESULT from
+    // InitializeSharedAudioStream on success, or a failure HRESULT if
+    // IAudioClient3 is unavailable / the format or period is unsupported — in
+    // which case the caller falls back to the standard shared Initialize.
+    HRESULT initialize_shared_low_latency_(WAVEFORMATEX* fmt);
+
+    // Handle AUDCLNT_E_DEVICE_INVALIDATED from an I/O thread (W4b): mark the
+    // stream not-running and fire the owning AudioSystem's device-change
+    // notification so the host can re-open. Idempotent-safe to call once per
+    // invalidation; the caller breaks its loop afterwards.
+    void on_device_invalidated_();
+
     IMMDevice*           device_         = nullptr;
     EDataFlow            flow_           = eRender;
+    AudioSystem*         owner_          = nullptr;  // for device-change notify (W4b)
     IAudioClient*        audio_client_   = nullptr;
     IAudioRenderClient*  render_client_  = nullptr;  // populated when flow_ == eRender
     IAudioCaptureClient* capture_client_ = nullptr;  // populated when flow_ == eCapture

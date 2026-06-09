@@ -153,8 +153,10 @@ audio_io:
     status: experimental
     platform: windows
     notes: >-
-      Shared-mode playback with IMMNotificationClient hotplug. Input
-      capture + exclusive-mode paths remain pending.
+      Shared-mode and exclusive-mode playback (DeviceConfig::share_mode),
+      a shared low-latency path via IAudioClient3 (DeviceConfig::low_latency),
+      IMMNotificationClient hotplug, and AUDCLNT_E_DEVICE_INVALIDATED recovery
+      (clean-stop + device-change notify; host re-opens).
   alsa:
     status: experimental
     platform: linux
@@ -867,8 +869,6 @@ limitations:
     - text: "Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process()."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.5"
   audio_io.wasapi:
-    - text: "Shared mode only; no exclusive mode."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
     - text: "Input capture not wired — input_view is always empty."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
     # Hotplug: IMMNotificationClient device-change callbacks are wired;

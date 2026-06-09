@@ -13,7 +13,7 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (21 items across 13 capabilities)
+### Known limitations (20 items across 13 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
@@ -28,7 +28,6 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](planning/production-readiness/05-auv3-mobile.md) |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](planning/production-readiness/01-format-adapters.md#1.5) |
-| `audio_io.wasapi` | Shared mode only; no exclusive mode. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.alsa` | No input capture path. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
