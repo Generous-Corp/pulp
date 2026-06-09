@@ -54,6 +54,25 @@ constexpr uint32_t role_to_atspi_role(View::AccessRole role) {
     return kRolePanel;
 }
 
+/// The AT-SPI role NAME for a Pulp AccessRole, returned by
+/// org.a11y.atspi.Accessible.GetRoleName (s). These are the canonical
+/// lowercase-with-spaces role strings from the AT-SPI2 IDL (the same names
+/// `atspi_role_get_name()` produces) so a screen reader that reads the name
+/// rather than the numeric role still gets the conventional label. Kept in
+/// lockstep with role_to_atspi_role() and locked by the offline table test.
+constexpr const char* role_to_atspi_role_name(View::AccessRole role) {
+    switch (role) {
+        case View::AccessRole::slider: return "slider";
+        case View::AccessRole::toggle: return "toggle button";
+        case View::AccessRole::label:  return "label";
+        case View::AccessRole::group:  return "panel";
+        case View::AccessRole::meter:  return "progress bar";
+        case View::AccessRole::image:  return "image";
+        case View::AccessRole::none:   return "panel";
+    }
+    return "panel";
+}
+
 // ── AtspiStateType values (subset) ───────────────────────────────────────────
 // AT-SPI's GetState returns a 64-bit state bitfield marshalled as two uint32
 // words (au of length 2: low word = states 0..31, high word = states 32..63).

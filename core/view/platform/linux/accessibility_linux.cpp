@@ -12,15 +12,25 @@
 // bus → a fresh private connection). DBus::connect_a11y_bus() handles the
 // discovery + switch; everything below talks to that connection.
 //
-// This slice (L7a-2) registers the process with the registry:
-//   1. connect to the a11y bus,
-//   2. export /org/a11y/atspi/accessible/root implementing
-//      org.a11y.atspi.Accessible + org.a11y.atspi.Application (+ the mandatory
-//      Introspectable + Properties interfaces),
-//   3. perform the org.a11y.atspi.Socket.Embed handshake against the registry
-//      so Orca discovers the process.
-// The per-widget object tree (Accessible per View, Component extents) is L7b;
-// Value + event signals are L7c — the notify_* hooks stay no-ops here.
+// What this TU exports:
+//   * /org/a11y/atspi/accessible/root — the APPLICATION accessible
+//     (org.a11y.atspi.Accessible + org.a11y.atspi.Application). Its
+//     GetChildren returns the top-level accessible Views.
+//   * /org/a11y/atspi/accessible/<n> — one object PER accessible View
+//     (org.a11y.atspi.Accessible + org.a11y.atspi.Component), built by a
+//     depth-first walk of the View tree (L7b). The Socket.Embed handshake
+//     against the registry (L7a-2) still links the application up to the
+//     desktop.
+//
+// The per-widget tree is rebuilt on accessibility_tree_changed(), which also
+// emits org.a11y.atspi.Event.Object.ChildrenChanged. Value + per-object
+// state/focus event signals are L7c — the notify_* hooks stay no-ops here.
+//
+// Tree-walk model (mirrors mac collect_accessible / Windows build_fragment_nodes):
+// depth-first; every View with a non-none AccessRole becomes one accessible
+// object; AccessRole::none containers are skipped as objects but recursed into,
+// so a deeply-nested accessible descendant re-parents onto the nearest
+// accessible ancestor (or onto the application root when there is none).
 //
 // Run-loop requirement: the registry calls methods on us asynchronously, so the
 // host must pump DBus::dispatch() periodically or those calls hang the AT. The
@@ -36,6 +46,8 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace pulp::view {
 
@@ -46,10 +58,13 @@ using pulp::platform::DBus;
 // AT-SPI well-known names / paths (the published wire constants).
 constexpr const char* kRootPath      = "/org/a11y/atspi/accessible/root";
 constexpr const char* kNullPath      = "/org/a11y/atspi/null";
+constexpr const char* kAccessiblePrefix = "/org/a11y/atspi/accessible/";
 constexpr const char* kRegistryName  = "org.a11y.atspi.Registry";
 constexpr const char* kIfaceAccessible   = "org.a11y.atspi.Accessible";
 constexpr const char* kIfaceApplication  = "org.a11y.atspi.Application";
+constexpr const char* kIfaceComponent    = "org.a11y.atspi.Component";
 constexpr const char* kIfaceSocket       = "org.a11y.atspi.Socket";
+constexpr const char* kIfaceEventObject  = "org.a11y.atspi.Event.Object";
 constexpr const char* kIfaceProperties   = "org.freedesktop.DBus.Properties";
 constexpr const char* kIfaceIntrospect   = "org.freedesktop.DBus.Introspectable";
 
@@ -58,20 +73,72 @@ constexpr const char* kToolkitName    = "Pulp";
 constexpr const char* kToolkitVersion = "1.0";
 constexpr const char* kAtspiVersion   = "2.1";
 
-// The exported root accessible + its owning a11y connection. Stored as the
+// org.a11y.atspi.Component CoordType: 0 = screen, 1 = window. Pulp's View
+// bounds are window-relative (no live screen origin without the native window),
+// so window coords are the honest answer; screen-coord GetExtents falls back to
+// the same window-relative box (a host that knows the window origin can offset).
+constexpr uint32_t kCoordWindow = 1;
+
+// ── Accessible-tree node ─────────────────────────────────────────────────────
+//
+// A View's static place in the exported accessible tree, captured when the set
+// is built. Children / parent are stored as indices into AtspiProvider::nodes_
+// so navigation is pure arithmetic (no live View-tree walk per D-Bus call).
+// index 0 is reserved for the application root; per-widget nodes start at 1.
+struct AccessNode {
+    View* view = nullptr;          // null only for the root node (index 0)
+    int parent_index = 0;          // 0 ⇒ parent is the application root
+    std::vector<int> children;     // indices into nodes_, in DFS order
+};
+
+// The exported accessible tree + its owning a11y connection. Stored as the
 // opaque handle returned by init_accessibility(). One per window/root.
 struct AtspiProvider {
     DBus bus;                       // owns the a11y-bus connection
-    View* root = nullptr;           // the View tree this root maps (children = L7b)
+    View* root = nullptr;           // the View tree this application maps
 
     // The registry's root accessible, captured from Socket.Embed: (bus_name,
-    // object_path). Reported as this app root's Parent so the tree connects up.
+    // object_path). Reported as the application root's Parent so the tree
+    // connects up to the desktop.
     std::string registry_parent_name;
     std::string registry_parent_path;
 
     // Application.Id, assigned by the registry via Properties.Set during/after
     // Embed. -1 until set.
     int app_id = -1;
+
+    // index → node. nodes_[0] is the application root (view == nullptr); every
+    // other entry is one accessible View. View* → index lets event hooks and
+    // GetIndexInParent resolve a View quickly.
+    std::vector<AccessNode> nodes_;
+    std::unordered_map<const View*, int> view_to_index_;
+
+    // ── Path / addressing helpers ────────────────────────────────────────────
+
+    std::string path_for_index(int index) const {
+        if (index <= 0) return kRootPath;
+        return std::string(kAccessiblePrefix) + std::to_string(index);
+    }
+
+    // Parse "/org/a11y/atspi/accessible/<n>" → index; root path → 0; -1 if not
+    // one of our object paths.
+    int index_for_path(const std::string& path) const {
+        if (path == kRootPath) return 0;
+        const std::string prefix = kAccessiblePrefix;
+        if (path.size() <= prefix.size() ||
+            path.compare(0, prefix.size(), prefix) != 0) {
+            return -1;
+        }
+        const std::string tail = path.substr(prefix.size());
+        if (tail.empty() || tail == "root") return 0;
+        int v = 0;
+        for (char c : tail) {
+            if (c < '0' || c > '9') return -1;
+            v = v * 10 + (c - '0');
+        }
+        if (v < 0 || v >= static_cast<int>(nodes_.size())) return -1;
+        return v;
+    }
 
     // Append an AT-SPI object reference (so) = (bus_name, object_path) into a
     // reply. AT-SPI addresses every accessible as this struct.
@@ -83,6 +150,12 @@ struct AtspiProvider {
         sw.append_object_path(path.empty() ? kNullPath : path);
         w.close_container(s);
     }
+    // Reference to one of OUR objects, addressed at our own unique bus name.
+    void append_self_ref(DBus::Writer& w, int index) {
+        append_object_ref(w, bus.unique_name(), path_for_index(index));
+    }
+
+    // ── State ────────────────────────────────────────────────────────────────
 
     // GetState returns au (array of two uint32 = the 64-bit state bitfield).
     void append_state(DBus::Writer& w) {
@@ -94,28 +167,101 @@ struct AtspiProvider {
         w.close_container(a);
     }
 
-    // org.a11y.atspi.Accessible methods on the root.
-    bool handle_accessible(DBus::CallContext& ctx) {
+    // ── Tree construction (DFS with re-parenting onto nearest accessible) ─────
+
+    void build_node(View& v, int parent_index) {
+        int my_index = parent_index;
+        if (v.access_role() != View::AccessRole::none) {
+            AccessNode node;
+            node.view = &v;
+            node.parent_index = parent_index;
+            my_index = static_cast<int>(nodes_.size());
+            nodes_.push_back(node);
+            view_to_index_[&v] = my_index;
+            nodes_[static_cast<size_t>(parent_index)].children.push_back(my_index);
+        }
+        for (size_t i = 0; i < v.child_count(); ++i) {
+            if (View* child = v.child_at(i)) build_node(*child, my_index);
+        }
+    }
+
+    void rebuild_tree() {
+        nodes_.clear();
+        view_to_index_.clear();
+        // index 0 = the application root (no View; it IS the application).
+        nodes_.push_back(AccessNode{});
+        if (!root) return;
+        // The root View itself is the application accessible (index 0), matching
+        // snapshot_accessibility_tree / mac / Windows which never expose the
+        // root View as a child object — its children become the top-level
+        // accessibles.
+        for (size_t i = 0; i < root->child_count(); ++i) {
+            if (View* child = root->child_at(i)) build_node(*child, 0);
+        }
+    }
+
+    // ── org.a11y.atspi.Accessible (any object) ────────────────────────────────
+
+    bool handle_accessible(DBus::CallContext& ctx, int index) {
         const std::string& m = ctx.member();
+        const bool is_root = (index == 0);
+        AccessNode& node = nodes_[static_cast<size_t>(index)];
+
         if (m == "GetRole") {
-            // The root accessible is the APPLICATION.
-            ctx.reply().append_uint32(atspi::kRoleApplication);
+            ctx.reply().append_uint32(
+                is_root ? atspi::kRoleApplication
+                        : atspi::role_to_atspi_role(node.view->access_role()));
             return true;
         }
         if (m == "GetRoleName") {
-            ctx.reply().append_string("application");
+            ctx.reply().append_string(
+                is_root ? "application"
+                        : atspi::role_to_atspi_role_name(node.view->access_role()));
+            return true;
+        }
+        if (m == "GetLocalizedRoleName") {
+            ctx.reply().append_string(
+                is_root ? "application"
+                        : atspi::role_to_atspi_role_name(node.view->access_role()));
             return true;
         }
         if (m == "GetChildCount") {
-            // L7a-2 exports only the root; the View subtree lands in L7b.
-            ctx.reply().append_int32(0);
+            ctx.reply().append_int32(static_cast<int>(node.children.size()));
             return true;
         }
         if (m == "GetChildren") {
-            // a(so) — empty for this slice.
+            // a(so) — child object references.
             DBus::Writer w = ctx.reply();
             auto a = w.open_array("(so)");
+            DBus::Writer aw = w.sub(a);
+            for (int child : node.children) append_self_ref(aw, child);
             w.close_container(a);
+            return true;
+        }
+        if (m == "GetChildAtIndex") {
+            int i = 0;
+            ctx.args().read_int32(i);
+            DBus::Writer w = ctx.reply();
+            if (i >= 0 && i < static_cast<int>(node.children.size())) {
+                append_self_ref(w, node.children[static_cast<size_t>(i)]);
+            } else {
+                append_object_ref(w, "", kNullPath);  // (so) null reference
+            }
+            return true;
+        }
+        if (m == "GetIndexInParent") {
+            int result = -1;
+            if (!is_root) {
+                const AccessNode& parent =
+                    nodes_[static_cast<size_t>(node.parent_index)];
+                for (size_t i = 0; i < parent.children.size(); ++i) {
+                    if (parent.children[i] == index) {
+                        result = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+            ctx.reply().append_int32(result);
             return true;
         }
         if (m == "GetState") {
@@ -128,8 +274,18 @@ struct AtspiProvider {
             auto a = w.open_array("s");
             DBus::Writer aw = w.sub(a);
             aw.append_string(kIfaceAccessible);
-            aw.append_string(kIfaceApplication);
+            if (is_root) {
+                aw.append_string(kIfaceApplication);
+            } else {
+                aw.append_string(kIfaceComponent);
+            }
             w.close_container(a);
+            return true;
+        }
+        if (m == "GetApplication") {
+            // (so) — the application root object.
+            DBus::Writer w = ctx.reply();
+            append_self_ref(w, 0);
             return true;
         }
         if (m == "GetAttributes") {
@@ -139,16 +295,112 @@ struct AtspiProvider {
             w.close_container(a);
             return true;
         }
+        if (m == "GetRelationSet") {
+            // a(ua(so)) — none.
+            DBus::Writer w = ctx.reply();
+            auto a = w.open_array("(ua(so))");
+            w.close_container(a);
+            return true;
+        }
         return false;  // decline → UnknownMethod
     }
 
-    // org.a11y.atspi.Application methods (Id is also a property; some clients
-    // call GetApplicationBusAddress etc., not needed for discovery).
+    // ── org.a11y.atspi.Component (per-widget objects) ─────────────────────────
+    //
+    // Root-relative bounds: walk parent chain summing bounds().x/y (mirrors the
+    // mac accessibilityFrame loop + the Windows view_to_screen_rect loop), then
+    // the View's own width/height. These are window-relative coordinates.
+
+    void compute_extents(View* v, int& x, int& y, int& w, int& h) {
+        x = y = w = h = 0;
+        if (!v) return;
+        float rx = 0, ry = 0;
+        for (View* cur = v; cur; cur = cur->parent()) {
+            rx += cur->bounds().x;
+            ry += cur->bounds().y;
+        }
+        x = static_cast<int>(rx);
+        y = static_cast<int>(ry);
+        w = static_cast<int>(v->bounds().width);
+        h = static_cast<int>(v->bounds().height);
+    }
+
+    bool handle_component(DBus::CallContext& ctx, int index) {
+        if (index == 0) return false;  // the application root has no geometry
+        View* v = nodes_[static_cast<size_t>(index)].view;
+        const std::string& m = ctx.member();
+
+        if (m == "GetExtents") {
+            // (u coord_type) -> (iiii x,y,w,h). We report window-relative box
+            // regardless of the requested coord type (no live screen origin).
+            int x, y, w, h;
+            compute_extents(v, x, y, w, h);
+            DBus::Writer rw = ctx.reply();
+            auto s = rw.open_struct();
+            DBus::Writer sw = rw.sub(s);
+            sw.append_int32(x);
+            sw.append_int32(y);
+            sw.append_int32(w);
+            sw.append_int32(h);
+            rw.close_container(s);
+            return true;
+        }
+        if (m == "GetPosition") {
+            // (u coord_type) -> (ii x,y)
+            int x, y, w, h;
+            compute_extents(v, x, y, w, h);
+            DBus::Writer rw = ctx.reply();
+            auto s = rw.open_struct();
+            DBus::Writer sw = rw.sub(s);
+            sw.append_int32(x);
+            sw.append_int32(y);
+            rw.close_container(s);
+            return true;
+        }
+        if (m == "GetSize") {
+            // () -> (ii w,h)
+            int x, y, w, h;
+            compute_extents(v, x, y, w, h);
+            DBus::Writer rw = ctx.reply();
+            auto s = rw.open_struct();
+            DBus::Writer sw = rw.sub(s);
+            sw.append_int32(w);
+            sw.append_int32(h);
+            rw.close_container(s);
+            return true;
+        }
+        if (m == "Contains") {
+            // (ii x,y, u coord_type) -> b
+            int px = 0, py = 0;
+            ctx.args().read_int32(px);
+            ctx.args().read_int32(py);
+            int x, y, w, h;
+            compute_extents(v, x, y, w, h);
+            const bool inside = px >= x && px < x + w && py >= y && py < y + h;
+            // AT-SPI marshals the bool as a uint32 on the wire (0/1).
+            ctx.reply().append_uint32(inside ? 1u : 0u);
+            return true;
+        }
+        if (m == "GetLayer") {
+            // () -> u. ATSPI_LAYER_WIDGET = 3.
+            ctx.reply().append_uint32(3u);
+            return true;
+        }
+        if (m == "GrabFocus") {
+            // () -> b. Request focus on the View; report success.
+            if (v) v->set_focus(true);
+            ctx.reply().append_uint32(1u);
+            return true;
+        }
+        return false;
+    }
+
+    // ── org.a11y.atspi.Application (root only) ─────────────────────────────────
+
     bool handle_application(DBus::CallContext& ctx) {
         const std::string& m = ctx.member();
         if (m == "GetLocale") {
-            // (u lc_category) -> s. Ignore the category; report the C locale.
-            ctx.reply().append_string("C");
+            ctx.reply().append_string("C");  // (u category) -> s
             return true;
         }
         if (m == "RegisterEventListener" || m == "DeregisterEventListener") {
@@ -158,38 +410,35 @@ struct AtspiProvider {
         return false;
     }
 
-    // org.a11y.atspi.Socket.Embed handshake reply is initiated by US (a method
-    // call out to the registry), not serviced here. But the registry may also
-    // call Embed back / Unembed on us in some flows — ack benignly.
+    // ── org.a11y.atspi.Socket (root only) ─────────────────────────────────────
+
     bool handle_socket(DBus::CallContext& ctx) {
         const std::string& m = ctx.member();
         if (m == "Embed" || m == "Unembed") {
-            // Reply with our own (so) root reference.
             DBus::Writer w = ctx.reply();
-            append_object_ref(w, bus.unique_name(), kRootPath);
+            append_self_ref(w, 0);
             return true;
         }
         return false;
     }
 
-    // org.freedesktop.DBus.Properties for the root's Accessible + Application
-    // interface properties. Get(iface, prop) -> v; GetAll(iface) -> a{sv};
-    // Set(iface, prop, v) -> () (the registry sets Application.Id this way).
-    bool handle_properties(DBus::CallContext& ctx) {
+    // ── org.freedesktop.DBus.Properties ───────────────────────────────────────
+
+    bool handle_properties(DBus::CallContext& ctx, int index) {
         const std::string& m = ctx.member();
         if (m == "Get") {
             std::string iface, prop;
             ctx.args().read_string(iface);
             ctx.args().read_string(prop);
             DBus::Writer w = ctx.reply();
-            return append_property_variant(w, iface, prop);
+            return append_property_variant(w, index, iface, prop);
         }
         if (m == "GetAll") {
             std::string iface;
             ctx.args().read_string(iface);
             DBus::Writer w = ctx.reply();
             auto a = w.open_array("{sv}");
-            append_all_properties(w, a, iface);
+            append_all_properties(w, a, index, iface);
             w.close_container(a);
             return true;
         }
@@ -197,10 +446,8 @@ struct AtspiProvider {
             std::string iface, prop;
             ctx.args().read_string(iface);
             ctx.args().read_string(prop);
-            // The third arg is a variant holding the value; recurse into it.
-            // Only Application.Id (i) is writable — the registry sets it to
-            // assign this app's slot.
-            if (iface == kIfaceApplication && prop == "Id") {
+            // Only Application.Id (i) is writable — the registry sets it.
+            if (index == 0 && iface == kIfaceApplication && prop == "Id") {
                 DBus::Reader var;
                 int v = 0;
                 if (ctx.args().recurse(var) && var.read_int32(v)) app_id = v;
@@ -211,23 +458,37 @@ struct AtspiProvider {
         return false;
     }
 
-    // Append a single property as a variant into `w`. Returns false (decline)
-    // for unknown property so the trampoline replies UnknownMethod.
-    bool append_property_variant(DBus::Writer& w, const std::string& iface,
+    const std::string& name_for(int index) const {
+        static const std::string kToolkit = kToolkitName;
+        if (index == 0) return kToolkit;
+        return nodes_[static_cast<size_t>(index)].view->access_label();
+    }
+
+    bool append_property_variant(DBus::Writer& w, int index,
+                                 const std::string& iface,
                                  const std::string& prop) {
+        const bool is_root = (index == 0);
+        const AccessNode& node = nodes_[static_cast<size_t>(index)];
         if (iface == kIfaceAccessible) {
-            if (prop == "Name") { return variant_string(w, kToolkitName); }
+            if (prop == "Name") { return variant_string(w, name_for(index)); }
             if (prop == "Description") { return variant_string(w, ""); }
             if (prop == "Parent") {
                 auto v = w.open_variant("(so)");
                 DBus::Writer vw = w.sub(v);
-                append_object_ref(vw, registry_parent_name, registry_parent_path);
+                if (is_root) {
+                    append_object_ref(vw, registry_parent_name,
+                                      registry_parent_path);
+                } else {
+                    append_self_ref(vw, node.parent_index);
+                }
                 w.close_container(v);
                 return true;
             }
-            if (prop == "ChildCount") { return variant_int32(w, 0); }
+            if (prop == "ChildCount") {
+                return variant_int32(w, static_cast<int>(node.children.size()));
+            }
         }
-        if (iface == kIfaceApplication) {
+        if (is_root && iface == kIfaceApplication) {
             if (prop == "ToolkitName") { return variant_string(w, kToolkitName); }
             if (prop == "Version") { return variant_string(w, kToolkitVersion); }
             if (prop == "AtspiVersion") { return variant_string(w, kAtspiVersion); }
@@ -237,7 +498,9 @@ struct AtspiProvider {
     }
 
     void append_all_properties(DBus::Writer& w, DBus::Writer::Container& arr,
-                               const std::string& iface) {
+                               int index, const std::string& iface) {
+        const bool is_root = (index == 0);
+        const AccessNode& node = nodes_[static_cast<size_t>(index)];
         DBus::Writer aw = w.sub(arr);
         auto entry = [&](const char* key, auto appender) {
             auto e = aw.open_dict_entry();
@@ -247,9 +510,12 @@ struct AtspiProvider {
             aw.close_container(e);
         };
         if (iface == kIfaceAccessible) {
-            entry("Name", [&](DBus::Writer& ew) { variant_string(ew, kToolkitName); });
-            entry("ChildCount", [&](DBus::Writer& ew) { variant_int32(ew, 0); });
-        } else if (iface == kIfaceApplication) {
+            const std::string nm = name_for(index);
+            entry("Name", [&](DBus::Writer& ew) { variant_string(ew, nm); });
+            entry("ChildCount", [&](DBus::Writer& ew) {
+                variant_int32(ew, static_cast<int>(node.children.size()));
+            });
+        } else if (is_root && iface == kIfaceApplication) {
             entry("ToolkitName",
                   [&](DBus::Writer& ew) { variant_string(ew, kToolkitName); });
             entry("Version",
@@ -273,12 +539,11 @@ struct AtspiProvider {
         return w.close_container(var);
     }
 
-    // org.freedesktop.DBus.Introspectable.Introspect -> s (XML). A minimal but
-    // valid document advertising the interfaces we answer; the registry uses it
-    // to know which interfaces to query.
-    bool handle_introspect(DBus::CallContext& ctx) {
+    // ── org.freedesktop.DBus.Introspectable ───────────────────────────────────
+
+    bool handle_introspect(DBus::CallContext& ctx, int index) {
         if (ctx.member() != "Introspect") return false;
-        static const char* kXml =
+        static const char* kRootXml =
             "<!DOCTYPE node PUBLIC "
             "\"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
             "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
@@ -288,40 +553,89 @@ struct AtspiProvider {
             "<interface name=\"org.freedesktop.DBus.Properties\"/>"
             "<interface name=\"org.freedesktop.DBus.Introspectable\"/>"
             "</node>";
-        ctx.reply().append_string(kXml);
+        static const char* kWidgetXml =
+            "<!DOCTYPE node PUBLIC "
+            "\"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
+            "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
+            "<node>"
+            "<interface name=\"org.a11y.atspi.Accessible\"/>"
+            "<interface name=\"org.a11y.atspi.Component\"/>"
+            "<interface name=\"org.freedesktop.DBus.Properties\"/>"
+            "<interface name=\"org.freedesktop.DBus.Introspectable\"/>"
+            "</node>";
+        ctx.reply().append_string(index == 0 ? kRootXml : kWidgetXml);
         return true;
     }
 
-    // Single registered handler for the root path — dispatches by interface.
-    bool dispatch_root(DBus::CallContext& ctx) {
+    // ── Dispatch (one handler per registered object path) ─────────────────────
+
+    bool dispatch_object(DBus::CallContext& ctx, int index) {
+        if (index < 0 || index >= static_cast<int>(nodes_.size())) return false;
         const std::string& iface = ctx.interface();
-        if (iface == kIfaceAccessible)  return handle_accessible(ctx);
-        if (iface == kIfaceApplication) return handle_application(ctx);
-        if (iface == kIfaceSocket)      return handle_socket(ctx);
-        if (iface == kIfaceProperties)  return handle_properties(ctx);
-        if (iface == kIfaceIntrospect)  return handle_introspect(ctx);
-        // Some clients send method calls with no interface (legacy). Try the
-        // Accessible set as a best-effort fallback.
-        if (iface.empty()) return handle_accessible(ctx);
+        if (iface == kIfaceAccessible)  return handle_accessible(ctx, index);
+        if (iface == kIfaceComponent)   return handle_component(ctx, index);
+        if (iface == kIfaceApplication) return index == 0 && handle_application(ctx);
+        if (iface == kIfaceSocket)      return index == 0 && handle_socket(ctx);
+        if (iface == kIfaceProperties)  return handle_properties(ctx, index);
+        if (iface == kIfaceIntrospect)  return handle_introspect(ctx, index);
+        // Legacy interface-less calls → best-effort Accessible.
+        if (iface.empty()) return handle_accessible(ctx, index);
         return false;
     }
 
-    // Perform the Socket.Embed handshake: tell the registry "here is my root";
-    // it returns ITS root reference (so) which becomes our Parent. Returns true
-    // on a well-formed reply.
+    // ── Object registration ───────────────────────────────────────────────────
     //
-    //   org.a11y.atspi.Socket.Embed(plug (so)) -> socket (so)
-    //
-    // We pass our own (unique_name, /…/root); the registry replies with its
-    // root accessible reference, which we record as this app root's Parent so
-    // the accessible tree links up to the desktop. The registry typically also
-    // sets Application.Id via Properties.Set afterwards (serviced by dispatch()).
+    // Each object path gets its own handler closure carrying its index. The
+    // generic object server resolves the path → handler; we resolve member.
+
+    bool export_all() {
+        bool ok = true;
+        for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
+            const std::string path = path_for_index(i);
+            const int index = i;
+            ok = bus.register_object(
+                     path,
+                     [this, index](DBus::CallContext& ctx) {
+                         return dispatch_object(ctx, index);
+                     }) &&
+                 ok;
+        }
+        return ok;
+    }
+
+    void unexport_all() {
+        for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
+            bus.unregister_object(path_for_index(i));
+        }
+    }
+
+    // Emit org.a11y.atspi.Event.Object.ChildrenChanged from the root. The
+    // AT-SPI event body is (siiv(so)): detail string, two ints, a variant, and
+    // the source-app reference. We send a "children-changed" event so a
+    // listening registry re-reads the tree. (Per-object value/state/focus
+    // signals are L7c.)
+    void emit_children_changed() {
+        bus.emit_signal(
+            kRootPath, kIfaceEventObject, "ChildrenChanged",
+            [this](DBus::Writer& w) {
+                w.append_string("");            // detail: "" (bulk add/remove)
+                w.append_int32(0);              // detail1
+                w.append_int32(0);              // detail2
+                auto v = w.open_variant("i");   // any_data (unused) as i
+                DBus::Writer vw = w.sub(v);
+                vw.append_int32(0);
+                w.close_container(v);
+                append_self_ref(w, 0);          // source application ref (so)
+            });
+    }
+
+    // ── Socket.Embed handshake (links the app up to the registry) ─────────────
+
     bool embed_with_registry() {
         const std::string my_name = bus.unique_name();
         bool ok = bus.call_method(
             kRegistryName, kRootPath, kIfaceSocket, "Embed",
             [&](DBus::Writer& w) {
-                // arg: plug (so)
                 auto s = w.open_struct();
                 DBus::Writer sw = w.sub(s);
                 sw.append_string(my_name);
@@ -329,7 +643,6 @@ struct AtspiProvider {
                 w.close_container(s);
             },
             [&](DBus::Reader& r) {
-                // reply: socket (so)
                 DBus::Reader sub;
                 if (r.recurse(sub)) {
                     std::string name, path;
@@ -362,69 +675,93 @@ void* init_accessibility(View& root, void* /*native_window*/) {
         return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
     }
 
-    AtspiProvider* p = provider.get();
-    const bool exported = provider->bus.register_object(
-        kRootPath, [p](DBus::CallContext& ctx) { return p->dispatch_root(ctx); });
-    if (!exported) {
-        runtime::log_warn("Linux AT-SPI: failed to export root accessible");
+    provider->rebuild_tree();
+    if (!provider->export_all()) {
+        runtime::log_warn("Linux AT-SPI: failed to export accessible objects");
         return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
     }
 
-    // Embed our root with the registry (Socket.Embed (so)->(so)); the registry's
-    // returned reference becomes our Parent and it assigns Application.Id via a
-    // Properties.Set that dispatch() services. A failed Embed (registry absent /
-    // slow) is non-fatal: the root stays exported and the registry can still
-    // discover + query us once it appears.
+    // Embed the application root with the registry (Socket.Embed (so)->(so)); a
+    // failed Embed (registry absent / slow) is non-fatal — the objects stay
+    // exported and the registry can still discover + query us once it appears.
     if (!provider->embed_with_registry()) {
         runtime::log_info("Linux AT-SPI: Socket.Embed not completed "
-                          "(registry absent?); root remains exported");
+                          "(registry absent?); objects remain exported");
     }
 
-    runtime::log_info("Linux AT-SPI: registered root accessible on a11y bus");
+    runtime::log_info(
+        "Linux AT-SPI: exported {} accessible objects on a11y bus",
+        provider->nodes_.size());
 
-    // Run-loop seam: the registry/Orca call methods on the exported root
+    // Run-loop seam: the registry/Orca call methods on the exported objects
     // asynchronously. The host MUST pump DBus::dispatch() periodically or those
-    // calls hang the AT (and Orca shows nothing). The handle exposes pump();
-    // a host with an event loop should call pump() each frame / on a timer.
-    //
-    // Wiring point: the X11 plugin-view host (plugin_view_host_linux.cpp) has no
-    // internal loop (the DAW pumps), and the standalone SDL host
-    // (sdl_window_host.cpp run_event_loop) does — the parent wires pump() into
-    // whichever host owns this handle. Left to the host so this TU stays
-    // loop-agnostic.
+    // calls hang the AT. The handle exposes pump(); a host with an event loop
+    // calls accessibility_pump() each frame / on a timer (wired in the SDL
+    // standalone host's run_event_loop). The X11 plugin-view host has no
+    // internal loop (the DAW pumps) and is left to a future slice.
     return provider.release();
 }
 
 void shutdown_accessibility(void* handle) {
-    // Distinguish the benign sentinel (uintptr 1) from a real provider pointer.
     if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) {
         runtime::log_info("Linux AT-SPI: shutdown (no provider)");
         return;
     }
     auto* p = static_cast<AtspiProvider*>(handle);
-    p->bus.unregister_object(kRootPath);
+    p->unexport_all();
     delete p;  // closes the a11y connection via DBus dtor
-    runtime::log_info("Linux AT-SPI: root accessible torn down");
+    runtime::log_info("Linux AT-SPI: accessible objects torn down");
 }
 
 // Pump the a11y connection so the registry's inbound method calls are serviced.
-// The host calls this from its event loop / timer. Safe on the sentinel handle.
 void accessibility_pump(void* handle) {
     if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
     static_cast<AtspiProvider*>(handle)->bus.dispatch(0);
 }
 
-void accessibility_tree_changed(void* /*handle*/) {
-    // L7b: structural change → re-export the per-widget subtree and emit
-    // children-changed on the root. No-op until the View subtree is exported.
+void accessibility_tree_changed(void* handle) {
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
+    auto* p = static_cast<AtspiProvider*>(handle);
+    // Tear down the old per-widget objects, rebuild from the current View tree,
+    // re-export, then tell any listener the structure changed.
+    p->unexport_all();
+    p->rebuild_tree();
+    p->export_all();
+    p->emit_children_changed();
 }
 
-// L7c event-raising surface. These emit org.a11y.atspi.Event.Object signals
-// (StateChanged / PropertyChange) once the per-widget objects exist. No-op for
-// L7a-2 (registration only).
+// L7c event-raising surface. These will emit org.a11y.atspi.Event.Object
+// signals (StateChanged / PropertyChange) per-object once value/state events
+// land. No-op for L7b (structural tree only).
 void notify_accessibility_value_changed(void* /*handle*/, View& /*target*/) {}
 void notify_accessibility_focus_changed(void* /*handle*/, View& /*target*/) {}
 void notify_accessibility_name_changed(void* /*handle*/, View& /*target*/) {}
+
+// ── Test-only seam ───────────────────────────────────────────────────────────
+//
+// The production provider connects to the desktop a11y bus (org.a11y.Bus),
+// which does NOT exist under a headless `dbus-run-session`. The loopback test
+// (test/test_atspi_tree.cpp) needs to exercise the *exact same* tree-build +
+// per-object Accessible/Component handlers against a bus a CI client can also
+// reach, so this seam builds an AtspiProvider on the plain SESSION bus instead
+// and exports the identical object set. It returns the handle (usable with
+// accessibility_pump / shutdown_accessibility) plus the server's unique bus
+// name so the test client can address calls at us. Returns nullptr (and leaves
+// out_bus_name empty) when no session bus is reachable. NOT used in production.
+void* init_accessibility_on_session_bus_for_test(View& root,
+                                                 std::string* out_bus_name) {
+    if (out_bus_name) out_bus_name->clear();
+    if (!DBus::library_available()) return nullptr;
+
+    auto provider = std::make_unique<AtspiProvider>();
+    provider->root = &root;
+    if (!provider->bus.connect_session()) return nullptr;
+    if (out_bus_name) *out_bus_name = provider->bus.unique_name();
+
+    provider->rebuild_tree();
+    if (!provider->export_all()) return nullptr;
+    return provider.release();
+}
 
 }  // namespace pulp::view
 

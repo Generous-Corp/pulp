@@ -4,6 +4,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <SDL3/SDL.h>
 #include <string>
@@ -78,6 +79,17 @@ public:
 
         show();
         register_dispatcher();
+
+        // Attach the OS-native accessibility provider for this root. On Linux
+        // this exports the AT-SPI accessible tree over D-Bus; the provider's
+        // inbound method calls must be pumped each loop iteration (see
+        // accessibility_pump below) or a connected screen reader hangs. On
+        // platforms with a callback-driven provider (none route through the SDL
+        // host today) init_accessibility / accessibility_pump are honest no-ops.
+        // The handle is sentinel-or-null when no a11y bus is reachable; pump and
+        // shutdown both tolerate that.
+        accessibility_handle_ = init_accessibility(root_, nullptr);
+
         bool running = true;
         needs_repaint_ = true;
 
@@ -151,6 +163,11 @@ public:
 
             drain_dispatcher_tasks();
 
+            // Service inbound accessibility IPC (Linux AT-SPI registry / Orca
+            // method calls on the exported View tree). Cheap when no assistive
+            // tech is connected; a no-op on the sentinel handle.
+            accessibility_pump(accessibility_handle_);
+
             if (needs_repaint_) {
                 render_frame();
                 needs_repaint_ = false;
@@ -159,6 +176,8 @@ public:
             SDL_Delay(16); // ~60fps
         }
 
+        shutdown_accessibility(accessibility_handle_);
+        accessibility_handle_ = nullptr;
         shutdown_dispatcher();
         if (close_callback_) close_callback_();
     }
@@ -201,6 +220,12 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     std::function<void()> close_callback_;
     bool needs_repaint_ = false;
+
+    // Opaque OS-accessibility provider handle (Linux AT-SPI today). Owned for
+    // the lifetime of run_event_loop(): created after the window is shown,
+    // pumped each iteration, torn down on exit. Null / sentinel when no
+    // provider attaches (honest-fail), which pump + shutdown both tolerate.
+    void* accessibility_handle_ = nullptr;
 
     // Files accumulated across an in-flight native drag-drop sequence
     // (SDL_EVENT_DROP_BEGIN … DROP_FILE* … DROP_COMPLETE) and the last reported

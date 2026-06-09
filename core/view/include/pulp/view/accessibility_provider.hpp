@@ -17,6 +17,7 @@
 // directly and do not route through init_accessibility().
 
 #include <cstdint>
+#include <string>
 
 namespace pulp::view {
 
@@ -79,5 +80,19 @@ void notify_accessibility_focus_changed(void* handle, View& target);
 /// (e.g. a button's label was updated). Fires UIA_AutomationPropertyChangedEvent
 /// for Name / LocalizedControlType; AT-SPI object::property-change.
 void notify_accessibility_name_changed(void* handle, View& target);
+
+#if defined(__linux__) && !defined(__ANDROID__)
+/// TEST-ONLY (Linux AT-SPI). Build the same accessible-object tree the
+/// production provider exports, but on the plain SESSION bus rather than the
+/// desktop a11y bus — so a loopback test under a headless `dbus-run-session`
+/// (which has no org.a11y.Bus) can act as an AT-SPI client and call
+/// Accessible.GetChildren / Component.GetExtents on the exported objects. The
+/// returned handle works with accessibility_pump() and shutdown_accessibility();
+/// `out_bus_name` receives the server's unique bus name so the client can
+/// address us. Returns nullptr when no session bus is reachable. Never used in
+/// production code paths.
+void* init_accessibility_on_session_bus_for_test(View& root,
+                                                 std::string* out_bus_name);
+#endif
 
 } // namespace pulp::view
