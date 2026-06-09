@@ -231,6 +231,23 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     if (applyTransformProp(id, key, value)) return;
     if (applyEventProp(id, key, value)) return;
 
+    // pulp parity-found (framework-importer #18) — `<img src="…">` /
+    // `<Image src="…">` must forward to the ImageView bridge via
+    // setImageSource, mirroring the non-React web-compat path
+    // (core/view/js/web-compat-element.js, pulp #1658). Before this the
+    // prop-applier created the Image widget (host-config createImage) but
+    // never dispatched `src`, so the emitted bundle had zero
+    // setImageSource calls and every <img> rendered as the empty "IMG"
+    // placeholder. Gate on `type === 'Image'` so a stray `src` on a
+    // non-image widget can't hit the ImageView-only setter. The path is
+    // forwarded verbatim (already absolute on the design-import / importer
+    // path); C++ setImageSource → ImageView::set_image_path resolves the
+    // rest, exactly as the web-compat path does — no JS-side resolution.
+    if (type === 'Image' && key === 'src') {
+        call('setImageSource', id, String(value));
+        return;
+    }
+
     // Type-dispatched widget / SVG props — these route on the widget
     // `type`, not purely on the prop key, so they stay in the
     // dispatcher rather than a key-keyed domain module.
@@ -507,6 +524,14 @@ export function applyChangedProps(
             if (key === 'textColor') {
                 // Empty string is the bridge-side "use default" sentinel.
                 call('setTextColor', id, '');
+                mutated = true;
+            }
+            // pulp parity-found (#18) — `<Image>` whose `src` is removed
+            // clears the ImageView back to the empty placeholder, matching
+            // the web-compat removeAttribute('src') reset semantics. Empty
+            // string is the bridge-side "no source" sentinel.
+            if (key === 'src' && type === 'Image') {
+                call('setImageSource', id, '');
                 mutated = true;
             }
             // Other setters: no-op — let the next mount cycle handle it
