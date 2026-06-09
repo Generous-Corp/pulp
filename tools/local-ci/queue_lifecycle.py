@@ -90,3 +90,50 @@ def finalize_job_locked(
                 include_prepared=include_prepared,
             )
         )
+
+
+def wait_for_job_completion(
+    job_id: str,
+    config: dict,
+    *,
+    load_job_fn: Callable[[str], dict | None],
+    load_result_fn: Callable[[Path], dict],
+    drain_pending_jobs_fn: Callable[..., tuple[bool, bool]],
+    current_runner_info_fn: Callable[[], dict | None],
+    sleep_fn: Callable[[float], None],
+    poll_secs: float,
+    print_fn: Callable[[str], None] = print,
+) -> tuple[dict | None, int]:
+    announced_wait = False
+
+    while True:
+        job = load_job_fn(job_id)
+        if job is None:
+            print_fn(f"Job not found: {job_id}")
+            return None, 1
+
+        if job.get("status") == "completed":
+            result_file = job.get("result_file")
+            if not result_file:
+                print_fn(f"Job completed without a result file: {job_id}")
+                return None, 1
+            result = load_result_fn(Path(result_file))
+            return result, 0 if result.get("overall") == "pass" else 1
+
+        acquired, _ = drain_pending_jobs_fn(config, blocking=False)
+        if acquired:
+            continue
+
+        runner = current_runner_info_fn()
+        if runner and not announced_wait:
+            active_job = runner.get("active_job_id")
+            active_branch = runner.get("active_branch")
+            if active_job and active_branch:
+                print_fn(
+                    f"Another local CI runner is active [{active_job}] {active_branch}; waiting for {job_id}..."
+                )
+            else:
+                print_fn("Another local CI runner is active; waiting for queued job completion...")
+            announced_wait = True
+
+        sleep_fn(poll_secs)
