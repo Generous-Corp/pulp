@@ -136,6 +136,14 @@ slices. Use `HeadlessHost` when a test needs one block; use
 `OfflineRenderHost` when it needs a fixed-duration render with final-block
 handling, silence padding, and absolute-frame event slicing.
 
+`pulp::host::GraphRuntimeQueues` is the fixed-capacity control/realtime
+handoff for graph-runtime work. Control code enqueues graph commands; the
+realtime graph drains and sorts them by block offset at the start of a block.
+The realtime graph publishes bounded control events and MIDI output events
+through separate RT-to-control queues with explicit drop counters. The queue
+primitive does not mutate `SignalGraph` directly; graph v2 and adapter
+migration code consume these commands against their active snapshot policy.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -146,5 +154,7 @@ handling, silence padding, and absolute-frame event slicing.
   — the no-allocation contract.
 * [`core/format/include/pulp/format/offline_render_host.hpp`](../../core/format/include/pulp/format/offline_render_host.hpp)
   — the deterministic multi-block render harness.
+* [`core/host/include/pulp/host/graph_runtime_queue.hpp`](../../core/host/include/pulp/host/graph_runtime_queue.hpp)
+  — the graph command/event/MIDI handoff queues.
 * sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
   and #29 (don't deref atomics per sample).

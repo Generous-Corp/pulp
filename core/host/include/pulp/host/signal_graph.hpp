@@ -14,6 +14,7 @@
 //   graph.prepare(48000, 512);
 //   graph.process(output_buffer, input_buffer, num_samples);
 
+#include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -39,9 +40,6 @@ enum class NodeType {
     MidiOutput,    // System MIDI output
     Custom,        // String-keyed extension node
 };
-
-using NodeId = uint32_t;
-using PortIndex = uint32_t;
 
 using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,

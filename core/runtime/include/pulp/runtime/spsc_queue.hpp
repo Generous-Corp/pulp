@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <utility>
 #include <choc/containers/choc_SingleReaderSingleWriterFIFO.h>
 
 namespace pulp::runtime {
