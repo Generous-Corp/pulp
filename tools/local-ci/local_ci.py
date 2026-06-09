@@ -2481,15 +2481,7 @@ def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
     result = supersedence_result(job, superseded_by, reason)
     result_path = save_result(result)
-    job["status"] = "completed"
-    job["completed_at"] = result["completed_at"]
-    job["result_file"] = str(result_path)
-    job["overall"] = "superseded"
-    job["superseded_by"] = superseded_by
-    job["superseded_reason"] = reason
-    job.pop("runner", None)
-    job.pop("active_targets", None)
-    job.pop("last_progress_at", None)
+    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
@@ -2499,14 +2491,7 @@ def cancellation_result(job: dict, reason: str) -> dict:
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
     result = cancellation_result(job, reason)
     result_path = save_result(result)
-    job["status"] = "completed"
-    job["completed_at"] = result["completed_at"]
-    job["result_file"] = str(result_path)
-    job["overall"] = "canceled"
-    job["canceled_reason"] = reason
-    job.pop("runner", None)
-    job.pop("active_targets", None)
-    job.pop("last_progress_at", None)
+    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
 
 
 def summarize_job(job: dict) -> str:
