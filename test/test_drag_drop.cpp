@@ -3,6 +3,14 @@
 #include <pulp/view/file_drop_zone.hpp>
 #include <pulp/view/view.hpp>
 
+// XDND payload-parsing + coordinate-mapping helpers (Linux X11 producer). These
+// are pure (X11-free) free functions, so the cross-platform dnd suite exercises
+// them on every platform; the X11 ClientMessage handshake itself needs xvfb and
+// is covered in test_plugin_view_host_factory.cpp. Relative include keeps the
+// header off the public include path (it is a platform-private helper) without
+// adding a CMake include-dir line to the frozen test/CMakeLists.txt.
+#include "../core/view/platform/linux/xdnd_parse.hpp"
+
 #include <string>
 #include <vector>
 
@@ -356,4 +364,69 @@ TEST_CASE("a drop a DropReceiver declines bubbles to View::on_drop",
     REQUIRE(dispatch_drop(root, session, make_text("hi"), {10, 10}));
     CHECK_FALSE(zone_fired);     // zone declines text
     CHECK(got_type == "text");   // bubbled to the ancestor on_drop
+}
+
+// ── XDND payload parsing + coordinate mapping (Linux X11 producer) ───────────
+
+TEST_CASE("XDND file_uri_to_path handles file:// forms", "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    CHECK(file_uri_to_path("file:///home/u/a.wav") == "/home/u/a.wav");
+    // Named authority is dropped (matches macOS [[url path]]).
+    CHECK(file_uri_to_path("file://localhost/home/u/a.wav") == "/home/u/a.wav");
+    // No-authority lenient form.
+    CHECK(file_uri_to_path("file:/home/u/a.wav") == "/home/u/a.wav");
+    // Bare absolute path passes through.
+    CHECK(file_uri_to_path("/home/u/a.wav") == "/home/u/a.wav");
+    // Percent-escapes decode (space, parens).
+    CHECK(file_uri_to_path("file:///home/u/my%20preset%20(1).json") ==
+          "/home/u/my preset (1).json");
+    // Non-file schemes are refused.
+    CHECK(file_uri_to_path("http://example.com/x").empty());
+    CHECK(file_uri_to_path("data:text/plain,hi").empty());
+    // Authority-only file URI has no path → empty.
+    CHECK(file_uri_to_path("file://host").empty());
+}
+
+TEST_CASE("XDND parse_uri_list splits CRLF and skips comments/blanks/non-file",
+          "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    // Canonical CRLF-separated list with a comment and a blank line.
+    const std::string payload =
+        "#comment\r\n"
+        "file:///a.wav\r\n"
+        "\r\n"
+        "file:///b%20c.json\r\n"
+        "http://skip.me/x\r\n";
+    auto paths = parse_uri_list(payload);
+    REQUIRE(paths.size() == 2);
+    CHECK(paths[0] == "/a.wav");
+    CHECK(paths[1] == "/b c.json");
+}
+
+TEST_CASE("XDND parse_uri_list tolerates lone LF and no trailing newline",
+          "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    auto paths = parse_uri_list("file:///x.wav\nfile:///y.wav");
+    REQUIRE(paths.size() == 2);
+    CHECK(paths[0] == "/x.wav");
+    CHECK(paths[1] == "/y.wav");
+    // A single URI with no newline at all.
+    auto one = parse_uri_list("file:///only.wav");
+    REQUIRE(one.size() == 1);
+    CHECK(one[0] == "/only.wav");
+    // Empty payload → empty list (no spurious entry).
+    CHECK(parse_uri_list("").empty());
+}
+
+TEST_CASE("XDND root_to_child_local subtracts the child window origin",
+          "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    // Pointer at root (130,170); child window origin at (100,150) on root.
+    Point p = root_to_child_local(130, 170, 100, 150);
+    CHECK(p.x == 30.0f);
+    CHECK(p.y == 20.0f);
+    // Origin at the root corner is an identity map.
+    Point q = root_to_child_local(5, 7, 0, 0);
+    CHECK(q.x == 5.0f);
+    CHECK(q.y == 7.0f);
 }

@@ -180,6 +180,16 @@ public:
         (void) child_view;
     }
 
+    // Pump any pending native drag-and-drop (and related) events on a host
+    // that owns its own platform connection. The Linux X11 host overrides this
+    // to drain its X connection and run the XDND target protocol (XdndEnter /
+    // Position / Drop), routing drops into the view tree via the shared
+    // dispatch core. Hosts driven by a host-owned event loop (Apple, the SDL
+    // standalone) do not need it. Default no-op. Call on the UI thread; a
+    // driver (standalone host idle, or a DAW editor idle hook) invokes it
+    // periodically so drags onto the embedded editor are serviced.
+    virtual void pump_x_events() {}
+
     // ── Design viewport (mirrors WindowHost::set_design_viewport) ────────
     //
     // Constrain editor resize to a fixed aspect ratio. Plugin hosts do not
