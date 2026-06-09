@@ -149,6 +149,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 import cleanup as _cleanup  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
+import macos_desktop as _macos_desktop  # noqa: E402
 import reporting as _reporting  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
@@ -1558,29 +1559,11 @@ def count_view_tree_nodes(node: object) -> int:
 
 
 def detect_macos_app_bundle(command: str | None) -> Path | None:
-    if not command:
-        return None
-    args = shlex.split(command)
-    if not args:
-        return None
-    exec_path = Path(args[0]).expanduser()
-    candidates = [exec_path, *exec_path.parents]
-    for candidate in candidates:
-        if candidate.suffix == ".app":
-            return candidate
-    return None
+    return _macos_desktop.detect_macos_app_bundle(command)
 
 
 def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
-    info_plist = app_path / "Contents" / "Info.plist"
-    if not info_plist.exists():
-        return None
-    try:
-        payload = plistlib.loads(info_plist.read_bytes())
-    except (plistlib.InvalidFileException, OSError):
-        return None
-    bundle_id = payload.get("CFBundleIdentifier")
-    return bundle_id if isinstance(bundle_id, str) and bundle_id else None
+    return _macos_desktop.macos_bundle_id_for_app_path(app_path)
 
 
 def desktop_run_manifests(config: dict, *, target_name: str | None = None, action: str | None = None) -> list[dict]:
@@ -1676,93 +1659,60 @@ def prune_desktop_run_manifests(
 
 
 def macos_window_probe_path() -> Path:
-    return SCRIPT_DIR / "macos_window_probe.swift"
+    return _macos_desktop.macos_window_probe_path(script_dir=SCRIPT_DIR)
 
 
 def macos_window_info_for_pid(pid: int) -> dict:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "window-info", "--pid", str(pid)],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.macos_window_info_for_pid(
+        pid,
+        macos_window_probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def macos_window_info_for_bundle_id(bundle_id: str) -> dict:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "window-info", "--bundle-id", bundle_id],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.macos_window_info_for_bundle_id(
+        bundle_id,
+        macos_window_probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def macos_accessibility_trusted() -> bool:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "accessibility-trusted"],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.macos_accessibility_trusted(
+        macos_window_probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    payload = json.loads(result.stdout)
-    return bool(payload.get("trusted"))
 
 
 def wait_for_macos_window(pid: int, timeout_secs: float) -> dict:
-    deadline = time.time() + timeout_secs
-    last_error = ""
-    while time.time() < deadline:
-        try:
-            payload = macos_window_info_for_pid(pid)
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            last_error = str(exc)
-            time.sleep(0.2)
-            continue
-        windows = payload.get("windows", [])
-        if windows:
-            return windows[0]
-        time.sleep(0.2)
-    raise RuntimeError(last_error or f"timed out waiting for a visible window for pid {pid}")
+    return _macos_desktop.wait_for_macos_window(
+        pid,
+        timeout_secs,
+        macos_window_info_for_pid_fn=macos_window_info_for_pid,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+    )
 
 
 def wait_for_macos_bundle_window(bundle_id: str, timeout_secs: float) -> tuple[int, dict]:
-    deadline = time.time() + timeout_secs
-    last_error = ""
-    while time.time() < deadline:
-        try:
-            payload = macos_window_info_for_bundle_id(bundle_id)
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            last_error = str(exc)
-            time.sleep(0.2)
-            continue
-        windows = payload.get("windows", [])
-        pid = payload.get("pid")
-        if windows and isinstance(pid, int):
-            return pid, windows[0]
-        activation_payload = activate_macos_bundle_id(bundle_id)
-        if activation_payload.get("stderr"):
-            last_error = activation_payload["stderr"]
-        time.sleep(0.2)
-    raise RuntimeError(last_error or f"timed out waiting for a visible window for bundle id {bundle_id}")
+    return _macos_desktop.wait_for_macos_bundle_window(
+        bundle_id,
+        timeout_secs,
+        macos_window_info_for_bundle_id_fn=macos_window_info_for_bundle_id,
+        activate_macos_bundle_id_fn=activate_macos_bundle_id,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+    )
 
 
 def capture_macos_window(window_id: int, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    last_error = ""
-    for attempt in range(5):
-        result = subprocess.run(
-            ["screencapture", "-x", "-l", str(window_id), str(output_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and output_path.exists():
-            return
-        last_error = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
-        if attempt < 4:
-            time.sleep(0.2)
-    raise RuntimeError(f"Could not capture macOS window {window_id}: {last_error}")
+    return _macos_desktop.capture_macos_window(
+        window_id,
+        output_path,
+        run_fn=subprocess.run,
+        sleep_fn=time.sleep,
+    )
 
 
 def parse_coordinate_pair(value: str, *, flag_name: str) -> tuple[float, float]:
@@ -1843,46 +1793,27 @@ def screen_point_for_content_point(window: dict, content_size: tuple[float, floa
 
 
 def activate_macos_pid(pid: int) -> dict:
-    result = subprocess.run(
-        ["swift", str(macos_window_probe_path()), "activate", "--pid", str(pid)],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.activate_macos_pid(
+        pid,
+        macos_window_probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def activate_macos_bundle_id(bundle_id: str) -> dict:
-    result = subprocess.run(
-        ["osascript", "-e", f'tell application id "{bundle_id}" to activate'],
-        capture_output=True,
-        text=True,
+    return _macos_desktop.activate_macos_bundle_id(
+        bundle_id,
+        run_fn=subprocess.run,
     )
-    return {
-        "activated": result.returncode == 0,
-        "bundle_id": bundle_id,
-        "stdout": result.stdout.strip(),
-        "stderr": result.stderr.strip(),
-        "returncode": result.returncode,
-    }
 
 
 def dispatch_macos_click(screen_x: float, screen_y: float) -> dict:
-    result = subprocess.run(
-        [
-            "swift",
-            str(macos_window_probe_path()),
-            "click",
-            "--x",
-            str(screen_x),
-            "--y",
-            str(screen_y),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+    return _macos_desktop.dispatch_macos_click(
+        screen_x,
+        screen_y,
+        macos_window_probe_path_fn=macos_window_probe_path,
+        run_fn=subprocess.run,
     )
-    return json.loads(result.stdout)
 
 
 def terminate_process(proc: subprocess.Popen, timeout_secs: float = 5.0) -> None:
@@ -1897,11 +1828,9 @@ def terminate_process(proc: subprocess.Popen, timeout_secs: float = 5.0) -> None
 
 
 def quit_macos_bundle_id(bundle_id: str) -> None:
-    subprocess.run(
-        ["osascript", "-e", f'tell application id "{bundle_id}" to quit'],
-        capture_output=True,
-        text=True,
-        check=False,
+    return _macos_desktop.quit_macos_bundle_id(
+        bundle_id,
+        run_fn=subprocess.run,
     )
 
 
