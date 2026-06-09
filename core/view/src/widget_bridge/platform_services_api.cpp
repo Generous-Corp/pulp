@@ -1,6 +1,7 @@
 // widget_bridge/platform_services_api.cpp - platform service registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <pulp/platform/child_process.hpp>
 #include <pulp/platform/clipboard.hpp>
@@ -32,22 +33,26 @@ std::string build_shell_command(const std::string& cmd) {
 } // namespace
 
 void WidgetBridge::register_platform_services_ai_api() {
+    BridgeApiContext api{engine_};
+
     // Model-agnostic AI CLI: configurable command for chat integration
-    engine_.register_function("setAICli", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAICli", [this](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
         if (!cmd.empty()) ai_cli_command_ = cmd;
         return choc::value::Value();
     });
 
-    engine_.register_function("getAICli", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "getAICli", [this](choc::javascript::ArgumentList) {
         return choc::value::createString(ai_cli_command_);
     });
 }
 
 void WidgetBridge::register_platform_services_exec_api() {
+    BridgeApiContext api{engine_};
+
     // Shell exec
     // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
-    engine_.register_function("exec", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "exec", [](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
         if (cmd.empty()) return choc::value::createString("");
         auto full_cmd = build_shell_command(cmd);
@@ -62,7 +67,7 @@ void WidgetBridge::register_platform_services_exec_api() {
     // execAsync(cmd, callbackId) - non-blocking shell command
     // Runs cmd on a background thread, dispatches result to JS via
     // __dispatch__(callbackId, 'result', stdout) when poll_async_results() runs.
-    engine_.register_function("execAsync", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "execAsync", [this](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
         auto cbId = args.get<std::string>(1, "");
         if (cmd.empty() || cbId.empty()) return choc::value::Value();
@@ -85,9 +90,11 @@ void WidgetBridge::register_platform_services_exec_api() {
 }
 
 void WidgetBridge::register_platform_services_dialog_api() {
+    BridgeApiContext api{engine_};
+
     // showOpenDialog(title, filterDesc, extensions) -> path or ""
     // extensions: semicolon-separated, e.g. "js;json;txt"
-    engine_.register_function("showOpenDialog", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "showOpenDialog", [](choc::javascript::ArgumentList args) {
         auto title = args.get<std::string>(0, "Open");
         auto desc = args.get<std::string>(1, "");
         auto exts = args.get<std::string>(2, "");
@@ -99,7 +106,7 @@ void WidgetBridge::register_platform_services_dialog_api() {
     });
 
     // showSaveDialog(title, filterDesc, extensions) -> path or ""
-    engine_.register_function("showSaveDialog", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "showSaveDialog", [](choc::javascript::ArgumentList args) {
         auto title = args.get<std::string>(0, "Save");
         auto desc = args.get<std::string>(1, "");
         auto exts = args.get<std::string>(2, "");
@@ -111,7 +118,7 @@ void WidgetBridge::register_platform_services_dialog_api() {
     });
 
     // chooseFolder(title) -> path or ""
-    engine_.register_function("chooseFolder", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "chooseFolder", [](choc::javascript::ArgumentList args) {
         auto title = args.get<std::string>(0, "Choose Folder");
         auto result = platform::FileDialog::choose_folder(title);
         return choc::value::createString(result.value_or(""));
@@ -119,13 +126,15 @@ void WidgetBridge::register_platform_services_dialog_api() {
 }
 
 void WidgetBridge::register_platform_services_clipboard_api() {
+    BridgeApiContext api{engine_};
+
     // P1: Clipboard - read/write text via platform::Clipboard
-    engine_.register_function("readClipboard", [](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "readClipboard", [](choc::javascript::ArgumentList) {
         auto text = platform::Clipboard::get_text();
         return choc::value::createString(text.value_or(""));
     });
 
-    engine_.register_function("writeClipboard", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "writeClipboard", [](choc::javascript::ArgumentList args) {
         auto text = args.get<std::string>(0, "");
         platform::Clipboard::set_text(text);
         return choc::value::Value();
