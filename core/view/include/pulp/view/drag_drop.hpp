@@ -1,9 +1,10 @@
 #pragma once
 
 #include <pulp/view/geometry.hpp>
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
-#include <functional>
 
 namespace pulp::view {
 
@@ -16,7 +17,7 @@ struct DropData {
     std::vector<std::string> file_paths;  // For file drops
     std::string text;                      // For text drops
     std::string custom_type;               // For custom data type
-    std::vector<uint8_t> custom_data;      // For custom binary data
+    std::vector<std::uint8_t> custom_data; // For custom binary data
 };
 
 // ── Drop target interface ────────────────────────────────────────────────────

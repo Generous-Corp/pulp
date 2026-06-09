@@ -1780,6 +1780,9 @@ pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 # Drag-and-drop tests
 pulp_add_test_suite(pulp-test-dnd SOURCES test_drag_drop.cpp LIBRARIES pulp::view)
 
+# Sample asset drop target adapter over cheap extension classification.
+pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
+
 # OSC tests
 pulp_add_test_suite(pulp-test-osc LIBRARIES pulp::osc)
 
