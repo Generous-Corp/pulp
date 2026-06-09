@@ -121,6 +121,31 @@ describe('@pulp/react SvgPath intrinsic (pulp #994)', () => {
         expect(setFR[0].args).toEqual(['icon7c', 'evenodd']);
     });
 
+    it('forwards fillGradient to setSvgFillGradient', () => {
+        applyAllProps(instance('icon7d', 'SvgPath', {
+            d: 'M0 0 L10 0 L10 10 Z',
+            fillGradient: 'linear-gradient(to bottom, #ff0000, #0000ff)',
+        }));
+        const setFG = bridge.calls.filter((c) => c.fn === 'setSvgFillGradient');
+        expect(setFG.length).toBe(1);
+        expect(setFG[0].args).toEqual([
+            'icon7d', 'linear-gradient(to bottom, #ff0000, #0000ff)',
+        ]);
+    });
+
+    it('re-applies fillGradient on commitUpdate when it changes', () => {
+        applyChangedProps(
+            instance('icon7e', 'SvgPath', {}),
+            { d: 'M0 0 L1 1', fillGradient: 'linear-gradient(to top, #111, #222)' },
+            { d: 'M0 0 L1 1', fillGradient: 'linear-gradient(to top, #333, #444)' },
+        );
+        const setFG = bridge.calls.filter((c) => c.fn === 'setSvgFillGradient');
+        expect(setFG.length).toBe(1);
+        expect(setFG[0].args).toEqual([
+            'icon7e', 'linear-gradient(to top, #333, #444)',
+        ]);
+    });
+
     it('commitUpdate replaces only changed props', () => {
         applyChangedProps(
             instance('icon8', 'SvgPath', {}),

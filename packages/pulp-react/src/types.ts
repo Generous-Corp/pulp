@@ -546,6 +546,17 @@ export interface SvgPathProps extends BaseProps {
     /// even-odd winding renders the ring's hole, where nonzero paints a
     /// solid disc. pulp #3656.
     fillRule?: 'nonzero' | 'evenodd';
+    /// Gradient fill as a CSS `linear-gradient(...)` string — e.g.
+    /// `"linear-gradient(to bottom, #ff0000, #0000ff)"`. When set
+    /// (non-empty), it overrides the solid `fill` color at paint time;
+    /// the SvgPathWidget parses the string and fills via
+    /// `Canvas::set_fill_gradient_linear`. Unparseable input silently
+    /// falls back to the solid `fill`. Radial / conic gradients and the
+    /// idiomatic `<SvgLinearGradient>` + `fill="url(#id)"` subtree form
+    /// are followups. (The C++ `setSvgFillGradient` bridge fn / widget
+    /// slot have existed since pulp #932 / #1737; this surfaces it as a
+    /// typed `@pulp/react` prop.)
+    fillGradient?: string;
     /// Stroke color as hex or `"none"`.
     stroke?: string;
     /// Stroke width in widget-local units. Defaults to 1.

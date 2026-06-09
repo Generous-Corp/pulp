@@ -304,6 +304,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         }
         case 'fill':         return call('setSvgFill', id, value as string);
         case 'fillRule':     return call('setSvgFillRule', id, value as string);
+        case 'fillGradient': return call('setSvgFillGradient', id, value as string);
         case 'stroke':       return call('setSvgStroke', id, value as string);
         case 'strokeWidth':  return call('setSvgStrokeWidth', id, value as number);
 

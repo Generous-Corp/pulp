@@ -1037,7 +1037,13 @@ Element.prototype.setAttribute = function(name, value) {
     // and is a no-op when the widget isn't created yet — appendChild
     // re-runs the replay once the native node exists.
     else if (name === "width" || name === "height") {
-        if (typeof __replayMediaAttributes__ === "function") {
+        // <rect> uses width/height as geometry — route those to the
+        // SvgRect replay so post-mount resizes reach the native widget.
+        // Other tags (img/video/svg) keep the media-attr reservation path.
+        if (this.tagName === "RECT" &&
+            typeof __replaySvgRectAttributes__ === "function") {
+            __replaySvgRectAttributes__(this);
+        } else if (typeof __replayMediaAttributes__ === "function") {
             __replayMediaAttributes__(this);
         }
     }
@@ -1118,6 +1124,31 @@ Element.prototype.setAttribute = function(name, value) {
                 var p = parseFloat(value);
                 if (p === p) setSvgStrokeWidth(this._id, p);
             }
+        }
+    }
+    // Raw <rect> / <line> live setAttribute parity with <path>: mount-time
+    // replay already runs from appendChild, but post-mount attribute
+    // mutations (x/y/fill/stroke/... ) were dropped for rect/line because
+    // only PATH was wired here. Re-run the replay helper, which reads the
+    // now-current this._attributes (setAttribute stores it above before
+    // dispatch). width/height for <rect> are handled in the media-attr
+    // branch above.
+    else if (this.tagName === "RECT" &&
+             (name === "x" || name === "y" || name === "fill" ||
+              name === "stroke" || name === "stroke-width" ||
+              name === "strokeWidth")) {
+        if (this._nativeCreated &&
+            typeof __replaySvgRectAttributes__ === "function") {
+            __replaySvgRectAttributes__(this);
+        }
+    }
+    else if (this.tagName === "LINE" &&
+             (name === "x1" || name === "y1" || name === "x2" ||
+              name === "y2" || name === "stroke" ||
+              name === "stroke-width" || name === "strokeWidth")) {
+        if (this._nativeCreated &&
+            typeof __replaySvgLineAttributes__ === "function") {
+            __replaySvgLineAttributes__(this);
         }
     }
 };
