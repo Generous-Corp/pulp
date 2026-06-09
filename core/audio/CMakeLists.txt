@@ -37,6 +37,7 @@ target_sources(pulp-audio PRIVATE
     src/rolling_audio_capture_buffer.cpp
     src/sample_key_map.cpp
     src/sample_pool.cpp
+    src/sample_voice_renderer.cpp
     src/sample_zone_map.cpp
     src/sample_slot_materializer.cpp
     src/sample_slot_bank.cpp

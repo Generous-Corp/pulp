@@ -208,6 +208,13 @@ envelopes, apply modulation, or render voices.
 values into caller-owned buffers; it does not multiply audio or own voice
 storage.
 
+`pulp::audio::SampleVoiceRenderer` is the first scalar sample-reader voice
+primitive. It renders one-shot forward playback from a `SamplePoolResolution`
+into a caller-owned `BufferView`, using caller-owned source-channel scratch and
+an optional per-voice `AhdsrEnvelope`. It can accumulate into an output buffer
+or clear/overwrite the requested span. Looping, streaming, interpolation policy,
+modulation, and SIMD voice summing remain separate slices.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -219,6 +226,7 @@ storage.
 * [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)
 * [`core/audio/include/pulp/audio/instrument_voice_allocator.hpp`](../../core/audio/include/pulp/audio/instrument_voice_allocator.hpp)
 * [`core/audio/include/pulp/audio/sample_pool.hpp`](../../core/audio/include/pulp/audio/sample_pool.hpp)
+* [`core/audio/include/pulp/audio/sample_voice_renderer.hpp`](../../core/audio/include/pulp/audio/sample_voice_renderer.hpp)
 * [`core/audio/include/pulp/audio/sample_zone_map.hpp`](../../core/audio/include/pulp/audio/sample_zone_map.hpp)
   — the no-allocation contract.
 * [`core/format/include/pulp/format/offline_render_host.hpp`](../../core/format/include/pulp/format/offline_render_host.hpp)
