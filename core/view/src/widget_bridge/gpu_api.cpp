@@ -1,6 +1,7 @@
 // widget_bridge/gpu_api.cpp - native GPU JS registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 #include "gpu_common.hpp"
 
 #if __has_include(<pulp/render/gpu_surface.hpp>)
@@ -176,8 +177,9 @@ wgpu::TextureUsage texture_usage_from_mask(uint32_t usage_mask) {
 } // namespace
 
 void WidgetBridge::register_gpu_api() {
+    BridgeApiContext api{engine_};
     // WebGPU: getGPUInfo() -> device capabilities
-    engine_.register_function("getGPUInfo", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "getGPUInfo", [this](choc::javascript::ArgumentList) {
         auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
         auto info = choc::value::createObject("");
         info.addMember("backend", choc::value::createString(gpu_info.backend));
@@ -204,13 +206,11 @@ void WidgetBridge::register_gpu_api() {
     gpu.methods.push_back({"getPreferredCanvasFormat", [this](const choc::value::Value*, size_t) {
         return choc::value::createString(detail::widget_bridge_gpu_info(gpu_surface_).preferred_canvas_format);
     }});
-    engine_.register_host_object("navigatorGPU", std::move(gpu));
-
-    engine_.register_function("__describeNativeAdapterImpl", [this](choc::javascript::ArgumentList) {
+    register_bridge_host_object(api, "navigatorGPU", std::move(gpu));
+    register_bridge_function(api, "__describeNativeAdapterImpl", [this](choc::javascript::ArgumentList) {
         return detail::gpu_descriptor_to_value(detail::widget_bridge_gpu_info(gpu_surface_));
     });
-
-    engine_.register_function("__describeNativeDeviceImpl", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "__describeNativeDeviceImpl", [this](choc::javascript::ArgumentList) {
         auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
         auto device = choc::value::createObject("");
         device.addMember("nativeBridge", choc::value::createBool(gpu_info.native_bridge));
@@ -218,7 +218,7 @@ void WidgetBridge::register_gpu_api() {
         return device;
     });
 
-    engine_.register_function("__gpuCanvasConfigureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCanvasConfigureImpl", [this](choc::javascript::ArgumentList args) {
         auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
         auto canvas_id = args.get<std::string>(0, "");
         auto width = static_cast<uint32_t>(std::max(1, args.get<int32_t>(1, 1)));
@@ -319,7 +319,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    engine_.register_function("__gpuCanvasDescribeCurrentTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCanvasDescribeCurrentTextureImpl", [this](choc::javascript::ArgumentList args) {
         // iOS-D.3b Slice 4: surface the presentable flag here too so
         // JS can verify per-frame that the texture it's about to draw
         // into IS the visible swapchain (slice 5 wires
@@ -363,7 +363,7 @@ void WidgetBridge::register_gpu_api() {
         return native_descriptor;
     });
 
-    engine_.register_function("__gpuCreateTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCreateTextureImpl", [this](choc::javascript::ArgumentList args) {
         auto payload_json = args.get<std::string>(0, "");
         if (payload_json.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
             return choc::value::createString("");
@@ -439,7 +439,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    engine_.register_function("__gpuQueueWriteTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueWriteTextureImpl", [this](choc::javascript::ArgumentList args) {
         auto payload_json = args.get<std::string>(0, "");
         if (payload_json.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
@@ -529,7 +529,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    engine_.register_function("__decodeImageDataImpl", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__decodeImageDataImpl", [](choc::javascript::ArgumentList args) {
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(false));
 
@@ -575,7 +575,7 @@ void WidgetBridge::register_gpu_api() {
         return result;
     });
 
-    engine_.register_function("__gpuDestroyTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuDestroyTextureImpl", [this](choc::javascript::ArgumentList args) {
         auto texture_id = args.get<std::string>(0, "");
         if (texture_id.empty() || native_gpu_bridge_state_ == nullptr) {
             return choc::value::createBool(false);
@@ -584,7 +584,7 @@ void WidgetBridge::register_gpu_api() {
         return choc::value::createBool(native_gpu_bridge_state_->textures.erase(texture_id) > 0);
     });
 
-    engine_.register_function("__gpuQueueSubmitImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueSubmitImpl", [this](choc::javascript::ArgumentList args) {
         auto canvas_id = args.get<std::string>(0, "");
         auto r = static_cast<float>(args.get<double>(1, 0.0));
         auto g = static_cast<float>(args.get<double>(2, 0.0));
@@ -653,7 +653,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    engine_.register_function("__gpuQueueDrawImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueDrawImpl", [this](choc::javascript::ArgumentList args) {
         auto canvas_id = args.get<std::string>(0, "");
         auto vertex_code = args.get<std::string>(1, "");
         auto vertex_entry = args.get<std::string>(2, "main");
@@ -1087,7 +1087,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    engine_.register_function("__gpuQueueDrawBufferedImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueDrawBufferedImpl", [this](choc::javascript::ArgumentList args) {
         if (args.numArgs < 1 || !args[0] || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
@@ -1853,7 +1853,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    engine_.register_function("__gpuQueuePresentTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueuePresentTextureImpl", [this](choc::javascript::ArgumentList args) {
         if (args.numArgs < 1 || !args[0] || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
@@ -2048,7 +2048,7 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 #endif
     });
 
-    engine_.register_function("__gpuCanvasPresentImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCanvasPresentImpl", [this](choc::javascript::ArgumentList args) {
         auto canvas_id = args.get<std::string>(0, "");
         if (canvas_id.empty() || native_gpu_bridge_state_ == nullptr) {
             return choc::value::createBool(false);
@@ -2065,14 +2065,14 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         return choc::value::createBool(it->second.configured);
     });
 
-    engine_.register_promise_function("__requestAdapterImpl", [this](const choc::value::Value*, size_t) {
+    register_bridge_promise_function(api, "__requestAdapterImpl", [this](const choc::value::Value*, size_t) {
         return detail::gpu_descriptor_to_value(detail::widget_bridge_gpu_info(gpu_surface_));
     });
 
     // -- Compute pipeline dispatch ---------------------------------------
     // Receives JSON from the JS compute pass encoder and dispatches
     // via Dawn's native compute pipeline infrastructure.
-    engine_.register_function("__gpuComputeDispatchImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuComputeDispatchImpl", [this](choc::javascript::ArgumentList args) {
         if (args.numArgs < 1 || !args[0] || gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
@@ -2237,7 +2237,7 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
     // -- Binary transfer: register a native buffer for zero-copy GPU upload --
     // Avoids base64 encoding overhead for buffers > 64KB.
-    engine_.register_function("__registerNativeBuffer", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__registerNativeBuffer", [this](choc::javascript::ArgumentList args) {
         auto buffer_id = args.get<std::string>(0, "");
         auto size = static_cast<size_t>(args.get<int64_t>(1, 0));
         if (buffer_id.empty() || size == 0) return choc::value::createBool(false);
@@ -2248,7 +2248,7 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         return choc::value::createBool(true);
     });
 
-    engine_.register_function("__writeNativeBuffer", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__writeNativeBuffer", [this](choc::javascript::ArgumentList args) {
         auto buffer_id = args.get<std::string>(0, "");
         auto offset = static_cast<size_t>(args.get<int64_t>(1, 0));
         auto data_b64 = args.get<std::string>(2, "");  // Still base64 for now, but in chunks
@@ -2266,7 +2266,7 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     });
 
     // -- DRACO mesh decode (native C++ decoder) --------------------------
-    engine_.register_function("__dracoDecodeBuffer", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__dracoDecodeBuffer", [](choc::javascript::ArgumentList args) {
         (void)args;
         auto result = choc::value::createObject("DracoResult");
         result.addMember("available", choc::value::createBool(
