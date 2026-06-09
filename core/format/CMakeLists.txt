@@ -12,6 +12,8 @@ target_sources(pulp-format PRIVATE
     src/registry.cpp
     src/headless.cpp
     src/offline_render_host.cpp
+    src/offline_sample_bounce.cpp
+    src/offline_sample_slot_bounce.cpp
     src/graph_runtime_executor.cpp
     src/plugin_state_io.cpp
     src/processor_block_adapter.cpp
