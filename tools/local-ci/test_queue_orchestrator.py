@@ -177,6 +177,57 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertNotIn("last_progress_at", queue[2])
         self.assertFalse(self.mod.upsert_job_active_targets_unlocked(queue, "unknown", {}))
 
+    def test_target_state_updates_merge_clear_and_remove_empty_state(self) -> None:
+        queue = [
+            {
+                "id": "job123",
+                "branch": "feature/q",
+                "status": "running",
+                "active_targets": {
+                    "mac": {"status": "running", "phase": "build"},
+                    "windows": {"status": "queued"},
+                },
+                "last_progress_at": "old",
+            }
+        ]
+
+        updated = self.mod.update_job_target_state_unlocked(
+            queue,
+            "job123",
+            "mac",
+            status="pass",
+            phase=None,
+            detail="ok",
+            now_iso_fn=lambda: "2026-06-09T00:04:00+00:00",
+        )
+        self.assertTrue(updated)
+        self.assertEqual(queue[0]["active_targets"]["mac"], {"status": "pass", "detail": "ok"})
+        self.assertEqual(queue[0]["active_targets"]["windows"], {"status": "queued"})
+        self.assertEqual(queue[0]["last_progress_at"], "2026-06-09T00:04:00+00:00")
+
+        cleared_target = self.mod.update_job_target_state_unlocked(
+            queue,
+            "job123",
+            "mac",
+            status=None,
+            detail=None,
+            now_iso_fn=lambda: "2026-06-09T00:05:00+00:00",
+        )
+        self.assertTrue(cleared_target)
+        self.assertNotIn("mac", queue[0]["active_targets"])
+        self.assertEqual(queue[0]["last_progress_at"], "2026-06-09T00:05:00+00:00")
+
+        cleared_all = self.mod.update_job_target_state_unlocked(
+            queue,
+            "job123",
+            "windows",
+            status=None,
+        )
+        self.assertTrue(cleared_all)
+        self.assertNotIn("active_targets", queue[0])
+        self.assertNotIn("last_progress_at", queue[0])
+        self.assertFalse(self.mod.update_job_target_state_unlocked(queue, "missing", "mac", status="pass"))
+
 
 if __name__ == "__main__":
     unittest.main()
