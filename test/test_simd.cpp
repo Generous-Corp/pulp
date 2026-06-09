@@ -2,9 +2,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/runtime/simd.hpp>
 #include <pulp/signal/simd_buffer.hpp>
-#include <vector>
+#include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <vector>
 
 using namespace pulp::runtime;
 using namespace pulp::signal;
@@ -31,6 +32,19 @@ TEST_CASE("simd_add matches scalar add", "[simd]") {
     for (size_t i = 0; i < N; ++i) {
         REQUIRE_THAT(dst[i], WithinAbs(expected[i], 1e-5));
     }
+}
+
+TEST_CASE("simd_add supports exact destination aliasing", "[simd]") {
+    std::vector<float> a{1.0f, 2.0f, 3.0f, 4.0f};
+    std::vector<float> b{10.0f, 20.0f, 30.0f, 40.0f};
+
+    simd_add(a.data(), b.data(), b.data(), b.size());
+    REQUIRE_THAT(b[0], WithinAbs(11.0f, 1e-6));
+    REQUIRE_THAT(b[3], WithinAbs(44.0f, 1e-6));
+
+    simd_add(a.data(), b.data(), a.data(), a.size());
+    REQUIRE_THAT(a[0], WithinAbs(12.0f, 1e-6));
+    REQUIRE_THAT(a[3], WithinAbs(48.0f, 1e-6));
 }
 
 TEST_CASE("simd_mul matches scalar mul", "[simd]") {
@@ -88,6 +102,45 @@ TEST_CASE("simd_scale multiplies by scalar", "[simd]") {
 
     for (size_t i = 0; i < N; ++i) {
         REQUIRE_THAT(dst[i], WithinAbs(static_cast<float>(i) * 0.5f, 1e-5));
+    }
+}
+
+TEST_CASE("simd_add_scaled accumulates scaled source", "[simd]") {
+    const size_t N = 1023;  // non-power-of-two to test tail handling
+    std::vector<float> src(N), dst(N), expected(N);
+
+    for (size_t i = 0; i < N; ++i) {
+        src[i] = static_cast<float>(i) * 0.01f;
+        dst[i] = static_cast<float>(N - i) * 0.02f;
+        expected[i] = dst[i] + src[i] * 0.25f;
+    }
+
+    simd_add_scaled(src.data(), 0.25f, dst.data(), N);
+
+    for (size_t i = 0; i < N; ++i) {
+        REQUIRE_THAT(dst[i], WithinAbs(expected[i], 1e-5));
+    }
+}
+
+TEST_CASE("simd_add_scaled handles empty and single-sample buffers", "[simd]") {
+    float src = 2.0f;
+    float dst = 3.0f;
+    simd_add_scaled(&src, 4.0f, &dst, 0);
+    REQUIRE_THAT(dst, WithinAbs(3.0f, 1e-6));
+
+    simd_add_scaled(&src, 4.0f, &dst, 1);
+    REQUIRE_THAT(dst, WithinAbs(11.0f, 1e-6));
+}
+
+TEST_CASE("simd_add_scaled supports negative scalar and exact in-place use",
+          "[simd]") {
+    std::vector<float> values{1.0f, -2.0f, 3.5f, -4.5f, 8.0f};
+    const auto original = values;
+
+    simd_add_scaled(values.data(), -0.5f, values.data(), values.size());
+
+    for (size_t i = 0; i < values.size(); ++i) {
+        REQUIRE_THAT(values[i], WithinAbs(original[i] * 0.5f, 1e-6));
     }
 }
 

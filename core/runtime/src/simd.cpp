@@ -23,8 +23,7 @@ size_t FloatLanes() {
     return hn::Lanes(d);
 }
 
-void AddF32(const float* HWY_RESTRICT a, const float* HWY_RESTRICT b,
-            float* HWY_RESTRICT dst, size_t count) {
+void AddF32(const float* a, const float* b, float* dst, size_t count) {
     const hn::ScalableTag<float> d;
     const size_t N = hn::Lanes(d);
     size_t i = 0;
@@ -90,6 +89,20 @@ void ScaleF32(const float* HWY_RESTRICT a, float scalar,
     }
     for (; i < count; ++i)
         dst[i] = a[i] * scalar;
+}
+
+void AddScaledF32(const float* a, float scalar, float* dst, size_t count) {
+    const hn::ScalableTag<float> d;
+    const size_t N = hn::Lanes(d);
+    auto vscalar = hn::Set(d, scalar);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        auto va = hn::LoadU(d, a + i);
+        auto vd = hn::LoadU(d, dst + i);
+        hn::StoreU(hn::MulAdd(va, vscalar, vd), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] += a[i] * scalar;
 }
 
 float ReduceAddF32(const float* HWY_RESTRICT data, size_t count) {
@@ -182,6 +195,7 @@ HWY_EXPORT(MulF32);
 HWY_EXPORT(FmaF32);
 HWY_EXPORT(SetF32);
 HWY_EXPORT(ScaleF32);
+HWY_EXPORT(AddScaledF32);
 HWY_EXPORT(ReduceAddF32);
 HWY_EXPORT(ReduceMaxF32);
 HWY_EXPORT(ReduceMinF32);
@@ -210,6 +224,10 @@ void simd_set(float value, float* dst, size_t count) {
 
 void simd_scale(const float* a, float scalar, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(ScaleF32)(a, scalar, dst, count);
+}
+
+void simd_add_scaled(const float* a, float scalar, float* dst, size_t count) {
+    HWY_DYNAMIC_DISPATCH(AddScaledF32)(a, scalar, dst, count);
 }
 
 float simd_reduce_add(const float* data, size_t count) {

@@ -11,7 +11,8 @@ namespace pulp::runtime {
 /// Number of float lanes on best available SIMD target
 size_t simd_float_lanes();
 
-/// Element-wise add: dst[i] = a[i] + b[i]
+/// Element-wise add: dst[i] = a[i] + b[i].
+/// Exact aliasing where dst == a or dst == b is supported; partial overlap is not.
 void simd_add(const float* a, const float* b, float* dst, size_t count);
 
 /// Element-wise multiply: dst[i] = a[i] * b[i]
@@ -26,6 +27,10 @@ void simd_set(float value, float* dst, size_t count);
 
 /// Scalar multiply: dst[i] = a[i] * scalar
 void simd_scale(const float* a, float scalar, float* dst, size_t count);
+
+/// Accumulate scaled source into destination: dst[i] += a[i] * scalar.
+/// Exact aliasing where a == dst is supported; partial overlap is not.
+void simd_add_scaled(const float* a, float scalar, float* dst, size_t count);
 
 /// Sum all elements (horizontal reduce)
 float simd_reduce_add(const float* data, size_t count);
