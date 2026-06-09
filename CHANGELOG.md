@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03930"></a>
+## [0.393.0] - 2026-06-09
+
+- feat(view): Linux XDND drag-drop on the plugin-host X11 window (#3645) ([#3770](https://github.com/danielraffel/pulp/pull/3770))
+- fix/ci release toolchain pin ([#3749](https://github.com/danielraffel/pulp/pull/3749))
+- refactor(local-ci): extract desktop reporting helpers ([#3759](https://github.com/danielraffel/pulp/pull/3759))
+- refactor(local-ci): extract desktop artifact layout helpers ([#3755](https://github.com/danielraffel/pulp/pull/3755))
+- refactor(local-ci): move stale validator cleanup helpers ([#3757](https://github.com/danielraffel/pulp/pull/3757))
+
 <a id="v03922"></a>
 ## [0.392.2] - 2026-06-09
 
@@ -4050,6 +4059,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.393.0]: https://github.com/danielraffel/pulp/releases/tag/v0.393.0
 [0.392.2]: https://github.com/danielraffel/pulp/releases/tag/v0.392.2
 [0.392.1]: https://github.com/danielraffel/pulp/releases/tag/v0.392.1
 [0.392.0]: https://github.com/danielraffel/pulp/releases/tag/v0.392.0
