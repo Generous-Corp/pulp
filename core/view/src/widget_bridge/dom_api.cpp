@@ -5,6 +5,7 @@
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
+#include "api_registry.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -33,10 +34,12 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
 } // namespace
 
 void WidgetBridge::register_dom_api() {
+    BridgeApiContext api{engine_};
+
     // __domAppend(parentId, childId, tag) - native appendChild.
     // Creates a native widget under parentId, purely in C++ - no re-entrant
     // JS evaluation which causes stack overflow in QuickJS.
-    engine_.register_function("__domAppend", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__domAppend", [this](choc::javascript::ArgumentList args) {
         auto parentId = args.get<std::string>(0, "");
         auto childId = args.get<std::string>(1, "");
         auto tag = args.get<std::string>(2, "div");
@@ -169,7 +172,7 @@ void WidgetBridge::register_dom_api() {
     });
 
     // __domRemove(childId) - native removeChild implementation.
-    engine_.register_function("__domRemove", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__domRemove", [this](choc::javascript::ArgumentList args) {
         auto childId = args.get<std::string>(0, "");
         auto* w = widget(childId);
         if (w) {
