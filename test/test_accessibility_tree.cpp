@@ -371,6 +371,8 @@ using pulp::platform::DBus;
 constexpr const char* kRootPath = "/org/a11y/atspi/accessible/root";
 constexpr const char* kIfaceAccessible = "org.a11y.atspi.Accessible";
 constexpr const char* kIfaceComponent  = "org.a11y.atspi.Component";
+constexpr const char* kIfaceValue      = "org.a11y.atspi.Value";
+constexpr const char* kIfaceProperties = "org.freedesktop.DBus.Properties";
 
 // One node read back over the wire from an Accessible object.
 struct WireNode {
@@ -601,9 +603,225 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
 
     shutdown_accessibility(handle);
 }
+
+// ── Linux AT-SPI Value interface + event signals loopback (slice L7c) ────────
+//
+// Builds a value-bearing widget (RangeProbe implements AccessibilityValueInterface
+// — the SAME interface the Windows W6 provider dynamic_casts to), exports it on
+// the session bus via the test seam, then acts as an AT-SPI client:
+//   * Properties.Get(Value, CurrentValue/MinimumValue/MaximumValue/
+//     MinimumIncrement) — assert the doubles match the View's value interface.
+//   * Properties.Set(Value, CurrentValue, X) — assert it routes back into the
+//     View's set_current_value (same path a user adjust takes), then re-Get to
+//     confirm the new value is reported.
+//   * Accessible.GetInterfaces — assert "org.a11y.atspi.Value" is advertised on
+//     the value-bearing node and ABSENT on a plain (non-value) label node.
+//   * Trigger notify_accessibility_value_changed and pump — assert the emit path
+//     runs without disturbing a subsequent Property read (signal RECEIPT needs a
+//     real registry / a client signal-subscription API the object-server layer
+//     does not expose, so this is the CI-verifiable surface; receipt is a
+//     VM-only proof under accerciser/Orca).
+
+namespace {
+
+// Read a single double-typed property via org.freedesktop.DBus.Properties.Get
+// over a fresh client connection. Returns false on transport error.
+bool get_double_property(const std::string& server_name, const std::string& path,
+                         const std::string& iface, const std::string& prop,
+                         double& out) {
+    DBus client;
+    if (!client.connect_session()) return false;
+    return client.call_method(
+        server_name, path, kIfaceProperties, "Get",
+        [&](DBus::Writer& w) {
+            w.append_string(iface);
+            w.append_string(prop);
+        },
+        [&](DBus::Reader& r) {
+            // reply: v (a variant wrapping the double).
+            DBus::Reader var;
+            if (r.recurse(var)) var.read_double(out);
+        });
+}
+
+// Set a double-typed property via Properties.Set (the variant body is d).
+bool set_double_property(const std::string& server_name, const std::string& path,
+                         const std::string& iface, const std::string& prop,
+                         double value) {
+    DBus client;
+    if (!client.connect_session()) return false;
+    // Properties.Set takes (ssv); the DBus::Writer has no direct variant-at-top
+    // helper for the value, so open the variant explicitly.
+    return client.call_method(
+        server_name, path, kIfaceProperties, "Set",
+        [&](DBus::Writer& w) {
+            w.append_string(iface);
+            w.append_string(prop);
+            auto v = w.open_variant("d");
+            DBus::Writer vw = w.sub(v);
+            vw.append_double(value);
+            w.close_container(v);
+        },
+        [](DBus::Reader&) {});
+}
+
+// Read Accessible.GetInterfaces (reply: as) into a vector of strings.
+bool get_interfaces(const std::string& server_name, const std::string& path,
+                    std::vector<std::string>& out) {
+    DBus client;
+    if (!client.connect_session()) return false;
+    return client.call_method(
+        server_name, path, kIfaceAccessible, "GetInterfaces",
+        [](DBus::Writer&) {},
+        [&](DBus::Reader& r) {
+            DBus::Reader arr;
+            if (!r.recurse(arr)) return;
+            while (arr.arg_type() != 0) {
+                std::string s;
+                if (arr.read_string(s)) out.push_back(s);
+                if (!arr.next()) break;
+            }
+        });
+}
+
+bool contains(const std::vector<std::string>& v, const std::string& s) {
+    for (const auto& e : v) if (e == s) return true;
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
+          "[view][accessibility][atspi][linux][issue-L7c]") {
+    if (!DBus::library_available()) {
+        SUCCEED("skipped: libdbus not available");
+        return;
+    }
+    {
+        DBus probe;
+        if (!probe.connect_session()) {
+            SUCCEED("skipped: no session bus (run under dbus-run-session)");
+            return;
+        }
+    }
+
+    // root (none)
+    //   ├─ "Gain" (slider, RangeProbe ⇒ AccessibilityValueInterface, [-12,12]=6)
+    //   └─ "Title" (label, plain View ⇒ NOT value-bearing)
+    Probe root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto gain = std::make_unique<RangeProbe>(6.0);
+    gain->set_access_role(View::AccessRole::slider);
+    gain->set_access_label("Gain");
+    gain->set_bounds({20, 30, 200, 24});
+    RangeProbe* gain_raw = gain.get();
+
+    auto title = std::make_unique<Probe>();
+    title->set_access_role(View::AccessRole::label);
+    title->set_access_label("Title");
+    title->set_bounds({10, 10, 100, 20});
+
+    root.add_child(std::move(gain));
+    root.add_child(std::move(title));
+
+    std::string server_name;
+    void* handle =
+        init_accessibility_on_session_bus_for_test(root, &server_name);
+    if (!handle) {
+        SUCCEED("skipped: could not export on session bus");
+        return;
+    }
+    REQUIRE_FALSE(server_name.empty());
+
+    // Resolve object paths from the root's GetChildren (DFS order: Gain, Title).
+    WireNode root_node;
+    bool got_tree = run_client_call(handle, [&] {
+        return read_node(server_name, kRootPath, root_node);
+    });
+    REQUIRE(got_tree);
+    REQUIRE(root_node.child_paths.size() == 2);
+    const std::string gain_path = root_node.child_paths[0];
+    const std::string title_path = root_node.child_paths[1];
+
+    // ── Value properties report the View's value interface ──────────────────
+    double cur = 0, lo = 0, hi = 0, inc = 0;
+    bool got_props = run_client_call(handle, [&] {
+        bool ok = true;
+        ok = get_double_property(server_name, gain_path, kIfaceValue,
+                                 "CurrentValue", cur) && ok;
+        ok = get_double_property(server_name, gain_path, kIfaceValue,
+                                 "MinimumValue", lo) && ok;
+        ok = get_double_property(server_name, gain_path, kIfaceValue,
+                                 "MaximumValue", hi) && ok;
+        ok = get_double_property(server_name, gain_path, kIfaceValue,
+                                 "MinimumIncrement", inc) && ok;
+        return ok;
+    });
+    REQUIRE(got_props);
+    REQUIRE(cur == 6.0);
+    REQUIRE(lo == -12.0);
+    REQUIRE(hi == 12.0);
+    REQUIRE(inc == gain_raw->get_step_size());  // (12 - -12)/100 = 0.24
+
+    // ── Set CurrentValue routes back into the View's value interface ─────────
+    bool did_set = run_client_call(handle, [&] {
+        return set_double_property(server_name, gain_path, kIfaceValue,
+                                   "CurrentValue", -3.5);
+    });
+    REQUIRE(did_set);
+    REQUIRE(gain_raw->get_current_value() == -3.5);  // user-adjust path taken
+
+    // Re-Get confirms the provider now reports the updated value.
+    double cur2 = 0;
+    bool got_again = run_client_call(handle, [&] {
+        return get_double_property(server_name, gain_path, kIfaceValue,
+                                   "CurrentValue", cur2);
+    });
+    REQUIRE(got_again);
+    REQUIRE(cur2 == -3.5);
+
+    // ── GetInterfaces gates Value to value-bearing nodes only ───────────────
+    std::vector<std::string> gain_ifaces, title_ifaces;
+    bool got_ifaces = run_client_call(handle, [&] {
+        return get_interfaces(server_name, gain_path, gain_ifaces) &&
+               get_interfaces(server_name, title_path, title_ifaces);
+    });
+    REQUIRE(got_ifaces);
+    REQUIRE(contains(gain_ifaces, kIfaceAccessible));
+    REQUIRE(contains(gain_ifaces, kIfaceComponent));
+    REQUIRE(contains(gain_ifaces, kIfaceValue));     // slider IS value-bearing
+    REQUIRE(contains(title_ifaces, kIfaceAccessible));
+    REQUIRE(contains(title_ifaces, kIfaceComponent));
+    REQUIRE_FALSE(contains(title_ifaces, kIfaceValue));  // label is NOT
+
+    // ── Event hooks run the emit path without disrupting later reads ─────────
+    // Receipt of the PropertyChange / StateChanged signal requires a real
+    // registry (VM-only); here we assert the emit path executes cleanly and the
+    // object remains queryable afterward (a marshalling fault would throw / wedge
+    // the dispatcher and the follow-up Get would fail).
+    notify_accessibility_value_changed(handle, *gain_raw);
+    notify_accessibility_focus_changed(handle, *gain_raw);
+    notify_accessibility_name_changed(handle, *gain_raw);
+    accessibility_pump(handle);
+
+    double cur3 = 0;
+    bool still_alive = run_client_call(handle, [&] {
+        return get_double_property(server_name, gain_path, kIfaceValue,
+                                   "CurrentValue", cur3);
+    });
+    REQUIRE(still_alive);
+    REQUIRE(cur3 == -3.5);
+
+    shutdown_accessibility(handle);
+}
 #else
 TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
           "[view][accessibility][atspi][issue-L7b]") {
+    SUCCEED("Linux AT-SPI provider is a Linux-only runtime backend");
+}
+TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
+          "[view][accessibility][atspi][issue-L7c]") {
     SUCCEED("Linux AT-SPI provider is a Linux-only runtime backend");
 }
 #endif
