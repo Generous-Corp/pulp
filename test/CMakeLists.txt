@@ -1424,10 +1424,10 @@ pulp_add_test_suite(pulp-test-midi-buffer-sysex LIBRARIES pulp::midi)
 # realtime-inside-sysex passthrough (#239), runaway cap, and multi-read
 # accumulator state.
 pulp_add_test_suite(pulp-test-raw-midi-parser LIBRARIES pulp::midi)
-# Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial).
-# Cross-platform — compiles everywhere; Windows-specific cases are
-# guarded behind #ifdef _WIN32.
+# Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial; cross-platform, Win cases #ifdef _WIN32).
 pulp_add_test_suite(pulp-test-winmidi-sysex LIBRARIES pulp::midi)
+# WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).
+pulp_add_test_suite(pulp-test-winrt-midi LIBRARIES pulp::midi)
 # Accessibility provider cross-platform entry (workstream 04 slices 4.1 + 4.2)
 pulp_add_test_suite(pulp-test-accessibility-provider LIBRARIES pulp::view)
 # PluginDescriptor validation (workstream 01 slice 1.9)

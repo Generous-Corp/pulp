@@ -1,0 +1,25 @@
+{
+  "$comment": [
+    "Manifest used ONLY by the windows-midi2-gate CI lane to provision the",
+    "Windows MIDI Services SDK (Microsoft.Windows.Devices.Midi2) C++/WinRT",
+    "projection so Pulp's opt-in WinRT MIDI 2.0 backend",
+    "(core/midi/platform/win/winrt_midi_device.cpp, gated by",
+    "PULP_HAS_WINRT_MIDI) can be compile-verified. This is NOT a Pulp",
+    "runtime dependency and is never part of the default build.",
+    "The midi2 port pulls cppwinrt (host) which generates the projection",
+    "headers; see tools/ci/midi2/README.md."
+  ],
+  "name": "pulp-winrt-midi2-gate",
+  "version-string": "0.0.0",
+  "dependencies": [
+    "cppwinrt",
+    "microsoft-windows-devices-midi2"
+  ],
+  "builtin-baseline": "2bffa0a8d92272dd2858db00226476698badc233",
+  "overrides": [
+    {
+      "name": "microsoft-windows-devices-midi2",
+      "version": "1.0.17-rc.4.25"
+    }
+  ]
+}

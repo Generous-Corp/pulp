@@ -168,6 +168,24 @@ unit tests still pass. It is non-gating by design; do not promote it to
 a required check until a self-hosted Linux runner with pinned osxcross
 + private SDK is provisioned and the matching full-build job lands.
 
+### Advisory compile-gate: `windows-midi2-gate`
+
+`build.yml`'s `windows-midi2-gate` job (`continue-on-error: true`, NOT a
+required check, NOT part of the build matrix) compile-verifies Pulp's
+opt-in WinRT MIDI 2.0 backend (`core/midi/platform/win/winrt_midi_device.cpp`,
+gated by `PULP_HAS_WINRT_MIDI`). That backend consumes the
+`Microsoft.Windows.Devices.Midi2` C++/WinRT projection, which ships
+out-of-band with the Windows MIDI Services SDK — a GitHub-only NuGet, NOT in
+the base Windows SDK, so no other lane can compile it. The job provisions it
+through Microsoft's official **vcpkg port** `microsoft-windows-devices-midi2`
+(it downloads the SDK NuGet, runs cppwinrt to generate the projection headers,
+and exports the `Microsoft::Windows::Devices::Midi2` CMake target). Pins +
+rationale live in `tools/ci/midi2/` (`vcpkg.json` + `README.md`). The default
+Windows build never sets `PULP_HAS_WINRT_MIDI`, so this is purely additive.
+Watch points: the port requires Windows SDK >= 10.0.26100.0 (windows-latest is
+right at that floor), and the drafted backend's API surface may still drift
+from the real `winrt::Microsoft::Windows::Devices::Midi2` namespace.
+
 ## PR Review Thread Hygiene
 
 Before opening a follow-up PR or declaring a phase complete, sweep review
