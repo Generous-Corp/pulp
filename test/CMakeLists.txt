@@ -2016,6 +2016,9 @@ pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
 # Built-in onset detection and slice-map analysis primitives.
 pulp_add_test_suite(pulp-test-onset-slice-analysis LIBRARIES pulp::audio)
 
+# Analysis provider descriptors, package availability policy, and provenance sidecars.
+pulp_add_test_suite(pulp-test-analyzer-provider LIBRARIES pulp::audio)
+
 # Loop reader and renderer primitives, including interpolation, fades, and crossfades.
 pulp_add_test_suite(pulp-test-loop-rendering LIBRARIES pulp::audio)
 
