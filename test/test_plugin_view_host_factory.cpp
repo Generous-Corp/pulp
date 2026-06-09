@@ -120,11 +120,18 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     }
 
     // Build the host with a recording drop zone covering the whole surface.
+    // The host re-runs a Yoga layout pass on every paint (attach_to_parent ->
+    // repaint -> paint_scene -> layout_children), so a manually-set bounds on a
+    // child does NOT survive — a default flex child with no sizing collapses to
+    // zero on the main axis. Give the zone flex_grow:1 so Yoga sizes it to fill
+    // the root's 200x150; otherwise the drop point hit-tests the (zero-height)
+    // zone, misses it, and dispatch_drop never reaches the receiver.
     pulp::view::View root;
     root.set_bounds({0, 0, 200, 150});
     auto zone_owned = std::make_unique<RecordingDropZone>();
     RecordingDropZone* zone = zone_owned.get();
     zone->set_bounds({0, 0, 200, 150});
+    zone->flex().flex_grow = 1.0f;  // fill the root's column main axis after layout
     root.add_child(std::move(zone_owned));
 
     pulp::view::register_platform_plugin_view_host();
