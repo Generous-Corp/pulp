@@ -1706,10 +1706,15 @@ preflight, source-prep, cleanup, and artifact-publishing contracts.
   `resolve_workflow_dispatch_defaults`, `summarize_workflow_provider_defaults`,
   `resolve_cli_dispatch_field_values`). Pure resolution — the actual
   subprocess `gh-api` dispatch still lives in `local_ci.py`.
+- `evidence_index.py` — owns the local-CI evidence index: result-to-evidence
+  normalization, latest passing target records, evidence index persistence,
+  branch/SHA grouping, and evidence summaries. Queue mutation, runner state,
+  result creation, and target execution stay out of this module.
 
 All original symbols are re-exported from `local_ci.py`, so any old
 `mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
-`mod.file_lock(...)` / `mod.BUILTIN_GITHUB_WORKFLOWS` test patch keeps
+`mod.file_lock(...)` / `mod.BUILTIN_GITHUB_WORKFLOWS` /
+`mod.collect_evidence_groups(...)` test patch keeps
 working — but new code should import directly from the sibling module
 to avoid the god-module dependency.
 

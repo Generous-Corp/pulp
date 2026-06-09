@@ -18,6 +18,7 @@ and the matching contract tests in the same change.
 | `github_workflows.py` | Pure GitHub Actions workflow/default/provider resolution. | `gh` subprocess calls, workflow dispatch, or polling. |
 | `cloud.py` | GitHub/Namespace cloud-run records, cost/history helpers, dispatch wrappers, and formatting. | Local/SSH validation execution. |
 | `footprint.py` | Local-CI state-size accounting and cleanup entry descriptions. | Cleanup candidate selection or deletion. |
+| `evidence_index.py` | Result-to-evidence normalization, latest passing target evidence, evidence index persistence, and evidence summaries. | Queue mutation, runner state, result creation, or target execution. |
 
 ## Remaining `local_ci.py` Clusters
 
@@ -32,7 +33,6 @@ behind the contracts added in this slice.
 | Desktop source preparation | Exact-SHA local/macOS, Linux, and Windows source preparation; command rewriting; prepare stamps. | `source_prep.py` |
 | Desktop target probes | macOS/Linux/Windows desktop tool probes, launch backends, and automation adapters. | `macos_desktop.py`, `linux_target.py`, `windows_target.py` |
 | Queue orchestration | Locking, enqueue/dedupe/supersede, stale-running requeue, runner info, target state updates. | `queue_orchestrator.py` |
-| Evidence index | Result-to-evidence normalization, latest passing target evidence, evidence summaries. | `evidence_index.py` |
 | Cleanup planning | Retention policy for result/log/bundle/prepared artifacts and deletion execution. | `cleanup.py` |
 | Target preflight | SSH primary/fallback/UTM/Namespace failover checks and submission metadata warnings. | `target_preflight.py` |
 | Validation execution | Local, SSH, Windows, Linux, smoke/full validation commands and target status reporting. | `execution.py` |
