@@ -1973,6 +1973,9 @@ pulp_add_test_suite(pulp-test-sample-key-map LIBRARIES pulp::audio)
 # Undoable sample edit document metadata kept separate from audio storage/import/export.
 pulp_add_test_suite(pulp-test-sample-edit-document LIBRARIES pulp::audio)
 
+# Sample asset import/export policy and platform-neutral drop classification.
+pulp_add_test_suite(pulp-test-sample-asset-io LIBRARIES pulp::audio)
+
 # Prepared sample-pool resolver over existing published sample stores.
 pulp_add_test_suite(pulp-test-sample-pool LIBRARIES pulp::audio)
 
