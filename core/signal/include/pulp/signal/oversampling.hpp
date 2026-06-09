@@ -5,7 +5,7 @@
 
 #include <array>
 #include <functional>
-#include <vector>
+#include <utility>
 
 namespace pulp::signal {
 
@@ -38,20 +38,36 @@ public:
         polyphase_iir, ///< Half-band polyphase IIR (allpass-network).
     };
 
-    void set_factor(Factor f) { factor_ = f; reset(); }
-    void set_sample_rate(float sr) { sample_rate_ = sr; configure_filters(); }
+    Oversampler() { configure_filters(); }
+
+    void set_factor(Factor f) {
+        factor_ = f;
+        configure_filters();
+        reset();
+    }
+    void set_sample_rate(float sr) {
+        sample_rate_ = sr;
+        configure_filters();
+        reset();
+    }
     void set_kind(Kind k) { kind_ = k; reset(); }
     Kind kind() const { return kind_; }
 
     // Process a single sample with oversampled callback.
     // The callback receives an upsampled sample and returns the processed
-    // output. The same callback fires `2*N` times per `process()` call for
-    // factor xN (the loop runs at the oversampled rate).
+    // output. The same callback fires N times per `process()` call for factor
+    // xN (the loop runs at the oversampled rate). Prefer this templated path
+    // for realtime use; it does not need to type-erase callbacks.
+    template <typename Callback>
+    float process(float input, Callback&& callback) {
+        return process_with_callback(input, std::forward<Callback>(callback));
+    }
+
+    // Source-compatible convenience overload for callers that already hold a
+    // std::function. Capturing or heap-backed std::function payloads are not a
+    // realtime-safety guarantee; hot paths should use the templated overload.
     float process(float input, std::function<float(float)> callback) {
-        if (kind_ == Kind::polyphase_iir) {
-            return process_polyphase_iir(input, callback);
-        }
-        return process_fir_biquad(input, callback);
+        return process_with_callback(input, callback);
     }
 
     void reset() {
@@ -68,20 +84,33 @@ private:
     Kind kind_ = Kind::fir_biquad;
     float sample_rate_ = 44100.0f;
 
+    static constexpr int factor_value(Factor factor) noexcept {
+        return factor == Factor::x4 ? 4 : 2;
+    }
+
+    template <typename Callback>
+    float process_with_callback(float input, Callback&& callback) {
+        if (kind_ == Kind::polyphase_iir) {
+            return process_polyphase_iir(input, callback);
+        }
+        return process_fir_biquad(input, callback);
+    }
+
     // ── fir_biquad lane ────────────────────────────────────────────────
     Biquad aa_up_, aa_down_;
 
     void configure_filters() {
-        float os_rate = sample_rate_ * static_cast<float>(factor_);
+        float os_rate = sample_rate_ * static_cast<float>(factor_value(factor_));
         float cutoff = sample_rate_ * 0.4f; // Below Nyquist of original rate
         aa_up_.set_coefficients(Biquad::Type::lowpass, cutoff, 0.707f, os_rate);
         aa_down_.set_coefficients(Biquad::Type::lowpass, cutoff, 0.707f, os_rate);
     }
 
-    float process_fir_biquad(float input, std::function<float(float)>& callback) {
-        int n = static_cast<int>(factor_);
+    template <typename Callback>
+    float process_fir_biquad(float input, Callback& callback) {
+        const int n = factor_value(factor_);
         // Upsample: insert zeros.
-        std::vector<float> upsampled(n, 0.0f);
+        std::array<float, 4> upsampled{};
         upsampled[0] = input * n; // scale-up to preserve energy
         for (int i = 0; i < n; ++i)
             upsampled[i] = aa_up_.process(upsampled[i]);
@@ -99,8 +128,9 @@ private:
     HalfBandUpsampler2x   hb_up_stage2_;
     HalfBandDownsampler2x hb_down_stage2_;
 
-    float process_polyphase_iir(float input, std::function<float(float)>& callback) {
-        if (factor_ == Factor::x2) {
+    template <typename Callback>
+    float process_polyphase_iir(float input, Callback& callback) {
+        if (factor_value(factor_) == 2) {
             // 1 in → 2 oversampled samples → 2 callback hits → 1 out.
             float u_lo = 0.f, u_hi = 0.f;
             hb_up_stage1_.process(input, u_lo, u_hi);

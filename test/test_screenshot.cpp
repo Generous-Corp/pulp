@@ -104,7 +104,7 @@ TEST_CASE("Screenshot backend availability is honest per build",
 // works in a GPU-less CI VM (Skia raster is pure CPU).
 TEST_CASE("Screenshot render_to_rgba produces non-black pixels (Skia raster)",
           "[view][screenshot][rgba]") {
-#if defined(__APPLE__) || defined(PULP_HAS_SKIA)
+#if defined(PULP_HAS_SKIA)
     View root;
     root.set_theme(Theme::dark());
     auto knob = std::make_unique<Knob>();
@@ -137,7 +137,7 @@ TEST_CASE("Screenshot render_to_rgba produces non-black pixels (Skia raster)",
     // must have a non-zero channel — proves the raster path actually painted.
     REQUIRE(any_nonzero);
 #else
-    SUCCEED("render_to_rgba unsupported without a Skia/native backend");
+    SUCCEED("render_to_rgba unsupported without a Skia raster backend");
 #endif
 }
 

@@ -97,7 +97,7 @@ GraphCommand command(std::uint64_t sequence_id,
 
 struct VisitLog {
     std::uint32_t nodes = 0;
-    std::uint32_t command_count = 0;
+    std::uint32_t last_command_result_count = 0;
 };
 
 bool record_visit(ProcessBlock& block,
@@ -108,7 +108,8 @@ bool record_visit(ProcessBlock& block,
         return false;
     }
     ++log->nodes;
-    log->command_count = static_cast<std::uint32_t>(context.command_results.size());
+    log->last_command_result_count =
+        static_cast<std::uint32_t>(context.command_results.size());
     return true;
 }
 
@@ -252,10 +253,34 @@ TEST_CASE("GraphRuntimeExecutor queue drain hot path does not allocate",
     REQUIRE(result.commands_accepted == 1);
     REQUIRE(result.commands_rejected == 1);
     REQUIRE(log.nodes == 3);
-    REQUIRE(log.command_count == 2);
+    REQUIRE(log.last_command_result_count == 2);
     REQUIRE(popped_first);
     REQUIRE(popped_second);
     REQUIRE_FALSE(popped_third);
+}
+
+TEST_CASE("FIR biquad oversampler hot path with function-pointer callback does not allocate",
+          "[signal][oversampling][rt-safety][no-alloc]") {
+    pulp::signal::Oversampler oversampler;
+    oversampler.set_factor(pulp::signal::Oversampler::Factor::x4);
+    oversampler.set_sample_rate(48000.0f);
+
+    for (int i = 0; i < 16; ++i) {
+        static_cast<void>(oversampler.process(0.05f * static_cast<float>(i), soft_clip));
+    }
+
+    float sum = 0.0f;
+    AllocationSnapshot allocations;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 64; ++i) {
+            sum += oversampler.process(0.01f * static_cast<float>(i - 32), soft_clip);
+        }
+        allocations = snapshot_allocations(probe);
+    }
+
+    require_no_alloc(allocations);
+    REQUIRE(std::isfinite(sum));
 }
 
 TEST_CASE("Polyphase oversampler hot path with function-pointer callback does not allocate",
