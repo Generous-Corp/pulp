@@ -20,7 +20,7 @@ and the matching contract tests in the same change.
 | `footprint.py` | Local-CI state-size accounting and cleanup entry descriptions. | Cleanup candidate selection or deletion. |
 | `evidence_index.py` | Result-to-evidence normalization, latest passing target evidence, evidence index persistence, and evidence summaries. | Queue mutation, runner state, result creation, or target execution. |
 | `ssh_bundle.py` | Git bundle naming, local bundle creation, and SSH upload/progress/probe mechanics. | Target validation execution or queue orchestration. |
-| `cleanup.py` | Local-CI artifact cleanup planning and deletion. | Queue mutation, runner state, or user-facing cleanup command output. |
+| `cleanup.py` | Local-CI artifact cleanup planning/deletion and stale Windows validator cleanup mechanics. | Lock acquisition, runner ownership, or user-facing cleanup command output. |
 
 ## Remaining `local_ci.py` Clusters
 

@@ -4126,108 +4126,23 @@ def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
-    candidates: list[dict] = []
-    for job in stale_running_jobs_unlocked(queue):
-        active_targets = job.get("active_targets") or {}
-        state = dict(active_targets.get("windows") or {})
-        host = state.get("host")
-        validator_pid = state.get("validator_pid")
-        validator_started_at = state.get("validator_started_at")
-        if not host or validator_pid is None or not validator_started_at:
-            continue
-        if state.get("cleanup_requested_at"):
-            continue
-
-        state["cleanup_requested_at"] = now_iso()
-        state["cleanup_status"] = "requested"
-        state["cleanup_reason"] = "stale_runner_recovery"
-        active_targets["windows"] = state
-        job["active_targets"] = active_targets
-        job["last_progress_at"] = now_iso()
-        candidates.append(
-            {
-                "job_id": job["id"],
-                "target": "windows",
-                "host": host,
-                "validator_pid": int(validator_pid),
-                "validator_started_at": validator_started_at,
-            }
-        )
-    return candidates
+    return _cleanup.collect_stale_windows_cleanup_candidates_unlocked(
+        queue,
+        stale_running_jobs_fn=stale_running_jobs_unlocked,
+        now_fn=now_iso,
+    )
 
 
 def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dict:
-    ps_script = f"""
-$PidToKill = {pid}
-$ExpectedStart = '{ps_literal(started_at)}'
-
-function Get-DescendantProcessIds {{
-    param([int]$RootPid)
-    $result = New-Object System.Collections.Generic.List[int]
-    $queue = New-Object System.Collections.Generic.Queue[int]
-    $queue.Enqueue($RootPid)
-    while ($queue.Count -gt 0) {{
-        $current = $queue.Dequeue()
-        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $current" -ErrorAction SilentlyContinue)
-        foreach ($child in $children) {{
-            $childPid = [int]$child.ProcessId
-            $result.Add($childPid)
-            $queue.Enqueue($childPid)
-        }}
-    }}
-    return $result
-}}
-
-$result = [ordered]@{{
-    found = $false
-    matched = $false
-    killed = $false
-    pid = $PidToKill
-}}
-
-try {{
-    $proc = Get-Process -Id $PidToKill -ErrorAction SilentlyContinue
-    if ($null -ne $proc) {{
-        $result.found = $true
-        $start = $proc.StartTime.ToUniversalTime().ToString('o')
-        $result.start = $start
-        if ($ExpectedStart -and $start -ne $ExpectedStart) {{
-            $result.matched = $false
-        }} else {{
-            $result.matched = $true
-            $children = @(Get-DescendantProcessIds -RootPid $PidToKill | Sort-Object -Descending -Unique)
-            foreach ($childPid in $children) {{
-                try {{
-                    Stop-Process -Id $childPid -Force -ErrorAction Stop
-                }} catch {{
-                }}
-            }}
-            Stop-Process -Id $PidToKill -Force -ErrorAction Stop
-            $result.killed = $true
-            $result.children = @($children)
-        }}
-    }}
-}} catch {{
-    $result.error = $_.Exception.Message
-}}
-
-$result | ConvertTo-Json -Compress
-""".strip()
-    run = run_logged_command(
-        windows_ssh_powershell_command(host),
-        input_text=ps_script,
-        timeout=120,
+    return _cleanup.cleanup_stale_windows_validator(
+        host,
+        pid,
+        started_at,
+        ps_literal_fn=ps_literal,
+        run_logged_command_fn=run_logged_command,
+        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
+        trim_line_fn=trim_line,
     )
-    lines = [line.strip() for line in run["output"].splitlines() if line.strip()]
-    payload = {}
-    if lines:
-        try:
-            payload = json.loads(lines[-1])
-        except json.JSONDecodeError:
-            payload = {"error": trim_line(lines[-1])}
-    if run["returncode"] != 0:
-        payload.setdefault("error", f"cleanup command exited {run['returncode']}")
-    return payload
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
@@ -4237,34 +4152,13 @@ def reclaim_stale_remote_validators(_config: dict) -> int:
         if candidates:
             save_queue_unlocked(queue)
 
-    for candidate in candidates:
-        result = cleanup_stale_windows_validator(
-            candidate["host"],
-            candidate["validator_pid"],
-            candidate["validator_started_at"],
-        )
-        update_job_target_state(
-            candidate["job_id"],
-            candidate["target"],
-            cleanup_completed_at=now_iso(),
-            cleanup_status=(
-                "killed"
-                if result.get("killed")
-                else "not-found"
-                if not result.get("found", True)
-                else "mismatch"
-                if result.get("found") and not result.get("matched", True)
-                else "error"
-                if result.get("error")
-                else "checked"
-            ),
-            cleanup_result=trim_line(json.dumps(result, sort_keys=True)),
-            validator_pid=None if result.get("killed") or not result.get("found", True) else candidate["validator_pid"],
-            validator_started_at=None
-            if result.get("killed") or not result.get("found", True)
-            else candidate["validator_started_at"],
-        )
-    return len(candidates)
+    return _cleanup.reclaim_stale_remote_validator_candidates(
+        candidates,
+        cleanup_validator_fn=cleanup_stale_windows_validator,
+        update_job_target_state_fn=update_job_target_state,
+        now_fn=now_iso,
+        trim_line_fn=trim_line,
+    )
 
 
 def write_runner_info(info: dict) -> None:
