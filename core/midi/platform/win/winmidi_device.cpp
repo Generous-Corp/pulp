@@ -323,10 +323,30 @@ public:
 
 } // namespace pulp::midi::win
 
+// The WinRT MIDI 2.0 backend (winrt_midi_device.cpp) is opt-in via the
+// PULP_HAS_WINRT_MIDI build flag. Both builds expose winrt_midi_available();
+// only the enabled build provides create_winrt_midi_system(). The mmeapi
+// factory below prefers the WinRT backend at runtime when the Windows MIDI
+// Services transport is present, and falls back to the classic mmeapi path
+// otherwise.
+namespace pulp::midi::win::winrt_backend {
+bool winrt_midi_available();
+#if defined(PULP_HAS_WINRT_MIDI)
+std::unique_ptr<MidiSystem> create_winrt_midi_system();
+#endif
+} // namespace pulp::midi::win::winrt_backend
+
 // Factory function
 namespace pulp::midi {
 
 std::unique_ptr<MidiSystem> create_midi_system() {
+#if defined(PULP_HAS_WINRT_MIDI)
+    if (win::winrt_backend::winrt_midi_available()) {
+        runtime::log_info("WinMIDI: using WinRT MIDI 2.0 backend");
+        return win::winrt_backend::create_winrt_midi_system();
+    }
+    runtime::log_info("WinMIDI: WinRT MIDI 2.0 unavailable; using mmeapi backend");
+#endif
     return std::make_unique<win::WinMidiSystem>();
 }
 
