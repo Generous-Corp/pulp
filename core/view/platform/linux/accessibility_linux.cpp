@@ -23,8 +23,14 @@
 //     desktop.
 //
 // The per-widget tree is rebuilt on accessibility_tree_changed(), which also
-// emits org.a11y.atspi.Event.Object.ChildrenChanged. Value + per-object
-// state/focus event signals are L7c — the notify_* hooks stay no-ops here.
+// emits org.a11y.atspi.Event.Object.ChildrenChanged. Slider/meter Views that
+// implement AccessibilityValueInterface additionally export org.a11y.atspi.Value
+// (CurrentValue/Minimum/Maximum/MinimumIncrement, serviced through the Properties
+// interface; CurrentValue is writable and routes back into the value interface's
+// set_current_value, the same path a user adjust takes). The notify_* hooks emit
+// the matching org.a11y.atspi.Event.Object signals (StateChanged "focused",
+// PropertyChange "accessible-value" / "accessible-name") so a listening registry
+// re-reads the changed object (L7c).
 //
 // Tree-walk model (mirrors mac collect_accessible / Windows build_fragment_nodes):
 // depth-first; every View with a non-none AccessRole becomes one accessible
@@ -38,6 +44,7 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/platform/atspi_mapping.hpp>
@@ -63,6 +70,7 @@ constexpr const char* kRegistryName  = "org.a11y.atspi.Registry";
 constexpr const char* kIfaceAccessible   = "org.a11y.atspi.Accessible";
 constexpr const char* kIfaceApplication  = "org.a11y.atspi.Application";
 constexpr const char* kIfaceComponent    = "org.a11y.atspi.Component";
+constexpr const char* kIfaceValue        = "org.a11y.atspi.Value";
 constexpr const char* kIfaceSocket       = "org.a11y.atspi.Socket";
 constexpr const char* kIfaceEventObject  = "org.a11y.atspi.Event.Object";
 constexpr const char* kIfaceProperties   = "org.freedesktop.DBus.Properties";
@@ -278,6 +286,9 @@ struct AtspiProvider {
                 aw.append_string(kIfaceApplication);
             } else {
                 aw.append_string(kIfaceComponent);
+                // Value only when the View is value-bearing (slider/meter that
+                // implements AccessibilityValueInterface).
+                if (value_iface(index)) aw.append_string(kIfaceValue);
             }
             w.close_container(a);
             return true;
@@ -446,11 +457,23 @@ struct AtspiProvider {
             std::string iface, prop;
             ctx.args().read_string(iface);
             ctx.args().read_string(prop);
-            // Only Application.Id (i) is writable — the registry sets it.
+            // Application.Id (i) is writable — the registry sets it.
             if (index == 0 && iface == kIfaceApplication && prop == "Id") {
                 DBus::Reader var;
                 int v = 0;
                 if (ctx.args().recurse(var) && var.read_int32(v)) app_id = v;
+            }
+            // Value.CurrentValue (d) is writable — an AT-driven adjust (Orca's
+            // "increase/decrease") sets it; route to the View's value interface
+            // along the SAME path a user adjust takes (set_current_value).
+            else if (iface == kIfaceValue && prop == "CurrentValue") {
+                if (AccessibilityValueInterface* vif = value_iface(index)) {
+                    DBus::Reader var;
+                    double v = 0.0;
+                    if (ctx.args().recurse(var) && var.read_double(v)) {
+                        vif->set_current_value(v);
+                    }
+                }
             }
             ctx.reply();  // empty success ack
             return true;
@@ -462,6 +485,17 @@ struct AtspiProvider {
         static const std::string kToolkit = kToolkitName;
         if (index == 0) return kToolkit;
         return nodes_[static_cast<size_t>(index)].view->access_label();
+    }
+
+    // The View→AccessibilityValueInterface accessor, identical to the one
+    // accessibility_win.cpp (W6) uses: a dynamic_cast on the View. mac, Windows,
+    // and Linux must agree on which Views are value-bearing, so all three resolve
+    // it the same way — never via role inspection. Null for the application root
+    // and for any View that does not implement the interface.
+    AccessibilityValueInterface* value_iface(int index) const {
+        if (index <= 0 || index >= static_cast<int>(nodes_.size())) return nullptr;
+        View* v = nodes_[static_cast<size_t>(index)].view;
+        return v ? dynamic_cast<AccessibilityValueInterface*>(v) : nullptr;
     }
 
     bool append_property_variant(DBus::Writer& w, int index,
@@ -494,6 +528,22 @@ struct AtspiProvider {
             if (prop == "AtspiVersion") { return variant_string(w, kAtspiVersion); }
             if (prop == "Id") { return variant_int32(w, app_id); }
         }
+        if (iface == kIfaceValue) {
+            if (AccessibilityValueInterface* vif = value_iface(index)) {
+                if (prop == "CurrentValue") {
+                    return variant_double(w, vif->get_current_value());
+                }
+                if (prop == "MinimumValue") {
+                    return variant_double(w, vif->get_minimum_value());
+                }
+                if (prop == "MaximumValue") {
+                    return variant_double(w, vif->get_maximum_value());
+                }
+                if (prop == "MinimumIncrement") {
+                    return variant_double(w, vif->get_step_size());
+                }
+            }
+        }
         return false;
     }
 
@@ -523,6 +573,21 @@ struct AtspiProvider {
             entry("AtspiVersion",
                   [&](DBus::Writer& ew) { variant_string(ew, kAtspiVersion); });
             entry("Id", [&](DBus::Writer& ew) { variant_int32(ew, app_id); });
+        } else if (iface == kIfaceValue) {
+            if (AccessibilityValueInterface* vif = value_iface(index)) {
+                entry("CurrentValue", [&](DBus::Writer& ew) {
+                    variant_double(ew, vif->get_current_value());
+                });
+                entry("MinimumValue", [&](DBus::Writer& ew) {
+                    variant_double(ew, vif->get_minimum_value());
+                });
+                entry("MaximumValue", [&](DBus::Writer& ew) {
+                    variant_double(ew, vif->get_maximum_value());
+                });
+                entry("MinimumIncrement", [&](DBus::Writer& ew) {
+                    variant_double(ew, vif->get_step_size());
+                });
+            }
         }
     }
 
@@ -536,6 +601,12 @@ struct AtspiProvider {
         auto var = w.open_variant("i");
         DBus::Writer vw = w.sub(var);
         vw.append_int32(v);
+        return w.close_container(var);
+    }
+    static bool variant_double(DBus::Writer& w, double v) {
+        auto var = w.open_variant("d");
+        DBus::Writer vw = w.sub(var);
+        vw.append_double(v);
         return w.close_container(var);
     }
 
@@ -553,17 +624,27 @@ struct AtspiProvider {
             "<interface name=\"org.freedesktop.DBus.Properties\"/>"
             "<interface name=\"org.freedesktop.DBus.Introspectable\"/>"
             "</node>";
-        static const char* kWidgetXml =
+        static const char* kWidgetHead =
             "<!DOCTYPE node PUBLIC "
             "\"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" "
             "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
             "<node>"
             "<interface name=\"org.a11y.atspi.Accessible\"/>"
-            "<interface name=\"org.a11y.atspi.Component\"/>"
+            "<interface name=\"org.a11y.atspi.Component\"/>";
+        static const char* kWidgetTail =
             "<interface name=\"org.freedesktop.DBus.Properties\"/>"
             "<interface name=\"org.freedesktop.DBus.Introspectable\"/>"
             "</node>";
-        ctx.reply().append_string(index == 0 ? kRootXml : kWidgetXml);
+        if (index == 0) {
+            ctx.reply().append_string(kRootXml);
+        } else {
+            std::string xml = kWidgetHead;
+            if (value_iface(index)) {
+                xml += "<interface name=\"org.a11y.atspi.Value\"/>";
+            }
+            xml += kWidgetTail;
+            ctx.reply().append_string(xml);
+        }
         return true;
     }
 
@@ -627,6 +708,39 @@ struct AtspiProvider {
                 w.close_container(v);
                 append_self_ref(w, 0);          // source application ref (so)
             });
+    }
+
+    // ── Per-object Event.Object signals (L7c) ─────────────────────────────────
+    //
+    // AT-SPI's object events all share the body signature (siiva{sv}): a detail
+    // string, two int32 details, an any_data variant, and a trailing a{sv}
+    // properties map (always empty here — the registry re-reads the source via
+    // Properties.Get). The signal is emitted FROM the changed object's own path
+    // so a listener knows which accessible changed; `member` is the event class
+    // ("StateChanged" / "PropertyChange"). `fill_variant` writes the any_data
+    // value (the new state/value/name); the helper frames the rest.
+    void emit_object_event(int index, const char* member,
+                           const std::string& detail, int detail1, int detail2,
+                           const std::function<void(DBus::Writer&)>& fill_variant) {
+        if (index < 0 || index >= static_cast<int>(nodes_.size())) return;
+        bus.emit_signal(
+            path_for_index(index), kIfaceEventObject, member,
+            [&](DBus::Writer& w) {
+                w.append_string(detail);
+                w.append_int32(detail1);
+                w.append_int32(detail2);
+                fill_variant(w);                  // any_data (v)
+                auto a = w.open_array("{sv}");     // properties a{sv} — empty
+                w.close_container(a);
+            });
+    }
+
+    // Resolve a target View to its exported object index, or -1 if the View is
+    // not part of the exported tree (e.g. an AccessRole::none container, or a
+    // View built after the last rebuild).
+    int index_for_view(const View* v) const {
+        auto it = view_to_index_.find(v);
+        return it == view_to_index_.end() ? -1 : it->second;
     }
 
     // ── Socket.Embed handshake (links the app up to the registry) ─────────────
@@ -730,12 +844,60 @@ void accessibility_tree_changed(void* handle) {
     p->emit_children_changed();
 }
 
-// L7c event-raising surface. These will emit org.a11y.atspi.Event.Object
-// signals (StateChanged / PropertyChange) per-object once value/state events
-// land. No-op for L7b (structural tree only).
-void notify_accessibility_value_changed(void* /*handle*/, View& /*target*/) {}
-void notify_accessibility_focus_changed(void* /*handle*/, View& /*target*/) {}
-void notify_accessibility_name_changed(void* /*handle*/, View& /*target*/) {}
+// L7c event-raising surface. Each emits the matching org.a11y.atspi.Event.Object
+// signal FROM the changed object's path so a listening registry/Orca re-reads it.
+// No-op when there is no live provider (the benign sentinel handle / honest-fail
+// path) or when the target View is not part of the exported tree.
+
+void notify_accessibility_focus_changed(void* handle, View& target) {
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
+    auto* p = static_cast<AtspiProvider*>(handle);
+    int index = p->index_for_view(&target);
+    if (index < 0) return;
+    // StateChanged: detail = state name ("focused"), detail1 = new value (1),
+    // detail2 = 0, any_data = unused (variant<i>(0)). A blur would emit detail1=0;
+    // the View hook fires on focus acquisition, so report focused=true.
+    p->emit_object_event(index, "StateChanged", "focused", 1, 0,
+                         [](DBus::Writer& w) {
+                             auto v = w.open_variant("i");
+                             DBus::Writer vw = w.sub(v);
+                             vw.append_int32(0);
+                             w.close_container(v);
+                         });
+}
+
+void notify_accessibility_value_changed(void* handle, View& target) {
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
+    auto* p = static_cast<AtspiProvider*>(handle);
+    int index = p->index_for_view(&target);
+    if (index < 0) return;
+    // PropertyChange: detail = "accessible-value", any_data = the new current
+    // value (variant<d>). Resolve through the value interface; if the target is
+    // not value-bearing, fall back to 0.0 (the event still tells the registry to
+    // re-read).
+    double current = 0.0;
+    if (AccessibilityValueInterface* vif = p->value_iface(index)) {
+        current = vif->get_current_value();
+    }
+    p->emit_object_event(index, "PropertyChange", "accessible-value", 0, 0,
+                         [current](DBus::Writer& w) {
+                             AtspiProvider::variant_double(w, current);
+                         });
+}
+
+void notify_accessibility_name_changed(void* handle, View& target) {
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
+    auto* p = static_cast<AtspiProvider*>(handle);
+    int index = p->index_for_view(&target);
+    if (index < 0) return;
+    // PropertyChange: detail = "accessible-name", any_data = the new name
+    // (variant<s>).
+    const std::string label = target.access_label();
+    p->emit_object_event(index, "PropertyChange", "accessible-name", 0, 0,
+                         [label](DBus::Writer& w) {
+                             AtspiProvider::variant_string(w, label);
+                         });
+}
 
 // ── Test-only seam ───────────────────────────────────────────────────────────
 //

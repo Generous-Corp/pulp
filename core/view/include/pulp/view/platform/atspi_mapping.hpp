@@ -79,6 +79,8 @@ constexpr const char* role_to_atspi_role_name(View::AccessRole role) {
 // These are the AtspiStateType bit INDICES Pulp sets today. Helpers below build
 // the two-word representation so the provider and the offline test agree.
 inline constexpr uint32_t kStateEnabled   = 8;    // ATSPI_STATE_ENABLED
+inline constexpr uint32_t kStateFocusable = 11;   // ATSPI_STATE_FOCUSABLE
+inline constexpr uint32_t kStateFocused   = 12;   // ATSPI_STATE_FOCUSED
 inline constexpr uint32_t kStateSensitive = 24;   // ATSPI_STATE_SENSITIVE
 inline constexpr uint32_t kStateShowing   = 26;   // ATSPI_STATE_SHOWING
 inline constexpr uint32_t kStateVisible   = 28;   // ATSPI_STATE_VISIBLE
