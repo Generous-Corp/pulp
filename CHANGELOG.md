@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03970"></a>
+## [0.397.0] - 2026-06-09
+
+- feat(platform): D-Bus system-bus + signal subscription + GetManagedObjects (BLE prereq) ([#3812](https://github.com/danielraffel/pulp/pull/3812))
+- refactor(local-ci): extract target state lifecycle helpers ([#3822](https://github.com/danielraffel/pulp/pull/3822))
+- refactor(local-ci): extract enqueue lifecycle helper ([#3821](https://github.com/danielraffel/pulp/pull/3821))
+- refactor(local-ci): extract wait loop helper ([#3820](https://github.com/danielraffel/pulp/pull/3820))
+
 <a id="v03960"></a>
 ## [0.396.0] - 2026-06-09
 
@@ -4100,6 +4108,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.397.0]: https://github.com/danielraffel/pulp/releases/tag/v0.397.0
 [0.396.0]: https://github.com/danielraffel/pulp/releases/tag/v0.396.0
 [0.395.0]: https://github.com/danielraffel/pulp/releases/tag/v0.395.0
 [0.394.0]: https://github.com/danielraffel/pulp/releases/tag/v0.394.0
