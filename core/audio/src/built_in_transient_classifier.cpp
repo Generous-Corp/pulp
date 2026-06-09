@@ -1,5 +1,7 @@
 #include <pulp/audio/built_in_transient_classifier.hpp>
 
+#include "built_in_analyzer_descriptors.hpp"
+
 #include <pulp/signal/fft.hpp>
 
 #include <algorithm>
@@ -16,23 +18,6 @@ namespace {
 
 constexpr std::uint32_t kFrameSize = 1024;
 constexpr double kMinClassifiableEnergy = 1.0e-7;
-
-AnalyzerDescriptor make_descriptor() {
-    AnalyzerDescriptor descriptor;
-    descriptor.id = "builtin.transient-classifier";
-    descriptor.display_name = "Built-in Basic Transient Classifier";
-    descriptor.version = "builtin";
-    descriptor.license_id = "MIT";
-    descriptor.backend = AnalyzerBackend::BuiltIn;
-    descriptor.availability = AnalyzerAvailability::Available;
-    descriptor.license_policy = AnalyzerLicensePolicy::Permissive;
-    descriptor.capabilities = {AnalyzerCapability::TransientClassification};
-    descriptor.execution_context = AnalyzerExecutionContext::BackgroundThread;
-    descriptor.supports_streaming_input = false;
-    descriptor.supports_offline_buffers = true;
-    descriptor.is_fallback = true;
-    return descriptor;
-}
 
 bool valid_source(BufferView<const float> source) noexcept {
     if (source.num_channels() == 0 || source.num_samples() == 0) return false;
@@ -157,7 +142,7 @@ double confidence_for(const SpectralFeatures& features, TransientClass transient
 }  // namespace
 
 BuiltInTransientClassifier::BuiltInTransientClassifier()
-    : descriptor_(make_descriptor()) {}
+    : descriptor_(detail::make_built_in_transient_classifier_descriptor()) {}
 
 const AnalyzerDescriptor& BuiltInTransientClassifier::descriptor() const noexcept {
     return descriptor_;

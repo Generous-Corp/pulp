@@ -1,5 +1,7 @@
 #include <pulp/audio/analyzer_provider.hpp>
 
+#include "built_in_analyzer_descriptors.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <utility>
@@ -28,27 +30,6 @@ bool contains_ascii_case_insensitive(std::string_view text,
         if (match) return true;
     }
     return false;
-}
-
-AnalyzerDescriptor built_in_descriptor(std::string id,
-                                       std::string display_name,
-                                       std::vector<AnalyzerCapability> capabilities,
-                                       AnalyzerExecutionContext execution_context,
-                                       bool is_fallback = false) {
-    AnalyzerDescriptor descriptor;
-    descriptor.id = std::move(id);
-    descriptor.display_name = std::move(display_name);
-    descriptor.version = "builtin";
-    descriptor.license_id = "MIT";
-    descriptor.backend = AnalyzerBackend::BuiltIn;
-    descriptor.availability = AnalyzerAvailability::Available;
-    descriptor.license_policy = AnalyzerLicensePolicy::Permissive;
-    descriptor.capabilities = std::move(capabilities);
-    descriptor.execution_context = execution_context;
-    descriptor.supports_streaming_input = false;
-    descriptor.supports_offline_buffers = true;
-    descriptor.is_fallback = is_fallback;
-    return descriptor;
 }
 
 bool license_allowed(AnalyzerLicensePolicy license,
@@ -346,29 +327,23 @@ const AnalyzerProvenance* find_analyzer_marker_provenance(
 
 std::vector<AnalyzerDescriptor> built_in_analyzer_descriptors() {
     return {
-        built_in_descriptor("builtin.onset-detector",
-                            "Built-in Onset Detector",
-                            {AnalyzerCapability::OnsetDetection},
-                            AnalyzerExecutionContext::BackgroundThread),
-        built_in_descriptor("builtin.slice-point-analyzer",
-                            "Built-in Slice Point Analyzer",
-                            {AnalyzerCapability::SliceAnalysis},
-                            AnalyzerExecutionContext::BackgroundThread),
-        built_in_descriptor("builtin.loop-point-analyzer",
-                            "Built-in Loop Point Analyzer",
-                            {AnalyzerCapability::LoopPointAnalysis},
-                            AnalyzerExecutionContext::BackgroundThread),
-        built_in_descriptor("builtin.key-tempo-analyzer",
-                            "Built-in Basic Key/Tempo Analyzer",
-                            {AnalyzerCapability::KeyDetection,
-                             AnalyzerCapability::TempoDetection},
-                            AnalyzerExecutionContext::BackgroundThread,
-                            true),
-        built_in_descriptor("builtin.transient-classifier",
-                            "Built-in Basic Transient Classifier",
-                            {AnalyzerCapability::TransientClassification},
-                            AnalyzerExecutionContext::BackgroundThread,
-                            true),
+        detail::make_built_in_analyzer_descriptor(
+            "builtin.onset-detector",
+            "Built-in Onset Detector",
+            {AnalyzerCapability::OnsetDetection},
+            AnalyzerExecutionContext::BackgroundThread),
+        detail::make_built_in_analyzer_descriptor(
+            "builtin.slice-point-analyzer",
+            "Built-in Slice Point Analyzer",
+            {AnalyzerCapability::SliceAnalysis},
+            AnalyzerExecutionContext::BackgroundThread),
+        detail::make_built_in_analyzer_descriptor(
+            "builtin.loop-point-analyzer",
+            "Built-in Loop Point Analyzer",
+            {AnalyzerCapability::LoopPointAnalysis},
+            AnalyzerExecutionContext::BackgroundThread),
+        detail::make_built_in_key_tempo_analyzer_descriptor(),
+        detail::make_built_in_transient_classifier_descriptor(),
     };
 }
 

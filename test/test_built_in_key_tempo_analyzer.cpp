@@ -3,6 +3,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/built_in_key_tempo_analyzer.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -17,6 +18,7 @@ using pulp::audio::BuiltInKeyTempoAnalyzer;
 using pulp::audio::KeyTempoAnalysisConfig;
 using pulp::audio::MusicalKeyMode;
 using pulp::audio::analyzer_descriptor_has_capability;
+using pulp::audio::built_in_analyzer_descriptors;
 
 namespace {
 
@@ -57,6 +59,15 @@ TEST_CASE("BuiltInKeyTempoAnalyzer exposes a package-free descriptor",
     REQUIRE_FALSE(descriptor.supports_streaming_input);
     REQUIRE(analyzer_descriptor_has_capability(descriptor, AnalyzerCapability::KeyDetection));
     REQUIRE(analyzer_descriptor_has_capability(descriptor, AnalyzerCapability::TempoDetection));
+
+    const auto builtins = built_in_analyzer_descriptors();
+    const auto found = std::find_if(builtins.begin(), builtins.end(), [](const auto& item) {
+        return item.id == "builtin.key-tempo-analyzer";
+    });
+    REQUIRE(found != builtins.end());
+    REQUIRE(found->display_name == descriptor.display_name);
+    REQUIRE(found->capabilities == descriptor.capabilities);
+    REQUIRE(found->is_fallback == descriptor.is_fallback);
 }
 
 TEST_CASE("BuiltInKeyTempoAnalyzer estimates tempo from synthetic attacks",
