@@ -1,6 +1,8 @@
 // widget_bridge/runtime_api.cpp - frame, timer, and motion runtime registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
+
 #include <pulp/view/motion.hpp>
 
 #include <algorithm>
@@ -45,7 +47,9 @@ void WidgetBridge::register_runtime_api() {
         );
     }
 
-    engine_.register_function("__requestFrame__", [this](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "__requestFrame__", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
         if (id > 0) {
             pending_frame_ids_.push_back(id);
@@ -58,14 +62,14 @@ void WidgetBridge::register_runtime_api() {
         return choc::value::createInt32(id);
     });
 
-    engine_.register_function("__cancelFrame__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__cancelFrame__", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
         auto it = std::find(pending_frame_ids_.begin(), pending_frame_ids_.end(), id);
         if (it != pending_frame_ids_.end()) pending_frame_ids_.erase(it);
         return choc::value::Value();
     });
 
-    engine_.register_function("__flushFrames__", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "__flushFrames__", [this](choc::javascript::ArgumentList) {
         auto ids = pending_frame_ids_;
         pending_frame_ids_.clear();
         if (ids.empty()) {
@@ -116,7 +120,7 @@ void WidgetBridge::register_runtime_api() {
     // the vendor + node identity. rAF callbacks pick up
     // `source_kind="rAF"` automatically via the ambient slot set by
     // `__flushFrames__` when an active script id is configured.
-    engine_.register_function("__motionPublishValue__",
+    register_bridge_function(api, "__motionPublishValue__",
         [](choc::javascript::ArgumentList args) {
             auto view = args.get<std::string>(0, "");
             auto metric = args.get<std::string>(1, "");
@@ -127,7 +131,7 @@ void WidgetBridge::register_runtime_api() {
             return choc::value::Value();
         });
 
-    engine_.register_function("__motionSetProvenance__",
+    register_bridge_function(api, "__motionSetProvenance__",
         [](choc::javascript::ArgumentList args) {
             motion::Provenance p;
             p.source_kind = args.get<std::string>(0, "");
@@ -140,7 +144,7 @@ void WidgetBridge::register_runtime_api() {
             return choc::value::Value();
         });
 
-    engine_.register_function("__motionClearProvenance__",
+    register_bridge_function(api, "__motionClearProvenance__",
         [](choc::javascript::ArgumentList) {
             motion::clear_ambient_provenance();
             return choc::value::Value();
@@ -172,7 +176,7 @@ void WidgetBridge::register_runtime_api() {
     // __timerCallbacks__; native tracks (id, deadline, repeat, interval)
     // so service_frame_callbacks() can fire expired timers without a
     // consumer-side shim.
-    engine_.register_function("__scheduleTimer__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__scheduleTimer__", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
         auto delay = args.get<double>(1, 0.0);
         auto repeat = args.get<bool>(2, false);
@@ -194,7 +198,7 @@ void WidgetBridge::register_runtime_api() {
         return choc::value::createInt32(id);
     });
 
-    engine_.register_function("__cancelTimer__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__cancelTimer__", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
         auto it = std::remove_if(pending_timers_.begin(), pending_timers_.end(),
             [id](const PendingTimer& p){ return p.id == id; });
@@ -202,7 +206,7 @@ void WidgetBridge::register_runtime_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("__flushTimers__", [this](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "__flushTimers__", [this](choc::javascript::ArgumentList) {
         if (pending_timers_.empty()) return choc::value::Value();
         auto now = std::chrono::steady_clock::now();
         std::vector<int> to_fire;
@@ -242,7 +246,7 @@ void WidgetBridge::register_runtime_api() {
     });
 
     // P0: performance.now() - high-resolution monotonic time in milliseconds.
-    engine_.register_function("__performanceNow__", [](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "__performanceNow__", [](choc::javascript::ArgumentList) {
         static auto start = std::chrono::steady_clock::now();
         auto now = std::chrono::steady_clock::now();
         double ms = std::chrono::duration<double, std::milli>(now - start).count();
