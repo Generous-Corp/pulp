@@ -712,6 +712,10 @@ elseif(WIN32)
     # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
     # UiaRaiseStructureChangedEvent.
     target_link_libraries(pulp-view-core PRIVATE uiautomationcore)
+    # OLE drag-drop on the plugin-host child HWND (WinPluginViewHost):
+    # ole32 = OleInitialize/RegisterDragDrop/ReleaseStgMedium; shell32 =
+    # DragQueryFileW for CF_HDROP file lists.
+    target_link_libraries(pulp-view-core PRIVATE ole32 shell32)
 elseif(ANDROID)
     target_sources(pulp-view-core PRIVATE
         src/plugin_view_host_stub.cpp
