@@ -3,6 +3,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
+#include "api_registry.hpp"
 
 #include <cctype>
 #include <filesystem>
@@ -137,8 +138,10 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 } // namespace
 
 void WidgetBridge::register_storage_key_value_api() {
+    BridgeApiContext api{engine_};
+
     // P2: localStorage equivalent - file-based key-value in plugin data dir.
-    engine_.register_function("storageGetItem", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "storageGetItem", [](choc::javascript::ArgumentList args) {
         auto key = args.get<std::string>(0, "");
         if (key.empty()) return choc::value::createString("");
         auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
@@ -149,7 +152,7 @@ void WidgetBridge::register_storage_key_value_api() {
         return choc::value::createString(val);
     });
 
-    engine_.register_function("storageSetItem", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "storageSetItem", [](choc::javascript::ArgumentList args) {
         auto key = args.get<std::string>(0, "");
         auto val = args.get<std::string>(1, "");
         if (key.empty()) return choc::value::Value();
@@ -160,7 +163,7 @@ void WidgetBridge::register_storage_key_value_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("storageRemoveItem", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "storageRemoveItem", [](choc::javascript::ArgumentList args) {
         auto key = args.get<std::string>(0, "");
         if (key.empty()) return choc::value::Value();
         auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
@@ -170,7 +173,9 @@ void WidgetBridge::register_storage_key_value_api() {
 }
 
 void WidgetBridge::register_asset_loading_api() {
-    engine_.register_function("__loadAssetSync__", [](choc::javascript::ArgumentList args) {
+    BridgeApiContext api{engine_};
+
+    register_bridge_function(api, "__loadAssetSync__", [](choc::javascript::ArgumentList args) {
         auto url = args.get<std::string>(0, "");
         auto asset = load_bridge_asset(url);
 
@@ -192,8 +197,10 @@ void WidgetBridge::register_asset_loading_api() {
 }
 
 void WidgetBridge::register_font_assets_api() {
+    BridgeApiContext api{engine_};
+
     // Font loading: loadFont(path) -> success boolean.
-    engine_.register_function("loadFont", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "loadFont", [](choc::javascript::ArgumentList args) {
         auto path = args.get<std::string>(0, "");
         // Font loading is platform-dependent; this registers the font path
         // for use by canvas.set_font() and Label font_family
@@ -207,7 +214,7 @@ void WidgetBridge::register_font_assets_api() {
     // shipped face instead of a same-named system font (or a generic fallback).
     // figma-import #43b: codegen emits these from the envelope's
     // font_family_assets before any setFontFamily.
-    engine_.register_function("registerFont", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerFont", [](choc::javascript::ArgumentList args) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
