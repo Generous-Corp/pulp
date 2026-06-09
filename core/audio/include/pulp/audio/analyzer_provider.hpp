@@ -12,15 +12,16 @@
 namespace pulp::audio {
 
 enum class AnalyzerCapability : std::uint8_t {
-    OnsetDetection,
-    BeatDetection,
-    SliceAnalysis,
-    LoopPointAnalysis,
-    KeyDetection,
-    TempoDetection,
-    TransientClassification,
-    TimeStretch,
-    PitchShift,
+    OnsetDetection = 0,
+    BeatDetection = 1,
+    SliceAnalysis = 2,
+    LoopPointAnalysis = 3,
+    KeyDetection = 4,
+    TempoDetection = 5,
+    TransientClassification = 6,
+    TimeStretch = 7,
+    PitchShift = 8,
+    PitchDetection = 9,
 };
 
 enum class AnalyzerBackend : std::uint8_t {

@@ -195,6 +195,9 @@ TEST_CASE("AnalyzerProvider exposes built-in analysis descriptors",
     REQUIRE(registry.descriptors_for(AnalyzerCapability::BeatDetection).empty());
     REQUIRE(std::string_view(analyzer_capability_name(AnalyzerCapability::PitchShift)) ==
             "pitch-shift");
+    REQUIRE(std::string_view(analyzer_capability_name(AnalyzerCapability::PitchDetection)) ==
+            "pitch-detection");
+    REQUIRE(static_cast<std::uint8_t>(AnalyzerCapability::PitchDetection) == 9);
     REQUIRE(std::string_view(analyzer_execution_context_name(
                 AnalyzerExecutionContext::BackgroundThread)) == "background-thread");
 }

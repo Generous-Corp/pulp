@@ -74,6 +74,7 @@ add_executable(pulp-cli
     design_binding.cpp
     create_targets.cpp
     package_registry.cpp
+    package_analyzer_descriptors.cpp
     package_commands.cpp
     package_commands_util.cpp
     package_commands_search.cpp

@@ -73,6 +73,8 @@ const char* analyzer_capability_name(AnalyzerCapability capability) noexcept {
             return "onset-detection";
         case AnalyzerCapability::BeatDetection:
             return "beat-detection";
+        case AnalyzerCapability::PitchDetection:
+            return "pitch-detection";
         case AnalyzerCapability::SliceAnalysis:
             return "slice-analysis";
         case AnalyzerCapability::LoopPointAnalysis:
