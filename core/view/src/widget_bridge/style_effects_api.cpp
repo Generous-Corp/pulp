@@ -1,6 +1,7 @@
 // widget_bridge/style_effects_api.cpp - CSS filter, clip-path, backdrop, and blend style registrations.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <cctype>
 #include <functional>
@@ -12,6 +13,7 @@ namespace pulp::view {
 
 void WidgetBridge::register_widget_style_filter_clip_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseColor = std::move(parse_color);
 
     // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
@@ -20,7 +22,7 @@ void WidgetBridge::register_widget_style_filter_clip_api(
     //   path passes the chain to canvas.save_layer_with_filters which
     //   composes via SkImageFilters on the Skia backend (CG falls
     //   through to blur-only for now).
-    engine_.register_function("setFilter", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setFilter", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto filter_str = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -142,7 +144,7 @@ void WidgetBridge::register_widget_style_filter_clip_api(
     // frosted-glass overlays / modal backgrounds (issue-926). Numeric
     // overload to keep the bridge cheap; string-form CSS parsing stays in
     // setFilter.
-    engine_.register_function("setBackdropFilter",
+    register_bridge_function(api, "setBackdropFilter",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto blur_px = args.get<double>(1, 0.0);
@@ -159,7 +161,7 @@ void WidgetBridge::register_widget_style_filter_clip_api(
     // remain documented as deferred). Forwarding the verbatim value
     // produced silent paint failures on every non-path() form (Codex
     // #1616 P1 on #1540).
-    engine_.register_function("setClipPath",
+    register_bridge_function(api, "setClipPath",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
@@ -205,6 +207,8 @@ void WidgetBridge::register_widget_style_filter_clip_api(
 }
 
 void WidgetBridge::register_widget_style_blend_api() {
+    BridgeApiContext api{engine_};
+
     // pulp #1549 - setMixBlendMode(id, "multiply") for CSS / RN
     // `mix-blend-mode`. Maps the W3C blend-mode keyword set to the
     // canvas BlendMode enum so the View paint path can pass it
@@ -215,7 +219,7 @@ void WidgetBridge::register_widget_style_blend_api() {
     // Unknown keywords (including the empty string and "normal") leave
     // the View at default `BlendMode::normal` so the fast path stays
     // a paint-time no-op.
-    engine_.register_function("setMixBlendMode",
+    register_bridge_function(api, "setMixBlendMode",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "normal");
