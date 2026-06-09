@@ -91,7 +91,12 @@ derive_runner_name(){
   local prefix="$RUNNER_NAME_PREFIX" l class=""
   if [ -z "$prefix" ]; then
     local _ls; IFS=',' read -ra _ls <<< "$LABELS"
-    for l in "${_ls[@]}"; do case "$l" in pulp-build-?*) class="${l#pulp-build-}";; esac; done
+    for l in "${_ls[@]}"; do
+      case "$l" in
+        pulp-build-vm) ;; # generic pilot label; fall back to host-specific name
+        pulp-build-?*) class="${l#pulp-build-}";;
+      esac
+    done
     if [ -n "$class" ]; then
       prefix="pulp-$class"
     else

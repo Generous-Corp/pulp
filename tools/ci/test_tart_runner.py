@@ -27,6 +27,7 @@ SCRIPT = Path(__file__).with_name("tart-runner.sh")
 M5_LABELS = "self-hosted,macos,arm64,pulp-build,pulp-build-m5"
 STUDIO_LABELS = "self-hosted,macos,arm64,pulp-build,pulp-build-studio"
 PLAIN_LABELS = "self-hosted,macos,arm64,pulp-build"
+PILOT_LABELS = "self-hosted,macos,arm64,pulp-build-vm"
 
 
 def _run(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -97,6 +98,14 @@ class NameDerivationTests(unittest.TestCase):
         name = _name("--labels", PLAIN_LABELS)
         self.assertTrue(name.startswith("pulp-"), name)
         self.assertTrue(name.endswith("-01"), name)
+
+    def test_generic_pilot_label_falls_back_to_hostname(self) -> None:
+        # `pulp-build-vm` is a routing label shared by every pilot host, not a
+        # host class. It must not derive the cross-host-colliding `pulp-vm-01`.
+        name = _name("--labels", PILOT_LABELS)
+        self.assertTrue(name.startswith("pulp-"), name)
+        self.assertTrue(name.endswith("-01"), name)
+        self.assertNotEqual(name, "pulp-vm-01")
 
     def test_name_is_stable_across_invocations(self) -> None:
         # The whole point: same machine + slot → same name, every time.

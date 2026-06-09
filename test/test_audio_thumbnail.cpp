@@ -74,6 +74,18 @@ TEST_CASE("AudioThumbnail empty buffer returns empty thumbnail", "[audio][thumbn
     REQUIRE(t.num_levels() == 0);
 }
 
+TEST_CASE("AudioThumbnail clamps ragged channel buffers to the shortest channel",
+          "[audio][thumbnail][edge]") {
+    auto data = make_sine(48000, 8, 2, 100.0);
+    data.channels[1].resize(5);
+
+    auto t = AudioThumbnail::build_from_buffer(data, 2);
+    REQUIRE_FALSE(t.empty());
+    REQUIRE(t.info().num_channels == 2);
+    REQUIRE(t.info().num_source_frames == 5);
+    REQUIRE(t.level(0).peaks_per_channel == 3);
+}
+
 TEST_CASE("AudioThumbnail peak-table covers the source amplitude", "[audio][thumbnail]") {
     // 1 s sine at 100 Hz, 44.1 kHz, mono, amplitude 0.5.
     const auto data = make_sine(44100, 44100, 1, 100.0, 0.5f);

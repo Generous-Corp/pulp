@@ -99,13 +99,18 @@ AudioThumbnail AudioThumbnail::build_from_buffer(
         return {};
     }
 
+    auto frames = data.channels[0].size();
+    for (const auto& channel : data.channels) {
+        frames = std::min(frames, channel.size());
+    }
+    if (frames == 0) return {};
+
     std::vector<const float*> ptrs(data.channels.size(), nullptr);
     for (std::size_t ch = 0; ch < data.channels.size(); ++ch) {
         ptrs[ch] = data.channels[ch].data();
     }
     return build_from_buffer_view(
-        BufferView<const float>(ptrs.data(), data.num_channels(),
-                                static_cast<std::size_t>(data.num_frames())),
+        BufferView<const float>(ptrs.data(), data.num_channels(), frames),
         data.sample_rate,
         samples_per_peak);
 }
