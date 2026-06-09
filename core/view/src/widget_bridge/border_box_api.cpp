@@ -1,6 +1,7 @@
 // widget_bridge/border_box_api.cpp - border-box style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <functional>
 #include <string>
@@ -9,9 +10,10 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(const std::string&)> parse_color) {
+    BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
-    engine_.register_function("setBorder", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorder", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto width = args.get<double>(2, 1.0);
@@ -22,7 +24,7 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
     });
 
     // setBorderSide(id, side, width, color) — per-side border
-    engine_.register_function("setBorderSide", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderSide", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto side = args.get<std::string>(1, "");
         auto width = static_cast<float>(args.get<double>(2, 1.0));
@@ -44,7 +46,7 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
     // are emitted only when a frame has asymmetric radii. Without the
     // "All" branch, the figma-plugin lane's setCornerRadius calls fell
     // through silently and panel corners stayed sharp.
-    engine_.register_function("setCornerRadius", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setCornerRadius", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto corner = args.get<std::string>(1, "");
         auto r = static_cast<float>(args.get<double>(2, 0));
@@ -66,7 +68,7 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
     // `borderRadius`) can update without recomputing the others.
     //
     // setBorderColor(id, hex)
-    engine_.register_function("setBorderColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -75,7 +77,7 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
     });
 
     // setBorderWidth(id, width)
-    engine_.register_function("setBorderWidth", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderWidth", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto width = static_cast<float>(args.get<double>(1, 1.0));
         auto* v = id.empty() ? &root_ : widget(id);
@@ -89,7 +91,7 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
     // time; double / groove / ridge / inset / outset currently degrade
     // to solid (paint-side gap, tracked for follow-up). none / hidden
     // short-circuit the stroke entirely.
-    engine_.register_function("setBorderStyle", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "solid");
         auto* v = id.empty() ? &root_ : widget(id);
