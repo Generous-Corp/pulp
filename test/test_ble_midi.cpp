@@ -206,3 +206,30 @@ TEST_CASE("create_ble_midi_central always returns a usable instance",
     REQUIRE((observed_err == BleMidiError::Unsupported ||
              observed_err == BleMidiError::PeripheralNotFound));
 }
+
+TEST_CASE("create_ble_midi_central is_available() is callable and honest",
+          "[ble-midi]") {
+    // is_available() must never crash and must report a definite bool on
+    // every platform. On macOS CI without a granted Bluetooth permission /
+    // powered adapter the CoreBluetooth backend reports false; the Windows
+    // WinRT scan backend reports true only when the BLE advertisement API
+    // is usable; the stub reports false. The contract under test is simply
+    // that the call is safe and that an unavailable backend keeps its
+    // scan / port surface as honest no-ops.
+    auto central = create_ble_midi_central();
+    REQUIRE(central != nullptr);
+    const bool available = central->is_available();
+    if (!available) {
+        // An unavailable backend must keep the scan surface inert: starting
+        // a scan must not flip is_scanning() on, and there are no known
+        // peripherals or port mappings to surface.
+        REQUIRE_FALSE(central->start_scan([](const BleMidiPeripheral&) {}));
+        REQUIRE_FALSE(central->is_scanning());
+        REQUIRE(central->known_peripherals().empty());
+        REQUIRE(central->midi_input_port_for("any-id").empty());
+        REQUIRE(central->midi_output_port_for("any-id").empty());
+    }
+    // stop_scan() is always safe, scanning or not.
+    central->stop_scan();
+    REQUIRE_FALSE(central->is_scanning());
+}

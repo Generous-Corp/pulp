@@ -57,14 +57,24 @@ elseif(WIN32)
     target_sources(pulp-midi PRIVATE
         platform/win/winmidi_device.cpp
         platform/win/winrt_midi_device.cpp
-        # BLE MIDI scaffold — WinRT BluetoothLEAdvertisementWatcher
-        # backend not yet wired; the stub central reports
-        # is_available() == false until a follow-up slice lands the
-        # WinRT GATT plumbing.
-        src/ble_midi_stub.cpp
+        # BLE MIDI — WinRT BluetoothLEAdvertisementWatcher scan backend.
+        # Unlike the WinRT MIDI 2.0 backend (winrt_midi_device.cpp), BLE
+        # GATT lives in Windows.Devices.Bluetooth* in the BASE Windows SDK
+        # cppwinrt projection, so no out-of-band vcpkg/NuGet dependency is
+        # needed — just the OS umbrella import libs below. This TU defines
+        # create_ble_midi_central() for Windows, so it REPLACES
+        # src/ble_midi_stub.cpp (linking both would duplicate the symbol).
+        # Scan-only in this slice; GATT connect/notify lands in a follow-up.
+        platform/win/ble_midi_win.cpp
     )
     target_link_libraries(pulp-midi PRIVATE
         winmm
+        # WinRT activation + COM apartment for the BLE advertisement watcher.
+        # WindowsApp is the desktop umbrella import lib (init_apartment,
+        # activation factories, event tokens); runtimeobject provides the
+        # WinRT/COM runtime helpers. Both ship with the base Windows SDK.
+        WindowsApp
+        runtimeobject
     )
     # Opt-in WinRT MIDI 2.0 (UMP) backend — Windows MIDI Services SDK.
     #

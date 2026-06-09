@@ -203,6 +203,21 @@ Watch points: the port requires Windows SDK >= 10.0.26100.0 (windows-latest is
 right at that floor), and the drafted backend's API surface may still drift
 from the real `winrt::Microsoft::Windows::Devices::Midi2` namespace.
 
+### Advisory compile-gate: `windows-ble-gate`
+
+`build.yml`'s `windows-ble-gate` job (`continue-on-error: true`, NOT a required
+check, NOT part of the build matrix) compile-verifies Pulp's WinRT Bluetooth-LE
+scan backend (`core/midi/platform/win/ble_midi_win.cpp`). Unlike
+`windows-midi2-gate`, the BLE GATT / advertisement APIs
+(`Windows.Devices.Bluetooth*`) ship in the BASE Windows SDK cppwinrt
+projection, so this gate needs NO vcpkg / out-of-band NuGet provisioning — the
+default Windows build already compiles the backend (it links `WindowsApp` +
+`runtimeobject`). The job is a fast, isolated `cmake --build … --target
+pulp-midi` so a blind (macOS-authored) Windows TU gets a compile signal without
+waiting on the full matrix. Watch point: the backend's
+`winrt::Windows::Devices::Bluetooth::Advertisement` API surface is written
+without a local Windows compiler, so signature drift surfaces here first.
+
 ## PR Review Thread Hygiene
 
 Before opening a follow-up PR or declaring a phase complete, sweep review
