@@ -14,6 +14,7 @@
 #include <cmath>
 #include <functional>
 #include <array>
+#include <memory>
 #include <vector>
 #include <optional>
 
@@ -1096,6 +1097,11 @@ private:
 //                         per redraw. Pulp item 6.12 — wire AudioThumbnail
 //                         into existing WaveformView without inventing a
 //                         new widget.
+//
+// This remains a display-only waveform widget. Sampler/editor behaviors
+// such as trim handles, fade curves, loop regions, slice markers, playheads,
+// hit testing, and snapping should live in dedicated editor/viewport modules
+// that compose this renderer instead of expanding WaveformView itself.
 
 }  // namespace pulp::view
 namespace pulp::audio { class AudioThumbnail; }
@@ -1122,14 +1128,22 @@ public:
     void set_data(std::vector<float> samples);
 
     // Wire the widget to read peak (min, max) pairs from a pre-decoded
-    // `AudioThumbnail` (Pulp item 6.12). The thumbnail is borrowed —
-    // callers (typically an `AudioThumbnailCache` owner) must outlive the
-    // widget or call `clear_thumbnail()`. Setting a thumbnail clears any
-    // raw sample buffer.
+    // `AudioThumbnail` (Pulp item 6.12). The shared_ptr overload is the
+    // editor/cache-safe path: the widget retains the CPU thumbnail summary
+    // while it may paint from it. Setting a thumbnail clears any raw sample
+    // buffer.
     //
     // `channel == UINT32_MAX` folds all channels into one display row.
+    void set_thumbnail(std::shared_ptr<const pulp::audio::AudioThumbnail> thumb,
+                       uint32_t channel = static_cast<uint32_t>(-1));
+    [[deprecated("set_thumbnail(const AudioThumbnail*) is borrowed; prefer shared_ptr overload or set_thumbnail_borrowed()")]]
     void set_thumbnail(const pulp::audio::AudioThumbnail* thumb,
                        uint32_t channel = static_cast<uint32_t>(-1));
+    // Explicit borrowed escape hatch for stack-owned tests or owners that
+    // manage lifetime externally. Prefer set_thumbnail(shared_ptr) for editor
+    // code and cache-backed thumbnails.
+    void set_thumbnail_borrowed(const pulp::audio::AudioThumbnail* thumb,
+                                uint32_t channel = static_cast<uint32_t>(-1));
     void clear_thumbnail();
 
     bool has_thumbnail() const noexcept { return thumbnail_ != nullptr; }
@@ -1160,7 +1174,10 @@ private:
     TriggerMode trigger_mode_ = TriggerMode::free_run;
     PreviewShape preview_shape_ = PreviewShape::none;
 
+    std::shared_ptr<const pulp::audio::AudioThumbnail> thumbnail_owner_;
     const pulp::audio::AudioThumbnail* thumbnail_ = nullptr;
+    std::vector<float> thumbnail_min_max_;
+    std::vector<float> thumbnail_envelope_;
     uint32_t thumbnail_channel_ = static_cast<uint32_t>(-1);
 };
 

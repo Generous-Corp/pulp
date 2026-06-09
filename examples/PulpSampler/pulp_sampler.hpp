@@ -1,14 +1,27 @@
 #pragma once
 
 /// PulpSampler — audio file sampler with MIDI triggering and ADSR envelope.
-/// Demonstrates: audio file loading, sample playback, ADSR, pitch shifting,
-/// waveform editor integration, PresetManager.
+/// Demonstrates: sample-slot publication, primitive loop rendering, ADSR,
+/// pitch shifting, waveform editor integration, PresetManager.
 
+#include "sampler_components.hpp"
+
+#include <pulp/audio/buffer.hpp>
+#include <pulp/audio/loop_renderer.hpp>
+#include <pulp/audio/loop_types.hpp>
+#include <pulp/audio/sample_key_map.hpp>
+#include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/adsr.hpp>
-#include <pulp/signal/smoothed_value.hpp>
-#include <vector>
+
+#include <algorithm>
+#include <atomic>
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <vector>
 
 namespace pulp::examples {
 
@@ -22,38 +35,11 @@ enum SamplerParams : state::ParamID {
     kSamplerLoop     = 7,  // 0 = one-shot, 1 = loop
 };
 
-/// A single voice for polyphonic sample playback.
-struct SamplerVoice {
-    bool active = false;
-    int note = -1;
-    float velocity = 0;
-    double position = 0;     ///< Current playback position (fractional samples)
-    double speed = 1.0;      ///< Playback speed (1.0 = original pitch)
-    signal::Adsr adsr;
-    bool released = false;
-
-    void start(int n, float vel, double spd, float sr) {
-        note = n;
-        velocity = vel;
-        position = 0;
-        speed = spd;
-        active = true;
-        released = false;
-        adsr.reset();
-        adsr.set_sample_rate(sr);
-        adsr.note_on();
-    }
-
-    void release() {
-        adsr.note_off();
-        released = true;
-    }
-};
-
 class PulpSamplerProcessor : public format::Processor {
 public:
     static constexpr int kMaxVoices = 8;
-    static constexpr int kRootNote = 60; // Middle C
+    static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
+    static constexpr std::uint32_t kMaxOutputChannels = 8;
 
     format::PluginDescriptor descriptor() const override {
         return {
@@ -87,27 +73,38 @@ public:
             .unit = "", .range = {0, 1, 0, 1}});
     }
 
-    /// Load a mono sample buffer. Call from the main thread.
-    void load_sample(const float* data, int num_samples, float sample_rate) {
-        sample_data_.assign(data, data + num_samples);
-        sample_rate_ = sample_rate;
+    /// Load a mono sample buffer. Call off the audio thread after prepare().
+    bool load_sample(const float* data, int num_samples, float sample_rate) {
+        return sample_store_.load_mono(data,
+                                       num_samples,
+                                       sample_rate,
+                                       audio_ack_generation_.load(std::memory_order_acquire));
     }
 
-    /// Load a sample from interleaved stereo (takes left channel).
-    void load_sample_stereo(const float* interleaved, int num_frames, float sample_rate) {
-        sample_data_.resize(static_cast<size_t>(num_frames));
-        for (int i = 0; i < num_frames; ++i) {
-            sample_data_[static_cast<size_t>(i)] = interleaved[i * 2]; // left channel
-        }
-        sample_rate_ = sample_rate;
+    /// Load a sample from interleaved stereo. Call off the audio thread after prepare().
+    bool load_sample_stereo(const float* interleaved, int num_frames, float sample_rate) {
+        return sample_store_.load_interleaved_stereo(
+            interleaved,
+            num_frames,
+            sample_rate,
+            audio_ack_generation_.load(std::memory_order_acquire));
     }
 
-    bool has_sample() const { return !sample_data_.empty(); }
-    int sample_length() const { return static_cast<int>(sample_data_.size()); }
+    bool has_sample() const { return sample_store_.has_sample(); }
+    int sample_length() const { return sample_store_.sample_length(); }
 
     void prepare(const format::PrepareContext& ctx) override {
         host_sample_rate_ = static_cast<float>(ctx.sample_rate);
-        for (auto& v : voices_) v = {};
+        max_block_frames_ = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(ctx.max_buffer_size));
+        prepared_output_channels_ = std::clamp<std::uint32_t>(
+            static_cast<std::uint32_t>(ctx.output_channels), 1, kMaxOutputChannels);
+
+        for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch) {
+            voice_scratch_[ch].assign(max_block_frames_, 0.0f);
+        }
+        sample_store_.prepare();
+        for (auto& voice : voices_) voice.reset();
+        publish_audio_acknowledgement(sample_store_.read_published_view());
     }
 
     void process(
@@ -117,117 +114,211 @@ public:
         midi::MidiBuffer&,
         const format::ProcessContext&) override
     {
-        // Clear output
-        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
-            auto out = output.channel(ch);
-            for (std::size_t i = 0; i < output.num_samples(); ++i) out[i] = 0;
-        }
+        clear_output(output);
 
-        if (sample_data_.empty()) return;
+        const auto published = sample_store_.read_published_view();
+        const bool can_trigger = sample_store_.slot_view_valid(published);
 
-        // Process MIDI
+        const auto params = current_params();
+        const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
+        midi_in.sort();
+
+        std::uint32_t cursor = 0;
         for (std::size_t i = 0; i < midi_in.size(); ++i) {
-            auto& event = midi_in[i];
-            if (event.message.isNoteOn()) {
+            const auto& event = midi_in[i];
+            const auto offset = static_cast<std::uint32_t>(
+                std::clamp(event.sample_offset, 0, static_cast<int32_t>(block_frames)));
+            if (offset > cursor) {
+                render_active_voices(output, cursor, offset - cursor, params);
+            }
+
+            if (event.message.isNoteOn() && can_trigger) {
                 trigger_note(event.message.getNoteNumber(),
-                             static_cast<float>(event.message.getVelocity()) / 127.0f);
+                             static_cast<float>(event.message.getVelocity()) / 127.0f,
+                             published,
+                             params);
             } else if (event.message.isNoteOff()) {
                 release_note(event.message.getNoteNumber());
             }
+            cursor = offset;
         }
 
-        // Read parameters
-        float gain_db = state().get_value(kSamplerGain);
-        float gain = std::pow(10.0f, gain_db / 20.0f);
-        float attack = state().get_value(kSamplerAttack);
-        float decay = state().get_value(kSamplerDecay);
-        float sustain = state().get_value(kSamplerSustain) / 100.0f;
-        float release = state().get_value(kSamplerRelease);
-        float pitch_st = state().get_value(kSamplerPitch);
-        bool loop = state().get_value(kSamplerLoop) >= 0.5f;
-
-        int num_samples = static_cast<int>(output.num_samples());
-        int sample_len = static_cast<int>(sample_data_.size());
-
-        for (auto& voice : voices_) {
-            if (!voice.active) continue;
-
-            // Update ADSR
-            voice.adsr.set_params({
-                attack / 1000.0f,
-                decay / 1000.0f,
-                sustain,
-                release / 1000.0f
-            });
-
-            // Pitch: note offset + pitch param
-            float note_offset = static_cast<float>(voice.note - kRootNote) + pitch_st;
-            double speed = std::pow(2.0, note_offset / 12.0)
-                         * (static_cast<double>(sample_rate_) / static_cast<double>(host_sample_rate_));
-            voice.speed = speed;
-
-            for (int i = 0; i < num_samples; ++i) {
-                float env = voice.adsr.next();
-
-                if (env <= 0.0001f && voice.released) {
-                    voice.active = false;
-                    break;
-                }
-
-                int pos = static_cast<int>(voice.position);
-                if (pos >= sample_len) {
-                    if (loop) {
-                        voice.position = std::fmod(voice.position, static_cast<double>(sample_len));
-                        pos = static_cast<int>(voice.position);
-                    } else {
-                        voice.active = false;
-                        break;
-                    }
-                }
-
-                // Linear interpolation
-                float frac = static_cast<float>(voice.position - static_cast<double>(pos));
-                float s0 = sample_data_[static_cast<size_t>(pos)];
-                float s1 = (pos + 1 < sample_len) ? sample_data_[static_cast<size_t>(pos + 1)] : s0;
-                float sample = s0 + frac * (s1 - s0);
-
-                float out = sample * env * voice.velocity * gain;
-
-                // Write to all output channels
-                for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
-                    output.channel(ch)[static_cast<size_t>(i)] += out;
-                }
-
-                voice.position += voice.speed;
-            }
+        if (cursor < block_frames) {
+            render_active_voices(output, cursor, block_frames - cursor, params);
         }
+
+        publish_audio_acknowledgement(published);
     }
 
 private:
-    std::vector<float> sample_data_;
-    float sample_rate_ = 44100.0f;
+    struct RenderParams {
+        float gain = 1.0f;
+        signal::Adsr::Params adsr;
+        float pitch_semitones = 0.0f;
+        bool loop = false;
+    };
+
+    SamplerSampleStore sample_store_;
+    audio::SampleKeyMap key_map_;
+    std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
+    std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
+    std::atomic<std::uint64_t> audio_ack_generation_{0};
     float host_sample_rate_ = 44100.0f;
+    std::uint32_t max_block_frames_ = 512;
+    std::uint32_t prepared_output_channels_ = 2;
     SamplerVoice voices_[kMaxVoices]{};
 
-    void trigger_note(int note, float velocity) {
-        // Find free voice or steal oldest
-        SamplerVoice* target = nullptr;
-        for (auto& v : voices_) {
-            if (!v.active) { target = &v; break; }
+    std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
+        std::array<audio::PublishedSampleView, kMaxVoices> active_views{};
+        std::size_t active_count = 0;
+        for (const auto& voice : voices_) {
+            if (!voice.active || !voice.sample.valid) continue;
+            active_views[active_count++] = voice.sample;
         }
-        if (!target) target = &voices_[0]; // steal first voice
+        return audio::SampleSlotBank::oldest_active_generation(
+            published, active_views.data(), active_count);
+    }
 
-        float pitch_st = state().get_value(kSamplerPitch);
-        float note_offset = static_cast<float>(note - kRootNote) + pitch_st;
-        double speed = std::pow(2.0, note_offset / 12.0)
-                     * (static_cast<double>(sample_rate_) / static_cast<double>(host_sample_rate_));
-        target->start(note, velocity, speed, host_sample_rate_);
+    void publish_audio_acknowledgement(
+        const audio::PublishedSampleView& published) noexcept {
+        const auto generation = audio_safe_generation(published);
+        audio_ack_generation_.store(generation, std::memory_order_release);
+    }
+
+    RenderParams current_params() const {
+        RenderParams params;
+        const float gain_db = state().get_value(kSamplerGain);
+        params.gain = std::pow(10.0f, gain_db / 20.0f);
+        params.adsr.attack = state().get_value(kSamplerAttack) / 1000.0f;
+        params.adsr.decay = state().get_value(kSamplerDecay) / 1000.0f;
+        params.adsr.sustain = state().get_value(kSamplerSustain) / 100.0f;
+        params.adsr.release = state().get_value(kSamplerRelease) / 1000.0f;
+        params.pitch_semitones = state().get_value(kSamplerPitch);
+        params.loop = state().get_value(kSamplerLoop) >= 0.5f;
+        return params;
+    }
+
+    static void clear_output(audio::BufferView<float>& output) noexcept {
+        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
+            std::fill_n(output.channel_ptr(ch), output.num_samples(), 0.0f);
+        }
+    }
+
+    audio::LoopRegion make_region(const audio::PublishedSampleView& sample,
+                                  bool loop) const noexcept {
+        audio::LoopRegion region;
+        region.start_frame = 0;
+        region.end_frame = sample.num_frames;
+        region.source_sample_rate = sample.sample_rate;
+        region.playback_mode = loop ? audio::LoopPlaybackMode::Forward
+                                    : audio::LoopPlaybackMode::OneShot;
+        region.interpolation = audio::LoopInterpolationMode::Linear;
+        region.crossfade_curve = audio::LoopCrossfadeCurve::Linear;
+        if (loop && sample.num_frames >= 32) {
+            region.crossfade_frames =
+                std::min<std::uint64_t>({64, sample.num_frames / 8, sample.num_frames / 2});
+        }
+        return region;
+    }
+
+    double playback_speed(int note,
+                          const audio::PublishedSampleView& sample,
+                          const RenderParams& params) const noexcept {
+        return key_map_.playback_rate_for_note(note,
+                                               sample.sample_rate,
+                                               static_cast<double>(host_sample_rate_),
+                                               params.pitch_semitones);
+    }
+
+    void render_active_voices(audio::BufferView<float>& output,
+                              std::uint32_t start_frame,
+                              std::uint32_t frames,
+                              const RenderParams& params) noexcept {
+        if (frames == 0) return;
+
+        const auto output_channels = std::min<std::uint32_t>(
+            {static_cast<std::uint32_t>(output.num_channels()),
+             prepared_output_channels_,
+             kMaxOutputChannels});
+        if (output_channels == 0) return;
+
+        for (std::uint32_t ch = 0; ch < output_channels; ++ch) {
+            voice_scratch_ptrs_[ch] = voice_scratch_[ch].data();
+        }
+
+        std::uint32_t rendered = 0;
+        while (rendered < frames) {
+            const auto chunk = std::min(frames - rendered, max_block_frames_);
+            audio::BufferView<float> scratch(voice_scratch_ptrs_.data(),
+                                             output_channels,
+                                             chunk);
+            for (auto& voice : voices_) {
+                if (!voice.active) continue;
+
+                std::array<const float*, kMaxSampleChannels> sample_ptrs{};
+                if (!sample_store_.populate_channel_ptrs(voice.sample,
+                                                         sample_ptrs.data(),
+                                                         sample_ptrs.size())) {
+                    voice.reset();
+                    continue;
+                }
+                audio::BufferView<const float> source(
+                    sample_ptrs.data(),
+                    voice.sample.num_channels,
+                    static_cast<std::size_t>(voice.sample.num_frames));
+
+                voice.adsr.set_params(params.adsr);
+                voice.renderer.set_playback_rate(playback_speed(voice.note, voice.sample, params));
+                // LoopRenderer::render() is overwrite-only, so this scratch
+                // buffer can be reused for each voice before additive mixdown.
+                const auto loop_result = voice.renderer.render(source, scratch, chunk);
+
+                bool voice_finished = false;
+                for (std::uint32_t i = 0; i < chunk; ++i) {
+                    const float env = voice.adsr.next();
+                    if (env <= 0.0001f && voice.released) {
+                        voice_finished = true;
+                        break;
+                    }
+
+                    const float scale = env * voice.velocity * params.gain;
+                    for (std::uint32_t ch = 0; ch < output_channels; ++ch) {
+                        output.channel_ptr(ch)[start_frame + rendered + i] +=
+                            voice_scratch_[ch][i] * scale;
+                    }
+                }
+
+                if (voice_finished || !loop_result.active) {
+                    voice.reset();
+                }
+            }
+            rendered += chunk;
+        }
+    }
+
+    void trigger_note(int note,
+                      float velocity,
+                      const audio::PublishedSampleView& sample,
+                      const RenderParams& params) {
+        SamplerVoice* target = nullptr;
+        for (auto& voice : voices_) {
+            if (!voice.active) {
+                target = &voice;
+                break;
+            }
+        }
+        if (target == nullptr) target = &voices_[0];
+
+        const auto region = make_region(sample, params.loop);
+        const auto speed = playback_speed(note, sample, params);
+        if (speed == 0.0) return;
+        target->start(note, velocity, speed, host_sample_rate_, sample, region, sample.num_frames);
     }
 
     void release_note(int note) {
-        for (auto& v : voices_) {
-            if (v.active && v.note == note && !v.released) {
-                v.release();
+        for (auto& voice : voices_) {
+            if (voice.active && voice.note == note && !voice.released) {
+                voice.release();
             }
         }
     }

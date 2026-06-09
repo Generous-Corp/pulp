@@ -22,7 +22,25 @@ target_sources(pulp-audio PRIVATE
     src/streaming_writer.cpp
     src/mmap_reader.cpp
     src/buffer_ops.cpp
-    src/audio_thumbnail.cpp
+    src/audio_stream_handoff.cpp
+    src/loop_point_analyzer.cpp
+    src/loop_reader.cpp
+    src/loop_renderer.cpp
+    src/loop_types.cpp
+    src/onset_detector.cpp
+    src/planar_audio_ring_buffer.cpp
+    src/published_sample_store.cpp
+    src/realtime_sample_recorder.cpp
+    src/rolling_audio_capture_buffer.cpp
+    src/sample_key_map.cpp
+    src/sample_slot_materializer.cpp
+    src/sample_slot_bank.cpp
+    src/sampler_looper_metrics.cpp
+    src/slice_map.cpp
+    src/slice_point_analyzer.cpp
+    src/audio_thumbnail_build.cpp
+    src/audio_thumbnail_cache.cpp
+    src/audio_thumbnail_serialization.cpp
     src/wav_metadata.cpp
     src/audio_device_manager.cpp
 )
@@ -62,7 +80,7 @@ if(TARGET alac)
     message(STATUS "Pulp: ALAC write enabled (Apple ALAC — Apache 2.0)")
 endif()
 
-target_link_libraries(pulp-audio PUBLIC pulp::runtime pulp::midi pulp::state)
+target_link_libraries(pulp-audio PUBLIC pulp::runtime pulp::midi pulp::state pulp::signal)
 
 # CHOC headers (audio file I/O)
 target_include_directories(pulp-audio PRIVATE

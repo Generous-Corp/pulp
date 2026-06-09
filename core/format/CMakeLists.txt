@@ -35,6 +35,7 @@ target_sources(pulp-format PRIVATE
     src/view_bridge.cpp
     src/remote_view_session.cpp
     src/native_core_processor.cpp
+    src/transport_quantizer.cpp
 )
 
 target_link_libraries(pulp-format

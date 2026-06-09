@@ -20,8 +20,86 @@
 #include <filesystem>
 #include <iostream>
 #include <regex>
+#include <string>
 
 namespace pulp::cli::pkg {
+
+namespace {
+
+bool default_suggestable(const PackageDescriptor& pkg) {
+    return check_license(pkg.license) == LicenseVerdict::allowed;
+}
+
+std::string license_note(const PackageDescriptor& pkg) {
+    const auto verdict = check_license(pkg.license);
+    if (verdict == LicenseVerdict::rejected) return red(" (license incompatible)");
+    if (verdict == LicenseVerdict::review_required) {
+        return yellow(" (license review required)");
+    }
+    return {};
+}
+
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
+void write_json_package(std::ostream& out,
+                        const PackageDescriptor& p,
+                        const std::string& indent) {
+    out << indent << "{"
+        << "\"id\": \"" << json_escape(p.id)
+        << "\", \"name\": \"" << json_escape(p.name)
+        << "\", \"version\": \"" << json_escape(p.version)
+        << "\", \"license\": \"" << json_escape(p.license)
+        << "\", \"description\": \"" << json_escape(p.description) << "\"}";
+}
+
+void write_json_package_array(std::ostream& out,
+                              const std::vector<const PackageDescriptor*>& packages,
+                              std::size_t limit,
+                              const std::string& indent) {
+    out << "[";
+    const auto count = std::min(packages.size(), limit);
+    for (std::size_t i = 0; i < count; ++i) {
+        out << (i == 0 ? "\n" : ",\n");
+        write_json_package(out, *packages[i], indent);
+    }
+    if (count > 0) out << "\n";
+    out << "]";
+}
+
+void add_unique_package(std::vector<const PackageDescriptor*>& packages,
+                        const PackageDescriptor& package) {
+    const auto exists = std::find_if(packages.begin(), packages.end(),
+                                     [&](const auto* p) {
+                                         return p != nullptr && p->id == package.id;
+                                     });
+    if (exists == packages.end()) packages.push_back(&package);
+}
+
+bool package_matches_includes(const PackageDescriptor& pkg,
+                              const std::vector<std::string>& includes) {
+    for (const auto& inc : includes) {
+        for (const auto& tag : pkg.tags) {
+            if (inc.find(tag) != std::string::npos) return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
 
 // ── Commands ──
 
@@ -223,9 +301,11 @@ int cmd_search(const std::vector<std::string>& args) {
         std::cout << "[\n";
         for (size_t i = 0; i < results.size(); ++i) {
             auto& p = *results[i];
-            std::cout << "  {\"id\": \"" << p.id << "\", \"name\": \"" << p.name
-                      << "\", \"version\": \"" << p.version << "\", \"license\": \""
-                      << p.license << "\", \"description\": \"" << p.description << "\"}";
+            std::cout << "  {\"id\": \"" << json_escape(p.id)
+                      << "\", \"name\": \"" << json_escape(p.name)
+                      << "\", \"version\": \"" << json_escape(p.version)
+                      << "\", \"license\": \"" << json_escape(p.license)
+                      << "\", \"description\": \"" << json_escape(p.description) << "\"}";
             if (i + 1 < results.size()) std::cout << ",";
             std::cout << "\n";
         }
@@ -293,7 +373,8 @@ int cmd_list(const std::vector<std::string>& args) {
         for (auto& [id, lp] : lock.packages) {
             if (!first) std::cout << ",\n";
             first = false;
-            std::cout << "  {\"id\": \"" << id << "\", \"version\": \"" << lp.version << "\"}";
+            std::cout << "  {\"id\": \"" << json_escape(id)
+                      << "\", \"version\": \"" << json_escape(lp.version) << "\"}";
         }
         std::cout << "\n]\n";
     } else {
@@ -319,6 +400,7 @@ int cmd_suggest(const std::vector<std::string>& args) {
                   << "  --description \"<text>\"   Find packages matching a description\n"
                   << "  --analyze <file>          Scan a source file for package suggestions\n"
                   << "  --alternative <package>   Find alternatives to a package\n"
+                  << "  --include-license-gated   Show packages that require license review/override\n"
                   << "  --format json             Output as JSON\n";
         return 0;
     }
@@ -336,6 +418,7 @@ int cmd_suggest(const std::vector<std::string>& args) {
     // Parse mode
     std::string mode, value;
     bool json_output = false;
+    bool include_license_gated = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--description") {
             if (missing_option_value(args, i)) {
@@ -365,6 +448,8 @@ int cmd_suggest(const std::vector<std::string>& args) {
                 return 2;
             }
             json_output = true; ++i;
+        } else if (args[i] == "--include-license-gated") {
+            include_license_gated = true;
         } else if (looks_like_option(args[i])) {
             print_fail("Unknown suggest option: " + args[i]);
             return 2;
@@ -376,30 +461,54 @@ int cmd_suggest(const std::vector<std::string>& args) {
 
     if (mode == "description") {
         auto results = search(reg, value);
+        const auto omitted_license_gated =
+            std::count_if(results.begin(), results.end(), [](const auto* pkg) {
+                return pkg != nullptr && !default_suggestable(*pkg);
+            });
+        if (!include_license_gated) {
+            results.erase(std::remove_if(results.begin(), results.end(), [](const auto* pkg) {
+                              return pkg == nullptr || !default_suggestable(*pkg);
+                          }),
+                          results.end());
+        } else {
+            results.erase(std::remove(results.begin(), results.end(), nullptr), results.end());
+        }
         if (results.empty()) {
-            std::cout << (json_output ? "[]" : "No packages match that description.") << "\n";
+            if (json_output) {
+                std::cout << "[]\n";
+            } else if (omitted_license_gated > 0) {
+                std::cout << "No default-suggestable packages match that description.\n";
+            } else {
+                std::cout << "No packages match that description.\n";
+            }
+            if (!json_output && omitted_license_gated > 0) {
+                std::cout << dim(std::to_string(omitted_license_gated) +
+                                  " license-gated match(es) omitted. Re-run with "
+                                  "--include-license-gated or use 'pulp search " +
+                                  value + "' to inspect licenses.") << "\n";
+            }
             return 0;
         }
         if (json_output) {
-            std::cout << "[\n";
-            for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
-                auto& p = *results[i];
-                if (i > 0) std::cout << ",\n";
-                std::cout << "  {\"id\": \"" << p.id << "\", \"version\": \"" << p.version
-                          << "\", \"license\": \"" << p.license << "\", \"description\": \""
-                          << p.description << "\"}";
-            }
-            std::cout << "\n]\n";
+            write_json_package_array(std::cout, results, 5, "  ");
+            std::cout << "\n";
         } else {
             std::cout << "Suggested packages for \"" << value << "\":\n\n";
             for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
                 auto& p = *results[i];
                 std::cout << "  " << green(p.id) << " " << dim("v" + p.version)
-                          << " " << dim("[" + p.license + "]") << "\n";
+                          << " " << dim("[" + p.license + "]")
+                          << license_note(p) << "\n";
                 std::cout << "    " << p.description << "\n";
                 if (!p.overlaps_with_builtin.empty())
                     std::cout << "    " << yellow("Note:") << " overlaps with Pulp built-ins\n";
                 std::cout << "\n";
+            }
+            if (!include_license_gated && omitted_license_gated > 0) {
+                std::cout << dim(std::to_string(omitted_license_gated) +
+                                  " license-gated match(es) omitted. Re-run with "
+                                  "--include-license-gated or use 'pulp search " +
+                                  value + "' to inspect licenses.") << "\n";
             }
         }
         return 0;
@@ -421,25 +530,47 @@ int cmd_suggest(const std::vector<std::string>& args) {
         for (; it != end; ++it)
             includes.push_back((*it)[1].str());
 
-        // Check each include against registry
-        bool found_any = false;
+        // Check each include against registry.
+        std::vector<const PackageDescriptor*> suggestions;
+        std::size_t omitted_license_gated = 0;
         for (auto& [id, pkg] : reg.packages) {
-            for (auto& inc : includes) {
-                bool match = false;
-                for (auto& tag : pkg.tags)
-                    if (inc.find(tag) != std::string::npos) { match = true; break; }
-                if (match) {
-                    if (!found_any) {
-                        std::cout << "Based on includes in " << value << ":\n\n";
-                        found_any = true;
-                    }
-                    std::cout << "  " << green(pkg.id) << " — " << pkg.description << "\n";
-                    break;
-                }
+            if (!include_license_gated && !default_suggestable(pkg)) {
+                if (package_matches_includes(pkg, includes)) ++omitted_license_gated;
+                continue;
+            }
+            if (package_matches_includes(pkg, includes)) {
+                add_unique_package(suggestions, pkg);
             }
         }
-        if (!found_any)
-            std::cout << "No package suggestions based on " << value << "\n";
+
+        if (json_output) {
+            std::cout << "{\n"
+                      << "  \"mode\": \"analyze\",\n"
+                      << "  \"source\": \"" << json_escape(value) << "\",\n"
+                      << "  \"omitted_license_gated\": " << omitted_license_gated << ",\n"
+                      << "  \"matches\": ";
+            write_json_package_array(std::cout, suggestions, suggestions.size(), "    ");
+            std::cout << "\n}\n";
+        } else {
+            bool found_any = false;
+            for (const auto* suggestion : suggestions) {
+                if (suggestion == nullptr) continue;
+                if (!found_any) {
+                    std::cout << "Based on includes in " << value << ":\n\n";
+                    found_any = true;
+                }
+                const auto& pkg = *suggestion;
+                    std::cout << "  " << green(pkg.id) << " " << dim("[" + pkg.license + "]")
+                              << license_note(pkg) << " — " << pkg.description << "\n";
+            }
+            if (!found_any)
+                std::cout << "No package suggestions based on " << value << "\n";
+            if (!include_license_gated && omitted_license_gated > 0) {
+                std::cout << dim(std::to_string(omitted_license_gated) +
+                                  " license-gated match(es) omitted. Re-run with "
+                                  "--include-license-gated to inspect them.") << "\n";
+            }
+        }
         return 0;
     }
 
@@ -451,26 +582,50 @@ int cmd_suggest(const std::vector<std::string>& args) {
         }
 
         auto& pkg = it->second;
-        std::cout << "Alternatives to " << pkg.name << ":\n\n";
+        std::vector<const PackageDescriptor*> alternatives;
 
         // Search by provides
         for (auto& provide : pkg.provides) {
             for (auto& [id, other] : reg.packages) {
                 if (id == value) continue;
+                if (!include_license_gated && !default_suggestable(other)) continue;
                 for (auto& op : other.provides) {
                     if (op == provide) {
-                        std::cout << "  " << green(other.id) << " " << dim("[" + other.license + "]")
-                                  << " — " << other.description << "\n";
+                        add_unique_package(alternatives, other);
                         break;
                     }
                 }
             }
         }
 
-        if (!pkg.alternatives.empty()) {
-            std::cout << "\nAlso noted (may require commercial license):\n";
-            for (auto& alt : pkg.alternatives)
-                std::cout << "  " << dim(alt) << "\n";
+        if (json_output) {
+            std::cout << "{\n"
+                      << "  \"mode\": \"alternative\",\n"
+                      << "  \"package\": ";
+            write_json_package(std::cout, pkg, "");
+            std::cout << ",\n  \"alternatives\": ";
+            write_json_package_array(std::cout, alternatives, alternatives.size(), "    ");
+            std::cout << ",\n  \"noted\": [";
+            for (std::size_t i = 0; i < pkg.alternatives.size(); ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << "\"" << json_escape(pkg.alternatives[i]) << "\"";
+            }
+            std::cout << "]\n}\n";
+        } else {
+            std::cout << "Alternatives to " << pkg.name << ":\n\n";
+            for (const auto* alternative : alternatives) {
+                if (alternative == nullptr) continue;
+                std::cout << "  " << green(alternative->id) << " "
+                          << dim("[" + alternative->license + "]")
+                          << license_note(*alternative)
+                          << " — " << alternative->description << "\n";
+            }
+
+            if (!pkg.alternatives.empty()) {
+                std::cout << "\nAlso noted (may require commercial license):\n";
+                for (auto& alt : pkg.alternatives)
+                    std::cout << "  " << dim(alt) << "\n";
+            }
         }
         return 0;
     }

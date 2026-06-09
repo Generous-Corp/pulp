@@ -203,6 +203,17 @@ TEST_CASE("AudioThumbnailCache records hit / miss statistics", "[audio][thumbnai
     REQUIRE(stats.entries == 1);
 }
 
+TEST_CASE("AudioThumbnailCache::put infers samples-per-peak from thumbnail",
+          "[audio][thumbnail][cache]") {
+    AudioThumbnailCache cache(4);
+    auto t = std::make_shared<AudioThumbnail>(
+        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 128));
+
+    cache.put("buffered", t);
+    REQUIRE(cache.get("buffered", 128).get() == t.get());
+    REQUIRE(cache.get("buffered", 256) == nullptr);
+}
+
 TEST_CASE("AudioThumbnailCache LRU evicts the oldest entry", "[audio][thumbnail][cache]") {
     AudioThumbnailCache cache(2);
 
@@ -274,6 +285,25 @@ TEST_CASE("AudioThumbnailCache::get_or_build hits the cache on second call",
     auto second = cache.get_or_build(path.string(), 256);
     REQUIRE(second != nullptr);
     REQUIRE(first.get() == second.get());  // shared instance => cache hit
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("AudioThumbnailCache keeps distinct samples-per-peak entries",
+          "[audio][thumbnail][cache]") {
+    const auto path = unique_wav_path();
+    const auto data = make_sine(44100, 22050, 1, 440.0, 0.7f);
+    REQUIRE(write_wav_file(path.string(), data));
+
+    AudioThumbnailCache cache(4);
+    auto coarse = cache.get_or_build(path.string(), 512);
+    REQUIRE(coarse != nullptr);
+    REQUIRE(coarse->level(0).samples_per_peak == 512);
+
+    auto fine = cache.get_or_build(path.string(), 128);
+    REQUIRE(fine != nullptr);
+    REQUIRE(fine->level(0).samples_per_peak == 128);
+    REQUIRE(fine.get() != coarse.get());
 
     std::filesystem::remove(path);
 }
@@ -352,6 +382,35 @@ TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
             }
         }
     }
+}
+
+TEST_CASE("deserialize_thumbnail rejects structurally empty cache blobs",
+          "[audio][thumbnail][persist]") {
+    const auto data = make_sine(44100, 8820, 2, 220.0, 0.6f);
+    const auto original = AudioThumbnail::build_from_buffer(data, 256);
+    const auto blob = serialize_thumbnail(original);
+
+    auto zero_channels = blob;
+    write_le<uint32_t>(zero_channels, 6, 0);
+    REQUIRE_FALSE(deserialize_thumbnail(zero_channels.data(), zero_channels.size()).has_value());
+
+    auto zero_frames = blob;
+    write_le<uint64_t>(zero_frames, 10, 0);
+    REQUIRE_FALSE(deserialize_thumbnail(zero_frames.data(), zero_frames.size()).has_value());
+
+    auto zero_sample_rate = blob;
+    write_le<uint32_t>(zero_sample_rate, 18, 0);
+    REQUIRE_FALSE(deserialize_thumbnail(zero_sample_rate.data(),
+                                        zero_sample_rate.size()).has_value());
+
+    auto zero_levels = blob;
+    write_le<uint32_t>(zero_levels, 22, 0);
+    REQUIRE_FALSE(deserialize_thumbnail(zero_levels.data(), zero_levels.size()).has_value());
+
+    auto zero_samples_per_peak = blob;
+    write_le<uint32_t>(zero_samples_per_peak, 26, 0);
+    REQUIRE_FALSE(deserialize_thumbnail(zero_samples_per_peak.data(),
+                                        zero_samples_per_peak.size()).has_value());
 }
 
 TEST_CASE("deserialize_thumbnail rejects bad magic / truncated blobs",
@@ -473,7 +532,7 @@ TEST_CASE("AudioThumbnailCache handles zero capacity, null inserts, and replacem
     REQUIRE(cache.size() == 1);
     cache.put("same", second);
     REQUIRE(cache.size() == 1);
-    REQUIRE(cache.get("same").get() == second.get());
+    REQUIRE(cache.get("same", 128).get() == second.get());
     REQUIRE(cache.stats().hits == 1);
 }
 
@@ -508,6 +567,46 @@ TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",
     }
 
     // Clean up.
+    std::filesystem::remove(wav_path);
+    std::error_code ec;
+    std::filesystem::remove_all(cache_dir, ec);
+}
+
+TEST_CASE("AudioThumbnailCache disk keys include samples-per-peak",
+          "[audio][thumbnail][cache][persist]") {
+    const auto cache_dir = unique_cache_dir();
+    const auto wav_path = unique_wav_path();
+    const auto data = make_sine(44100, 22050, 1, 330.0, 0.5f);
+    REQUIRE(write_wav_file(wav_path.string(), data));
+
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        auto coarse = cache.get_or_build(wav_path.string(), 512);
+        REQUIRE(coarse != nullptr);
+        REQUIRE(coarse->level(0).samples_per_peak == 512);
+        REQUIRE(cache.stats().disk_writes == 1);
+    }
+
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        auto fine = cache.get_or_build(wav_path.string(), 128);
+        REQUIRE(fine != nullptr);
+        REQUIRE(fine->level(0).samples_per_peak == 128);
+        REQUIRE(cache.stats().disk_hits == 0);
+        REQUIRE(cache.stats().disk_writes == 1);
+    }
+
+    {
+        AudioThumbnailCache cache(4);
+        cache.set_disk_cache_dir(cache_dir.string());
+        auto coarse = cache.get_or_build(wav_path.string(), 512);
+        REQUIRE(coarse != nullptr);
+        REQUIRE(coarse->level(0).samples_per_peak == 512);
+        REQUIRE(cache.stats().disk_hits == 1);
+    }
+
     std::filesystem::remove(wav_path);
     std::error_code ec;
     std::filesystem::remove_all(cache_dir, ec);
@@ -666,12 +765,13 @@ TEST_CASE("WaveformView accepts an AudioThumbnail source", "[view][waveform][thu
     REQUIRE_FALSE(view.has_thumbnail());
 
     auto data = make_sine(44100, 4410, 1, 200.0);
-    AudioThumbnail thumb = AudioThumbnail::build_from_buffer(data, 256);
-    REQUIRE_FALSE(thumb.empty());
+    auto thumb = std::make_shared<AudioThumbnail>(
+        AudioThumbnail::build_from_buffer(data, 256));
+    REQUIRE_FALSE(thumb->empty());
 
-    view.set_thumbnail(&thumb);
+    view.set_thumbnail(thumb);
     REQUIRE(view.has_thumbnail());
-    REQUIRE(view.thumbnail() == &thumb);
+    REQUIRE(view.thumbnail() == thumb.get());
     // Setting a thumbnail clears any raw sample buffer.
     REQUIRE(view.sample_count() == 0);
 
@@ -684,4 +784,9 @@ TEST_CASE("WaveformView accepts an AudioThumbnail source", "[view][waveform][thu
     // clear_thumbnail() is a no-op once samples are active.
     view.clear_thumbnail();
     REQUIRE_FALSE(view.has_thumbnail());
+
+    AudioThumbnail borrowed = AudioThumbnail::build_from_buffer(data, 256);
+    view.set_thumbnail_borrowed(&borrowed);
+    REQUIRE(view.has_thumbnail());
+    REQUIRE(view.thumbnail() == &borrowed);
 }

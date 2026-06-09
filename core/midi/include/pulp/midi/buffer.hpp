@@ -39,7 +39,10 @@ public:
     std::size_t size() const { return events_.size(); }
 
     /// Sort events by sample_offset for sample-accurate processing.
-    /// Call this before iterating in the audio callback.
+    /// Call this before iterating in the audio callback. Sorting is
+    /// in-place over the existing event storage; realtime callers must not
+    /// append while sorting and should rely on adapters to have bounded the
+    /// event count before process().
     void sort() {
         std::sort(events_.begin(), events_.end(),
             [](const MidiEvent& a, const MidiEvent& b) {

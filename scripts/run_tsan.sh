@@ -35,8 +35,8 @@ cmake --build "${BUILD_DIR}" -j"${JOBS}"
 
 # halt_on_error=1 → fail on first real race.
 # history_size=7 → deeper history for diagnosis (default 4).
-# Optional suppressions file: ${REPO_ROOT}/tools/tsan-suppressions.txt
-SUPPRESSIONS="${REPO_ROOT}/tools/tsan-suppressions.txt"
+# Optional suppressions file for documented lock-free patterns.
+SUPPRESSIONS="${REPO_ROOT}/test/tsan.supp"
 TSAN_OPT="halt_on_error=1:history_size=7"
 if [[ -f "${SUPPRESSIONS}" ]]; then
     TSAN_OPT="${TSAN_OPT}:suppressions=${SUPPRESSIONS}"

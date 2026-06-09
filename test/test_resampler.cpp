@@ -126,8 +126,14 @@ TEST_CASE("Resampler DC unity gain across ratios",
         { 48000.0, 48000.0 },     // identity
         { 44100.0, 48000.0 },     // up by rational
         { 48000.0, 44100.0 },     // down by rational
+        { 48000.0, 88200.0 },     // common host rate
         { 48000.0, 96000.0 },     // 2x up
         { 96000.0, 48000.0 },     // 2x down
+        { 88200.0, 48000.0 },     // common source rate
+        { 176400.0, 48000.0 },    // high source rate
+        { 48000.0, 176400.0 },    // high host rate
+        { 192000.0, 48000.0 },    // 4x down
+        { 48000.0, 192000.0 },    // 4x up
         { 44100.0, 47999.0 },     // near-irrational up
         { 48000.0, 44099.0 },     // near-irrational down
     };
@@ -354,6 +360,61 @@ TEST_CASE("Resampler max_output_for matches actual block production",
         in.data(), in.size(), out.data(), out.size());
     REQUIRE(produced > 0u);
     REQUIRE(produced <= cap);
+}
+
+TEST_CASE("Resampler detailed process reports consumed input frames",
+          "[signal][resampler]") {
+    Resampler r;
+    r.prepare(48000.0, 96000.0, 1, 1024);
+    const auto in = sine(1000.0, 48000.0, 1024);
+    std::vector<float> out(64, 0.0f);
+
+    const auto detailed =
+        r.process_block_mono_detailed(in.data(), in.size(), out.data(), out.size());
+    REQUIRE(detailed.output_frames == out.size());
+    REQUIRE(detailed.input_frames_consumed > 0u);
+    REQUIRE(detailed.input_frames_consumed < in.size());
+
+    std::vector<float> out_legacy(64, 0.0f);
+    Resampler legacy;
+    legacy.prepare(48000.0, 96000.0, 1, 1024);
+    REQUIRE(legacy.process_block_mono(in.data(), in.size(), out_legacy.data(), out_legacy.size()) ==
+            detailed.output_frames);
+}
+
+TEST_CASE("Resampler consumed-input accounting resumes the same stream",
+          "[signal][resampler]") {
+    const auto in = sine(1000.0, 48000.0, 1024);
+
+    Resampler one_shot;
+    one_shot.prepare(48000.0, 96000.0, 1, 1024);
+    std::vector<float> expected(256, 0.0f);
+    const auto expected_result = one_shot.process_block_mono_detailed(
+        in.data(), in.size(), expected.data(), expected.size());
+    REQUIRE(expected_result.output_frames == expected.size());
+
+    Resampler split;
+    split.prepare(48000.0, 96000.0, 1, 1024);
+    std::vector<float> first(64, 0.0f);
+    const auto first_result = split.process_block_mono_detailed(
+        in.data(), in.size(), first.data(), first.size());
+    REQUIRE(first_result.output_frames == first.size());
+    REQUIRE(first_result.input_frames_consumed > 0u);
+
+    std::vector<float> second(expected.size() - first.size(), 0.0f);
+    const auto second_result = split.process_block_mono_detailed(
+        in.data() + first_result.input_frames_consumed,
+        in.size() - first_result.input_frames_consumed,
+        second.data(),
+        second.size());
+    REQUIRE(second_result.output_frames == second.size());
+
+    for (std::size_t i = 0; i < first.size(); ++i) {
+        REQUIRE_THAT(first[i], WithinAbs(expected[i], 1e-6f));
+    }
+    for (std::size_t i = 0; i < second.size(); ++i) {
+        REQUIRE_THAT(second[i], WithinAbs(expected[first.size() + i], 1e-6f));
+    }
 }
 
 TEST_CASE("Resampler prepare produces a rectangular polyphase split",

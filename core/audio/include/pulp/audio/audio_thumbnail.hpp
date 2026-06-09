@@ -16,15 +16,16 @@
 //     base "samples_per_peak" level by walking the audio source once, then
 //     decimate by 2x for each subsequent level until we are down to a
 //     handful of peaks.
-//   * AudioThumbnailCache is a tiny LRU keyed by source path. Eviction is
-//     by configurable maximum entry count.
+//   * AudioThumbnailCache is a tiny LRU keyed by source path and requested
+//     base resolution. Eviction is by configurable maximum entry count.
 //   * Optional on-disk persistence — call `set_disk_cache_dir(path)` to
 //     point the cache at a directory. After that, `get_or_build()` first
-//     consults the disk cache (keyed by SHA-256 of "<source-path>|<mtime>")
-//     and writes a `.thumb` file on every cache insert. Re-opening Pulp
-//     finds cached thumbnails instantly without re-decoding the source.
-//     Disk cache files are versioned with a magic header so old / corrupt
-//     entries are silently ignored.
+//     consults the disk cache (keyed by SHA-256 of
+//     "<source-path>|<mtime>|<samples-per-peak>") and writes a `.thumb`
+//     file on every cache insert. Re-opening Pulp finds cached thumbnails
+//     instantly without re-decoding the source. Disk cache files are
+//     versioned with a magic header so old / corrupt entries are silently
+//     ignored.
 //
 // Wired into core/view::WaveformView so that callers may pass either a raw
 // sample buffer (existing behaviour) or an AudioThumbnail* (new behaviour
@@ -42,6 +43,7 @@
 #include <vector>
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/buffer.hpp>
 
 namespace pulp::audio {
 
@@ -103,6 +105,13 @@ public:
     // sources that are already loaded.
     static AudioThumbnail build_from_buffer(
         const AudioFileData& data,
+        uint32_t samples_per_peak = 256);
+    // Build from an immutable planar buffer view. This is the sampler/editor
+    // bridge for published sample slots and materialized rolling captures.
+    // The thumbnail owns its peak tables; it does not retain the source view.
+    static AudioThumbnail build_from_buffer_view(
+        BufferView<const float> source,
+        uint32_t sample_rate,
         uint32_t samples_per_peak = 256);
 
     AudioThumbnailInfo info() const noexcept;
@@ -180,6 +189,8 @@ struct AudioThumbnailCacheStats {
 
 class AudioThumbnailCache {
 public:
+    static constexpr uint32_t kInferSamplesPerPeak = 0;
+
     explicit AudioThumbnailCache(std::size_t max_entries = 32);
 
     // Returns a shared_ptr to the thumbnail for `path`, building it on
@@ -190,12 +201,18 @@ public:
 
     // Returns the cached thumbnail if present, otherwise nullptr. Does
     // NOT build. Records a hit or miss in stats.
-    std::shared_ptr<const AudioThumbnail> get(const std::string& path);
+    std::shared_ptr<const AudioThumbnail> get(
+        const std::string& path,
+        uint32_t samples_per_peak = 256);
 
     // Insert a pre-built thumbnail. Used for tests and for sources that
-    // were built from a buffer rather than a path.
+    // were built from a buffer rather than a path. The cache key is inferred
+    // from thumbnail.level(0).samples_per_peak when present; the third
+    // argument is only a fallback for thumbnails that do not expose a base
+    // resolution. kInferSamplesPerPeak falls back to the normal 256 default.
     void put(const std::string& path,
-             std::shared_ptr<const AudioThumbnail> thumbnail);
+             std::shared_ptr<const AudioThumbnail> thumbnail,
+             uint32_t fallback_samples_per_peak = kInferSamplesPerPeak);
 
     // Drop everything.
     void clear();
@@ -207,7 +224,7 @@ public:
     AudioThumbnailCacheStats stats() const;
 
     std::size_t size() const;
-    std::size_t capacity() const noexcept { return capacity_; }
+    std::size_t capacity() const;
 
     // Resize the cache. If the new capacity is smaller, evicts LRU
     // entries to fit.
@@ -217,7 +234,7 @@ public:
     // Pass an empty path to disable disk caching. The directory is
     // created on demand. Idempotent — safe to call repeatedly.
     void set_disk_cache_dir(const std::string& dir);
-    const std::string& disk_cache_dir() const noexcept { return disk_dir_; }
+    std::string disk_cache_dir() const;
 
     // Best-effort: drop every `.thumb` file under the disk cache dir.
     // Does nothing if no dir is configured.
@@ -238,10 +255,13 @@ private:
 
     // Disk-cache helpers — return nullptr / false on any I/O failure.
     // Both are safe to call with disk_dir_ empty; they no-op silently.
-    std::shared_ptr<const AudioThumbnail> load_from_disk(const std::string& path) const;
+    std::shared_ptr<const AudioThumbnail> load_from_disk(const std::string& path,
+                                                        uint32_t samples_per_peak) const;
     bool write_to_disk(const std::string& path,
+                       uint32_t samples_per_peak,
                        const AudioThumbnail& thumbnail) const;
-    std::string disk_path_for(const std::string& source_path) const;
+    std::string disk_path_for(const std::string& source_path,
+                              uint32_t samples_per_peak) const;
 
     mutable std::mutex mtx_;
     List list_;

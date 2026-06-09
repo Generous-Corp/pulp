@@ -142,7 +142,7 @@ another. Common fixes:
 
 TSan can flag known-safe patterns like CHOC's SPSC FIFO or atomic fences
 we've deliberately relaxed. Add the offending trace signature to
-`tools/tsan-suppressions.txt` (one per line, see TSan docs for format).
+`test/tsan.supp` (one per line, see TSan docs for format).
 Every entry needs a comment explaining *why* it's safe — otherwise it's
 a silent bug.
 

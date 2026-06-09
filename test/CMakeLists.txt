@@ -1193,6 +1193,10 @@ pulp_add_test_suite(pulp-test-processor-defaults LIBRARIES pulp::format)
 # and the three change flags (tempo_changed / time_sig_changed /
 # transport_changed) once per block.
 pulp_add_test_suite(pulp-test-playhead-diff LIBRARIES pulp::format)
+# Sampler/looper transport quantization helper. Schedules block-relative
+# offsets for immediate, beat, bar, grid, and host-loop boundaries from
+# ProcessContext.
+pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 # VST3 SMPTE → FrameRate mapping (pure helper, no Steinberg SDK
 # dependency). Pins the #2963 59.94 vs 60 regression among others.
 pulp_add_test_suite(pulp-test-vst3-frame-rate LIBRARIES pulp::format)
@@ -1946,6 +1950,31 @@ pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio)
 # AudioThumbnail + AudioThumbnailCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
 pulp_add_test_suite(pulp-test-audio-thumbnail LIBRARIES pulp::audio pulp::view)
+
+# First sampler/looper storage primitives split by ownership so failures point
+# to the actual layer instead of a catch-all primitive bucket.
+pulp_add_test_suite(pulp-test-planar-audio-ring-buffer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-rolling-audio-capture LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-slot-bank-store LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-realtime-sample-recorder LIBRARIES pulp::audio)
+
+# Resampled generated-audio handoff accounting and split-pull regressions.
+pulp_add_test_suite(pulp-test-audio-stream-handoff LIBRARIES pulp::audio)
+
+# Sampler key/pitch/slice mapping policy kept out of renderers and slot storage.
+pulp_add_test_suite(pulp-test-sample-key-map LIBRARIES pulp::audio)
+
+# Loop metadata validation and off-RT loop candidate analysis.
+pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
+
+# Built-in onset detection and slice-map analysis primitives.
+pulp_add_test_suite(pulp-test-onset-slice-analysis LIBRARIES pulp::audio)
+
+# Loop reader and renderer primitives, including interpolation, fades, and crossfades.
+pulp_add_test_suite(pulp-test-loop-rendering LIBRARIES pulp::audio)
+
+# End-to-end synthetic generated looper harness over core primitives only.
+pulp_add_test_suite(pulp-test-sampler-looper-integration LIBRARIES pulp::audio)
 
 # WAV metadata round-trip tests (BWAV / iXML / ASWG / ACID — item 6.11)
 pulp_add_test_suite(pulp-test-wav-metadata LIBRARIES pulp::audio)

@@ -170,6 +170,11 @@ struct ResamplerQuality {
     std::size_t phases = 64;            ///< polyphase oversample factor `L`
 };
 
+struct ResamplerProcessResult {
+    std::size_t output_frames = 0;
+    std::size_t input_frames_consumed = 0;
+};
+
 class Resampler {
 public:
     Resampler() = default;
@@ -278,11 +283,11 @@ public:
     /// Returns the actual number of output samples produced.
     ///
     /// Allocation-free after `prepare()`.
-    std::size_t process_block(const float* const* input,
-                              std::size_t in_count,
-                              float* const* output,
-                              std::size_t out_capacity) {
-        if (channels_ == 0 || taps_per_phase_ == 0 || phases_.empty()) return 0;
+    ResamplerProcessResult process_block_detailed(const float* const* input,
+                                                  std::size_t in_count,
+                                                  float* const* output,
+                                                  std::size_t out_capacity) {
+        if (channels_ == 0 || taps_per_phase_ == 0 || phases_.empty()) return {};
         const std::size_t L = phases_.size();
         const double L_d = static_cast<double>(L);
 
@@ -298,7 +303,7 @@ public:
             while (phase_acc_ >= 1.0) {
                 if (input_consumed >= in_count) {
                     // Ran out of input — return what we have.
-                    return out_n;
+                    return {out_n, input_consumed};
                 }
                 for (std::size_t c = 0; c < channels_; ++c) {
                     auto& d = delays_[c];
@@ -341,7 +346,23 @@ public:
             ++out_n;
             phase_acc_ += step_;
         }
-        return out_n;
+        return {out_n, input_consumed};
+    }
+
+    std::size_t process_block(const float* const* input,
+                              std::size_t in_count,
+                              float* const* output,
+                              std::size_t out_capacity) {
+        return process_block_detailed(input, in_count, output, out_capacity).output_frames;
+    }
+
+    ResamplerProcessResult process_block_mono_detailed(const float* input,
+                                                       std::size_t in_count,
+                                                       float* output,
+                                                       std::size_t out_capacity) {
+        const float* in_ptrs[1] = { input };
+        float* out_ptrs[1] = { output };
+        return process_block_detailed(in_ptrs, in_count, out_ptrs, out_capacity);
     }
 
     /// Mono convenience wrapper around `process_block`.
@@ -349,9 +370,7 @@ public:
                                    std::size_t in_count,
                                    float* output,
                                    std::size_t out_capacity) {
-        const float* in_ptrs[1] = { input };
-        float* out_ptrs[1] = { output };
-        return process_block(in_ptrs, in_count, out_ptrs, out_capacity);
+        return process_block_mono_detailed(input, in_count, output, out_capacity).output_frames;
     }
 
     /// Worst-case output sample count for a given input count.

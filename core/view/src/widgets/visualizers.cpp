@@ -646,17 +646,36 @@ void WaveformView::apply_trigger() {
 void WaveformView::set_data(const float* samples, size_t count) {
     samples_.assign(samples, samples + count);
     apply_trigger();
+    thumbnail_owner_.reset();
     thumbnail_ = nullptr;  // raw samples win over any cached thumbnail
 }
 
 void WaveformView::set_data(std::vector<float> samples) {
     samples_ = std::move(samples);
     apply_trigger();
+    thumbnail_owner_.reset();
     thumbnail_ = nullptr;
 }
 
+void WaveformView::set_thumbnail(
+    std::shared_ptr<const pulp::audio::AudioThumbnail> thumb,
+    uint32_t channel) {
+    thumbnail_owner_ = std::move(thumb);
+    thumbnail_ = thumbnail_owner_.get();
+    thumbnail_channel_ = channel;
+    // A live thumbnail shadows any prior raw sample buffer at paint time;
+    // we drop the samples cache so memory doesn't double up.
+    samples_.clear();
+}
+
 void WaveformView::set_thumbnail(const pulp::audio::AudioThumbnail* thumb,
-                                  uint32_t channel) {
+                                 uint32_t channel) {
+    set_thumbnail_borrowed(thumb, channel);
+}
+
+void WaveformView::set_thumbnail_borrowed(const pulp::audio::AudioThumbnail* thumb,
+                                          uint32_t channel) {
+    thumbnail_owner_.reset();
     thumbnail_ = thumb;
     thumbnail_channel_ = channel;
     // A live thumbnail shadows any prior raw sample buffer at paint time;
@@ -665,6 +684,7 @@ void WaveformView::set_thumbnail(const pulp::audio::AudioThumbnail* thumb,
 }
 
 void WaveformView::clear_thumbnail() {
+    thumbnail_owner_.reset();
     thumbnail_ = nullptr;
 }
 
@@ -689,28 +709,31 @@ void WaveformView::paint(canvas::Canvas& canvas) {
         float cy = b.height * 0.5f;
         canvas.stroke_line(0, cy, b.width, cy);
 
-        // Render one (min, max) pair per pixel column. ~2 KB on the stack
-        // for a 1024-wide widget; cap at 4096 px to stay bounded.
+        // Render one (min, max) pair per pixel column. Scratch storage is
+        // retained on the view so repainting a stable-size editor does not
+        // allocate every frame; cap at 4096 px to stay bounded.
         const std::size_t target_peaks =
             std::min<std::size_t>(static_cast<std::size_t>(std::max(1.0f, b.width)), 4096u);
-        std::vector<float> min_max(target_peaks * 2, 0.0f);
+        thumbnail_min_max_.assign(target_peaks * 2, 0.0f);
         const std::size_t produced = thumbnail_->render_min_max(
-            thumbnail_channel_, static_cast<uint32_t>(target_peaks), min_max.data());
+            thumbnail_channel_,
+            static_cast<uint32_t>(target_peaks),
+            thumbnail_min_max_.data());
         if (produced == 0) return;
 
         // Drive the GPU waveform shader with the per-column max so the
         // line/fill remain consistent with the live-sample path. We render
         // the absolute envelope (max(|min|, |max|)) — perceptually closest
         // to traditional audio-editor waveform displays.
-        std::vector<float> envelope(produced);
+        thumbnail_envelope_.resize(produced);
         for (std::size_t i = 0; i < produced; ++i) {
-            const float lo = min_max[i * 2 + 0];
-            const float hi = min_max[i * 2 + 1];
+            const float lo = thumbnail_min_max_[i * 2 + 0];
+            const float hi = thumbnail_min_max_[i * 2 + 1];
             const float amp = std::max(std::abs(lo), std::abs(hi));
             // Signed envelope: top half positive, bottom half negative would
             // require two passes through the shader. The shader already
             // handles symmetric ±amp, so we feed it max amplitude per column.
-            envelope[i] = hi >= -lo ? amp : -amp;
+            thumbnail_envelope_[i] = hi >= -lo ? amp : -amp;
         }
 
         canvas::Canvas::WaveformStyle style;
@@ -720,7 +743,7 @@ void WaveformView::paint(canvas::Canvas& canvas) {
         style.show_fill = true;
         style.fill_center = 0.5f;
 
-        canvas.draw_waveform(envelope.data(), envelope.size(),
+        canvas.draw_waveform(thumbnail_envelope_.data(), thumbnail_envelope_.size(),
                               0, 0, b.width, b.height, style);
         return;
     }

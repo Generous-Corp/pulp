@@ -4,7 +4,7 @@
 if(PULP_HAS_CLAP)
     # CLAP plugin
     add_library(PulpSampler_CLAP MODULE clap_entry.cpp)
-    target_link_libraries(PulpSampler_CLAP PRIVATE pulp::format pulp::signal clap)
+    target_link_libraries(PulpSampler_CLAP PRIVATE pulp::format pulp::audio pulp::signal clap)
     target_include_directories(PulpSampler_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set_target_properties(PulpSampler_CLAP PROPERTIES
         BUNDLE TRUE
@@ -23,7 +23,7 @@ endif()
 # Test
 if(PULP_BUILD_TESTS)
     add_executable(pulp-sampler-test test_pulp_sampler.cpp)
-    target_link_libraries(pulp-sampler-test PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+    target_link_libraries(pulp-sampler-test PRIVATE pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain)
     target_include_directories(pulp-sampler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(pulp-sampler-test)
 endif()

@@ -140,7 +140,7 @@
       "name": "BTrack",
       "version": "master",
       "description": "Real-time beat tracking via onset detection",
-      "license": "MIT",
+      "license": "GPL-3.0",
       "category": "dsp",
       "url": "https://github.com/adamstark/BTrack",
       "fetch": {
@@ -196,16 +196,18 @@
         "tempo-detection"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "MIT-licensed beat tracking \u2014 alternative to GPL Aubio for tempo analysis",
+      "unique_value": "Real-time beat tracking via onset detection; upstream is GPL-3.0 and must not be a default recommendation",
       "alternatives": [
-        "Aubio (GPL-3.0, more comprehensive)"
+        "Aubio (GPL-3.0, more comprehensive)",
+        "Signalsmith DSP (MIT, spectral toolkit only)",
+        "PFFFT (BSD-3-Clause, FFT accelerator only)"
       ],
       "migration_notes": {},
       "verification": {
-        "last_verified": "",
+        "last_verified": "2026-06-08",
         "verified_version": "master",
         "upstream_commit": "unknown",
-        "upstream_latest": "master",
+        "upstream_latest": "1.0.7",
         "pulp_commit": "unknown",
         "build_status": {}
       }
