@@ -202,6 +202,12 @@ the tail is done. Choke and steal are force-termination events and can be
 reported through caller-owned spans. The allocator does not own sample data, run
 envelopes, apply modulation, or render voices.
 
+`pulp::audio::AhdsrEnvelope` is the per-voice AHDSR/ADSR gain primitive. Call
+`prepare()` off the audio thread, then drive `note_on()`, `note_off()`,
+`next_sample()`, or `render()` from realtime voice code. `render()` writes gain
+values into caller-owned buffers; it does not multiply audio or own voice
+storage.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -209,6 +215,7 @@ envelopes, apply modulation, or render voices.
   `pump_listeners()`.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
+* [`core/audio/include/pulp/audio/instrument_envelope.hpp`](../../core/audio/include/pulp/audio/instrument_envelope.hpp)
 * [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)
 * [`core/audio/include/pulp/audio/instrument_voice_allocator.hpp`](../../core/audio/include/pulp/audio/instrument_voice_allocator.hpp)
 * [`core/audio/include/pulp/audio/sample_pool.hpp`](../../core/audio/include/pulp/audio/sample_pool.hpp)
