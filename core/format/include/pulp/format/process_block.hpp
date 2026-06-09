@@ -245,7 +245,10 @@ struct EventDropCounters {
 /// without logging or allocating from the audio callback.
 struct EventBlock {
     const state::ParameterEventQueue* parameter_events = nullptr;
-    const midi::MidiBuffer* midi_in = nullptr;
+    // Mutable to match the legacy Processor::process() ABI. Processors should
+    // still treat inbound MIDI as read-only; graph paths that need shared
+    // immutable event streams should adapt before entering the legacy ABI.
+    midi::MidiBuffer* midi_in = nullptr;
     midi::MidiBuffer* midi_out = nullptr;
     // Null means no sidecar events for this block. Adapters should leave these
     // null instead of publishing empty sidecars.

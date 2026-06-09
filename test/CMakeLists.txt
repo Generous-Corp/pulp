@@ -2054,6 +2054,10 @@ endif()
 pulp_add_test_suite(pulp-test-graph-runtime-executor
     LIBRARIES pulp::format)
 
+# ProcessBlock to legacy Processor::process() adapter for migration slices.
+pulp_add_test_suite(pulp-test-processor-block-adapter
+    LIBRARIES pulp::format)
+
 # .pulpset render/replay harness (G4)
 pulp_add_test_suite(pulp-test-pulpset-replay SOURCES test_pulpset_replay.cpp LIBRARIES pulp::format)
 

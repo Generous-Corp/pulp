@@ -163,6 +163,14 @@ accepted/rejected events, and visits nodes in plan order. Snapshot
 publication/lifetime policy, audio-buffer routing, feedback delay storage, and
 `SignalGraph` mutation belong to later graph-runtime migration slices.
 
+`pulp::format::process_processor_block()` is the additive bridge from
+`ProcessBlock` back to the legacy `Processor::process()` ABI. It requires an
+active main output bus, allows output-only instrument blocks, publishes
+EventBlock sidecars for the duration of the call, restores any previous
+Processor sidecar pointers, and preserves the distinction between no EventBlock
+and an EventBlock with an empty parameter queue. It does not change the
+Processor vtable.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -179,5 +187,7 @@ publication/lifetime policy, audio-buffer routing, feedback delay storage, and
   — dense graph topology plans and bounded validation.
 * [`core/format/include/pulp/format/graph_runtime_executor.hpp`](../../core/format/include/pulp/format/graph_runtime_executor.hpp)
   — `ProcessBlock` graph snapshot/executor seam.
+* [`core/format/include/pulp/format/processor_block_adapter.hpp`](../../core/format/include/pulp/format/processor_block_adapter.hpp)
+  — `ProcessBlock` to `Processor::process()` bridge.
 * sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
   and #29 (don't deref atomics per sample).
