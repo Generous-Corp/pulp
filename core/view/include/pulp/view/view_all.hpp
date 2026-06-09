@@ -7,6 +7,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/waveform_gpu_primitives.hpp>
 #include <pulp/view/waveform_gpu_render_controller.hpp>
+#include <pulp/view/waveform_headless_render_backend.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/audio_bridge.hpp>

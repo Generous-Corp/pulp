@@ -1997,6 +1997,9 @@ pulp_add_test_suite(pulp-test-waveform-gpu-primitives LIBRARIES pulp::view)
 # Backend-neutral waveform GPU render/upload/cache lifecycle orchestration.
 pulp_add_test_suite(pulp-test-waveform-gpu-render-controller LIBRARIES pulp::view)
 
+# Concrete CPU/headless consumer for waveform render-controller lifecycle decisions.
+pulp_add_test_suite(pulp-test-waveform-headless-render-backend LIBRARIES pulp::view)
+
 # Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
 pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
 
