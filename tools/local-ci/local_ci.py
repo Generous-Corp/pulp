@@ -2763,30 +2763,29 @@ def claim_next_job() -> dict | None:
 
 
 def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
-    retained_queue: list[dict] | None = None
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        _queue_orchestrator.complete_job_unlocked(
+    _queue_lifecycle.finalize_job_locked(
+        job_id,
+        result,
+        result_path,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        complete_job_unlocked_fn=lambda queue, current_job_id, current_result, current_result_path: _queue_orchestrator.complete_job_unlocked(
             queue,
-            job_id,
-            result,
-            result_path,
+            current_job_id,
+            current_result,
+            current_result_path,
             now_iso_fn=now_iso,
-        )
-
-        retained_queue, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
-        save_queue_unlocked(retained_queue)
-
-    if retained_queue is not None:
-        apply_local_ci_cleanup_plan(
-            collect_local_ci_cleanup_plan(
-                retained_queue,
-                keep_results=KEEP_COMPLETED_JOBS,
-                keep_logs=KEEP_COMPLETED_JOBS,
-                keep_bundles=0,
-                include_prepared=False,
-            )
-        )
+        ),
+        trim_completed_jobs_with_removed_ids_fn=trim_completed_jobs_with_removed_ids,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        collect_local_ci_cleanup_plan_fn=collect_local_ci_cleanup_plan,
+        apply_local_ci_cleanup_plan_fn=apply_local_ci_cleanup_plan,
+        keep_results=KEEP_COMPLETED_JOBS,
+        keep_logs=KEEP_COMPLETED_JOBS,
+        keep_bundles=0,
+        include_prepared=False,
+    )
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
