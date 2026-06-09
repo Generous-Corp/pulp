@@ -1,9 +1,10 @@
 """Pure queue policy helpers for local CI.
 
 This module owns job identity, priority ordering, supersedence, cancellation
-result payloads, summaries, and completed-queue retention. Higher-level queue
-mutation, locking, runner liveness, result persistence, and drain orchestration
-remain in local_ci.py until later extraction slices.
+result payloads, summaries, runner-info active-target mutation, and
+completed-queue retention. Higher-level queue mutation, locking, runner
+liveness, result persistence, and drain orchestration remain in local_ci.py
+until later extraction slices.
 """
 
 from __future__ import annotations
@@ -225,6 +226,24 @@ def summarize_active_targets(active_targets: dict | None, preferred_order: list[
         parts.append(f"{name}={state.get('status', '?')}")
 
     return ", ".join(parts)
+
+
+def update_runner_info_active_targets(
+    info: dict,
+    job_id: str,
+    active_targets: dict | None,
+    *,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> bool:
+    if info.get("active_job_id") != job_id:
+        return False
+
+    if active_targets:
+        info["active_targets"] = active_targets
+    else:
+        info.pop("active_targets", None)
+    info["updated_at"] = now_iso_fn()
+    return True
 
 
 def upsert_job_active_targets_unlocked(

@@ -95,6 +95,46 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.job_sort_key({"id": "low", "priority": "low", "queued_at": "1"}),
         )
 
+    def test_runner_info_active_target_update_matches_active_job_only(self) -> None:
+        info = {
+            "active_job_id": "job123",
+            "active_targets": {"mac": {"status": "running"}},
+            "updated_at": "2026-06-09T00:00:00+00:00",
+        }
+
+        updated = self.mod.update_runner_info_active_targets(
+            info,
+            "job123",
+            {"mac": {"status": "pass"}, "windows": {"status": "running"}},
+            now_iso_fn=lambda: "2026-06-09T00:01:00+00:00",
+        )
+
+        self.assertTrue(updated)
+        self.assertEqual(info["active_targets"]["mac"], {"status": "pass"})
+        self.assertEqual(info["active_targets"]["windows"], {"status": "running"})
+        self.assertEqual(info["updated_at"], "2026-06-09T00:01:00+00:00")
+
+        cleared = self.mod.update_runner_info_active_targets(
+            info,
+            "job123",
+            None,
+            now_iso_fn=lambda: "2026-06-09T00:02:00+00:00",
+        )
+
+        self.assertTrue(cleared)
+        self.assertNotIn("active_targets", info)
+        self.assertEqual(info["updated_at"], "2026-06-09T00:02:00+00:00")
+
+        unchanged = dict(info)
+        self.assertFalse(
+            self.mod.update_runner_info_active_targets(
+                info,
+                "other-job",
+                {"mac": {"status": "fail"}},
+            )
+        )
+        self.assertEqual(info, unchanged)
+
     def test_supersedence_and_terminal_result_payloads(self) -> None:
         older = {
             "id": "older",

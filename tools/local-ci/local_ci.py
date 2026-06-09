@@ -2754,15 +2754,16 @@ def write_runner_info(info: dict) -> None:
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
     info = current_runner_info()
-    if not info or info.get("active_job_id") != job_id:
+    if not info:
         return
 
-    if active_targets:
-        info["active_targets"] = active_targets
-    else:
-        info.pop("active_targets", None)
-    info["updated_at"] = now_iso()
-    write_runner_info(info)
+    if _queue_orchestrator.update_runner_info_active_targets(
+        info,
+        job_id,
+        active_targets,
+        now_iso_fn=now_iso,
+    ):
+        write_runner_info(info)
 
 
 def clear_runner_info() -> None:
