@@ -1282,6 +1282,7 @@ private:
 class MultiMeter : public View {
 public:
     enum class Layout { vertical, horizontal };
+    enum class DisplayStyle { continuous, segmented };
 
     MultiMeter() { set_access_role(AccessRole::meter); }
 
@@ -1290,6 +1291,9 @@ public:
 
     void set_layout(Layout l) { layout_ = l; }
     Layout layout() const { return layout_; }
+
+    void set_display_style(DisplayStyle s) { display_style_ = s; }
+    DisplayStyle display_style() const { return display_style_; }
 
     void set_channel_count(int count);
     int channel_count() const { return ballistics_.num_channels; }
@@ -1301,6 +1305,7 @@ public:
 
 private:
     Layout layout_ = Layout::vertical;
+    DisplayStyle display_style_ = DisplayStyle::continuous;
     signal::MultiChannelBallistics ballistics_;
 };
 

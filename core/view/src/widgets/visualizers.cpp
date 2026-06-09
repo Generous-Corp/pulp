@@ -978,6 +978,119 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
     int num_ch = ballistics_.num_channels;
     if (num_ch <= 0) return;
 
+    if (display_style_ == DisplayStyle::segmented && layout_ == Layout::horizontal) {
+        constexpr float kMinDb = -60.0f;
+        constexpr float kMaxDb = 6.0f;
+        auto level_to_position = [&](float level) {
+            if (level <= 0.0f) return 0.0f;
+            const float db = 20.0f * std::log10(std::max(level, 1.0e-6f));
+            return std::clamp((db - kMinDb) / (kMaxDb - kMinDb), 0.0f, 1.0f);
+        };
+        auto position_to_db = [&](float position) {
+            return kMinDb + std::clamp(position, 0.0f, 1.0f) * (kMaxDb - kMinDb);
+        };
+        auto active_color_for_db = [](float db) {
+            if (db >= 0.0f) return canvas::Color::rgba8(255, 48, 48);
+            if (db >= -6.0f) return canvas::Color::rgba8(246, 218, 61);
+            return canvas::Color::rgba8(134, 232, 68);
+        };
+        auto inactive_color_for_db = [](float db) {
+            if (db >= 0.0f) return canvas::Color::rgba8(66, 16, 18);
+            if (db >= -6.0f) return canvas::Color::rgba8(62, 48, 17);
+            return canvas::Color::rgba8(23, 43, 18);
+        };
+        auto label_for_channel = [](int ch) -> const char* {
+            if (ch == 0) return "L";
+            if (ch == 1) return "R";
+            if (ch == 2) return "C";
+            if (ch == 3) return "Ls";
+            if (ch == 4) return "Rs";
+            return "";
+        };
+
+        canvas.set_fill_color(resolve_color("bg.primary", canvas::Color::rgba8(7, 8, 11)));
+        canvas.fill_rounded_rect(0, 0, b.width, b.height, 3.0f);
+
+        const float pad = 4.0f;
+        const float label_w = 18.0f;
+        const float scale_h = b.height >= 36.0f ? 12.0f : 0.0f;
+        const float meter_x = label_w + pad;
+        const float meter_w = std::max(1.0f, b.width - meter_x - pad);
+        const float row_gap = 3.0f;
+        const float row_area_h = std::max(
+            1.0f,
+            b.height - pad * 2.0f - scale_h - row_gap * static_cast<float>(num_ch - 1));
+        const float row_h = std::max(3.0f, row_area_h / static_cast<float>(num_ch));
+        const int segments = meter_w >= 180.0f ? 36 : 24;
+        const float segment_gap = 2.0f;
+        const float segment_w = std::max(
+            2.0f,
+            (meter_w - segment_gap * static_cast<float>(segments - 1)) /
+                static_cast<float>(segments));
+
+        canvas.set_font("Inter", 9.0f);
+        for (int ch = 0; ch < num_ch; ++ch) {
+            const auto& bc = ballistics_.channels[ch];
+            const float y0 = pad + static_cast<float>(ch) * (row_h + row_gap);
+            const float y_mid = y0 + row_h * 0.5f;
+            const float peak_pos = level_to_position(bc.display_peak);
+            const float rms_pos = level_to_position(bc.display_rms);
+
+            canvas.set_fill_color(resolve_color("accent.success", canvas::Color::rgba8(134, 232, 68)));
+            const char* label = label_for_channel(ch);
+            if (label[0] != '\0') canvas.fill_text(label, pad, y_mid + 3.0f);
+
+            for (int i = 0; i < segments; ++i) {
+                const float segment_pos =
+                    (static_cast<float>(i) + 0.5f) / static_cast<float>(segments);
+                const float db = position_to_db(segment_pos);
+                const bool active = segment_pos <= peak_pos;
+                auto color = active ? active_color_for_db(db) : inactive_color_for_db(db);
+                if (active && segment_pos > rms_pos) color.a = 175;
+                canvas.set_fill_color(color);
+                const float x = meter_x + static_cast<float>(i) * (segment_w + segment_gap);
+                canvas.fill_rect(x, y0, segment_w, row_h);
+            }
+
+            const float held_pos = level_to_position(bc.held_peak);
+            if (held_pos > 0.0f) {
+                canvas.set_stroke_color(bc.held_peak >= 1.0f
+                    ? resolve_color("accent.error", canvas::Color::rgba8(255, 48, 48))
+                    : canvas::Color::rgba8(255, 255, 255));
+                canvas.set_line_width(1.0f);
+                const float x = meter_x + held_pos * meter_w;
+                canvas.stroke_line(x, y0 - 1.0f, x, y0 + row_h + 1.0f);
+            }
+
+            if (bc.clip_indicator) {
+                canvas.set_fill_color(resolve_color("accent.error", canvas::Color::rgba8(255, 48, 48)));
+                canvas.fill_rect(b.width - pad - 3.0f, y0, 3.0f, row_h);
+            }
+        }
+
+        if (scale_h > 0.0f) {
+            struct Tick { float db; const char* label; };
+            constexpr Tick ticks[] = {
+                {-20.0f, "-20"}, {-15.0f, "-15"}, {-10.0f, "-10"},
+                { -6.0f,  "-6"}, { -3.0f,  "-3"}, {  0.0f,   "0"},
+                {  2.0f,  "+2"}, {  4.0f,  "+4"},
+            };
+            canvas.set_font("Inter", 8.0f);
+            canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(160, 166, 185)));
+            for (const auto& tick : ticks) {
+                const float pos = std::clamp((tick.db - kMinDb) / (kMaxDb - kMinDb), 0.0f, 1.0f);
+                const float x = meter_x + pos * meter_w;
+                canvas.set_stroke_color(canvas::Color::rgba8(58, 64, 73));
+                canvas.set_line_width(1.0f);
+                canvas.stroke_line(x, pad, x, b.height - scale_h - 1.0f);
+                canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(160, 166, 185)));
+                canvas.fill_text(tick.label, x - 6.0f, b.height - 3.0f);
+            }
+            canvas.fill_text("dB", meter_x - 14.0f, b.height - 3.0f);
+        }
+        return;
+    }
+
     // Background
     auto bg = resolve_color("control.track", canvas::Color::rgba8(30, 30, 30));
     canvas.set_fill_color(bg);

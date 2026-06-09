@@ -636,6 +636,10 @@ TEST_CASE("SettingsPanel updates input and output meters from audio bridges",
     REQUIRE(audio_tab != nullptr);
     auto meters = descendants<MultiMeter>(*audio_tab);
     REQUIRE(meters.size() >= 2);
+    REQUIRE(meters[0]->layout() == MultiMeter::Layout::horizontal);
+    REQUIRE(meters[0]->display_style() == MultiMeter::DisplayStyle::segmented);
+    REQUIRE(meters[1]->layout() == MultiMeter::Layout::horizontal);
+    REQUIRE(meters[1]->display_style() == MultiMeter::DisplayStyle::segmented);
 
     MeterData input_data;
     input_data.num_channels = 1;

@@ -195,14 +195,18 @@ void SettingsPanel::build_audio_tab() {
     auto meter = std::make_unique<view::MultiMeter>();
     input_meter_ = meter.get();
     meter->set_channel_count(2);
-    meter->flex().preferred_height = 24.0f;
+    meter->set_layout(view::MultiMeter::Layout::horizontal);
+    meter->set_display_style(view::MultiMeter::DisplayStyle::segmented);
+    meter->flex().preferred_height = 48.0f;
     audio_tab->add_child(std::move(meter));
 
     audio_tab->add_child(make_section_label("Output Level"));
     auto out_meter = std::make_unique<view::MultiMeter>();
     output_meter_ = out_meter.get();
     out_meter->set_channel_count(2);
-    out_meter->flex().preferred_height = 24.0f;
+    out_meter->set_layout(view::MultiMeter::Layout::horizontal);
+    out_meter->set_display_style(view::MultiMeter::DisplayStyle::segmented);
+    out_meter->flex().preferred_height = 48.0f;
     audio_tab->add_child(std::move(out_meter));
 
     // Test tone section. Header line: "Test Signal" on the left, the "Sine Tone" switch on

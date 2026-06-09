@@ -1809,6 +1809,21 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     REQUIRE(horizontal_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
     REQUIRE(horizontal_canvas.count(DrawCommand::Type::fill_rect) >= 4);
     REQUIRE(horizontal_canvas.count(DrawCommand::Type::stroke_line) >= 6);
+
+    MultiMeter segmented;
+    segmented.set_bounds({0, 0, 260, 48});
+    segmented.set_layout(MultiMeter::Layout::horizontal);
+    segmented.set_display_style(MultiMeter::DisplayStyle::segmented);
+    segmented.update(data, 0.1f);
+
+    RecordingCanvas segmented_canvas;
+    segmented.paint(segmented_canvas);
+
+    REQUIRE(segmented.display_style() == MultiMeter::DisplayStyle::segmented);
+    REQUIRE(segmented_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(segmented_canvas.count(DrawCommand::Type::fill_rect) >= 24);
+    REQUIRE(segmented_canvas.count(DrawCommand::Type::fill_text) >= 4);
+    REQUIRE(segmented_canvas.count(DrawCommand::Type::stroke_line) >= 8);
 }
 
 TEST_CASE("MultiMeter with no channels paints nothing",
