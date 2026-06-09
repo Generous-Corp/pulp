@@ -71,6 +71,12 @@ bool StandaloneApp::start() {
         persisted_config_loaded_ = true;  // don't re-overlay on soft restarts (apply_config)
     }
 
+    const bool processor_has_audio_input = !desc.input_buses.empty();
+    config_.supports_audio_input = config_.supports_audio_input && processor_has_audio_input;
+    if (!config_.supports_audio_input) {
+        config_.input_channels = 0;
+    }
+
     // Set up audio
     audio_system_ = audio::create_audio_system();
     audio_device_ = audio_system_->create_device(config_.audio_device_id);
@@ -90,6 +96,10 @@ bool StandaloneApp::start() {
         runtime::log_error("Standalone: failed to open audio device");
         return false;
     }
+
+    config_.audio_device_id = audio_device_->info().id;
+    config_.sample_rate = audio_device_->sample_rate();
+    config_.buffer_size = audio_device_->buffer_size();
 
     // Prepare processor
     PrepareContext prep;

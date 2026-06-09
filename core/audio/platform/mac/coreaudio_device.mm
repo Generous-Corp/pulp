@@ -2,6 +2,9 @@
 #include <pulp/runtime/log.hpp>
 #include <CoreAudio/CoreAudio.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace pulp::audio::mac {
@@ -13,6 +16,68 @@ namespace {
 // iOS 16+. Phase B floor follows that guarantee.
 constexpr AudioObjectPropertySelector kIOThreadWorkgroupSelector =
     kAudioDevicePropertyIOThreadOSWorkgroup;
+
+bool read_nominal_sample_rate(AudioDeviceID device_id, double& sample_rate) {
+    AudioObjectPropertyAddress prop{};
+    prop.mSelector = kAudioDevicePropertyNominalSampleRate;
+    prop.mScope    = kAudioObjectPropertyScopeGlobal;
+    prop.mElement  = kAudioObjectPropertyElementMain;
+
+    Float64 rate = 0.0;
+    UInt32 size = sizeof(rate);
+    OSStatus status = AudioObjectGetPropertyData(device_id, &prop, 0, nullptr, &size, &rate);
+    if (status != noErr) return false;
+
+    sample_rate = static_cast<double>(rate);
+    return sample_rate > 0.0;
+}
+
+OSStatus set_nominal_sample_rate(AudioDeviceID device_id, double sample_rate) {
+    AudioObjectPropertyAddress prop{};
+    prop.mSelector = kAudioDevicePropertyNominalSampleRate;
+    prop.mScope    = kAudioObjectPropertyScopeGlobal;
+    prop.mElement  = kAudioObjectPropertyElementMain;
+
+    Float64 rate = static_cast<Float64>(sample_rate);
+    UInt32 size = sizeof(rate);
+    return AudioObjectSetPropertyData(device_id, &prop, 0, nullptr, size, &rate);
+}
+
+bool read_buffer_frame_size(AudioDeviceID device_id, UInt32& frames) {
+    AudioObjectPropertyAddress prop{};
+    prop.mSelector = kAudioDevicePropertyBufferFrameSize;
+    prop.mScope    = kAudioObjectPropertyScopeGlobal;
+    prop.mElement  = kAudioObjectPropertyElementMain;
+
+    UInt32 size = sizeof(frames);
+    OSStatus status = AudioObjectGetPropertyData(device_id, &prop, 0, nullptr, &size, &frames);
+    return status == noErr && frames > 0;
+}
+
+OSStatus set_buffer_frame_size(AudioDeviceID device_id, UInt32 frames) {
+    AudioObjectPropertyAddress prop{};
+    prop.mSelector = kAudioDevicePropertyBufferFrameSize;
+    prop.mScope    = kAudioObjectPropertyScopeGlobal;
+    prop.mElement  = kAudioObjectPropertyElementMain;
+
+    UInt32 size = sizeof(frames);
+    return AudioObjectSetPropertyData(device_id, &prop, 0, nullptr, size, &frames);
+}
+
+bool device_exists(AudioDeviceID device_id) {
+    AudioObjectPropertyAddress prop{};
+    prop.mSelector = kAudioObjectPropertyName;
+    prop.mScope    = kAudioObjectPropertyScopeGlobal;
+    prop.mElement  = kAudioObjectPropertyElementMain;
+    return AudioObjectHasProperty(device_id, &prop);
+}
+
+void add_unique_sample_rate(std::vector<double>& rates, double rate) {
+    if (rate <= 0.0) return;
+    auto matches = [rate](double existing) { return std::abs(existing - rate) < 1.0; };
+    if (std::find_if(rates.begin(), rates.end(), matches) == rates.end())
+        rates.push_back(rate);
+}
 
 }  // namespace
 
@@ -90,6 +155,20 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         return false;
     }
 
+    double actual_rate = 0.0;
+    if (read_nominal_sample_rate(device_id_, actual_rate)) {
+        if (config_.sample_rate > 0.0 && std::abs(actual_rate - config_.sample_rate) >= 1.0) {
+            OSStatus rate_status = set_nominal_sample_rate(device_id_, config_.sample_rate);
+            if (rate_status != noErr) {
+                runtime::log_warn("CoreAudio: could not set nominal sample rate to {} Hz ({})",
+                    config_.sample_rate, static_cast<int>(rate_status));
+            }
+            if (!read_nominal_sample_rate(device_id_, actual_rate))
+                actual_rate = config_.sample_rate;
+        }
+        config_.sample_rate = actual_rate;
+    }
+
     // Enable input on bus 1 if input channels are requested
     input_enabled_ = false;
     if (config_.input_channels > 0) {
@@ -142,6 +221,19 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         }
     }
 
+    // Set buffer size
+    UInt32 buffer_size = static_cast<UInt32>(config_.buffer_size);
+    OSStatus buffer_status = buffer_size > 0
+        ? set_buffer_frame_size(device_id_, buffer_size)
+        : kAudio_ParamError;
+    if (buffer_status != noErr) {
+        runtime::log_warn("CoreAudio: could not set buffer size to {} ({})",
+            config_.buffer_size, static_cast<int>(buffer_status));
+    }
+    UInt32 actual_buffer_size = 0;
+    if (read_buffer_frame_size(device_id_, actual_buffer_size))
+        config_.buffer_size = static_cast<int>(actual_buffer_size);
+
     // Pre-allocate input capture buffers (no allocation in audio callback)
     if (input_enabled_) {
         auto in_ch = static_cast<UInt32>(config_.input_channels);
@@ -160,17 +252,6 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
             input_buffer_list_->mBuffers[c].mData = input_buffer_storage_.data() + c * buf_frames;
             input_ptrs_[c] = static_cast<float*>(input_buffer_list_->mBuffers[c].mData);
         }
-    }
-
-    // Set buffer size
-    UInt32 buffer_size = static_cast<UInt32>(config_.buffer_size);
-    status = AudioUnitSetProperty(audio_unit_,
-        kAudioDevicePropertyBufferFrameSize,
-        kAudioUnitScope_Global, 0,
-        &buffer_size, sizeof(buffer_size));
-    if (status != noErr) {
-        runtime::log_warn("CoreAudio: could not set buffer size to {} ({})",
-            config_.buffer_size, static_cast<int>(status));
     }
 
     // Set render callback
@@ -563,16 +644,28 @@ DeviceInfo CoreAudioSystem::query_device_info(AudioDeviceID device_id) {
     size = 0;
     AudioObjectGetPropertyDataSize(device_id, &prop, 0, nullptr, &size);
     if (size > 0) {
+        static constexpr double kCommonRates[] = {
+            44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0
+        };
         auto count = size / sizeof(AudioValueRange);
         std::vector<AudioValueRange> ranges(count);
         if (AudioObjectGetPropertyData(device_id, &prop, 0, nullptr, &size, ranges.data()) == noErr) {
             for (const auto& r : ranges) {
                 if (r.mMinimum == r.mMaximum) {
-                    info.sample_rates.push_back(r.mMinimum);
+                    add_unique_sample_rate(info.sample_rates, r.mMinimum);
+                } else {
+                    for (double common : kCommonRates) {
+                        if (common >= r.mMinimum && common <= r.mMaximum)
+                            add_unique_sample_rate(info.sample_rates, common);
+                    }
                 }
             }
         }
     }
+    double current_rate = 0.0;
+    if (read_nominal_sample_rate(device_id, current_rate))
+        add_unique_sample_rate(info.sample_rates, current_rate);
+    std::sort(info.sample_rates.begin(), info.sample_rates.end());
 
     return info;
 }
@@ -603,7 +696,20 @@ std::unique_ptr<AudioDevice> CoreAudioSystem::create_device(const std::string& d
     if (device_id.empty()) {
         id = get_default_device(false);
     } else {
-        id = static_cast<AudioDeviceID>(std::stoul(device_id));
+        try {
+            auto parsed = static_cast<AudioDeviceID>(std::stoul(device_id));
+            if (device_exists(parsed)) {
+                id = parsed;
+            } else {
+                id = get_default_device(false);
+                runtime::log_warn("CoreAudio: saved device '{}' is unavailable; using default output",
+                    device_id);
+            }
+        } catch (...) {
+            id = get_default_device(false);
+            runtime::log_warn("CoreAudio: saved device '{}' is invalid; using default output",
+                device_id);
+        }
     }
     return std::make_unique<CoreAudioDevice>(id);
 }

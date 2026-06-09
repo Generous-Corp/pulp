@@ -60,6 +60,9 @@ private:
     void rebuild_rate_and_buffer_lists();
     void apply_config();
     void update_latency_label();
+    [[nodiscard]] int current_output_device_index() const;
+    [[nodiscard]] int current_sample_rate_index() const;
+    [[nodiscard]] int current_buffer_size_index() const;
 
     SettingsPanelCallbacks callbacks_;
     audio::AudioSystem* audio_sys_ = nullptr;
@@ -73,6 +76,7 @@ private:
 
     // Audio tab widgets
     view::ComboBox* output_device_combo_ = nullptr;
+    view::Label* input_device_label_ = nullptr;
     view::ComboBox* input_device_combo_ = nullptr;
     view::ComboBox* sample_rate_combo_ = nullptr;
     view::ComboBox* buffer_size_combo_ = nullptr;

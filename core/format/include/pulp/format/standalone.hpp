@@ -23,6 +23,11 @@ struct StandaloneConfig {
     int buffer_size = 256;
     int output_channels = 2;
     int input_channels = 0;
+    // Capability flag for apps/instruments that do not consume audio input.
+    // The standalone host derives this from the processor descriptor at
+    // startup, and the settings UI uses it to avoid presenting an unusable
+    // input-device workflow for instrument-only apps.
+    bool supports_audio_input = true;
     // When true, run_with_editor() avoids showing/activating the native
     // window. Use with screenshot_path for CI/test smoke runs.
     bool headless = false;

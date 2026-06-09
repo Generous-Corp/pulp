@@ -371,7 +371,7 @@ TEST_CASE("SettingsPanel applies audio and MIDI selections",
     output_combo->set_selected(1);
     REQUIRE(applied.audio_device_id == "usb-out");
     REQUIRE(applied.sample_rate == 48000.0);
-    REQUIRE(applied.buffer_size == 128);
+    REQUIRE(applied.buffer_size == 256);
 
     sample_rate_combo->set_selected(1);
     buffer_size_combo->set_selected(1);
@@ -388,7 +388,7 @@ TEST_CASE("SettingsPanel applies audio and MIDI selections",
     lists[0]->set_selected(1);
 
     REQUIRE(applied.midi_input_id == "pads");
-    REQUIRE(apply_calls >= 5);
+    REQUIRE(apply_calls >= 4);
 }
 
 TEST_CASE("SettingsPanel set_current_config prefers explicit output over default",
@@ -428,6 +428,131 @@ TEST_CASE("SettingsPanel set_current_config prefers explicit output over default
     REQUIRE(combos[2]->selected() == 1);
     REQUIRE(combos[3]->items().size() == 2);
     REQUIRE(combos[3]->selected() == 1);
+}
+
+TEST_CASE("SettingsPanel preserves audio selections across apply rebind",
+          "[standalone][settings][audio]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "builtin-out",
+         .name = "Built-in Output",
+         .max_output_channels = 2,
+         .sample_rates = {44100.0},
+         .buffer_sizes = {64},
+         .is_default_output = true},
+        {.id = "usb-out",
+         .name = "USB Output",
+         .max_output_channels = 2,
+         .sample_rates = {44100.0, 48000.0},
+         .buffer_sizes = {64, 512}},
+    };
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, nullptr);
+
+    StandaloneConfig cfg;
+    cfg.audio_device_id = "builtin-out";
+    cfg.sample_rate = 44100.0;
+    cfg.buffer_size = 64;
+    panel.set_current_config(cfg);
+
+    StandaloneConfig applied = cfg;
+    int apply_calls = 0;
+    panel.set_callbacks(SettingsPanelCallbacks{
+        .on_config_apply = [&](const StandaloneConfig& next) {
+            applied = next;
+            ++apply_calls;
+        },
+    });
+
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    REQUIRE(audio_tab != nullptr);
+
+    auto combos = descendants<ComboBox>(*audio_tab);
+    REQUIRE(combos.size() >= 4);
+    auto* output_combo = combos[0];
+    auto* sample_rate_combo = combos[2];
+    auto* buffer_size_combo = combos[3];
+
+    output_combo->set_selected(1);
+    REQUIRE(applied.audio_device_id == "usb-out");
+    REQUIRE(applied.sample_rate == 44100.0);
+    REQUIRE(applied.buffer_size == 64);
+
+    panel.bind_systems(&audio, nullptr);
+    REQUIRE(output_combo->selected() == 1);
+    REQUIRE(sample_rate_combo->items().size() == 2);
+    REQUIRE(buffer_size_combo->items().size() == 2);
+
+    sample_rate_combo->set_selected(1);
+    buffer_size_combo->set_selected(1);
+    REQUIRE(applied.sample_rate == 48000.0);
+    REQUIRE(applied.buffer_size == 512);
+
+    panel.bind_systems(&audio, nullptr);
+    REQUIRE(output_combo->selected() == 1);
+    REQUIRE(sample_rate_combo->selected() == 1);
+    REQUIRE(buffer_size_combo->selected() == 1);
+    REQUIRE(sample_rate_combo->selected_text() == "48000 Hz");
+
+    sample_rate_combo->set_selected(0);
+    REQUIRE(applied.sample_rate == 44100.0);
+    REQUIRE(apply_calls >= 4);
+}
+
+TEST_CASE("SettingsPanel marks audio input unused for instrument-only configs",
+          "[standalone][settings][audio]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "builtin-out",
+         .name = "Built-in Output",
+         .max_output_channels = 2,
+         .sample_rates = {44100.0, 48000.0},
+         .buffer_sizes = {64},
+         .is_default_output = true},
+        {.id = "mic-in",
+         .name = "USB Mic",
+         .max_input_channels = 2,
+         .sample_rates = {48000.0},
+         .buffer_sizes = {64},
+         .is_default_input = true},
+    };
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, nullptr);
+
+    StandaloneConfig cfg;
+    cfg.audio_device_id = "builtin-out";
+    cfg.sample_rate = 44100.0;
+    cfg.input_channels = 0;
+    cfg.supports_audio_input = false;
+    panel.set_current_config(cfg);
+
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    REQUIRE(audio_tab != nullptr);
+
+    auto combos = descendants<ComboBox>(*audio_tab);
+    REQUIRE(combos.size() >= 4);
+    auto* input_combo = combos[1];
+    auto* sample_rate_combo = combos[2];
+
+    REQUIRE(input_combo->items().size() == 1);
+    REQUIRE(input_combo->items()[0] == "(Not used by this instrument)");
+    REQUIRE(input_combo->selected() == 0);
+
+    StandaloneConfig applied;
+    panel.set_callbacks(SettingsPanelCallbacks{
+        .on_config_apply = [&](const StandaloneConfig& next) {
+            applied = next;
+        },
+    });
+
+    sample_rate_combo->set_selected(1);
+    REQUIRE(applied.sample_rate == 48000.0);
+    REQUIRE(applied.input_channels == 0);
+    REQUIRE_FALSE(applied.supports_audio_input);
 }
 
 TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
@@ -550,18 +675,20 @@ TEST_CASE("SettingsPanel uses fallback rate and buffer choices without output de
     REQUIRE(combos[1]->items().size() == 2);
     REQUIRE(combos[2]->items().size() >= 6);
     REQUIRE(combos[3]->items().size() >= 7);
+    REQUIRE(combos[2]->selected() == 1);
+    REQUIRE(combos[3]->selected() == 2);
 
-    combos[2]->set_selected(1);
+    combos[2]->set_selected(0);
     REQUIRE(apply_calls == 1);
     REQUIRE(applied.audio_device_id.empty());
-    REQUIRE(applied.sample_rate == 48000.0);
-    REQUIRE(applied.buffer_size == 64);
+    REQUIRE(applied.sample_rate == 44100.0);
+    REQUIRE(applied.buffer_size == 256);
 
-    combos[3]->set_selected(2);
+    combos[3]->set_selected(0);
     REQUIRE(apply_calls == 2);
     REQUIRE(applied.audio_device_id.empty());
-    REQUIRE(applied.sample_rate == 48000.0);
-    REQUIRE(applied.buffer_size == 256);
+    REQUIRE(applied.sample_rate == 44100.0);
+    REQUIRE(applied.buffer_size == 64);
 }
 
 TEST_CASE("Standalone editor chrome keeps the editor root when settings are hidden",
