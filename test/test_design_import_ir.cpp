@@ -224,21 +224,19 @@ TEST_CASE("DesignIR round-trips dropdown / text_field / tab_group overlay elemen
     dropdown.kind = InteractiveElementKind::dropdown;
     dropdown.x = 210; dropdown.y = 180; dropdown.w = 120; dropdown.h = 28;
     dropdown.options = {"1/4 Delay", "1/8 Delay", "Reverb"};
-    dropdown.selected_index = 0;
-    dropdown.source_node_id = "9:1";
+    dropdown.selected_index = 0; dropdown.source_node_id = "9:1";
+    dropdown.label = "Delay Mode";  // design caption -> generated-param name (round-trip below)
     ir.root.interactive_elements.push_back(dropdown);
 
     IRInteractiveElement search;
     search.kind = InteractiveElementKind::text_field;
-    search.x = 16; search.y = 50; search.w = 280; search.h = 32;
-    search.placeholder = "Search";
+    search.x = 16; search.y = 50; search.w = 280; search.h = 32; search.placeholder = "Search";
     ir.root.interactive_elements.push_back(search);
 
     IRInteractiveElement tabs;
     tabs.kind = InteractiveElementKind::tab_group;
     tabs.x = 320; tabs.y = 48; tabs.w = 160; tabs.h = 28;
-    tabs.options = {"1", "2", "3", "4"};
-    tabs.selected_index = 2;
+    tabs.options = {"1", "2", "3", "4"}; tabs.selected_index = 2;
     ir.root.interactive_elements.push_back(tabs);
 
     const auto canonical = serialize_design_ir(ir);
@@ -252,11 +250,13 @@ TEST_CASE("DesignIR round-trips dropdown / text_field / tab_group overlay elemen
     REQUIRE(d.options.size() == 3);
     REQUIRE(d.options[2] == "Reverb");
     REQUIRE(d.source_node_id == "9:1");
+    REQUIRE(d.label == "Delay Mode");                      // caption survives round-trip
 
     const auto& s = parsed.root.interactive_elements[1];
     REQUIRE(s.kind == InteractiveElementKind::text_field);
     REQUIRE(s.placeholder == "Search");
     REQUIRE(s.w == 280.0f);
+    REQUIRE(s.label.empty());                              // omitted when unset
 
     const auto& t = parsed.root.interactive_elements[2];
     REQUIRE(t.kind == InteractiveElementKind::tab_group);

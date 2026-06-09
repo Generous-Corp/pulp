@@ -349,6 +349,13 @@ struct IRInteractiveElement {
     /// the default dark field color.
     std::string bg_color;
 
+    /// Human-readable name for the control, taken from the design's own caption
+    /// text (e.g. the "DEPTH" label under a knob). Empty when the importer found
+    /// no confident caption — consumers then fall back to the binding key. This is
+    /// the name a host surfaces for the generated parameter (embed ABI v5
+    /// PulpEmbedParamInfo.name); unit/range remain importer follow-ups.
+    std::string label;
+
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };
 
