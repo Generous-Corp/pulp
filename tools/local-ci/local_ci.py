@@ -2703,14 +2703,13 @@ def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dic
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        candidates = collect_stale_windows_cleanup_candidates_unlocked(queue)
-        if candidates:
-            save_queue_unlocked(queue)
-
-    return _cleanup.reclaim_stale_remote_validator_candidates(
-        candidates,
+    return _queue_lifecycle.reclaim_stale_remote_validators_locked(
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        collect_stale_windows_cleanup_candidates_unlocked_fn=collect_stale_windows_cleanup_candidates_unlocked,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        reclaim_stale_remote_validator_candidates_fn=_cleanup.reclaim_stale_remote_validator_candidates,
         cleanup_validator_fn=cleanup_stale_windows_validator,
         update_job_target_state_fn=update_job_target_state,
         now_fn=now_iso,
