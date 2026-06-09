@@ -9,9 +9,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
+using pulp::audio::AnalyzerBackend;
+using pulp::audio::AnalyzerCapability;
+using pulp::audio::AnalyzerMarkerProvenance;
+using pulp::audio::AnalyzerProvenance;
 using pulp::audio::Buffer;
 using pulp::audio::BufferView;
 using pulp::audio::OnsetDetectionConfig;
@@ -21,6 +28,8 @@ using pulp::audio::OnsetMarker;
 using pulp::audio::SliceMarkerSource;
 using pulp::audio::SlicePointAnalysisConfig;
 using pulp::audio::SlicePointAnalyzer;
+using pulp::audio::TransientClass;
+using pulp::audio::TransientClassification;
 using pulp::audio::validate_slice_map;
 
 namespace {
@@ -32,6 +41,17 @@ BufferView<const float> const_view(const Buffer<float>& buffer,
         ptrs[ch] = buffer.channel(ch).data();
     }
     return {ptrs.data(), buffer.num_channels(), buffer.num_samples()};
+}
+
+AnalyzerProvenance package_provenance(std::string provider_id,
+                                      std::string analysis_id) {
+    AnalyzerProvenance provenance;
+    provenance.provider_id = std::move(provider_id);
+    provenance.package_id = "package.test";
+    provenance.version = "1.0";
+    provenance.analysis_id = std::move(analysis_id);
+    provenance.backend = AnalyzerBackend::Package;
+    return provenance;
 }
 
 bool has_marker_near(const std::vector<OnsetMarker>& markers,
@@ -180,6 +200,146 @@ TEST_CASE("SlicePointAnalyzer builds ordered regions from debounced onsets",
     REQUIRE(result.map.regions[0].start_frame == 0);
     REQUIRE(result.map.regions[0].end_frame == 1050);
     REQUIRE(result.map.regions[4].end_frame == source.num_samples());
+}
+
+TEST_CASE("SlicePointAnalyzer remaps analyzer provenance through debounced markers",
+          "[audio][onset][slice][provider]") {
+    Buffer<float> source(1, 4096);
+    std::vector<const float*> ptrs;
+    const auto view = const_view(source, ptrs);
+
+    std::vector<OnsetMarker> onsets = {
+        {1000, 0.5, OnsetDetectionMethod::EnergyFlux},
+        {1100, 0.9, OnsetDetectionMethod::EnergyFlux},
+        {2400, 0.7, OnsetDetectionMethod::SpectralFlux},
+    };
+    std::vector<AnalyzerMarkerProvenance> onset_provenance = {
+        {0, AnalyzerCapability::OnsetDetection,
+         package_provenance("package.test.onset", "candidate-a")},
+        {1, AnalyzerCapability::OnsetDetection,
+         package_provenance("package.test.onset", "candidate-b")},
+        {2, AnalyzerCapability::OnsetDetection,
+         package_provenance("package.test.onset", "candidate-c")},
+    };
+
+    SlicePointAnalysisConfig config;
+    config.source_generation = 19;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 256;
+    config.snap_to_zero_crossing = false;
+    config.onset_provenance = std::span<const AnalyzerMarkerProvenance>(
+        onset_provenance.data(), onset_provenance.size());
+
+    SlicePointAnalyzer analyzer;
+    const auto result = analyzer.analyze(view, onsets, config);
+    REQUIRE(result.ok);
+    REQUIRE(validate_slice_map(result.map));
+    REQUIRE(result.map.markers.size() == 3);
+    REQUIRE(result.map.markers[1].frame == 1100);
+    REQUIRE(result.map.markers[2].frame == 2400);
+    REQUIRE(result.marker_provenance.size() == 2);
+    REQUIRE(result.marker_provenance[0].marker_index == 1);
+    REQUIRE(result.marker_provenance[0].provenance.analysis_id == "candidate-b");
+    REQUIRE(result.marker_provenance[1].marker_index == 2);
+    REQUIRE(result.marker_provenance[1].provenance.analysis_id == "candidate-c");
+}
+
+TEST_CASE("SlicePointAnalyzer attaches transient classifications to nearest markers",
+          "[audio][onset][slice][provider]") {
+    Buffer<float> source(1, 4096);
+    std::vector<const float*> ptrs;
+    const auto view = const_view(source, ptrs);
+
+    std::vector<OnsetMarker> onsets = {
+        {1000, 0.8, OnsetDetectionMethod::EnergyFlux},
+        {2500, 0.7, OnsetDetectionMethod::EnergyFlux},
+    };
+    std::vector<TransientClassification> classifications = {
+        {1008, 0.70, TransientClass::Kick,
+         package_provenance("package.test.transient", "kick-low")},
+        {1012, 0.95, TransientClass::Snare,
+         package_provenance("package.test.transient", "snare-high")},
+        {2600, 0.80, TransientClass::Hat,
+         package_provenance("package.test.transient", "hat")},
+        {3600, 0.99, TransientClass::Vocal,
+         package_provenance("package.test.transient", "too-far")},
+    };
+
+    SlicePointAnalysisConfig config;
+    config.source_generation = 20;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 256;
+    config.snap_to_zero_crossing = false;
+    config.transient_classifications = std::span<const TransientClassification>(
+        classifications.data(), classifications.size());
+    config.transient_match_radius_frames = 128;
+
+    SlicePointAnalyzer analyzer;
+    const auto result = analyzer.analyze(view, onsets, config);
+    REQUIRE(result.ok);
+    REQUIRE(validate_slice_map(result.map));
+    REQUIRE(result.marker_classifications.size() == 2);
+    REQUIRE(result.marker_classifications[0].marker_index == 1);
+    REQUIRE(result.marker_classifications[0].transient_class == TransientClass::Snare);
+    REQUIRE(result.marker_classifications[0].confidence == 0.95);
+    REQUIRE(result.marker_classifications[0].provenance.analysis_id == "snare-high");
+    REQUIRE(result.marker_classifications[1].marker_index == 2);
+    REQUIRE(result.marker_classifications[1].transient_class == TransientClass::Hat);
+}
+
+TEST_CASE("SlicePointAnalyzer ignores invalid marker confidences before sorting",
+          "[audio][onset][slice][provider]") {
+    Buffer<float> source(1, 2048);
+    std::vector<const float*> ptrs;
+    const auto view = const_view(source, ptrs);
+
+    std::vector<OnsetMarker> onsets = {
+        {512, std::numeric_limits<double>::quiet_NaN(), OnsetDetectionMethod::EnergyFlux},
+        {1000, 0.8, OnsetDetectionMethod::EnergyFlux},
+    };
+    std::vector<pulp::audio::SliceMarker> additional = {
+        {1500, -0.1, SliceMarkerSource::Imported},
+    };
+
+    SlicePointAnalysisConfig config;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 128;
+    config.snap_to_zero_crossing = false;
+    config.additional_markers =
+        std::span<const pulp::audio::SliceMarker>(additional.data(), additional.size());
+
+    SlicePointAnalyzer analyzer;
+    const auto result = analyzer.analyze(view, onsets, config);
+    REQUIRE(result.ok);
+    REQUIRE(validate_slice_map(result.map));
+    REQUIRE(result.map.markers.size() == 2);
+    REQUIRE(result.map.markers[1].frame == 1000);
+}
+
+TEST_CASE("SlicePointAnalyzer rejects malformed onset provenance sidecars",
+          "[audio][onset][slice][provider]") {
+    Buffer<float> source(1, 2048);
+    std::vector<const float*> ptrs;
+    const auto view = const_view(source, ptrs);
+
+    std::vector<OnsetMarker> onsets = {
+        {1000, 0.8, OnsetDetectionMethod::EnergyFlux},
+    };
+    std::vector<AnalyzerMarkerProvenance> bad_provenance = {
+        {1, AnalyzerCapability::OnsetDetection,
+         package_provenance("package.test.onset", "out-of-range")},
+    };
+
+    SlicePointAnalysisConfig config;
+    config.source_sample_rate = 48000.0;
+    config.onset_provenance = std::span<const AnalyzerMarkerProvenance>(
+        bad_provenance.data(), bad_provenance.size());
+
+    SlicePointAnalyzer analyzer;
+    const auto result = analyzer.analyze(view, onsets, config);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.map.markers.empty());
+    REQUIRE(result.marker_provenance.empty());
 }
 
 TEST_CASE("SlicePointAnalyzer sorts and prioritizes snapped markers",
