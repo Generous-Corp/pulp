@@ -294,6 +294,33 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
     return (-priority_value(job.get("priority", "normal")), job.get("queued_at", ""), job["id"])
 
 
+def claim_next_job_unlocked(
+    queue: list[dict],
+    *,
+    runner: dict,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> dict | None:
+    pending = sorted(
+        [job for job in queue if job.get("status") == "pending"],
+        key=job_sort_key,
+    )
+    if not pending:
+        return None
+
+    selected_id = pending[0]["id"]
+    for job in queue:
+        if job["id"] != selected_id:
+            continue
+        job["status"] = "running"
+        job["started_at"] = now_iso_fn()
+        job["runner"] = runner
+        job.pop("active_targets", None)
+        job.pop("last_progress_at", None)
+        return job
+
+    return None
+
+
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
     candidates = queue
     if statuses is not None:
