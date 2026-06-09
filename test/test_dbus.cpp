@@ -146,6 +146,43 @@ TEST_CASE("DBus object-server honest-fails without a bus",
     REQUIRE_FALSE(bus.emit_signal("/pulp/test", "pulp.Test", "Ping",
                                   [](DBus::Writer&) {}));
     REQUIRE_FALSE(bus.dispatch(0));
+    // a11y-bus switch (L7a-2): honest-fails without any bus at all.
+    REQUIRE_FALSE(bus.a11y_connected());
+    REQUIRE_FALSE(bus.connect_a11y_bus());
+}
+
+// L7a-2: switching a connected session DBus over to the accessibility bus.
+// CI-verifiable shape: on a headless session bus (dbus-run-session) there is no
+// org.a11y.Bus daemon, so connect_a11y_bus() must honest-fail (return false)
+// WITHOUT tearing down the usable session connection. A real desktop with
+// at-spi2-core running is the VM lane that exercises the success path.
+TEST_CASE("DBus connect_a11y_bus honest-fails without an a11y daemon",
+          "[platform][dbus][objectserver][a11y][issue-L7a2]") {
+    if (!DBus::library_available()) {
+        SUCCEED("skipped: libdbus not available");
+        return;
+    }
+    DBus bus;
+    if (!bus.connect_session()) {
+        SUCCEED("skipped: no session bus (run under dbus-run-session)");
+        return;
+    }
+    REQUIRE(bus.connected());
+    REQUIRE_FALSE(bus.a11y_connected());
+
+    // Under dbus-run-session there is no org.a11y.Bus; GetAddress fails and the
+    // switch is declined. (On a desktop with at-spi2-core this would return
+    // true and a11y_connected() would flip — the VM lane covers that.)
+    if (bus.connect_a11y_bus()) {
+        // An a11y daemon happened to be reachable (developer desktop): the
+        // contract still holds — the active connection is now the a11y bus.
+        REQUIRE(bus.a11y_connected());
+        REQUIRE(bus.connected());
+        SUCCEED("a11y bus reachable: switched over");
+        return;
+    }
+    // Honest-fail path: declined, but the session connection is untouched.
+    REQUIRE_FALSE(bus.a11y_connected());
 }
 
 #if defined(__linux__)

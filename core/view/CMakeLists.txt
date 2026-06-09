@@ -465,37 +465,18 @@ target_sources(pulp-view-script PRIVATE
 # AU/VST3/CLAP plugins.
 # The ObjC runtime loads WebKit on dylib load if any WKWebView references exist,
 # which crashes Logic Pro's sandboxed AUHostingServiceXPC process.
-# ── Linux ATK accessibility (#18 phase 1) ───────────────────────────────────
+# ── Linux AT-SPI accessibility (workstream 04, L7) ──────────────────────────
 #
-# Pulp publishes accessibility info to Linux screen readers (Orca) via
-# ATK + the at-spi2-atk bridge. This slice only wires the ATK headers
-# into the build so accessibility_linux.cpp can use the real AtkRole
-# enum instead of hard-coded integer constants. The full AtkObject
-# vtable + at-spi2 bridge runtime is a follow-up PR that needs
-# screen-reader validation on a real Linux desktop.
-#
-# Without libatk-dev, accessibility_linux.cpp keeps the pre-existing
-# fallback constants so contributors on minimal images still build.
-#
-# Install on Debian/Ubuntu: sudo apt install -y libatk1.0-dev
-if(UNIX AND NOT APPLE AND NOT ANDROID)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(PULP_ATK QUIET IMPORTED_TARGET atk)
-        if(PULP_ATK_FOUND)
-            target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_ATK=1)
-            target_link_libraries(pulp-view-core PRIVATE PkgConfig::PULP_ATK)
-            message(STATUS
-                "Pulp: Linux ATK ${PULP_ATK_VERSION} found — "
-                "accessibility_linux.cpp will use real AtkRole enum")
-        else()
-            message(STATUS
-                "Pulp: Linux ATK dev headers not found "
-                "(install: sudo apt install libatk1.0-dev) — "
-                "accessibility_linux.cpp will use stub constants")
-        endif()
-    endif()
-endif()
+# Pulp publishes accessibility info to Linux screen readers (Orca) by
+# implementing the AT-SPI2 *wire protocol* directly over D-Bus
+# (pulp::platform::DBus, libdbus-1 dlopen'd, honest-fail). There is NO
+# build-time or link-time dependency on libatk / libatspi / atk-bridge-2.0 —
+# the protocol numbers live in core/view/include/pulp/view/platform/atspi_mapping.hpp
+# and accessibility_linux.cpp exports the objects. Roles/states are unit-tested
+# offline; the live AT stack is exercised in the Linux VM lane. This also keeps
+# the build MIT-clean (the ATK runtime is LGPL-adjacent). PkgConfig is still
+# discovered below for X11 / WebView.
+find_package(PkgConfig QUIET)
 
 option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
 if(PULP_BUILD_WEBVIEW)
@@ -751,18 +732,9 @@ elseif(UNIX)
             message(STATUS "Pulp: X11 not found — Linux PluginViewHost limited to headless render")
         endif()
     endif()
-    # Linux AT-SPI bridge (workstream 04 #248). Optional: linking atk-
-    # bridge-2.0 when pkg-config finds it enables screen-reader
-    # (Orca) registration via atk_bridge_adaptor_init. Skipped on
-    # minimal/headless distros so the library still loads.
-    if(PkgConfig_FOUND OR PKG_CONFIG_FOUND)
-        pkg_check_modules(ATK_BRIDGE IMPORTED_TARGET atk-bridge-2.0)
-        if(ATK_BRIDGE_FOUND)
-            target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_ATSPI=1)
-            target_link_libraries(pulp-view-core PRIVATE PkgConfig::ATK_BRIDGE)
-            message(STATUS "Pulp: AT-SPI bridge enabled (atk-bridge-2.0)")
-        endif()
-    endif()
+    # Linux AT-SPI (workstream 04, L7) needs no link deps: accessibility_linux.cpp
+    # speaks the AT-SPI2 wire protocol directly over pulp::platform::DBus
+    # (libdbus-1 dlopen'd). No atk-bridge-2.0 / libatspi at build time.
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).
