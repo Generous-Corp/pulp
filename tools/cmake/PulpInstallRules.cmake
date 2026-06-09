@@ -159,7 +159,7 @@ if(TARGET SDL3_Headers)
 endif()
 
 # Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal format canvas render view native-components)
+foreach(subsystem platform runtime events state audio midi signal graph format canvas render view native-components)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"
