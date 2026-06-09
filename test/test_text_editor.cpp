@@ -29,6 +29,20 @@ uint16_t main_modifier() {
 #endif
 }
 
+// A canvas whose shaped text_x_for_byte() deliberately diverges from the sum of
+// isolated per-glyph measure_text() widths — the exact gap that kerning/spacing
+// produces with a real shaper. A caret built from shaped offsets lands near 500+;
+// one built by summing glyph widths (the pre-fix path) lands near 16. Used to
+// assert TextEditor::paint feeds caret_rect() from text_x_for_byte, not glyph sums.
+struct ShapedOffsetCanvas : RecordingCanvas {
+    float measure_text(const std::string& text) override {
+        return 8.0f * static_cast<float>(text.size());
+    }
+    float text_x_for_byte(const std::string& text, std::size_t byte_index) override {
+        return 500.0f + static_cast<float>(std::min(byte_index, text.size()));
+    }
+};
+
 } // namespace
 
 TEST_CASE("TextEditor set and get text", "[view][text_editor]") {
@@ -469,6 +483,25 @@ TEST_CASE("TextEditor caret_rect has a fallback before first paint",
     REQUIRE(rect.y == 2.0f);
     REQUIRE(rect.width == 1.5f);
     REQUIRE(rect.height >= 13.0f);
+}
+
+TEST_CASE("TextEditor caret X comes from shaped offsets, not summed glyph widths",
+          "[view][text_editor][paint]") {
+    // Regression guard for the caret/selection-X fix: paint() must populate the layout's
+    // x_offsets from canvas.text_x_for_byte() (which a real shaper kerns), not from summing
+    // isolated measure_text() advances. ShapedOffsetCanvas makes the two paths diverge by
+    // ~500 px so the caret position reveals which one fed it.
+    TextEditor editor;
+    editor.on_focus_changed(true);              // so set_text leaves the caret at the end
+    editor.set_bounds({0, 0, 800, 24});
+    editor.set_text("AV");                      // caret now at byte 2
+
+    ShapedOffsetCanvas canvas;
+    editor.paint(canvas);
+
+    const auto rect = editor.caret_rect();
+    // Shaped offset for byte 2 is 502; the pre-fix glyph-sum path would put it near 16.
+    REQUIRE(rect.x > 400.0f);
 }
 
 TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
