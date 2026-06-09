@@ -97,6 +97,53 @@ TEST_CASE("Package analyzer descriptors map registry provides to core capabiliti
                                                AnalyzerCapability::LoopPointAnalysis));
 }
 
+TEST_CASE("Package analyzer descriptors expose restricted MIR candidates as gated metadata",
+          "[cli][packages][analysis]") {
+    const auto loaded = load_registry(registry_path());
+    REQUIRE(loaded.error.empty());
+
+    const auto& essentia = package(loaded.registry, "essentia");
+    const auto lock = lock_with({"essentia"});
+    const auto mac_targets = std::vector<PlatformTarget>{{"macOS", "arm64"}};
+
+    const auto gated = package_analyzer_descriptors(
+        essentia,
+        lock,
+        std::span<const PlatformTarget>(mac_targets.data(), mac_targets.size()));
+    REQUIRE(gated.size() == 1);
+    const auto& gated_descriptor = gated[0];
+    REQUIRE(gated_descriptor.id == "package.essentia.mir");
+    REQUIRE(gated_descriptor.package_id == "essentia");
+    REQUIRE(gated_descriptor.license_policy == AnalyzerLicensePolicy::Copyleft);
+    REQUIRE(gated_descriptor.availability == AnalyzerAvailability::Disabled);
+    REQUIRE(gated_descriptor.execution_context == AnalyzerExecutionContext::BackgroundThread);
+    REQUIRE(analyzer_descriptor_has_capability(gated_descriptor,
+                                               AnalyzerCapability::OnsetDetection));
+    REQUIRE(analyzer_descriptor_has_capability(gated_descriptor,
+                                               AnalyzerCapability::BeatDetection));
+    REQUIRE(analyzer_descriptor_has_capability(gated_descriptor,
+                                               AnalyzerCapability::PitchDetection));
+    REQUIRE(analyzer_descriptor_has_capability(gated_descriptor,
+                                               AnalyzerCapability::KeyDetection));
+
+    const auto allowed = package_analyzer_descriptors(
+        essentia,
+        lock,
+        std::span<const PlatformTarget>(mac_targets.data(), mac_targets.size()),
+        true);
+    REQUIRE(allowed.size() == 1);
+    REQUIRE(allowed[0].availability == AnalyzerAvailability::Available);
+
+    const auto windows_targets = std::vector<PlatformTarget>{{"Windows", "x64"}};
+    const auto unsupported = package_analyzer_descriptors(
+        essentia,
+        lock,
+        std::span<const PlatformTarget>(windows_targets.data(), windows_targets.size()),
+        true);
+    REQUIRE(unsupported.size() == 1);
+    REQUIRE(unsupported[0].availability == AnalyzerAvailability::UnsupportedPlatform);
+}
+
 TEST_CASE("Package analyzer descriptors expose allowed time-pitch packages",
           "[cli][packages][analysis]") {
     const auto loaded = load_registry(registry_path());

@@ -531,7 +531,9 @@
       ],
       "provides": [
         "pitch-detection",
+        "onset-detection",
         "beat-detection",
+        "key-detection",
         "audio-analysis",
         "mfcc",
         "spectral-analysis"
