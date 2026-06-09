@@ -1,14 +1,17 @@
 // widget_bridge/style_visibility_api.cpp - visibility and interaction style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <string>
 
 namespace pulp::view {
 
 void WidgetBridge::register_widget_style_visibility_api() {
+    BridgeApiContext api{engine_};
+
     // setVisible(id, bool)
-    engine_.register_function("setVisible", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setVisible", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<double>(1, 1) > 0.5;
         auto it = widgets_.find(id);
@@ -18,6 +21,8 @@ void WidgetBridge::register_widget_style_visibility_api() {
 }
 
 void WidgetBridge::register_widget_style_interaction_api() {
+    BridgeApiContext api{engine_};
+
     // setPointerEvents(id, "none"|"auto") - CSS pointer-events: skip in hit_test
     // pulp #1026 - RN-shaped 4-valued pointerEvents:
     //   "auto"     - default, this view + children intercept events.
@@ -28,7 +33,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // set_hit_testable(); we keep that mapping for the binary cases for
     // back-compat with existing scripts and additionally route the new
     // four-valued enum via View::set_pointer_events().
-    engine_.register_function("setPointerEvents", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setPointerEvents", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "auto");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -54,7 +59,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // by the paint path only when a 3D transform with negative Z is
     // active; pulp's transform model is currently 2D-affine, so this is
     // a no-op for painting today and reserved for future 3D support.
-    engine_.register_function("setBackfaceVisibility", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBackfaceVisibility", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "visible");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -63,7 +68,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
     });
 
     // setVisibility(id, "visible"|"hidden") - hidden preserves layout space
-    engine_.register_function("setVisibility", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setVisibility", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<std::string>(1, "visible");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -85,7 +90,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // Label::set_multi_line side-effect stays in lock-step so existing
     // single-line Label paint paths (incl. #1407 ellipsis truncation)
     // keep working when only one of the flags is set.
-    engine_.register_function("setWhiteSpace", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWhiteSpace", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ws = args.get<std::string>(1, "normal");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -131,7 +136,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // Now stores the keyword on View::user_select_ so widgets that
     // participate in selection can read it. Unknown keywords map to
     // the spec default (auto).
-    engine_.register_function("setUserSelect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setUserSelect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "auto");
         auto* v = id.empty() ? &root_ : widget(id);
