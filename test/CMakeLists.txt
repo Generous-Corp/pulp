@@ -2038,6 +2038,9 @@ pulp_add_test_suite(pulp-test-onset-slice-analysis LIBRARIES pulp::audio)
 # Analysis provider descriptors, package availability policy, and provenance sidecars.
 pulp_add_test_suite(pulp-test-analyzer-provider LIBRARIES pulp::audio)
 
+# Built-in package-free key/tempo analyzer baseline.
+pulp_add_test_suite(pulp-test-built-in-key-tempo-analyzer LIBRARIES pulp::audio)
+
 # Optional time/pitch processor contract and Signalsmith Stretch package adapter.
 pulp_add_test_suite(pulp-test-time-pitch-processor LIBRARIES pulp::audio)
 

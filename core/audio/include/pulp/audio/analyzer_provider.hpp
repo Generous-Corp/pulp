@@ -104,6 +104,9 @@ struct AnalyzerDescriptor {
     AnalyzerExecutionContext execution_context = AnalyzerExecutionContext::BackgroundThread;
     bool supports_streaming_input = false;
     bool supports_offline_buffers = true;
+    // True for permissive baseline/fallback analyzers that should not be
+    // treated as quality-equivalent to dedicated package-backed providers.
+    bool is_fallback = false;
 };
 
 struct AnalyzerSelectionPolicy {

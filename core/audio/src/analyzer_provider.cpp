@@ -33,7 +33,8 @@ bool contains_ascii_case_insensitive(std::string_view text,
 AnalyzerDescriptor built_in_descriptor(std::string id,
                                        std::string display_name,
                                        std::vector<AnalyzerCapability> capabilities,
-                                       AnalyzerExecutionContext execution_context) {
+                                       AnalyzerExecutionContext execution_context,
+                                       bool is_fallback = false) {
     AnalyzerDescriptor descriptor;
     descriptor.id = std::move(id);
     descriptor.display_name = std::move(display_name);
@@ -46,6 +47,7 @@ AnalyzerDescriptor built_in_descriptor(std::string id,
     descriptor.execution_context = execution_context;
     descriptor.supports_streaming_input = false;
     descriptor.supports_offline_buffers = true;
+    descriptor.is_fallback = is_fallback;
     return descriptor;
 }
 
@@ -356,6 +358,12 @@ std::vector<AnalyzerDescriptor> built_in_analyzer_descriptors() {
                             "Built-in Loop Point Analyzer",
                             {AnalyzerCapability::LoopPointAnalysis},
                             AnalyzerExecutionContext::BackgroundThread),
+        built_in_descriptor("builtin.key-tempo-analyzer",
+                            "Built-in Basic Key/Tempo Analyzer",
+                            {AnalyzerCapability::KeyDetection,
+                             AnalyzerCapability::TempoDetection},
+                            AnalyzerExecutionContext::BackgroundThread,
+                            true),
     };
 }
 

@@ -25,6 +25,7 @@ target_sources(pulp-audio PRIVATE
     src/voice_sum_mixer.cpp
     src/mmap_reader.cpp
     src/buffer_ops.cpp
+    src/built_in_key_tempo_analyzer.cpp
     src/audio_stream_handoff.cpp
     src/instrument_envelope.cpp
     src/instrument_runtime.cpp
