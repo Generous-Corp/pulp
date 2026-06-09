@@ -532,7 +532,7 @@ platform_maturity:
       notes: UIA stub — role mapping defined, IRawElementProviderSimple/WM_GETOBJECT/event firing pending. See production-readiness workstream 04.
     linux:
       status: partial
-      notes: AT-SPI stub — role mapping defined, D-Bus registration pending. See production-readiness workstream 04.
+      notes: AT-SPI2 over direct D-Bus (no libatk) — a11y-bus connect, root Accessible/Application export, and Socket.Embed registration done; per-widget tree + value/events pending. See core/view/platform/linux/accessibility_linux.cpp and production-readiness workstream 04.
   ime_composition:
     status: usable
     platform: macos

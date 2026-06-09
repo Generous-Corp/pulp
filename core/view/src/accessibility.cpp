@@ -8,6 +8,7 @@
 // the vtables here is the standard fix.
 
 #include <pulp/view/accessibility.hpp>
+#include <pulp/view/accessibility_provider.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <sstream>
@@ -66,5 +67,15 @@ void announce_accessibility(std::string_view text,
     pulp::runtime::log_info("a11y announce ({}): {}", pol,
                             std::string(text));
 }
+
+// Default accessibility_pump(): a no-op for every platform whose provider runs
+// callback-driven on the OS side (macOS / iOS / Windows / Android). The Linux
+// AT-SPI provider needs to service inbound D-Bus calls, so it supplies its own
+// definition in platform/linux/accessibility_linux.cpp — excluded here on the
+// Linux *desktop* build to avoid a duplicate symbol. Android is __linux__ but
+// uses the TalkBack provider (no D-Bus pump), so it keeps this no-op.
+#if !defined(__linux__) || defined(__ANDROID__)
+void accessibility_pump(void* /*handle*/) {}
+#endif
 
 } // namespace pulp::view

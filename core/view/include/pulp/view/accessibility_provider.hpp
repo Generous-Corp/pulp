@@ -43,6 +43,16 @@ void shutdown_accessibility(void* handle);
 /// value updates don't need this — those fire per-property events.
 void accessibility_tree_changed(void* handle);
 
+/// Service any pending accessibility IPC for this handle. On Linux AT-SPI the
+/// registry / screen reader calls methods on the exported objects over D-Bus;
+/// those calls hang the assistive tech unless the host pumps periodically. A
+/// host with an event loop should call this each frame or on a short timer.
+///
+/// No-op on platforms whose accessibility runs callback-driven on the OS side
+/// (macOS / iOS NSAccessibility, Windows UIA, Android TalkBack) and on a null /
+/// sentinel handle. Cheap when no assistive tech is connected.
+void accessibility_pump(void* handle);
+
 // ── Phase 2 event-raising surface (#247) ────────────────────────────────
 //
 // Widgets call these when their accessibility-relevant state changes so

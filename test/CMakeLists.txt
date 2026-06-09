@@ -1434,9 +1434,9 @@ pulp_add_test_suite(pulp-test-accessibility-provider LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-descriptor-validation LIBRARIES pulp::format)
 # PluginInfo metadata shape (workstream 03 slice 3.7)
 pulp_add_test_suite(pulp-test-plugin-info-metadata LIBRARIES pulp::host)
-# UIA mapping (workstream 04 slice 4.1a)
+# A11y role mapping tables — UIA (slice 4.1a) + AT-SPI (slice L7a-2)
 pulp_add_test_suite(pulp-test-uia-mapping LIBRARIES pulp::view)
-
+pulp_add_test_suite(pulp-test-atspi-mapping LIBRARIES pulp::view)
 # AudioSystem hotplug base plumbing (workstream 02 slice 2.7)
 pulp_add_test_suite(pulp-test-audio-system-hotplug LIBRARIES pulp::audio)
 

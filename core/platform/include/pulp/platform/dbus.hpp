@@ -28,6 +28,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -48,6 +49,30 @@ public:
     /// connected).
     bool connect_session();
     bool connected() const;
+
+    /// Switch this DBus over to the desktop accessibility ("a11y") bus.
+    ///
+    /// The a11y bus is a SECOND D-Bus daemon, separate from the session bus:
+    /// its address is discovered by calling org.a11y.Bus.GetAddress on the
+    /// session bus, then a fresh private connection is opened to that address.
+    /// AT-SPI (Orca and friends) lives entirely on this bus — the registry, the
+    /// app's exported accessible objects, and the event traffic all flow over
+    /// it, never the session bus.
+    ///
+    /// After this returns true, the connection backing register_object /
+    /// unregister_object / emit_signal / dispatch / unique_name is the a11y
+    /// connection (the session connection used to discover the address is
+    /// closed). connect_session() must have succeeded first.
+    ///
+    /// Returns false off Linux, without libdbus, when there is no session bus,
+    /// when org.a11y.Bus is absent (a headless host with no a11y daemon), or
+    /// when the returned address cannot be opened — i.e. honest-fail, so a
+    /// non-accessibility desktop simply yields a no-op provider.
+    bool connect_a11y_bus();
+
+    /// True iff this DBus is currently backed by the a11y bus connection (i.e.
+    /// connect_a11y_bus() succeeded). False on the plain session connection.
+    bool a11y_connected() const;
 
     /// This connection's unique bus name (e.g. ":1.42"), assigned by the broker
     /// at connect time. Empty when not connected / off Linux. Needed so a peer
@@ -85,6 +110,10 @@ public:
     /// list. The cursor advances on each successful read.
     class Reader {
     public:
+        /// Default-constructed inert Reader — every read returns false. Useful
+        /// as the out-parameter passed to recurse().
+        Reader() = default;
+
         /// Read a string ('s') or object-path ('o') at the cursor into `out` and
         /// advance. Returns false (leaving the cursor put) on type mismatch / end.
         bool read_string(std::string& out);
@@ -96,11 +125,22 @@ public:
         /// Advance to the next argument. Returns false when there is no next.
         bool next();
 
+        /// Descend into the container (struct / array / variant / dict-entry)
+        /// at the cursor, returning a sub-Reader over its elements. The cursor
+        /// is NOT advanced — call next() afterwards to step past the container.
+        /// `out_sub` receives the sub-Reader; returns false if the cursor is not
+        /// on a container (or at end). The sub-Reader is valid only while this
+        /// Reader and the underlying message live.
+        bool recurse(Reader& out_sub);
+
     private:
         friend class DBus;
         Reader(DBus* owner, void* iter) : owner_(owner), iter_(iter) {}
+        // A recurse() sub-iterator owns its DBusMessageIter buffer; the parent
+        // hands ownership to the sub-Reader so it outlives the call returning it.
         DBus* owner_ = nullptr;
-        void* iter_ = nullptr;   // DBusMessageIter*
+        void* iter_ = nullptr;   // DBusMessageIter* (non-owning view)
+        std::shared_ptr<void> owned_iter_;  // set only for recurse() sub-readers
     };
 
     /// Appends values to an outgoing message (reply or signal). Container open/
@@ -203,6 +243,20 @@ public:
     /// This is the object-server consumption model; do NOT interleave it with
     /// the portal file_chooser pop_message pump on the same pending traffic.
     bool dispatch(int timeout_ms = 0);
+
+    /// Generic blocking method call (object-server companion to register_object).
+    /// Sends `member` on `destination`/`path`/`interface`, marshalling the body
+    /// via `build_args`, and blocks up to `timeout_ms` for the reply; the reply
+    /// arguments are handed to `read_reply` (may be null to ignore the body).
+    /// Returns false off Linux / without a connection / on transport or D-Bus
+    /// error (e.g. the peer returned an error reply). This is the call needed to
+    /// drive a handshake such as AT-SPI's Socket.Embed where the app both
+    /// exports objects AND calls out to a registry.
+    bool call_method(const std::string& destination, const std::string& path,
+                     const std::string& interface, const std::string& member,
+                     const std::function<void(Writer&)>& build_args,
+                     const std::function<void(Reader&)>& read_reply,
+                     int timeout_ms = 5000);
 
     DBus(const DBus&) = delete;
     DBus& operator=(const DBus&) = delete;

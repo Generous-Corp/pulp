@@ -66,7 +66,9 @@ constexpr int kHandlerNotYetHandled = 1;   // DBUS_HANDLER_RESULT_NOT_YET_HANDLE
 // stack struct; we over-allocate a buffer to hold it across ABI versions.
 struct DBus::Impl {
     void* handle = nullptr;       // dlopen handle
-    void* conn = nullptr;         // DBusConnection*
+    void* conn = nullptr;         // DBusConnection* (session or, after
+                                  // connect_a11y_bus(), the a11y bus)
+    bool on_a11y = false;         // true once switched to the a11y bus
 
     // Path → handler routing table for exported objects. The trampoline recovers
     // `this` from the vtable user_data and looks the path up here.
@@ -166,6 +168,14 @@ struct DBus::Impl {
     fn_msg_get_sender msg_get_sender = nullptr;
     fn_get_unique     get_unique_name = nullptr;
 
+    // ── a11y-bus additions ──
+    // dbus_connection_open_private(const char* address, DBusError*) → DBusConnection*
+    using fn_open_private = void* (*)(const char*, void*);
+    // dbus_bus_register(DBusConnection*, DBusError*) → dbus_bool_t
+    using fn_bus_register = unsigned (*)(void*, void*);
+    fn_open_private open_private = nullptr;
+    fn_bus_register bus_register = nullptr;
+
     template <typename Fn>
     Fn sym(const char* name) { return reinterpret_cast<Fn>(dlsym(handle, name)); }
 
@@ -209,6 +219,10 @@ struct DBus::Impl {
         msg_get_sender = sym<fn_msg_get_sender>("dbus_message_get_sender");
         get_unique_name = sym<fn_get_unique>("dbus_connection_get_unique_name");
 
+        // a11y-bus symbols (needed to open the separate accessibility daemon).
+        open_private = sym<fn_open_private>("dbus_connection_open_private");
+        bus_register = sym<fn_bus_register>("dbus_bus_register");
+
         return error_init && error_free && error_is_set && bus_get_private &&
                conn_close && conn_unref && set_exit_on_disconnect && add_match &&
                read_write && pop_message && send_with_reply_and_block &&
@@ -220,7 +234,7 @@ struct DBus::Impl {
                msg_new_method_return && msg_new_signal && msg_new_error &&
                conn_send && conn_flush && read_write_dispatch &&
                msg_get_interface && msg_get_member && msg_get_sender &&
-               get_unique_name;
+               get_unique_name && open_private && bus_register;
     }
 
     // Append one a{sv} entry: key (string) → variant of `vtype` holding `val`.
@@ -336,6 +350,21 @@ int DBus::Reader::arg_type() const {
 bool DBus::Reader::next() {
     if (!owner_ || !owner_->impl_ || !iter_) return false;
     return owner_->impl_->iter_next(iter_) != 0;
+}
+bool DBus::Reader::recurse(Reader& out_sub) {
+    if (!owner_ || !owner_->impl_ || !iter_) return false;
+    auto& d = *owner_->impl_;
+    const int t = d.iter_get_arg_type(iter_);
+    if (t != kTypeStruct && t != kTypeArray && t != kTypeVariant &&
+        t != kTypeDictEnt) {
+        return false;
+    }
+    auto buf = std::make_shared<Impl::IterBuf>();
+    d.iter_recurse(iter_, buf.get());
+    out_sub.owner_ = owner_;
+    out_sub.iter_ = buf.get();
+    out_sub.owned_iter_ = buf;   // keep the sub-iterator alive with the Reader
+    return true;
 }
 
 // ── Writer facade ───────────────────────────────────────────────────────────
@@ -476,6 +505,68 @@ bool DBus::connect_session() {
     return true;
 }
 
+bool DBus::a11y_connected() const { return impl_ && impl_->conn && impl_->on_a11y; }
+
+bool DBus::connect_a11y_bus() {
+    if (a11y_connected()) return true;        // already switched over
+    if (!connect_session()) return false;     // need the session bus to ask
+    Impl& d = *impl_;
+
+    // 1. Ask the session bus for the accessibility bus address:
+    //    org.a11y.Bus . GetAddress() -> s   (on /org/a11y/bus).
+    void* msg = d.msg_new_method_call(
+        "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress");
+    if (!msg) return false;
+
+    Impl::ErrBuf err;
+    d.error_init(&err);
+    void* reply = d.send_with_reply_and_block(d.conn, msg, 5000, &err);
+    d.msg_unref(msg);
+    std::string address;
+    if (reply && !d.error_is_set(&err)) {
+        Impl::IterBuf it;
+        if (d.iter_init(reply, &it) && d.iter_get_arg_type(&it) == kTypeString) {
+            const char* a = nullptr;
+            d.iter_get_basic(&it, &a);
+            if (a) address = a;
+        }
+    }
+    if (reply) d.msg_unref(reply);
+    d.error_free(&err);
+    if (address.empty()) return false;   // no a11y daemon (headless) → honest-fail
+
+    // 2. Open a NEW private connection to that address and register with it.
+    d.error_init(&err);
+    void* a11y = d.open_private(address.c_str(), &err);
+    if (!a11y || d.error_is_set(&err)) {
+        if (a11y) { d.conn_close(a11y); d.conn_unref(a11y); }
+        d.error_free(&err);
+        return false;
+    }
+    d.error_free(&err);
+
+    d.error_init(&err);
+    const unsigned registered = d.bus_register(a11y, &err);
+    if (!registered || d.error_is_set(&err)) {
+        d.error_free(&err);
+        d.conn_close(a11y);
+        d.conn_unref(a11y);
+        return false;
+    }
+    d.error_free(&err);
+    d.set_exit_on_disconnect(a11y, 0u);
+
+    // 3. Swap the active connection over to the a11y bus. Any objects registered
+    //    on the session connection are dropped (none are at switch time — the
+    //    AT-SPI provider exports onto the a11y bus only). The session connection
+    //    served only to discover the address; close it.
+    d.conn_close(d.conn);
+    d.conn_unref(d.conn);
+    d.conn = a11y;
+    d.on_a11y = true;
+    return true;
+}
+
 bool DBus::register_object(const std::string& path, IncomingHandler handler) {
     if (!connect_session()) return false;
     Impl& d = *impl_;
@@ -548,6 +639,50 @@ bool DBus::dispatch(int timeout_ms) {
     // which removes messages BEFORE the dispatcher would route them. Do not
     // interleave the two on the same pending traffic.
     return impl_->read_write_dispatch(impl_->conn, timeout_ms) != 0;
+}
+
+bool DBus::call_method(const std::string& destination, const std::string& path,
+                       const std::string& interface, const std::string& member,
+                       const std::function<void(Writer&)>& build_args,
+                       const std::function<void(Reader&)>& read_reply,
+                       int timeout_ms) {
+    if (!connected()) return false;
+    Impl& d = *impl_;
+
+    void* msg = d.msg_new_method_call(destination.c_str(), path.c_str(),
+                                      interface.c_str(), member.c_str());
+    if (!msg) return false;
+
+    Impl::IterBuf args;
+    d.iter_init_append(msg, &args);
+    if (build_args) {
+        Writer w(this, &args);
+        build_args(w);
+    }
+
+    Impl::ErrBuf err;
+    d.error_init(&err);
+    void* reply = d.send_with_reply_and_block(d.conn, msg, timeout_ms, &err);
+    d.msg_unref(msg);
+    if (!reply || d.error_is_set(&err)) {
+        if (reply) d.msg_unref(reply);
+        d.error_free(&err);
+        return false;
+    }
+    d.error_free(&err);
+
+    if (read_reply) {
+        Impl::IterBuf it;
+        if (d.iter_init(reply, &it)) {
+            Reader r(this, &it);
+            read_reply(r);
+        } else {
+            Reader r(this, nullptr);
+            read_reply(r);  // no body: a Reader over null returns false on reads
+        }
+    }
+    d.msg_unref(reply);
+    return true;
 }
 
 std::optional<DBus::PortalResult> DBus::file_chooser(
@@ -685,6 +820,7 @@ bool DBus::Reader::read_uint32(unsigned&) { return false; }
 bool DBus::Reader::read_double(double&) { return false; }
 int  DBus::Reader::arg_type() const { return 0; }
 bool DBus::Reader::next() { return false; }
+bool DBus::Reader::recurse(Reader&) { return false; }
 
 bool DBus::Writer::append_string(const std::string&) { return false; }
 bool DBus::Writer::append_object_path(const std::string&) { return false; }
@@ -707,11 +843,16 @@ DBus::~DBus() = default;
 bool DBus::connected() const { return false; }
 std::string DBus::unique_name() const { return {}; }
 bool DBus::connect_session() { return false; }
+bool DBus::connect_a11y_bus() { return false; }
+bool DBus::a11y_connected() const { return false; }
 bool DBus::register_object(const std::string&, IncomingHandler) { return false; }
 bool DBus::unregister_object(const std::string&) { return false; }
 bool DBus::emit_signal(const std::string&, const std::string&, const std::string&,
                        const std::function<void(Writer&)>&) { return false; }
 bool DBus::dispatch(int) { return false; }
+bool DBus::call_method(const std::string&, const std::string&, const std::string&,
+                       const std::string&, const std::function<void(Writer&)>&,
+                       const std::function<void(Reader&)>&, int) { return false; }
 std::optional<DBus::PortalResult> DBus::file_chooser(
     const std::string&, const std::string&,
     const std::map<std::string, std::string>&,
