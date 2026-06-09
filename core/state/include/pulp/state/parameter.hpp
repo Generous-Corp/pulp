@@ -27,18 +27,76 @@ enum class ParamRate {
 ///
 /// Normalization maps the [min, max] range to [0, 1] for host automation.
 /// If @c step is non-zero, denormalized values snap to the nearest step.
+///
+/// ## Shaped (non-linear) ranges
+///
+/// `skew` and `symmetric_skew` give the range a non-linear curve between the
+/// [0, 1] host-automation domain and the [min, max] parameter domain:
+///
+/// - `skew == 1` (default) is **linear** — the conversion is bit-identical to
+///   a plain affine map, so existing linear parameters are unchanged.
+/// - `skew < 1` weights the curve toward `min` (small real values cover more
+///   of the [0, 1] domain — e.g. a frequency knob where the low end gets more
+///   resolution). `skew > 1` weights toward `max`.
+/// - `symmetric_skew == true` mirrors the curve around the centre, so the
+///   midpoint of the normalized domain lands at the midpoint of [min, max] and
+///   both halves fan out symmetrically. Useful for bipolar parameters (pan,
+///   detune, balance).
+///
+/// The shaping convention matches `NormalisableRange<T>` below, which shares
+/// the same math. Use `ParamRange::with_centre()` to derive the skew that
+/// places a chosen real value at the normalized midpoint (0.5).
 struct ParamRange {
     float min = 0.0f;
     float max = 1.0f;
     float default_value = 0.0f;
-    float step = 0.0f; ///< Quantization step. 0 = continuous.
+    float step = 0.0f;           ///< Quantization step. 0 = continuous.
+    float skew = 1.0f;           ///< 1 = linear, <1 weights min, >1 weights max.
+    bool symmetric_skew = false; ///< Mirror the curve around the centre (bipolar).
+
+    /// Build a linear range covering [lo, hi] with the given default and step.
+    /// Provided so call sites can be explicit about the linear case alongside
+    /// the shaped factories below.
+    static ParamRange linear(float lo, float hi, float def = 0.0f,
+                             float step_value = 0.0f) {
+        return ParamRange{lo, hi, def, step_value, 1.0f, false};
+    }
+
+    /// Build a shaped range whose normalized midpoint (0.5) maps to @p centre.
+    /// Equivalent to choosing the skew that satisfies denormalize(0.5) == centre.
+    /// Falls back to a linear range when @p centre is not strictly inside the
+    /// open interval (min, max).
+    static ParamRange with_centre(float lo, float hi, float centre,
+                                  float def = 0.0f, float step_value = 0.0f) {
+        ParamRange r{lo, hi, def, step_value, 1.0f, false};
+        if (hi > lo && centre > lo && centre < hi) {
+            const float proportion = (centre - lo) / (hi - lo);
+            r.skew = std::log(0.5f) / std::log(proportion);
+        }
+        return r;
+    }
+
+    /// True when this range is a plain affine (linear) map — the common case.
+    /// Used to take a bit-identical fast path that bypasses the skew math.
+    bool is_linear() const { return skew == 1.0f && !symmetric_skew; }
 
     /// Map a real value to the normalized [0, 1] range.
     /// @param value  Raw parameter value in [min, max].
     /// @return Normalized value clamped to [0, 1].
     float normalize(float value) const {
         if (max == min) return 0.0f;
-        return std::clamp((value - min) / (max - min), 0.0f, 1.0f);
+        // Bit-identical linear fast path — preserves legacy behavior exactly.
+        if (is_linear()) {
+            return std::clamp((value - min) / (max - min), 0.0f, 1.0f);
+        }
+        float proportion = std::clamp((value - min) / (max - min), 0.0f, 1.0f);
+        if (symmetric_skew) {
+            const float centred = (proportion * 2.0f) - 1.0f; // [-1, 1]
+            const float magnitude = std::pow(std::abs(centred), skew);
+            const float signed_mag = centred < 0.0f ? -magnitude : magnitude;
+            return (signed_mag + 1.0f) * 0.5f;
+        }
+        return std::pow(proportion, skew);
     }
 
     /// Map a normalized [0, 1] value back to the real range.
@@ -46,7 +104,25 @@ struct ParamRange {
     /// @param normalized  Value in [0, 1].
     /// @return Real value clamped to [min, max], optionally quantized.
     float denormalize(float normalized) const {
-        auto value = min + normalized * (max - min);
+        // Bit-identical linear fast path — preserves legacy behavior exactly.
+        if (is_linear()) {
+            auto value = min + normalized * (max - min);
+            if (step > 0.0f) {
+                value = min + std::round((value - min) / step) * step;
+            }
+            return std::clamp(value, min, max);
+        }
+        normalized = std::clamp(normalized, 0.0f, 1.0f);
+        float proportion;
+        if (symmetric_skew) {
+            const float centred = (normalized * 2.0f) - 1.0f; // [-1, 1]
+            const float magnitude = std::pow(std::abs(centred), 1.0f / skew);
+            const float signed_mag = centred < 0.0f ? -magnitude : magnitude;
+            proportion = (signed_mag + 1.0f) * 0.5f;
+        } else {
+            proportion = std::pow(normalized, 1.0f / skew);
+        }
+        float value = min + proportion * (max - min);
         if (step > 0.0f) {
             value = min + std::round((value - min) / step) * step;
         }

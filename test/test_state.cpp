@@ -87,6 +87,54 @@ TEST_CASE("ParamRange normalization", "[state][range]") {
     REQUIRE_THAT(range.denormalize(1.0f), WithinAbs(100.0, 0.001));
 }
 
+TEST_CASE("StateStore normalized seam honors a shaped (skewed) range",
+          "[state][range][shaped][store]") {
+    // The adapter-facing path is StateStore::set_normalized_rt /
+    // get_normalized, which both convert through ParamRange. A skewed range
+    // must round-trip through that seam exactly the way a format adapter
+    // (e.g. VST3 plainToNormalized/normalizedToPlain) drives it. A linear
+    // param registered alongside must be unaffected.
+    StateStore store;
+
+    ParamInfo freq = make_param_info(
+        1, "Freq", "Hz",
+        ParamRange::with_centre(20.0f, 20000.0f, 1000.0f));
+    ParamInfo gain = make_param_info(2, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
+    store.add_parameter(freq);
+    store.add_parameter(gain);
+
+    REQUIRE_FALSE(store.info(1)->range.is_linear());
+    REQUIRE(store.info(2)->range.is_linear());
+
+    // Skewed param: 0.5 normalized maps to the 1 kHz centre, and the value
+    // read back as normalized matches what we wrote.
+    store.set_normalized(1, 0.5f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1000.0, 1.0));
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.5, 1e-4));
+
+    // Endpoints exact through the store seam.
+    store.set_normalized(1, 0.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(20.0, 1e-3));
+    store.set_normalized(1, 1.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(20000.0, 1e-3));
+
+    // Full round-trip monotonicity through the realtime write path.
+    float prev = -1.0f;
+    for (int i = 0; i <= 100; ++i) {
+        const float n = static_cast<float>(i) / 100.0f;
+        store.set_normalized_rt(1, n);
+        const float v = store.get_value(1);
+        REQUIRE(v >= prev);
+        REQUIRE_THAT(store.get_normalized(1), WithinAbs(n, 1e-3));
+        prev = v;
+    }
+
+    // Linear param is bit-identical to a plain affine map through the seam.
+    store.set_normalized(2, 0.5f);
+    REQUIRE_THAT(store.get_value(2), WithinAbs(-24.0, 1e-3)); // -60 + 0.5*72
+    REQUIRE(store.get_normalized(2) == gain.range.normalize(store.get_value(2)));
+}
+
 TEST_CASE("ParamInfo defaults to control rate and preserves audio-rate metadata",
           "[state][params][rate]") {
     ParamInfo default_info;
