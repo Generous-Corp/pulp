@@ -796,7 +796,7 @@ jobs:
               rm -rf "$PULP_BUILD_DIR"
             fi
           fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ] || { [ "${RUNNER_OS}" = "macOS" ] && [ "${{ github.event_name == 'workflow_dispatch' && inputs.macos_runner_selector_json != '' }}" = "true" ]; }; then
             cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
           else
             cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
