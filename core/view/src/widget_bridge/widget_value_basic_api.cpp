@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_basic_api.cpp - basic widget value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 
 #include <pulp/view/ui_components.hpp>
 
@@ -12,8 +13,10 @@
 namespace pulp::view {
 
 void WidgetBridge::register_widget_value_label_api() {
+    BridgeApiContext api{engine_};
+
     // Property setters
-    engine_.register_function("setLabel", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setLabel", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto text = args.get<std::string>(1, "");
         auto* v = widget(id);
@@ -27,15 +30,17 @@ void WidgetBridge::register_widget_value_label_api() {
 }
 
 void WidgetBridge::register_widget_value_basic_api() {
+    BridgeApiContext api{engine_};
+
     // setStyle — placeholder until KnobStyle/ToggleStyle enums added to main widgets
-    engine_.register_function("setStyle", [](choc::javascript::ArgumentList) {
+    register_bridge_function(api, "setStyle", [](choc::javascript::ArgumentList) {
         return choc::value::Value();
     });
 
     // setWidgetStyle(id, "standard"|"minimal"|"silver") — switch rendering mode
     // "minimal" draws simple shapes matching design tools (circles, thin tracks)
     // "silver" draws a skeuomorphic chrome-body knob (figma-import alt path)
-    engine_.register_function("setWidgetStyle", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWidgetStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto style_str = args.get<std::string>(1, "standard");
         WidgetRenderStyle style;
@@ -49,7 +54,7 @@ void WidgetBridge::register_widget_value_basic_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("setItems", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setItems", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         if (auto* c = dynamic_cast<ComboBox*>(widget(id))) {
             std::vector<std::string> items;
@@ -64,7 +69,7 @@ void WidgetBridge::register_widget_value_basic_api() {
     });
 
     // setSelected(id, index) — set ComboBox selected index without firing on_change
-    engine_.register_function("setSelected", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSelected", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto idx = args.get<int>(1, 0);
         if (auto* c = dynamic_cast<ComboBox*>(widget(id))) {
