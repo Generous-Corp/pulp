@@ -11,6 +11,9 @@
 namespace pulp::audio {
 
 struct PublishedSampleStoreConfig {
+    // The store-level replacement path needs one currently published slot and
+    // one free slot for the next sample. Use SampleSlotBank directly for
+    // specialized one-slot/offline materialization workflows.
     std::uint32_t slot_count = 0;
     std::uint32_t max_channels = 0;
     std::uint64_t max_frames_per_slot = 0;
@@ -82,4 +85,3 @@ private:
 };
 
 }  // namespace pulp::audio
-

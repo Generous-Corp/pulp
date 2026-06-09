@@ -215,8 +215,9 @@ TEST_CASE("PublishedSampleStore enforces fixed publication capacity",
           "[audio][sampler][store]") {
     PublishedSampleStore store;
     REQUIRE_FALSE(store.prepare(PublishedSampleStoreConfig{}));
-    REQUIRE(store.prepare(PublishedSampleStoreConfig{1, 1, 4}));
-    REQUIRE_FALSE(store.prepare(PublishedSampleStoreConfig{2, 1, 4}));
+    REQUIRE_FALSE(store.prepare(PublishedSampleStoreConfig{1, 1, 4}));
+    REQUIRE(store.prepare(PublishedSampleStoreConfig{2, 1, 4}));
+    REQUIRE_FALSE(store.prepare(PublishedSampleStoreConfig{3, 1, 4}));
 
     Buffer<float> source(1, 5);
     fill_sequence(source, 1.0f);
@@ -239,6 +240,22 @@ TEST_CASE("PublishedSampleStore enforces fixed publication capacity",
     REQUIRE(out[0][0] == 10.0f);
     REQUIRE_FALSE(store.populate_channel_ptrs(view, nullptr, 1));
     REQUIRE_FALSE(store.populate_channel_ptrs(view, out, 0));
+
+    Buffer<float> replacement(1, 3);
+    fill_sequence(replacement, 20.0f);
+    std::vector<const float*> replacement_ptrs;
+    REQUIRE(store.publish(const_view(replacement, replacement_ptrs),
+                          3,
+                          48000.0,
+                          view.generation));
+    const auto replacement_view = store.read_published_view();
+    REQUIRE(replacement_view.valid);
+    REQUIRE(replacement_view.generation == view.generation + 1);
+    REQUIRE(replacement_view.num_frames == 3);
+    const float* replacement_out[1] = {};
+    REQUIRE(store.populate_channel_ptrs(replacement_view, replacement_out, 1));
+    REQUIRE(replacement_out[0][0] == 20.0f);
+    REQUIRE(replacement_out[0][2] == 22.0f);
 }
 
 TEST_CASE("SampleSlotBank rejects frame-count mismatches on one-shot writes",

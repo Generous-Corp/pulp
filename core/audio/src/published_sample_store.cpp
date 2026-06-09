@@ -7,7 +7,7 @@ namespace pulp::audio {
 
 bool PublishedSampleStore::config_valid(
     const PublishedSampleStoreConfig& config) const noexcept {
-    return config.slot_count > 0 &&
+    return config.slot_count >= 2 &&
            config.max_channels > 0 &&
            config.max_frames_per_slot > 0;
 }
