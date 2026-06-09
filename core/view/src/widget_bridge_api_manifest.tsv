@@ -112,6 +112,7 @@ setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgViewBox	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgFill	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgFillGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp
+setSvgFillRule	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgStroke	svg	function	core/view/src/widget_bridge/svg_api.cpp
 setSvgStrokeWidth	svg	function	core/view/src/widget_bridge/svg_api.cpp
 createSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp

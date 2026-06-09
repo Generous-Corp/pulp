@@ -555,6 +555,16 @@ function __replaySvgPathAttributes__(el) {
         }
         setSvgFill(el._id, fillVal);
     }
+    // fill-rule / fillRule — winding rule ("nonzero" | "evenodd").
+    // pulp #3656 — compound annular paths (a stroked ellipse lowered to
+    // `M…Z M…Z` by JUCE's SVGGraphicsContext) only render the hole under
+    // even-odd. Accept either the HTML hyphen spelling or the JSX
+    // camelCase spelling, mirroring stroke-width / strokeWidth above.
+    var fr = a["fill-rule"];
+    if (fr === undefined) fr = a.fillRule;
+    if (fr !== undefined && typeof setSvgFillRule === "function") {
+        setSvgFillRule(el._id, String(fr));
+    }
     // viewBox — inherited from the parent <svg>. The SVG spec attaches
     // viewBox to the outer <svg>, but the SvgPathWidget needs the (w,h)
     // pair to scale path coordinates into widget bounds. Walk up until
@@ -1090,6 +1100,7 @@ Element.prototype.setAttribute = function(name, value) {
     // the replay flush from _attributes for the pre-mount case.
     else if (this.tagName === "PATH" &&
              (name === "d" || name === "stroke" || name === "fill" ||
+              name === "fill-rule" || name === "fillRule" ||
               name === "stroke-width" || name === "strokeWidth")) {
         if (this._nativeCreated) {
             if (name === "d" && typeof setSvgPath === "function") {
@@ -1098,6 +1109,10 @@ Element.prototype.setAttribute = function(name, value) {
                 setSvgStroke(this._id, String(value));
             } else if (name === "fill" && typeof setSvgFill === "function") {
                 setSvgFill(this._id, String(value));
+            } else if ((name === "fill-rule" || name === "fillRule") &&
+                       typeof setSvgFillRule === "function") {
+                // pulp #3656 — live winding-rule update on an existing path.
+                setSvgFillRule(this._id, String(value));
             } else if ((name === "stroke-width" || name === "strokeWidth") &&
                        typeof setSvgStrokeWidth === "function") {
                 var p = parseFloat(value);

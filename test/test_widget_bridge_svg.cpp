@@ -96,6 +96,29 @@ TEST_CASE("WidgetBridge setSvgFill 'none' disables fill",
     REQUIRE(w->has_stroke());
 }
 
+TEST_CASE("WidgetBridge setSvgFillRule selects winding rule on SvgPathWidget",
+          "[view][bridge][issue-3656]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgPath('ring', '')");
+    bridge.load_script("setSvgPath('ring', 'M0 0L10 0L10 10Z M2 2L8 2L8 8Z')");
+
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("ring"));
+    REQUIRE(w != nullptr);
+    // Default winding is nonzero (SVG / Canvas2D default).
+    REQUIRE(w->fill_rule() == pulp::canvas::FillRule::nonzero);
+
+    bridge.load_script("setSvgFillRule('ring', 'evenodd')");
+    REQUIRE(w->fill_rule() == pulp::canvas::FillRule::evenodd);
+
+    // Any non-"evenodd" token resets to nonzero.
+    bridge.load_script("setSvgFillRule('ring', 'nonzero')");
+    REQUIRE(w->fill_rule() == pulp::canvas::FillRule::nonzero);
+}
+
 // pulp #968 — canvasRect / canvasStrokeRect must honour the active fill /
 // stroke style when no color arg is passed. Validates the JS bridge path:
 //   1. five-arg canvasRect → fillStyle (color or gradient) wins

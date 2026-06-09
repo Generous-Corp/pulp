@@ -675,6 +675,10 @@ void SvgPathWidget::set_stroke_width(float w) {
     stroke_width_ = std::max(0.0f, w);
 }
 
+void SvgPathWidget::set_fill_rule(canvas::FillRule rule) {
+    fill_rule_ = rule;
+}
+
 void SvgPathWidget::reparse() {
     parse_path(path_data_, segments_);
 }
@@ -743,7 +747,7 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
                                                  pg->colors.data(),
                                                  pg->positions.data(),
                                                  static_cast<int>(pg->colors.size()));
-                canvas.fill_current_path();
+                canvas.fill_current_path(fill_rule_);
                 canvas.clear_fill_gradient();
                 gradient_applied = true;
             }
@@ -752,7 +756,7 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
         }
         if (!gradient_applied) {
             canvas.set_fill_color(fill_color_);
-            canvas.fill_current_path();
+            canvas.fill_current_path(fill_rule_);
         }
     }
     if (has_stroke_ && stroke_width_ > 0) {
