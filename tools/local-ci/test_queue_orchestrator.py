@@ -119,6 +119,37 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertFalse(self.mod.bump_pending_job_priority_unlocked(queue[2], "high"))
         self.assertNotIn("bumped_at", queue[2])
 
+    def test_queue_command_lookup_and_priority_mutation_helpers(self) -> None:
+        queue = [
+            {"id": "pending", "branch": "feature/pending", "status": "pending", "priority": "normal"},
+            {"id": "running", "branch": "feature/running", "status": "running", "priority": "low"},
+            {"id": "completed", "branch": "feature/completed", "status": "completed", "priority": "high"},
+        ]
+
+        self.assertIs(
+            self.mod.find_queue_command_job_unlocked(queue, "feature/pending"),
+            queue[0],
+        )
+        self.assertIs(
+            self.mod.find_queue_command_job_unlocked(queue, "running"),
+            queue[1],
+        )
+        self.assertIsNone(self.mod.find_queue_command_job_unlocked(queue, "feature/completed"))
+        self.assertIsNone(self.mod.find_queue_command_job_unlocked(queue, "missing"))
+
+        updated = self.mod.set_pending_job_priority_unlocked(
+            queue[0],
+            "low",
+            now_iso_fn=lambda: "2026-06-09T00:06:00+00:00",
+        )
+
+        self.assertTrue(updated)
+        self.assertEqual(queue[0]["priority"], "low")
+        self.assertEqual(queue[0]["bumped_at"], "2026-06-09T00:06:00+00:00")
+        self.assertFalse(self.mod.set_pending_job_priority_unlocked(queue[1], "high"))
+        self.assertEqual(queue[1]["priority"], "low")
+        self.assertNotIn("bumped_at", queue[1])
+
     def test_runner_info_active_target_update_matches_active_job_only(self) -> None:
         info = {
             "active_job_id": "job123",

@@ -4615,15 +4615,17 @@ def cmd_bump(args: argparse.Namespace) -> int:
     try:
         with file_lock(queue_lock_path(), blocking=True):
             queue = load_queue_unlocked()
-            job = find_job_unlocked(queue, args.job, statuses={"pending", "running"})
+            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
             if job is None:
                 print(f"No active job matches '{args.job}'.")
                 return 1
-            if job["status"] != "pending":
+            if not _queue_orchestrator.set_pending_job_priority_unlocked(
+                job,
+                requested_priority,
+                now_iso_fn=now_iso,
+            ):
                 print(f"Job is already {job['status']}; only pending jobs can be reprioritized.")
                 return 1
-            job["priority"] = requested_priority
-            job["bumped_at"] = now_iso()
             save_queue_unlocked(queue)
             print(f"Updated priority: {summarize_job(job)}")
             return 0
@@ -4636,7 +4638,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     try:
         with file_lock(queue_lock_path(), blocking=True):
             queue = load_queue_unlocked()
-            job = find_job_unlocked(queue, args.job, statuses={"pending", "running"})
+            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
             if job is None:
                 print(f"No active job matches '{args.job}'.")
                 return 1

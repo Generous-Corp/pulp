@@ -1,12 +1,14 @@
 """Pure queue policy helpers for local CI.
 
-This module owns job identity, enqueue duplicate/priority policy, priority
-ordering, enqueue supersedence candidate selection, cancellation result
-payloads, summaries, stale-running job selection/replacement/requeue state,
-stale-running reconciliation action selection, runner-info active-target
-mutation, completed-job state mutation, and completed-queue retention.
-Higher-level queue mutation, locking, runner liveness, result persistence, and
-drain orchestration remain in local_ci.py until later extraction slices.
+This module owns job identity, enqueue duplicate/priority policy, enqueue
+supersedence candidate selection, queue-command lookup and priority mutation,
+priority ordering, supersedence, cancellation result payloads, summaries,
+stale-running job selection/replacement/requeue state, stale-running
+reconciliation action selection, runner-info active-target mutation,
+completed-job state mutation, and
+completed-queue retention. Higher-level queue mutation, locking, runner
+liveness, result persistence, and drain orchestration remain in local_ci.py
+until later extraction slices.
 """
 
 from __future__ import annotations
@@ -114,6 +116,24 @@ def bump_pending_job_priority_unlocked(
         return False
 
     job["priority"] = requested_priority
+    job["bumped_at"] = now_iso_fn()
+    return True
+
+
+def find_queue_command_job_unlocked(queue: list[dict], job_ref: str) -> dict | None:
+    return find_job_unlocked(queue, job_ref, statuses={"pending", "running"})
+
+
+def set_pending_job_priority_unlocked(
+    job: dict,
+    requested_priority: str,
+    *,
+    now_iso_fn: Callable[[], str] = now_iso,
+) -> bool:
+    if job.get("status") != "pending":
+        return False
+
+    job["priority"] = normalize_priority(requested_priority)
     job["bumped_at"] = now_iso_fn()
     return True
 
