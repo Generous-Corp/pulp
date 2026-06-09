@@ -1970,6 +1970,9 @@ pulp_add_test_suite(pulp-test-audio-stream-handoff LIBRARIES pulp::audio)
 # Sampler key/pitch/slice mapping policy kept out of renderers and slot storage.
 pulp_add_test_suite(pulp-test-sample-key-map LIBRARIES pulp::audio)
 
+# Undoable sample edit document metadata kept separate from audio storage/import/export.
+pulp_add_test_suite(pulp-test-sample-edit-document LIBRARIES pulp::audio)
+
 # Prepared sample-pool resolver over existing published sample stores.
 pulp_add_test_suite(pulp-test-sample-pool LIBRARIES pulp::audio)
 
