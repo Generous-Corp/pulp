@@ -1979,6 +1979,9 @@ pulp_add_test_suite(pulp-test-sample-zone-map LIBRARIES pulp::audio)
 # Pool-backed instrument trigger resolver over sample zones.
 pulp_add_test_suite(pulp-test-instrument-runtime LIBRARIES pulp::audio)
 
+# Prepared voice-slot allocation, stealing, release, and choke-group policy.
+pulp_add_test_suite(pulp-test-instrument-voice-allocator LIBRARIES pulp::audio)
+
 # Loop metadata validation and off-RT loop candidate analysis.
 pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
 

@@ -193,6 +193,15 @@ policy plus the resolved sample rate. It intentionally does not allocate
 voices, enforce choke groups, stream sample tails, apply modulation, or render
 audio.
 
+`pulp::audio::InstrumentVoiceAllocator` is the prepared voice-slot policy layer
+for trigger allocation, release, deterministic stealing, voice groups, and
+choke groups. Call `prepare()` off the audio thread, then trigger/release
+against the fixed voice array in realtime code. Note-off moves a voice to
+`Released`; the future envelope/render layer should call `finish_voice()` when
+the tail is done. Choke and steal are force-termination events and can be
+reported through caller-owned spans. The allocator does not own sample data, run
+envelopes, apply modulation, or render voices.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -201,6 +210,7 @@ audio.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
 * [`core/audio/include/pulp/audio/instrument_runtime.hpp`](../../core/audio/include/pulp/audio/instrument_runtime.hpp)
+* [`core/audio/include/pulp/audio/instrument_voice_allocator.hpp`](../../core/audio/include/pulp/audio/instrument_voice_allocator.hpp)
 * [`core/audio/include/pulp/audio/sample_pool.hpp`](../../core/audio/include/pulp/audio/sample_pool.hpp)
 * [`core/audio/include/pulp/audio/sample_zone_map.hpp`](../../core/audio/include/pulp/audio/sample_zone_map.hpp)
   — the no-allocation contract.
