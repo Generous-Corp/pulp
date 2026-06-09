@@ -1905,6 +1905,9 @@ pulp_add_test_suite(pulp-test-runtime LIBRARIES pulp::runtime)
 # Additive process-block contract for graph/offline/sampler runtime slices.
 pulp_add_test_suite(pulp-test-process-block LIBRARIES pulp::format)
 
+# Deterministic multi-block offline rendering over HeadlessHost.
+pulp_add_test_suite(pulp-test-offline-render-host LIBRARIES pulp::format)
+
 # AbstractFifo (index-pair SPSC FIFO management)
 pulp_add_test_suite(pulp-test-abstract-fifo LIBRARIES pulp::runtime)
 

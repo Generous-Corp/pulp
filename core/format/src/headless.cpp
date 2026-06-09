@@ -6,8 +6,28 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 namespace pulp::format {
+namespace {
+
+class ScopedProcessorParamEvents {
+public:
+    ScopedProcessorParamEvents(Processor& processor,
+                               const state::ParameterEventQueue& events)
+        : processor_(processor) {
+        processor_.set_param_events(&events);
+    }
+
+    ~ScopedProcessorParamEvents() {
+        processor_.set_param_events(nullptr);
+    }
+
+private:
+    Processor& processor_;
+};
+
+} // namespace
 
 HeadlessHost::HeadlessHost(ProcessorFactory factory) {
+    if (!factory) return;
     processor_ = factory();
     if (processor_) {
         processor_->set_state_store(&store_);
@@ -86,7 +106,7 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     if (context.num_samples <= 0) {
         context.num_samples = static_cast<int>(output.num_samples());
     }
-    processor_->set_param_events(&param_events);
+    ScopedProcessorParamEvents scoped_param_events(*processor_, param_events);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
     processor_->process(output, input, midi_in, midi_out, context);
 }

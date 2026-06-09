@@ -127,6 +127,15 @@ memory is provided before the callback. This keeps the same hard
 real-time rule as `Processor::process()`: no hidden allocation, locks,
 file I/O, logging, package work, or host calls in the audio callback.
 
+`pulp::format::OfflineRenderHost` is the control-thread companion for
+multi-block renders, bounces, freeze-to-sample tests, and generated-audio
+materialization. It owns result/staging buffers and may allocate outside the
+audio callback, but each processor invocation is still a bounded
+`HeadlessHost` block with explicit `ProcessContext`, MIDI, and parameter-event
+slices. Use `HeadlessHost` when a test needs one block; use
+`OfflineRenderHost` when it needs a fixed-duration render with final-block
+handling, silence padding, and absolute-frame event slicing.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -135,5 +144,7 @@ file I/O, logging, package work, or host calls in the audio callback.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
   — the no-allocation contract.
+* [`core/format/include/pulp/format/offline_render_host.hpp`](../../core/format/include/pulp/format/offline_render_host.hpp)
+  — the deterministic multi-block render harness.
 * sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
   and #29 (don't deref atomics per sample).

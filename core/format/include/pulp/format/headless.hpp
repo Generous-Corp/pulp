@@ -80,6 +80,9 @@ public:
     /// Release processing resources. Safe to call multiple times.
     void release();
 
+    /// True when the factory produced a processor instance.
+    bool valid() const noexcept { return processor_ != nullptr; }
+
     /// Access the parameter store for reading/writing parameter values.
     state::StateStore& state() { return store_; }
     /// @copydoc state()
