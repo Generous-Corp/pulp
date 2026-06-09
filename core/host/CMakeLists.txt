@@ -10,7 +10,6 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
-    src/graph_runtime_plan.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
     src/scan_blacklist.cpp
@@ -20,7 +19,7 @@ target_sources(pulp-host PRIVATE
     src/node_pack.cpp
 )
 
-target_link_libraries(pulp-host PUBLIC pulp::audio pulp::midi pulp::runtime pulp::state)
+target_link_libraries(pulp-host PUBLIC pulp::audio pulp::graph pulp::midi pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
 target_link_libraries(pulp-host PRIVATE pulp::platform)
 # node_pack.cpp dlopen()s signed node packs (desktop + Android). iOS never builds

@@ -1,11 +1,11 @@
-#include <pulp/host/graph_runtime_plan.hpp>
+#include <pulp/graph/graph_runtime_plan.hpp>
 
 #include <algorithm>
 #include <limits>
 #include <queue>
 #include <utility>
 
-namespace pulp::host {
+namespace pulp::graph {
 namespace {
 
 GraphRuntimePlanResult fail(GraphRuntimePlanErrorCode code,
@@ -260,4 +260,4 @@ GraphRuntimePlanResult build_graph_runtime_plan(
     return result;
 }
 
-} // namespace pulp::host
+} // namespace pulp::graph

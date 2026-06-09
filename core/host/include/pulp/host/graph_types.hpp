@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#include <pulp/graph/graph_types.hpp>
 
 namespace pulp::host {
 
-using NodeId = std::uint32_t;
-using PortIndex = std::uint32_t;
+using ::pulp::graph::NodeId;
+using ::pulp::graph::PortIndex;
 
 } // namespace pulp::host

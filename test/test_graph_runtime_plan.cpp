@@ -1,41 +1,41 @@
 #include <catch2/catch_test_macros.hpp>
-#include <pulp/host/graph_runtime_plan.hpp>
+#include <pulp/graph/graph_runtime_plan.hpp>
 
 #include <array>
 #include <vector>
 
 namespace {
 
-pulp::host::GraphRuntimeNodeSpec node(pulp::host::NodeId id,
+pulp::graph::GraphRuntimeNodeSpec node(pulp::graph::NodeId id,
                                       std::uint32_t inputs,
                                       std::uint32_t outputs,
-                                      pulp::host::GraphRuntimeNodeKind kind =
-                                          pulp::host::GraphRuntimeNodeKind::Processor) {
+                                      pulp::graph::GraphRuntimeNodeKind kind =
+                                          pulp::graph::GraphRuntimeNodeKind::Processor) {
     return {id, kind, inputs, outputs};
 }
 
-pulp::host::GraphRuntimeConnectionSpec connect(pulp::host::NodeId source,
-                                               pulp::host::PortIndex source_port,
-                                               pulp::host::NodeId dest,
-                                               pulp::host::PortIndex dest_port,
+pulp::graph::GraphRuntimeConnectionSpec connect(pulp::graph::NodeId source,
+                                               pulp::graph::PortIndex source_port,
+                                               pulp::graph::NodeId dest,
+                                               pulp::graph::PortIndex dest_port,
                                                bool feedback = false) {
     return {source, source_port, dest, dest_port, feedback, false};
 }
 
-pulp::host::GraphRuntimeConnectionSpec event_connect(pulp::host::NodeId source,
-                                                     pulp::host::PortIndex source_port,
-                                                     pulp::host::NodeId dest,
-                                                     pulp::host::PortIndex dest_port,
+pulp::graph::GraphRuntimeConnectionSpec event_connect(pulp::graph::NodeId source,
+                                                     pulp::graph::PortIndex source_port,
+                                                     pulp::graph::NodeId dest,
+                                                     pulp::graph::PortIndex dest_port,
                                                      bool feedback = false) {
     return {source, source_port, dest, dest_port, feedback, true};
 }
 
-pulp::host::GraphRuntimeNodeSpec event_node(
-    pulp::host::NodeId id,
+pulp::graph::GraphRuntimeNodeSpec event_node(
+    pulp::graph::NodeId id,
     std::uint32_t event_inputs,
     std::uint32_t event_outputs,
-    pulp::host::GraphRuntimeNodeKind kind) {
-    pulp::host::GraphRuntimeNodeSpec spec;
+    pulp::graph::GraphRuntimeNodeKind kind) {
+    pulp::graph::GraphRuntimeNodeSpec spec;
     spec.id = id;
     spec.kind = kind;
     spec.event_input_ports = event_inputs;
@@ -46,11 +46,11 @@ pulp::host::GraphRuntimeNodeSpec event_node(
 } // namespace
 
 TEST_CASE("GraphRuntimePlan builds dense node and connection arrays",
-          "[host][graph-runtime][plan]") {
+          "[graph][graph-runtime][plan]") {
     const std::array nodes = {
-        node(10, 0, 2, pulp::host::GraphRuntimeNodeKind::AudioInput),
+        node(10, 0, 2, pulp::graph::GraphRuntimeNodeKind::AudioInput),
         node(20, 2, 2),
-        node(30, 2, 0, pulp::host::GraphRuntimeNodeKind::AudioOutput),
+        node(30, 2, 0, pulp::graph::GraphRuntimeNodeKind::AudioOutput),
     };
     const std::array connections = {
         connect(10, 0, 20, 0),
@@ -59,7 +59,7 @@ TEST_CASE("GraphRuntimePlan builds dense node and connection arrays",
         connect(20, 1, 30, 1),
     };
 
-    auto result = pulp::host::build_graph_runtime_plan(nodes, connections);
+    auto result = pulp::graph::build_graph_runtime_plan(nodes, connections);
 
     REQUIRE(result.ok());
     REQUIRE(result.plan.node_count() == 3);
@@ -87,26 +87,26 @@ TEST_CASE("GraphRuntimePlan builds dense node and connection arrays",
 }
 
 TEST_CASE("GraphRuntimePlan rejects duplicate and reserved node ids",
-          "[host][graph-runtime][plan]") {
+          "[graph][graph-runtime][plan]") {
     const std::array duplicate_nodes = {
         node(1, 0, 1),
         node(1, 1, 0),
     };
-    auto duplicate = pulp::host::build_graph_runtime_plan(duplicate_nodes, {});
+    auto duplicate = pulp::graph::build_graph_runtime_plan(duplicate_nodes, {});
     REQUIRE_FALSE(duplicate.ok());
-    REQUIRE(duplicate.error.code == pulp::host::GraphRuntimePlanErrorCode::DuplicateNodeId);
+    REQUIRE(duplicate.error.code == pulp::graph::GraphRuntimePlanErrorCode::DuplicateNodeId);
     REQUIRE(duplicate.error.node_id == 1);
 
     const std::array reserved_nodes = {
         node(0, 0, 1),
     };
-    auto reserved = pulp::host::build_graph_runtime_plan(reserved_nodes, {});
+    auto reserved = pulp::graph::build_graph_runtime_plan(reserved_nodes, {});
     REQUIRE_FALSE(reserved.ok());
-    REQUIRE(reserved.error.code == pulp::host::GraphRuntimePlanErrorCode::InvalidNodeId);
+    REQUIRE(reserved.error.code == pulp::graph::GraphRuntimePlanErrorCode::InvalidNodeId);
 }
 
 TEST_CASE("GraphRuntimePlan enforces bounded complexity limits",
-          "[host][graph-runtime][plan]") {
+          "[graph][graph-runtime][plan]") {
     const std::array nodes = {
         node(1, 0, 1),
         node(2, 1, 0),
@@ -115,37 +115,37 @@ TEST_CASE("GraphRuntimePlan enforces bounded complexity limits",
         connect(1, 0, 2, 0),
     };
 
-    pulp::host::GraphRuntimeLimits limits;
+    pulp::graph::GraphRuntimeLimits limits;
     limits.max_nodes = 1;
-    auto too_many_nodes = pulp::host::build_graph_runtime_plan(nodes, connections, limits);
+    auto too_many_nodes = pulp::graph::build_graph_runtime_plan(nodes, connections, limits);
     REQUIRE_FALSE(too_many_nodes.ok());
-    REQUIRE(too_many_nodes.error.code == pulp::host::GraphRuntimePlanErrorCode::TooManyNodes);
+    REQUIRE(too_many_nodes.error.code == pulp::graph::GraphRuntimePlanErrorCode::TooManyNodes);
 
     limits = {};
     limits.max_connections = 0;
-    auto invalid_limits = pulp::host::build_graph_runtime_plan(nodes, connections, limits);
+    auto invalid_limits = pulp::graph::build_graph_runtime_plan(nodes, connections, limits);
     REQUIRE_FALSE(invalid_limits.ok());
-    REQUIRE(invalid_limits.error.code == pulp::host::GraphRuntimePlanErrorCode::InvalidLimits);
+    REQUIRE(invalid_limits.error.code == pulp::graph::GraphRuntimePlanErrorCode::InvalidLimits);
 
     limits = {};
     limits.max_ports_per_node = 1;
     const std::array wide_nodes = {
         node(1, 0, 2),
     };
-    auto too_many_ports_per_node = pulp::host::build_graph_runtime_plan(wide_nodes, {}, limits);
+    auto too_many_ports_per_node = pulp::graph::build_graph_runtime_plan(wide_nodes, {}, limits);
     REQUIRE_FALSE(too_many_ports_per_node.ok());
     REQUIRE(too_many_ports_per_node.error.code ==
-            pulp::host::GraphRuntimePlanErrorCode::InvalidNodePortCount);
+            pulp::graph::GraphRuntimePlanErrorCode::InvalidNodePortCount);
 
     limits = {};
     limits.max_total_ports = 1;
-    auto too_many_total_ports = pulp::host::build_graph_runtime_plan(nodes, {}, limits);
+    auto too_many_total_ports = pulp::graph::build_graph_runtime_plan(nodes, {}, limits);
     REQUIRE_FALSE(too_many_total_ports.ok());
-    REQUIRE(too_many_total_ports.error.code == pulp::host::GraphRuntimePlanErrorCode::TooManyPorts);
+    REQUIRE(too_many_total_ports.error.code == pulp::graph::GraphRuntimePlanErrorCode::TooManyPorts);
 }
 
 TEST_CASE("GraphRuntimePlan validates connection endpoints and ports",
-          "[host][graph-runtime][plan]") {
+          "[graph][graph-runtime][plan]") {
     const std::array nodes = {
         node(1, 0, 1),
         node(2, 1, 0),
@@ -154,45 +154,45 @@ TEST_CASE("GraphRuntimePlan validates connection endpoints and ports",
     const std::array unknown_source = {
         connect(99, 0, 2, 0),
     };
-    auto source_result = pulp::host::build_graph_runtime_plan(nodes, unknown_source);
+    auto source_result = pulp::graph::build_graph_runtime_plan(nodes, unknown_source);
     REQUIRE_FALSE(source_result.ok());
-    REQUIRE(source_result.error.code == pulp::host::GraphRuntimePlanErrorCode::UnknownSourceNode);
+    REQUIRE(source_result.error.code == pulp::graph::GraphRuntimePlanErrorCode::UnknownSourceNode);
     REQUIRE(source_result.error.node_id == 99);
 
     const std::array unknown_dest = {
         connect(1, 0, 99, 0),
     };
-    auto dest_result = pulp::host::build_graph_runtime_plan(nodes, unknown_dest);
+    auto dest_result = pulp::graph::build_graph_runtime_plan(nodes, unknown_dest);
     REQUIRE_FALSE(dest_result.ok());
-    REQUIRE(dest_result.error.code == pulp::host::GraphRuntimePlanErrorCode::UnknownDestinationNode);
+    REQUIRE(dest_result.error.code == pulp::graph::GraphRuntimePlanErrorCode::UnknownDestinationNode);
     REQUIRE(dest_result.error.node_id == 99);
 
     const std::array bad_source_port = {
         connect(1, 1, 2, 0),
     };
-    auto source_port_result = pulp::host::build_graph_runtime_plan(nodes, bad_source_port);
+    auto source_port_result = pulp::graph::build_graph_runtime_plan(nodes, bad_source_port);
     REQUIRE_FALSE(source_port_result.ok());
-    REQUIRE(source_port_result.error.code == pulp::host::GraphRuntimePlanErrorCode::SourcePortOutOfRange);
+    REQUIRE(source_port_result.error.code == pulp::graph::GraphRuntimePlanErrorCode::SourcePortOutOfRange);
 
     const std::array bad_dest_port = {
         connect(1, 0, 2, 1),
     };
-    auto dest_port_result = pulp::host::build_graph_runtime_plan(nodes, bad_dest_port);
+    auto dest_port_result = pulp::graph::build_graph_runtime_plan(nodes, bad_dest_port);
     REQUIRE_FALSE(dest_port_result.ok());
-    REQUIRE(dest_port_result.error.code == pulp::host::GraphRuntimePlanErrorCode::DestinationPortOutOfRange);
+    REQUIRE(dest_port_result.error.code == pulp::graph::GraphRuntimePlanErrorCode::DestinationPortOutOfRange);
 }
 
 TEST_CASE("GraphRuntimePlan validates event connections separately from audio ports",
-          "[host][graph-runtime][plan][midi]") {
+          "[graph][graph-runtime][plan][midi]") {
     const std::array nodes = {
-        event_node(1, 0, 1, pulp::host::GraphRuntimeNodeKind::MidiInput),
-        event_node(2, 1, 0, pulp::host::GraphRuntimeNodeKind::MidiOutput),
+        event_node(1, 0, 1, pulp::graph::GraphRuntimeNodeKind::MidiInput),
+        event_node(2, 1, 0, pulp::graph::GraphRuntimeNodeKind::MidiOutput),
     };
     const std::array event_connections = {
         event_connect(1, 0, 2, 0),
     };
 
-    auto accepted = pulp::host::build_graph_runtime_plan(nodes, event_connections);
+    auto accepted = pulp::graph::build_graph_runtime_plan(nodes, event_connections);
     REQUIRE(accepted.ok());
     REQUIRE(accepted.plan.node_count() == 2);
     REQUIRE(accepted.plan.nodes[0].event_output_ports == 1);
@@ -204,22 +204,22 @@ TEST_CASE("GraphRuntimePlan validates event connections separately from audio po
     const std::array audio_connections = {
         connect(1, 0, 2, 0),
     };
-    auto audio_rejected = pulp::host::build_graph_runtime_plan(nodes, audio_connections);
+    auto audio_rejected = pulp::graph::build_graph_runtime_plan(nodes, audio_connections);
     REQUIRE_FALSE(audio_rejected.ok());
     REQUIRE(audio_rejected.error.code ==
-            pulp::host::GraphRuntimePlanErrorCode::SourcePortOutOfRange);
+            pulp::graph::GraphRuntimePlanErrorCode::SourcePortOutOfRange);
 
     const std::array bad_event_connections = {
         event_connect(1, 1, 2, 0),
     };
-    auto event_rejected = pulp::host::build_graph_runtime_plan(nodes, bad_event_connections);
+    auto event_rejected = pulp::graph::build_graph_runtime_plan(nodes, bad_event_connections);
     REQUIRE_FALSE(event_rejected.ok());
     REQUIRE(event_rejected.error.code ==
-            pulp::host::GraphRuntimePlanErrorCode::SourcePortOutOfRange);
+            pulp::graph::GraphRuntimePlanErrorCode::SourcePortOutOfRange);
 }
 
 TEST_CASE("GraphRuntimePlan rejects cycles unless an edge is explicit feedback",
-          "[host][graph-runtime][plan]") {
+          "[graph][graph-runtime][plan]") {
     const std::array nodes = {
         node(1, 1, 1),
         node(2, 1, 1),
@@ -229,15 +229,15 @@ TEST_CASE("GraphRuntimePlan rejects cycles unless an edge is explicit feedback",
         connect(2, 0, 1, 0),
     };
 
-    auto rejected = pulp::host::build_graph_runtime_plan(nodes, cycle);
+    auto rejected = pulp::graph::build_graph_runtime_plan(nodes, cycle);
     REQUIRE_FALSE(rejected.ok());
-    REQUIRE(rejected.error.code == pulp::host::GraphRuntimePlanErrorCode::CycleDetected);
+    REQUIRE(rejected.error.code == pulp::graph::GraphRuntimePlanErrorCode::CycleDetected);
 
     const std::array feedback_cycle = {
         connect(1, 0, 2, 0),
         connect(2, 0, 1, 0, true),
     };
-    auto accepted = pulp::host::build_graph_runtime_plan(nodes, feedback_cycle);
+    auto accepted = pulp::graph::build_graph_runtime_plan(nodes, feedback_cycle);
     REQUIRE(accepted.ok());
     REQUIRE(accepted.plan.connection_count() == 2);
     REQUIRE(accepted.plan.connections[1].feedback);
@@ -247,7 +247,7 @@ TEST_CASE("GraphRuntimePlan rejects cycles unless an edge is explicit feedback",
 }
 
 TEST_CASE("GraphRuntimePlan handles feedback self-loops explicitly",
-          "[host][graph-runtime][plan]") {
+          "[graph][graph-runtime][plan]") {
     const std::array nodes = {
         node(1, 1, 1),
     };
@@ -255,14 +255,14 @@ TEST_CASE("GraphRuntimePlan handles feedback self-loops explicitly",
     const std::array self_loop = {
         connect(1, 0, 1, 0),
     };
-    auto rejected = pulp::host::build_graph_runtime_plan(nodes, self_loop);
+    auto rejected = pulp::graph::build_graph_runtime_plan(nodes, self_loop);
     REQUIRE_FALSE(rejected.ok());
-    REQUIRE(rejected.error.code == pulp::host::GraphRuntimePlanErrorCode::CycleDetected);
+    REQUIRE(rejected.error.code == pulp::graph::GraphRuntimePlanErrorCode::CycleDetected);
 
     const std::array feedback_self_loop = {
         connect(1, 0, 1, 0, true),
     };
-    auto accepted = pulp::host::build_graph_runtime_plan(nodes, feedback_self_loop);
+    auto accepted = pulp::graph::build_graph_runtime_plan(nodes, feedback_self_loop);
     REQUIRE(accepted.ok());
     REQUIRE(accepted.plan.connection_count() == 1);
     REQUIRE(accepted.plan.connections[0].feedback);
@@ -275,8 +275,8 @@ TEST_CASE("GraphRuntimePlan handles feedback self-loops explicitly",
 }
 
 TEST_CASE("GraphRuntimePlan accepts empty graphs as valid no-op plans",
-          "[host][graph-runtime][plan]") {
-    auto result = pulp::host::build_graph_runtime_plan({}, {});
+          "[graph][graph-runtime][plan]") {
+    auto result = pulp::graph::build_graph_runtime_plan({}, {});
     REQUIRE(result.ok());
     REQUIRE(result.plan.node_count() == 0);
     REQUIRE(result.plan.connection_count() == 0);

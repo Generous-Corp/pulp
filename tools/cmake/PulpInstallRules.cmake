@@ -28,7 +28,7 @@ include(GNUInstallDirs)
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
-    pulp-audio pulp-midi pulp-signal pulp-format
+    pulp-audio pulp-midi pulp-signal pulp-graph pulp-format
     pulp-canvas pulp-view-core pulp-view-script pulp-view
     pulp-standalone pulp-dsl pulp-native-components
 )

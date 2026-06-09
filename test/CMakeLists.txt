@@ -2038,10 +2038,17 @@ pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 
 # Fixed-capacity graph command/event queues for runtime v2 handoff.
-pulp_add_test_suite(pulp-test-graph-runtime-queue LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-graph-runtime-queue LIBRARIES pulp::graph)
 
 # Dense graph runtime plan and bounded topology validation for runtime v2.
-pulp_add_test_suite(pulp-test-graph-runtime-plan LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-graph-runtime-plan LIBRARIES pulp::graph)
+
+if(TARGET pulp-host)
+    # Compatibility coverage for legacy host graph-runtime include paths.
+    pulp_add_test_suite(pulp-test-graph-runtime-host-compat
+        SOURCES test_graph_runtime_host_compat.cpp
+        LIBRARIES pulp::host)
+endif()
 
 # .pulpset render/replay harness (G4)
 pulp_add_test_suite(pulp-test-pulpset-replay SOURCES test_pulpset_replay.cpp LIBRARIES pulp::format)
