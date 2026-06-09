@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <utility>
@@ -63,6 +65,48 @@ struct ParsedBlob {
     std::span<const uint8_t> plugin_blob;
 };
 
+struct EnvelopeSizes {
+    uint32_t store_size = 0;
+    uint32_t plugin_size = 0;
+    std::size_t payload_size = 0;
+    std::size_t expected_size = 0;
+    std::size_t crc_offset = 0;
+};
+
+bool read_envelope_sizes(std::span<const uint8_t> bytes,
+                         EnvelopeSizes& sizes) noexcept {
+    if (bytes.size() < (kEnvelopeHeaderSize + kEnvelopeFooterSize)) {
+        return false;
+    }
+
+    sizes.store_size = choc::memory::readLittleEndian<uint32_t>(bytes.data() + 8);
+    sizes.plugin_size = choc::memory::readLittleEndian<uint32_t>(bytes.data() + 12);
+
+    const auto max_size = std::numeric_limits<std::size_t>::max();
+    const auto store_size = static_cast<std::size_t>(sizes.store_size);
+    const auto plugin_size = static_cast<std::size_t>(sizes.plugin_size);
+    if (plugin_size > max_size - store_size) {
+        return false;
+    }
+
+    sizes.payload_size = store_size + plugin_size;
+    const auto available_payload = bytes.size() - kEnvelopeHeaderSize - kEnvelopeFooterSize;
+    if (sizes.payload_size > available_payload) {
+        return false;
+    }
+
+    if (sizes.payload_size > max_size - kEnvelopeHeaderSize - kEnvelopeFooterSize) {
+        return false;
+    }
+    sizes.expected_size = kEnvelopeHeaderSize + sizes.payload_size + kEnvelopeFooterSize;
+    if (bytes.size() != sizes.expected_size) {
+        return false;
+    }
+
+    sizes.crc_offset = kEnvelopeHeaderSize + sizes.payload_size;
+    return true;
+}
+
 struct EnvelopeMigrationEntry {
     uint32_t from_version = 0;
     uint32_t to_version = 0;
@@ -74,13 +118,47 @@ std::vector<EnvelopeMigrationEntry>& envelope_migrations() {
     return migrations;
 }
 
-const EnvelopeMigrationEntry* find_envelope_migration(uint32_t from_version) {
+std::mutex& envelope_migrations_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::optional<EnvelopeMigrationEntry> find_envelope_migration(uint32_t from_version) {
+    std::lock_guard<std::mutex> lock(envelope_migrations_mutex());
     for (const auto& entry : envelope_migrations()) {
         if (entry.from_version == from_version) {
-            return &entry;
+            return entry;
         }
     }
-    return nullptr;
+    return std::nullopt;
+}
+
+std::optional<uint32_t> find_envelope_migration_target(uint32_t from_version) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(envelope_migrations_mutex());
+        for (const auto& entry : envelope_migrations()) {
+            if (entry.from_version == from_version) {
+                return entry.to_version;
+            }
+        }
+    } catch (...) {
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+bool envelope_migration_chain_available(uint32_t from_version) noexcept {
+    auto version = from_version;
+    while (version < kEnvelopeVersion) {
+        auto to_version = find_envelope_migration_target(version);
+        if (!to_version.has_value() ||
+            *to_version <= version ||
+            *to_version > kEnvelopeVersion) {
+            return false;
+        }
+        version = *to_version;
+    }
+    return version == kEnvelopeVersion;
 }
 
 std::optional<uint32_t> envelope_version(std::span<const uint8_t> bytes) {
@@ -92,32 +170,18 @@ std::optional<uint32_t> envelope_version(std::span<const uint8_t> bytes) {
 }
 
 bool has_valid_envelope_crc(std::span<const uint8_t> bytes) {
-    if (!has_magic(bytes, kEnvelopeMagic)
-        || bytes.size() < (kEnvelopeHeaderSize + kEnvelopeFooterSize)) {
+    if (!has_magic(bytes, kEnvelopeMagic)) {
         return false;
     }
 
-    const uint32_t store_size =
-        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 8);
-    const uint32_t plugin_size =
-        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 12);
-    const std::size_t payload_size =
-        static_cast<std::size_t>(store_size) + static_cast<std::size_t>(plugin_size);
-
-    if (payload_size > (bytes.size() - kEnvelopeHeaderSize - kEnvelopeFooterSize)) {
+    EnvelopeSizes sizes;
+    if (!read_envelope_sizes(bytes, sizes)) {
         return false;
     }
 
-    const std::size_t expected_size =
-        kEnvelopeHeaderSize + payload_size + kEnvelopeFooterSize;
-    if (bytes.size() != expected_size) {
-        return false;
-    }
-
-    const std::size_t crc_offset = kEnvelopeHeaderSize + payload_size;
     const uint32_t stored_crc =
-        choc::memory::readLittleEndian<uint32_t>(bytes.data() + crc_offset);
-    const uint32_t computed_crc = crc32_simple(bytes.data(), crc_offset);
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + sizes.crc_offset);
+    const uint32_t computed_crc = crc32_simple(bytes.data(), sizes.crc_offset);
     return stored_crc == computed_crc;
 }
 
@@ -137,8 +201,8 @@ bool migrate_envelope_to_current(std::span<const uint8_t> bytes,
 
     std::vector<uint8_t> current(bytes.begin(), bytes.end());
     while (*version != kEnvelopeVersion) {
-        const auto* migration = find_envelope_migration(*version);
-        if (migration == nullptr
+        auto migration = find_envelope_migration(*version);
+        if (!migration.has_value()
             || migration->to_version <= *version
             || migration->to_version > kEnvelopeVersion) {
             return false;
@@ -197,33 +261,21 @@ bool parse_blob(std::span<const uint8_t> bytes,
         return false;
     }
 
-    const uint32_t store_size =
-        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 8);
-    const uint32_t plugin_size =
-        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 12);
-    const std::size_t payload_size =
-        static_cast<std::size_t>(store_size) + static_cast<std::size_t>(plugin_size);
-
-    if (payload_size > (bytes.size() - kEnvelopeHeaderSize - kEnvelopeFooterSize)) {
+    EnvelopeSizes sizes;
+    if (!read_envelope_sizes(bytes, sizes)) {
         return false;
     }
 
-    const std::size_t expected_size =
-        kEnvelopeHeaderSize + payload_size + kEnvelopeFooterSize;
-    if (bytes.size() != expected_size) {
-        return false;
-    }
-
-    const std::size_t crc_offset = kEnvelopeHeaderSize + payload_size;
     const uint32_t stored_crc =
-        choc::memory::readLittleEndian<uint32_t>(bytes.data() + crc_offset);
-    const uint32_t computed_crc = crc32_simple(bytes.data(), crc_offset);
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + sizes.crc_offset);
+    const uint32_t computed_crc = crc32_simple(bytes.data(), sizes.crc_offset);
     if (stored_crc != computed_crc) {
         return false;
     }
 
-    parsed.store_blob = bytes.subspan(kEnvelopeHeaderSize, store_size);
-    parsed.plugin_blob = bytes.subspan(kEnvelopeHeaderSize + store_size, plugin_size);
+    parsed.store_blob = bytes.subspan(kEnvelopeHeaderSize, sizes.store_size);
+    parsed.plugin_blob = bytes.subspan(kEnvelopeHeaderSize + sizes.store_size,
+                                       sizes.plugin_size);
     return true;
 }
 
@@ -248,6 +300,116 @@ uint32_t current_envelope_version() {
     return kEnvelopeVersion;
 }
 
+const char* restore_diagnostic_status_name(RestoreDiagnosticStatus status) noexcept {
+    switch (status) {
+        case RestoreDiagnosticStatus::ok: return "ok";
+        case RestoreDiagnosticStatus::empty_blob: return "empty_blob";
+        case RestoreDiagnosticStatus::unknown_format: return "unknown_format";
+        case RestoreDiagnosticStatus::truncated_envelope: return "truncated_envelope";
+        case RestoreDiagnosticStatus::unsupported_envelope_version: return "unsupported_envelope_version";
+        case RestoreDiagnosticStatus::envelope_migration_unavailable: return "envelope_migration_unavailable";
+        case RestoreDiagnosticStatus::payload_size_mismatch: return "payload_size_mismatch";
+        case RestoreDiagnosticStatus::crc_mismatch: return "crc_mismatch";
+        case RestoreDiagnosticStatus::empty_store_payload: return "empty_store_payload";
+        case RestoreDiagnosticStatus::total_size_budget_exceeded: return "total_size_budget_exceeded";
+        case RestoreDiagnosticStatus::store_size_budget_exceeded: return "store_size_budget_exceeded";
+        case RestoreDiagnosticStatus::plugin_size_budget_exceeded: return "plugin_size_budget_exceeded";
+    }
+    return "unknown";
+}
+
+RestoreDiagnostics inspect_restore_blob(
+    std::span<const uint8_t> bytes,
+    const RestoreDiagnosticPolicy& policy) noexcept {
+    RestoreDiagnostics diagnostics;
+    diagnostics.total_bytes = static_cast<uint64_t>(bytes.size());
+    diagnostics.large_state = policy.large_state_threshold_bytes > 0 &&
+        diagnostics.total_bytes > policy.large_state_threshold_bytes;
+
+    if (bytes.empty()) {
+        diagnostics.status = RestoreDiagnosticStatus::empty_blob;
+        return diagnostics;
+    }
+    if (policy.max_total_bytes > 0 && diagnostics.total_bytes > policy.max_total_bytes) {
+        diagnostics.status = RestoreDiagnosticStatus::total_size_budget_exceeded;
+        return diagnostics;
+    }
+
+    auto apply_budget = [&]() noexcept {
+        if (policy.max_total_bytes > 0 && diagnostics.total_bytes > policy.max_total_bytes) {
+            diagnostics.status = RestoreDiagnosticStatus::total_size_budget_exceeded;
+            return;
+        }
+        if (policy.max_store_bytes > 0 && diagnostics.store_bytes > policy.max_store_bytes) {
+            diagnostics.status = RestoreDiagnosticStatus::store_size_budget_exceeded;
+            return;
+        }
+        if (policy.max_plugin_bytes > 0 && diagnostics.plugin_bytes > policy.max_plugin_bytes) {
+            diagnostics.status = RestoreDiagnosticStatus::plugin_size_budget_exceeded;
+            return;
+        }
+        diagnostics.status = RestoreDiagnosticStatus::ok;
+    };
+
+    if (has_magic(bytes, kStateStoreMagic)) {
+        diagnostics.format = RestoreBlobFormat::legacy_state_store;
+        diagnostics.store_bytes = diagnostics.total_bytes;
+        apply_budget();
+        return diagnostics;
+    }
+
+    if (!has_magic(bytes, kEnvelopeMagic)) {
+        diagnostics.status = RestoreDiagnosticStatus::unknown_format;
+        return diagnostics;
+    }
+
+    diagnostics.format = RestoreBlobFormat::envelope;
+    if (bytes.size() < (kEnvelopeHeaderSize + kEnvelopeFooterSize)) {
+        diagnostics.status = RestoreDiagnosticStatus::truncated_envelope;
+        return diagnostics;
+    }
+
+    diagnostics.envelope_version = choc::memory::readLittleEndian<uint32_t>(bytes.data() + 4);
+    diagnostics.requires_envelope_migration = diagnostics.envelope_version < kEnvelopeVersion;
+    if (diagnostics.envelope_version > kEnvelopeVersion) {
+        diagnostics.status = RestoreDiagnosticStatus::unsupported_envelope_version;
+        return diagnostics;
+    }
+
+    EnvelopeSizes sizes;
+    if (!read_envelope_sizes(bytes, sizes)) {
+        diagnostics.status = RestoreDiagnosticStatus::payload_size_mismatch;
+        return diagnostics;
+    }
+
+    diagnostics.store_bytes = sizes.store_size;
+    diagnostics.plugin_bytes = sizes.plugin_size;
+    diagnostics.requires_plugin_restore = sizes.plugin_size > 0;
+    diagnostics.may_require_resource_relink = sizes.plugin_size > 0;
+
+    const uint32_t stored_crc =
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + sizes.crc_offset);
+    const uint32_t computed_crc = crc32_simple(bytes.data(), sizes.crc_offset);
+    if (stored_crc != computed_crc) {
+        diagnostics.status = RestoreDiagnosticStatus::crc_mismatch;
+        return diagnostics;
+    }
+
+    if (diagnostics.store_bytes == 0) {
+        diagnostics.status = RestoreDiagnosticStatus::empty_store_payload;
+        return diagnostics;
+    }
+
+    if (diagnostics.requires_envelope_migration &&
+        !envelope_migration_chain_available(diagnostics.envelope_version)) {
+        diagnostics.status = RestoreDiagnosticStatus::envelope_migration_unavailable;
+        return diagnostics;
+    }
+
+    apply_budget();
+    return diagnostics;
+}
+
 bool register_envelope_migration(uint32_t from_version,
                                  uint32_t to_version,
                                  EnvelopeMigrationFn migration) {
@@ -256,8 +418,12 @@ bool register_envelope_migration(uint32_t from_version,
         || !migration) {
         return false;
     }
-    if (find_envelope_migration(from_version) != nullptr) {
-        return false;
+
+    std::lock_guard<std::mutex> lock(envelope_migrations_mutex());
+    for (const auto& entry : envelope_migrations()) {
+        if (entry.from_version == from_version) {
+            return false;
+        }
     }
 
     envelope_migrations().push_back({from_version, to_version, std::move(migration)});
@@ -270,6 +436,11 @@ std::vector<uint8_t> serialize(const state::StateStore& store,
     auto plugin_blob = processor.serialize_plugin_state();
     if (plugin_blob.empty()) {
         return store_blob;
+    }
+
+    const auto max_u32 = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max());
+    if (store_blob.size() > max_u32 || plugin_blob.size() > max_u32) {
+        return {};
     }
 
     std::vector<uint8_t> out;
