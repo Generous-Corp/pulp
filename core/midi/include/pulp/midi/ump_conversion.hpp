@@ -94,12 +94,20 @@ inline UmpPacket midi1_event_to_ump2(const MidiEvent& ev, uint8_t group = 0) {
         default:
             break;
     }
-    // Fall back to a MIDI 1.0 UMP (type 0x2) carrying the raw bytes.
+    // Fall back to a "raw bytes" UMP carrying the original status + data.
+    // System messages (status >= 0xF0: real-time clock/start/stop/active-
+    // sensing and system-common like MTC / song-position) are UMP Type 0x1
+    // (System Real Time and System Common). Everything else that reaches
+    // here (program change, channel pressure, …) is a MIDI 1.0 Channel
+    // Voice message and stays Type 0x2. Encoding system messages as Type
+    // 0x2 produced malformed UMP that transport/clock-sync consumers reject.
+    const uint8_t status_byte = ev.data()[0];
+    const uint32_t mt = (status_byte >= 0xF0) ? 0x1u : 0x2u;
     UmpPacket p;
     p.word_count = 1;
-    p.words[0] = (0x2u << 28)
+    p.words[0] = (mt << 28)
                | (uint32_t(group & 0x0F) << 24)
-               | (uint32_t(ev.data()[0]) << 16)
+               | (uint32_t(status_byte) << 16)
                | (uint32_t(ev.size() > 1 ? ev.data()[1] : 0) << 8)
                | uint32_t(ev.size() > 2 ? ev.data()[2] : 0);
     return p;
@@ -125,6 +133,19 @@ inline bool ump_to_midi1_event(const UmpPacket& p, MidiEvent& out) {
     if (mt == UmpMessageType::Midi1ChannelVoice) {
         // Byte 1 is status|channel (already in words[0] bits 16-23),
         // Byte 2 in bits 8-15, byte 3 in bits 0-7.
+        const uint8_t s = static_cast<uint8_t>((p.words[0] >> 16) & 0xFF);
+        const uint8_t d1 = static_cast<uint8_t>((p.words[0] >> 8) & 0xFF);
+        const uint8_t d2 = static_cast<uint8_t>(p.words[0] & 0xFF);
+        out = {choc::midi::ShortMessage(s, d1, d2), 0, 0.0};
+        return true;
+    }
+    if (mt == UmpMessageType::System) {
+        // System Real Time (clock 0xF8, start/continue/stop, active sensing)
+        // and System Common (MTC 0xF1, song position 0xF2, …). The UMP carries
+        // the status byte plus up to two data bytes in the same byte layout as
+        // a MIDI 1.0 Channel Voice UMP; ShortMessage derives the correct
+        // length from the status byte. Dropping these (as the prior
+        // channel-voice-only path did) silently loses clock/transport input.
         const uint8_t s = static_cast<uint8_t>((p.words[0] >> 16) & 0xFF);
         const uint8_t d1 = static_cast<uint8_t>((p.words[0] >> 8) & 0xFF);
         const uint8_t d2 = static_cast<uint8_t>(p.words[0] & 0xFF);

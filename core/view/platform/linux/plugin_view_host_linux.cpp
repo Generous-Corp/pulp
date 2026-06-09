@@ -431,7 +431,11 @@ private:
         int ox = 0, oy = 0;
         child_root_origin(ox, oy);
         Point local = xdnd::root_to_child_local(root_x, root_y, ox, oy);
-        return window_to_root_point(local);
+        // X11 reports physical pixels; window_to_root_point() expects logical
+        // coordinates, so divide by the HiDPI scale first (mirrors the Win
+        // host's ScreenToClient ÷ scale path). At scale 1.0 this is a no-op.
+        const float s = scale_ > 0.0f ? scale_ : 1.0f;
+        return window_to_root_point({local.x / s, local.y / s});
     }
 
     // Read the source's offered types. XdndEnter packs up to 3 types inline
