@@ -1870,6 +1870,7 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-rt-safety SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp LIBRARIES pulp::signal)
 
 # Signal filter tests (P5 test-split — extracted from test_signal.cpp).
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
