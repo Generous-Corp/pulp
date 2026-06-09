@@ -377,6 +377,7 @@ target_sources(pulp-view-core PRIVATE
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
     src/visualization_bridge.cpp
+    src/waveform_editor_primitives.cpp
     src/frame_clock.cpp
     src/motion.cpp
     src/motion_geometry.cpp

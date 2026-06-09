@@ -5,6 +5,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/waveform_editor_primitives.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <vector>
 #include <functional>
@@ -45,11 +46,21 @@ public:
 
     /// Set mono audio data to display.
     void set_audio_data(const float* data, int num_samples, float sample_rate) {
+        if (!data || num_samples <= 0) {
+            audio_data_.clear();
+            sample_rate_ = sample_rate;
+            total_samples_ = 0;
+            viewport_.set_total_samples(0);
+            clamp_editor_state_to_audio_bounds();
+            return;
+        }
+
         audio_data_.assign(data, data + num_samples);
         sample_rate_ = sample_rate;
         total_samples_ = num_samples;
-        visible_start_ = 0;
-        visible_length_ = num_samples;
+        viewport_.set_total_samples(num_samples);
+        viewport_.set_visible_range(0, num_samples);
+        clamp_editor_state_to_audio_bounds();
     }
 
     int total_samples() const { return total_samples_; }
@@ -58,15 +69,14 @@ public:
     // ── Selection ────────────────────────────────────────────────────────
 
     void set_selection(int start, int end) {
-        selection_start_ = std::clamp(start, 0, total_samples_);
-        selection_end_ = std::clamp(end, 0, total_samples_);
-        if (on_selection_changed) on_selection_changed(selection_start_, selection_end_);
+        set_selection_impl(start, end, true);
+        dragging_ = false;
     }
 
     void clear_selection() { set_selection(0, 0); }
     bool has_selection() const { return selection_start_ != selection_end_; }
-    int selection_start() const { return std::min(selection_start_, selection_end_); }
-    int selection_end() const { return std::max(selection_start_, selection_end_); }
+    int selection_start() const { return selection_start_; }
+    int selection_end() const { return selection_end_; }
     int selection_length() const { return selection_end() - selection_start(); }
 
     std::function<void(int start, int end)> on_selection_changed;
@@ -75,32 +85,21 @@ public:
 
     /// Set the visible range (in samples).
     void set_visible_range(int start, int length) {
-        visible_start_ = std::max(0, start);
-        visible_length_ = std::clamp(length, 16, total_samples_);
-        if (visible_start_ + visible_length_ > total_samples_)
-            visible_start_ = total_samples_ - visible_length_;
+        viewport_.set_total_samples(total_samples_);
+        viewport_.set_visible_range(start, length);
     }
 
-    int visible_start() const { return visible_start_; }
-    int visible_length() const { return visible_length_; }
+    int visible_start() const { return static_cast<int>(viewport_.visible_start); }
+    int visible_length() const { return static_cast<int>(viewport_.visible_length); }
 
     /// Zoom in by a factor (centered on the view midpoint).
-    void zoom_in(float factor = 2.0f) {
-        int new_len = std::max(16, static_cast<int>(static_cast<float>(visible_length_) / factor));
-        int center = visible_start_ + visible_length_ / 2;
-        set_visible_range(center - new_len / 2, new_len);
-    }
+    void zoom_in(float factor = 2.0f) { viewport_.zoom_in(factor); }
 
     /// Zoom out by a factor.
-    void zoom_out(float factor = 2.0f) {
-        int new_len = std::min(total_samples_,
-            static_cast<int>(static_cast<float>(visible_length_) * factor));
-        int center = visible_start_ + visible_length_ / 2;
-        set_visible_range(center - new_len / 2, new_len);
-    }
+    void zoom_out(float factor = 2.0f) { viewport_.zoom_out(factor); }
 
     /// Zoom to fit all audio data.
-    void zoom_to_fit() { set_visible_range(0, total_samples_); }
+    void zoom_to_fit() { viewport_.zoom_to_fit(); }
 
     /// Zoom to selection.
     void zoom_to_selection() {
@@ -108,9 +107,7 @@ public:
     }
 
     /// Scroll by a number of samples.
-    void scroll(int delta_samples) {
-        set_visible_range(visible_start_ + delta_samples, visible_length_);
-    }
+    void scroll(int delta_samples) { viewport_.scroll(delta_samples); }
 
     // ── Playhead ─────────────────────────────────────────────────────────
 
@@ -127,7 +124,8 @@ public:
 
     void paint(canvas::Canvas& canvas) override {
         auto b = local_bounds();
-        if (audio_data_.empty()) return;
+        if (audio_data_.empty() || b.is_empty()) return;
+        const auto viewport = viewport_for_bounds(b);
 
         // Background
         canvas.set_fill_color(resolve_color("waveform_bg",
@@ -159,10 +157,10 @@ public:
             canvas::Color::hex(0x4a9eff)));
         canvas.set_line_width(1);
 
-        float samples_per_pixel = static_cast<float>(visible_length_) / b.width;
+        float samples_per_pixel = static_cast<float>(viewport.samples_per_pixel());
         for (int px = 0; px < static_cast<int>(b.width); ++px) {
-            int s0 = visible_start_ + static_cast<int>(static_cast<float>(px) * samples_per_pixel);
-            int s1 = visible_start_ + static_cast<int>(static_cast<float>(px + 1) * samples_per_pixel);
+            int s0 = static_cast<int>(viewport.visible_start + static_cast<int64_t>(static_cast<float>(px) * samples_per_pixel));
+            int s1 = static_cast<int>(viewport.visible_start + static_cast<int64_t>(static_cast<float>(px + 1) * samples_per_pixel));
             s0 = std::clamp(s0, 0, total_samples_ - 1);
             s1 = std::clamp(s1, s0 + 1, total_samples_);
 
@@ -185,44 +183,43 @@ public:
         canvas.stroke_line(b.x, center_y, b.x + b.width, center_y);
 
         // Playhead
-        if (playhead_ >= visible_start_ && playhead_ < visible_start_ + visible_length_) {
-            float px = sample_to_x(playhead_, b);
+        const auto playhead = build_waveform_playhead_overlay(viewport, playhead_);
+        if (playhead.visible) {
             canvas.set_stroke_color(resolve_color("playhead",
                 canvas::Color::hex(0xff4444)));
             canvas.set_line_width(1.5f);
-            canvas.stroke_line(px, b.y, px, b.y + b.height);
+            canvas.stroke_line(playhead.x, b.y, playhead.x, b.y + b.height);
         }
     }
 
     // ── Events ───────────────────────────────────────────────────────────
 
     void on_mouse_event(const MouseEvent& event) override {
-        if (!event.is_down && !dragging_) return;
-        auto b = local_bounds();
+        if (event.is_cancelled) {
+            dragging_ = false;
+            return;
+        }
 
+        const bool explicit_phase = event.hasExplicitPhase();
+        const bool is_press = explicit_phase ? event.isPress() : (!dragging_ && event.is_down);
+        const bool is_drag = explicit_phase ? event.isDrag() : (dragging_ && !event.is_down);
+        const bool is_release = explicit_phase ? event.isRelease() : (dragging_ && event.is_down);
+
+        if (!is_press && !is_drag && !is_release) return;
+
+        auto b = local_bounds();
         int sample = x_to_sample(event.position.x, b);
 
-        if (event.is_down) {
-            if (event.isShiftDown() && has_selection()) {
-                // Extend selection
-                selection_end_ = sample;
-            } else {
-                selection_start_ = sample;
-                selection_end_ = sample;
-                dragging_ = true;
-            }
-        } else if (dragging_) {
-            // Mouse up — finalize selection
+        if (is_press) {
+            drag_anchor_ = (event.isShiftDown() && has_selection()) ? selection_start() : sample;
+            set_selection_impl(drag_anchor_, sample, true);
+            dragging_ = true;
+        } else if (is_drag && dragging_) {
+            set_selection_impl(drag_anchor_, sample, true);
+        } else if (is_release && dragging_) {
+            set_selection_impl(drag_anchor_, sample, true);
             dragging_ = false;
         }
-
-        // Drag — extend selection
-        if (dragging_ && !event.is_down) {
-            selection_end_ = sample;
-        }
-
-        if (on_selection_changed && has_selection())
-            on_selection_changed(selection_start(), selection_end());
     }
 
     bool on_key_event(const KeyEvent& event) override {
@@ -232,8 +229,8 @@ public:
             if (event.key == KeyCode::a) { set_selection(0, total_samples_); return true; }
         }
 
-        if (event.key == KeyCode::left) { scroll(-visible_length_ / 10); return true; }
-        if (event.key == KeyCode::right) { scroll(visible_length_ / 10); return true; }
+        if (event.key == KeyCode::left) { scroll(-visible_length() / 10); return true; }
+        if (event.key == KeyCode::right) { scroll(visible_length() / 10); return true; }
 
         // +/- for zoom
         if (event.key == KeyCode::num0 && event.isMainModifier()) { zoom_to_fit(); return true; }
@@ -245,22 +242,50 @@ private:
     std::vector<float> audio_data_;
     float sample_rate_ = 44100.0f;
     int total_samples_ = 0;
-    int visible_start_ = 0;
-    int visible_length_ = 0;
+    WaveformViewport viewport_;
     int selection_start_ = 0;
     int selection_end_ = 0;
     int playhead_ = 0;
+    int drag_anchor_ = 0;
     bool dragging_ = false;
     std::vector<WaveformRegion> regions_;
 
+    void set_selection_impl(int start, int end, bool notify) {
+        start = std::clamp(start, 0, total_samples_);
+        end = std::clamp(end, 0, total_samples_);
+        if (end < start) std::swap(start, end);
+
+        const bool changed = start != selection_start_ || end != selection_end_;
+        selection_start_ = start;
+        selection_end_ = end;
+        if (notify && changed && on_selection_changed) {
+            on_selection_changed(selection_start_, selection_end_);
+        }
+    }
+
+    void clamp_editor_state_to_audio_bounds() {
+        set_selection_impl(selection_start_, selection_end_, false);
+        playhead_ = std::clamp(playhead_, 0, total_samples_);
+        drag_anchor_ = std::clamp(drag_anchor_, 0, total_samples_);
+        dragging_ = false;
+        for (auto& region : regions_) {
+            region.start_sample = std::clamp(region.start_sample, 0, total_samples_);
+            region.end_sample = std::clamp(region.end_sample, 0, total_samples_);
+        }
+    }
+
+    WaveformViewport viewport_for_bounds(const Rect& b) const {
+        auto viewport = viewport_;
+        viewport.set_bounds(b);
+        return viewport;
+    }
+
     float sample_to_x(int sample, const Rect& b) const {
-        float frac = static_cast<float>(sample - visible_start_) / static_cast<float>(visible_length_);
-        return b.x + frac * b.width;
+        return viewport_for_bounds(b).sample_to_x(sample);
     }
 
     int x_to_sample(float x, const Rect& b) const {
-        float frac = (x - b.x) / b.width;
-        return visible_start_ + static_cast<int>(frac * static_cast<float>(visible_length_));
+        return static_cast<int>(viewport_for_bounds(b).x_to_sample(x));
     }
 };
 
