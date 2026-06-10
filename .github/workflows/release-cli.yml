@@ -233,21 +233,41 @@ jobs:
       # Pulp's documented JS engine policy (CLAUDE.md) is QuickJS on
       # Linux, so the CLI must not link JSC-GTK at all. Issue #720.
       #
-      # Ensure the Rust toolchain is on PATH before configure. GitHub-hosted
-      # runners ship cargo on PATH; self-hosted runners (the bare-metal Studio
-      # Macs) have it at ~/.cargo/bin but a non-interactive job shell never
-      # sources the profile that adds it. Without cargo on PATH at CONFIGURE
-      # time, CMake's find_program(cargo) fails, the Rust `pulp` target is
-      # never wired up, and `build/pulp` (the user-facing CLI) silently never
-      # builds — it only surfaced downstream as
+      # Ensure a WORKING Rust toolchain is on PATH before configure. The
+      # user-facing `pulp` binary is the Rust CLI (experimental/pulp-rs);
+      # CMake only wires that target up when find_program(cargo) succeeds at
+      # CONFIGURE time, and the pulp-rs CMakeLists fail-SOFTs (STATUS, not
+      # FATAL) when cargo is missing — so a broken toolchain silently drops
+      # build/pulp and only surfaces far downstream as
       # `package_cli.py: FAIL: binary not at build/pulp`.
-      - name: Ensure Rust toolchain on PATH
+      #
+      # Failure modes seen on self-hosted Macs (2026-06-10, v0.400.0):
+      #   - cargo not on the non-interactive job PATH (lives at ~/.cargo/bin);
+      #   - a BROKEN rustup install — ~/.cargo/bin/rustup proxy missing, so the
+      #     cargo/rustc shims are dangling symlinks and won't execute even
+      #     though ~/.rustup/toolchains/<tc>/bin/cargo is a perfectly good
+      #     binary.
+      # GitHub-hosted runners already ship a working cargo on PATH, so this
+      # step is a fast no-op there. Self-heal by finding a cargo that actually
+      # RUNS (PATH → ~/.cargo/bin → the toolchain's own bin, which bypasses a
+      # broken proxy) and prepending its dir to GITHUB_PATH. Fail LOUD if none
+      # works, so a runner without Rust never silently ships a CLI-less tarball.
+      - name: Ensure a working Rust toolchain on PATH
         if: runner.os != 'Windows'
         run: |
-          if [ -d "$HOME/.cargo/bin" ]; then
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            echo "Added $HOME/.cargo/bin to PATH for cargo discovery"
+          runs() { "$1/cargo" --version >/dev/null 2>&1; }
+          use() { echo "$1" >> "$GITHUB_PATH"; echo "rust: using cargo at $1 ($("$1/cargo" --version))"; }
+          if command -v cargo >/dev/null 2>&1 && cargo --version >/dev/null 2>&1; then
+            echo "rust: cargo already works on PATH ($(cargo --version))"; exit 0
           fi
+          if runs "$HOME/.cargo/bin"; then use "$HOME/.cargo/bin"; exit 0; fi
+          # Broken rustup proxy / dangling shim — fall back to a toolchain's
+          # direct bin (a real cargo binary, no proxy needed).
+          for tc in "$HOME"/.rustup/toolchains/*/bin; do
+            if runs "$tc"; then use "$tc"; exit 0; fi
+          done
+          echo "::error::No working cargo found (broken rustup? run 'rustup default stable' on this runner). release-cli needs Rust to build the user-facing build/pulp CLI — refusing to ship a CLI-less tarball." >&2
+          exit 1
         shell: bash
 
       # Build the CLI binary WITHOUT WebView; the SDK build below
