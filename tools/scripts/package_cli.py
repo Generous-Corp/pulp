@@ -186,7 +186,14 @@ def fix_rpath_macos(binary: Path) -> None:
     # Linux-hosted darwin cross-build can point at the llvm/cctools
     # equivalent; skip with a clear note when no codesign tool is available.
     codesign = os.environ.get("CODESIGN", "codesign")
-    if shutil.which(codesign) or os.path.isabs(codesign):
+    # shutil.which() resolves both a bare command on PATH AND an absolute path
+    # (returning None if that absolute path doesn't exist or isn't executable),
+    # so it is the complete guard. A prior `or os.path.isabs(codesign)` made a
+    # NON-EXISTENT absolute CODESIGN look usable, then `subprocess.run(...,
+    # check=False)` raised an uncaught FileNotFoundError (check=False suppresses
+    # only non-zero exits, not a missing executable) — crashing the packager
+    # instead of taking the intended skip-with-note path.
+    if shutil.which(codesign):
         print("  re-signing (ad-hoc) after rpath rewrite", flush=True)
         subprocess.run(
             [codesign, "--force", "--sign", "-", str(binary)],

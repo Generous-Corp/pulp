@@ -17,6 +17,18 @@ name: Coverage staleness check
 # issue. It does NOT inspect Codecov directly (no API token needed); a green
 # main coverage run is the proxy for "the dashboard got fresh C++ data."
 #
+# PROXY LIMITATION (deliberate): coverage.yml's per-OS Codecov upload steps run
+# `if: always()` with `fail_ci_if_error: false`, and the matrix is
+# `fail-fast: false`, so a run can conclude SUCCESS while one OS leg's upload
+# silently failed. This watchdog therefore catches the failure mode that
+# actually bit us — runs never COMPLETING on main (superseded/cancelled, the
+# 2026-05/06 incident) — but NOT a completed-but-upload-dropped run. Detecting
+# the latter would require querying Codecov's API for per-flag freshness (a
+# token + scope we intentionally avoid here); a dropped upload also self-heals
+# on the next 8h scheduled refresh. If false-green ever becomes a real problem,
+# the right fix is a separate Codecov-API freshness probe, not flipping
+# fail_ci_if_error (which would make coverage red on transient Codecov outages).
+#
 # Closes automatically on the next sweep once a fresh success exists.
 
 on:
