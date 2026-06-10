@@ -39,6 +39,24 @@ def desktop_action_success_lines(action: str, target_name: str, manifest: dict) 
     return lines
 
 
+def desktop_config_show_lines(desktop_config: dict) -> list[str]:
+    return [
+        "Desktop automation config:",
+        f"  artifact_root: {desktop_config['artifact_root']}",
+        f"  publish_mode: {desktop_config['publish_mode']}",
+        f"  publish_branch: {desktop_config['publish_branch']}",
+        f"  retention_days: {desktop_config['retention_days']}",
+        "  target optional keys: target.<name>.(webview_driver|webdriver_url|debug_attach|debugger_command|video_capture|frame_stats)",
+    ]
+
+
+def desktop_config_update_lines(payload: dict) -> list[str]:
+    return [
+        f"Desktop automation config updated: {payload['key']} = {payload['value']}",
+        f"  config: {payload['config_path']}",
+    ]
+
+
 def desktop_recent_lines(run_summaries: list[dict], *, short_sha_fn) -> list[str]:
     lines = ["Desktop automation recent runs:"]
     for run_summary in run_summaries:
@@ -74,6 +92,26 @@ def desktop_recent_lines(run_summaries: list[dict], *, short_sha_fn) -> list[str
         ui_snapshot = artifacts.get("ui_snapshot")
         if ui_snapshot:
             lines.append(f"    ui_snapshot: {ui_snapshot}")
+    return lines
+
+
+def desktop_publish_lines(report: dict) -> list[str]:
+    return [
+        "Desktop publish report ready:",
+        f"  runs: {report['run_count']}",
+        f"  output_dir: {report['output_dir']}",
+        f"  index_html: {report['index_html']}",
+        f"  index_json: {report['index_json']}",
+    ]
+
+
+def desktop_cleanup_empty_line() -> str:
+    return "Desktop cleanup: nothing to remove."
+
+
+def desktop_cleanup_lines(paths: list) -> list[str]:
+    lines = [f"Desktop cleanup removed {len(paths)} bundle(s)."]
+    lines.extend(f"  {path}" for path in paths[:10])
     return lines
 
 
