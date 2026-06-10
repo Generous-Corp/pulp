@@ -118,4 +118,3 @@ GraphRuntimePlanResult build_graph_runtime_plan(
     GraphRuntimeLimits limits = {});
 
 } // namespace pulp::graph
-

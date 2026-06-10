@@ -65,4 +65,3 @@ SamplerLooperMetricsSnapshot collect_sampler_looper_metrics(
     const SliceMap* slices = nullptr) noexcept;
 
 }  // namespace pulp::audio
-

@@ -271,4 +271,3 @@ private:
 };
 
 } // namespace pulp::graph
-

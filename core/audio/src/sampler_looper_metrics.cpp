@@ -79,4 +79,3 @@ SamplerLooperMetricsSnapshot collect_sampler_looper_metrics(
 }
 
 }  // namespace pulp::audio
-

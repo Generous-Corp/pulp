@@ -83,4 +83,3 @@ SampleKeySliceResolution SampleKeyMap::resolve_slice_for_note(
 }
 
 }  // namespace pulp::audio
-

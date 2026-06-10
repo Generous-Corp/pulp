@@ -280,4 +280,3 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
 }
 
 #endif  // PULP_TEST_HAS_X11
-

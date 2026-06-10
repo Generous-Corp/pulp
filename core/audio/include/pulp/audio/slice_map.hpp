@@ -38,4 +38,3 @@ struct SliceMap {
 bool validate_slice_map(const SliceMap& map) noexcept;
 
 }  // namespace pulp::audio
-

@@ -31,4 +31,3 @@ LoopValidationResult validate_loop_region(const LoopRegion& region,
 }
 
 }  // namespace pulp::audio
-

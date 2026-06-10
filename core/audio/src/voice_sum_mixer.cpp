@@ -123,4 +123,3 @@ VoiceSumResult VoiceSumMixer::mix(std::span<const VoiceSumInput> inputs,
 }
 
 }  // namespace pulp::audio
-

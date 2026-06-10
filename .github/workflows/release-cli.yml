@@ -38,7 +38,7 @@ env:
   # same output as the hook that writes CHANGELOG.md. Must track
   # tools/shipyard.toml to avoid split behavior between local flows
   # and release-time jobs (Codex P1 on PR #719).
-  SHIPYARD_VERSION: "0.59.0"
+  SHIPYARD_VERSION: "0.68.0"
 
 jobs:
   # Resolve the macOS runner for the darwin-arm64 matrix legs.
