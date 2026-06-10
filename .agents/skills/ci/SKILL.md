@@ -1785,6 +1785,11 @@ preflight, source-prep, cleanup, and artifact-publishing contracts.
   writable-artifact checks, WebDriver status probing, and doctor-check
   assembly. Keep CLI output formatting, desktop action execution, artifact
   persistence, and launch-adapter orchestration outside this module.
+- `desktop_actions.py` — owns pure desktop action helper policy:
+  coordinate parsing, view-tree click selection, screen-point mapping,
+  default labels, and view-tree counts. Keep target execution, artifact
+  persistence, report rollups, and OS-specific launch/probe helpers out of
+  this module.
 
 All original symbols are re-exported from `local_ci.py`, so any old
 `mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
