@@ -1,8 +1,9 @@
 """Validation command execution helpers for local CI.
 
 This module owns subprocess output capture, progress marker parsing, heartbeat
-updates, and optional command log writing. Higher-level target validation and
-result assembly stay in local_ci.py until later execution slices.
+updates, optional command log writing, and target-neutral command result
+assembly. Higher-level target validation stays in local_ci.py until later
+execution slices.
 """
 
 from __future__ import annotations
@@ -59,6 +60,53 @@ def prepared_state_root(target_name: str, validation: str) -> Path:
 
 def should_reuse_prepared_state(job: dict) -> bool:
     return len(job.get("targets", [])) == 1
+
+
+def validation_result_from_run(
+    target_name: str,
+    run: dict,
+    *,
+    log_path: Path,
+    validation: str,
+    transport_mode: str,
+    timeout_secs: int = 3600,
+) -> dict:
+    if run["timed_out"]:
+        return {
+            "target": target_name,
+            "status": "timeout",
+            "exit_code": -1,
+            "duration_secs": run["duration_secs"],
+            "stdout_tail": "",
+            "stderr_tail": f"Validation timed out after {timeout_secs}s",
+            "log_file": str(log_path),
+            "transport_mode": transport_mode,
+        }
+
+    tail = run["output"][-2000:] if run["output"] else ""
+    if validation == "smoke":
+        if "__PULP_VALIDATION__:smoke" not in run["output"] or "__PULP_TEST_POLICY__:skip" not in run["output"]:
+            failed = True
+            tail = (
+                "Smoke validation contract violated: expected validation=smoke and test_policy=skip markers.\n"
+                + tail
+            )[-2000:]
+        else:
+            failed = run["returncode"] != 0
+    else:
+        failed = run["returncode"] != 0
+
+    return {
+        "target": target_name,
+        "status": "pass" if not failed else "fail",
+        "exit_code": run["returncode"],
+        "duration_secs": run["duration_secs"],
+        "stdout_tail": "" if failed else tail,
+        "stderr_tail": tail if failed else "",
+        "log_file": str(log_path),
+        "validation": validation,
+        "transport_mode": transport_mode,
+    }
 
 
 def run_logged_command(

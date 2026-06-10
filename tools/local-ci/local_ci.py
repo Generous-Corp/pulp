@@ -3123,6 +3123,25 @@ def should_reuse_prepared_state(job: dict) -> bool:
     return _execution.should_reuse_prepared_state(job)
 
 
+def validation_result_from_run(
+    target_name: str,
+    run: dict,
+    *,
+    log_path: Path,
+    validation: str,
+    transport_mode: str,
+    timeout_secs: int = 3600,
+) -> dict:
+    return _execution.validation_result_from_run(
+        target_name,
+        run,
+        log_path=log_path,
+        validation=validation,
+        transport_mode=transport_mode,
+        timeout_secs=timeout_secs,
+    )
+
+
 def run_logged_command(
     cmd: list[str],
     *,
@@ -3182,40 +3201,13 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
         cmd += ["--exclude-regex", exclude_tests]
 
     run = run_logged_command(cmd, cwd=ROOT, timeout=3600, log_path=log_path, report_progress=report_progress)
-    if run["timed_out"]:
-        return {
-            "target": "mac",
-            "status": "timeout",
-            "exit_code": -1,
-            "duration_secs": run["duration_secs"],
-            "stdout_tail": "",
-            "stderr_tail": "Validation timed out after 3600s",
-            "log_file": str(log_path),
-            "transport_mode": "local",
-        }
-    tail = run["output"][-2000:] if run["output"] else ""
-    if validation == "smoke":
-        if "__PULP_VALIDATION__:smoke" not in run["output"] or "__PULP_TEST_POLICY__:skip" not in run["output"]:
-            failed = True
-            tail = (
-                "Smoke validation contract violated: expected validation=smoke and test_policy=skip markers.\n"
-                + tail
-            )[-2000:]
-        else:
-            failed = run["returncode"] != 0
-    else:
-        failed = run["returncode"] != 0
-    return {
-        "target": "mac",
-        "status": "pass" if not failed else "fail",
-        "exit_code": run["returncode"],
-        "duration_secs": run["duration_secs"],
-        "stdout_tail": "" if failed else tail,
-        "stderr_tail": tail if failed else "",
-        "log_file": str(log_path),
-        "validation": validation,
-        "transport_mode": "local",
-    }
+    return validation_result_from_run(
+        "mac",
+        run,
+        log_path=log_path,
+        validation=validation,
+        transport_mode="local",
+    )
 
 
 def run_posix_ssh_validation(
@@ -3311,40 +3303,13 @@ def run_posix_ssh_validation(
     cmd = ["ssh", host, "bash", "-lc", shlex.quote(remote_cmd)]
 
     run = run_logged_command(cmd, timeout=3600, log_path=log_path, report_progress=report_progress)
-    if run["timed_out"]:
-        return {
-            "target": target_name,
-            "status": "timeout",
-            "exit_code": -1,
-            "duration_secs": run["duration_secs"],
-            "stdout_tail": "",
-            "stderr_tail": "Validation timed out after 3600s",
-            "log_file": str(log_path),
-            "transport_mode": "bundle",
-        }
-    tail = run["output"][-2000:] if run["output"] else ""
-    if validation == "smoke":
-        if "__PULP_VALIDATION__:smoke" not in run["output"] or "__PULP_TEST_POLICY__:skip" not in run["output"]:
-            failed = True
-            tail = (
-                "Smoke validation contract violated: expected validation=smoke and test_policy=skip markers.\n"
-                + tail
-            )[-2000:]
-        else:
-            failed = run["returncode"] != 0
-    else:
-        failed = run["returncode"] != 0
-    return {
-        "target": target_name,
-        "status": "pass" if not failed else "fail",
-        "exit_code": run["returncode"],
-        "duration_secs": run["duration_secs"],
-        "stdout_tail": "" if failed else tail,
-        "stderr_tail": tail if failed else "",
-        "log_file": str(log_path),
-        "validation": validation,
-        "transport_mode": "bundle",
-    }
+    return validation_result_from_run(
+        target_name,
+        run,
+        log_path=log_path,
+        validation=validation,
+        transport_mode="bundle",
+    )
 
 
 def ps_literal(value: str) -> str:
@@ -3914,41 +3879,14 @@ target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
         log_path=log_path,
         report_progress=report_progress,
     )
-    if run["timed_out"]:
-        return {
-            "target": target_name,
-            "status": "timeout",
-            "exit_code": -1,
-            "duration_secs": run["duration_secs"],
-            "stdout_tail": "",
-            "stderr_tail": "Validation timed out after 3600s",
-            "log_file": str(log_path),
-            "transport_mode": "bundle",
-        }
-    tail = run["output"][-2000:] if run["output"] else ""
     validation = job.get("validation", "full")
-    if validation == "smoke":
-        if "__PULP_VALIDATION__:smoke" not in run["output"] or "__PULP_TEST_POLICY__:skip" not in run["output"]:
-            failed = True
-            tail = (
-                "Smoke validation contract violated: expected validation=smoke and test_policy=skip markers.\n"
-                + tail
-            )[-2000:]
-        else:
-            failed = run["returncode"] != 0
-    else:
-        failed = run["returncode"] != 0
-    return {
-        "target": target_name,
-        "status": "pass" if not failed else "fail",
-        "exit_code": run["returncode"],
-        "duration_secs": run["duration_secs"],
-        "stdout_tail": "" if failed else tail,
-        "stderr_tail": tail if failed else "",
-        "log_file": str(log_path),
-        "validation": validation,
-        "transport_mode": "bundle",
-    }
+    return validation_result_from_run(
+        target_name,
+        run,
+        log_path=log_path,
+        validation=validation,
+        transport_mode="bundle",
+    )
 
 
 # ── Job Processing ───────────────────────────────────────────────────────────

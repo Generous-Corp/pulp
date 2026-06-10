@@ -62,6 +62,65 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(self.mod.should_reuse_prepared_state({"targets": ["mac"]}))
         self.assertFalse(self.mod.should_reuse_prepared_state({"targets": ["mac", "ubuntu"]}))
 
+    def test_validation_result_from_run_reports_timeout(self) -> None:
+        result = self.mod.validation_result_from_run(
+            "mac",
+            {"timed_out": True, "duration_secs": 3600.0},
+            log_path=Path("mac.log"),
+            validation="full",
+            transport_mode="local",
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "target": "mac",
+                "status": "timeout",
+                "exit_code": -1,
+                "duration_secs": 3600.0,
+                "stdout_tail": "",
+                "stderr_tail": "Validation timed out after 3600s",
+                "log_file": "mac.log",
+                "transport_mode": "local",
+            },
+        )
+
+    def test_validation_result_from_run_splits_pass_and_fail_tails(self) -> None:
+        passed = self.mod.validation_result_from_run(
+            "ubuntu",
+            {"timed_out": False, "returncode": 0, "output": "ok\n", "duration_secs": 1.2},
+            log_path=Path("ubuntu.log"),
+            validation="full",
+            transport_mode="bundle",
+        )
+        failed = self.mod.validation_result_from_run(
+            "ubuntu",
+            {"timed_out": False, "returncode": 7, "output": "boom\n", "duration_secs": 1.3},
+            log_path=Path("ubuntu.log"),
+            validation="full",
+            transport_mode="bundle",
+        )
+
+        self.assertEqual(passed["status"], "pass")
+        self.assertEqual(passed["stdout_tail"], "ok\n")
+        self.assertEqual(passed["stderr_tail"], "")
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual(failed["stdout_tail"], "")
+        self.assertEqual(failed["stderr_tail"], "boom\n")
+
+    def test_validation_result_from_run_enforces_smoke_contract(self) -> None:
+        result = self.mod.validation_result_from_run(
+            "windows",
+            {"timed_out": False, "returncode": 0, "output": "ok\n", "duration_secs": 1.2},
+            log_path=Path("windows.log"),
+            validation="smoke",
+            transport_mode="bundle",
+        )
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("Smoke validation contract violated", result["stderr_tail"])
+        self.assertEqual(result["stdout_tail"], "")
+
     def test_run_logged_command_starts_reader_before_writing_input(self) -> None:
         read_started = threading.Event()
         read_finished = threading.Event()
