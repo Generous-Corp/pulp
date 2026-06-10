@@ -448,7 +448,12 @@ if(TARGET mbedcrypto)
     target_compile_definitions(pulp-cpp-httplib INTERFACE CPPHTTPLIB_MBEDTLS_SUPPORT)
     target_include_directories(pulp-cpp-httplib INTERFACE ${mbedtls_SOURCE_DIR}/include)
     target_link_libraries(pulp-cpp-httplib INTERFACE mbedcrypto mbedx509 mbedtls)
-    if(APPLE)
+    if(PULP_IOS)
+        # cpp-httplib's Apple automatic root-certificate bridge uses macOS-only
+        # Security APIs that are not declared by the iPhone simulator SDK.
+        target_compile_definitions(pulp-cpp-httplib INTERFACE
+            CPPHTTPLIB_DISABLE_MACOSX_AUTOMATIC_ROOT_CERTIFICATES)
+    elseif(APPLE)
         # httplib's mbedTLS path loads system trust anchors from the macOS
         # keychain via the Security framework. Carried here (not on individual
         # consumers) so every TU that compiles the SSL-enabled header also
