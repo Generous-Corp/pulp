@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/events/event_loop.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/state/binding.hpp>
 #include <pulp/state/state.hpp>
 #include <pulp/state/state_migration.hpp>
@@ -335,6 +336,46 @@ TEST_CASE("ParamCursor ramps from the current interpolated value when events ove
     cursor.advance_to(8);
     REQUIRE_FALSE(cursor.is_ramping(1));
     REQUIRE_THAT(cursor.value(1), WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("ParamCursor ramp interpolation stays inside the no-allocation contract",
+          "[state][params][cursor][ramp][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.5f}));
+    store.set_value(1, 0.5f);
+
+    ParameterEventQueue events;
+    REQUIRE(events.push(ParameterEvent{.param_id = 1,
+                                       .sample_offset = 0,
+                                       .value = 1.0f,
+                                       .ramp_duration_sample_frames = 4}));
+    REQUIRE(events.push(ParameterEvent{.param_id = 1,
+                                       .sample_offset = 4,
+                                       .value = 0.0f,
+                                       .ramp_duration_sample_frames = 4}));
+    events.sort();
+
+    std::array<float, 5> sampled{};
+    {
+        pulp::runtime::ScopedNoAlloc guard;
+        ParamCursor cursor(store, &events);
+        cursor.advance_to(0);
+        sampled[0] = cursor.value(1);
+        sampled[1] = cursor.value_at(1, 2);
+        cursor.advance_to(2);
+        sampled[2] = cursor.value(1);
+        cursor.advance_to(6);
+        sampled[3] = cursor.value(1);
+        cursor.advance_to(8);
+        sampled[4] = cursor.value(1);
+    }
+
+    REQUIRE_THAT(sampled[0], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(sampled[1], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(sampled[2], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(sampled[3], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(sampled[4], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.5f, 1e-6f));
 }
 
 TEST_CASE("ParamCursor clamps ramp targets and treats non-positive durations as immediate",
