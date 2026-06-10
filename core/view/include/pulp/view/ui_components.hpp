@@ -10,6 +10,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 
@@ -220,6 +221,9 @@ public:
     void set_active_tab(int index);
     int active_tab() const { return active_; }
     int tab_count() const { return static_cast<int>(tabs_.size()); }
+    std::string_view tab_title(int index) const;
+    int find_tab(std::string_view title) const;
+    bool set_active_tab(std::string_view title);
 
     /// Hide the tab bar and use the panel purely as a navigable card stack (the active
     /// tab is shown; switch with set_active_tab()). Useful when an outer container should

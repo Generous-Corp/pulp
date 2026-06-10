@@ -12,6 +12,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::format {
@@ -49,6 +50,18 @@ public:
 
     /// Number of tabs currently in the panel (Audio + MIDI + any added sections).
     [[nodiscard]] int tab_count() const;
+    [[nodiscard]] int active_tab() const {
+        return tab_panel_ ? tab_panel_->active_tab() : -1;
+    }
+
+    /// Select a host or plugin-contributed tab. Title lookup is exact and returns false
+    /// when the tab is absent, so plugin UIs can deep-link to optional sections safely.
+    void set_active_tab(int index) {
+        if (tab_panel_) tab_panel_->set_active_tab(index);
+    }
+    bool set_active_tab(std::string_view title) {
+        return tab_panel_ ? tab_panel_->set_active_tab(title) : false;
+    }
 
     /// Call periodically (~30 Hz) from idle/timer to refresh meters and hotplug.
     void poll();

@@ -82,6 +82,18 @@ TEST_CASE("add_section appends plugin tabs after Audio/MIDI", "[format][settings
     REQUIRE(panel.tab_count() == 4);
 }
 
+TEST_CASE("SettingsPanel can select a plugin tab by title", "[format][settings]") {
+    SettingsPanel panel;
+    panel.add_section("Models", label("models"));
+    panel.add_section("License", label("license"));
+
+    REQUIRE(panel.active_tab() == 0);
+    REQUIRE(panel.set_active_tab("Models"));
+    REQUIRE(panel.active_tab() == 2);
+    REQUIRE_FALSE(panel.set_active_tab("Missing"));
+    REQUIRE(panel.active_tab() == 2);
+}
+
 TEST_CASE("add_section ignores a null view", "[format][settings]") {
     SettingsPanel panel;
     const int before = panel.tab_count();

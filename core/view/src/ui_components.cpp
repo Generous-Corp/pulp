@@ -499,6 +499,25 @@ void TabPanel::set_active_tab(int index) {
     if (on_tab_change) on_tab_change(index);
 }
 
+std::string_view TabPanel::tab_title(int index) const {
+    if (index < 0 || index >= static_cast<int>(tabs_.size())) return {};
+    return tabs_[static_cast<size_t>(index)].title;
+}
+
+int TabPanel::find_tab(std::string_view title) const {
+    for (int i = 0; i < static_cast<int>(tabs_.size()); ++i) {
+        if (tabs_[static_cast<size_t>(i)].title == title) return i;
+    }
+    return -1;
+}
+
+bool TabPanel::set_active_tab(std::string_view title) {
+    const int index = find_tab(title);
+    if (index < 0) return false;
+    set_active_tab(index);
+    return true;
+}
+
 void TabPanel::paint(canvas::Canvas& canvas) {
     if (!show_tab_bar_) return;  // card-stack mode: no tab bar, content fills the panel
     auto b = local_bounds();
