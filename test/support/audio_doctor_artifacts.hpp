@@ -1,0 +1,49 @@
+#pragma once
+
+/// @file audio_doctor_artifacts.hpp
+/// JSON curve artifacts for the offline Audio Doctor (harness Phase 7,
+/// slice 1).
+///
+/// The Doctor's response/THD curves are its reviewable outputs: a human, CI,
+/// or future AI tool can read a stable JSON document instead of re-running the
+/// analysis. Each artifact carries a `schema_version`, the analyzer name, the
+/// Analyzer Determinism Contract fields (window, length, stimulus, sample
+/// rate — so a reader can reproduce or judge the measurement), and the curve
+/// points. Serialized via choc::value + choc::json (CHOC-first policy),
+/// matching the audio_artifacts.cpp style.
+///
+/// Layering: this is part of the Doctor (top layer) — it includes
+/// audio_doctor.hpp and must not be included by anything below scenarios.
+
+#include "audio_doctor.hpp"
+
+#include <filesystem>
+#include <string>
+#include <string_view>
+
+namespace pulp::test::audio {
+
+/// Current Doctor-curve schema version. Bump when a field changes meaning or
+/// is removed; purely additive fields do not require a bump.
+inline constexpr std::int64_t kDoctorCurveSchemaVersion = 1;
+
+/// Serialize a magnitude/response curve to a JSON string. `scenario` is
+/// recorded verbatim as provenance.
+std::string response_curve_to_json(const ResponseCurve& curve,
+                                   std::string_view scenario);
+
+/// Serialize a THD result to a JSON string (including the harmonic breakdown).
+std::string thd_to_json(const ThdResult& thd, std::string_view scenario);
+
+/// Write `response_curve_to_json` to
+/// `<temp>/pulp-audio-doctor/<sanitized-scenario>.response.json` and return
+/// the path (overwriting any previous run's artifact for the same scenario).
+std::filesystem::path write_response_artifact(const ResponseCurve& curve,
+                                              std::string_view scenario);
+
+/// Write `thd_to_json` to
+/// `<temp>/pulp-audio-doctor/<sanitized-scenario>.thd.json` and return path.
+std::filesystem::path write_thd_artifact(const ThdResult& thd,
+                                         std::string_view scenario);
+
+} // namespace pulp::test::audio
