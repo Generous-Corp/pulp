@@ -1366,6 +1366,34 @@ def gh_pr_list_open() -> list[dict]:
     return json.loads(result.stdout)
 
 
+def no_open_prs_line() -> str:
+    return "No open PRs."
+
+
+def open_prs_header_line(count: int) -> str:
+    return f"Open PRs ({count}):"
+
+
+def open_pr_list_entry_lines(pr: dict) -> list[str]:
+    author = pr.get("author", {}).get("login", "?")
+    labels = ", ".join(label.get("name", "") for label in pr.get("labels", []))
+    label_str = f" [{labels}]" if labels else ""
+    return [
+        f"  #{pr['number']:4d}  {pr['title']}",
+        f"         {pr['headRefName']} by {author}{label_str}",
+    ]
+
+
+def open_pr_list_lines(prs: list[dict]) -> list[str]:
+    if not prs:
+        return [no_open_prs_line()]
+
+    lines = [open_prs_header_line(len(prs)), ""]
+    for pr in prs:
+        lines.extend(open_pr_list_entry_lines(pr))
+    return lines
+
+
 def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
     if pr_ref == "latest":
         prs = gh_pr_list_open()
@@ -2020,5 +2048,4 @@ def cmd_cloud_status(args: argparse.Namespace) -> int:
             detail = f" duration={job_duration}" if job_duration else ""
             print(f"    {job.get('name', '?')}: {status}{suffix}{detail}")
     return 0
-
 

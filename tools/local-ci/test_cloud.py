@@ -212,6 +212,29 @@ class CloudCliHelperTests(unittest.TestCase):
         ):
             self.assertIsNone(self.mod.gh_run_view("danielraffel/pulp", 2))
 
+    def test_open_pr_list_lines_match_cli_display(self):
+        self.assertEqual(self.mod.open_pr_list_lines([]), ["No open PRs."])
+
+        prs = [
+            {
+                "number": 7,
+                "title": "Refactor local CI",
+                "headRefName": "feature/local-ci",
+                "author": {"login": "dev"},
+                "labels": [{"name": "ci"}, {"name": "refactor"}],
+            }
+        ]
+
+        self.assertEqual(
+            self.mod.open_pr_list_lines(prs),
+            [
+                "Open PRs (1):",
+                "",
+                "  #   7  Refactor local CI",
+                "         feature/local-ci by dev [ci, refactor]",
+            ],
+        )
+
     def test_cloud_record_storage_and_refresh_edges(self):
         with tempfile.TemporaryDirectory() as tmp:
             cloud_dir = Path(tmp)

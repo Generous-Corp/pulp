@@ -498,6 +498,7 @@ from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2
     summarize_namespace_usage,
     summarize_runner_selector,
     update_cloud_record_from_run,
+    open_pr_list_lines,
 )
 
 
@@ -4675,17 +4676,8 @@ def cmd_list(_args: argparse.Namespace) -> int:
         return 1
 
     prs = gh_pr_list_open()
-    if not prs:
-        print("No open PRs.")
-        return 0
-
-    print(f"Open PRs ({len(prs)}):\n")
-    for pr in prs:
-        author = pr.get("author", {}).get("login", "?")
-        labels = ", ".join(label.get("name", "") for label in pr.get("labels", []))
-        label_str = f" [{labels}]" if labels else ""
-        print(f"  #{pr['number']:4d}  {pr['title']}")
-        print(f"         {pr['headRefName']} by {author}{label_str}")
+    for line in open_pr_list_lines(prs):
+        print(line)
     return 0
 
 

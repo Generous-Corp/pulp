@@ -16,7 +16,7 @@ and the matching contract tests in the same change.
 | `job_queue.py` | Queue entry normalization and unlocked queue load/save. | Lock acquisition, stale-running reconciliation, supersedence side effects. |
 | `targets.py` | Enabled-target discovery, `--targets` parsing, and configured target resolution. | Transport-specific preflight, SSH probes, fallback routing. |
 | `github_workflows.py` | Pure GitHub Actions workflow/default/provider resolution. | `gh` subprocess calls, workflow dispatch, or polling. |
-| `cloud.py` | GitHub/Namespace cloud-run records, cost/history helpers, dispatch wrappers, and formatting. | Local/SSH validation execution. |
+| `cloud.py` | GitHub/Namespace cloud-run records, cost/history helpers, dispatch wrappers, PR-list line fragments, and formatting. | Local/SSH validation execution. |
 | `footprint.py` | Local-CI state-size accounting, cleanup entry descriptions, and state-footprint line fragments. | Cleanup candidate selection or deletion. |
 | `evidence_index.py` | Result-to-evidence normalization, latest passing target evidence, evidence index persistence, evidence summaries, and evidence-command line fragments. | Queue mutation, runner state, result creation, or target execution. |
 | `ssh_bundle.py` | Git bundle naming, local bundle creation, and SSH upload/progress/probe mechanics. | Target validation execution or queue orchestration. |
