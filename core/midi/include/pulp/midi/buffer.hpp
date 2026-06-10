@@ -58,8 +58,10 @@ public:
         sysex_.reserve(sysex_capacity);
     }
 
-    /// When enabled, add()/add_sysex() drop once reserved capacity is full
-    /// instead of growing vectors. Intended for adapter-owned realtime buffers.
+    /// When enabled, add() and move-based add_sysex() drop once reserved
+    /// capacity is full instead of growing vectors. add_sysex_copy() always
+    /// drops in this mode because copying host-owned payload bytes would
+    /// allocate on the realtime path. Intended for adapter-owned buffers.
     void set_realtime_capacity_limit(bool enabled = true) {
         limit_to_reserved_capacity_ = enabled;
     }
@@ -138,6 +140,10 @@ public:
                         std::size_t size,
                         int32_t sample_offset = 0,
                         double ts = 0.0) {
+        if (limit_to_reserved_capacity_) {
+            record_sysex_drop();
+            return false;
+        }
         if (!can_append_sysex()) {
             record_sysex_drop();
             return false;

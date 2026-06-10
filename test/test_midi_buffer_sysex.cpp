@@ -56,6 +56,19 @@ TEST_CASE("realtime capacity limit drops MIDI and sysex without growing",
     REQUIRE(buf.dropped_sysex_count() == 0);
 }
 
+TEST_CASE("realtime capacity limit drops copy-based sysex without allocating",
+          "[midi][buffer][sysex][realtime]") {
+    MidiBuffer buf;
+    buf.reserve(1, 1);
+    buf.set_realtime_capacity_limit(true);
+
+    const uint8_t payload[] = {0xF0, 0x7D, 0x01, 0xF7};
+    REQUIRE_FALSE(buf.add_sysex_copy(payload, sizeof(payload), 12, 0.25));
+    REQUIRE(buf.sysex_size() == 0);
+    REQUIRE(buf.sysex_capacity() == 1);
+    REQUIRE(buf.dropped_sysex_count() == 1);
+}
+
 TEST_CASE("clear_sysex removes sidecar events but leaves short messages alone",
           "[midi][buffer][sysex]") {
     MidiBuffer buf;

@@ -16,6 +16,7 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::midi {
@@ -49,12 +50,35 @@ class MpeBuffer {
 public:
     MpeBuffer() { events_.reserve(kInitialCapacity); }
 
-    void add(const MpeExpressionEvent& e) { events_.push_back(e); }
-    void add(MpeExpressionEvent&& e) { events_.push_back(std::move(e)); }
+    bool add(const MpeExpressionEvent& e) {
+        if (!can_append()) {
+            record_drop();
+            return false;
+        }
+        events_.push_back(e);
+        return true;
+    }
+    bool add(MpeExpressionEvent&& e) {
+        if (!can_append()) {
+            record_drop();
+            return false;
+        }
+        events_.push_back(std::move(e));
+        return true;
+    }
 
-    void clear() { events_.clear(); }
+    void clear() {
+        events_.clear();
+        dropped_events_ = 0;
+    }
     bool empty() const { return events_.empty(); }
     std::size_t size() const { return events_.size(); }
+    std::size_t capacity() const { return events_.capacity(); }
+    std::uint32_t dropped_event_count() const { return dropped_events_; }
+    void reserve(std::size_t capacity) { events_.reserve(capacity); }
+    void set_realtime_capacity_limit(bool enabled = true) {
+        limit_to_reserved_capacity_ = enabled;
+    }
 
     void sort() {
         std::sort(events_.begin(), events_.end(),
@@ -71,8 +95,19 @@ public:
     const MpeExpressionEvent& operator[](std::size_t i) const { return events_[i]; }
 
 private:
+    bool can_append() const {
+        return !limit_to_reserved_capacity_ || events_.size() < events_.capacity();
+    }
+    void record_drop() {
+        if (dropped_events_ < std::numeric_limits<std::uint32_t>::max()) {
+            ++dropped_events_;
+        }
+    }
+
     static constexpr std::size_t kInitialCapacity = 128;
     std::vector<MpeExpressionEvent> events_;
+    bool limit_to_reserved_capacity_ = false;
+    std::uint32_t dropped_events_ = 0;
 };
 
 /// Convenience: install tracker callbacks that forward events to `out` with

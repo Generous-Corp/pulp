@@ -107,8 +107,10 @@ private:
     std::thread read_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> defer_first_dispatch_until_callback_{false};
+    std::shared_ptr<std::atomic<bool>> first_dispatch_gate_;
     mutable std::mutex callback_mutex_;
 
+    void release_first_dispatch_gate();
     void start_read_thread();
     void read_loop();
 };

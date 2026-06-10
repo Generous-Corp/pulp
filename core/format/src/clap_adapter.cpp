@@ -124,6 +124,10 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->midi_out.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity);
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
+    self->mpe_buffer.reserve(kRealtimeMidiEventCapacity);
+    self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
+    self->mpe_buffer.set_realtime_capacity_limit(true);
+    self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
 
     auto desc = self->processor->descriptor();
@@ -445,8 +449,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     0.0};
                 midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
-                // Workstream 01 — route CLAP sysex into MidiBuffer's
-                // variable-length sidecar (issue #239).
+                // CLAP gives us a host-owned payload pointer. The current
+                // realtime-limited MidiBuffer drops copy-based SysEx rather
+                // than allocating payload storage on the process path.
                 const auto ev = load_event<clap_event_midi_sysex_t>(hdr);
                 if (ev.buffer && ev.size > 0) {
                     midi_in.add_sysex_copy(

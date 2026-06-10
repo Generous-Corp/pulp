@@ -126,14 +126,32 @@ void InterprocessConnection::set_on_disconnected(std::function<void()> callback)
 
 void InterprocessConnection::set_on_message(
     std::function<void(const void*, size_t)> callback) {
-    std::lock_guard lock(callback_mutex_);
-    on_message = std::move(callback);
+    bool has_first_frame_handler = false;
+    {
+        std::lock_guard lock(callback_mutex_);
+        on_message = std::move(callback);
+        has_first_frame_handler = static_cast<bool>(on_message) ||
+                                  static_cast<bool>(on_text_message);
+    }
+    if (has_first_frame_handler) release_first_dispatch_gate();
 }
 
 void InterprocessConnection::set_on_text_message(
     std::function<void(std::string_view)> callback) {
-    std::lock_guard lock(callback_mutex_);
-    on_text_message = std::move(callback);
+    bool has_first_frame_handler = false;
+    {
+        std::lock_guard lock(callback_mutex_);
+        on_text_message = std::move(callback);
+        has_first_frame_handler = static_cast<bool>(on_message) ||
+                                  static_cast<bool>(on_text_message);
+    }
+    if (has_first_frame_handler) release_first_dispatch_gate();
+}
+
+void InterprocessConnection::release_first_dispatch_gate() {
+    if (auto gate = first_dispatch_gate_) {
+        gate->store(true, std::memory_order_release);
+    }
 }
 
 bool InterprocessConnection::connect(std::string_view name, IpcTransport transport) {
@@ -346,16 +364,17 @@ void InterprocessConnection::read_loop() {
         std::function<void(std::string_view)> text_callback;
         const bool wait_for_first_callback =
             defer_first_dispatch_until_callback_.exchange(false);
-        const int attempts = wait_for_first_callback ? 100 : 1;
-        for (int attempt = 0; attempt < attempts; ++attempt) {
-            {
-                std::lock_guard lock(callback_mutex_);
-                message_callback = on_message;
-                text_callback = on_text_message;
+        if (wait_for_first_callback) {
+            auto gate = first_dispatch_gate_;
+            while (running_.load() && gate &&
+                   !gate->load(std::memory_order_acquire)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            if (message_callback || text_callback || attempt + 1 == attempts)
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        {
+            std::lock_guard lock(callback_mutex_);
+            message_callback = on_message;
+            text_callback = on_text_message;
         }
 
         // Dispatch message
@@ -411,11 +430,13 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 }
 
                 auto conn = std::make_unique<InterprocessConnection>();
+                auto first_dispatch_gate = std::make_shared<std::atomic<bool>>(false);
                 // Inject the accepted socket via friend access
                 conn->impl_->transport = IpcTransport::Socket;
                 conn->impl_->socket = std::move(*client_sock);
                 conn->state_.store(IpcState::Connected);
                 conn->defer_first_dispatch_until_callback_.store(true);
+                conn->first_dispatch_gate_ = first_dispatch_gate;
                 conn->connection_made();
                 std::function<void()> connected_callback;
                 {
@@ -428,16 +449,18 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 // then hand off. This avoids use-after-free if the
                 // callback destroys the connection immediately.
                 // The read thread uses atomics so it can start before
-                // handlers are set. Its first dispatch waits briefly for
-                // the accepted callback to install handlers, preserving
-                // an eager client's first frame without handing out a
-                // connection whose lifetime we no longer control.
+                // handlers are set. Its first dispatch waits for the
+                // accepted callback to finish installing handlers, preserving
+                // an eager client's first frame without relying on a fixed
+                // timeout or handing out a connection whose lifetime we no
+                // longer control.
                 conn->start_read_thread();
 
                 if (on_client_connected)
                     on_client_connected(std::move(conn));
                 else
                     client_connected(std::move(conn));
+                first_dispatch_gate->store(true, std::memory_order_release);
             }
         }
     });
