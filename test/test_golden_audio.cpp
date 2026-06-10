@@ -10,6 +10,12 @@
 // Golden-file style tests for PulpGain audio processing
 // These verify the complete audio pipeline produces correct output
 // for known inputs and parameter settings.
+//
+// Signal generation and RMS/peak measurement use the shared harness
+// helpers (test/support/) — harness PR 1B conversion.
+
+#include "support/audio_metrics.hpp"
+#include "support/audio_test_signals.hpp"
 
 #include "pulp_gain.hpp"
 #include "pulp_tone.hpp"
@@ -19,29 +25,9 @@
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
-
-// Helper: generate a sine wave buffer
-static pulp::audio::Buffer<float> make_sine(int channels, int samples,
-                                             float freq = 440.0f,
-                                             double sample_rate = 48000.0) {
-    pulp::audio::Buffer<float> buf(channels, samples);
-    for (int ch = 0; ch < channels; ++ch) {
-        for (int i = 0; i < samples; ++i) {
-            buf.channel(ch)[i] = std::sin(2.0f * std::numbers::pi_v<float> * freq * i / sample_rate);
-        }
-    }
-    return buf;
-}
-
-// Helper: compute RMS of a buffer channel
-static float rms(const pulp::audio::Buffer<float>& buf, int ch) {
-    float sum = 0.0f;
-    auto span = buf.channel(ch);
-    for (std::size_t i = 0; i < buf.num_samples(); ++i) {
-        sum += span[i] * span[i];
-    }
-    return std::sqrt(sum / static_cast<float>(buf.num_samples()));
-}
+using pulp::test::audio::analyze;
+using pulp::test::audio::make_sine;
+using pulp::test::audio::summarize;
 
 // Helper: process through headless host
 static void process_headless(pulp::format::HeadlessHost& host,
@@ -78,10 +64,10 @@ TEST_CASE("Golden: PulpGain +6dB doubles amplitude", "[golden][pulpgain]") {
     process_headless(host, in, out);
 
     float gain_linear = std::pow(10.0f, 6.0f / 20.0f); // ≈ 1.995
-    float in_rms = rms(in, 0);
-    float out_rms = rms(out, 0);
+    const double in_rms = analyze(in, 48000.0).channels[0].rms;
+    const double out_rms = analyze(out, 48000.0).channels[0].rms;
 
-    REQUIRE_THAT(static_cast<double>(out_rms / in_rms),
+    REQUIRE_THAT(out_rms / in_rms,
                  WithinRel(static_cast<double>(gain_linear), 0.01));
 }
 
@@ -95,9 +81,9 @@ TEST_CASE("Golden: PulpGain -inf dB silences signal", "[golden][pulpgain]") {
     pulp::audio::Buffer<float> out(2, 1024);
     process_headless(host, in, out);
 
-    float out_rms = rms(out, 0);
+    const double out_rms = analyze(out, 48000.0).channels[0].rms;
     // -120 dB combined = essentially silent
-    REQUIRE(out_rms < 0.001f);
+    REQUIRE(out_rms < 0.001);
 }
 
 TEST_CASE("Golden: PulpGain bypass passes through unmodified", "[golden][pulpgain]") {
@@ -131,14 +117,16 @@ TEST_CASE("Golden: PulpGain stereo channels are independent", "[golden][pulpgain
     process_headless(host, in, out);
 
     // At unity gain, channels should match input independently
-    float rms_in_L = rms(in, 0), rms_in_R = rms(in, 1);
-    float rms_out_L = rms(out, 0), rms_out_R = rms(out, 1);
+    const auto in_m = analyze(in, 48000.0);
+    const auto out_m = analyze(out, 48000.0);
+    const double rms_in_L = in_m.channels[0].rms, rms_in_R = in_m.channels[1].rms;
+    const double rms_out_L = out_m.channels[0].rms, rms_out_R = out_m.channels[1].rms;
 
-    REQUIRE_THAT(static_cast<double>(rms_out_L), WithinRel(static_cast<double>(rms_in_L), 0.001));
-    REQUIRE_THAT(static_cast<double>(rms_out_R), WithinRel(static_cast<double>(rms_in_R), 0.001));
+    REQUIRE_THAT(rms_out_L, WithinRel(rms_in_L, 0.001));
+    REQUIRE_THAT(rms_out_R, WithinRel(rms_in_R, 0.001));
 
     // Channels should not be identical (different frequencies)
-    REQUIRE(std::abs(rms_in_L - rms_in_R) < 0.1f); // Both are ~0.707 RMS
+    REQUIRE(std::abs(rms_in_L - rms_in_R) < 0.1); // Both are ~0.707 RMS
     // But samples differ
     REQUIRE(std::abs(out.channel(0)[10] - out.channel(1)[10]) > 0.01f);
 }
@@ -190,11 +178,9 @@ TEST_CASE("Golden: PulpTone produces sound with MIDI note", "[golden][pulptone]"
     host.process(out_view, in_view, midi_in, midi_out);
 
     // Should produce non-zero output when a note is playing
-    float max_sample = 0.0f;
-    for (std::size_t i = 0; i < 1024; ++i) {
-        max_sample = std::max(max_sample, std::abs(out.channel(0)[i]));
-    }
-    REQUIRE(max_sample > 0.01f); // audible output
+    const auto m = analyze(out, 48000.0);
+    INFO(summarize(m));
+    REQUIRE(m.channels[0].peak > 0.01); // audible output
 }
 
 TEST_CASE("Golden: PulpTone is silent without MIDI", "[golden][pulptone]") {
@@ -212,9 +198,7 @@ TEST_CASE("Golden: PulpTone is silent without MIDI", "[golden][pulptone]") {
     host.process(out_view, in_view, midi_in, midi_out);
 
     // No notes playing: output should be silence
-    float max_sample = 0.0f;
-    for (std::size_t i = 0; i < 1024; ++i) {
-        max_sample = std::max(max_sample, std::abs(out.channel(0)[i]));
-    }
-    REQUIRE(max_sample < 0.001f);
+    const auto m = analyze(out, 48000.0);
+    INFO(summarize(m));
+    REQUIRE(m.channels[0].peak < 0.001);
 }

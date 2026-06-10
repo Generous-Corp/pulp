@@ -105,14 +105,7 @@ BufferMetrics analyze(const pulp::audio::BufferView<const float>& buffer,
 BufferMetrics analyze(const pulp::audio::Buffer<float>& buffer,
                       double sample_rate,
                       const AnalyzeOptions& options) {
-    // Buffer has no const view(); build one. Offline-only code, so the
-    // temporary pointer vector is acceptable.
-    std::vector<const float*> ptrs(buffer.num_channels());
-    for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch)
-        ptrs[ch] = buffer.channel(ch).data();
-    pulp::audio::BufferView<const float> view(
-        ptrs.data(), buffer.num_channels(), buffer.num_samples());
-    return analyze(view, sample_rate, options);
+    return analyze(ConstBufferView(buffer), sample_rate, options);
 }
 
 FrequencyEstimate estimate_frequency(std::span<const float> samples,

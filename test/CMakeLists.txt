@@ -5634,34 +5634,38 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 
+# Harness support lib (test/support/audio_*): compiled once, targets link it.
+add_library(pulp-audio-test-support STATIC support/audio_metrics.cpp support/audio_assertions.cpp support/audio_artifacts.cpp)
+target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain + PulpTone)
 add_executable(pulp-test-golden test_golden_audio.cpp)
-target_link_libraries(pulp-test-golden PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
-target_include_directories(pulp-test-golden PRIVATE
-    ${CMAKE_SOURCE_DIR}/examples/pulp-gain
-    ${CMAKE_SOURCE_DIR}/examples/pulp-tone
-)
+target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-golden)
 
-# Audio observability harness PR 1A: offline metrics/assertions/summary
-# helpers (test/support/audio_*) + tests for the helpers themselves.
-add_executable(pulp-test-audio-support test_audio_support.cpp support/audio_metrics.cpp support/audio_assertions.cpp)
-target_link_libraries(pulp-test-audio-support PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+# Tone-render regression (harness PR 1B): PulpTone at 48 kHz across host block
+# sizes via the shared helpers; failures write a JSON metrics artifact.
+add_executable(pulp-test-audio-tone-regression test_audio_tone_regression.cpp)
+target_link_libraries(pulp-test-audio-tone-regression PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-tone-regression PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
+catch_discover_tests(pulp-test-audio-tone-regression)
+
+# Harness helper self-tests (PR 1A)
+add_executable(pulp-test-audio-support test_audio_support.cpp)
+target_link_libraries(pulp-test-audio-support PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-support PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
 catch_discover_tests(pulp-test-audio-support)
 
-# Audio determinism matrix (#48 / #356): SR × block-size sweep
-# asserting framework-layer invariants (unity pass-through, silence,
-# block-size invariance, re-prepare cleanliness) across the examples
-# that are known SR/block-independent today.
+# Audio determinism matrix (#48 / #356): SR × block-size sweep asserting
+# framework invariants (pass-through, silence, block invariance, re-prepare).
 add_executable(pulp-test-audio-matrix test_audio_determinism_matrix.cpp)
 target_link_libraries(pulp-test-audio-matrix PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-matrix)
 
-# Audio edge-case corpus (#49 / #356): zero-length blocks, denormals,
-# impulse position, DC extremes, param change between blocks,
-# re-prepare idempotency. Framework-layer contract only.
+# Audio edge-case corpus (#49 / #356): zero blocks, denormals, impulse pos,
+# DC extremes, mid-block param change, re-prepare. Framework contract only.
 add_executable(pulp-test-audio-edge-cases test_audio_edge_cases.cpp)
 target_link_libraries(pulp-test-audio-edge-cases PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-edge-cases PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
@@ -5669,17 +5673,14 @@ catch_discover_tests(pulp-test-audio-edge-cases)
 
 # Golden-file tests for PulpEffect (separate to avoid enum collision with PulpGain)
 add_executable(pulp-test-golden-effect test_golden_effect.cpp)
-target_link_libraries(pulp-test-golden-effect PRIVATE pulp::format Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-golden-effect PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden-effect PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-golden-effect)
 
 # Negative-path tests (NaN, Inf, extreme sample rates, edge cases)
 add_executable(pulp-test-negative-path test_negative_path.cpp)
 target_link_libraries(pulp-test-negative-path PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories(pulp-test-negative-path PRIVATE
-    ${CMAKE_SOURCE_DIR}/examples/pulp-gain
-    ${CMAKE_SOURCE_DIR}/examples/pulp-tone
-)
+target_include_directories(pulp-test-negative-path PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-negative-path)
 
 # iOS foundation tests (platform detection, safe area geometry, touch events,

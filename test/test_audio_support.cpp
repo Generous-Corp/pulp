@@ -20,6 +20,7 @@
 
 #include "support/audio_assertions.hpp"
 #include "support/audio_metrics.hpp"
+#include "support/audio_test_signals.hpp"
 
 #include <pulp/format/headless.hpp>
 
@@ -32,25 +33,6 @@
 using namespace pulp::test::audio;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
-
-namespace {
-
-pulp::audio::Buffer<float> make_sine(int channels, int samples, float freq,
-                                     double sample_rate,
-                                     float amplitude = 1.0f) {
-    pulp::audio::Buffer<float> buf(channels, samples);
-    for (int ch = 0; ch < channels; ++ch) {
-        for (int i = 0; i < samples; ++i) {
-            buf.channel(ch)[i] = amplitude *
-                std::sin(2.0f * std::numbers::pi_v<float> * freq *
-                         static_cast<float>(i) /
-                         static_cast<float>(sample_rate));
-        }
-    }
-    return buf;
-}
-
-} // namespace
 
 // ── metrics: levels ─────────────────────────────────────────────────────
 
