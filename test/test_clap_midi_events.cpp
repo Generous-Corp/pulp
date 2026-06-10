@@ -45,6 +45,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 using namespace pulp;
@@ -213,6 +214,9 @@ public:
     }
     void prepare(const PrepareContext& context) override {
         captured_prepare = context;
+        captured_midi.reserve(64, 16);
+        captured_ump.reserve(64);
+        captured_param_events.reserve(64);
         ++prepare_count;
     }
     void release() override { ++release_count; }
@@ -243,9 +247,13 @@ public:
             }
         }
         captured_midi.clear();
+        captured_midi.clear_sysex();
         for (const auto& ev : midi_in) captured_midi.add(ev);
-        for (const auto& se : midi_in.sysex()) {
-            captured_midi.add_sysex(se.data, se.sample_offset, se.timestamp);
+        for (auto& se : midi_in.sysex()) {
+            // This test processor runs behind the CLAP adapter's no-alloc
+            // process guard; steal the adapter-owned sysex payload rather
+            // than allocating a copy while capturing assertions.
+            captured_midi.add_sysex(std::move(se.data), se.sample_offset, se.timestamp);
         }
         had_mpe_input = (mpe_input() != nullptr);
         had_ump_input = (ump_input() != nullptr);
@@ -288,8 +296,8 @@ public:
                  midi::MidiBuffer& midi_out,
                  const ProcessContext&) override {
         for (const auto& ev : to_emit) midi_out.add(ev);
-        for (const auto& se : sysex_to_emit) {
-            midi_out.add_sysex(se.data, se.sample_offset, se.timestamp);
+        for (auto& se : sysex_to_emit) {
+            midi_out.add_sysex(std::move(se.data), se.sample_offset, se.timestamp);
         }
     }
 };

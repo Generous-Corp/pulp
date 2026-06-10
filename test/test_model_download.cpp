@@ -460,5 +460,6 @@ TEST_CASE("model store: install_model rejects a bundle whose assets collide on f
     REQUIRE_FALSE(inst.ok);
     REQUIRE(inst.error.find("same file") != std::string::npos);
 
-    fs::remove_all(root);
+    std::error_code cleanup_error;
+    fs::remove_all(root, cleanup_error);
 }

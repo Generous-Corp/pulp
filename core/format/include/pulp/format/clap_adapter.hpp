@@ -68,6 +68,11 @@ struct PulpClapPlugin {
     std::vector<float> param_snapshot;
     state::ParameterEventQueue param_events;
 
+    // Reused per-block MIDI buffers. Reserved during activate() so processors
+    // can append outbound MIDI while the process no-allocation guard is active.
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+
     // MPE sidecar — populated from midi_in before each process() call when
     // the Processor declares MPE in its effective PluginDescriptor capabilities.
     midi::MpeVoiceTracker mpe_tracker;

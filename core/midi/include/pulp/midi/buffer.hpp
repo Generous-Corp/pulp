@@ -38,6 +38,12 @@ public:
     bool empty() const { return events_.empty(); }
     std::size_t size() const { return events_.size(); }
 
+    /// Preallocate storage for realtime callers that append during process().
+    void reserve(std::size_t event_capacity, std::size_t sysex_capacity = 0) {
+        events_.reserve(event_capacity);
+        sysex_.reserve(sysex_capacity);
+    }
+
     /// Sort events by sample_offset for sample-accurate processing.
     /// Call this before iterating in the audio callback. Sorting is
     /// in-place over the existing event storage; realtime callers must not

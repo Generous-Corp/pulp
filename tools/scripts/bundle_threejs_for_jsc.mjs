@@ -69,7 +69,9 @@ async function loadEsbuild() {
         const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
         const result = spawnSync(npmBin, ["install", "--no-audit", "--no-fund", "--prefix", SCRIPT_DIR], {
             stdio: "inherit",
-            shell: false,
+            // npm.cmd is a shell script on Windows and cannot be spawned
+            // directly by Node's exec/spawn path on every hosted runner.
+            shell: process.platform === "win32",
         });
         if (result.error) {
             throw new Error(`failed to launch ${npmBin}: ${result.error.message}`);

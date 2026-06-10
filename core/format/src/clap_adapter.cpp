@@ -16,6 +16,11 @@
 
 namespace pulp::format::clap_adapter {
 
+namespace {
+constexpr std::size_t kRealtimeMidiEventCapacity = state::ParameterEventQueue::kCapacity;
+constexpr std::size_t kRealtimeMidiSysexCapacity = 128;
+}
+
 static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
     return static_cast<PulpClapPlugin*>(plugin->plugin_data);
 }
@@ -115,6 +120,9 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     auto* self = get_self(plugin);
     self->sample_rate = sr;
     self->max_buffer_size = static_cast<int>(max_frames);
+    self->midi_in.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity);
+    self->midi_out.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity);
+    self->param_snapshot.reserve(self->store.all_params().size());
 
     auto desc = self->processor->descriptor();
     PrepareContext ctx;
@@ -264,7 +272,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     self->processor->set_sidechain(sc_channels > 0 ? &sidechain_view : nullptr);
 
     // Build MIDI from CLAP note events
-    midi::MidiBuffer midi_in, midi_out;
+    auto& midi_in = self->midi_in;
+    auto& midi_out = self->midi_out;
+    midi_in.clear();
+    midi_in.clear_sysex();
+    midi_out.clear();
+    midi_out.clear_sysex();
     // Track whether any native CLAP_EVENT_MIDI2 packet was delivered so we
     // can skip the MIDI 1.0 → UMP synthesis path when the host is speaking
     // UMP natively. The host still sends CLAP_EVENT_NOTE_* in parallel for
