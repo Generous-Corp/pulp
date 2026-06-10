@@ -221,6 +221,17 @@ bool StandaloneApp::start() {
         ui_midi_collector_.drain_into(midi_in, block_start_seconds,
                                       ctx.buffer_size, ctx.sample_rate);
 
+#if PULP_ENABLE_AUDIO_PROBES
+        auto analyze_output_probe = [&]() noexcept {
+            const size_t out_ch = output.num_channels();
+            for (size_t c = 0; c < out_ch && c < output_probe_ptrs_.size(); ++c)
+                output_probe_ptrs_[c] = output.channel_ptr(c);
+            const size_t probe_ch = std::min(out_ch, output_probe_ptrs_.size());
+            output_probe_.analyze_output(audio::BufferView<const float>(
+                output_probe_ptrs_.data(), probe_ch, output.num_samples()));
+        };
+#endif
+
         if (test_signal_.is_active() && config_.route_test_signal_to_output) {
             const size_t out_ch = std::min(output.num_channels(), direct_output_ptrs_.size());
             for (size_t c = 0; c < out_ch; ++c)
@@ -236,6 +247,9 @@ bool StandaloneApp::start() {
                     static_cast<int>(out_ch),
                     ctx.buffer_size);
             }
+#if PULP_ENABLE_AUDIO_PROBES
+            analyze_output_probe();
+#endif
             if (config_.transport_playing) {
                 transport_position_samples_.fetch_add(
                     ctx.buffer_size, std::memory_order_relaxed);
@@ -332,14 +346,7 @@ bool StandaloneApp::start() {
         // processor silence from output-boundary silence. Fill the
         // pre-allocated const pointer array (no audio-thread allocation), then
         // wrap it in a const view for analyze_output().
-        {
-            const size_t out_ch = output.num_channels();
-            for (size_t c = 0; c < out_ch && c < output_probe_ptrs_.size(); ++c)
-                output_probe_ptrs_[c] = output.channel_ptr(c);
-            const size_t probe_ch = std::min(out_ch, output_probe_ptrs_.size());
-            output_probe_.analyze_output(audio::BufferView<const float>(
-                output_probe_ptrs_.data(), probe_ch, output.num_samples()));
-        }
+        analyze_output_probe();
 #endif
 
         // Advance the rolling sample clock so the next block reads a

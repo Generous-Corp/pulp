@@ -448,6 +448,7 @@ try {{
             $configureArgs += @(
                 '-DPULP_BUILD_TESTS=OFF',
                 '-DPULP_BUILD_EXAMPLES=OFF',
+                '-DPULP_ENABLE_AUDIO_PROBES=OFF',
                 '-DPULP_ENABLE_GPU=OFF'
             )
         }}

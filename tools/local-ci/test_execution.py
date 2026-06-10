@@ -1200,6 +1200,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertIn('Write-Host "__PULP_TEST_POLICY__:skip"', script)
         self.assertIn("-DPULP_BUILD_TESTS=OFF", script)
         self.assertIn("-DPULP_BUILD_EXAMPLES=OFF", script)
+        self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", script)
         self.assertIn("-DPULP_ENABLE_GPU=OFF", script)
         self.assertIn("Invoke-Native cmake @('--install', $Build, '--prefix', $Install, '--config', 'Release')", script)
         self.assertIn('Write-Host "__PULP_PHASE__:smoke"', script)
