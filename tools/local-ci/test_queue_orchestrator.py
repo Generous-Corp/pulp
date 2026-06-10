@@ -256,6 +256,11 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertEqual(fail_state["phase"], "build")
         self.assertEqual(fail_state["log_path"], "/tmp/pulp/logs/default-windows.log")
         self.assertIsNone(fail_state["transport_mode"])
+        states = {"windows": {"status": "running", "phase": "build"}}
+        snapshot = self.mod.target_state_snapshot(states)
+        self.assertEqual(snapshot, {"windows": {"status": "running", "phase": "build"}})
+        self.assertIsNot(snapshot["windows"], states["windows"])
+        self.assertIsNone(self.mod.target_state_snapshot({}))
 
         self.assertEqual(self.mod.status_runner_line(None), "Runner: idle")
         self.assertEqual(

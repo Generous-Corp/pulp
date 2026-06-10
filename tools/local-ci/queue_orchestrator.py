@@ -9,8 +9,8 @@ queue-command result line fragments, queue and result status line fragments,
 runner status line fragments, recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
-initial/progress/completed target-state payloads, completed-job state mutation,
-queue status grouping, and completed-queue retention. Higher-level queue mutation, locking, runner
+initial/progress/completed target-state payloads, target-state snapshots,
+completed-job state mutation, queue status grouping, and completed-queue retention. Higher-level queue mutation, locking, runner
 liveness, result persistence, and drain orchestration remain in local_ci.py
 until later extraction slices.
 """
@@ -498,6 +498,11 @@ def completed_target_state(
         "transport_mode": result.get("transport_mode", previous_state.get("transport_mode")),
         "wait_reason": previous_state.get("wait_reason"),
     }
+
+
+def target_state_snapshot(target_states: dict[str, dict]) -> dict | None:
+    snapshot = {name: dict(state) for name, state in target_states.items()}
+    return snapshot or None
 
 
 def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tuple[dict | None, str | None]:
