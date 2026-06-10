@@ -44,16 +44,30 @@ public:
 
         while (next_event_ < events_.size() &&
                events_[next_event_].sample_offset <= sample_offset) {
+            update_ramps_to(events_[next_event_].sample_offset);
             apply_event(events_[next_event_]);
             ++next_event_;
         }
 
+        update_ramps_to(sample_offset);
         position_ = sample_offset;
     }
 
     float value(ParamID id) const {
         if (const auto* entry = find_entry(id)) return entry->value;
         return store_ ? store_->get_value(id) : 0.0f;
+    }
+
+    float value_at(ParamID id, int32_t sample_offset) const {
+        if (const auto* entry = find_entry(id)) {
+            return value_for_entry_at(*entry, sample_offset);
+        }
+        return store_ ? store_->get_value(id) : 0.0f;
+    }
+
+    bool is_ramping(ParamID id) const {
+        if (const auto* entry = find_entry(id)) return entry->ramping;
+        return false;
     }
 
     bool is_tracked(ParamID id) const {
@@ -67,6 +81,11 @@ private:
     struct Entry {
         ParamID param_id = 0;
         float value = 0.0f;
+        float ramp_start_value = 0.0f;
+        float ramp_target_value = 0.0f;
+        int32_t ramp_start_sample_offset = 0;
+        int32_t ramp_end_sample_offset = 0;
+        bool ramping = false;
     };
 
     Entry* find_entry(ParamID id) {
@@ -100,10 +119,17 @@ private:
         if (!allow_unregistered && !is_registered(id)) return;
         if (auto* entry = find_entry(id)) {
             entry->value = clamp_value(id, value);
+            entry->ramping = false;
             return;
         }
         if (entry_count_ >= entries_.size()) return;
-        entries_[entry_count_++] = Entry{id, clamp_value(id, value)};
+        const float clamped = clamp_value(id, value);
+        entries_[entry_count_++] = Entry{
+            .param_id = id,
+            .value = clamped,
+            .ramp_start_value = clamped,
+            .ramp_target_value = clamped,
+        };
     }
 
     void ensure_event_entry(ParamID id) {
@@ -112,11 +138,62 @@ private:
         add_or_update(id, store_->get_value(id), false);
     }
 
+    float value_for_entry_at(const Entry& entry, int32_t sample_offset) const {
+        if (!entry.ramping) return entry.value;
+        if (sample_offset <= entry.ramp_start_sample_offset) {
+            return entry.ramp_start_value;
+        }
+        if (sample_offset >= entry.ramp_end_sample_offset) {
+            return entry.ramp_target_value;
+        }
+
+        const auto elapsed = static_cast<float>(sample_offset - entry.ramp_start_sample_offset);
+        const auto duration = static_cast<float>(entry.ramp_end_sample_offset
+                                                 - entry.ramp_start_sample_offset);
+        const float t = duration > 0.0f ? (elapsed / duration) : 1.0f;
+        return entry.ramp_start_value + (entry.ramp_target_value - entry.ramp_start_value) * t;
+    }
+
+    void update_ramps_to(int32_t sample_offset) {
+        for (std::size_t i = 0; i < entry_count_; ++i) {
+            auto& entry = entries_[i];
+            if (!entry.ramping) continue;
+            entry.value = value_for_entry_at(entry, sample_offset);
+            if (sample_offset >= entry.ramp_end_sample_offset) {
+                entry.value = entry.ramp_target_value;
+                entry.ramping = false;
+            }
+        }
+    }
+
+    int32_t ramp_end_for(const ParameterEvent& event) const {
+        if (event.ramp_duration_sample_frames <= 0) return event.sample_offset;
+        const auto max = std::numeric_limits<int32_t>::max();
+        if (event.sample_offset > max - event.ramp_duration_sample_frames) return max;
+        return event.sample_offset + event.ramp_duration_sample_frames;
+    }
+
     void apply_event(const ParameterEvent& event) {
-        if (find_entry(event.param_id) == nullptr && !is_registered(event.param_id)) {
+        if (!is_registered(event.param_id)) return;
+        ensure_event_entry(event.param_id);
+        auto* entry = find_entry(event.param_id);
+        if (!entry) return;
+
+        const float target = clamp_value(event.param_id, event.value);
+        if (event.ramp_duration_sample_frames <= 0) {
+            entry->value = target;
+            entry->ramping = false;
             return;
         }
-        add_or_update(event.param_id, event.value, false);
+
+        entry->ramp_start_value = entry->value;
+        entry->ramp_target_value = target;
+        entry->ramp_start_sample_offset = event.sample_offset;
+        entry->ramp_end_sample_offset = ramp_end_for(event);
+        entry->ramping = entry->ramp_end_sample_offset > entry->ramp_start_sample_offset;
+        if (!entry->ramping) {
+            entry->value = target;
+        }
     }
 
     const StateStore* store_ = nullptr;

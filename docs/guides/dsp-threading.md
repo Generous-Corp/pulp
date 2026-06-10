@@ -108,7 +108,8 @@ instead of polling atomics inside the loop:
 
 * `param_events()` exposes the host-delivered `ParameterEventQueue`
   for the current block.
-* `format::ParamCursor` advances parameter values at sample offsets.
+* `format::ParamCursor` advances parameter values at sample offsets and
+  interpolates active `ramp_duration_sample_frames` events.
 * `format::for_each_subblock()` slices the audio block at parameter
   event boundaries so your DSP can render each stable span.
 * `format::ControlRateParamSmoother` follows the parameter's configured

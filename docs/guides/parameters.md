@@ -170,7 +170,10 @@ previous_gain_ = state().get_value(kGain);
 ```
 
 `for_each_subblock` never mutates `StateStore`; it advances a block-local
-cursor as event offsets are crossed. `ParamInfo::smoothing_ramp_seconds` and
+cursor as event offsets are crossed. `ParamCursor` honors
+`ParameterEvent::ramp_duration_sample_frames` when you advance it to
+intermediate sample offsets, and `value_at(id, sample_offset)` can query an
+active ramp without moving the cursor. `ParamInfo::smoothing_ramp_seconds` and
 `format::ControlRateParamSmoother` provide an opt-in ramp for processors that
 want click-free block-rate changes without splitting into sub-blocks.
 
