@@ -8,6 +8,38 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03980"></a>
+## [0.398.0] - 2026-06-09
+
+- feat(midi): Linux BlueZ BLE MIDI backend + virtual MIDI-port merge (L13) ([#3824](https://github.com/danielraffel/pulp/pull/3824))
+- refactor(local-ci): extract stale validator lifecycle helper ([#3823](https://github.com/danielraffel/pulp/pull/3823))
+- feat(midi): WinRT BLE MIDI scan-probe backend + advisory compile-gate (W13 part 1) ([#3811](https://github.com/danielraffel/pulp/pull/3811))
+
+<a id="v03970"></a>
+## [0.397.0] - 2026-06-09
+
+- feat(platform): D-Bus system-bus + signal subscription + GetManagedObjects (BLE prereq) ([#3812](https://github.com/danielraffel/pulp/pull/3812))
+- refactor(local-ci): extract target state lifecycle helpers ([#3822](https://github.com/danielraffel/pulp/pull/3822))
+- refactor(local-ci): extract enqueue lifecycle helper ([#3821](https://github.com/danielraffel/pulp/pull/3821))
+- refactor(local-ci): extract wait loop helper ([#3820](https://github.com/danielraffel/pulp/pull/3820))
+
+<a id="v03960"></a>
+## [0.396.0] - 2026-06-09
+
+- chore/cut v0.396.0 ([#3819](https://github.com/danielraffel/pulp/pull/3819))
+- fix/skia linux arm64 release asset ([#3817](https://github.com/danielraffel/pulp/pull/3817))
+- refactor(local-ci): extract finalize lifecycle helper ([#3818](https://github.com/danielraffel/pulp/pull/3818))
+- refactor(local-ci): extract locked job lifecycle helpers ([#3813](https://github.com/danielraffel/pulp/pull/3813))
+- feature/svgpath jsx parity contract ([#3810](https://github.com/danielraffel/pulp/pull/3810))
+- refactor(local-ci): extract runner state helpers ([#3809](https://github.com/danielraffel/pulp/pull/3809))
+- feature/svgpath wiring parity ([#3802](https://github.com/danielraffel/pulp/pull/3802))
+- refactor(local-ci): extract queue command mutation helpers ([#3805](https://github.com/danielraffel/pulp/pull/3805))
+- refactor(local-ci): extract stale-running action helper ([#3803](https://github.com/danielraffel/pulp/pull/3803))
+- refactor(local-ci): extract enqueue supersedence helper ([#3800](https://github.com/danielraffel/pulp/pull/3800))
+- refactor(local-ci): extract enqueue state helpers ([#3796](https://github.com/danielraffel/pulp/pull/3796))
+- feature/svgpath fill rule ([#3794](https://github.com/danielraffel/pulp/pull/3794))
+- ci/release artifact smoke ([#3795](https://github.com/danielraffel/pulp/pull/3795))
+
 <a id="v03950"></a>
 ## [0.395.0] - 2026-06-09
 
@@ -4083,6 +4115,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.398.0]: https://github.com/danielraffel/pulp/releases/tag/v0.398.0
+[0.397.0]: https://github.com/danielraffel/pulp/releases/tag/v0.397.0
+[0.396.0]: https://github.com/danielraffel/pulp/releases/tag/v0.396.0
 [0.395.0]: https://github.com/danielraffel/pulp/releases/tag/v0.395.0
 [0.394.0]: https://github.com/danielraffel/pulp/releases/tag/v0.394.0
 [0.393.0]: https://github.com/danielraffel/pulp/releases/tag/v0.393.0

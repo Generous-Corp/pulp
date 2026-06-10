@@ -2514,10 +2514,15 @@ def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_ta
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        if upsert_job_active_targets_unlocked(queue, job_id, active_targets):
-            save_queue_unlocked(queue)
+    _queue_lifecycle.update_job_active_targets_locked(
+        job_id,
+        active_targets,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        upsert_job_active_targets_unlocked_fn=upsert_job_active_targets_unlocked,
+        save_queue_unlocked_fn=save_queue_unlocked,
+    )
 
 
 def enqueue_job(
@@ -2529,32 +2534,34 @@ def enqueue_job(
     validation: str,
     submission: dict | None = None,
 ) -> tuple[dict, bool]:
-    requested_priority = normalize_priority(priority)
-    normalized_validation = normalize_validation_mode(validation)
-
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        queue, changed = reconcile_running_jobs_unlocked(queue)
-        if changed:
-            save_queue_unlocked(queue)
-        fingerprint = make_fingerprint(branch, sha, targets, normalized_validation)
-
-        existing = _queue_orchestrator.find_active_job_by_fingerprint_unlocked(queue, fingerprint)
-        if existing is not None:
-            if _queue_orchestrator.bump_pending_job_priority_unlocked(
-                existing,
-                requested_priority,
-                now_iso_fn=now_iso,
-            ):
-                save_queue_unlocked(queue)
-            return normalize_job(existing), False
-
-        job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
-        queue.append(job)
-        for existing, reason in _queue_orchestrator.pending_supersedence_candidates_unlocked(queue, job):
-            supersede_job_unlocked(existing, job["id"], reason)
-        save_queue_unlocked(trim_completed_jobs(queue))
-        return job, True
+    return _queue_lifecycle.enqueue_job_locked(
+        branch,
+        sha,
+        priority,
+        targets,
+        mode,
+        validation,
+        submission=submission,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        normalize_priority_fn=normalize_priority,
+        normalize_validation_mode_fn=normalize_validation_mode,
+        make_fingerprint_fn=make_fingerprint,
+        find_active_job_by_fingerprint_unlocked_fn=_queue_orchestrator.find_active_job_by_fingerprint_unlocked,
+        bump_pending_job_priority_unlocked_fn=lambda existing, requested_priority: _queue_orchestrator.bump_pending_job_priority_unlocked(
+            existing,
+            requested_priority,
+            now_iso_fn=now_iso,
+        ),
+        make_job_fn=make_job,
+        pending_supersedence_candidates_unlocked_fn=_queue_orchestrator.pending_supersedence_candidates_unlocked,
+        supersede_job_unlocked_fn=supersede_job_unlocked,
+        trim_completed_jobs_fn=trim_completed_jobs,
+        normalize_job_fn=normalize_job,
+    )
 
 
 def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
@@ -2657,16 +2664,22 @@ def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
 
 
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        if _queue_orchestrator.update_job_target_state_unlocked(
+    _queue_lifecycle.update_job_target_state_locked(
+        job_id,
+        target_name,
+        fields,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        update_job_target_state_unlocked_fn=lambda queue, current_job_id, current_target_name, current_fields: _queue_orchestrator.update_job_target_state_unlocked(
             queue,
-            job_id,
-            target_name,
-            fields,
+            current_job_id,
+            current_target_name,
+            current_fields,
             now_iso_fn=now_iso,
-        ):
-            save_queue_unlocked(queue)
+        ),
+        save_queue_unlocked_fn=save_queue_unlocked,
+    )
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
@@ -2690,14 +2703,13 @@ def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dic
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        candidates = collect_stale_windows_cleanup_candidates_unlocked(queue)
-        if candidates:
-            save_queue_unlocked(queue)
-
-    return _cleanup.reclaim_stale_remote_validator_candidates(
-        candidates,
+    return _queue_lifecycle.reclaim_stale_remote_validators_locked(
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        collect_stale_windows_cleanup_candidates_unlocked_fn=collect_stale_windows_cleanup_candidates_unlocked,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        reclaim_stale_remote_validator_candidates_fn=_cleanup.reclaim_stale_remote_validator_candidates,
         cleanup_validator_fn=cleanup_stale_windows_validator,
         update_job_target_state_fn=update_job_target_state,
         now_fn=now_iso,
@@ -2789,39 +2801,16 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
-    announced_wait = False
-
-    while True:
-        job = load_job(job_id)
-        if job is None:
-            print(f"Job not found: {job_id}")
-            return None, 1
-
-        if job.get("status") == "completed":
-            result_file = job.get("result_file")
-            if not result_file:
-                print(f"Job completed without a result file: {job_id}")
-                return None, 1
-            result = load_result(Path(result_file))
-            return result, 0 if result.get("overall") == "pass" else 1
-
-        acquired, _ = drain_pending_jobs(config, blocking=False)
-        if acquired:
-            continue
-
-        runner = current_runner_info()
-        if runner and not announced_wait:
-            active_job = runner.get("active_job_id")
-            active_branch = runner.get("active_branch")
-            if active_job and active_branch:
-                print(
-                    f"Another local CI runner is active [{active_job}] {active_branch}; waiting for {job_id}..."
-                )
-            else:
-                print("Another local CI runner is active; waiting for queued job completion...")
-            announced_wait = True
-
-        time.sleep(WAIT_POLL_SECS)
+    return _queue_lifecycle.wait_for_job_completion(
+        job_id,
+        config,
+        load_job_fn=load_job,
+        load_result_fn=load_result,
+        drain_pending_jobs_fn=drain_pending_jobs,
+        current_runner_info_fn=current_runner_info,
+        sleep_fn=time.sleep,
+        poll_secs=WAIT_POLL_SECS,
+    )
 
 
 def notify(message: str) -> None:

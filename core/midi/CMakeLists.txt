@@ -29,9 +29,14 @@ target_sources(pulp-midi PRIVATE
     src/ump_session.cpp
     # BLE MIDI — Apple BLE-MIDI 1.0 transport. The packet codec is
     # cross-platform; create_ble_midi_central() resolves to either the
-    # CoreBluetooth backend on Apple or the safe-no-op stub on other
-    # platforms (see ble_midi_stub.cpp below).
+    # CoreBluetooth backend on Apple, the BlueZ D-Bus backend on Linux, or
+    # the safe-no-op stub on other platforms (see the per-platform branch).
     src/ble_midi_packet.cpp
+    # Process-wide registry that bridges a connected BLE peripheral into the
+    # platform MidiSystem's port list (the off-Apple analog of CoreMIDI
+    # auto-exposing OS-paired BLE peripherals as endpoints). Empty + inert on
+    # platforms whose central never registers anything (the stub central).
+    src/ble_midi_registry.cpp
 )
 
 if(APPLE AND NOT IOS)
@@ -57,14 +62,24 @@ elseif(WIN32)
     target_sources(pulp-midi PRIVATE
         platform/win/winmidi_device.cpp
         platform/win/winrt_midi_device.cpp
-        # BLE MIDI scaffold — WinRT BluetoothLEAdvertisementWatcher
-        # backend not yet wired; the stub central reports
-        # is_available() == false until a follow-up slice lands the
-        # WinRT GATT plumbing.
-        src/ble_midi_stub.cpp
+        # BLE MIDI — WinRT BluetoothLEAdvertisementWatcher scan backend.
+        # Unlike the WinRT MIDI 2.0 backend (winrt_midi_device.cpp), BLE
+        # GATT lives in Windows.Devices.Bluetooth* in the BASE Windows SDK
+        # cppwinrt projection, so no out-of-band vcpkg/NuGet dependency is
+        # needed — just the OS umbrella import libs below. This TU defines
+        # create_ble_midi_central() for Windows, so it REPLACES
+        # src/ble_midi_stub.cpp (linking both would duplicate the symbol).
+        # Scan-only in this slice; GATT connect/notify lands in a follow-up.
+        platform/win/ble_midi_win.cpp
     )
     target_link_libraries(pulp-midi PRIVATE
         winmm
+        # WinRT activation + COM apartment for the BLE advertisement watcher.
+        # WindowsApp is the desktop umbrella import lib (init_apartment,
+        # activation factories, event tokens); runtimeobject provides the
+        # WinRT/COM runtime helpers. Both ship with the base Windows SDK.
+        WindowsApp
+        runtimeobject
     )
     # Opt-in WinRT MIDI 2.0 (UMP) backend — Windows MIDI Services SDK.
     #
@@ -142,13 +157,16 @@ elseif(WIN32)
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     target_sources(pulp-midi PRIVATE
         platform/linux/alsa_midi_device.cpp
-        # BLE MIDI scaffold — BlueZ D-Bus glue not yet wired; the stub
-        # central reports is_available() == false until the BlueZ
-        # GattCharacteristic1 backend lands.
-        src/ble_midi_stub.cpp
+        # BLE MIDI — BlueZ (org.bluez) over the runtime-dlopened libdbus client
+        # in core/platform. No new library is linked: BlueZ is a system daemon,
+        # libdbus is loaded at runtime. Replaces the former no-op stub.
+        platform/linux/ble_midi_linux.cpp
     )
     find_package(ALSA REQUIRED)
     target_link_libraries(pulp-midi PRIVATE ALSA::ALSA)
+    # pulp::platform carries the DBus client (system-bus BlueZ access) and the
+    # ALSA MidiSystem's registry merge. PUBLIC include dirs come transitively.
+    target_link_libraries(pulp-midi PRIVATE pulp::platform)
 # Android MIDI wired via PulpAndroid.cmake → pulp_wire_android_sources()
 # BLE MIDI on Android: BluetoothLeScanner + BluetoothGatt notification
 # via the existing JNI bridge — scaffold only; the stub central is

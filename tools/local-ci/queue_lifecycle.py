@@ -7,6 +7,116 @@ import os
 from pathlib import Path
 
 
+def enqueue_job_locked(
+    branch: str,
+    sha: str,
+    priority: str,
+    targets: list[str],
+    mode: str,
+    validation: str,
+    submission: dict | None = None,
+    *,
+    queue_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    load_queue_unlocked_fn: Callable[[], list[dict]],
+    reconcile_running_jobs_unlocked_fn: Callable[[list[dict]], tuple[list[dict], bool]],
+    save_queue_unlocked_fn: Callable[[list[dict]], None],
+    normalize_priority_fn: Callable[[str], str],
+    normalize_validation_mode_fn: Callable[[str], str],
+    make_fingerprint_fn: Callable[[str, str, list[str], str], str],
+    find_active_job_by_fingerprint_unlocked_fn: Callable[[list[dict], str], dict | None],
+    bump_pending_job_priority_unlocked_fn: Callable[[dict, str], bool],
+    make_job_fn: Callable[..., dict],
+    pending_supersedence_candidates_unlocked_fn: Callable[[list[dict], dict], list[tuple[dict, str]]],
+    supersede_job_unlocked_fn: Callable[[dict, str, str], None],
+    trim_completed_jobs_fn: Callable[[list[dict]], list[dict]],
+    normalize_job_fn: Callable[[dict], dict],
+) -> tuple[dict, bool]:
+    requested_priority = normalize_priority_fn(priority)
+    normalized_validation = normalize_validation_mode_fn(validation)
+
+    with file_lock_fn(queue_lock_path_fn(), blocking=True):
+        queue = load_queue_unlocked_fn()
+        queue, changed = reconcile_running_jobs_unlocked_fn(queue)
+        if changed:
+            save_queue_unlocked_fn(queue)
+        fingerprint = make_fingerprint_fn(branch, sha, targets, normalized_validation)
+
+        existing = find_active_job_by_fingerprint_unlocked_fn(queue, fingerprint)
+        if existing is not None:
+            if bump_pending_job_priority_unlocked_fn(existing, requested_priority):
+                save_queue_unlocked_fn(queue)
+            return normalize_job_fn(existing), False
+
+        job = make_job_fn(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
+        queue.append(job)
+        for existing, reason in pending_supersedence_candidates_unlocked_fn(queue, job):
+            supersede_job_unlocked_fn(existing, job["id"], reason)
+        save_queue_unlocked_fn(trim_completed_jobs_fn(queue))
+        return job, True
+
+
+def update_job_active_targets_locked(
+    job_id: str,
+    active_targets: dict | None,
+    *,
+    queue_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    load_queue_unlocked_fn: Callable[[], list[dict]],
+    upsert_job_active_targets_unlocked_fn: Callable[[list[dict], str, dict | None], bool],
+    save_queue_unlocked_fn: Callable[[list[dict]], None],
+) -> None:
+    with file_lock_fn(queue_lock_path_fn(), blocking=True):
+        queue = load_queue_unlocked_fn()
+        if upsert_job_active_targets_unlocked_fn(queue, job_id, active_targets):
+            save_queue_unlocked_fn(queue)
+
+
+def update_job_target_state_locked(
+    job_id: str,
+    target_name: str,
+    fields: dict,
+    *,
+    queue_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    load_queue_unlocked_fn: Callable[[], list[dict]],
+    update_job_target_state_unlocked_fn: Callable[[list[dict], str, str, dict], bool],
+    save_queue_unlocked_fn: Callable[[list[dict]], None],
+) -> None:
+    with file_lock_fn(queue_lock_path_fn(), blocking=True):
+        queue = load_queue_unlocked_fn()
+        if update_job_target_state_unlocked_fn(queue, job_id, target_name, fields):
+            save_queue_unlocked_fn(queue)
+
+
+def reclaim_stale_remote_validators_locked(
+    *,
+    queue_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    load_queue_unlocked_fn: Callable[[], list[dict]],
+    collect_stale_windows_cleanup_candidates_unlocked_fn: Callable[[list[dict]], list[dict]],
+    save_queue_unlocked_fn: Callable[[list[dict]], None],
+    reclaim_stale_remote_validator_candidates_fn: Callable[..., int],
+    cleanup_validator_fn: Callable[[str, int, str], dict],
+    update_job_target_state_fn: Callable[..., None],
+    now_fn: Callable[[], str],
+    trim_line_fn: Callable[[str], str],
+) -> int:
+    with file_lock_fn(queue_lock_path_fn(), blocking=True):
+        queue = load_queue_unlocked_fn()
+        candidates = collect_stale_windows_cleanup_candidates_unlocked_fn(queue)
+        if candidates:
+            save_queue_unlocked_fn(queue)
+
+    return reclaim_stale_remote_validator_candidates_fn(
+        candidates,
+        cleanup_validator_fn=cleanup_validator_fn,
+        update_job_target_state_fn=update_job_target_state_fn,
+        now_fn=now_fn,
+        trim_line_fn=trim_line_fn,
+    )
+
+
 def load_job_locked(
     job_id: str,
     *,
@@ -90,3 +200,50 @@ def finalize_job_locked(
                 include_prepared=include_prepared,
             )
         )
+
+
+def wait_for_job_completion(
+    job_id: str,
+    config: dict,
+    *,
+    load_job_fn: Callable[[str], dict | None],
+    load_result_fn: Callable[[Path], dict],
+    drain_pending_jobs_fn: Callable[..., tuple[bool, bool]],
+    current_runner_info_fn: Callable[[], dict | None],
+    sleep_fn: Callable[[float], None],
+    poll_secs: float,
+    print_fn: Callable[[str], None] = print,
+) -> tuple[dict | None, int]:
+    announced_wait = False
+
+    while True:
+        job = load_job_fn(job_id)
+        if job is None:
+            print_fn(f"Job not found: {job_id}")
+            return None, 1
+
+        if job.get("status") == "completed":
+            result_file = job.get("result_file")
+            if not result_file:
+                print_fn(f"Job completed without a result file: {job_id}")
+                return None, 1
+            result = load_result_fn(Path(result_file))
+            return result, 0 if result.get("overall") == "pass" else 1
+
+        acquired, _ = drain_pending_jobs_fn(config, blocking=False)
+        if acquired:
+            continue
+
+        runner = current_runner_info_fn()
+        if runner and not announced_wait:
+            active_job = runner.get("active_job_id")
+            active_branch = runner.get("active_branch")
+            if active_job and active_branch:
+                print_fn(
+                    f"Another local CI runner is active [{active_job}] {active_branch}; waiting for {job_id}..."
+                )
+            else:
+                print_fn("Another local CI runner is active; waiting for queued job completion...")
+            announced_wait = True
+
+        sleep_fn(poll_secs)

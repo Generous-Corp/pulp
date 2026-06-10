@@ -43,6 +43,7 @@ namespace pulp::platform {
 
 namespace {
 // D-Bus type codes + bus type (avoid the build-time dbus header).
+constexpr int kTypeByte    = 'y';
 constexpr int kTypeString  = 's';
 constexpr int kTypeObjPath = 'o';
 constexpr int kTypeBool    = 'b';
@@ -54,7 +55,8 @@ constexpr int kTypeStruct  = 'r';   // STRUCT type code (open_container takes 'r
 constexpr int kTypeVariant = 'v';
 constexpr int kTypeDictEnt = 'e';
 constexpr int kTypeInvalid = '\0';
-constexpr int kBusSession  = 0;
+constexpr int kBusSession  = 0;   // DBUS_BUS_SESSION
+constexpr int kBusSystem   = 1;   // DBUS_BUS_SYSTEM
 
 // DBusHandlerResult values (dbus-shared.h).
 constexpr int kHandlerHandled       = 0;   // DBUS_HANDLER_RESULT_HANDLED
@@ -176,6 +178,24 @@ struct DBus::Impl {
     fn_open_private open_private = nullptr;
     fn_bus_register bus_register = nullptr;
 
+    // ── signal-subscription additions ──
+    // DBusHandleMessageFunction: DBusHandlerResult (*)(conn, msg, user_data)
+    using fn_filter_func  = int (*)(void*, void*, void*);
+    // dbus_connection_add_filter(conn, filter_fn, user_data, free_fn) → dbus_bool_t
+    using fn_add_filter   = unsigned (*)(void*, void*, void*, void*);
+    // dbus_connection_remove_filter(conn, filter_fn, user_data)
+    using fn_remove_filter = void (*)(void*, void*, void*);
+    fn_add_filter    add_filter = nullptr;
+    fn_remove_filter remove_filter = nullptr;
+
+    // Registered signal subscriptions. The filter trampoline walks these on each
+    // incoming signal and invokes every handler whose interface matches and whose
+    // member matches (or is empty = any member of the interface).
+    struct SignalSub { std::string interface; std::string member; SignalHandler handler; };
+    std::map<unsigned, SignalSub> signal_subs;
+    unsigned next_signal_token = 0;
+    bool filter_installed = false;   // the connection filter is lazily added once
+
     template <typename Fn>
     Fn sym(const char* name) { return reinterpret_cast<Fn>(dlsym(handle, name)); }
 
@@ -223,6 +243,10 @@ struct DBus::Impl {
         open_private = sym<fn_open_private>("dbus_connection_open_private");
         bus_register = sym<fn_bus_register>("dbus_bus_register");
 
+        // Signal-subscription symbols (connection message filter).
+        add_filter = sym<fn_add_filter>("dbus_connection_add_filter");
+        remove_filter = sym<fn_remove_filter>("dbus_connection_remove_filter");
+
         return error_init && error_free && error_is_set && bus_get_private &&
                conn_close && conn_unref && set_exit_on_disconnect && add_match &&
                read_write && pop_message && send_with_reply_and_block &&
@@ -234,7 +258,8 @@ struct DBus::Impl {
                msg_new_method_return && msg_new_signal && msg_new_error &&
                conn_send && conn_flush && read_write_dispatch &&
                msg_get_interface && msg_get_member && msg_get_sender &&
-               get_unique_name && open_private && bus_register;
+               get_unique_name && open_private && bus_register &&
+               add_filter && remove_filter;
     }
 
     // Append one a{sv} entry: key (string) → variant of `vtype` holding `val`.
@@ -311,6 +336,53 @@ struct DBus::Impl {
         owner_view.impl_ = nullptr;  // do NOT free the borrowed Impl on dtor
         return result;
     }
+
+    // Connection-wide message FILTER for incoming signals. Unlike the object-path
+    // trampoline above (method calls only), the filter sees every message —
+    // including broadcast signals, which never hit the vtable. We route matching
+    // signals to subscribed handlers and ALWAYS return NOT_YET_HANDLED so the
+    // normal object-path dispatch (method-call routing) is unaffected.
+    static int signal_filter(void* /*conn*/, void* msg, void* user_data) {
+        auto* self = static_cast<Impl*>(user_data);
+        if (!self || !msg) return kHandlerNotYetHandled;
+        if (self->signal_subs.empty()) return kHandlerNotYetHandled;
+
+        // Only consider signals. msg_is_signal(msg, iface, member) returns true
+        // when both match; pass the message's own interface/member so it reduces
+        // to a "is this a signal at all?" probe.
+        const char* iface  = self->msg_get_interface(msg);
+        const char* member = self->msg_get_member(msg);
+        if (!iface || !member) return kHandlerNotYetHandled;
+        if (!self->msg_is_signal(msg, iface, member)) return kHandlerNotYetHandled;
+
+        const char* path = self->msg_get_path(msg);
+        const std::string path_s   = path ? path : "";
+        const std::string iface_s  = iface;
+        const std::string member_s = member;
+
+        // Snapshot the matching subscriptions before invoking any handler: a
+        // handler may add/remove subscriptions, which would invalidate iterators
+        // over signal_subs.
+        std::vector<SignalHandler> to_invoke;
+        for (auto& [token, sub] : self->signal_subs) {
+            (void)token;
+            if (sub.interface != iface_s) continue;
+            if (!sub.member.empty() && sub.member != member_s) continue;
+            if (sub.handler) to_invoke.push_back(sub.handler);
+        }
+        if (to_invoke.empty()) return kHandlerNotYetHandled;
+
+        DBus owner_view;             // lightweight non-owning DBus to host Reader
+        owner_view.impl_ = self;
+        for (auto& h : to_invoke) {
+            IterBuf args_iter;
+            const bool has_args = self->iter_init(msg, &args_iter) != 0;
+            Reader r(&owner_view, has_args ? &args_iter : nullptr);
+            h(path_s, iface_s, member_s, r);
+        }
+        owner_view.impl_ = nullptr;  // borrowed; do NOT free on dtor
+        return kHandlerNotYetHandled;  // never claim the message
+    }
 };
 
 // ── Reader facade ───────────────────────────────────────────────────────────
@@ -342,6 +414,12 @@ bool DBus::Reader::read_double(double& out) {
     auto& d = *owner_->impl_;
     if (d.iter_get_arg_type(iter_) != kTypeDouble) return false;
     double v = 0; d.iter_get_basic(iter_, &v); out = v; d.iter_next(iter_); return true;
+}
+bool DBus::Reader::read_byte(unsigned char& out) {
+    if (!owner_ || !owner_->impl_ || !iter_) return false;
+    auto& d = *owner_->impl_;
+    if (d.iter_get_arg_type(iter_) != kTypeByte) return false;
+    unsigned char v = 0; d.iter_get_basic(iter_, &v); out = v; d.iter_next(iter_); return true;
 }
 int DBus::Reader::arg_type() const {
     if (!owner_ || !owner_->impl_ || !iter_) return kTypeInvalid;
@@ -394,6 +472,10 @@ bool DBus::Writer::append_uint32(unsigned v) {
 bool DBus::Writer::append_double(double v) {
     if (!owner_ || !owner_->impl_ || !iter_) return false;
     return owner_->impl_->iter_append_basic(iter_, kTypeDouble, &v) != 0;
+}
+bool DBus::Writer::append_byte(unsigned char v) {
+    if (!owner_ || !owner_->impl_ || !iter_) return false;
+    return owner_->impl_->iter_append_basic(iter_, kTypeByte, &v) != 0;
 }
 DBus::Writer::Container DBus::Writer::open_array(const std::string& element_signature) {
     Container c;
@@ -473,7 +555,17 @@ DBus::DBus() = default;
 
 DBus::~DBus() {
     if (impl_) {
-        if (impl_->conn) { impl_->conn_close(impl_->conn); impl_->conn_unref(impl_->conn); }
+        if (impl_->conn) {
+            // Drop the signal filter before tearing the connection down so its
+            // user_data (this Impl) is never dereferenced after free.
+            if (impl_->filter_installed && impl_->remove_filter) {
+                impl_->remove_filter(impl_->conn,
+                                     reinterpret_cast<void*>(&Impl::signal_filter),
+                                     impl_);
+            }
+            impl_->conn_close(impl_->conn);
+            impl_->conn_unref(impl_->conn);
+        }
         if (impl_->handle) dlclose(impl_->handle);
         delete impl_;
     }
@@ -487,7 +579,7 @@ std::string DBus::unique_name() const {
     return n ? std::string(n) : std::string();
 }
 
-bool DBus::connect_session() {
+bool DBus::connect_bus(int bus_type) {
     if (connected()) return true;
     auto impl = new Impl();
     impl->handle = dlopen("libdbus-1.so.3", RTLD_LAZY | RTLD_LOCAL);
@@ -496,7 +588,7 @@ bool DBus::connect_session() {
 
     Impl::ErrBuf err;
     impl->error_init(&err);
-    impl->conn = impl->bus_get_private(kBusSession, &err);
+    impl->conn = impl->bus_get_private(bus_type, &err);
     if (!impl->conn || impl->error_is_set(&err)) {
         if (impl->conn) { impl->conn_close(impl->conn); impl->conn_unref(impl->conn); }
         impl->error_free(&err);
@@ -509,6 +601,9 @@ bool DBus::connect_session() {
     impl_ = impl;
     return true;
 }
+
+bool DBus::connect_session() { return connect_bus(kBusSession); }
+bool DBus::connect_system() { return connect_bus(kBusSystem); }
 
 bool DBus::a11y_connected() const { return impl_ && impl_->conn && impl_->on_a11y; }
 
@@ -690,6 +785,95 @@ bool DBus::call_method(const std::string& destination, const std::string& path,
     return true;
 }
 
+unsigned DBus::add_signal_handler(const std::string& interface,
+                                  const std::string& member,
+                                  SignalHandler handler) {
+    if (!connected() || !handler) return 0;
+    Impl& d = *impl_;
+
+    // Install the connection filter once, on the first subscription.
+    if (!d.filter_installed) {
+        if (d.add_filter(d.conn, reinterpret_cast<void*>(&Impl::signal_filter),
+                         &d /*user_data*/, nullptr /*free_fn*/) == 0) {
+            return 0;  // OOM adding the filter → honest-fail
+        }
+        d.filter_installed = true;
+    }
+
+    // Tell the broker to deliver matching signals to this connection.
+    std::string rule = "type='signal',interface='" + interface + "'";
+    if (!member.empty()) rule += ",member='" + member + "'";
+    Impl::ErrBuf err;
+    d.error_init(&err);
+    d.add_match(d.conn, rule.c_str(), &err);
+    const bool match_failed = d.error_is_set(&err) != 0;
+    d.error_free(&err);
+    if (match_failed) return 0;
+
+    const unsigned token = ++d.next_signal_token;
+    d.signal_subs[token] = Impl::SignalSub{interface, member, std::move(handler)};
+    return token;
+}
+
+bool DBus::remove_signal_handler(unsigned token) {
+    if (!connected()) return false;
+    Impl& d = *impl_;
+    auto it = d.signal_subs.find(token);
+    if (it == d.signal_subs.end()) return false;
+    d.signal_subs.erase(it);
+    // The org.freedesktop.DBus match rule is intentionally left in place: removing
+    // it precisely would require ref-counting identical rules across tokens, and a
+    // surplus rule only costs a few unmatched deliveries that the filter ignores.
+    return true;
+}
+
+bool DBus::get_managed_objects(
+    const std::string& destination, const std::string& path,
+    const std::function<void(const std::string&, const std::string&)>& per_object,
+    int timeout_ms) {
+    if (!connected()) return false;
+    // GetManagedObjects() -> a{oa{sa{sv}}}: a dict of object-path → (dict of
+    // interface-name → (dict of property-name → variant)). We walk the outer
+    // array of dict-entries, then each object's inner array of interface
+    // dict-entries, reporting (object-path, interface-name). Property values are
+    // skipped — callers re-query specific props via call_method as needed.
+    return call_method(
+        destination, path, "org.freedesktop.DBus.ObjectManager",
+        "GetManagedObjects", /*build_args=*/nullptr,
+        [&](Reader& reply) {
+            if (reply.arg_type() != kTypeArray) return;
+            Reader objects;
+            if (!reply.recurse(objects)) return;          // → outer a{o...}
+            while (objects.arg_type() == kTypeDictEnt) {
+                Reader obj_entry;
+                if (!objects.recurse(obj_entry)) break;    // → {o, a{sa{sv}}}
+                std::string obj_path;
+                if (!obj_entry.read_string(obj_path)) {    // object path 'o'
+                    objects.next();
+                    continue;
+                }
+                // obj_entry cursor now on the inner a{sa{sv}} (interfaces).
+                if (obj_entry.arg_type() == kTypeArray) {
+                    Reader ifaces;
+                    if (obj_entry.recurse(ifaces)) {
+                        while (ifaces.arg_type() == kTypeDictEnt) {
+                            Reader iface_entry;
+                            if (!ifaces.recurse(iface_entry)) break;  // → {s, a{sv}}
+                            std::string iface_name;
+                            if (iface_entry.read_string(iface_name) && per_object) {
+                                per_object(obj_path, iface_name);
+                            }
+                            // The remaining a{sv} of props is skipped.
+                            ifaces.next();
+                        }
+                    }
+                }
+                objects.next();
+            }
+        },
+        timeout_ms);
+}
+
 std::optional<DBus::PortalResult> DBus::file_chooser(
     const std::string& method, const std::string& title,
     const std::map<std::string, std::string>& options,
@@ -823,6 +1007,7 @@ bool DBus::Reader::read_string(std::string&) { return false; }
 bool DBus::Reader::read_int32(int&) { return false; }
 bool DBus::Reader::read_uint32(unsigned&) { return false; }
 bool DBus::Reader::read_double(double&) { return false; }
+bool DBus::Reader::read_byte(unsigned char&) { return false; }
 int  DBus::Reader::arg_type() const { return 0; }
 bool DBus::Reader::next() { return false; }
 bool DBus::Reader::recurse(Reader&) { return false; }
@@ -833,6 +1018,7 @@ bool DBus::Writer::append_bool(bool) { return false; }
 bool DBus::Writer::append_int32(int) { return false; }
 bool DBus::Writer::append_uint32(unsigned) { return false; }
 bool DBus::Writer::append_double(double) { return false; }
+bool DBus::Writer::append_byte(unsigned char) { return false; }
 DBus::Writer::Container DBus::Writer::open_array(const std::string&) { return {}; }
 DBus::Writer::Container DBus::Writer::open_struct() { return {}; }
 DBus::Writer::Container DBus::Writer::open_variant(const std::string&) { return {}; }
@@ -848,7 +1034,9 @@ DBus::DBus() = default;
 DBus::~DBus() = default;
 bool DBus::connected() const { return false; }
 std::string DBus::unique_name() const { return {}; }
+bool DBus::connect_bus(int) { return false; }
 bool DBus::connect_session() { return false; }
+bool DBus::connect_system() { return false; }
 bool DBus::connect_a11y_bus() { return false; }
 bool DBus::a11y_connected() const { return false; }
 bool DBus::register_object(const std::string&, IncomingHandler) { return false; }
@@ -859,6 +1047,13 @@ bool DBus::dispatch(int) { return false; }
 bool DBus::call_method(const std::string&, const std::string&, const std::string&,
                        const std::string&, const std::function<void(Writer&)>&,
                        const std::function<void(Reader&)>&, int) { return false; }
+unsigned DBus::add_signal_handler(const std::string&, const std::string&,
+                                  SignalHandler) { return 0; }
+bool DBus::remove_signal_handler(unsigned) { return false; }
+bool DBus::get_managed_objects(
+    const std::string&, const std::string&,
+    const std::function<void(const std::string&, const std::string&)>&,
+    int) { return false; }
 std::optional<DBus::PortalResult> DBus::file_chooser(
     const std::string&, const std::string&,
     const std::map<std::string, std::string>&,

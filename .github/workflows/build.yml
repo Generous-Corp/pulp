@@ -1089,6 +1089,50 @@ jobs:
         shell: pwsh
         run: cmake --build build-midi2 --config Release --target pulp-midi
 
+  # ── Windows BLE MIDI compile-gate (advisory) ─────────────────────────────
+  #
+  # Compile-verifies Pulp's WinRT Bluetooth-LE scan backend
+  # (core/midi/platform/win/ble_midi_win.cpp). Unlike the MIDI 2.0 gate
+  # above, the BLE GATT / advertisement APIs (Windows.Devices.Bluetooth*)
+  # ship in the BASE Windows SDK cppwinrt projection, so this gate needs NO
+  # vcpkg / out-of-band NuGet provisioning — the default Windows build
+  # already compiles the backend. This standalone job exists purely to give
+  # the blind (macOS-authored) Windows TU a fast, isolated compile signal on
+  # the pulp-midi target without waiting on the full build matrix.
+  #
+  # ADVISORY: standalone job, not part of the required build matrix or any
+  # required alias, so it can never block merge.
+  windows-ble-gate:
+    needs: classify
+    if: needs.classify.outputs.native_build_required == 'true'
+    runs-on: windows-latest
+    name: Windows BLE compile-gate (advisory)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      # Default Windows configure — no PULP_HAS_WINRT_MIDI, no vcpkg. The BLE
+      # backend compiles on the base SDK projection out of the box.
+      - name: Configure (base Windows SDK — WinRT BLE backend)
+        shell: pwsh
+        run: |
+          cmake -S . -B build-ble `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DPULP_BUILD_TESTS=OFF `
+            -DPULP_BUILD_EXAMPLES=OFF
+
+      # Build only pulp-midi — the WinRT BLE TU lives there and is the whole
+      # point of this gate. Avoids paying for the full tree.
+      - name: Build pulp-midi (compile-verify the WinRT BLE backend)
+        shell: pwsh
+        run: cmake --build build-ble --config Release --target pulp-midi
+
   # ── Stable-name status aliases for advisory platforms ─────────────────────
   # Branch protection requires a context literally named `macos`. Keep it
   # independent of the advisory Linux/Windows matrix legs: this job polls

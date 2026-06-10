@@ -8,10 +8,13 @@
 // cross-platform half that every backend reuses.
 
 #include <pulp/midi/ble_midi.hpp>
+#include <pulp/midi/ble_midi_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 using namespace pulp::midi;
@@ -205,4 +208,165 @@ TEST_CASE("create_ble_midi_central always returns a usable instance",
     REQUIRE(saw_failed);
     REQUIRE((observed_err == BleMidiError::Unsupported ||
              observed_err == BleMidiError::PeripheralNotFound));
+}
+
+TEST_CASE("create_ble_midi_central is_available() is callable and honest",
+          "[ble-midi]") {
+    // is_available() must never crash and must report a definite bool on
+    // every platform. On macOS CI without a granted Bluetooth permission /
+    // powered adapter the CoreBluetooth backend reports false; the Windows
+    // WinRT scan backend reports true only when the BLE advertisement API
+    // is usable; the stub reports false. The contract under test is simply
+    // that the call is safe and that an unavailable backend keeps its
+    // scan / port surface as honest no-ops.
+    auto central = create_ble_midi_central();
+    REQUIRE(central != nullptr);
+    const bool available = central->is_available();
+    if (!available) {
+        // An unavailable backend must keep the scan surface inert: starting
+        // a scan must not flip is_scanning() on, and there are no known
+        // peripherals or port mappings to surface.
+        REQUIRE_FALSE(central->start_scan([](const BleMidiPeripheral&) {}));
+        REQUIRE_FALSE(central->is_scanning());
+        REQUIRE(central->known_peripherals().empty());
+        REQUIRE(central->midi_input_port_for("any-id").empty());
+        REQUIRE(central->midi_output_port_for("any-id").empty());
+    }
+    // stop_scan() is always safe, scanning or not.
+    central->stop_scan();
+    REQUIRE_FALSE(central->is_scanning());
+}
+
+// ── BleMidiPortRegistry — the off-Apple port-merge seam ──────────────────────
+//
+// Cross-platform + transport-free, so it is unit-testable on every host (no
+// BlueZ / Bluetooth hardware needed). These tests pin the bridge the BlueZ
+// central populates on connect and the ALSA MidiSystem merges into its
+// enumeration. Each test uses a unique peripheral id so the process-wide
+// singleton stays isolated, and unregisters at the end.
+
+namespace {
+const char* find_port(const std::vector<MidiPortInfo>& ports,
+                      const std::string& id) {
+    for (const auto& p : ports)
+        if (p.id == id) return p.name.c_str();
+    return nullptr;
+}
+}  // namespace
+
+TEST_CASE("BleMidiPortRegistry surfaces a registered input in list_inputs",
+          "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    const std::string id = "ble-midi-in:/test/dev_AA_registry_in";
+    reg.register_input(id, "Reg Test Keyboard");
+
+    REQUIRE(reg.is_input(id));
+    REQUIRE_FALSE(reg.is_output(id));
+    auto inputs = reg.list_inputs();
+    const char* name = find_port(inputs, id);
+    REQUIRE(name != nullptr);
+    REQUIRE(std::string(name) == "Reg Test Keyboard");
+
+    reg.unregister_input(id);
+    REQUIRE_FALSE(reg.is_input(id));
+    REQUIRE(find_port(reg.list_inputs(), id) == nullptr);
+}
+
+TEST_CASE("BleMidiPortRegistry delivers a decoded short message to the attached "
+          "MidiInput callback", "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    const std::string id = "ble-midi-in:/test/dev_BB_registry_deliver";
+    reg.register_input(id, "Deliver Test");
+
+    std::vector<MidiEvent> events;
+    std::vector<std::vector<uint8_t>> sysex;
+    REQUIRE(reg.attach_input(
+        id,
+        [&](const MidiEvent& e) { events.push_back(e); },
+        [&](const std::vector<uint8_t>& bytes, double) { sysex.push_back(bytes); }));
+
+    // A Note On Ch1 note 60 vel 100 — the bytes the central's decoder produces.
+    reg.deliver_message(id, {0x90, 60, 100}, /*timestamp_sec=*/0.5);
+    REQUIRE(events.size() == 1);
+    REQUIRE(events[0].is_note_on());
+    REQUIRE(events[0].note() == 60);
+    REQUIRE(events[0].velocity() == 100);
+    REQUIRE(events[0].timestamp == 0.5);
+    REQUIRE(sysex.empty());
+
+    // After detach, no further delivery reaches the callback.
+    reg.detach_input(id);
+    reg.deliver_message(id, {0x90, 62, 110}, 0.6);
+    REQUIRE(events.size() == 1);
+
+    reg.unregister_input(id);
+}
+
+TEST_CASE("BleMidiPortRegistry routes a SysEx payload to the sysex callback",
+          "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    const std::string id = "ble-midi-in:/test/dev_CC_registry_sysex";
+    reg.register_input(id, "SysEx Test");
+
+    std::vector<MidiEvent> events;
+    std::vector<std::vector<uint8_t>> sysex;
+    REQUIRE(reg.attach_input(
+        id,
+        [&](const MidiEvent& e) { events.push_back(e); },
+        [&](const std::vector<uint8_t>& bytes, double) { sysex.push_back(bytes); }));
+
+    const std::vector<uint8_t> msg = {0xF0, 0x7E, 0x00, 0x06, 0x01, 0xF7};
+    reg.deliver_message(id, msg, 1.0);
+    REQUIRE(events.empty());
+    REQUIRE(sysex.size() == 1);
+    REQUIRE(sysex[0] == msg);
+
+    reg.unregister_input(id);
+}
+
+TEST_CASE("BleMidiPortRegistry output sink forwards sent bytes to the central",
+          "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    const std::string id = "ble-midi-out:/test/dev_DD_registry_out";
+    std::vector<std::vector<uint8_t>> written;
+    reg.register_output(id, "Out Test",
+                        [&](const std::vector<uint8_t>& b) { written.push_back(b); });
+
+    REQUIRE(reg.is_output(id));
+    auto outputs = reg.list_outputs();
+    const char* name = find_port(outputs, id);
+    REQUIRE(name != nullptr);
+    REQUIRE(std::string(name) == "Out Test");
+
+    auto sink = reg.output_sink(id);
+    REQUIRE(static_cast<bool>(sink));
+    sink({0xB0, 7, 64});
+    REQUIRE(written.size() == 1);
+    REQUIRE(written[0] == std::vector<uint8_t>{0xB0, 7, 64});
+
+    reg.unregister_output(id);
+    REQUIRE_FALSE(reg.is_output(id));
+    REQUIRE_FALSE(static_cast<bool>(reg.output_sink(id)));
+}
+
+TEST_CASE("BleMidiPortRegistry deliver_message is a no-op for unknown / unopened "
+          "ports", "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    // Never registered — must not crash, must not deliver.
+    reg.deliver_message("ble-midi-in:/test/never-registered", {0x90, 60, 100}, 0.0);
+
+    // Registered but no host callback attached — also a safe no-op.
+    const std::string id = "ble-midi-in:/test/dev_EE_unopened";
+    reg.register_input(id, "Unopened");
+    reg.deliver_message(id, {0x90, 60, 100}, 0.0);  // attach_input never called
+    REQUIRE(reg.is_input(id));
+    reg.unregister_input(id);
+}
+
+TEST_CASE("BleMidiPortRegistry attach_input rejects an unregistered port",
+          "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    REQUIRE_FALSE(reg.attach_input(
+        "ble-midi-in:/test/never-registered-attach",
+        [](const MidiEvent&) {}, [](const std::vector<uint8_t>&, double) {}));
 }
