@@ -2587,6 +2587,10 @@ def completed_target_state(
     )
 
 
+def target_state_snapshot(target_states: dict[str, dict]) -> dict | None:
+    return _queue_orchestrator.target_state_snapshot(target_states)
+
+
 def status_runner_line(runner_info: dict | None) -> str:
     return _queue_orchestrator.status_runner_line(runner_info)
 
@@ -3685,9 +3689,9 @@ def process_job(job: dict, config: dict) -> dict:
 
     def flush_target_states() -> None:
         with state_lock:
-            snapshot = {name: dict(state) for name, state in target_states.items()}
-        update_runner_active_targets(job["id"], snapshot or None)
-        update_job_active_targets(job["id"], snapshot or None)
+            snapshot = target_state_snapshot(target_states)
+        update_runner_active_targets(job["id"], snapshot)
+        update_job_active_targets(job["id"], snapshot)
 
     def progress_factory(name: str):
         def report(**fields) -> None:
