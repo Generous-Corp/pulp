@@ -2510,6 +2510,14 @@ def summarize_job(job: dict) -> str:
     return _queue_orchestrator.summarize_job(job)
 
 
+def bump_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
+    return _queue_orchestrator.bump_queue_command_result_line(result, job_ref)
+
+
+def cancel_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
+    return _queue_orchestrator.cancel_queue_command_result_line(result, job_ref)
+
+
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
     return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
 
@@ -4616,15 +4624,9 @@ def cmd_bump(args: argparse.Namespace) -> int:
         print(f"Error: {exc}")
         return 1
 
-    if result["status"] == "missing":
-        print(f"No active job matches '{args.job}'.")
-        return 1
-    if result["status"] == "not_pending":
-        print(f"Job is already {result['job_status']}; only pending jobs can be reprioritized.")
-        return 1
-
-    print(f"Updated priority: {result['summary']}")
-    return 0
+    exit_code, line = bump_queue_command_result_line(result, args.job)
+    print(line)
+    return exit_code
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
@@ -4634,15 +4636,9 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         print(f"Error: {exc}")
         return 1
 
-    if result["status"] == "missing":
-        print(f"No active job matches '{args.job}'.")
-        return 1
-    if result["status"] == "not_pending":
-        print(f"Job is already {result['job_status']}; only pending jobs can be canceled safely.")
-        return 1
-
-    print(f"Canceled: {result['summary']}")
-    return 0
+    exit_code, line = cancel_queue_command_result_line(result, args.job)
+    print(line)
+    return exit_code
 
 
 def cmd_list(_args: argparse.Namespace) -> int:

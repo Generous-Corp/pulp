@@ -5,8 +5,8 @@ supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
 recent-completed selection,
-queue and result status line fragments, runner status line fragments,
-recent-completed result summaries,
+queue-command result line fragments, queue and result status line fragments,
+runner status line fragments, recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 completed-job state mutation, queue status grouping, and completed-queue
@@ -242,6 +242,22 @@ def cancellation_result(
         "overall": "canceled",
         "canceled_reason": reason,
     }
+
+
+def bump_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
+    if result["status"] == "missing":
+        return 1, f"No active job matches '{job_ref}'."
+    if result["status"] == "not_pending":
+        return 1, f"Job is already {result['job_status']}; only pending jobs can be reprioritized."
+    return 0, f"Updated priority: {result['summary']}"
+
+
+def cancel_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
+    if result["status"] == "missing":
+        return 1, f"No active job matches '{job_ref}'."
+    if result["status"] == "not_pending":
+        return 1, f"Job is already {result['job_status']}; only pending jobs can be canceled safely."
+    return 0, f"Canceled: {result['summary']}"
 
 
 def complete_job_with_result_unlocked(job: dict, result: dict, result_path: Path | str) -> None:

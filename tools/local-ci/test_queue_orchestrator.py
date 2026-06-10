@@ -357,6 +357,38 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertEqual(queue[1]["priority"], "low")
         self.assertNotIn("bumped_at", queue[1])
 
+    def test_queue_command_result_line_helpers(self) -> None:
+        self.assertEqual(
+            self.mod.bump_queue_command_result_line({"status": "missing"}, "missing"),
+            (1, "No active job matches 'missing'."),
+        )
+        self.assertEqual(
+            self.mod.bump_queue_command_result_line(
+                {"status": "not_pending", "job_status": "running"},
+                "running",
+            ),
+            (1, "Job is already running; only pending jobs can be reprioritized."),
+        )
+        self.assertEqual(
+            self.mod.bump_queue_command_result_line({"status": "updated", "summary": "summary"}, "job"),
+            (0, "Updated priority: summary"),
+        )
+        self.assertEqual(
+            self.mod.cancel_queue_command_result_line({"status": "missing"}, "missing"),
+            (1, "No active job matches 'missing'."),
+        )
+        self.assertEqual(
+            self.mod.cancel_queue_command_result_line(
+                {"status": "not_pending", "job_status": "running"},
+                "running",
+            ),
+            (1, "Job is already running; only pending jobs can be canceled safely."),
+        )
+        self.assertEqual(
+            self.mod.cancel_queue_command_result_line({"status": "canceled", "summary": "summary"}, "job"),
+            (0, "Canceled: summary"),
+        )
+
     def test_runner_info_active_target_update_matches_active_job_only(self) -> None:
         info = {
             "active_job_id": "job123",
