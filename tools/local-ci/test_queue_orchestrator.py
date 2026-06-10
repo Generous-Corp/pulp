@@ -409,6 +409,14 @@ class QueueOrchestratorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Multiple jobs match branch"):
             self.mod.find_job_unlocked(queue, "feature/a")
 
+        self.assertEqual(self.mod.select_job_for_logs(queue, None, "def333")["branch"], "feature/b")
+        self.assertEqual(
+            self.mod.select_job_for_logs(queue, {"active_job_id": "def333"}, None)["id"],
+            "def333",
+        )
+        self.assertEqual(self.mod.select_job_for_logs(queue, None, None)["id"], "abc222")
+        self.assertIsNone(self.mod.select_job_for_logs([{"id": "pending", "status": "pending"}], None, None))
+
         updated = self.mod.upsert_job_active_targets_unlocked(
             queue,
             "def333",

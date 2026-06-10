@@ -512,3 +512,16 @@ def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None
         )
 
     return None
+
+
+def select_job_for_logs(queue: list[dict], runner_info: dict | None, job_ref: str | None) -> dict | None:
+    if job_ref:
+        return find_job_unlocked(queue, job_ref)
+
+    if runner_info and runner_info.get("active_job_id"):
+        return find_job_unlocked(queue, runner_info["active_job_id"])
+
+    for job in reversed(queue):
+        if job.get("status") == "completed":
+            return job
+    return None

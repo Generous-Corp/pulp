@@ -4620,19 +4620,11 @@ def cmd_list(_args: argparse.Namespace) -> int:
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
-    queue = load_queue()
-    runner = current_runner_info()
-
-    if job_ref:
-        return find_job_unlocked(queue, job_ref)
-
-    if runner and runner.get("active_job_id"):
-        return find_job_unlocked(queue, runner["active_job_id"])
-
-    completed = [job for job in queue if job.get("status") == "completed"]
-    if completed:
-        return completed[-1]
-    return None
+    return _queue_orchestrator.select_job_for_logs(
+        load_queue(),
+        current_runner_info(),
+        job_ref,
+    )
 
 
 def cmd_logs(args: argparse.Namespace) -> int:
