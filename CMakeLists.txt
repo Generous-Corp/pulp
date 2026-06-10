@@ -95,6 +95,15 @@ option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
 # GPU + desktop (PULP_HAS_INSPECT), which gates linking; this flag gates
 # the source-side wiring on top of that.
 option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (dev/examples ON, release-ship OFF)" ON)
+# RT output-boundary audio probe in the standalone host — the data source for
+# the dev Audio Inspector window. Default ON for dev/examples; release /
+# standalone-ship builds configure -DPULP_ENABLE_AUDIO_PROBES=OFF. The probe's
+# analyze_output() is RT-safe (no alloc/lock/FFT); plugin formats never link
+# the standalone tap. NOTE: it gates MEMBER declarations in the public
+# standalone.hpp, so core/format defines it PUBLIC (consistent for every
+# includer) — a PRIVATE def would give the library and its consumers a
+# different sizeof(StandaloneApp) (ODR).
+option(PULP_ENABLE_AUDIO_PROBES "Wire the RT output-boundary probe into the standalone host (dev/examples ON, release-ship OFF)" ON)
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)

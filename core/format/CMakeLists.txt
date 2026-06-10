@@ -79,6 +79,20 @@ else()
     target_compile_definitions(pulp-format PRIVATE PULP_ENABLE_INSPECTOR=0)
 endif()
 
+# PULP_ENABLE_AUDIO_PROBES wires the RT output-boundary probe into the
+# standalone host (the dev Audio Inspector's data source). Unlike the
+# inspector flag, this one gates MEMBER declarations in the PUBLIC
+# standalone.hpp (output_probe_ / output_probe_ptrs_ / output_probe()), so it
+# is defined PUBLIC — every target that includes standalone.hpp must see the
+# same value or sizeof(StandaloneApp) diverges (ODR). Defined unconditionally
+# as 0/1 so source can `#if PULP_ENABLE_AUDIO_PROBES`. Default ON for
+# dev/examples; release/standalone-ship builds configure OFF.
+if(PULP_ENABLE_AUDIO_PROBES)
+    target_compile_definitions(pulp-format PUBLIC PULP_ENABLE_AUDIO_PROBES=1)
+else()
+    target_compile_definitions(pulp-format PUBLIC PULP_ENABLE_AUDIO_PROBES=0)
+endif()
+
 # Host-quirks default policy (host-quirks enforcement plan).
 #
 # Selects the baseline tier filter detect_quirks() / resolved_quirks() apply

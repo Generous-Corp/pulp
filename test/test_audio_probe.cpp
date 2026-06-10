@@ -279,6 +279,41 @@ TEST_CASE("AudioStats mirrors device counters without shadowing",
     REQUIRE(probe.stats().device_xruns == 0);
 }
 
+TEST_CASE("AudioStats clipped_blocks / nan_blocks are per-BLOCK, not per-sample",
+          "[audio-probe][audio-stats]") {
+    // The bug this guards: clipped_blocks/nan_blocks were populated with the
+    // per-SAMPLE clip_count / nan_inf_count. A single block with many clipped
+    // (or many NaN) samples must count as exactly ONE block.
+    AudioProbe probe;
+    probe.prepare(2, 64, 48000.0);
+
+    // Block 1: 10 clipped samples + 5 NaN samples — but it is ONE block.
+    StereoBlock b1(64);
+    b1.fill(0.1f, 0.1f);
+    for (int i = 0; i < 10; ++i) b1.left[i] = 2.0f;                       // clips
+    for (int i = 10; i < 15; ++i)
+        b1.right[i] = std::numeric_limits<float>::quiet_NaN();            // NaN
+    probe.analyze_output(b1.view());
+
+    AudioStats s1 = probe.stats();
+    REQUIRE(s1.clipped_blocks == 1);  // ONE block, not 10
+    REQUIRE(s1.nan_blocks == 1);      // ONE block, not 5
+    // The per-sample totals on the snapshot remain the raw sample counts.
+    REQUIRE(probe.latest().clip_count == 10);
+    REQUIRE(probe.latest().nan_inf_count == 5);
+
+    // Block 2: clean → block tallies unchanged. Block 3: clipped → +1 block.
+    StereoBlock clean(64); clean.fill(0.1f, 0.1f);
+    probe.analyze_output(clean.view());
+    StereoBlock b3(64); b3.fill(0.1f, 0.1f); b3.left[0] = 2.0f;
+    probe.analyze_output(b3.view());
+
+    AudioStats s3 = probe.stats();
+    REQUIRE(s3.clipped_blocks == 2);  // blocks 1 and 3
+    REQUIRE(s3.nan_blocks == 1);      // only block 1
+    REQUIRE(s3.callbacks == 3);
+}
+
 TEST_CASE("AudioProbe reset clears cumulative counters",
           "[audio-probe]") {
     AudioProbe probe;

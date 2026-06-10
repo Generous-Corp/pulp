@@ -121,8 +121,10 @@ private:
     float clip_ceiling_ = 1.0f;
 
     std::uint64_t sequence_number_ = 0;
-    std::uint64_t clip_count_ = 0;
-    std::uint64_t nan_inf_count_ = 0;
+    std::uint64_t clip_count_ = 0;      // per-sample
+    std::uint64_t nan_inf_count_ = 0;   // per-sample
+    std::uint64_t clipped_blocks_ = 0;  // per-block: blocks with >=1 clip
+    std::uint64_t nan_blocks_ = 0;      // per-block: blocks with >=1 NaN/Inf
     std::uint64_t callbacks_ = 0;
     std::uint64_t silence_run_blocks_ = 0;
     std::uint64_t dropped_capture_frames_ = 0;
