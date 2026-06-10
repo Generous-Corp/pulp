@@ -597,6 +597,42 @@ def unreachable_target_result(target_name: str, detail: str = "Host unreachable"
     }
 
 
+def target_exception_result(target_name: str, exc: Exception) -> dict:
+    return {
+        "target": target_name,
+        "status": "error",
+        "exit_code": -1,
+        "duration_secs": 0,
+        "stdout_tail": "",
+        "stderr_tail": str(exc),
+    }
+
+
+def completed_job_result(
+    job: dict,
+    results: list[dict],
+    *,
+    completed_at: str,
+    provenance: dict,
+) -> dict:
+    payload = {
+        "job_id": job["id"],
+        "branch": job["branch"],
+        "sha": job["sha"],
+        "priority": job["priority"],
+        "submission": job.get("submission"),
+        "provenance": provenance,
+        "targets": job.get("targets", []),
+        "queued_at": job.get("queued_at", ""),
+        "completed_at": completed_at,
+        "results": results,
+        "overall": "pass" if all(result["status"] == "pass" for result in results) else "fail",
+    }
+    if results:
+        payload["validation"] = job.get("validation", "full")
+    return payload
+
+
 def run_logged_command(
     cmd: list[str],
     *,
