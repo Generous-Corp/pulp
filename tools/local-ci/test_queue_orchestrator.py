@@ -656,6 +656,18 @@ class QueueOrchestratorTests(unittest.TestCase):
         self.assertEqual(self.mod.select_job_for_logs(queue, None, None)["id"], "abc222")
         self.assertIsNone(self.mod.select_job_for_logs([{"id": "pending", "status": "pending"}], None, None))
 
+        self.assertEqual(self.mod.missing_job_logs_line(), "No matching job logs found.")
+        self.assertEqual(
+            self.mod.missing_log_files_line({"id": "abc222", "branch": "feature/a"}),
+            "No logs found for job [abc222] feature/a.",
+        )
+        self.assertEqual(
+            self.mod.job_logs_header_line({"id": "abc222", "branch": "feature/a", "sha": "1" * 40}),
+            "Logs for [abc222] feature/a @ 111111111111",
+        )
+        self.assertEqual(self.mod.log_section_header_line("mac"), "== mac ==")
+        self.assertEqual(self.mod.empty_log_line(), "(empty)")
+
         updated = self.mod.upsert_job_active_targets_unlocked(
             queue,
             "def333",

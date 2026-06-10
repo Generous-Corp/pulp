@@ -4,7 +4,7 @@ This module owns job identity, enqueue duplicate/priority policy, enqueue
 supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
-recent-completed selection,
+recent-completed selection, log-command line fragments,
 queue-command result line fragments, queue and result status line fragments,
 runner status line fragments, recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
@@ -679,3 +679,23 @@ def select_job_for_logs(queue: list[dict], runner_info: dict | None, job_ref: st
         if job.get("status") == "completed":
             return job
     return None
+
+
+def missing_job_logs_line() -> str:
+    return "No matching job logs found."
+
+
+def missing_log_files_line(job: dict) -> str:
+    return f"No logs found for job [{job['id']}] {job['branch']}."
+
+
+def job_logs_header_line(job: dict) -> str:
+    return f"Logs for [{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))}"
+
+
+def log_section_header_line(target: str) -> str:
+    return f"== {target} =="
+
+
+def empty_log_line() -> str:
+    return "(empty)"

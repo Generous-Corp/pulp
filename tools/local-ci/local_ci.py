@@ -2574,6 +2574,26 @@ def result_overall_line(result: dict) -> str:
     return _queue_orchestrator.result_overall_line(result)
 
 
+def missing_job_logs_line() -> str:
+    return _queue_orchestrator.missing_job_logs_line()
+
+
+def missing_log_files_line(job: dict) -> str:
+    return _queue_orchestrator.missing_log_files_line(job)
+
+
+def job_logs_header_line(job: dict) -> str:
+    return _queue_orchestrator.job_logs_header_line(job)
+
+
+def log_section_header_line(target: str) -> str:
+    return _queue_orchestrator.log_section_header_line(target)
+
+
+def empty_log_line() -> str:
+    return _queue_orchestrator.empty_log_line()
+
+
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
     return _queue_orchestrator.upsert_job_active_targets_unlocked(
         queue,
@@ -4677,7 +4697,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
         return 1
 
     if job is None:
-        print("No matching job logs found.")
+        print(missing_job_logs_line())
         return 1
 
     paths: list[Path]
@@ -4689,17 +4709,17 @@ def cmd_logs(args: argparse.Namespace) -> int:
         paths = sorted(log_dir.glob("*.log"))
 
     if not paths:
-        print(f"No logs found for job [{job['id']}] {job['branch']}.")
+        print(missing_log_files_line(job))
         return 1
 
-    print(f"Logs for [{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))}\n")
+    print(f"{job_logs_header_line(job)}\n")
     for path in paths:
-        print(f"== {path.stem} ==")
+        print(log_section_header_line(path.stem))
         lines = tail_lines(path, args.lines)
         if lines:
             print("".join(lines).rstrip())
         else:
-            print("(empty)")
+            print(empty_log_line())
         print()
     return 0
 
