@@ -2560,6 +2560,22 @@ def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[s
     return _queue_orchestrator.status_target_detail_lines(job, active_targets)
 
 
+def completed_target_state(
+    job_id: str,
+    target_name: str,
+    result: dict,
+    previous_state: dict | None,
+    *,
+    completed_at: str,
+) -> dict:
+    return _queue_orchestrator.completed_target_state(
+        result,
+        previous_state,
+        completed_at=completed_at,
+        default_log_path=str(target_log_path(job_id, target_name)),
+    )
+
+
 def status_runner_line(runner_info: dict | None) -> str:
     return _queue_orchestrator.status_runner_line(runner_info)
 
@@ -3700,19 +3716,13 @@ def process_job(job: dict, config: dict) -> dict:
                 result = target_exception_result(name, exc)
 
             results.append(result)
-            target_states[name] = {
-                "status": result.get("status", "?"),
-                "exit_code": result.get("exit_code"),
-                "duration_secs": result.get("duration_secs"),
-                "completed_at": now_iso(),
-                "phase": "done" if result.get("status") == "pass" else target_states.get(name, {}).get("phase", "done"),
-                "log_path": result.get("log_file", str(target_log_path(job["id"], name))),
-                "last_output_at": target_states.get(name, {}).get("last_output_at"),
-                "last_line": target_states.get(name, {}).get("last_line"),
-                "host": target_states.get(name, {}).get("host"),
-                "transport_mode": result.get("transport_mode", target_states.get(name, {}).get("transport_mode")),
-                "wait_reason": target_states.get(name, {}).get("wait_reason"),
-            }
+            target_states[name] = completed_target_state(
+                job["id"],
+                name,
+                result,
+                target_states.get(name, {}),
+                completed_at=now_iso(),
+            )
             flush_target_states()
 
     results.sort(key=lambda item: item["target"])

@@ -199,6 +199,44 @@ class QueueOrchestratorTests(unittest.TestCase):
                 "  cleanup: terminated pid 123",
             ],
         )
+        pass_state = self.mod.completed_target_state(
+            {
+                "status": "pass",
+                "exit_code": 0,
+                "duration_secs": 4.2,
+                "log_file": "/tmp/pulp/logs/result-windows.log",
+                "transport_mode": "bundle",
+            },
+            {
+                "phase": "validate",
+                "last_output_at": "2026-06-09T00:02:00Z",
+                "last_line": "ok",
+                "host": "win",
+                "transport_mode": "ssh",
+                "wait_reason": "host-lock",
+            },
+            completed_at="2026-06-09T00:03:00Z",
+            default_log_path="/tmp/pulp/logs/default-windows.log",
+        )
+        self.assertEqual(pass_state["status"], "pass")
+        self.assertEqual(pass_state["phase"], "done")
+        self.assertEqual(pass_state["log_path"], "/tmp/pulp/logs/result-windows.log")
+        self.assertEqual(pass_state["transport_mode"], "bundle")
+        self.assertEqual(pass_state["last_output_at"], "2026-06-09T00:02:00Z")
+        self.assertEqual(pass_state["last_line"], "ok")
+        self.assertEqual(pass_state["host"], "win")
+        self.assertEqual(pass_state["wait_reason"], "host-lock")
+
+        fail_state = self.mod.completed_target_state(
+            {"status": "fail", "exit_code": 2, "duration_secs": 1.0},
+            {"phase": "build"},
+            completed_at="2026-06-09T00:04:00Z",
+            default_log_path="/tmp/pulp/logs/default-windows.log",
+        )
+        self.assertEqual(fail_state["phase"], "build")
+        self.assertEqual(fail_state["log_path"], "/tmp/pulp/logs/default-windows.log")
+        self.assertIsNone(fail_state["transport_mode"])
+
         self.assertEqual(self.mod.status_runner_line(None), "Runner: idle")
         self.assertEqual(
             self.mod.status_runner_line(

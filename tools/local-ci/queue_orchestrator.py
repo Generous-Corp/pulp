@@ -9,8 +9,8 @@ queue-command result line fragments, queue and result status line fragments,
 runner status line fragments, recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
-completed-job state mutation, queue status grouping, and completed-queue
-retention. Higher-level queue mutation, locking, runner
+completed target-state payloads, completed-job state mutation, queue status
+grouping, and completed-queue retention. Higher-level queue mutation, locking, runner
 liveness, result persistence, and drain orchestration remain in local_ci.py
 until later extraction slices.
 """
@@ -456,6 +456,29 @@ def update_runner_info_active_targets(
         info.pop("active_targets", None)
     info["updated_at"] = now_iso_fn()
     return True
+
+
+def completed_target_state(
+    result: dict,
+    previous_state: dict | None,
+    *,
+    completed_at: str,
+    default_log_path: str,
+) -> dict:
+    previous_state = previous_state or {}
+    return {
+        "status": result.get("status", "?"),
+        "exit_code": result.get("exit_code"),
+        "duration_secs": result.get("duration_secs"),
+        "completed_at": completed_at,
+        "phase": "done" if result.get("status") == "pass" else previous_state.get("phase", "done"),
+        "log_path": result.get("log_file", default_log_path),
+        "last_output_at": previous_state.get("last_output_at"),
+        "last_line": previous_state.get("last_line"),
+        "host": previous_state.get("host"),
+        "transport_mode": result.get("transport_mode", previous_state.get("transport_mode")),
+        "wait_reason": previous_state.get("wait_reason"),
+    }
 
 
 def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tuple[dict | None, str | None]:
