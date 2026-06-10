@@ -44,7 +44,7 @@ permissions:
   contents: read
 
 # Cancel superseded runs when a new commit lands on the same PR. The
-# sandbox-e2e matrix is a ~30 min build + pytest pass per OS — no value
+# sandbox-e2e matrix is a long cold build + pytest pass per OS — no value
 # in finishing a stale run when a fixup commit supersedes it.
 concurrency:
   group: sandbox-e2e-${{ github.ref }}
@@ -75,7 +75,7 @@ jobs:
     name: sandbox-e2e (${{ matrix.os }})
     needs: resolve-runners
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

@@ -111,6 +111,14 @@ Slice 6 (#551).
   re-block the release). Static symbol read = NO execution, so it's headless-safe
   — never use dlopen+init (loads GPU/Skia libs the headless runner lacks) or
   re-run the hardware-dependent ctest suite.
+- **Sandbox E2E macOS has a long cold C++ CLI build.**
+  `.github/workflows/sandbox-e2e.yml` builds the `pulp-cli` target before
+  running the Python sandbox harness. On GitHub-hosted `macos-latest`, a cold
+  C++ CLI build can exceed 30 minutes and be reported as `cancelled` with
+  `The operation was canceled` plus orphaned `clang` processes, before pytest
+  starts. Treat that as a job timeout/build-cost issue, not a sandbox assertion
+  failure. The workflow uses `timeout-minutes: 60` so the cold macOS build has
+  room to finish while still bounding genuinely wedged runs.
 - `.github/workflows/header-self-contained.yml` (pulp #2576) is a BLOCKING gate
   for the "compiles on Apple Clang, breaks on Linux" transitive-include class
   (e.g. `uint32_t` without `#include <cstdint>` — broke the v0.197.4 release).
