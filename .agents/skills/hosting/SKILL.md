@@ -142,6 +142,12 @@ predictable output, no MIDI.
   Use `connect_audio_rate_modulation()` only for continuous, automatable
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into
   stepped/read-only/control-rate parameters.
+- MIDI graph edges carry one block with three parallel payloads: short MIDI
+  events, SysEx, and optional UMP sidecars. When copying or clearing graph MIDI
+  scratch, handle all three together. If a `MidiBuffer` attaches a `UmpBuffer`
+  owned by `NodeRuntime`, attach it only after the runtime object is in its
+  final `CompiledGraph` storage; attaching before a move leaves a stale sidecar
+  pointer.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
