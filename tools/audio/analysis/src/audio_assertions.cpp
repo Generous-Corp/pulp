@@ -1,7 +1,7 @@
 // audio_assertions.cpp — reusable signal assertions (harness PR 1A).
 // See audio_assertions.hpp for the message and tolerance policy.
 
-#include "audio_assertions.hpp"
+#include <pulp/audio/analysis/audio_assertions.hpp>
 
 #include <algorithm>
 #include <cmath>

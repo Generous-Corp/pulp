@@ -1182,6 +1182,10 @@ pulp audio model status [--json]                # Show configured + resolved mod
 pulp audio model activate <model-id> [--json]   # Pick the active model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/corpus [options]
 pulp audio read-bundle <path-to-bundle> [--json]
+pulp audio validate summarize <file.wav> [--json]
+pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
+pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
+pulp audio validate assert <audio-run-dir-or-assertions.json>
 ```
 
 **Subcommands**:
@@ -1193,8 +1197,14 @@ pulp audio read-bundle <path-to-bundle> [--json]
 | `model activate <id>` | Select the active model and persist the state file |
 | `excerpt-find` | Score audio files (or a directory) against a text query and emit an excerpt bundle |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
+| `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
+| `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
+| `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
+| `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
 
-Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. All subcommands accept `--json` for machine-readable output.
+Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
+
+The `validate` subcommands are the offline harness CLI over captured audio (Phase 7). They analyze WAVs and stored artifact bundles with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
 
 ### sdk
 

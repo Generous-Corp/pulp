@@ -1025,6 +1025,31 @@ commands:
             kind: flag
       - name: read-bundle
         summary: Pretty-print a previously emitted excerpt bundle
+      - name: validate summarize
+        summary: Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits machine output
+        args:
+          - name: --json
+            kind: flag
+      - name: validate doctor
+        summary: Offline Audio Doctor over a WAV — THD/THD+N (--thd) and/or spectrum magnitude at checkpoints (--response f1,f2,...); writes a JSON curve artifact
+        args:
+          - name: --thd
+            kind: flag
+          - name: --response
+            kind: option
+          - name: --fundamental
+            kind: option
+          - name: --channel
+            kind: option
+      - name: validate compare
+        summary: Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. --mode spectral currently reuses the null residual with a looser default tolerance (true spectral distance is a later slice)
+        args:
+          - name: --mode
+            kind: option
+          - name: --tolerance
+            kind: option
+      - name: validate assert
+        summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
     docs: reference/cli.md#audio
 
   - name: sdk

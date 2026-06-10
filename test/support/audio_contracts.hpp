@@ -34,7 +34,8 @@
 /// Nothing below may include this header. No new DSP or measurement code
 /// lives here — every helper composes existing metrics/assertions.
 
-#include "audio_artifacts.hpp"
+#include <pulp/audio/analysis/audio_artifacts.hpp>
+
 #include "render_scenario.hpp"
 
 namespace pulp::test::audio {

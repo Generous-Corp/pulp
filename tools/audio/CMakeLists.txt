@@ -22,3 +22,8 @@ target_link_libraries(pulp-tool-audio
 target_include_directories(pulp-tool-audio PRIVATE
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
 )
+
+# Reusable offline audio-file analysis lib (file metrics, assertions, spectrum
+# analyzers + JSON artifacts). Promoted out of test/support so the shipped CLI
+# can link it without any test/ dependency.
+add_subdirectory(analysis)

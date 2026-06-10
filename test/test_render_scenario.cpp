@@ -18,7 +18,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "support/audio_artifacts.hpp"
+#include <pulp/audio/analysis/audio_artifacts.hpp>
 #include "support/render_scenario.hpp"
 
 #include <cmath>

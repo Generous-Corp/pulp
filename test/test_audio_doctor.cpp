@@ -14,7 +14,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "support/audio_doctor.hpp"
-#include "support/audio_doctor_artifacts.hpp"
+#include <pulp/audio/analysis/audio_doctor_artifacts.hpp>
 
 #include "pulp_effect.hpp"
 

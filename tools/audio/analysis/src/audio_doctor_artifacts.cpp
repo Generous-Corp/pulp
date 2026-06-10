@@ -2,7 +2,7 @@
 // (harness Phase 7, slice 1). See audio_doctor_artifacts.hpp for the schema
 // contract; mirrors the audio_artifacts.cpp CHOC-first style.
 
-#include "audio_doctor_artifacts.hpp"
+#include <pulp/audio/analysis/audio_doctor_artifacts.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -55,6 +55,11 @@ std::filesystem::path write(const std::string& json, std::string_view scenario,
     const auto path = artifact_dir() / (sanitize(scenario) + suffix);
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << json;
+    out.flush();
+    // Return an EMPTY path on any write failure so a caller never advertises an
+    // "Artifact:" line for a file that was not actually written.
+    if (!out)
+        return {};
     return path;
 }
 

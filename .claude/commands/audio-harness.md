@@ -28,10 +28,18 @@ What you get:
 - **Audio Doctor (offline)** — `response_relative_to_input()` for a magnitude /
   frequency-response curve (`attenuation_db_at(hz)`), `measure_thd()` for THD /
   THD+N + harmonic breakdown. Curves serialize to schema-versioned JSON.
+- **`pulp audio validate <verb>` CLI** — the same analyzers over captured audio
+  files / `audio-run/` bundles, no plugin instantiation:
+  - `pulp audio validate summarize out.wav [--json]` — signal summary
+  - `pulp audio validate doctor out.wav --thd [--fundamental <hz>]` / `--response f1,f2,...`
+  - `pulp audio validate compare a.wav b.wav [--mode null|spectral] [--tolerance <dbfs>]`
+  - `pulp audio validate assert audio-run/assertions.json` — re-check stored assertions, nonzero on failure
 
 To add coverage for a new effect, copy the nearest contract fixture in
 `test/test_audio_contracts.cpp` (or a Doctor case in `test/test_audio_doctor.cpp`)
-and adjust the expectations — don't hand-roll sample loops.
+and adjust the expectations — don't hand-roll sample loops. For a captured WAV or
+an `audio-run/` bundle, reach for the `pulp audio validate` verbs above.
 
-> Live in-app inspection (the Audio Inspector window) and a `pulp audio validate`
-> CLI are planned phases of the harness; until they land, use the fixtures above.
+> Live in-app inspection (the Audio Inspector window) and a scenario-driven
+> `render` verb are planned phases of the harness; until they land, use the
+> fixtures and the `validate` verbs above.

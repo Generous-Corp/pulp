@@ -3,28 +3,41 @@
 Shared test-only support code for the audio observability harness. Nothing
 here ships in runtime builds; everything runs off the audio thread.
 
+The pure file-analysis layers (metrics, assertions, artifacts, and the
+buffer-level FFT spectrum analyzers) live in the reusable
+`pulp::audio-analysis` lib at `tools/audio/analysis/`
+(`<pulp/audio/analysis/…>` headers, namespace `pulp::test::audio`). They were
+promoted out of this directory so the shipped `pulp audio validate …` CLI can
+analyze decoded WAVs without linking any `test/` library. The
+`Processor`-driven layers (signals, scenarios, contracts, and the
+scenario-driven Doctor wiring) stay test-only here and link that lib.
+
 ## Layering rule
 
 ```
-signals  (audio_test_signals, audio_signal_generators)   — deterministic stimulus + event scripts
+file-analysis lib — pulp::audio-analysis (tools/audio/analysis), also linked by the CLI:
+metrics    (audio_metrics)      — pure-arithmetic facts about buffers
+assertions (audio_assertions)   — CheckResult pass/fail over metrics/buffers
+artifacts  (audio_artifacts)    — JSON serialization of metrics + provenance
+spectrum   (audio_spectrum)     — buffer-level FFT response + THD/THD+N
+           (audio_doctor_artifacts) — JSON curve artifacts for response/THD
+
+test-only (test/support), links pulp::audio-analysis:
+signals    (audio_test_signals, audio_signal_generators) — deterministic stimulus + event scripts
    ↓
-metrics  (audio_metrics)                                 — pure-arithmetic facts about buffers
+scenarios  (render_scenario)    — HeadlessHost block-loop renders + matrix sweeps
    ↓
-assertions (audio_assertions)                            — CheckResult pass/fail over metrics/buffers
+contracts  (audio_contracts)    — named claims over one rendered scenario
    ↓
-artifacts (audio_artifacts)                              — JSON serialization of metrics + provenance
-   ↓
-scenarios (render_scenario)                              — HeadlessHost block-loop renders + matrix sweeps
-   ↓
-contracts (audio_contracts)                              — named claims over one rendered scenario
-   ↓
-doctor (audio_doctor, audio_doctor_artifacts)            — offline FFT analyzers over a scenario (response, THD)
+doctor     (audio_doctor)       — scenario-driven response/THD (delegates to audio_spectrum)
 ```
 
 **No back-edges.** A layer may include layers above it in this list, never
 below. Generators must not measure; metrics must not render; the artifact
-writer must not know what a scenario is beyond its provenance string. When
-adding a helper, place it in the lowest layer that can express it.
+writer must not know what a scenario is beyond its provenance string. The
+file-analysis lib must never depend on the test-only layers (it has no
+`Processor`/scenario knowledge). When adding a helper, place it in the lowest
+layer that can express it.
 
 Determinism is the harness contract: every generator documents its exact
 expression and seed handling (no `std::random_device`, no clocks), and

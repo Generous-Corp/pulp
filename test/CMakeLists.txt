@@ -5628,14 +5628,9 @@ add_executable(pulp-test-matrix-sampler test_matrix_sampler.cpp)
 target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
-
-# Harness support lib (test/support/audio_*): compiled once, targets link it.
-add_library(pulp-audio-test-support STATIC support/audio_metrics.cpp support/audio_assertions.cpp support/audio_artifacts.cpp support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/audio_doctor_artifacts.cpp)
-target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal)
-
-# Harness suites — golden audio (PulpGain+PulpTone), tone regression (PR 1B),
-# render scenarios (PR 2), helper self-tests (PR 1A), and example contracts
-# (PR 3; effect contracts in their own TU over the kBypass enum collision).
+# Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
+add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp)
+target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
@@ -5656,11 +5651,16 @@ add_executable(pulp-test-audio-contracts test_audio_contracts.cpp test_audio_con
 target_link_libraries(pulp-test-audio-contracts PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-contracts PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-audio-contracts)
-# Audio Doctor (offline analyzers — magnitude response + THD; harness Phase 7)
 add_executable(pulp-test-audio-doctor test_audio_doctor.cpp)
 target_link_libraries(pulp-test-audio-doctor PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-doctor PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-audio-doctor)
+add_executable(pulp-test-cli-audio-validate test_cli_audio_validate.cpp)
+target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-audio-validate pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-audio-validate)
 # Phase 5 RT output-boundary probe — allocation-counting acceptance + counters.
 add_executable(pulp-test-audio-probe test_audio_probe.cpp harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-audio-probe PRIVATE pulp::audio pulp::runtime Catch2::Catch2WithMain)

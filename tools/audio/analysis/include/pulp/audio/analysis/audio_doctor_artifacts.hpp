@@ -12,10 +12,12 @@
 /// points. Serialized via choc::value + choc::json (CHOC-first policy),
 /// matching the audio_artifacts.cpp style.
 ///
-/// Layering: this is part of the Doctor (top layer) — it includes
-/// audio_doctor.hpp and must not be included by anything below scenarios.
+/// Layering: this serializes the buffer-level analyzers' result structs, so it
+/// includes audio_spectrum.hpp (the FFT-bearing analysis core). It lives in the
+/// tool-only `pulp-audio-analysis` lib and must never be linked into a
+/// runtime/plugin build.
 
-#include "audio_doctor.hpp"
+#include "audio_spectrum.hpp"
 
 #include <filesystem>
 #include <string>

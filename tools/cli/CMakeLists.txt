@@ -61,6 +61,7 @@ add_executable(pulp-cli
     cmd_validate.cpp
     cmd_sdk.cpp
     cmd_audio.cpp
+    cmd_audio_validate.cpp
     cmd_version.cpp
     cmd_dev.cpp
     cmd_loop.cpp
@@ -111,7 +112,7 @@ add_executable(pulp-cli
 # basename — so all ctest entries below keep working.
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
-target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
+target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
 
 # Link-order fix for libskia.a → fontconfig on Linux+GNU ld (#1962).
 #

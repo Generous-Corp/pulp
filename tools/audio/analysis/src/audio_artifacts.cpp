@@ -2,7 +2,7 @@
 // scenarios (harness PR 1B). See audio_artifacts.hpp for the schema
 // contract.
 
-#include "audio_artifacts.hpp"
+#include <pulp/audio/analysis/audio_artifacts.hpp>
 
 #include <choc/text/choc_JSON.h>
 

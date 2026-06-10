@@ -37,8 +37,9 @@
 /// Layering (see README.md): scenarios sit on top of signals + metrics +
 /// assertions; nothing below may include this header.
 
-#include "audio_metrics.hpp"
-#include "audio_assertions.hpp"
+#include <pulp/audio/analysis/audio_metrics.hpp>
+#include <pulp/audio/analysis/audio_assertions.hpp>
+
 #include "audio_signal_generators.hpp"
 
 #include <pulp/format/headless.hpp>

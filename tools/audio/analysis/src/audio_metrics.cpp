@@ -1,7 +1,7 @@
 // audio_metrics.cpp — deterministic offline signal metrics (harness PR 1A).
 // See audio_metrics.hpp for the analyzer determinism contract.
 
-#include "audio_metrics.hpp"
+#include <pulp/audio/analysis/audio_metrics.hpp>
 
 #include <algorithm>
 #include <cmath>

@@ -27,16 +27,13 @@
     },
     "audio-harness": {
       "paths": [
-        "test/support/audio_metrics.*",
-        "test/support/audio_assertions.*",
         "test/support/audio_signal_generators.*",
         "test/support/audio_test_signals.*",
-        "test/support/audio_artifacts.*",
         "test/support/render_scenario.*",
         "test/support/audio_contracts.*",
         "test/support/audio_doctor.*",
-        "test/support/audio_doctor_artifacts.*",
-        "test/support/README.md"
+        "test/support/README.md",
+        "tools/audio/analysis/**"
       ]
     },
     "auv3": {

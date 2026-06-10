@@ -28,9 +28,9 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 
-#include "support/audio_artifacts.hpp"
-#include "support/audio_assertions.hpp"
-#include "support/audio_metrics.hpp"
+#include <pulp/audio/analysis/audio_artifacts.hpp>
+#include <pulp/audio/analysis/audio_assertions.hpp>
+#include <pulp/audio/analysis/audio_metrics.hpp>
 
 #include <choc/text/choc_JSON.h>
 

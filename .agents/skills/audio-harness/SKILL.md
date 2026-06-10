@@ -121,8 +121,40 @@ phase/Pearson correlation (the RT snapshot carries no inter-sample L*R term yet)
 This is for *watching what is currently flowing*; controlled-stimulus measurement
 (response/THD/etc.) is the offline Doctor above.
 
+## CLI: `pulp audio validate <verb>` (offline, over WAVs / artifact bundles)
+
+The harness analyzers are also reachable from the shipped CLI, nested under the
+existing `pulp audio` command (the `model`/`excerpt-find`/`read-bundle` verbs are
+untouched). The CLI is **not** tied to a plugin, so it analyzes captured audio
+files and stored `audio-run/` artifacts — not live processor instantiation
+(controlled-stimulus render stays the test-side `RenderScenario`). It links the
+reusable `pulp::audio-analysis` lib (`tools/audio/analysis`, namespace
+`pulp::test::audio`), the same file-analysis code the test harness uses; no
+`test/` library is linked into the CLI and no FFT leaks into a runtime build.
+
+```bash
+# Agent-readable signal summary (peak/RMS/DC/dominant pitch); --json for machine output
+pulp audio validate summarize out.wav [--json]
+
+# Offline Audio Doctor: THD/THD+N and/or spectrum magnitude at checkpoints.
+# Writes a schema-versioned JSON curve artifact to the temp dir.
+pulp audio validate doctor out.wav --thd [--fundamental 1000]
+pulp audio validate doctor out.wav --response 100,1000,8000
+
+# Null/spectral diff verdict (exits nonzero past tolerance)
+pulp audio validate compare before.wav after.wav [--mode null|spectral] [--tolerance -120]
+
+# Re-check a stored assertions.json (or an audio-run dir holding one); nonzero on failure
+pulp audio validate assert audio-run/assertions.json
+```
+
+`assertions.json` schema: `{"schema_version":1,"assertions":[{...}]}` where each
+entry has a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`,
+`frequency_near`), a `file` (relative to the JSON), and the check's named
+tolerance (`min_rms_dbfs`, `ceiling_dbfs`, `expected_hz` + `tolerance_cents`,
+...). The `/audio-harness` slash command documents these verbs.
+
 ## Roadmap (planned — do NOT instruct using this until it lands)
 
-- **`pulp audio validate <verb>` CLI** (render / assert / summarize / compare /
-  doctor over these analyzers) — nests under the existing `pulp audio` command.
-  Update the `/audio-harness` command to wrap it when it ships.
+- **Live ring-capture-to-WAV** (`pulp audio validate` over a running plugin's
+  tapped output) and a scenario-driven `render` verb are later Phase-7 slices.

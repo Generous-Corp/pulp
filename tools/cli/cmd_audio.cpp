@@ -12,6 +12,8 @@
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/service.hpp>
 
+#include "cmd_audio_validate.hpp"
+
 // Parsing helpers (defined in cli_common.cpp, not in header since they are only
 // used by audio command — declare them locally to keep the header lean).
 extern bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out);
@@ -25,12 +27,17 @@ static void print_audio_usage() {
     std::cout << "  pulp audio model activate <model-id> [--json]\n";
     std::cout << "  pulp audio excerpt-find --text <query> --input <path> [options]\n";
     std::cout << "  pulp audio read-bundle <path> [--json]\n";
+    std::cout << "  pulp audio validate <verb> ...   (summarize|doctor|compare|assert)\n";
 }
 
 int cmd_audio(const std::vector<std::string>& args) {
     if (args.empty()) {
         print_audio_usage();
         return 0;
+    }
+
+    if (args[0] == "validate") {
+        return cmd_audio_validate({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "model") {
