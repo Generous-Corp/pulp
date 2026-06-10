@@ -3964,114 +3964,17 @@ def cmd_desktop_status(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print("Desktop automation:")
-    print(f"  artifact_root: {desktop_cfg['artifact_root']}")
-    print(f"  publish_mode: {desktop_cfg['publish_mode']}")
-    print(f"  publish_branch: {desktop_cfg['publish_branch']}")
-    print(f"  retention_days: {desktop_cfg['retention_days']}")
     latest_publish_matches = desktop_publish_reports(config, limit=1)
     latest_publish = latest_publish_matches[0] if latest_publish_matches else None
-    if latest_publish:
-        print(f"  latest_publish: {latest_publish.get('label') or '?'} @ {latest_publish.get('generated_at') or '?'}")
-        if latest_publish.get('output_dir'):
-            print(f"  latest_publish_dir: {latest_publish['output_dir']}")
-        if latest_publish.get('index_html'):
-            print(f"  latest_publish_html: {latest_publish['index_html']}")
-    print("\nTargets:")
-    for target_info in target_payloads:
-        name = target_info["name"]
-        print(f"  {name}:")
-        print(f"    enabled: {target_info['enabled']}")
-        print(f"    adapter: {target_info['adapter']}")
-        print(f"    bootstrap: {target_info['bootstrap']}")
-        print(f"    type: {target_info['type']}")
-        if target_info.get("host"):
-            print(f"    host: {target_info['host']}")
-        if target_info.get("repo_path"):
-            print(f"    repo_path: {target_info['repo_path']}")
-        print(f"    capability_tier: {target_info['capability_tier']}")
-        print(f"    capabilities: {target_info['capabilities_text']}")
-        if target_info.get("optional_capabilities"):
-            print(f"    optional_capabilities: {', '.join(target_info['optional_capabilities'])}")
-        optional_features = target_info.get("optional_features") or {}
-        if any(optional_features.values()):
-            print(f"    optional_features: {json.dumps(optional_features, sort_keys=True)}")
-        print(f"    installed: {'yes' if target_info['installed'] else 'no'}")
-        if target_info["installed_at"]:
-            print(f"    installed_at: {target_info['installed_at']}")
-        if target_info.get("remote_bootstrap_ready") is not None:
-            print(f"    remote_bootstrap_ready: {target_info['remote_bootstrap_ready']}")
-        if target_info.get("remote_tooling_ready") is not None:
-            print(f"    remote_tooling_ready: {target_info['remote_tooling_ready']}")
-        if target_info.get("remote_repo_checkout_ready") is not None:
-            print(f"    remote_repo_checkout_ready: {target_info['remote_repo_checkout_ready']}")
-        contract = target_info.get("contract") or {}
-        if contract.get("task_name"):
-            print(f"    task_name: {contract['task_name']}")
-        if contract.get("remote_root"):
-            print(f"    remote_root: {contract['remote_root']}")
-        tooling_probe = target_info.get("tooling_probe") or {}
-        if tooling_probe.get("git_found"):
-            print(f"    remote_git: {windows_tooling_detail(tooling_probe, 'git')}")
-        elif target_info.get("remote_tooling_ready") is not None:
-            print("    remote_git: missing")
-        if tooling_probe.get("gh_found"):
-            print(f"    remote_gh: {windows_tooling_detail(tooling_probe, 'gh')}")
-        repo_checkout_probe = target_info.get("repo_checkout_probe") or {}
-        if repo_checkout_probe.get("repo_path"):
-            print(f"    remote_repo_checkout: {windows_repo_checkout_detail(repo_checkout_probe, fallback_path=target_info.get('repo_path'))}")
-        latest_run = target_info.get("latest_run")
-        if latest_run:
-            latest_completed = latest_run["completed_at"]
-            latest_label = latest_run["label"]
-            print(f"    latest_run: {latest_label} @ {latest_completed}")
-            print(f"    latest_run_status: {latest_run['run_status']}")
-            print(
-                f"    latest_run_source: mode={latest_run['source_mode']} sha={short_sha(latest_run['source_sha'])} "
-                f"branch={latest_run['source_branch'] or '?'}"
-            )
-            if latest_run.get("host"):
-                print(f"    latest_run_host: {latest_run['host']}")
-            if latest_run.get("proof_scope") and latest_run["proof_scope"] != "unknown":
-                print(f"    latest_run_proof_scope: {latest_run['proof_scope']}")
-            interaction_mode = latest_run.get("interaction_mode")
-            if interaction_mode:
-                print(f"    latest_interaction_mode: {interaction_mode}")
-            before_screenshot = latest_run.get("before_screenshot")
-            if before_screenshot:
-                print(f"    latest_before_screenshot: {before_screenshot}")
-            diff_screenshot = latest_run.get("diff_screenshot")
-            if diff_screenshot:
-                print(f"    latest_diff_screenshot: {diff_screenshot}")
-            image_change = latest_run.get("image_change")
-            if image_change:
-                print(f"    latest_image_change: changed={image_change.get('changed')} method={image_change.get('method')}")
-            screenshot = latest_run.get("screenshot")
-            if screenshot:
-                print(f"    latest_screenshot: {screenshot}")
-            ui_snapshot = latest_run.get("ui_snapshot")
-            if ui_snapshot:
-                print(f"    latest_ui_snapshot: {ui_snapshot}")
-            bundle_dir = latest_run.get("bundle_dir")
-            if bundle_dir:
-                print(f"    latest_bundle: {bundle_dir}")
-        latest_proof = target_info.get("latest_proof")
-        if latest_proof:
-            latest_proof_run = latest_proof["latest_run"]
-            print(
-                "    latest_proof: "
-                f"{latest_proof['action']} mode={latest_proof['source']['mode']} "
-                f"sha={short_sha(latest_proof['source']['sha'])} @ {latest_proof_run['completed_at']}"
-            )
-            if latest_proof.get("proof_scope") and latest_proof["proof_scope"] != "unknown":
-                host_detail = f" host={latest_proof['host']}" if latest_proof.get("host") else ""
-                print(
-                    f"    latest_proof_scope: {latest_proof['proof_scope']}{host_detail} "
-                    f"runs={latest_proof['run_count']}"
-                )
-            proof_bundle = latest_proof_run.get("artifacts", {}).get("bundle_dir")
-            if proof_bundle:
-                print(f"    latest_proof_bundle: {proof_bundle}")
+    for line in _desktop_cli.desktop_status_lines(
+        desktop_cfg,
+        target_payloads,
+        latest_publish=latest_publish,
+        short_sha_fn=short_sha,
+        windows_tooling_detail_fn=windows_tooling_detail,
+        windows_repo_checkout_detail_fn=windows_repo_checkout_detail,
+    ):
+        print(line)
     return 0
 
 

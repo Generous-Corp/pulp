@@ -1798,9 +1798,9 @@ preflight, source-prep, cleanup, and artifact-publishing contracts.
   mapping, screen-point mapping, default labels, and view-tree counts. Keep
   target execution, artifact persistence, report rollups, and OS-specific
   launch/probe helpers out of this module.
-- `desktop_cli.py` — owns desktop automation CLI line fragments for config,
-  action success, recent-run, proof, publish, and cleanup output. Keep target
-  execution, artifact persistence, report rollups, proof selection, and
+- `desktop_cli.py` — owns desktop automation CLI line fragments for status,
+  config, action success, recent-run, proof, publish, and cleanup output. Keep
+  target execution, artifact persistence, report rollups, proof selection, and
   desktop action policy out of this module.
 
 All original symbols are re-exported from `local_ci.py`, so any old
