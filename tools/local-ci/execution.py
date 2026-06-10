@@ -9,6 +9,7 @@ execution slices.
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue as queue_module
 import shlex
 import subprocess
@@ -635,6 +636,30 @@ def completed_job_result(
 
 def sorted_target_results(results: list[dict]) -> list[dict]:
     return sorted(results, key=lambda item: item["target"])
+
+
+def run_target_tasks(
+    tasks: list[tuple[str, Callable[[], dict]]],
+    *,
+    exception_result_fn: Callable[[str, Exception], dict],
+    on_target_complete: Callable[[str, dict], None],
+) -> list[dict]:
+    if not tasks:
+        return []
+
+    results = []
+    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        futures = {pool.submit(fn): name for name, fn in tasks}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                result = exception_result_fn(name, exc)
+
+            results.append(result)
+            on_target_complete(name, result)
+    return results
 
 
 def run_logged_command(

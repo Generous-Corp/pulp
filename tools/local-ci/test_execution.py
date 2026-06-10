@@ -159,6 +159,39 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual([item["target"] for item in sorted_results], ["mac", "ubuntu", "windows"])
         self.assertEqual([item["target"] for item in results], ["windows", "mac", "ubuntu"])
 
+    def test_run_target_tasks_collects_results_and_reports_completion(self) -> None:
+        completed = []
+
+        def failing_task() -> dict:
+            raise RuntimeError("boom")
+
+        results = self.mod.run_target_tasks(
+            [
+                ("mac", lambda: {"target": "mac", "status": "pass"}),
+                ("windows", failing_task),
+            ],
+            exception_result_fn=lambda name, exc: {
+                "target": name,
+                "status": "error",
+                "stderr_tail": str(exc),
+            },
+            on_target_complete=lambda name, result: completed.append((name, result["status"])),
+        )
+
+        self.assertCountEqual(
+            [(item["target"], item["status"]) for item in results],
+            [("mac", "pass"), ("windows", "error")],
+        )
+        self.assertCountEqual(completed, [("mac", "pass"), ("windows", "error")])
+        self.assertEqual(
+            self.mod.run_target_tasks(
+                [],
+                exception_result_fn=lambda name, exc: {},
+                on_target_complete=lambda name, result: None,
+            ),
+            [],
+        )
+
     def test_local_validation_command_builds_full_and_smoke_commands(self) -> None:
         full_cmd, full_validation = self.mod.local_validation_command(
             {"sha": "a" * 40, "targets": ["mac"], "validation": "full"},

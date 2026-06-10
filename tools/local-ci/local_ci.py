@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from collections.abc import Callable
 import fcntl
 import json
 import os
@@ -50,7 +51,6 @@ import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -3234,6 +3234,18 @@ def sorted_target_results(results: list[dict]) -> list[dict]:
     return _execution.sorted_target_results(results)
 
 
+def run_target_tasks(
+    tasks: list[tuple[str, Callable[[], dict]]],
+    *,
+    on_target_complete: Callable[[str, dict], None],
+) -> list[dict]:
+    return _execution.run_target_tasks(
+        tasks,
+        exception_result_fn=target_exception_result,
+        on_target_complete=on_target_complete,
+    )
+
+
 def run_logged_command(
     cmd: list[str],
     *,
@@ -3713,26 +3725,17 @@ def process_job(job: dict, config: dict) -> dict:
         target_states[name] = initial_target_state(job["id"], name, started_at=now_iso())
     flush_target_states()
 
-    results = []
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-        futures = {pool.submit(fn): name for name, fn in tasks}
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                result = future.result()
-            except Exception as exc:
-                result = target_exception_result(name, exc)
+    def record_target_completion(name: str, result: dict) -> None:
+        target_states[name] = completed_target_state(
+            job["id"],
+            name,
+            result,
+            target_states.get(name, {}),
+            completed_at=now_iso(),
+        )
+        flush_target_states()
 
-            results.append(result)
-            target_states[name] = completed_target_state(
-                job["id"],
-                name,
-                result,
-                target_states.get(name, {}),
-                completed_at=now_iso(),
-            )
-            flush_target_states()
-
+    results = run_target_tasks(tasks, on_target_complete=record_target_completion)
     return completed_job_result(job, sorted_target_results(results))
 
 
