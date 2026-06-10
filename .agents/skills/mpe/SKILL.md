@@ -182,6 +182,21 @@ then, an MPE synth loaded as VST3/AU sees MIDI events but the
 `MpeBuffer` will be empty; the voice tracker inside the processor
 still works if you extract per-note data from `MidiBuffer` yourself.
 
+### Realtime sidecar buffers are capacity-limited
+
+`MpeBuffer` and `UmpBuffer` support the same adapter-owned realtime
+capacity policy as `MidiBuffer`: reserve storage before the audio
+thread, call `set_realtime_capacity_limit(true)`, and treat `add()`
+returning `false` plus `dropped_event_count()` as the overflow signal.
+
+This matters for CLAP because one short MIDI event can fan out to many
+MPE sidecar callbacks, and native `CLAP_EVENT_MIDI2` packets append
+directly to the UMP sidecar before `Processor::process()`. The CLAP
+adapter reserves both sidecars in `clap_activate()` and drops rather
+than growing vectors during `clap_process()`. If you add a new adapter
+or widen the sidecar contract, test the overflow path without copying
+large event vectors inside the processor no-allocation guard.
+
 ## Reference material
 
 - Guide: [docs/guides/mpe.md](../../../docs/guides/mpe.md)
