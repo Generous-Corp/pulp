@@ -703,19 +703,24 @@ actually published.
 
 `auto-release.yml` creates the tag immediately on merge, but
 `release-cli.yml` only publishes after the matrix is green. If matrix
-fails (as in #1962), the tag exists with no Release — and
+fails, the tag exists with no Release — and
 `workflow_dispatch` against that tag re-runs the BROKEN workflow file
 from the tag's source. Two safe options:
 
-1. **Source-ref dispatch (#1962):** Run the *fixed* workflow from main
-   while building the *tag's* source:
+1. **Main workflow + blank source_ref:** Run the *fixed*
+   workflow from main, pass the tag as `version`, and leave `source_ref`
+   blank. That checks out the tag's source while enabling the backfill
+   overlay step:
 
        gh workflow run release-cli.yml --ref main \
-           -f version=v0.97.0 -f source_ref=v0.97.0
+           -f version=v0.97.0
 
-   The build-cli job overlays `tools/scripts/fetch_skia_for_release.py`
-   from main automatically, so a backfill picks up post-tag fetch-script
-   fixes even though the tag's tree predates them.
+   The build-cli job overlays safe release-pipeline helper files from
+   main automatically, so a backfill picks up post-tag fetch-script,
+   packaging, manifest, and targeted CMake fixes even though the tag's
+   tree predates them. Leave `make_latest` false for old-tag backfills;
+   set it true only when backfilling the current newest tag after the
+   automatic tag-triggered run failed.
 
 2. **Cherry-pick fix + retag:** Only if the build itself needs to change.
    Pulp doesn't retag immutable releases — use option 1 unless the

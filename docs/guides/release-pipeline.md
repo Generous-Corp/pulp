@@ -52,7 +52,7 @@ PR merge to main
 │ 2a. release-cli.yml — the heavy lifter                   │
 │                                                          │
 │ Matrix (5 platforms, parallel):                          │
-│   - darwin-arm64    → github-hosted macos-15             │
+│   - darwin-arm64    → resolved release macOS runner      │
 │   - linux-x64       → github-hosted ubuntu-latest        │
 │   - linux-arm64     → github-hosted ubuntu-22.04-arm     │
 │   - windows-x64     → github-hosted windows-latest       │
@@ -89,6 +89,9 @@ PR merge to main
 │     `draft: false`).                                     │
 │   - Does NOT generate appcast.xml or create the draft;  │
 │     both are owned by sign-and-release.yml (2b below).  │
+│   - Tag-push releases update GitHub's /releases/latest  │
+│     pointer. Manual workflow_dispatch backfills do not   │
+│     unless the operator sets make_latest=true.           │
 └─────────────────────────────────────────────────────────┘
      │
      ▼
@@ -179,6 +182,20 @@ end. Triage by which assets are present:
 
 In all three cases the `release-draft-stuck-check` watchdog will eventually
 flag a stuck draft (see release-watchdog.md).
+
+## Manual release-cli backfills
+
+Use `workflow_dispatch` on `release-cli.yml` when a tag already exists but the
+CLI/SDK assets need to be rebuilt with the current release pipeline.
+
+- Leave `source_ref` blank for the normal old-tag backfill. The workflow checks
+  out the requested `version` tag, then overlays the current `main` copies of
+  release-pipeline helper files that are safe to use with older source trees.
+- Set `source_ref` only when you intentionally want to build that source ref
+  under the `version` label. That is not the normal backfill path.
+- Leave `make_latest` false for old-tag backfills. Set it true only when
+  backfilling the current newest release after the automatic tag-triggered run
+  failed before publishing.
 
 ## Worked example — the v0.101.x SDK saga
 

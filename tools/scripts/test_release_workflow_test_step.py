@@ -335,6 +335,16 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.text = RELEASE_CLI.read_text(encoding="utf-8")
 
+    def _find_step_block(self, step_name: str) -> str:
+        pattern = re.compile(
+            rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
+            r"(.+?)(?=\n\s*-\s*name:|\Z)",
+            re.DOTALL,
+        )
+        match = pattern.search(self.text)
+        self.assertIsNotNone(match, f"could not locate `{step_name}` step")
+        return match.group(0)
+
     def _find_step_run(self, step_name: str) -> str:
         pattern = re.compile(
             rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
@@ -345,6 +355,21 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         match = pattern.search(self.text)
         self.assertIsNotNone(match, f"could not locate `{step_name}` step")
         return match.group(1)
+
+    def test_backfill_overlay_runs_for_version_tag_checkout(self) -> None:
+        step_block = self._find_step_block(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        condition = step_block.split("run:", 1)[0]
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+        self.assertIn("inputs.source_ref == ''", condition)
+        self.assertNotIn(
+            "inputs.source_ref != ''",
+            condition,
+            "Normal manual backfills leave source_ref blank and check out "
+            "inputs.version. The overlay must run in that path because the "
+            "checked-out tag can predate the release-pipeline fixes.",
+        )
 
     def test_backfill_overlay_keeps_cli_cmake_source_list_from_tag(self) -> None:
         run_block = self._find_step_run(
@@ -378,6 +403,47 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("_PULP_CLI_FONTCONFIG", run_block)
         self.assertIn("path.write_text(text", run_block)
         self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
+
+
+class ReleaseCliLatestPointer(unittest.TestCase):
+    """Manual release-cli backfills must not move GitHub's latest pointer."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = RELEASE_CLI.read_text(encoding="utf-8")
+
+    def _find_step_block(self, step_name: str) -> str:
+        pattern = re.compile(
+            rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
+            r"(.+?)(?=\n\s*-\s*name:|\Z)",
+            re.DOTALL,
+        )
+        match = pattern.search(self.text)
+        self.assertIsNotNone(match, f"could not locate `{step_name}` step")
+        return match.group(0)
+
+    def test_manual_dispatch_make_latest_input_defaults_false(self) -> None:
+        input_match = re.search(
+            r"make_latest:\s*\n(?P<body>(?:\s{8,}[^\n]*\n)+)",
+            self.text,
+        )
+        self.assertIsNotNone(input_match, "release-cli.yml must define a make_latest input")
+        input_block = input_match.group("body")
+        self.assertIn("type: boolean", input_block)
+        self.assertIn("default: false", input_block)
+
+    def test_create_release_promotes_latest_only_for_tag_push_or_opt_in(self) -> None:
+        step_block = self._find_step_block("Create release")
+        self.assertIn(
+            "make_latest: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}",
+            step_block,
+        )
+        self.assertNotIn(
+            "make_latest: true",
+            step_block,
+            "Unconditional make_latest lets an old-tag workflow_dispatch backfill "
+            "move GitHub's /releases/latest pointer backward.",
+        )
 
 
 class SignAndReleaseContentsWriteTest(unittest.TestCase):

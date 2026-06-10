@@ -23,6 +23,14 @@ on:
           `main` while still checking out the broken TAG's source code.
         required: false
         default: ''
+      make_latest:
+        description: |
+          Update GitHub's /releases/latest pointer for this manual dispatch.
+          Leave false for old-tag backfills; set true only when backfilling
+          the current newest release tag after a failed automatic tag run.
+        required: false
+        type: boolean
+        default: false
 
 # Never cancel an in-flight release. If two tags push back-to-back,
 # serialize rather than cancel — interrupting a binary build halfway
@@ -171,15 +179,15 @@ jobs:
       # configure doesn't trip on them.
 
       # Backfill safety net (pulp #1962): when a workflow_dispatch
-      # backfill is checking out a tag that pre-dates the chrome/m144
-      # layout flatten fix, the script in that tag's source tree is the
-      # OLD version and will fail. Pull the current `main` copy of the
-      # script over the in-tree copy so the workflow's fetch step picks
-      # up the fix regardless of when the tag was cut. This is a no-op
-      # for tag-push triggers (the dispatched source_ref is empty so we
-      # skip).
+      # backfill leaves source_ref blank, actions/checkout uses the old
+      # `version` tag source tree. Tags that pre-date release-pipeline
+      # fixes carry the OLD helper scripts and CMake glue, so pull the
+      # current `main` copies over the checked-out tag before building.
+      # This is a no-op for tag-push triggers and intentionally skipped
+      # when source_ref is supplied, because that mode builds the
+      # operator-selected source ref under the requested version label.
       - name: Overlay latest release-pipeline files (workflow_dispatch backfill)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref == '' }}
         shell: bash
         # Pull the current `main` copies of files that gate release-cli's
         # success but live in the source tree rather than the workflow
@@ -827,9 +835,8 @@ jobs:
             artifacts/**/*
           draft: false
           prerelease: false
-          # Explicitly claim GitHub's "latest release" pointer. Without this,
-          # releases published after v0.395.0 (v0.397..v0.406) stayed off
-          # `releases/latest` — so `pulp upgrade`, the install script, and the
-          # repo's "Latest" badge all kept pointing at v0.395.0 while newer
-          # CLIs shipped. `make_latest: true` is the durable fix (2026-06-10).
-          make_latest: true
+          # Explicitly claim GitHub's "latest release" pointer for normal tag
+          # pushes. Manual dispatches are often old-tag backfills, so they must
+          # opt in with `make_latest=true`; otherwise a backfill for an older
+          # tag can move `/releases/latest` backward.
+          make_latest: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}
