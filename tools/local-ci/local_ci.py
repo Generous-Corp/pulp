@@ -2617,22 +2617,16 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
-    changed = False
-    actions = _queue_orchestrator.stale_running_reconciliation_actions_unlocked(
+    return _queue_lifecycle.reconcile_running_jobs_unlocked(
         queue,
-        stale_running_jobs_unlocked(queue),
+        stale_running_jobs_unlocked_fn=stale_running_jobs_unlocked,
+        stale_running_reconciliation_actions_unlocked_fn=_queue_orchestrator.stale_running_reconciliation_actions_unlocked,
+        supersede_job_unlocked_fn=supersede_job_unlocked,
+        requeue_stale_running_job_unlocked_fn=lambda job: _queue_orchestrator.requeue_stale_running_job_unlocked(
+            job,
+            now_iso_fn=now_iso,
+        ),
     )
-    for action in actions:
-        job = action["job"]
-        if action["action"] == "supersede":
-            supersede_job_unlocked(job, action["replacement"]["id"], action["reason"])
-            changed = True
-            continue
-
-        _queue_orchestrator.requeue_stale_running_job_unlocked(job, now_iso_fn=now_iso)
-        changed = True
-
-    return queue, changed
 
 
 def read_runner_info() -> dict | None:

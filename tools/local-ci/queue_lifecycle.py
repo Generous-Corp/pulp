@@ -7,6 +7,32 @@ import os
 from pathlib import Path
 
 
+def reconcile_running_jobs_unlocked(
+    queue: list[dict],
+    *,
+    stale_running_jobs_unlocked_fn: Callable[[list[dict]], list[dict]],
+    stale_running_reconciliation_actions_unlocked_fn: Callable[[list[dict], list[dict]], list[dict]],
+    supersede_job_unlocked_fn: Callable[[dict, str, str], None],
+    requeue_stale_running_job_unlocked_fn: Callable[[dict], None],
+) -> tuple[list[dict], bool]:
+    changed = False
+    actions = stale_running_reconciliation_actions_unlocked_fn(
+        queue,
+        stale_running_jobs_unlocked_fn(queue),
+    )
+    for action in actions:
+        job = action["job"]
+        if action["action"] == "supersede":
+            supersede_job_unlocked_fn(job, action["replacement"]["id"], action["reason"])
+            changed = True
+            continue
+
+        requeue_stale_running_job_unlocked_fn(job)
+        changed = True
+
+    return queue, changed
+
+
 def enqueue_job_locked(
     branch: str,
     sha: str,

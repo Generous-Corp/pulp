@@ -34,6 +34,74 @@ class QueueLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_reconcile_running_jobs_applies_supersede_and_requeue_actions(self) -> None:
+        superseded_job = {"id": "old", "status": "running"}
+        requeued_job = {"id": "retry", "status": "running"}
+        replacement = {"id": "new"}
+        queue = [superseded_job, requeued_job, replacement]
+        events: list[tuple[str, object]] = []
+
+        def stale_jobs(loaded_queue):
+            self.assertIs(loaded_queue, queue)
+            events.append(("stale", [job["id"] for job in loaded_queue]))
+            return [superseded_job, requeued_job]
+
+        def actions(loaded_queue, stale):
+            self.assertIs(loaded_queue, queue)
+            self.assertEqual(stale, [superseded_job, requeued_job])
+            events.append(("actions", [job["id"] for job in stale]))
+            return [
+                {
+                    "action": "supersede",
+                    "job": superseded_job,
+                    "replacement": replacement,
+                    "reason": "newer_sha",
+                },
+                {"action": "requeue", "job": requeued_job},
+            ]
+
+        def supersede(job, replacement_id, reason):
+            events.append(("supersede", (job["id"], replacement_id, reason)))
+            job["status"] = "completed"
+
+        def requeue(job):
+            events.append(("requeue", job["id"]))
+            job["status"] = "pending"
+
+        result = self.mod.reconcile_running_jobs_unlocked(
+            queue,
+            stale_running_jobs_unlocked_fn=stale_jobs,
+            stale_running_reconciliation_actions_unlocked_fn=actions,
+            supersede_job_unlocked_fn=supersede,
+            requeue_stale_running_job_unlocked_fn=requeue,
+        )
+
+        self.assertEqual(result, (queue, True))
+        self.assertEqual(superseded_job["status"], "completed")
+        self.assertEqual(requeued_job["status"], "pending")
+        self.assertEqual(
+            events,
+            [
+                ("stale", ["old", "retry", "new"]),
+                ("actions", ["old", "retry"]),
+                ("supersede", ("old", "new", "newer_sha")),
+                ("requeue", "retry"),
+            ],
+        )
+
+    def test_reconcile_running_jobs_returns_unchanged_without_actions(self) -> None:
+        queue = [{"id": "job1", "status": "pending"}]
+
+        result = self.mod.reconcile_running_jobs_unlocked(
+            queue,
+            stale_running_jobs_unlocked_fn=lambda loaded_queue: [],
+            stale_running_reconciliation_actions_unlocked_fn=lambda loaded_queue, stale_jobs: [],
+            supersede_job_unlocked_fn=lambda job, replacement_id, reason: self.fail("unexpected supersede"),
+            requeue_stale_running_job_unlocked_fn=lambda job: self.fail("unexpected requeue"),
+        )
+
+        self.assertEqual(result, (queue, False))
+
     def test_enqueue_job_reconciles_saves_bumps_existing_and_normalizes(self) -> None:
         queue = [
             {
