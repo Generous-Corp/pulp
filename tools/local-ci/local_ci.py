@@ -2521,8 +2521,20 @@ def status_target_states(job: dict, active_targets: dict | None) -> list[tuple[s
     return _queue_orchestrator.status_target_states(job, active_targets)
 
 
+def status_submission_lines(job: dict) -> list[str]:
+    return _queue_orchestrator.status_submission_lines(job)
+
+
 def target_state_detail_parts(state: dict) -> list[str]:
     return _queue_orchestrator.target_state_detail_parts(state)
+
+
+def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[str]:
+    return _queue_orchestrator.status_target_detail_lines(job, active_targets)
+
+
+def recent_completed_status_line(job: dict, result: dict) -> str:
+    return _queue_orchestrator.recent_completed_status_line(job, result)
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
@@ -4728,28 +4740,14 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print(f"\nRunning ({len(running)}):")
         for job in running:
             print(f"  {summarize_job(job)} started {job.get('started_at', '?')}")
-            submission = job.get("submission") or {}
-            if submission.get("config_path"):
-                print(
-                    "    submission: "
-                    f"root={submission.get('submitted_root', '?')} "
-                    f"config={submission.get('config_path')} "
-                    f"({submission.get('config_source', '?')})"
-                )
-            if submission.get("provenance"):
-                print(f"    provenance: {provenance_summary(submission.get('provenance'))}")
+            for line in status_submission_lines(job):
+                print(f"    {line}")
             active_targets = status_active_targets(job, runner)
             target_summary = summarize_active_targets(active_targets, job.get("targets"))
             if target_summary:
                 print(f"    live targets: {target_summary}")
-            for name, state in status_target_states(job, active_targets):
-                details = target_state_detail_parts(state)
-                if details:
-                    print(f"    {name}: " + ", ".join(details))
-                if state.get("last_line"):
-                    print(f"      {state['last_line']}")
-                if state.get("cleanup_result"):
-                    print(f"      cleanup: {state['cleanup_result']}")
+            for line in status_target_detail_lines(job, active_targets):
+                print(f"    {line}")
     else:
         print("\nNo running jobs.")
 
@@ -4757,29 +4755,15 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print(f"\nPending ({len(pending)}):")
         for job in pending:
             print(f"  {summarize_job(job)} queued {job.get('queued_at', '?')}")
-            submission = job.get("submission") or {}
-            if submission.get("config_path"):
-                print(
-                    "    submission: "
-                    f"root={submission.get('submitted_root', '?')} "
-                    f"config={submission.get('config_path')} "
-                    f"({submission.get('config_source', '?')})"
-                )
-            if submission.get("provenance"):
-                print(f"    provenance: {provenance_summary(submission.get('provenance'))}")
+            for line in status_submission_lines(job):
+                print(f"    {line}")
             active_targets = status_active_targets(job)
             target_summary = summarize_active_targets(active_targets, job.get("targets"))
             if target_summary:
                 progress_at = job.get("last_progress_at") or job.get("requeued_at") or "?"
                 print(f"    last known targets: {target_summary} (updated {progress_at})")
-            for name, state in status_target_states(job, active_targets):
-                details = target_state_detail_parts(state)
-                if details:
-                    print(f"    {name}: " + ", ".join(details))
-                if state.get("last_line"):
-                    print(f"      {state['last_line']}")
-                if state.get("cleanup_result"):
-                    print(f"      cleanup: {state['cleanup_result']}")
+            for line in status_target_detail_lines(job, active_targets):
+                print(f"    {line}")
     else:
         print("\nNo pending jobs.")
 
@@ -4790,14 +4774,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
             result_file = job.get("result_file")
             if result_file and Path(result_file).exists():
                 result = load_result(Path(result_file))
-                targets = ", ".join(
-                    f"{item['target']}={item['status']}" for item in result.get("results", [])
-                )
-                print(
-                    f"  [{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))} "
-                    f"{result.get('overall', '?').upper()} [{targets}] "
-                    f"via {provenance_summary(result.get('provenance'))}"
-                )
+                print(f"  {recent_completed_status_line(job, result)}")
             else:
                 print(f"  {summarize_job(job)} (result file missing)")
 

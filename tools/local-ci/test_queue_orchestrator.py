@@ -127,6 +127,29 @@ class QueueOrchestratorTests(unittest.TestCase):
         )
         self.assertEqual(self.mod.status_target_states({"targets": ["mac"]}, None), [])
         self.assertEqual(
+            self.mod.status_submission_lines(
+                {
+                    "submission": {
+                        "submitted_root": "/tmp/pulp",
+                        "config_path": "/tmp/pulp/.pulp-ci.json",
+                        "config_source": "worktree",
+                        "provenance": {
+                            "execution_kind": "hosted",
+                            "hosted_orchestrator": "github-actions",
+                            "runner_provider": "github-hosted",
+                            "runner_selector": "ubuntu-latest",
+                            "run_id": "12345",
+                        },
+                    }
+                }
+            ),
+            [
+                "submission: root=/tmp/pulp config=/tmp/pulp/.pulp-ci.json (worktree)",
+                "provenance: hosted via github-actions/github-hosted selector=ubuntu-latest run=12345",
+            ],
+        )
+        self.assertEqual(self.mod.status_submission_lines({"submission": {}}), [])
+        self.assertEqual(
             self.mod.target_state_detail_parts(
                 {
                     "phase": "build",
@@ -157,6 +180,45 @@ class QueueOrchestratorTests(unittest.TestCase):
                 "liveness=alive",
                 "log=windows.log",
             ],
+        )
+        self.assertEqual(
+            self.mod.status_target_detail_lines(
+                {"targets": ["windows"]},
+                {
+                    "windows": {
+                        "phase": "cleanup",
+                        "cleanup_status": "done",
+                        "last_line": "last output",
+                        "cleanup_result": "terminated pid 123",
+                    }
+                },
+            ),
+            [
+                "windows: phase=cleanup, cleanup=done",
+                "  last output",
+                "  cleanup: terminated pid 123",
+            ],
+        )
+        self.assertEqual(
+            self.mod.recent_completed_status_line(
+                {
+                    "id": "done123",
+                    "branch": "feature/q",
+                    "sha": "abcdef1234567890",
+                },
+                {
+                    "overall": "pass",
+                    "results": [
+                        {"target": "mac", "status": "pass"},
+                        {"target": "linux", "status": "skip"},
+                    ],
+                    "provenance": {
+                        "execution_kind": "direct",
+                        "direct_backend": "local-ci",
+                    },
+                },
+            ),
+            "[done123] feature/q @ abcdef123456 PASS [mac=pass, linux=skip] via direct via local-ci",
         )
         self.assertLess(
             self.mod.job_sort_key({"id": "high", "priority": "high", "queued_at": "2"}),

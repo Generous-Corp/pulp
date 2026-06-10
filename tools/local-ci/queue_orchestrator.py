@@ -5,6 +5,8 @@ supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
 recent-completed selection,
+queue status submission/target line fragments, recent-completed result
+summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 completed-job state mutation, queue status grouping, and completed-queue
@@ -24,7 +26,7 @@ import uuid
 
 from git_helpers import now_iso, short_sha
 from normalize import normalize_priority, normalize_validation_mode, priority_value
-from provenance import normalize_provenance
+from provenance import normalize_provenance, provenance_summary
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -310,6 +312,21 @@ def status_target_states(job: dict, active_targets: dict | None) -> list[tuple[s
     return states
 
 
+def status_submission_lines(job: dict) -> list[str]:
+    submission = job.get("submission") or {}
+    lines: list[str] = []
+    if submission.get("config_path"):
+        lines.append(
+            "submission: "
+            f"root={submission.get('submitted_root', '?')} "
+            f"config={submission.get('config_path')} "
+            f"({submission.get('config_source', '?')})"
+        )
+    if submission.get("provenance"):
+        lines.append(f"provenance: {provenance_summary(submission.get('provenance'))}")
+    return lines
+
+
 def target_state_detail_parts(state: dict) -> list[str]:
     details = []
     field_labels = [
@@ -333,6 +350,28 @@ def target_state_detail_parts(state: dict) -> list[str]:
     if state.get("log_path"):
         details.append(f"log={Path(state['log_path']).name}")
     return details
+
+
+def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[str]:
+    lines: list[str] = []
+    for name, state in status_target_states(job, active_targets):
+        details = target_state_detail_parts(state)
+        if details:
+            lines.append(f"{name}: " + ", ".join(details))
+        if state.get("last_line"):
+            lines.append(f"  {state['last_line']}")
+        if state.get("cleanup_result"):
+            lines.append(f"  cleanup: {state['cleanup_result']}")
+    return lines
+
+
+def recent_completed_status_line(job: dict, result: dict) -> str:
+    targets = ", ".join(f"{item['target']}={item['status']}" for item in result.get("results", []))
+    return (
+        f"[{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))} "
+        f"{result.get('overall', '?').upper()} [{targets}] "
+        f"via {provenance_summary(result.get('provenance'))}"
+    )
 
 
 def update_runner_info_active_targets(
