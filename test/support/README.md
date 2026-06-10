@@ -17,6 +17,8 @@ artifacts (audio_artifacts)                              — JSON serialization 
 scenarios (render_scenario)                              — HeadlessHost block-loop renders + matrix sweeps
    ↓
 contracts (audio_contracts)                              — named claims over one rendered scenario
+   ↓
+doctor (audio_doctor, audio_doctor_artifacts)            — offline FFT analyzers over a scenario (response, THD)
 ```
 
 **No back-edges.** A layer may include layers above it in this list, never
@@ -71,3 +73,26 @@ pitch + level over a held window), `expect_finite_and_unclipped` (hygiene).
 Partition invariance is the existing `assert_block_partition_invariant`.
 Anything else: `.expect({condition, "message"})` — expectations are plain
 `CheckResult`s.
+
+## Doctor (offline)
+
+The Audio Doctor sits on top of scenarios: it drives a processor through a
+`RenderScenario` and runs an offline FFT (`core/signal`) to answer "is this
+DSP behaving correctly?" — magnitude/frequency response and THD/THD+N in this
+slice. Heavy FFT/analyzer code lives only here (test/support); nothing below
+scenarios may include `audio_doctor.hpp`. Each analyzer states its Analyzer
+Determinism Contract (window, FFT length, stimulus, coherence) in its header
+and echoes those fields into a schema-versioned JSON curve artifact.
+
+```cpp
+auto scenario = RenderScenario(create_pulp_effect)   // input/duration overridden
+    .name("lowpass.response").sample_rate(48000.0).block_size(256)
+    .set_param(kFrequency, 200.0f).set_param(kFilterType, 0.0f);
+const double checkpoints[] = {50.0, 8000.0};
+auto curve = response_relative_to_input(scenario, checkpoints, {.fft_length = 16384});
+CHECK(curve.attenuation_db_at(8000.0) >= 20.0);      // direct response claim
+write_response_artifact(curve, "lowpass.response");  // reviewable JSON
+
+auto thd = measure_thd(scenario, /*fundamental_hz=*/999.0, {.fft_length = 16384});
+CHECK(thd.thd < 0.001);                              // clean tone, near-zero THD
+```
