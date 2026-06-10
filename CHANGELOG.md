@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03990"></a>
+## [0.399.0] - 2026-06-09
+
+- feat(midi): Windows WinRT GATT BLE MIDI connect/notify + MidiSystem port merge (W13 — completes BLE epic) ([#3830](https://github.com/danielraffel/pulp/pull/3830))
+
 <a id="v03980"></a>
 ## [0.398.0] - 2026-06-09
 
@@ -4115,6 +4120,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.399.0]: https://github.com/danielraffel/pulp/releases/tag/v0.399.0
 [0.398.0]: https://github.com/danielraffel/pulp/releases/tag/v0.398.0
 [0.397.0]: https://github.com/danielraffel/pulp/releases/tag/v0.397.0
 [0.396.0]: https://github.com/danielraffel/pulp/releases/tag/v0.396.0
