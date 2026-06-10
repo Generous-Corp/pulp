@@ -274,12 +274,24 @@ jobs:
       # `tools/cli/`. The release tarball must include both.
       - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
+        # Linux: GNU strip works directly. macOS (Apple Silicon): binaries are
+        # ad-hoc code-signed at link time, and `strip` invalidates that
+        # signature — on the self-hosted Macs that surfaces as a hard `strip`
+        # failure (GitHub-hosted tolerated it). Strip is only a size
+        # optimization, so on macOS we strip best-effort and re-apply the
+        # ad-hoc signature; a functional binary must never block the release.
+        # #2067: pulp-mcp ships in the CLI tarball so the Claude Code plugin's
+        # MCP launcher can resolve it on $PATH after install.
         run: |
-          strip build/pulp
-          strip build/tools/cli/pulp-cpp
-          # #2067: pulp-mcp ships in the CLI tarball so the Claude Code
-          # plugin's MCP launcher can resolve it on $PATH after install.
-          strip build/tools/mcp/pulp-mcp
+          for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp; do
+            if [ "${RUNNER_OS}" = "macOS" ]; then
+              strip -x "$bin" 2>/dev/null || strip "$bin" 2>/dev/null || \
+                echo "note: strip skipped for $bin (non-fatal)"
+              codesign --force --sign - "$bin" 2>/dev/null || true
+            else
+              strip "$bin"
+            fi
+          done
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'
