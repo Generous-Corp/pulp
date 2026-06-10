@@ -4200,40 +4200,9 @@ def cmd_desktop_recent(args: argparse.Namespace) -> int:
         print(json.dumps({"runs": manifests}, indent=2))
         return 0
 
-    print("Desktop automation recent runs:")
-    for manifest in manifests:
-        run_summary = desktop_run_summary(config, manifest)
-        action = run_summary.get("action", "run")
-        target = run_summary.get("target", "?")
-        label = run_summary.get("label", action)
-        completed = run_summary.get("completed_at") or "?"
-        bundle_dir = run_summary.get("artifacts", {}).get("bundle_dir", "?")
-        print(f"  {target}/{action}: {label} @ {completed}")
-        print(f"    status: {run_summary['run_status']}")
-        source = run_summary["source"]
-        print(f"    source: mode={source['mode']} sha={short_sha(source['sha'])} branch={source['branch'] or '?'}")
-        if run_summary.get("proof_scope") and run_summary["proof_scope"] != "unknown":
-            host_detail = f" host={run_summary['host']}" if run_summary.get("host") else ""
-            print(f"    proof_scope: {run_summary['proof_scope']}{host_detail}")
-        print(f"    bundle: {bundle_dir}")
-        before_screenshot = run_summary.get("artifacts", {}).get("before_screenshot")
-        if before_screenshot:
-            print(f"    before_screenshot: {before_screenshot}")
-        diff_screenshot = run_summary.get("artifacts", {}).get("diff_screenshot")
-        if diff_screenshot:
-            print(f"    diff_screenshot: {diff_screenshot}")
-        interaction_mode = run_summary.get("interaction_mode")
-        if interaction_mode:
-            print(f"    interaction_mode: {interaction_mode}")
-        image_change = run_summary.get("artifacts", {}).get("image_change")
-        if image_change:
-            print(f"    image_change: changed={image_change.get('changed')} method={image_change.get('method')}")
-        screenshot = run_summary.get("artifacts", {}).get("screenshot")
-        if screenshot:
-            print(f"    screenshot: {screenshot}")
-        ui_snapshot = run_summary.get("artifacts", {}).get("ui_snapshot")
-        if ui_snapshot:
-            print(f"    ui_snapshot: {ui_snapshot}")
+    run_summaries = [desktop_run_summary(config, manifest) for manifest in manifests]
+    for line in _desktop_cli.desktop_recent_lines(run_summaries, short_sha_fn=short_sha):
+        print(line)
     return 0
 
 
@@ -4263,52 +4232,20 @@ def cmd_desktop_proof(args: argparse.Namespace) -> int:
         return 0
 
     if not proofs:
-        filters = []
-        if args.target:
-            filters.append(f"target={args.target}")
-        if args.action:
-            filters.append(f"action={args.action}")
-        if args.source_mode:
-            filters.append(f"source_mode={args.source_mode}")
-        if args.sha:
-            filters.append(f"sha={short_sha(args.sha)}")
-        if args.branch:
-            filters.append(f"branch={args.branch}")
-        suffix = f" ({', '.join(filters)})" if filters else ""
-        print(f"No desktop proofs found{suffix}.")
+        print(
+            _desktop_cli.desktop_proof_empty_line(
+                target=args.target,
+                action=args.action,
+                source_mode=args.source_mode,
+                sha=args.sha,
+                branch=args.branch,
+                short_sha_fn=short_sha,
+            )
+        )
         return 0
 
-    print("Desktop automation proofs:")
-    for proof in proofs:
-        latest_run = proof["latest_run"]
-        source = proof["source"]
-        print(
-            f"  {proof['target']}/{proof['action']}: mode={source['mode']} "
-            f"sha={short_sha(source['sha'])} @ {latest_run['completed_at']}"
-        )
-        host_detail = f" host={proof['host']}" if proof.get("host") else ""
-        print(
-            f"    proof_scope: {proof['proof_scope']} adapter={proof['adapter']}{host_detail} "
-            f"runs={proof['run_count']}"
-        )
-        if source.get("branch"):
-            print(f"    branch: {source['branch']}")
-        if latest_run.get("label"):
-            print(f"    label: {latest_run['label']}")
-        if latest_run.get("interaction_mode"):
-            print(f"    interaction_mode: {latest_run['interaction_mode']}")
-        bundle_dir = latest_run.get("artifacts", {}).get("bundle_dir")
-        if bundle_dir:
-            print(f"    bundle: {bundle_dir}")
-        screenshot = latest_run.get("artifacts", {}).get("screenshot")
-        if screenshot:
-            print(f"    screenshot: {screenshot}")
-        ui_snapshot = latest_run.get("artifacts", {}).get("ui_snapshot")
-        if ui_snapshot:
-            print(f"    ui_snapshot: {ui_snapshot}")
-        agent_manifest = latest_run.get("artifacts", {}).get("agent_manifest")
-        if agent_manifest:
-            print(f"    agent_manifest: {agent_manifest}")
+    for line in _desktop_cli.desktop_proof_lines(proofs, short_sha_fn=short_sha):
+        print(line)
     return 0
 
 
