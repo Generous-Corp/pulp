@@ -5630,32 +5630,32 @@ target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/
 catch_discover_tests(pulp-test-matrix-sampler)
 
 # Harness support lib (test/support/audio_*): compiled once, targets link it.
-add_library(pulp-audio-test-support STATIC support/audio_metrics.cpp support/audio_assertions.cpp support/audio_artifacts.cpp support/audio_signal_generators.cpp support/render_scenario.cpp)
+add_library(pulp-audio-test-support STATIC support/audio_metrics.cpp support/audio_assertions.cpp support/audio_artifacts.cpp support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp)
 target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal)
 
-# Golden-file audio tests (uses HeadlessHost + PulpGain + PulpTone)
+# Harness suites — golden audio (PulpGain+PulpTone), tone regression (PR 1B),
+# render scenarios (PR 2), helper self-tests (PR 1A), and example contracts
+# (PR 3; effect contracts in their own TU over the kBypass enum collision).
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-golden)
-
-# Tone-render regression (harness PR 1B): PulpTone block sweep + JSON metrics artifact.
 add_executable(pulp-test-audio-tone-regression test_audio_tone_regression.cpp)
 target_link_libraries(pulp-test-audio-tone-regression PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-tone-regression PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-tone-regression)
-
-# Render-scenario harness (PR 2): typed scenarios, generators, matrix runner.
 add_executable(pulp-test-render-scenario test_render_scenario.cpp)
 target_link_libraries(pulp-test-render-scenario PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-render-scenario PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-render-scenario)
-
-# Harness helper self-tests (PR 1A)
 add_executable(pulp-test-audio-support test_audio_support.cpp)
 target_link_libraries(pulp-test-audio-support PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-support PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
 catch_discover_tests(pulp-test-audio-support)
+add_executable(pulp-test-audio-contracts test_audio_contracts.cpp test_audio_contracts_effect.cpp)
+target_link_libraries(pulp-test-audio-contracts PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-contracts PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
+catch_discover_tests(pulp-test-audio-contracts)
 
 # Audio determinism matrix (#48 / #356): SR × block-size sweep asserting
 # framework invariants (pass-through, silence, block invariance, re-prepare).
