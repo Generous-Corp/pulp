@@ -143,6 +143,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 import cleanup as _cleanup  # noqa: E402
+import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
@@ -1003,13 +1004,7 @@ def wait_for_path(path: Path, timeout_secs: float) -> Path:
 
 
 def count_view_tree_nodes(node: object) -> int:
-    if not isinstance(node, dict):
-        return 0
-    children = node.get("children", [])
-    total = 1
-    if isinstance(children, list):
-        total += sum(count_view_tree_nodes(child) for child in children)
-    return total
+    return _desktop_actions.count_view_tree_nodes(node)
 
 
 def detect_macos_app_bundle(command: str | None) -> Path | None:
@@ -1170,32 +1165,11 @@ def capture_macos_window(window_id: int, output_path: Path) -> None:
 
 
 def parse_coordinate_pair(value: str, *, flag_name: str) -> tuple[float, float]:
-    parts = [segment.strip() for segment in value.split(",", 1)]
-    if len(parts) != 2:
-        raise ValueError(f"{flag_name} must be in X,Y form.")
-    try:
-        return float(parts[0]), float(parts[1])
-    except ValueError as exc:
-        raise ValueError(f"{flag_name} must contain numeric X,Y values.") from exc
+    return _desktop_actions.parse_coordinate_pair(value, flag_name=flag_name)
 
 
 def iter_view_tree_nodes(node: object, *, offset_x: float = 0.0, offset_y: float = 0.0):
-    if not isinstance(node, dict):
-        return
-    bounds = node.get("bounds") if isinstance(node.get("bounds"), dict) else {}
-    absolute_x = offset_x + float(bounds.get("x", 0.0) or 0.0)
-    absolute_y = offset_y + float(bounds.get("y", 0.0) or 0.0)
-    absolute_bounds = {
-        "x": absolute_x,
-        "y": absolute_y,
-        "width": float(bounds.get("width", 0.0) or 0.0),
-        "height": float(bounds.get("height", 0.0) or 0.0),
-    }
-    yield node, absolute_bounds
-    children = node.get("children")
-    if isinstance(children, list):
-        for child in children:
-            yield from iter_view_tree_nodes(child, offset_x=absolute_x, offset_y=absolute_y)
+    yield from _desktop_actions.iter_view_tree_nodes(node, offset_x=offset_x, offset_y=offset_y)
 
 
 def resolve_view_tree_click_point(
@@ -1206,44 +1180,17 @@ def resolve_view_tree_click_point(
     view_text: str | None,
     view_label: str | None,
 ) -> tuple[float, float]:
-    for node, bounds in iter_view_tree_nodes(view_tree):
-        if not node.get("visible", True):
-            continue
-        if view_id and node.get("id") != view_id:
-            continue
-        if view_type and node.get("type") != view_type:
-            continue
-        if view_text and node.get("text") != view_text:
-            continue
-        if view_label and node.get("label") != view_label:
-            continue
-        if bounds["width"] <= 0 or bounds["height"] <= 0:
-            continue
-        return bounds["x"] + (bounds["width"] / 2.0), bounds["y"] + (bounds["height"] / 2.0)
-    filters = [
-        part for part in [
-            f"id={view_id}" if view_id else None,
-            f"type={view_type}" if view_type else None,
-            f"text={view_text}" if view_text else None,
-            f"label={view_label}" if view_label else None,
-        ] if part
-    ]
-    joined = ", ".join(filters) or "<none>"
-    raise RuntimeError(f"No visible view matched click selector ({joined}).")
+    return _desktop_actions.resolve_view_tree_click_point(
+        view_tree,
+        view_id=view_id,
+        view_type=view_type,
+        view_text=view_text,
+        view_label=view_label,
+    )
 
 
 def screen_point_for_content_point(window: dict, content_size: tuple[float, float], content_point: tuple[float, float]) -> tuple[float, float]:
-    bounds = window.get("bounds", {})
-    window_x = float(bounds.get("x", 0.0) or 0.0)
-    window_y = float(bounds.get("y", 0.0) or 0.0)
-    window_width = float(bounds.get("width", 0.0) or 0.0)
-    window_height = float(bounds.get("height", 0.0) or 0.0)
-    content_width, content_height = content_size
-    point_x, point_y = content_point
-
-    inset_x = max((window_width - content_width) / 2.0, 0.0)
-    inset_y = max(window_height - content_height, 0.0)
-    return window_x + inset_x + point_x, window_y + inset_y + point_y
+    return _desktop_actions.screen_point_for_content_point(window, content_size, content_point)
 
 
 def activate_macos_pid(pid: int) -> dict:
@@ -1636,12 +1583,7 @@ def run_macos_local_smoke(
 
 
 def default_desktop_label(command: str | None, *, bundle_id: str | None = None) -> str:
-    if bundle_id:
-        return bundle_id.split('.')[-1] or bundle_id
-    args = shlex.split(command or "")
-    if not args:
-        return "desktop-run"
-    return Path(args[0]).stem or "desktop-run"
+    return _desktop_actions.default_desktop_label(command, bundle_id=bundle_id)
 
 
 def remote_linux_bundle_relpath(target_name: str, action_name: str, bundle_dir: Path) -> str:
