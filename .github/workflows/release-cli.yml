@@ -194,21 +194,20 @@ jobs:
         #   - core/canvas/CMakeLists.txt: fontconfig propagation from
         #     pulp-canvas STATIC lib via PkgConfig::FONTCONFIG IMPORTED
         #     target (#1962 follow-up).
-        #   - tools/cli/CMakeLists.txt: re-link fontconfig in pulp-cli
-        #     so it appears AFTER libskia.a in the GNU ld link line
-        #     (left-to-right archive resolution; the chrome/m144 Skia
-        #     archive references Fc* symbols that ld won't resolve from
-        #     an earlier-positioned -lfontconfig). #1962 follow-up.
         #   - tools/deps/manifest.json: release asset inventory must
         #     include all require_gpu release Skia binaries, including
         #     linux-arm64, when backfilling older tags.
+        #
+        # Do NOT wholesale-overlay tools/cli/CMakeLists.txt. That file's
+        # source list drifts as CLI features land on main, and an older tag may
+        # not contain newly referenced .cpp files. Patch only the fontconfig
+        # tail-link block below so the tag keeps its own source list.
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
           for path in \
               tools/scripts/fetch_skia_for_release.py \
               core/canvas/CMakeLists.txt \
-              tools/cli/CMakeLists.txt \
               tools/deps/manifest.json \
               ; do
             url="https://raw.githubusercontent.com/${repo}/main/${path}"
@@ -216,6 +215,41 @@ jobs:
             curl -fsSL "$url" -o "$path"
             wc -c "$path"
           done
+
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          path = Path("tools/cli/CMakeLists.txt")
+          text = path.read_text(encoding="utf-8")
+          if "_PULP_CLI_FONTCONFIG" in text:
+              print("tools/cli/CMakeLists.txt already has the fontconfig tail-link block")
+              raise SystemExit(0)
+
+          match = re.search(r"(?m)^target_link_libraries\(pulp-cli PRIVATE[^\n]*\)\n", text)
+          if not match:
+              raise SystemExit("FAIL: cannot find single-line pulp-cli target_link_libraries block")
+
+          block = """
+
+          # Link-order fix for libskia.a -> fontconfig on Linux+GNU ld (#1962).
+          # Keep this as a targeted backfill patch instead of overlaying this
+          # whole CMake file from main: old tags may not have new CLI source
+          # files referenced by main's add_executable() list.
+          if(UNIX AND NOT APPLE AND NOT ANDROID)
+              find_package(PkgConfig)
+              if(PkgConfig_FOUND)
+                  pkg_check_modules(_PULP_CLI_FONTCONFIG IMPORTED_TARGET fontconfig)
+                  if(_PULP_CLI_FONTCONFIG_FOUND)
+                      target_link_libraries(pulp-cli PRIVATE PkgConfig::_PULP_CLI_FONTCONFIG)
+                  endif()
+              endif()
+          endif()
+          """
+          text = text[: match.end()] + block + text[match.end() :]
+          path.write_text(text, encoding="utf-8")
+          print("Patched tools/cli/CMakeLists.txt with the fontconfig tail-link block")
+          PY
 
       - name: Fetch Skia binaries
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
