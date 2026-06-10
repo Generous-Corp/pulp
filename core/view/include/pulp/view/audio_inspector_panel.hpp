@@ -121,6 +121,19 @@ public:
 
     const AudioWaveformView& waveform() const { return *waveform_view_; }
 
+    // ── Rendered-text accessors (for headless tests) ────────────────────────
+    // The exact strings the labels paint. A test can assert these are
+    // populated (e.g. the status reads "live", the level reads "dBFS") so a
+    // regression that leaves the panel visually blank is caught in CI, not
+    // only by eye.
+    const std::string& status_text() const { return status_label_->text(); }
+    const std::string& level_text() const { return level_label_->text(); }
+    /// Color the status heading paints with. A test can assert its channels
+    /// are in the valid [0,1] range — the white-on-white regression that hid
+    /// every label came from feeding 0-255 values into the [0,1] Color ctor,
+    /// which Skia clamps to white. Guards that specific class of bug.
+    canvas::Color status_color() const { return status_label_->text_color(); }
+
 private:
     void build_ui();
     void refresh_labels();

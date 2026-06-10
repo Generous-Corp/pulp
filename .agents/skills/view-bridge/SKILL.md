@@ -932,3 +932,31 @@ is the first wired probe stage for "UI works, no sound" reports. Gotchas:
 - The probe is RT-safe (scalar-only, no FFT/alloc/locks) — `pulp::audio::AudioProbe`.
   Do NOT model audio-thread work on `pulp::view::VisualizationBridge`, which runs
   STFT and returns `std::vector` in its callback (explicitly quarantined).
+
+### Phase 6 — Audio Inspector tool window wired into the host
+
+`run_with_editor()` opens a `pulp::view::AudioInspectorWindow` (a SEPARATE
+floating window, sibling of the layout inspector — not a tab) that observes
+`output_probe_`. It is created only when a real `WindowHost` exists, behind the
+same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
+
+- **Key routing must not clobber the layout inspector.** The audio inspector's
+  toggle (Cmd/Ctrl+Shift+A) dispatches through a shell-owned `CommandRegistry`
+  via `route_global_keys(window_root, registry)`, which writes
+  `window_root.on_global_key`. The layout inspector (Cmd+I) uses
+  `on_global_click` (`install_inspector_hooks`). Distinct hooks → they coexist;
+  do not move either onto the other's hook.
+- **Compose the idle callback, don't replace it.** `poll()` must run each tick
+  to refresh meters; capture the existing `pre_screenshot_idle` and call it
+  first, then `audio_inspector_->poll()` — clobbering `set_idle_callback` drops
+  the scripted-ui / settings / overlay paint.
+- **Open + live waveform are env-gated.** `PULP_AUDIO_INSPECTOR` shows the
+  window AND makes `start()` size `output_probe_`'s capture ring (to
+  `AudioWaveformView::kCapacity`); without it the probe stays summary-only (no
+  waveform allocation). Headless `--screenshot` also writes the inspector's own
+  surface to `<stem>.audio-inspector.png` when it is open.
+- **Teardown order:** destroy the window before the `CommandRegistry` (its RAII
+  handler removal targets a live registry) and before `output_probe_`.
+- **Panel colors:** `canvas::Color` channels are floats in `[0,1]` — build panel
+  colors with `Color::rgba8(r,g,b,a)`, NOT `Color{26,26,32,255}` brace-init,
+  which Skia clamps to opaque white (the white-on-white panel bug).

@@ -861,6 +861,23 @@ TEST_CASE("Standalone idle callback still polls settings without scripted UI",
     REQUIRE(settings_polled);
 }
 
+TEST_CASE("Standalone idle callback can be composed by tool windows",
+          "[standalone][chrome]") {
+    std::vector<std::string> calls;
+
+    auto prior = make_standalone_idle_callback(
+        [&] { calls.push_back("scripted"); },
+        [&] { calls.push_back("settings"); });
+    auto composed = [prior, &calls] {
+        prior();
+        calls.push_back("audio-inspector");
+    };
+
+    composed();
+    REQUIRE(calls == std::vector<std::string>{
+        "scripted", "settings", "audio-inspector"});
+}
+
 TEST_CASE("Standalone repaint helper routes scripted UI repaint through the window",
           "[standalone][chrome]") {
     StubWindowHost window;

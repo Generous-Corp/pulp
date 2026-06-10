@@ -35,7 +35,7 @@ void AudioInspectorWindow::build_ui() {
     root_ = std::make_unique<View>();
     root_->set_id("audio-inspector-window-root");
     root_->flex().direction = FlexDirection::column;
-    root_->set_background_color(canvas::Color{26, 26, 32, 255});
+    root_->set_background_color(canvas::Color::rgba8(26, 26, 32, 255));
 
     auto panel = std::make_unique<AudioInspectorPanel>();
     panel->flex().flex_grow = 1;

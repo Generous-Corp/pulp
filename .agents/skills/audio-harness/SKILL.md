@@ -121,6 +121,37 @@ phase/Pearson correlation (the RT snapshot carries no inter-sample L*R term yet)
 This is for *watching what is currently flowing*; controlled-stimulus measurement
 (response/THD/etc.) is the offline Doctor above.
 
+### Launch the Audio Inspector in the standalone host
+
+`StandaloneApp::run_with_editor()` wires the inspector to the host's
+output-boundary probe automatically (behind `PULP_ENABLE_AUDIO_PROBES`, default
+ON for dev/examples). At runtime, toggle it with **Cmd/Ctrl+Shift+A**, or open it
+on launch by setting `PULP_AUDIO_INSPECTOR` in the environment:
+
+```bash
+# Live: feed a test signal so output is non-silent, then open the inspector.
+PULP_AUDIO_INSPECTOR=1 ./build/examples/<app>/pulp-<app>
+```
+
+`PULP_AUDIO_INSPECTOR` also enables the probe's capture ring (sized to the panel
+display width), so the inspector paints a live *waveform* and not just meters —
+the default probe config is summary-only. The toggle routes through a
+shell-owned `CommandRegistry` via `route_global_keys` (the root view's
+`on_global_key`), which is independent of the layout inspector's `on_global_click`
+(Cmd/Ctrl+I) — both tools coexist on one window without clobbering.
+
+Headless proof: a screenshot run with the inspector open also captures the
+inspector's OWN window surface next to the main screenshot:
+
+```bash
+# Writes /tmp/x.png (main) AND /tmp/x.audio-inspector.png (the live panel).
+PULP_AUDIO_INSPECTOR=1 ./build/examples/<app>/pulp-<app> \
+  --screenshot /tmp/x.png --screenshot-frame-delay 90
+```
+
+The sibling `<stem>.audio-inspector.png` is only written when the inspector
+window is visible and the host has GPU capture (`WindowHost::capture_png()`).
+
 ## CLI: `pulp audio validate <verb>` (offline, over WAVs / artifact bundles)
 
 The harness analyzers are also reachable from the shipped CLI, nested under the

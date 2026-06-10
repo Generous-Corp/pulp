@@ -292,27 +292,32 @@ inline void attach_standalone_editor_bridge(
         });
 }
 
+inline std::function<void()> make_standalone_idle_callback(
+    std::function<void()> poll_scripted_ui,
+    std::function<void()> poll_settings) {
+    if (poll_scripted_ui) {
+        return [poll_scripted_ui = std::move(poll_scripted_ui),
+                poll_settings = std::move(poll_settings)] {
+            poll_scripted_ui();
+            if (poll_settings) {
+                poll_settings();
+            }
+        };
+    }
+
+    return [poll_settings = std::move(poll_settings)] {
+        if (poll_settings) {
+            poll_settings();
+        }
+    };
+}
+
 inline void install_standalone_idle_callback(
     view::WindowHost& window,
     std::function<void()> poll_scripted_ui,
     std::function<void()> poll_settings) {
-    if (poll_scripted_ui) {
-        window.set_idle_callback(
-            [poll_scripted_ui = std::move(poll_scripted_ui),
-             poll_settings = std::move(poll_settings)] {
-                poll_scripted_ui();
-                if (poll_settings) {
-                    poll_settings();
-                }
-            });
-        return;
-    }
-
-    window.set_idle_callback([poll_settings = std::move(poll_settings)] {
-        if (poll_settings) {
-            poll_settings();
-        }
-    });
+    window.set_idle_callback(make_standalone_idle_callback(
+        std::move(poll_scripted_ui), std::move(poll_settings)));
 }
 
 template <typename ScriptedUi>
