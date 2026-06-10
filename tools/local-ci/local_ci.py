@@ -3616,64 +3616,17 @@ def resolve_ssh_target_execution(job: dict, target_name: str, target_cfg: dict, 
     )
 
 
-def _build_target_tasks(job: dict, config: dict, progress_factory=None) -> list[tuple[str, object]]:
-    targets = config["targets"]
-    defaults = config.get("defaults", {})
-    requested = set(job.get("targets") or enabled_targets(config))
-    tasks: list[tuple[str, object]] = []
-
-    mac_cfg = targets.get("mac", {})
-    if "mac" in requested and mac_cfg.get("enabled", True):
-        reporter = progress_factory("mac") if progress_factory else None
-        tasks.append(("mac", lambda r=reporter: run_local_validation(job, mac_cfg.get("exclude_tests", ""), r)))
-
-    ubuntu_cfg = targets.get("ubuntu")
-    if "ubuntu" in requested and ubuntu_cfg and ubuntu_cfg.get("enabled", True):
-        host, repo_path = resolve_ssh_target_execution(job, "ubuntu", ubuntu_cfg, defaults)
-        if host:
-            exc = ubuntu_cfg.get("exclude_tests", "")
-            reporter = progress_factory("ubuntu") if progress_factory else None
-            tasks.append(
-                (
-                    "ubuntu",
-                    lambda h=host, repo=repo_path, e=exc, cfg=config, r=reporter: run_posix_ssh_validation(
-                        "ubuntu", h, repo, job, exclude_tests=e, config=cfg, report_progress=r
-                    ),
-                )
-            )
-        else:
-            tasks.append(("ubuntu", lambda: unreachable_target_result("ubuntu")))
-
-    win_cfg = targets.get("windows")
-    if "windows" in requested and win_cfg and win_cfg.get("enabled", True):
-        host, repo_path = resolve_ssh_target_execution(job, "windows", win_cfg, defaults)
-        if host:
-            exc = win_cfg.get("exclude_tests", "")
-            reporter = progress_factory("windows") if progress_factory else None
-            generator = win_cfg.get("cmake_generator", "Visual Studio 17 2022")
-            platform = win_cfg.get("cmake_platform", "")
-            generator_instance = win_cfg.get("cmake_generator_instance", "")
-            tasks.append(
-                (
-                    "windows",
-                    lambda h=host, repo=repo_path, e=exc, cfg=config, r=reporter, g=generator, p=platform, i=generator_instance: run_windows_ssh_validation(
-                        "windows",
-                        h,
-                        repo,
-                        job,
-                        exclude_tests=e,
-                        cmake_generator=g,
-                        cmake_platform=p,
-                        cmake_generator_instance=i,
-                        config=cfg,
-                        report_progress=r,
-                    ),
-                )
-            )
-        else:
-            tasks.append(("windows", lambda: unreachable_target_result("windows")))
-
-    return tasks
+def _build_target_tasks(job: dict, config: dict, progress_factory=None) -> list[tuple[str, Callable[[], dict]]]:
+    return _execution.build_target_tasks(
+        job,
+        config,
+        enabled_targets_fn=enabled_targets,
+        resolve_ssh_target_execution_fn=resolve_ssh_target_execution,
+        run_local_validation_fn=run_local_validation,
+        run_posix_ssh_validation_fn=run_posix_ssh_validation,
+        run_windows_ssh_validation_fn=run_windows_ssh_validation,
+        progress_factory=progress_factory,
+    )
 
 
 def process_job(job: dict, config: dict) -> dict:
