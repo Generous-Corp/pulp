@@ -1333,14 +1333,21 @@ def run_macos_local_smoke(
     source_request: dict | None = None,
 ) -> dict:
     bundle_dir = create_desktop_run_bundle(config, "mac", action_name)
-    screenshot_path = Path(output_path).expanduser() if output_path else bundle_dir / "screenshots" / "window.png"
-    before_screenshot_path = bundle_dir / "screenshots" / "before.png"
-    diff_screenshot_path = bundle_dir / "screenshots" / "diff.png"
-    ui_snapshot_path = bundle_dir / "ui-tree.json"
-    log_path = bundle_dir / "stdout.log"
-    err_path = bundle_dir / "stderr.log"
+    action_paths = _desktop_actions.desktop_action_artifact_paths(bundle_dir, output_path)
+    screenshot_path = action_paths["screenshot"]
+    before_screenshot_path = action_paths["before_screenshot"]
+    diff_screenshot_path = action_paths["diff_screenshot"]
+    ui_snapshot_path = action_paths["ui_snapshot"]
+    log_path = action_paths["stdout"]
+    err_path = action_paths["stderr"]
 
-    interaction_requested = any([click_point, click_view_id, click_view_type, click_view_text, click_view_label])
+    interaction_requested = _desktop_actions.desktop_interaction_requested(
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+    )
     use_pulp_app_automation = bool(pulp_app_automation and interaction_requested)
     if use_pulp_app_automation and bundle_id:
         raise RuntimeError("Pulp app automation requires a direct --command launch so automation env vars can be injected.")
@@ -1442,23 +1449,12 @@ def run_macos_local_smoke(
 
         inspector_summary = None
         view_tree = None
-        content_size = (
-            float(window.get("bounds", {}).get("width", 0.0) or 0.0),
-            float(window.get("bounds", {}).get("height", 0.0) or 0.0),
-        )
+        content_size = _desktop_actions.content_size_from_window(window)
         if capture_ui_snapshot and not use_pulp_app_automation:
             wait_for_path(ui_snapshot_path, timeout_secs)
             view_tree = json.loads(ui_snapshot_path.read_text())
-            root_bounds = view_tree.get("bounds") if isinstance(view_tree.get("bounds"), dict) else {}
-            content_size = (
-                float(root_bounds.get("width", content_size[0]) or content_size[0]),
-                float(root_bounds.get("height", content_size[1]) or content_size[1]),
-            )
-            inspector_summary = {
-                "root_id": view_tree.get("id"),
-                "root_type": view_tree.get("type"),
-                "view_count": count_view_tree_nodes(view_tree),
-            }
+            content_size = _desktop_actions.content_size_from_view_tree(view_tree, content_size)
+            inspector_summary = _desktop_actions.view_tree_inspector_summary(view_tree)
 
         interaction_summary = None
         if use_pulp_app_automation:
@@ -1468,28 +1464,15 @@ def run_macos_local_smoke(
             if capture_ui_snapshot:
                 wait_for_path(ui_snapshot_path, timeout_secs)
                 view_tree = json.loads(ui_snapshot_path.read_text())
-                root_bounds = view_tree.get("bounds") if isinstance(view_tree.get("bounds"), dict) else {}
-                content_size = (
-                    float(root_bounds.get("width", content_size[0]) or content_size[0]),
-                    float(root_bounds.get("height", content_size[1]) or content_size[1]),
-                )
-                inspector_summary = {
-                    "root_id": view_tree.get("id"),
-                    "root_type": view_tree.get("type"),
-                    "view_count": count_view_tree_nodes(view_tree),
-                }
-            interaction_summary = {
-                "mode": "pulp-app",
-                "click": {
-                    "selector": {
-                        "id": click_view_id,
-                        "type": click_view_type,
-                        "text": click_view_text,
-                        "label": click_view_label,
-                        "point": click_point,
-                    }
-                },
-            }
+                content_size = _desktop_actions.content_size_from_view_tree(view_tree, content_size)
+                inspector_summary = _desktop_actions.view_tree_inspector_summary(view_tree)
+            interaction_summary = _desktop_actions.pulp_app_interaction_summary(
+                click_point=click_point,
+                click_view_id=click_view_id,
+                click_view_type=click_view_type,
+                click_view_text=click_view_text,
+                click_view_label=click_view_label,
+            )
         else:
             if interaction_requested and capture_before:
                 capture_macos_window(int(window["windowId"]), before_screenshot_path)
@@ -1513,12 +1496,13 @@ def run_macos_local_smoke(
                     "click": {
                         "content_point": {"x": content_point[0], "y": content_point[1]},
                         "screen_point": {"x": screen_point[0], "y": screen_point[1]},
-                        "selector": {
-                            "id": click_view_id,
-                            "type": click_view_type,
-                            "text": click_view_text,
-                            "label": click_view_label,
-                        },
+                        "selector": _desktop_actions.desktop_click_selector(
+                            click_view_id=click_view_id,
+                            click_view_type=click_view_type,
+                            click_view_text=click_view_text,
+                            click_view_label=click_view_label,
+                            include_point=False,
+                        ),
                         "activation": activation_payload,
                         "dispatch": dispatch_payload,
                     }
@@ -1702,7 +1686,13 @@ def run_linux_xvfb_remote_action(
         raise RuntimeError(
             f"Desktop target `{target_name}` needs xvfb-run or an existing desktop display session."
         )
-    interaction_requested = any([click_point, click_view_id, click_view_type, click_view_text, click_view_label])
+    interaction_requested = _desktop_actions.desktop_interaction_requested(
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+    )
     if not pulp_app_automation:
         if capture_ui_snapshot:
             raise RuntimeError("linux-xvfb desktop inspect supports UI snapshots only with --pulp-app-automation.")
@@ -1710,12 +1700,13 @@ def run_linux_xvfb_remote_action(
             raise RuntimeError("linux-xvfb view-target selectors currently require --pulp-app-automation.")
 
     bundle_dir = create_desktop_run_bundle(config, target_name, action_name)
-    screenshot_path = Path(output_path).expanduser() if output_path else bundle_dir / "screenshots" / "window.png"
-    before_screenshot_path = bundle_dir / "screenshots" / "before.png"
-    diff_screenshot_path = bundle_dir / "screenshots" / "diff.png"
-    ui_snapshot_path = bundle_dir / "ui-tree.json"
-    log_path = bundle_dir / "stdout.log"
-    err_path = bundle_dir / "stderr.log"
+    action_paths = _desktop_actions.desktop_action_artifact_paths(bundle_dir, output_path)
+    screenshot_path = action_paths["screenshot"]
+    before_screenshot_path = action_paths["before_screenshot"]
+    diff_screenshot_path = action_paths["diff_screenshot"]
+    ui_snapshot_path = action_paths["ui_snapshot"]
+    log_path = action_paths["stdout"]
+    err_path = action_paths["stderr"]
     pid_path = bundle_dir / "pid.txt"
     window_id_path = bundle_dir / "window-id.txt"
     window_title_path = bundle_dir / "window-title.txt"
@@ -1837,25 +1828,16 @@ def run_linux_xvfb_remote_action(
     if capture_ui_snapshot and ui_snapshot_path.exists():
         view_tree = json.loads(ui_snapshot_path.read_text())
         manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-        manifest["inspector"] = {
-            "root_id": view_tree.get("id"),
-            "root_type": view_tree.get("type"),
-            "view_count": count_view_tree_nodes(view_tree),
-        }
+        manifest["inspector"] = _desktop_actions.view_tree_inspector_summary(view_tree)
     if interaction_requested:
         if pulp_app_automation:
-            manifest["interaction"] = {
-                "mode": "pulp-app",
-                "click": {
-                    "selector": {
-                        "id": click_view_id,
-                        "type": click_view_type,
-                        "text": click_view_text,
-                        "label": click_view_label,
-                        "point": click_point,
-                    }
-                },
-            }
+            manifest["interaction"] = _desktop_actions.pulp_app_interaction_summary(
+                click_point=click_point,
+                click_view_id=click_view_id,
+                click_view_type=click_view_type,
+                click_view_text=click_view_text,
+                click_view_label=click_view_label,
+            )
         else:
             click_summary = {"point": click_point}
             if click_point:
@@ -1927,15 +1909,22 @@ def run_windows_session_agent_action(
             )
 
     bundle_dir = create_desktop_run_bundle(config, target_name, action_name)
-    screenshot_path = Path(output_path).expanduser() if output_path else bundle_dir / "screenshots" / "window.png"
-    before_screenshot_path = bundle_dir / "screenshots" / "before.png"
-    diff_screenshot_path = bundle_dir / "screenshots" / "diff.png"
-    ui_snapshot_path = bundle_dir / "ui-tree.json"
-    log_path = bundle_dir / "stdout.log"
-    err_path = bundle_dir / "stderr.log"
+    action_paths = _desktop_actions.desktop_action_artifact_paths(bundle_dir, output_path)
+    screenshot_path = action_paths["screenshot"]
+    before_screenshot_path = action_paths["before_screenshot"]
+    diff_screenshot_path = action_paths["diff_screenshot"]
+    ui_snapshot_path = action_paths["ui_snapshot"]
+    log_path = action_paths["stdout"]
+    err_path = action_paths["stderr"]
     agent_manifest_path = bundle_dir / "agent-manifest.json"
     started_at = now_iso()
-    interaction_requested = any([click_point, click_view_id, click_view_type, click_view_text, click_view_label])
+    interaction_requested = _desktop_actions.desktop_interaction_requested(
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+    )
     source_context = dict(source_request or {})
     if source_context.get("mode") == "exact-sha":
         source_context = prepare_windows_exact_sha_source(bundle_dir, target_name, host, command, source_context)
@@ -2058,27 +2047,20 @@ def run_windows_session_agent_action(
     if capture_ui_snapshot and ui_snapshot_path.exists():
         view_tree = json.loads(ui_snapshot_path.read_text())
         manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-        manifest["inspector"] = {
-            "root_id": view_tree.get("id"),
-            "root_type": view_tree.get("type"),
-            "view_count": count_view_tree_nodes(view_tree),
-        }
+        manifest["inspector"] = _desktop_actions.view_tree_inspector_summary(view_tree)
     remote_interaction = remote_manifest.get("interaction")
     if remote_interaction:
         manifest["interaction"] = remote_interaction
     elif interaction_requested:
-        manifest["interaction"] = {
-            "mode": "pulp-app" if pulp_app_automation else "window-capture",
-            "click": {
-                "selector": {
-                    "id": click_view_id,
-                    "type": click_view_type,
-                    "text": click_view_text,
-                    "label": click_view_label,
-                    "point": click_point,
-                }
-            },
-        }
+        manifest["interaction"] = _desktop_actions.pulp_app_interaction_summary(
+            click_point=click_point,
+            click_view_id=click_view_id,
+            click_view_type=click_view_type,
+            click_view_text=click_view_text,
+            click_view_label=click_view_label,
+        )
+        if not pulp_app_automation:
+            manifest["interaction"]["mode"] = "window-capture"
     attach_desktop_source_to_manifest(manifest, source_context or source_request)
     atomic_write_text(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
     write_desktop_run_rollups(config, target_name=target_name)
