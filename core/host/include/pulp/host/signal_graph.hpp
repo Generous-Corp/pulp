@@ -354,7 +354,7 @@ private:
         std::vector<float> input_data;
         std::vector<float*> input_ptrs;
         std::vector<const float*> input_const_ptrs;
-        float gain = 1.0f;
+        std::unique_ptr<std::atomic<float>> gain;
 
         // PDC: cumulative samples of latency from AudioInput to this node's
         // input ports (input_latency) and output ports (output_latency).

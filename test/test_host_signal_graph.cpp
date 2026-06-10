@@ -534,6 +534,75 @@ TEST_CASE("SignalGraph live gain updates and release silence output",
     REQUIRE(graph.node_latency_samples(gain) == 0);
 }
 
+TEST_CASE("SignalGraph live gain Race is atomic while processing",
+          "[host][graph][race][tsan]") {
+    SignalGraph graph;
+    auto in  = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::vector<float> input(32, 1.0f);
+    std::vector<float> output(32, 0.0f);
+    const float* in_ptrs[1] = {input.data()};
+    float* out_ptrs[1] = {output.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 32);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 32);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> updates_active{false};
+    std::atomic<bool> saw_invalid_output{false};
+    std::atomic<int> processed_blocks{0};
+    std::atomic<int> blocks_during_updates{0};
+    std::thread audio_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.process(out_view, in_view, 32);
+            processed_blocks.fetch_add(1, std::memory_order_relaxed);
+            if (updates_active.load(std::memory_order_acquire)) {
+                blocks_during_updates.fetch_add(1, std::memory_order_relaxed);
+            }
+            for (float sample : output) {
+                if (!std::isfinite(sample) || sample < -1.0e-6f
+                    || sample > 1.0f + 1.0e-6f) {
+                    saw_invalid_output.store(true, std::memory_order_relaxed);
+                    break;
+                }
+            }
+        }
+    });
+
+    bool all_gain_updates_succeeded = true;
+    constexpr int kMinGainUpdates = 10000;
+    constexpr int kMinBlocksDuringUpdates = 4;
+    constexpr int kMaxGainUpdates = 1000000;
+    int update_count = 0;
+    updates_active.store(true, std::memory_order_release);
+    while ((update_count < kMinGainUpdates
+            || blocks_during_updates.load(std::memory_order_relaxed)
+                < kMinBlocksDuringUpdates)
+           && update_count < kMaxGainUpdates) {
+        const int i = update_count++;
+        const float g = static_cast<float>(i % 17) / 16.0f;
+        all_gain_updates_succeeded =
+            graph.set_node_gain(gain, g) && all_gain_updates_succeeded;
+        if ((i % 64) == 0) std::this_thread::yield();
+    }
+    updates_active.store(false, std::memory_order_release);
+
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(all_gain_updates_succeeded);
+    REQUIRE(processed_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(blocks_during_updates.load(std::memory_order_relaxed)
+            >= kMinBlocksDuringUpdates);
+    REQUIRE_FALSE(saw_invalid_output.load(std::memory_order_relaxed));
+    graph.release();
+}
+
 TEST_CASE("SignalGraph query helpers handle non-plugin and cleared nodes",
           "[host][graph][issue-493]") {
     SignalGraph graph;

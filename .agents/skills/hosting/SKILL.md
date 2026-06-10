@@ -228,6 +228,10 @@ rules:
   The published snapshot copies the shared_ptr, so a plugin survives
   past the removal of its GraphNode until the audio thread's stale
   snapshot reference drops. Do not stash raw plugin pointers.
+- **Live control scalars.** If a control-path setter updates state inside the
+  already-published `CompiledGraph`, the audio-thread field must be RT-safe.
+  `set_node_gain()` stores into a per-runtime `std::atomic<float>`; do not
+  reintroduce plain mutable snapshot fields for values read by `process()`.
 - **Parameter domain.** `HostParamInfo::min_value` / `max_value` /
   `default_value` are the **plain** parameter domain. VST3-internal
   normalization is hidden behind the loader.
