@@ -9,7 +9,7 @@ requires:
 
 # Tart golden-VM CI lane
 
-Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the scripts live in `tools/ci/`.
+Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the reusable macOS provider now lives in the sibling `/Volumes/Workshop/Code/tartci` repo. Pulp's `tools/ci/tart-runner.sh` / `tart-run-job.sh` scripts are the legacy/precursor shape and should stay as compatibility wrappers once the tartci lane graduates.
 
 ## Why (the failure modes this fixes)
 - **Build-dir churn → ODR heap corruption.** One `build/` reconfigured across branches/build-types mixes object layouts → `malloc: error for object 0x3f800000` (that's `1.0f` freed as a pointer) aborting in e.g. `Theme::~Theme`. Every job in a *pristine* clone makes this impossible.
@@ -55,7 +55,8 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 ## Concurrency & hosts
 - **macOS caps 2 concurrent running VMs PER HOST** (kernel quota; booting a 3rd throws "number of VMs exceeds the system limit"). For ≥3 concurrent, **distribute runners across multiple Macs** (e.g. Mac Studio + MacBook Pro M5 → 2+2 = 4) — each runs `tart-runner.sh`; new hosts inherit the host-class label (`*-studio`, `*-m1`, `*-m5`) and cap=2. A dedicated Studio *can* raise the cap via the kernel-quota override (plan Appendix D; SIP off + dev kernel — last resort).
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
-- **Capacity-aware cloud→local queue draining is implemented and VM-slot-aware.** Two cooperating pieces share one rule — a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host, Linux/Windows guests don't count): (1) `tart-runner.sh --loop` boots a VM only when there's queued `Build and Test` work AND a free slot (`PULP_VM_CAP`, default 2; `--cap N` to override); (2) `tools/scripts/macos_reroute_watcher.py`'s `free_macos_slots(hosts)` sums free slots across hosts (`--hosts-config` JSON, `tart list` locally or over SSH) and reclaims a still-queued cloud job into a freed slot. Default (no hosts-config) = a single local bare-metal slot, i.e. the pre-#3299 single-runner behavior — safe to run before the cutover. The two never double-book a host because they evaluate the same `running_macos_vms < cap` predicate.
+- **Capacity-aware local queue draining is implemented and VM-slot-aware.** The current tartci/Shipyard path shares one rule: a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host), and only macOS/Darwin guests consume the `macos` VM slot. Linux Tart and Windows QEMU lanes use their own labels, supervisors, and caps; they do not reduce macOS free slots, though CPU/RAM can still need route weights or reservations.
+- **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R danielraffel/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
