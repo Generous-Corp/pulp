@@ -29,6 +29,33 @@ TEST_CASE("add_sysex appends variable-length payloads", "[midi][buffer][sysex]")
     REQUIRE(buf.sysex()[1].data.size() == 9);
 }
 
+TEST_CASE("realtime capacity limit drops MIDI and sysex without growing",
+          "[midi][buffer][sysex][realtime]") {
+    MidiBuffer buf;
+    buf.reserve(1, 1);
+    buf.set_realtime_capacity_limit(true);
+
+    REQUIRE(buf.add(MidiEvent::note_on(0, 60, 100)));
+    REQUIRE_FALSE(buf.add(MidiEvent::note_on(0, 61, 100)));
+    REQUIRE(buf.size() == 1);
+    REQUIRE(buf.event_capacity() == 1);
+    REQUIRE(buf.dropped_event_count() == 1);
+
+    REQUIRE(buf.add_sysex({0xF0, 0x7D, 0x01, 0xF7}));
+    REQUIRE_FALSE(buf.add_sysex({0xF0, 0x7D, 0x02, 0xF7}));
+    REQUIRE(buf.sysex_size() == 1);
+    REQUIRE(buf.sysex_capacity() == 1);
+    REQUIRE(buf.dropped_sysex_count() == 1);
+
+    buf.clear();
+    REQUIRE(buf.dropped_event_count() == 0);
+    REQUIRE(buf.sysex_size() == 1);
+    REQUIRE(buf.dropped_sysex_count() == 1);
+
+    buf.clear_sysex();
+    REQUIRE(buf.dropped_sysex_count() == 0);
+}
+
 TEST_CASE("clear_sysex removes sidecar events but leaves short messages alone",
           "[midi][buffer][sysex]") {
     MidiBuffer buf;

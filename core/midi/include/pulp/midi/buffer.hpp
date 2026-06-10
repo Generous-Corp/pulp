@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::midi {
 
@@ -24,17 +25,30 @@ public:
     MidiBuffer() = default;
 
     /// Append a MIDI event to the buffer.
-    void add(const MidiEvent& event) {
+    bool add(const MidiEvent& event) {
+        if (!can_append_event()) {
+            record_event_drop();
+            return false;
+        }
         events_.push_back(event);
+        return true;
     }
 
     /// @copydoc add(const MidiEvent&)
-    void add(MidiEvent&& event) {
+    bool add(MidiEvent&& event) {
+        if (!can_append_event()) {
+            record_event_drop();
+            return false;
+        }
         events_.push_back(std::move(event));
+        return true;
     }
 
     /// Remove all events.
-    void clear() { events_.clear(); }
+    void clear() {
+        events_.clear();
+        dropped_events_ = 0;
+    }
     bool empty() const { return events_.empty(); }
     std::size_t size() const { return events_.size(); }
 
@@ -43,6 +57,17 @@ public:
         events_.reserve(event_capacity);
         sysex_.reserve(sysex_capacity);
     }
+
+    /// When enabled, add()/add_sysex() drop once reserved capacity is full
+    /// instead of growing vectors. Intended for adapter-owned realtime buffers.
+    void set_realtime_capacity_limit(bool enabled = true) {
+        limit_to_reserved_capacity_ = enabled;
+    }
+    bool realtime_capacity_limited() const { return limit_to_reserved_capacity_; }
+    std::size_t event_capacity() const { return events_.capacity(); }
+    std::size_t sysex_capacity() const { return sysex_.capacity(); }
+    std::uint32_t dropped_event_count() const { return dropped_events_; }
+    std::uint32_t dropped_sysex_count() const { return dropped_sysex_events_; }
 
     /// Sort events by sample_offset for sample-accurate processing.
     /// Call this before iterating in the audio callback. Sorting is
@@ -93,18 +118,66 @@ public:
         double  timestamp = 0.0;     ///< absolute time in seconds
     };
 
-    void add_sysex(std::vector<uint8_t> data, int32_t sample_offset = 0, double ts = 0.0) {
+    bool add_sysex(std::vector<uint8_t> data, int32_t sample_offset = 0, double ts = 0.0) {
+        if (!can_append_sysex()) {
+            record_sysex_drop();
+            return false;
+        }
         sysex_.push_back({std::move(data), sample_offset, ts});
+        return true;
     }
-    void clear_sysex() { sysex_.clear(); }
+    bool add_sysex(SysexEvent&& event) {
+        if (!can_append_sysex()) {
+            record_sysex_drop();
+            return false;
+        }
+        sysex_.push_back(std::move(event));
+        return true;
+    }
+    bool add_sysex_copy(const uint8_t* data,
+                        std::size_t size,
+                        int32_t sample_offset = 0,
+                        double ts = 0.0) {
+        if (!can_append_sysex()) {
+            record_sysex_drop();
+            return false;
+        }
+        sysex_.push_back({
+            std::vector<uint8_t>(data, data + size),
+            sample_offset,
+            ts,
+        });
+        return true;
+    }
+    void clear_sysex() {
+        sysex_.clear();
+        dropped_sysex_events_ = 0;
+    }
     std::size_t sysex_size() const { return sysex_.size(); }
     const std::vector<SysexEvent>& sysex() const { return sysex_; }
     std::vector<SysexEvent>& sysex() { return sysex_; }
 
 private:
+    bool can_append_event() const {
+        return !limit_to_reserved_capacity_ || events_.size() < events_.capacity();
+    }
+    bool can_append_sysex() const {
+        return !limit_to_reserved_capacity_ || sysex_.size() < sysex_.capacity();
+    }
+    static void saturating_increment(std::uint32_t& value) {
+        if (value < std::numeric_limits<std::uint32_t>::max()) {
+            ++value;
+        }
+    }
+    void record_event_drop() { saturating_increment(dropped_events_); }
+    void record_sysex_drop() { saturating_increment(dropped_sysex_events_); }
+
     std::vector<MidiEvent> events_;
     std::vector<SysexEvent> sysex_;
     class UmpBuffer* ump_ = nullptr;
+    bool limit_to_reserved_capacity_ = false;
+    std::uint32_t dropped_events_ = 0;
+    std::uint32_t dropped_sysex_events_ = 0;
 };
 
 } // namespace pulp::midi

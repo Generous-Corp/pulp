@@ -122,6 +122,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->max_buffer_size = static_cast<int>(max_frames);
     self->midi_in.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity);
     self->midi_out.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity);
+    self->midi_in.set_realtime_capacity_limit(true);
+    self->midi_out.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
 
     auto desc = self->processor->descriptor();
@@ -447,8 +449,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 // variable-length sidecar (issue #239).
                 const auto ev = load_event<clap_event_midi_sysex_t>(hdr);
                 if (ev.buffer && ev.size > 0) {
-                    midi_in.add_sysex(
-                        std::vector<uint8_t>(ev.buffer, ev.buffer + ev.size),
+                    midi_in.add_sysex_copy(
+                        ev.buffer,
+                        ev.size,
                         static_cast<int32_t>(hdr->time),
                         0.0);
                 }

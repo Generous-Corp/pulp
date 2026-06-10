@@ -203,14 +203,16 @@ CLAP's push contract requires (the host copies before returning).
 
 `midi_in` and `midi_out` are per-instance buffers on `PulpClapPlugin`,
 not fresh locals inside `clap_process()`. `clap_activate()` reserves
-their short-message and sysex sidecar storage before the adapter enters
-the process no-allocation guard, then `clap_process()` clears and reuses
-them every block. If you add a new outbound MIDI path or a test
-processor that captures/forwards sysex while behind the CLAP no-alloc
-guard, preallocate in `prepare()` and move prebuilt sysex vectors into
-`MidiBuffer::add_sysex(...)`; copying a vector payload inside
-`process()` will trip the RT allocation trap under ASan/TSan/debug
-test builds.
+their short-message and sysex sidecar storage, enables realtime capacity
+limits, then `clap_process()` clears and reuses them every block. Past
+the reserved capacity, appends must drop and increment the MidiBuffer
+drop counters; they must not grow vectors under the process no-allocation
+guard. If you add a new inbound/outbound MIDI path, cover the overflow
+case in `test_clap_midi_events.cpp`. If you add a test processor that
+captures/forwards sysex while behind the CLAP no-alloc guard, preallocate
+in `prepare()` and move prebuilt sysex events into `MidiBuffer`; copying
+a vector payload inside `process()` will trip the RT allocation trap
+under ASan/TSan/debug test builds.
 
 ### State save / restore
 
