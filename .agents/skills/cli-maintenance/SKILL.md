@@ -46,9 +46,18 @@ requires:
 audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, projects, project
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness
+build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness, audio-inspect
 
-`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI (model/bundle tooling, intentionally no slash command, above). The `pulp audio validate …` harness CLI is a later phase; when it lands, upgrade `/audio-harness` to wrap it and add `/audio-inspect` for the live Audio Inspector window.
+`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI (model/bundle tooling, intentionally no slash command, above). The `pulp audio validate …` harness CLI is a later phase; when it lands, upgrade `/audio-harness` to wrap it.
+
+Not every slash command wraps a `pulp` CLI subcommand. A slash command may
+also document a developer-tool *surface* with no CLI backing — e.g.
+`audio-inspect` opens the in-app Audio Inspector window
+(`pulp::view::AudioInspectorWindow`, registered via `CommandRegistry`), so
+it needs no `cli-commands.yaml` entry and no `pulp <name>` subcommand. When a
+slash command is window/feature documentation rather than a CLI wrapper, skip
+the CLI-source / manifest / `docs/reference/cli.md` steps and just keep the
+`.md` and this cross-reference accurate.
 
 ### 4. Update docs
 - [ ] Add/update section in `docs/reference/cli.md`

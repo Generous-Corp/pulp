@@ -408,6 +408,8 @@ target_sources(pulp-view-core PRIVATE
     src/splash_screen.cpp
     src/live_constant_editor.cpp
     src/inspector_window.cpp
+    src/audio_inspector_panel.cpp
+    src/audio_inspector_window.cpp
     src/command_registry.cpp
     src/key_mapping_editor.cpp
     src/window_classes.cpp
