@@ -679,7 +679,6 @@ bool get_interfaces(const std::string& server_name, const std::string& path,
             while (arr.arg_type() != 0) {
                 std::string s;
                 if (arr.read_string(s)) out.push_back(s);
-                if (!arr.next()) break;
             }
         });
 }
