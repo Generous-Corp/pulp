@@ -2,6 +2,9 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/device.hpp>
+#if PULP_ENABLE_AUDIO_PROBES
+#include <pulp/audio/audio_probe.hpp>
+#endif
 #include <pulp/format/processor.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
@@ -97,6 +100,17 @@ public:
     TestSignalSource& test_signal() { return test_signal_; }
     view::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
     view::AudioBridge& output_meter_bridge() { return output_meter_bridge_; }
+
+#if PULP_ENABLE_AUDIO_PROBES
+    /// Realtime output-boundary probe (Phase 5). Observes the processor output
+    /// at the "standalone processor-output boundary" — immediately after
+    /// `processor_->process(...)` and before the device callback returns. This
+    /// is the first wired probe stage for the "UI works, no sound" report. A
+    /// consumer (UI/test) reads the latest snapshot via
+    /// `output_probe().latest()`. Distinct from `input_meter_bridge_`, which is
+    /// input-oriented and lacks the snapshot's stage/sequence/NaN/clip fields.
+    audio::AudioProbe& output_probe() { return output_probe_; }
+#endif
     audio::AudioSystem* audio_system() { return audio_system_.get(); }
     midi::MidiSystem* midi_system() { return midi_system_.get(); }
 
@@ -152,6 +166,15 @@ private:
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;
     view::AudioBridge output_meter_bridge_;
+#if PULP_ENABLE_AUDIO_PROBES
+    // Phase 5 realtime output-boundary probe. prepare()d in start() with the
+    // device's channel/buffer/rate; analyze_output() is called from the audio
+    // callback right after processor render. RT-safe (scalar-only).
+    audio::AudioProbe output_probe_;
+    // Pre-allocated channel-pointer array for the probe view (no audio-thread
+    // allocation). Sized in start() to the output channel count.
+    std::vector<const float*> output_probe_ptrs_;
+#endif
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
     audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input
     std::vector<float*> test_ptrs_;           // Pre-allocated channel pointers

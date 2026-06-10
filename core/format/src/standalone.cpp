@@ -159,6 +159,18 @@ bool StandaloneApp::start() {
     for (int c = 0; c < silence_ch; ++c)
         silence_ptrs_[static_cast<size_t>(c)] = silence_buffer_.view().channel_ptr(static_cast<size_t>(c));
 
+#if PULP_ENABLE_AUDIO_PROBES
+    // Phase 5 — prepare the realtime output-boundary probe BEFORE the audio
+    // callback starts. This is the only place it allocates. Capture is left
+    // off here (latest-summary only); a debug/support build can opt into the
+    // last-N ring via output_probe().prepare(...) with a CaptureConfig.
+    output_probe_.prepare(config_.output_channels, config_.buffer_size,
+                          config_.sample_rate,
+                          audio::AudioProbeStage::kStandaloneOutputBoundary);
+    output_probe_ptrs_.assign(static_cast<size_t>(std::max(config_.output_channels, 0)),
+                              nullptr);
+#endif
+
     // Set up MIDI input (optional)
     if (desc.accepts_midi) {
         midi_system_ = midi::create_midi_system();
@@ -312,6 +324,23 @@ bool StandaloneApp::start() {
                 static_cast<int>(out_ch),
                 ctx.buffer_size);
         }
+#if PULP_ENABLE_AUDIO_PROBES
+        // Phase 5 — standalone processor-output boundary probe. Tap the
+        // processor's output immediately after render and before returning to
+        // the device callback. RT-safe: scalar-only, no allocation, no FFT.
+        // This is the boundary where "UI works, no sound" reports separate
+        // processor silence from output-boundary silence. Fill the
+        // pre-allocated const pointer array (no audio-thread allocation), then
+        // wrap it in a const view for analyze_output().
+        {
+            const size_t out_ch = output.num_channels();
+            for (size_t c = 0; c < out_ch && c < output_probe_ptrs_.size(); ++c)
+                output_probe_ptrs_[c] = output.channel_ptr(c);
+            const size_t probe_ch = std::min(out_ch, output_probe_ptrs_.size());
+            output_probe_.analyze_output(audio::BufferView<const float>(
+                output_probe_ptrs_.data(), probe_ch, output.num_samples()));
+        }
+#endif
 
         // Advance the rolling sample clock so the next block reads a
         // monotonic timeline. Done after process() so the in-block

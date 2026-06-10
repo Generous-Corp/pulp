@@ -5661,7 +5661,10 @@ add_executable(pulp-test-audio-doctor test_audio_doctor.cpp)
 target_link_libraries(pulp-test-audio-doctor PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-doctor PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-audio-doctor)
-
+# Phase 5 RT output-boundary probe — allocation-counting acceptance + counters.
+add_executable(pulp-test-audio-probe test_audio_probe.cpp harness/rt_allocation_probe.cpp)
+target_link_libraries(pulp-test-audio-probe PRIVATE pulp::audio pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-audio-probe)
 # Audio determinism matrix (#48 / #356): SR × block sweep, framework invariants (pass-through, silence, block invariance, re-prepare).
 add_executable(pulp-test-audio-matrix test_audio_determinism_matrix.cpp)
 target_link_libraries(pulp-test-audio-matrix PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
@@ -5682,16 +5685,13 @@ add_executable(pulp-test-negative-path test_negative_path.cpp)
 target_link_libraries(pulp-test-negative-path PRIVATE pulp::format Catch2::Catch2WithMain)
 target_include_directories(pulp-test-negative-path PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-negative-path)
-
 # iOS foundation tests (platform detection, safe area geometry, touch events,
 # AUv3 HostApp template shape).
 pulp_add_test_suite(pulp-test-ios-foundation LIBRARIES pulp::view pulp::platform)
 target_compile_definitions(pulp-test-ios-foundation PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-
 # Identity/UUID tests
 pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
-
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
 if(PULP_BUILD_WEBVIEW)
     add_executable(pulp-test-webview test_web_view.cpp)

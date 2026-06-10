@@ -911,3 +911,21 @@ overlay (`View::contains_native_overlay()`), the standalone now routes through
 `capture_native_overlay_png()` (e.g. `WebViewPanel::snapshot_png()` → WKWebView
 takeSnapshot) so WebView editors are self-verifiable headlessly. A plain Skia UI
 falls through to the back-buffer capture unchanged. See the `screenshot` skill.
+
+## Standalone audio-callback probe tap (Phase 5 observability harness)
+
+`StandaloneApp`'s audio callback carries an optional realtime output-boundary
+probe, gated behind the `PULP_ENABLE_AUDIO_PROBES` CMake option (default OFF).
+When ON, `start()` `prepare()`s `output_probe_` (the only place it allocates)
+and the callback calls `output_probe_.analyze_output(...)` immediately after
+`processor_->process(...)` — the "standalone processor-output boundary." This
+is the first wired probe stage for "UI works, no sound" reports. Gotchas:
+
+- It is NOT the input meter bridge. `input_meter_bridge_` is input-oriented and
+  lacks the snapshot's stage/sequence/NaN/clip/silence fields. Don't conflate.
+- The tap is fully `#if PULP_ENABLE_AUDIO_PROBES`-guarded; an OFF build links no
+  `AudioProbe` symbols into `standalone.cpp.o` (verified by `nm`). If you touch
+  the callback, keep the probe strictly inside that guard so OFF builds pay $0.
+- The probe is RT-safe (scalar-only, no FFT/alloc/locks) — `pulp::audio::AudioProbe`.
+  Do NOT model audio-thread work on `pulp::view::VisualizationBridge`, which runs
+  STFT and returns `std::vector` in its callback (explicitly quarantined).

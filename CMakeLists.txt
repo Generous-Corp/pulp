@@ -103,6 +103,16 @@ option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters (Slice 0 of #516
 if(PULP_BENCHMARK)
     add_compile_definitions(PULP_BENCHMARK)
 endif()
+# Audio observability harness (Phase 5). Gates the realtime AudioProbe TAP
+# call sites in runtime code (e.g. the standalone output-boundary probe) so an
+# OFF build pays nothing for live probing. The release-safe AudioStats counter
+# subset and the AudioProbe type itself always compile; only the wiring that
+# calls analyze_output() from a live audio path is behind this flag. Default
+# OFF per the harness plan's build tiers.
+option(PULP_ENABLE_AUDIO_PROBES "Wire realtime AudioProbe taps into live audio paths (dev/debug). Default OFF; release-safe counters stay available without it." OFF)
+if(PULP_ENABLE_AUDIO_PROBES)
+    add_compile_definitions(PULP_ENABLE_AUDIO_PROBES=1)
+endif()
 # Item 4.2 — opt-in suite that drives real third-party plugin binaries
 # (Surge XT / Vital / OB-Xd / Dexed) through the host stack. OFF by default
 # so the public CI matrix never depends on third-party download mirrors;

@@ -58,6 +58,8 @@ target_sources(pulp-audio PRIVATE
     src/audio_thumbnail_serialization.cpp
     src/wav_metadata.cpp
     src/audio_device_manager.cpp
+    src/audio_probe.cpp
+    src/audio_boundary_report.cpp
 )
 
 # CoreAudioFormat reader (macOS only — AAC, ALAC, CAF via ExtAudioFile)
