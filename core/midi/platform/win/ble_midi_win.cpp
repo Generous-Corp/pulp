@@ -209,6 +209,7 @@ public:
     // hresult_error here — treat any throw as "unavailable" so callers
     // degrade gracefully (matching the stub central's contract).
     bool is_available() const override {
+        ensure_winrt_init();
         try {
             wda::BluetoothLEAdvertisementWatcher probe{};
             (void)probe;
@@ -219,6 +220,7 @@ public:
     }
 
     bool start_scan(BleMidiScanCallback cb) override {
+        ensure_winrt_init();
         if (scanning_.load()) return true;  // start while scanning == no-op
         {
             std::lock_guard<std::mutex> lock(mu_);
@@ -252,6 +254,7 @@ public:
     }
 
     void stop_scan() override {
+        ensure_winrt_init();
         if (!scanning_.exchange(false)) return;
         teardown_watcher();
     }
@@ -407,6 +410,7 @@ public:
     }
 
     void disconnect(const std::string& id) override {
+        ensure_winrt_init();
         std::unique_ptr<Connection> conn;
         {
             std::lock_guard<std::mutex> lock(mu_);
@@ -470,6 +474,7 @@ private:
     // Fired on a WinRT thread-pool thread for each filtered advertisement.
     void on_received(const wda::BluetoothLEAdvertisementWatcher&,
                      const wda::BluetoothLEAdvertisementReceivedEventArgs& args) {
+        ensure_winrt_init();
         try {
             BleMidiPeripheral snapshot;
             snapshot.id = address_to_id(args.BluetoothAddress());
@@ -515,6 +520,7 @@ private:
     // match the winrt_midi_device.cpp / CoreBluetooth discipline.
     void on_value_changed(const gatt::GattCharacteristic& characteristic,
                           const gatt::GattValueChangedEventArgs& args) {
+        ensure_winrt_init();
         try {
             wss::IBuffer buffer = args.CharacteristicValue();
             if (!buffer || buffer.Length() == 0) return;
@@ -546,6 +552,7 @@ private:
     // disconnect() path so a transient flap does not desync the port list.
     void on_connection_status_changed(const wdb::BluetoothLEDevice& device,
                                       const wf::IInspectable&) {
+        ensure_winrt_init();
         try {
             if (device.ConnectionStatus() !=
                 wdb::BluetoothConnectionStatus::Disconnected) {
@@ -571,6 +578,7 @@ private:
 
     void gatt_write(const std::string& id,
                     const std::vector<uint8_t>& midi_bytes) {
+        ensure_winrt_init();
         if (midi_bytes.empty()) return;
         gatt::GattCharacteristic characteristic{nullptr};
         {
