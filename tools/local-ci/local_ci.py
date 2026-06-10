@@ -2578,6 +2578,38 @@ def trim_completed_jobs(queue: list[dict]) -> list[dict]:
     )
 
 
+def bump_queue_command_job(job_ref: str, requested_priority: str) -> dict:
+    return _queue_lifecycle.bump_queue_command_job_locked(
+        job_ref,
+        requested_priority,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
+        set_pending_job_priority_unlocked_fn=lambda job, priority: _queue_orchestrator.set_pending_job_priority_unlocked(
+            job,
+            priority,
+            now_iso_fn=now_iso,
+        ),
+        save_queue_unlocked_fn=save_queue_unlocked,
+        summarize_job_fn=summarize_job,
+    )
+
+
+def cancel_queue_command_job(job_ref: str) -> dict:
+    return _queue_lifecycle.cancel_queue_command_job_locked(
+        job_ref,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
+        cancel_job_unlocked_fn=cancel_job_unlocked,
+        trim_completed_jobs_fn=trim_completed_jobs,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        summarize_job_fn=summarize_job,
+    )
+
+
 def result_file_job_id(path: Path) -> str | None:
     return _cleanup.result_file_job_id(path)
 
@@ -4524,45 +4556,38 @@ def cmd_bump(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        with file_lock(queue_lock_path(), blocking=True):
-            queue = load_queue_unlocked()
-            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
-            if job is None:
-                print(f"No active job matches '{args.job}'.")
-                return 1
-            if not _queue_orchestrator.set_pending_job_priority_unlocked(
-                job,
-                requested_priority,
-                now_iso_fn=now_iso,
-            ):
-                print(f"Job is already {job['status']}; only pending jobs can be reprioritized.")
-                return 1
-            save_queue_unlocked(queue)
-            print(f"Updated priority: {summarize_job(job)}")
-            return 0
+        result = bump_queue_command_job(args.job, requested_priority)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1
+
+    if result["status"] == "missing":
+        print(f"No active job matches '{args.job}'.")
+        return 1
+    if result["status"] == "not_pending":
+        print(f"Job is already {result['job_status']}; only pending jobs can be reprioritized.")
+        return 1
+
+    print(f"Updated priority: {result['summary']}")
+    return 0
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
     try:
-        with file_lock(queue_lock_path(), blocking=True):
-            queue = load_queue_unlocked()
-            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
-            if job is None:
-                print(f"No active job matches '{args.job}'.")
-                return 1
-            if job["status"] != "pending":
-                print(f"Job is already {job['status']}; only pending jobs can be canceled safely.")
-                return 1
-            cancel_job_unlocked(job)
-            save_queue_unlocked(trim_completed_jobs(queue))
-            print(f"Canceled: {summarize_job(job)}")
-            return 0
+        result = cancel_queue_command_job(args.job)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1
+
+    if result["status"] == "missing":
+        print(f"No active job matches '{args.job}'.")
+        return 1
+    if result["status"] == "not_pending":
+        print(f"Job is already {result['job_status']}; only pending jobs can be canceled safely.")
+        return 1
+
+    print(f"Canceled: {result['summary']}")
+    return 0
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
