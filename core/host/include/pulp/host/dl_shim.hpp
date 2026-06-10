@@ -38,8 +38,21 @@
 namespace pulp::host::detail {
 
 inline void* dl_open(const char* path, int /*flags*/) {
+    // Invalid plugin probes are expected during scanning/tests. Suppress the
+    // Windows loader's critical-error UI so failures return NULL promptly.
+    DWORD old_error_mode = 0;
+    constexpr DWORD kLoaderProbeMode =
+        SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX;
+    const BOOL changed_error_mode =
+        ::SetThreadErrorMode(kLoaderProbeMode, &old_error_mode);
+
+    HMODULE module = ::LoadLibraryA(path);
+
+    if (changed_error_mode) {
+        ::SetThreadErrorMode(old_error_mode, nullptr);
+    }
     // LoadLibraryA returns NULL on failure. Caller inspects return value.
-    return reinterpret_cast<void*>(::LoadLibraryA(path));
+    return reinterpret_cast<void*>(module);
 }
 
 inline void* dl_sym(void* handle, const char* name) {

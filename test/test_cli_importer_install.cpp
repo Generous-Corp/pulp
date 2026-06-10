@@ -103,6 +103,22 @@ void write_file(const fs::path& path, const std::string& body) {
     f << body;
 }
 
+std::string json_escape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char c : text) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
 // Build a mock importer package (tar.gz) at <out>, containing an entrypoint
 // file and a SKILL.md. Returns the package path. Uses the system tar, which is
 // present on all CI platforms.
@@ -121,7 +137,7 @@ fs::path build_mock_package(const fs::path& staging, const fs::path& out,
 }
 
 // A registry fixture with a single importer descriptor pointing at a local
-// package via importer_artifacts (url_template carries a file:// path so the
+// package via importer_artifacts (url_template carries a local path so the
 // non --from path also works in the alias test).
 ToolDescriptor make_importer(const std::string& sha,
                              const std::string& sdk_min = "0.0.0",
@@ -343,7 +359,7 @@ TEST_CASE("uninstall removes the skill, record, and install tree",
 namespace {
 
 // Materialize a tool-registry.json under a repo dir whose importer artifact
-// url_template points at the mock package via a file:// URL, then chdir there
+// url_template points at the mock package via a local path, then chdir there
 // so find_tool_registry_path() locates it.
 fs::path write_repo_registry(const fs::path& repo, const std::string& sha,
                              const fs::path& pkg) {
@@ -371,7 +387,7 @@ fs::path write_repo_registry(const fs::path& repo, const std::string& sha,
       "vendor_id": "framework-x",
       "importer_artifacts": {
         ")") + platform + R"(": {
-          "url_template": "file://)" + pkg.string() + R"(",
+          "url_template": ")" + json_escape(pkg.string()) + R"(",
           "archive_format": "tar.gz",
           "sha256": ")" + sha + R"("
         }
