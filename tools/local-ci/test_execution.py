@@ -268,6 +268,125 @@ class ExecutionTests(unittest.TestCase):
         )
         self.assertEqual(ensure_calls[-1][1]["host"], "u0")
 
+    def test_build_target_tasks_binds_target_runners_and_reporters(self) -> None:
+        job = {
+            "id": "job-plan",
+            "branch": "feature/plan",
+            "sha": "a" * 40,
+            "targets": ["mac", "ubuntu", "windows"],
+            "validation": "full",
+        }
+        config = {
+            "targets": {
+                "mac": {"enabled": True, "exclude_tests": "mac-slow"},
+                "ubuntu": {
+                    "enabled": True,
+                    "host": "ubuntu",
+                    "repo_path": "/home/daniel/pulp",
+                    "exclude_tests": "ubuntu-slow",
+                },
+                "windows": {
+                    "enabled": True,
+                    "host": "win",
+                    "repo_path": r"C:\Pulp",
+                    "exclude_tests": "win-slow",
+                    "cmake_generator": "Ninja",
+                    "cmake_platform": "ARM64",
+                    "cmake_generator_instance": "VS",
+                },
+            },
+            "defaults": {},
+        }
+        reporters = {}
+        calls = []
+
+        def progress_factory(name: str) -> str:
+            reporter = f"report-{name}"
+            reporters[name] = reporter
+            return reporter
+
+        def resolve(_job: dict, target_name: str, target_cfg: dict, _defaults: dict) -> tuple[str, str]:
+            return target_cfg["host"], target_cfg["repo_path"]
+
+        def run_local(_job: dict, exclude_tests: str, report_progress: str) -> dict:
+            calls.append(("mac", exclude_tests, report_progress))
+            return {"target": "mac", "status": "pass"}
+
+        def run_posix(target_name: str, host: str, repo_path: str, _job: dict, **kwargs) -> dict:
+            calls.append((target_name, host, repo_path, kwargs["exclude_tests"], kwargs["report_progress"]))
+            return {"target": target_name, "status": "pass"}
+
+        def run_windows(target_name: str, host: str, repo_path: str, _job: dict, **kwargs) -> dict:
+            calls.append(
+                (
+                    target_name,
+                    host,
+                    repo_path,
+                    kwargs["exclude_tests"],
+                    kwargs["cmake_generator"],
+                    kwargs["cmake_platform"],
+                    kwargs["cmake_generator_instance"],
+                    kwargs["report_progress"],
+                )
+            )
+            return {"target": target_name, "status": "pass"}
+
+        tasks = self.mod.build_target_tasks(
+            job,
+            config,
+            enabled_targets_fn=lambda _config: ["mac"],
+            resolve_ssh_target_execution_fn=resolve,
+            run_local_validation_fn=run_local,
+            run_posix_ssh_validation_fn=run_posix,
+            run_windows_ssh_validation_fn=run_windows,
+            progress_factory=progress_factory,
+        )
+
+        self.assertEqual([name for name, _fn in tasks], ["mac", "ubuntu", "windows"])
+        self.assertEqual([fn()["status"] for _name, fn in tasks], ["pass", "pass", "pass"])
+        self.assertEqual(reporters, {"mac": "report-mac", "ubuntu": "report-ubuntu", "windows": "report-windows"})
+        self.assertEqual(
+            calls,
+            [
+                ("mac", "mac-slow", "report-mac"),
+                ("ubuntu", "ubuntu", "/home/daniel/pulp", "ubuntu-slow", "report-ubuntu"),
+                ("windows", "win", r"C:\Pulp", "win-slow", "Ninja", "ARM64", "VS", "report-windows"),
+            ],
+        )
+
+    def test_build_target_tasks_returns_unreachable_results_without_reporters(self) -> None:
+        job = {
+            "id": "job-offline",
+            "branch": "feature/offline",
+            "sha": "b" * 40,
+            "targets": ["ubuntu", "windows"],
+            "validation": "full",
+        }
+        config = {
+            "targets": {
+                "mac": {"enabled": False},
+                "ubuntu": {"enabled": True, "host": "ubuntu", "repo_path": "/repo"},
+                "windows": {"enabled": True, "host": "win", "repo_path": r"C:\Repo"},
+            },
+            "defaults": {},
+        }
+        reporters = []
+
+        tasks = self.mod.build_target_tasks(
+            job,
+            config,
+            enabled_targets_fn=lambda _config: ["mac"],
+            resolve_ssh_target_execution_fn=lambda _job, _name, _cfg, _defaults: (None, "/repo"),
+            run_local_validation_fn=lambda *_args, **_kwargs: self.fail("unexpected local runner"),
+            run_posix_ssh_validation_fn=lambda *_args, **_kwargs: self.fail("unexpected posix runner"),
+            run_windows_ssh_validation_fn=lambda *_args, **_kwargs: self.fail("unexpected windows runner"),
+            progress_factory=lambda name: reporters.append(name) or name,
+        )
+
+        self.assertEqual([name for name, _fn in tasks], ["ubuntu", "windows"])
+        self.assertEqual([fn()["status"] for _name, fn in tasks], ["unreachable", "unreachable"])
+        self.assertEqual(reporters, [])
+
     def test_run_target_tasks_collects_results_and_reports_completion(self) -> None:
         completed = []
 
