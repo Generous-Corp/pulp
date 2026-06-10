@@ -79,6 +79,74 @@ class ExecutionTests(unittest.TestCase):
             "VM unavailable",
         )
 
+    def test_target_exception_result_matches_queue_contract(self) -> None:
+        result = self.mod.target_exception_result("windows", RuntimeError("boom"))
+
+        self.assertEqual(
+            result,
+            {
+                "target": "windows",
+                "status": "error",
+                "exit_code": -1,
+                "duration_secs": 0,
+                "stdout_tail": "",
+                "stderr_tail": "boom",
+            },
+        )
+
+    def test_completed_job_result_preserves_empty_job_contract(self) -> None:
+        job = {
+            "id": "job-empty",
+            "branch": "feature/empty",
+            "sha": "1" * 40,
+            "priority": "low",
+            "targets": [],
+            "queued_at": "2026-04-01T00:00:00+00:00",
+            "validation": "smoke",
+            "submission": {"target_hosts": {}},
+        }
+
+        result = self.mod.completed_job_result(
+            job,
+            [],
+            completed_at="2026-04-01T00:01:00+00:00",
+            provenance={"kind": "direct"},
+        )
+
+        self.assertEqual(result["job_id"], "job-empty")
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["overall"], "pass")
+        self.assertNotIn("validation", result)
+        self.assertEqual(result["submission"], {"target_hosts": {}})
+        self.assertEqual(result["provenance"], {"kind": "direct"})
+
+    def test_completed_job_result_summarizes_target_results(self) -> None:
+        job = {
+            "id": "job-results",
+            "branch": "feature/results",
+            "sha": "2" * 40,
+            "priority": "normal",
+            "targets": ["mac", "windows"],
+            "validation": "smoke",
+        }
+
+        passing = self.mod.completed_job_result(
+            job,
+            [{"target": "mac", "status": "pass"}, {"target": "windows", "status": "pass"}],
+            completed_at="2026-04-01T00:02:00+00:00",
+            provenance={},
+        )
+        failing = self.mod.completed_job_result(
+            job,
+            [{"target": "mac", "status": "pass"}, {"target": "windows", "status": "fail"}],
+            completed_at="2026-04-01T00:03:00+00:00",
+            provenance={},
+        )
+
+        self.assertEqual(passing["validation"], "smoke")
+        self.assertEqual(passing["overall"], "pass")
+        self.assertEqual(failing["overall"], "fail")
+
     def test_local_validation_command_builds_full_and_smoke_commands(self) -> None:
         full_cmd, full_validation = self.mod.local_validation_command(
             {"sha": "a" * 40, "targets": ["mac"], "validation": "full"},

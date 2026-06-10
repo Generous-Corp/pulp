@@ -3186,6 +3186,19 @@ def unreachable_target_result(target_name: str, detail: str = "Host unreachable"
     return _execution.unreachable_target_result(target_name, detail)
 
 
+def target_exception_result(target_name: str, exc: Exception) -> dict:
+    return _execution.target_exception_result(target_name, exc)
+
+
+def completed_job_result(job: dict, results: list[dict]) -> dict:
+    return _execution.completed_job_result(
+        job,
+        results,
+        completed_at=now_iso(),
+        provenance=normalize_provenance(job.get("provenance")),
+    )
+
+
 def run_logged_command(
     cmd: list[str],
     *,
@@ -3665,19 +3678,7 @@ def process_job(job: dict, config: dict) -> dict:
 
     tasks = _build_target_tasks(job, config, progress_factory=progress_factory)
     if not tasks:
-        return {
-            "job_id": job["id"],
-            "branch": job["branch"],
-            "sha": job["sha"],
-            "priority": job["priority"],
-            "submission": job.get("submission"),
-            "provenance": normalize_provenance(job.get("provenance")),
-            "targets": job.get("targets", []),
-            "queued_at": job.get("queued_at", ""),
-            "completed_at": now_iso(),
-            "results": [],
-            "overall": "pass",
-        }
+        return completed_job_result(job, [])
 
     for name, _fn in tasks:
         target_states[name] = {
@@ -3696,14 +3697,7 @@ def process_job(job: dict, config: dict) -> dict:
             try:
                 result = future.result()
             except Exception as exc:
-                result = {
-                    "target": name,
-                    "status": "error",
-                    "exit_code": -1,
-                    "duration_secs": 0,
-                    "stdout_tail": "",
-                    "stderr_tail": str(exc),
-                }
+                result = target_exception_result(name, exc)
 
             results.append(result)
             target_states[name] = {
@@ -3722,20 +3716,7 @@ def process_job(job: dict, config: dict) -> dict:
             flush_target_states()
 
     results.sort(key=lambda item: item["target"])
-    return {
-        "job_id": job["id"],
-        "branch": job["branch"],
-        "sha": job["sha"],
-        "priority": job["priority"],
-        "validation": job.get("validation", "full"),
-        "submission": job.get("submission"),
-        "provenance": normalize_provenance(job.get("provenance")),
-        "targets": job.get("targets", []),
-        "queued_at": job.get("queued_at", ""),
-        "completed_at": now_iso(),
-        "results": results,
-        "overall": "pass" if all(result["status"] == "pass" for result in results) else "fail",
-    }
+    return completed_job_result(job, results)
 
 
 def save_result(result: dict) -> Path:
