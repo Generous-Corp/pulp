@@ -432,6 +432,25 @@ class TargetedCtestTests(unittest.TestCase):
         )
 
 
+class CoverageConfigureTests(unittest.TestCase):
+    """Coverage configure should stay headless-safe on non-Skia worktrees."""
+
+    def test_local_diff_cover_disables_gpu_examples(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            "-DPULP_ENABLE_GPU=OFF",
+            text,
+            "local_diff_cover.sh must not require Skia/GPU examples before "
+            "it can measure coverage for core/tooling diffs.",
+        )
+        self.assertIn(
+            "-DPULP_BUILD_EXAMPLES=OFF",
+            text,
+            "local_diff_cover.sh should build tests, not example apps, for "
+            "the local diff-cover gate.",
+        )
+
+
 class ImporterCoverageAutoInclusionTests(unittest.TestCase):
     """Importer CLI test targets are wired into the targeted diff-cover lane.
 
