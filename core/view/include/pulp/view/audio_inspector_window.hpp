@@ -98,6 +98,14 @@ public:
     /// Panel accessor — for headless state assertions.
     const AudioInspectorPanel& panel() const { return *panel_; }
 
+    /// The window's own `WindowHost`, or null until `show()` has created one
+    /// (and after a host_factory that returned null). Exposed so a headless
+    /// host can `capture_png()` the inspector's surface for a screenshot proof,
+    /// the same way the standalone host captures its main window. Ownership
+    /// stays with this window — the caller must not retain the pointer past the
+    /// window's lifetime.
+    WindowHost* window_host() const { return window_host_.get(); }
+
 private:
     // CommandHandler (private base) — registry dispatch entry points.
     std::vector<CommandID> commands() const override;

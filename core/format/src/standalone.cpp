@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <string_view>
 
 // WYSIWYG P6 FIX 5 — the dev inspector (Cmd+I overlay) is gated behind the
@@ -32,6 +34,10 @@
 
 #if PULP_STANDALONE_INSPECTOR
 #include <pulp/inspect/inspector_overlay.hpp>
+#endif
+#if PULP_ENABLE_AUDIO_PROBES
+#include <pulp/view/audio_inspector_window.hpp>
+#include <pulp/view/command_registry.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
@@ -162,11 +168,18 @@ bool StandaloneApp::start() {
 #if PULP_ENABLE_AUDIO_PROBES
     // Phase 5 — prepare the realtime output-boundary probe BEFORE the audio
     // callback starts. This is the only place it allocates. Capture is left
-    // off here (latest-summary only); a debug/support build can opt into the
-    // last-N ring via output_probe().prepare(...) with a CaptureConfig.
+    // off by default (latest-summary only); the Phase 6 Audio Inspector window
+    // (PULP_AUDIO_INSPECTOR) and debug/support builds opt into the last-N ring
+    // so the inspector can paint a live waveform, not just meters. The ring is
+    // sized to the panel's display capacity so a tick fills the trace.
+    audio::AudioProbe::CaptureConfig probe_capture;
+    audio_inspector_capture_ = runtime::get_env("PULP_AUDIO_INSPECTOR").has_value();
+    if (audio_inspector_capture_)
+        probe_capture.capture_frames = view::AudioWaveformView::kCapacity;
     output_probe_.prepare(config_.output_channels, config_.buffer_size,
                           config_.sample_rate,
-                          audio::AudioProbeStage::kStandaloneOutputBoundary);
+                          audio::AudioProbeStage::kStandaloneOutputBoundary,
+                          probe_capture);
     output_probe_ptrs_.assign(static_cast<size_t>(std::max(config_.output_channels, 0)),
                               nullptr);
 #endif
@@ -504,6 +517,30 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     inspect::install_inspector_hooks(*inspector);
 #endif
 
+#if PULP_ENABLE_AUDIO_PROBES
+    // Phase 6 — Audio Inspector tool window. A SEPARATE floating window (sibling
+    // of the layout inspector, not a tab in it) that observes `output_probe_`.
+    // It dispatches its toggle (Cmd/Ctrl+Shift+A) through a shell-owned
+    // CommandRegistry routed via `route_global_keys` — that writes
+    // `window_root.on_global_key`, which is distinct from the layout inspector's
+    // `on_global_click` (Cmd+I), so the two coexist without clobbering. Only
+    // wired when a real WindowHost exists (the show() path needs one).
+    view::AudioInspectorWindow* audio_inspector_ptr = nullptr;
+    if (window) {
+        // Fresh registry + window per run (a prior run's window referenced an
+        // already-destroyed root view). Destroy the window before the registry
+        // so its RAII handler removal targets a live registry.
+        audio_inspector_.reset();
+        command_registry_ = std::make_unique<view::CommandRegistry>();
+        audio_inspector_ = std::make_unique<view::AudioInspectorWindow>(
+            nullptr, window.get());
+        audio_inspector_->set_probe(&output_probe_);
+        audio_inspector_->register_command_handler(*command_registry_);
+        view::route_global_keys(window_root, *command_registry_);
+        audio_inspector_ptr = audio_inspector_.get();
+    }
+#endif
+
     // Wire inspector into the idle callback to push overlay paint each frame.
     // The inspector uses View::overlay_queue() for rendering and intercepts
     // key events through the root view's on_global_click callback for Cmd+I.
@@ -548,7 +585,40 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
     }
 #else
-    detail::install_standalone_idle_callback(*window, scripted_ui_ptr, settings_ptr);
+    pre_screenshot_idle = detail::make_standalone_idle_callback(
+        scripted_ui_ptr
+            ? std::function<void()>{[scripted_ui_ptr] { scripted_ui_ptr->poll(); }}
+            : std::function<void()>{},
+        settings_ptr
+            ? std::function<void()>{[settings_ptr] { settings_ptr->poll(); }}
+            : std::function<void()>{});
+    window->set_idle_callback(pre_screenshot_idle);
+#endif
+
+#if PULP_ENABLE_AUDIO_PROBES
+    // Refresh the Audio Inspector from `output_probe_` every UI tick. Compose
+    // with whatever idle work is already wired (inspector overlay / scripted_ui
+    // / settings poll) rather than clobbering it: capture the current
+    // `pre_screenshot_idle` (empty in the inspector-off build, where the
+    // standalone idle callback is installed directly) and call it first.
+    // poll() is cheap and safe when the window is hidden or no probe is set.
+    if (audio_inspector_ptr) {
+        auto prior_idle = pre_screenshot_idle;
+        pre_screenshot_idle = [prior_idle, audio_inspector_ptr] {
+            if (prior_idle) prior_idle();
+            audio_inspector_ptr->poll();
+        };
+        window->set_idle_callback(pre_screenshot_idle);
+    }
+
+    // Open the Audio Inspector when PULP_AUDIO_INSPECTOR is set (mirrors the
+    // PULP_INSPECTOR layout-inspector block above). The capture ring was sized
+    // in start() under the same env, so the window paints a live waveform.
+    if (audio_inspector_ptr && runtime::get_env("PULP_AUDIO_INSPECTOR")) {
+        audio_inspector_ptr->show();
+        runtime::log_info(
+            "Standalone: audio inspector enabled via PULP_AUDIO_INSPECTOR env var");
+    }
 #endif
 
     if (!opts.initially_hidden)
@@ -571,7 +641,42 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             ? effective_config.screenshot_frame_delay : 30;
         cap.path = effective_config.screenshot_path;
         auto* editor_view = bridge->view();
-        cap.capture_fn = [host, editor_view, w, h] {
+#if PULP_ENABLE_AUDIO_PROBES
+        // Sibling capture of the Audio Inspector's OWN window surface, written
+        // next to the main screenshot as "<stem>.audio-inspector.png" when the
+        // inspector is open. Lets a headless run prove the live panel loaded
+        // (PULP_AUDIO_INSPECTOR=1 --screenshot X.png yields X.audio-inspector.png).
+        const std::string inspector_png_path = [&] {
+            std::filesystem::path p(effective_config.screenshot_path);
+            return (p.parent_path() /
+                    (p.stem().string() + ".audio-inspector" +
+                     p.extension().string()))
+                .string();
+        }();
+#endif
+        cap.capture_fn = [host, editor_view, w, h
+#if PULP_ENABLE_AUDIO_PROBES
+                          , audio_inspector_ptr, inspector_png_path
+#endif
+        ] {
+#if PULP_ENABLE_AUDIO_PROBES
+            // Side-effect: capture the inspector window's own surface at the
+            // same frame, before the main window closes. capture_png() returns
+            // empty on hosts without GPU capture — skip the write in that case.
+            if (audio_inspector_ptr && audio_inspector_ptr->is_visible()) {
+                if (auto* ihost = audio_inspector_ptr->window_host()) {
+                    auto ipng = ihost->capture_png();
+                    if (!ipng.empty()) {
+                        std::ofstream out(inspector_png_path, std::ios::binary);
+                        out.write(reinterpret_cast<const char*>(ipng.data()),
+                                  static_cast<std::streamsize>(ipng.size()));
+                        runtime::log_info(
+                            "Standalone: audio inspector screenshot written to {}",
+                            inspector_png_path);
+                    }
+                }
+            }
+#endif
             // If the editor hosts a native overlay (a WebView), use its in-process
             // snapshot (WKWebView takeSnapshot) — capture_back_buffer_png() reads the
             // Skia back buffer and can't see an OS-composited native overlay. For a
@@ -626,6 +731,14 @@ void StandaloneApp::stop_audio_keep_processor() {
 
 void StandaloneApp::stop() {
     stop_audio_keep_processor();
+#if PULP_ENABLE_AUDIO_PROBES
+    // Tear the Audio Inspector down before the processor / probe so its raw
+    // `output_probe_` pointer never dangles. Destroying the window first also
+    // removes its handler from `command_registry_` (RAII in its destructor);
+    // destroy the registry after, so the removal has a live registry to target.
+    audio_inspector_.reset();
+    command_registry_.reset();
+#endif
     if (processor_) {
         processor_->release();
         processor_.reset();

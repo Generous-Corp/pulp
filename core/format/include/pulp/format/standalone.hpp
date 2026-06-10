@@ -18,6 +18,11 @@
 #include <string>
 #include <vector>
 
+namespace pulp::view {
+class AudioInspectorWindow;
+class CommandRegistry;
+}  // namespace pulp::view
+
 namespace pulp::format {
 
 struct StandaloneConfig {
@@ -174,6 +179,22 @@ private:
     // Pre-allocated channel-pointer array for the probe view (no audio-thread
     // allocation). Sized in start() to the output channel count.
     std::vector<const float*> output_probe_ptrs_;
+
+    // Developer Audio Inspector tool window (Phase 6). A separate floating
+    // window that reads `output_probe_.latest()` each UI tick and renders the
+    // live meters / waveform / probe-stage status. Lives on the app so it
+    // outlives the idle callback that polls it; `output_probe_` is declared
+    // before it so the probe outlives the window on teardown (the window holds
+    // a raw probe pointer). Constructed in run_with_editor() only when a real
+    // window exists, behind a shared CommandRegistry routed by
+    // `route_global_keys` (Cmd/Ctrl+Shift+A). Opened when PULP_AUDIO_INSPECTOR
+    // is set in the environment.
+    std::unique_ptr<view::CommandRegistry> command_registry_;
+    std::unique_ptr<view::AudioInspectorWindow> audio_inspector_;
+    // True when the probe was prepared with a capture ring (so the inspector
+    // can show a waveform, not just meters). Enabled when PULP_AUDIO_INSPECTOR
+    // is set at start() time.
+    bool audio_inspector_capture_ = false;
 #endif
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
     audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input

@@ -27,11 +27,14 @@
 #include <pulp/view/inspector_window.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cmath>
 #include <memory>
 #include <vector>
+#include <filesystem>
+#include <fstream>
 
 using namespace pulp::view;
 using pulp::audio::AudioProbe;
@@ -245,42 +248,87 @@ TEST_CASE("AudioInspectorWindow copies a fixed-capacity waveform off the probe",
 TEST_CASE("AudioInspectorPanel renders a non-empty headless snapshot",
           "[view][audio-inspector][audio-harness]") {
     // Visual proof the panel paints end-to-end (meters + waveform + labels)
-    // without a window. Asserts a non-trivial PNG; skips honestly when the
-    // build has no screenshot provider (CPU-only / headless CI without Skia).
-    if (!has_screenshot_provider()) {
-        SUCCEED("no screenshot provider in this build — render proof skipped");
+    // through the offscreen GPU surface (Dawn + Skia). Skips honestly when this
+    // build has no GPU capture (CPU-only / no Skia / headless CI without GPU).
+    if (!has_gpu_capture()) {
+        SUCCEED("no GPU capture in this build — render proof skipped");
         return;
     }
 
     AudioProbe probe;
     AudioProbe::CaptureConfig cap;
-    cap.capture_frames = 256;
+    cap.capture_frames = AudioWaveformView::kCapacity;
     probe.prepare(2, 128, 48000.0, AudioProbeStage::kStandaloneOutputBoundary, cap);
+    // Several blocks of a 440 Hz sine so the meters read a real level and the
+    // capture ring fills with a visible waveform (one block of 128 frames is
+    // less than the display width — feed enough to populate the trace).
     StereoBlock block(128);
     for (std::size_t i = 0; i < block.left.size(); ++i) {
-        block.left[i] = 0.5f * std::sin(static_cast<float>(i) * 0.2f);
-        block.right[i] = 0.25f * std::sin(static_cast<float>(i) * 0.2f);
+        const float s = std::sin(2.0f * 3.14159265f * 440.0f *
+                                 static_cast<float>(i) / 48000.0f);
+        block.left[i] = 0.6f * s;
+        block.right[i] = 0.45f * s;
     }
-    probe.analyze_output(block.view());
+    for (int b = 0; b < 8; ++b) probe.analyze_output(block.view());
 
-    AudioInspectorPanel panel;
-    panel.set_bounds({0, 0, 300, 440});
-    {
-        AudioInspectorWindow window;
-        window.set_probe(&probe);
-        window.poll();
-        REQUIRE(window.panel().status() == AudioInspectorPanel::Status::kLive);
-    }
-    // Drive the standalone panel directly so it owns the render tree.
+    // Read the snapshot + captured waveform DIRECTLY (no intervening window
+    // poll() — poll() drains the single-consumer capture FIFO, which would
+    // leave the panel's waveform silently empty).
     const auto snap = probe.latest();
     std::vector<float> wf(AudioWaveformView::kCapacity);
     const int n = probe.read_capture(wf.data(), static_cast<int>(wf.size()));
-    panel.update(AudioInspectorPanel::Status::kLive, snap, {}, wf.data(), n);
+    REQUIRE(n > 0);  // the waveform the panel renders is genuinely non-empty
 
-    // Skia backend composites the meters + waveform correctly (CoreGraphics
-    // is fine here too — no file images — but Skia is the faithful default).
-    auto png = render_to_png(panel, 300, 440, 2.0f, ScreenshotBackend::skia);
+    AudioInspectorPanel panel;
+    panel.set_bounds({0, 0, 300, 440});
+    panel.update(AudioInspectorPanel::Status::kLive, snap, {}, wf.data(), n);
+    REQUIRE(panel.status() == AudioInspectorPanel::Status::kLive);
+    REQUIRE(panel.waveform().sample_count() == n);
+
+    // The labels actually carry the live readout text — the panel is not
+    // silently blank. (The text strings were always set; this guards the data
+    // path, the pixel assertion below guards that they actually render.)
+    REQUIRE(panel.status_text().find("live") != std::string::npos);
+    REQUIRE(panel.level_text().find("dBFS") != std::string::npos);
+    // The heading color must be a valid [0,1] Color. The white-on-white bug
+    // that hid every label fed 0-255 values into the [0,1] ctor, so the
+    // channels read >1 and Skia clamped them to white. Assert they're in range.
+    const auto sc = panel.status_color();
+    REQUIRE(sc.r <= 1.0f);
+    REQUIRE(sc.g <= 1.0f);
+    REQUIRE(sc.b <= 1.0f);
+    REQUIRE(sc.a <= 1.0f);
+
+    // Render through the offscreen GPU surface. `has_gpu_capture()` only proves
+    // the GPU backend is COMPILED in — the Dawn/Metal device can still fail to
+    // initialize at RUNTIME (e.g. a headless CI session with no GPU access), in
+    // which case render_to_png_gpu returns an empty buffer. Skip the pixel
+    // assertions honestly there; the white-on-white regression is already caught
+    // GPU-independently by the status_color() channel-range check above.
+    auto png = render_to_png_gpu(panel, 300, 440, 2.0f);
+    if (png.empty()) {
+        SUCCEED("offscreen GPU device unavailable at runtime — pixel proof skipped");
+        return;
+    }
     REQUIRE(png.size() > 100);  // a real PNG, not an empty/blank buffer
+    const auto out =
+        (std::filesystem::temp_directory_path() / "pulp-audio-inspector-live.png")
+            .string();
+    std::ofstream(out, std::ios::binary)
+        .write(reinterpret_cast<const char*>(png.data()),
+               static_cast<std::streamsize>(png.size()));
+
+    // Pixel-level guard against the white-on-white regression: the panel paints
+    // a dark UI background ({26,26,32}), so a correctly-rendered frame is
+    // predominantly dark. The bug clamped every fill/text/trace to white, which
+    // makes the frame predominantly bright — a high luminance mean. Assert the
+    // frame is dark AND has real content variation (text + waveform pixels).
+    // luminance_mean / stddev are on a 0-255 scale. A correct dark UI sits well
+    // under mid-gray (~30 here); the white-clamped bug pushed it toward 255.
+    const ScreenshotContentStats stats = analyze_screenshot_content(png);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.luminance_mean < 128.0);   // dark UI, not a white-clamped frame
+    REQUIRE(stats.luminance_stddev > 1.0);   // real content (text + trace), not flat
 }
 
 TEST_CASE("AudioInspectorWindow toggle command opens via the registry and does "
@@ -288,10 +336,18 @@ TEST_CASE("AudioInspectorWindow toggle command opens via the registry and does "
           "[view][audio-inspector][audio-harness]") {
     CommandRegistry reg;
     int factory_calls = 0;
+    bool captured_root_background = false;
+    pulp::canvas::Color root_background;
 
     {
-        AudioInspectorWindow window(nullptr, nullptr,
-                                    null_host_factory(&factory_calls));
+        AudioInspectorWindow window(
+            nullptr, nullptr,
+            [&](View& root, const WindowOptions&) -> std::unique_ptr<WindowHost> {
+                ++factory_calls;
+                captured_root_background = root.has_background_color();
+                root_background = root.background_color();
+                return nullptr;
+            });
         window.register_command_handler(reg);
 
         // The registry path must not clobber any raw global-key hook.
@@ -308,6 +364,11 @@ TEST_CASE("AudioInspectorWindow toggle command opens via the registry and does "
         // Toggle chord routes to the window's handler → show() → host factory.
         REQUIRE(reg.dispatch_key_event(audio_toggle_chord()));
         REQUIRE(factory_calls == 1);
+        REQUIRE(captured_root_background);
+        REQUIRE(root_background.r <= 1.0f);
+        REQUIRE(root_background.g <= 1.0f);
+        REQUIRE(root_background.b <= 1.0f);
+        REQUIRE(root_background.a <= 1.0f);
 
         // Re-registering with the same registry must not double-add.
         window.register_command_handler(reg);

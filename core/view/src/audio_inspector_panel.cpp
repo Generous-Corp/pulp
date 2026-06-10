@@ -63,14 +63,14 @@ void AudioWaveformView::paint(canvas::Canvas& canvas) {
     if (b.width <= 0 || b.height <= 0) return;
 
     // Housing.
-    canvas.set_fill_color(canvas::Color{18, 18, 22, 255});
+    canvas.set_fill_color(canvas::Color::rgba8(18, 18, 22, 255));
     canvas.fill_rect(b.x, b.y, b.width, b.height);
 
     const float mid = b.y + b.height * 0.5f;
 
     // Zero-line: bright when live, dim when stale / no probe.
-    canvas.set_stroke_color(live_ ? canvas::Color{70, 80, 95, 255}
-                                  : canvas::Color{45, 45, 52, 255});
+    canvas.set_stroke_color(live_ ? canvas::Color::rgba8(70, 80, 95, 255)
+                                  : canvas::Color::rgba8(45, 45, 52, 255));
     canvas.set_line_width(1.0f);
     canvas.stroke_line(b.x, mid, b.x + b.width, mid);
 
@@ -87,7 +87,7 @@ void AudioWaveformView::paint(canvas::Canvas& canvas) {
                                             mid - s * half};
     }
 
-    canvas.set_stroke_color(canvas::Color{90, 200, 140, 255});
+    canvas.set_stroke_color(canvas::Color::rgba8(90, 200, 140, 255));
     canvas.set_line_width(1.25f);
     canvas.stroke_path(pts.data(), static_cast<std::size_t>(count_));
 }
@@ -103,7 +103,7 @@ AudioInspectorPanel::AudioInspectorPanel() {
 void AudioInspectorPanel::build_ui() {
     flex().direction = FlexDirection::column;
     flex().padding = 10;
-    set_background_color(canvas::Color{26, 26, 32, 255});
+    set_background_color(canvas::Color::rgba8(26, 26, 32, 255));
 
     auto make_label = [](const std::string& text, float size, int weight,
                          canvas::Color color) {
@@ -114,9 +114,9 @@ void AudioInspectorPanel::build_ui() {
         return l;
     };
 
-    const canvas::Color heading{210, 215, 225, 255};
-    const canvas::Color body{170, 176, 188, 255};
-    const canvas::Color muted{120, 126, 138, 255};
+    const canvas::Color heading = canvas::Color::rgba8(210, 215, 225, 255);
+    const canvas::Color body = canvas::Color::rgba8(170, 176, 188, 255);
+    const canvas::Color muted = canvas::Color::rgba8(120, 126, 138, 255);
 
     // Status / availability line.
     {
@@ -265,15 +265,15 @@ void AudioInspectorPanel::refresh_labels() {
         switch (status_) {
             case Status::kNoProbe:
                 status_label_->set_text("Audio Inspector — no probe");
-                status_label_->set_text_color(canvas::Color{200, 150, 90, 255});
+                status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
                 break;
             case Status::kStale:
                 status_label_->set_text("Audio Inspector — stale (probe idle)");
-                status_label_->set_text_color(canvas::Color{200, 150, 90, 255});
+                status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
                 break;
             case Status::kLive:
                 status_label_->set_text("Audio Inspector — live");
-                status_label_->set_text_color(canvas::Color{120, 200, 150, 255});
+                status_label_->set_text_color(canvas::Color::rgba8(120, 200, 150, 255));
                 break;
         }
     }

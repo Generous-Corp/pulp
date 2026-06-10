@@ -1930,11 +1930,11 @@ pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
-
+pulp_add_test_suite(pulp-test-standalone-audio-inspector
+    LIBRARIES pulp::standalone pulp::view PROPERTIES PROCESSORS 8)
 # Headless screenshot capture state machine (pulp #468)
 pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
-
 # STFT and audio visualization signal tests
 pulp_add_test_suite(pulp-test-stft LIBRARIES pulp::signal)
 
