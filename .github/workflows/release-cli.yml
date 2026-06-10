@@ -41,16 +41,27 @@ env:
   SHIPYARD_VERSION: "0.59.0"
 
 jobs:
-  # Resolve the macOS runner for the darwin-arm64 matrix legs. When
-  # PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is set (the same repo
-  # variable build.yml uses for PR macOS routing post-2026-05-18
-  # cutover), route release-cli's macOS leg through Namespace cloud
-  # runners instead of GitHub-hosted macos-15. Falls back to macos-15
-  # when unset so reverting the cutover doesn't break releases.
-  # Background: 2026-05-18 SDK starvation — the GitHub-hosted macos-15
-  # queue backed up for hours and blocked v0.111..v0.134 release-cli
-  # runs from completing (compound with the supersede bug fixed in
-  # pulp #2238 and the Skia gate fix in pulp #2281).
+  # Resolve the macOS runner for the darwin-arm64 matrix legs.
+  #
+  # Priority (first set wins):
+  #   1. PULP_RELEASE_MACOS_RUNS_ON_JSON — dedicated release-cli override
+  #      (the "wire each lane its own runs-on var" pattern from CLAUDE.md).
+  #   2. PULP_LOCAL_MACOS_RUNS_ON_JSON — the self-hosted Studio/M5 pool that
+  #      already backs the required `macos` PR gate (build.yml). release-cli
+  #      is low-volume (tags only) so it won't starve that gate, and the
+  #      `actions/checkout` default `clean: true` (git clean -ffdx) wipes the
+  #      untracked build dirs each run, so a release build on the persistent
+  #      self-hosted disk is clean-by-construction (no warm-dir ODR — release
+  #      also never touches the shared ccache).
+  #   3. PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON — Namespace cloud (off for cost).
+  #   4. GitHub-hosted macos-15 — last-resort fallback.
+  #
+  # Why this changed: the GitHub-hosted macos-15 pool repeatedly starves
+  # release-cli's darwin leg for hours (2026-05-18 blocked v0.111..v0.134;
+  # 2026-06-09 blocked v0.396.0+ for 3h+ while ~6 macos-15 lanes — coverage,
+  # sanitizers — exhausted the hosted concurrency cap and 4 self-hosted Macs
+  # sat idle). Routing the release leg to the idle self-hosted pool by default
+  # removes that single point of failure for publishing.
   resolve-macos-runner:
     runs-on: ubuntu-latest
     outputs:
@@ -58,9 +69,17 @@ jobs:
     steps:
       - id: resolve
         env:
+          RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
+          LOCAL_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
         run: |
-          if [ -n "${NAMESPACE_JSON:-}" ]; then
+          if [ -n "${RELEASE_JSON:-}" ]; then
+            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-cli via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
+          elif [ -n "${LOCAL_JSON:-}" ]; then
+            echo "runs_on_json=${LOCAL_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-cli via self-hosted PULP_LOCAL_MACOS_RUNS_ON_JSON: ${LOCAL_JSON}"
+          elif [ -n "${NAMESPACE_JSON:-}" ]; then
             echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
             echo "Routing macOS release-cli through Namespace: ${NAMESPACE_JSON}"
           else
