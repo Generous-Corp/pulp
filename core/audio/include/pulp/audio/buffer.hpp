@@ -171,6 +171,14 @@ public:
         return {ptrs_.data(), num_channels_, num_samples_};
     }
 
+    /// @copydoc view()
+    /// Const overload: yields a read-only view. `SampleType**` converts to
+    /// `const SampleType* const*` implicitly (qualification conversion), so
+    /// no extra pointer array is needed.
+    BufferView<const SampleType> view() const {
+        return {ptrs_.data(), num_channels_, num_samples_};
+    }
+
     /// @copydoc BufferView::channel(std::size_t)
     std::span<SampleType> channel(std::size_t index) {
         return {ptrs_[index], num_samples_};

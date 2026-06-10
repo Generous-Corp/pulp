@@ -85,28 +85,6 @@ BufferMetrics analyze(const pulp::audio::Buffer<float>& buffer,
                       double sample_rate,
                       const AnalyzeOptions& options = {});
 
-/// Const-view adapter: pulp::audio::Buffer has no `view() const` today
-/// (planned core fix alongside the PR 2 RenderScenario work), so analysis
-/// code that takes `BufferView<const float>` needs this shim. Owns the
-/// pointer array; keep the adapter alive while the view is in use.
-class ConstBufferView {
-public:
-    explicit ConstBufferView(const pulp::audio::Buffer<float>& buffer)
-        : ptrs_(buffer.num_channels()) {
-        for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch)
-            ptrs_[ch] = buffer.channel(ch).data();
-        num_channels_ = buffer.num_channels();
-        num_samples_ = buffer.num_samples();
-    }
-    operator pulp::audio::BufferView<const float>() const {
-        return {ptrs_.data(), num_channels_, num_samples_};
-    }
-private:
-    std::vector<const float*> ptrs_;
-    std::size_t num_channels_ = 0;
-    std::size_t num_samples_ = 0;
-};
-
 /// Result of estimate_frequency().
 struct FrequencyEstimate {
     double hz = 0.0;          ///< 0.0 when no estimate is possible.

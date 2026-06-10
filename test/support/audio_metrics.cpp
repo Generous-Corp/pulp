@@ -105,7 +105,7 @@ BufferMetrics analyze(const pulp::audio::BufferView<const float>& buffer,
 BufferMetrics analyze(const pulp::audio::Buffer<float>& buffer,
                       double sample_rate,
                       const AnalyzeOptions& options) {
-    return analyze(ConstBufferView(buffer), sample_rate, options);
+    return analyze(buffer.view(), sample_rate, options);
 }
 
 FrequencyEstimate estimate_frequency(std::span<const float> samples,
