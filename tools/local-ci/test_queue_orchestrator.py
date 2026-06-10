@@ -90,6 +90,38 @@ class QueueOrchestratorTests(unittest.TestCase):
             ),
             "mac=pass, windows=running",
         )
+        self.assertEqual(
+            self.mod.target_state_detail_parts(
+                {
+                    "phase": "build",
+                    "validation_mode": "smoke",
+                    "transport_mode": "ssh",
+                    "test_policy": "smoke",
+                    "prepared_state": "ready",
+                    "wait_reason": "queue",
+                    "cleanup_status": "done",
+                    "last_output_at": "2026-06-09T00:00:00Z",
+                    "last_heartbeat_at": "2026-06-09T00:01:00Z",
+                    "quiet_for_secs": 3,
+                    "liveness": "alive",
+                    "log_path": "/tmp/pulp/logs/windows.log",
+                }
+            ),
+            [
+                "phase=build",
+                "mode=smoke",
+                "transport=ssh",
+                "tests=smoke",
+                "prepared=ready",
+                "wait=queue",
+                "cleanup=done",
+                "output=2026-06-09T00:00:00Z",
+                "heartbeat=2026-06-09T00:01:00Z",
+                "idle=3s",
+                "liveness=alive",
+                "log=windows.log",
+            ],
+        )
         self.assertLess(
             self.mod.job_sort_key({"id": "high", "priority": "high", "queued_at": "2"}),
             self.mod.job_sort_key({"id": "low", "priority": "low", "queued_at": "1"}),

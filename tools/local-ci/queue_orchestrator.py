@@ -3,7 +3,7 @@
 This module owns job identity, enqueue duplicate/priority policy, enqueue
 supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
-stale-running job selection/replacement/requeue state, stale-running
+target-state status detail formatting, stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 completed-job state mutation, and
 completed-queue retention. Higher-level queue mutation, locking, runner
@@ -283,6 +283,31 @@ def summarize_active_targets(active_targets: dict | None, preferred_order: list[
         parts.append(f"{name}={state.get('status', '?')}")
 
     return ", ".join(parts)
+
+
+def target_state_detail_parts(state: dict) -> list[str]:
+    details = []
+    field_labels = [
+        ("phase", "phase"),
+        ("validation_mode", "mode"),
+        ("transport_mode", "transport"),
+        ("test_policy", "tests"),
+        ("prepared_state", "prepared"),
+        ("wait_reason", "wait"),
+        ("cleanup_status", "cleanup"),
+        ("last_output_at", "output"),
+        ("last_heartbeat_at", "heartbeat"),
+    ]
+    for field, label in field_labels:
+        if state.get(field):
+            details.append(f"{label}={state[field]}")
+    if state.get("quiet_for_secs") is not None:
+        details.append(f"idle={state['quiet_for_secs']}s")
+    if state.get("liveness"):
+        details.append(f"liveness={state['liveness']}")
+    if state.get("log_path"):
+        details.append(f"log={Path(state['log_path']).name}")
+    return details
 
 
 def update_runner_info_active_targets(

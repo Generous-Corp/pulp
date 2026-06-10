@@ -2513,6 +2513,10 @@ def summarize_active_targets(active_targets: dict | None, preferred_order: list[
     return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
 
 
+def target_state_detail_parts(state: dict) -> list[str]:
+    return _queue_orchestrator.target_state_detail_parts(state)
+
+
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
     return _queue_orchestrator.upsert_job_active_targets_unlocked(
         queue,
@@ -4730,31 +4734,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 state = (active_targets or {}).get(name)
                 if not state:
                     continue
-                details = []
-                if state.get("phase"):
-                    details.append(f"phase={state['phase']}")
-                if state.get("validation_mode"):
-                    details.append(f"mode={state['validation_mode']}")
-                if state.get("transport_mode"):
-                    details.append(f"transport={state['transport_mode']}")
-                if state.get("test_policy"):
-                    details.append(f"tests={state['test_policy']}")
-                if state.get("prepared_state"):
-                    details.append(f"prepared={state['prepared_state']}")
-                if state.get("wait_reason"):
-                    details.append(f"wait={state['wait_reason']}")
-                if state.get("cleanup_status"):
-                    details.append(f"cleanup={state['cleanup_status']}")
-                if state.get("last_output_at"):
-                    details.append(f"output={state['last_output_at']}")
-                if state.get("last_heartbeat_at"):
-                    details.append(f"heartbeat={state['last_heartbeat_at']}")
-                if state.get("quiet_for_secs") is not None:
-                    details.append(f"idle={state['quiet_for_secs']}s")
-                if state.get("liveness"):
-                    details.append(f"liveness={state['liveness']}")
-                if state.get("log_path"):
-                    details.append(f"log={Path(state['log_path']).name}")
+                details = target_state_detail_parts(state)
                 if details:
                     print(f"    {name}: " + ", ".join(details))
                 if state.get("last_line"):
@@ -4787,31 +4767,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 state = (active_targets or {}).get(name)
                 if not state:
                     continue
-                details = []
-                if state.get("phase"):
-                    details.append(f"phase={state['phase']}")
-                if state.get("validation_mode"):
-                    details.append(f"mode={state['validation_mode']}")
-                if state.get("transport_mode"):
-                    details.append(f"transport={state['transport_mode']}")
-                if state.get("test_policy"):
-                    details.append(f"tests={state['test_policy']}")
-                if state.get("prepared_state"):
-                    details.append(f"prepared={state['prepared_state']}")
-                if state.get("wait_reason"):
-                    details.append(f"wait={state['wait_reason']}")
-                if state.get("cleanup_status"):
-                    details.append(f"cleanup={state['cleanup_status']}")
-                if state.get("last_output_at"):
-                    details.append(f"output={state['last_output_at']}")
-                if state.get("last_heartbeat_at"):
-                    details.append(f"heartbeat={state['last_heartbeat_at']}")
-                if state.get("quiet_for_secs") is not None:
-                    details.append(f"idle={state['quiet_for_secs']}s")
-                if state.get("liveness"):
-                    details.append(f"liveness={state['liveness']}")
-                if state.get("log_path"):
-                    details.append(f"log={Path(state['log_path']).name}")
+                details = target_state_detail_parts(state)
                 if details:
                     print(f"    {name}: " + ", ".join(details))
                 if state.get("last_line"):
