@@ -41,16 +41,27 @@ env:
   SHIPYARD_VERSION: "0.59.0"
 
 jobs:
-  # Resolve the macOS runner for the darwin-arm64 matrix legs. When
-  # PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is set (the same repo
-  # variable build.yml uses for PR macOS routing post-2026-05-18
-  # cutover), route release-cli's macOS leg through Namespace cloud
-  # runners instead of GitHub-hosted macos-15. Falls back to macos-15
-  # when unset so reverting the cutover doesn't break releases.
-  # Background: 2026-05-18 SDK starvation — the GitHub-hosted macos-15
-  # queue backed up for hours and blocked v0.111..v0.134 release-cli
-  # runs from completing (compound with the supersede bug fixed in
-  # pulp #2238 and the Skia gate fix in pulp #2281).
+  # Resolve the macOS runner for the darwin-arm64 matrix legs.
+  #
+  # Priority (first set wins):
+  #   1. PULP_RELEASE_MACOS_RUNS_ON_JSON — dedicated release-cli override
+  #      (the "wire each lane its own runs-on var" pattern from CLAUDE.md).
+  #   2. PULP_LOCAL_MACOS_RUNS_ON_JSON — the self-hosted Studio/M5 pool that
+  #      already backs the required `macos` PR gate (build.yml). release-cli
+  #      is low-volume (tags only) so it won't starve that gate, and the
+  #      `actions/checkout` default `clean: true` (git clean -ffdx) wipes the
+  #      untracked build dirs each run, so a release build on the persistent
+  #      self-hosted disk is clean-by-construction (no warm-dir ODR — release
+  #      also never touches the shared ccache).
+  #   3. PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON — Namespace cloud (off for cost).
+  #   4. GitHub-hosted macos-15 — last-resort fallback.
+  #
+  # Why this changed: the GitHub-hosted macos-15 pool repeatedly starves
+  # release-cli's darwin leg for hours (2026-05-18 blocked v0.111..v0.134;
+  # 2026-06-09 blocked v0.396.0+ for 3h+ while ~6 macos-15 lanes — coverage,
+  # sanitizers — exhausted the hosted concurrency cap and 4 self-hosted Macs
+  # sat idle). Routing the release leg to the idle self-hosted pool by default
+  # removes that single point of failure for publishing.
   resolve-macos-runner:
     runs-on: ubuntu-latest
     outputs:
@@ -58,9 +69,17 @@ jobs:
     steps:
       - id: resolve
         env:
+          RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
+          LOCAL_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
         run: |
-          if [ -n "${NAMESPACE_JSON:-}" ]; then
+          if [ -n "${RELEASE_JSON:-}" ]; then
+            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-cli via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
+          elif [ -n "${LOCAL_JSON:-}" ]; then
+            echo "runs_on_json=${LOCAL_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-cli via self-hosted PULP_LOCAL_MACOS_RUNS_ON_JSON: ${LOCAL_JSON}"
+          elif [ -n "${NAMESPACE_JSON:-}" ]; then
             echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
             echo "Routing macOS release-cli through Namespace: ${NAMESPACE_JSON}"
           else
@@ -96,7 +115,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          # lfs: false — release-cli fetches the Skia binaries explicitly via
+          # fetch_skia_for_release.py (see "Fetch Skia prebuilt binaries" below;
+          # the LFS pull does NOT populate them). Pulling LFS here is redundant
+          # AND fails the checkout on the self-hosted macOS runners (git-lfs not
+          # configured there — the working main `macos` gate in build.yml also
+          # uses lfs: false). This was an 8-second checkout failure on
+          # pulp-studio-01 that blocked v0.400.0's darwin-arm64 leg.
+          lfs: false
           # On `workflow_dispatch`, prefer `source_ref` if the user supplied
           # one; otherwise check out the `version` tag they typed. On
           # push-tag triggers, fall through to the default (the tag ref).
@@ -173,6 +199,9 @@ jobs:
         #     (left-to-right archive resolution; the chrome/m144 Skia
         #     archive references Fc* symbols that ld won't resolve from
         #     an earlier-positioned -lfontconfig). #1962 follow-up.
+        #   - tools/deps/manifest.json: release asset inventory must
+        #     include all require_gpu release Skia binaries, including
+        #     linux-arm64, when backfilling older tags.
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
@@ -180,6 +209,7 @@ jobs:
               tools/scripts/fetch_skia_for_release.py \
               core/canvas/CMakeLists.txt \
               tools/cli/CMakeLists.txt \
+              tools/deps/manifest.json \
               ; do
             url="https://raw.githubusercontent.com/${repo}/main/${path}"
             echo "Overlaying ${path} from ${url}"
@@ -244,12 +274,24 @@ jobs:
       # `tools/cli/`. The release tarball must include both.
       - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
+        # Linux: GNU strip works directly. macOS (Apple Silicon): binaries are
+        # ad-hoc code-signed at link time, and `strip` invalidates that
+        # signature — on the self-hosted Macs that surfaces as a hard `strip`
+        # failure (GitHub-hosted tolerated it). Strip is only a size
+        # optimization, so on macOS we strip best-effort and re-apply the
+        # ad-hoc signature; a functional binary must never block the release.
+        # #2067: pulp-mcp ships in the CLI tarball so the Claude Code plugin's
+        # MCP launcher can resolve it on $PATH after install.
         run: |
-          strip build/pulp
-          strip build/tools/cli/pulp-cpp
-          # #2067: pulp-mcp ships in the CLI tarball so the Claude Code
-          # plugin's MCP launcher can resolve it on $PATH after install.
-          strip build/tools/mcp/pulp-mcp
+          for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp; do
+            if [ "${RUNNER_OS}" = "macOS" ]; then
+              strip -x "$bin" 2>/dev/null || strip "$bin" 2>/dev/null || \
+                echo "note: strip skipped for $bin (non-fatal)"
+              codesign --force --sign - "$bin" 2>/dev/null || true
+            else
+              strip "$bin"
+            fi
+          done
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'

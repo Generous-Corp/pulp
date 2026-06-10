@@ -3,6 +3,16 @@
 Pulp includes or depends on the following third-party software.
 Entries are listed in alphabetical order (case-insensitive).
 
+This file covers code that Pulp **redistributes** (bundles, vendors, or fetches
+into a shipped artifact). Operating-system libraries, services, and frameworks
+that Pulp merely links dynamically, `dlopen`s at runtime, talks to over D-Bus
+IPC, or invokes as a subprocess — e.g. ALSA, JACK, D-Bus, BlueZ,
+xdg-desktop-portal, AT-SPI2, the WinRT/Windows SDK system APIs, and Apple's
+system frameworks — are **not** redistributed by Pulp and so are not listed
+here. They are recognized in `DEPENDENCIES.md` ("System / OS-Provided
+Dependencies") and on the public licensing page
+(`docs/reference/licensing.md` → generouscorp.com/pulp/licensing).
+
 ---
 
 ## AudioUnitSDK

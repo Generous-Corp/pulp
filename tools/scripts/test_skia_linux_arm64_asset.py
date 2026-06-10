@@ -7,24 +7,27 @@ release_assets`` after the GPU-gated CLI on Ubuntu aarch64 fell back to
 the no-Skia path silently — same failure mode as pulp #1817 on
 darwin-arm64, but for the linux ARM lane.
 
-The chrome/m150 release of the danielraffel/skia-builder fork does NOT
-publish a ``skia-build-linux-arm64-gpu-release.zip`` slice (m149 did).
-Linux arm64 therefore stays on the m149 asset or rebuilds from source
-via ``tools/build-skia.sh`` until the fork republishes that slice.
+The chrome/m150 release of the danielraffel/skia-builder fork initially
+shipped no ``skia-build-linux-arm64-gpu-release.zip`` slice: the fork's
+linux-arm64 build lane (skia-builder 634672f) was added ~20h after m150
+was cut, and that commit wired the build matrix but not the
+create-release upload list. Both are fixed now — the fork uploads
+linux-arm64 on every release, and the m150 release was backfilled with
+the slice — so the manifest carries a ``linux-arm64`` entry again.
 
-This test guards the two invariants that still hold on m150 so the
-absence is deliberate and observable rather than a silent regression:
+This test guards the invariants that keep the lane honest:
 
-1. ``fetch_skia_for_release.py`` still maps ``linux-arm64 →
-   linux-arm64`` and resolves to the canonical
-   ``linux-gpu/lib/Release/libskia.a`` location FindSkia.cmake probes —
-   so the day the fork republishes the slice, dropping the URL+sha back
-   into the manifest is the only change needed.
-2. If a ``linux-arm64`` release asset entry IS present in the manifest,
-   it must be well-formed (canonical fork URL + 64-hex sha256) and
-   mirrored in ``tools/harness/visual/pins.py``. On m150 the entry is
-   intentionally absent, and this test asserts that fetch wiring copes
-   with the absence.
+1. ``fetch_skia_for_release.py`` maps ``linux-arm64 → linux-arm64`` and
+   resolves to the canonical ``linux-gpu/lib/Release/libskia.a`` location
+   FindSkia.cmake probes (shared with linux-x64 after the post-unpack
+   flatten).
+2. If a ``linux-arm64`` release asset entry is present in the manifest
+   (the m150 steady state), it must be well-formed (canonical fork URL +
+   64-hex sha256) and mirrored in ``tools/harness/visual/pins.py``. The
+   test still tolerates a temporary absence so a future Skia bump that
+   lands before the slice is rebaked doesn't hard-fail; the harder
+   "GPU-ON requires an asset" invariant lives in
+   ``test_release_cli_gpu_asset_coverage.py``.
 
 Run with:
 

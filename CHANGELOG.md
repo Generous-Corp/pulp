@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04000"></a>
+## [0.400.0] - 2026-06-09
+
+- chore/cut v0.400.0 ([#3840](https://github.com/danielraffel/pulp/pull/3840))
+- test(audio): add offline audio metrics/assertions/summary helpers (harness PR 1A) ([#3834](https://github.com/danielraffel/pulp/pull/3834))
+- ci/release cli macos self hosted ([#3835](https://github.com/danielraffel/pulp/pull/3835))
+- refactor(local-ci): extract running reconciliation helper ([#3836](https://github.com/danielraffel/pulp/pull/3836))
+- ci(release): restore linux-arm64 Skia asset + guard the require-GPU/asset invariant ([#3814](https://github.com/danielraffel/pulp/pull/3814))
+- refactor(local-ci): extract drain lifecycle helper ([#3825](https://github.com/danielraffel/pulp/pull/3825))
+- docs(licensing): recognize system/OS-provided dependencies (BlueZ, D-Bus, ALSA, JACK, WinRT, …) ([#3828](https://github.com/danielraffel/pulp/pull/3828))
+
 <a id="v03990"></a>
 ## [0.399.0] - 2026-06-09
 
@@ -4120,6 +4131,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.400.0]: https://github.com/danielraffel/pulp/releases/tag/v0.400.0
 [0.399.0]: https://github.com/danielraffel/pulp/releases/tag/v0.399.0
 [0.398.0]: https://github.com/danielraffel/pulp/releases/tag/v0.398.0
 [0.397.0]: https://github.com/danielraffel/pulp/releases/tag/v0.397.0

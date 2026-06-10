@@ -733,7 +733,7 @@ pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+ver
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
 | `notarize` | Submit signed bundles (or `--path` artifacts) to Apple notarytool (macOS) |
-| `package`  | Create `.pkg`/`.dmg` installers in `artifacts/` |
+| `package`  | Create macOS `.pkg`/`.dmg` installers or Linux `.deb`/`.tar.gz` packages in `artifacts/` |
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `check`    | Check signing status of all built plugins |
@@ -742,7 +742,7 @@ pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+ver
 `--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;
 `.pkg` installers are signed at creation time with a Developer ID **Installer** identity, not here.
 
-`package` creates per-format `.pkg` files using `pkgbuild` (or `.dmg` with `--dmg`). macOS only.
+`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary.
 
 #### `pulp ship share` — one-off "sign it for a friend"
 

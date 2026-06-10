@@ -6,6 +6,7 @@
 
 #include <pulp/view/command_registry.hpp>
 #include <pulp/state/properties_file.hpp>
+#include <pulp/view/view.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -174,6 +175,12 @@ bool CommandRegistry::dispatch_key_event(const KeyEvent& event) {
     CommandID id = shortcuts_.find(event.key, event.modifiers);
     if (id == kInvalidCommandID) return false;
     return dispatch(id);
+}
+
+void route_global_keys(View& root, CommandRegistry& registry) {
+    root.on_global_key = [&registry](const KeyEvent& event) -> bool {
+        return registry.dispatch_key_event(event);
+    };
 }
 
 } // namespace pulp::view

@@ -83,3 +83,25 @@ These SDKs are not part of Pulp's redistributed dependency chain. Pulp may integ
 | AAX SDK | Separately licensed by Avid | Optional AAX format integration | Developer obtains independently, keeps it out-of-tree, and points `PULP_AAX_SDK_DIR` at it |
 | ARA SDK | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains independently (https://github.com/Celemony/ARA_SDK), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
 | ASIO SDK | Proprietary (Steinberg) | Optional ASIO device I/O integration | Developer obtains independently; never bundled or exported by Pulp |
+
+## System / OS-Provided Dependencies (not bundled)
+
+These operating-system libraries, services, and frameworks are **not** part of
+Pulp's redistributed dependency chain — Pulp does not bundle, vendor, fetch, or
+export them. They are provided by the user's OS (or installed by the user), and
+Pulp reaches them by dynamic linking, runtime `dlopen`, D-Bus IPC to a system
+service, or subprocess invocation. They are intentionally absent from
+`NOTICE.md` (which lists redistributed code) and are recognized here and on the
+public licensing page (`docs/reference/licensing.md`).
+
+| Name | License | How Used | Pulp Boundary | Platform |
+|------|---------|----------|---------------|----------|
+| ALSA (alsa-lib / libasound) | LGPL-2.1-or-later | Native audio + MIDI I/O | Dynamically linked (`find_package(ALSA)`); not redistributed | Linux |
+| JACK (libjack; PipeWire JACK layer) | LGPL-2.1-or-later | Optional low-latency audio | Linked only when found at build time (`PULP_HAS_JACK`); not redistributed | Linux |
+| D-Bus (libdbus-1) | AFL-2.1 OR GPL-2.0-or-later | Desktop IPC transport (portals, AT-SPI, BlueZ) | Runtime `dlopen("libdbus-1.so.3")`; no build-time link, not redistributed | Linux |
+| BlueZ (org.bluez) | GPL-2.0-or-later (daemon) / LGPL-2.1-or-later (libs) | Bluetooth-LE MIDI scan/connect/GATT | D-Bus IPC to the system `org.bluez` service; not linked or redistributed | Linux |
+| xdg-desktop-portal | LGPL-2.1-or-later | Native file open/save dialogs | D-Bus IPC; not linked or redistributed | Linux |
+| AT-SPI2 (at-spi2-core) | LGPL-2.1-or-later | Accessibility tree export | D-Bus IPC over the a11y bus; not linked or redistributed | Linux |
+| xclip / xsel / wl-clipboard | GPL-2.0-or-later / GPL-3.0-or-later | Arbitrary-MIME clipboard | Invoked as a subprocess; not linked or redistributed | Linux |
+| Windows SDK / WinRT (Windows.Devices.Bluetooth, WASAPI, UI Automation, Win32) | Microsoft — OS/SDK provided | BLE MIDI, audio, accessibility, dialogs, windowing | System APIs in the base Windows SDK (links `WindowsApp`/`runtimeobject`); no out-of-band package | Windows |
+| Apple system frameworks (CoreAudio, CoreMIDI, CoreBluetooth, Cocoa/UIKit) | Apple — OS provided | Audio/MIDI/Bluetooth/windowing | Linked system frameworks; OS-provided, not redistributed | macOS / iOS |

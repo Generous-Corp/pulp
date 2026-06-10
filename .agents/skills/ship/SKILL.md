@@ -660,6 +660,32 @@ now include it. When bumping Skia, run `nm -D` on the new `libskia.a`
 and grep for `Fc[A-Z]\|Hb[a-z]\|FT_` — any new symbol class means
 a matching system package needs to be added to the apt step.
 
+**A new fork build lane must be wired into BOTH the matrix AND the
+release upload — and Pulp must require GPU only where an asset exists.**
+The chrome/m150 incident (v0.395.0 stuck as a draft for days): the
+skia-builder fork's linux-arm64 build lane was added (634672f) ~20h
+after m150 was already cut, and that commit wired the build *matrix*
+but not the `create-release` `files:` list — so the slice was built
+every run, uploaded as a workflow artifact, and silently dropped from
+the published release. Meanwhile `release-cli.yml` set
+`PULP_REQUIRE_GPU_FOR_SDK=ON` for linux-arm64 while
+`tools/deps/manifest.json` had no linux-arm64 asset, so the release leg
+FATALed with "Skia not found" and never promoted the draft. Two guards
+now catch this class:
+- skia-builder `tools/check_release_coverage.py` (+ `lint.yml`): every
+  active build-matrix lane must appear in the `create-release` upload
+  list. Catches "built but not released."
+- Pulp `tools/scripts/test_release_cli_gpu_asset_coverage.py` (wired
+  into `workflow-lint.yml`): every release-cli platform marked
+  `PULP_REQUIRE_GPU_FOR_SDK=ON` must have a `release_assets` entry in
+  manifest.json (via `fetch_skia_for_release.py`'s MATRIX_TO_MANIFEST).
+  Catches "required but not provided" — the contradiction that
+  `test_skia_linux_arm64_asset.py` deliberately tolerated.
+When a fork release drops or adds a slice, update the manifest
+`release_assets` + `tools/harness/visual/pins.py` in lockstep, and only
+keep a platform in the `REQUIRE_GPU=ON` case blocks while its asset is
+actually published.
+
 ### Backfilling a stuck release tag
 
 `auto-release.yml` creates the tag immediately on merge, but

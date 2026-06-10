@@ -2578,6 +2578,38 @@ def trim_completed_jobs(queue: list[dict]) -> list[dict]:
     )
 
 
+def bump_queue_command_job(job_ref: str, requested_priority: str) -> dict:
+    return _queue_lifecycle.bump_queue_command_job_locked(
+        job_ref,
+        requested_priority,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
+        set_pending_job_priority_unlocked_fn=lambda job, priority: _queue_orchestrator.set_pending_job_priority_unlocked(
+            job,
+            priority,
+            now_iso_fn=now_iso,
+        ),
+        save_queue_unlocked_fn=save_queue_unlocked,
+        summarize_job_fn=summarize_job,
+    )
+
+
+def cancel_queue_command_job(job_ref: str) -> dict:
+    return _queue_lifecycle.cancel_queue_command_job_locked(
+        job_ref,
+        queue_lock_path_fn=queue_lock_path,
+        file_lock_fn=file_lock,
+        load_queue_unlocked_fn=load_queue_unlocked,
+        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
+        cancel_job_unlocked_fn=cancel_job_unlocked,
+        trim_completed_jobs_fn=trim_completed_jobs,
+        save_queue_unlocked_fn=save_queue_unlocked,
+        summarize_job_fn=summarize_job,
+    )
+
+
 def result_file_job_id(path: Path) -> str | None:
     return _cleanup.result_file_job_id(path)
 
@@ -2617,22 +2649,16 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
-    changed = False
-    actions = _queue_orchestrator.stale_running_reconciliation_actions_unlocked(
+    return _queue_lifecycle.reconcile_running_jobs_unlocked(
         queue,
-        stale_running_jobs_unlocked(queue),
+        stale_running_jobs_unlocked_fn=stale_running_jobs_unlocked,
+        stale_running_reconciliation_actions_unlocked_fn=_queue_orchestrator.stale_running_reconciliation_actions_unlocked,
+        supersede_job_unlocked_fn=supersede_job_unlocked,
+        requeue_stale_running_job_unlocked_fn=lambda job: _queue_orchestrator.requeue_stale_running_job_unlocked(
+            job,
+            now_iso_fn=now_iso,
+        ),
     )
-    for action in actions:
-        job = action["job"]
-        if action["action"] == "supersede":
-            supersede_job_unlocked(job, action["replacement"]["id"], action["reason"])
-            changed = True
-            continue
-
-        _queue_orchestrator.requeue_stale_running_job_unlocked(job, now_iso_fn=now_iso)
-        changed = True
-
-    return queue, changed
 
 
 def read_runner_info() -> dict | None:
@@ -2648,18 +2674,9 @@ def current_runner_info() -> dict | None:
 
 
 def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
-    runner = read_runner_info()
-    runner_pid = runner.get("pid") if runner else None
-    runner_alive = pid_alive(runner_pid)
-
-    if runner and not runner_alive:
-        clear_runner_info()
-        runner = None
-        runner_pid = None
-
-    return _queue_orchestrator.stale_running_jobs_for_runner_unlocked(
+    return _runner_state.stale_running_jobs_for_current_runner(
         queue,
-        runner_pid if runner else None,
+        stale_running_jobs_for_runner_unlocked_fn=_queue_orchestrator.stale_running_jobs_for_runner_unlocked,
     )
 
 
@@ -2722,17 +2739,19 @@ def write_runner_info(info: dict) -> None:
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
-    info = current_runner_info()
-    if not info:
-        return
+    def update_info(info: dict, current_job_id: str, current_active_targets: dict | None) -> bool:
+        return _queue_orchestrator.update_runner_info_active_targets(
+            info,
+            current_job_id,
+            current_active_targets,
+            now_iso_fn=now_iso,
+        )
 
-    if _queue_orchestrator.update_runner_info_active_targets(
-        info,
+    _runner_state.update_current_runner_active_targets(
         job_id,
         active_targets,
-        now_iso_fn=now_iso,
-    ):
-        write_runner_info(info)
+        update_runner_info_active_targets_fn=update_info,
+    )
 
 
 def clear_runner_info() -> None:
@@ -4223,72 +4242,24 @@ def print_result(result: dict, result_path: Path | None = None) -> None:
 
 
 def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
-    acquired = False
-    try:
-        with file_lock(drain_lock_path(), blocking=blocking):
-            acquired = True
-            runner_info = {
-                "pid": os.getpid(),
-                "root": str(ROOT),
-                "started_at": now_iso(),
-                "active_job_id": None,
-                "active_branch": None,
-            }
-            write_runner_info(runner_info)
-            any_failure = False
-
-            while True:
-                reclaim_stale_remote_validators(config)
-                job = claim_next_job()
-                if job is None:
-                    break
-
-                runner_info.update(
-                    {
-                        "active_job_id": job["id"],
-                        "active_branch": job["branch"],
-                        "updated_at": now_iso(),
-                    }
-                )
-                write_runner_info(runner_info)
-
-                try:
-                    result = process_job(job, config)
-                except Exception as exc:
-                    result = {
-                        "job_id": job["id"],
-                        "branch": job["branch"],
-                        "sha": job["sha"],
-                        "priority": job["priority"],
-                        "validation": job.get("validation", "full"),
-                        "targets": job.get("targets", []),
-                        "queued_at": job.get("queued_at", ""),
-                        "completed_at": now_iso(),
-                        "results": [
-                            {
-                                "target": "scheduler",
-                                "status": "error",
-                                "exit_code": -1,
-                                "duration_secs": 0,
-                                "stdout_tail": "",
-                                "stderr_tail": str(exc),
-                            }
-                        ],
-                        "overall": "fail",
-                    }
-
-                result_path = save_result(result)
-                finalize_job(job["id"], result, result_path)
-                print_result(result, result_path)
-                if result["overall"] != "pass":
-                    any_failure = True
-
-            return True, any_failure
-    except LockBusyError:
-        return False, False
-    finally:
-        if acquired:
-            clear_runner_info()
+    return _queue_lifecycle.drain_pending_jobs_locked(
+        config,
+        blocking=blocking,
+        root=ROOT,
+        drain_lock_path_fn=drain_lock_path,
+        file_lock_fn=file_lock,
+        lock_busy_error_cls=LockBusyError,
+        write_runner_info_fn=write_runner_info,
+        clear_runner_info_fn=clear_runner_info,
+        reclaim_stale_remote_validators_fn=reclaim_stale_remote_validators,
+        claim_next_job_fn=claim_next_job,
+        process_job_fn=process_job,
+        save_result_fn=save_result,
+        finalize_job_fn=finalize_job,
+        print_result_fn=print_result,
+        now_fn=now_iso,
+        pid_fn=os.getpid,
+    )
 
 
 # ── GitHub Helpers ───────────────────────────────────────────────────────────
@@ -4585,45 +4556,38 @@ def cmd_bump(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        with file_lock(queue_lock_path(), blocking=True):
-            queue = load_queue_unlocked()
-            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
-            if job is None:
-                print(f"No active job matches '{args.job}'.")
-                return 1
-            if not _queue_orchestrator.set_pending_job_priority_unlocked(
-                job,
-                requested_priority,
-                now_iso_fn=now_iso,
-            ):
-                print(f"Job is already {job['status']}; only pending jobs can be reprioritized.")
-                return 1
-            save_queue_unlocked(queue)
-            print(f"Updated priority: {summarize_job(job)}")
-            return 0
+        result = bump_queue_command_job(args.job, requested_priority)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1
+
+    if result["status"] == "missing":
+        print(f"No active job matches '{args.job}'.")
+        return 1
+    if result["status"] == "not_pending":
+        print(f"Job is already {result['job_status']}; only pending jobs can be reprioritized.")
+        return 1
+
+    print(f"Updated priority: {result['summary']}")
+    return 0
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
     try:
-        with file_lock(queue_lock_path(), blocking=True):
-            queue = load_queue_unlocked()
-            job = _queue_orchestrator.find_queue_command_job_unlocked(queue, args.job)
-            if job is None:
-                print(f"No active job matches '{args.job}'.")
-                return 1
-            if job["status"] != "pending":
-                print(f"Job is already {job['status']}; only pending jobs can be canceled safely.")
-                return 1
-            cancel_job_unlocked(job)
-            save_queue_unlocked(trim_completed_jobs(queue))
-            print(f"Canceled: {summarize_job(job)}")
-            return 0
+        result = cancel_queue_command_job(args.job)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1
+
+    if result["status"] == "missing":
+        print(f"No active job matches '{args.job}'.")
+        return 1
+    if result["status"] == "not_pending":
+        print(f"Job is already {result['job_status']}; only pending jobs can be canceled safely.")
+        return 1
+
+    print(f"Canceled: {result['summary']}")
+    return 0
 
 
 def cmd_list(_args: argparse.Namespace) -> int:

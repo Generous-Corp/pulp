@@ -7,6 +7,32 @@ import os
 from pathlib import Path
 
 
+def reconcile_running_jobs_unlocked(
+    queue: list[dict],
+    *,
+    stale_running_jobs_unlocked_fn: Callable[[list[dict]], list[dict]],
+    stale_running_reconciliation_actions_unlocked_fn: Callable[[list[dict], list[dict]], list[dict]],
+    supersede_job_unlocked_fn: Callable[[dict, str, str], None],
+    requeue_stale_running_job_unlocked_fn: Callable[[dict], None],
+) -> tuple[list[dict], bool]:
+    changed = False
+    actions = stale_running_reconciliation_actions_unlocked_fn(
+        queue,
+        stale_running_jobs_unlocked_fn(queue),
+    )
+    for action in actions:
+        job = action["job"]
+        if action["action"] == "supersede":
+            supersede_job_unlocked_fn(job, action["replacement"]["id"], action["reason"])
+            changed = True
+            continue
+
+        requeue_stale_running_job_unlocked_fn(job)
+        changed = True
+
+    return queue, changed
+
+
 def enqueue_job_locked(
     branch: str,
     sha: str,
@@ -89,6 +115,57 @@ def update_job_target_state_locked(
             save_queue_unlocked_fn(queue)
 
 
+def bump_queue_command_job_locked(
+    job_ref: str,
+    requested_priority: str,
+    *,
+    queue_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    load_queue_unlocked_fn: Callable[[], list[dict]],
+    find_queue_command_job_unlocked_fn: Callable[[list[dict], str], dict | None],
+    set_pending_job_priority_unlocked_fn: Callable[[dict, str], bool],
+    save_queue_unlocked_fn: Callable[[list[dict]], None],
+    summarize_job_fn: Callable[[dict], str],
+) -> dict:
+    with file_lock_fn(queue_lock_path_fn(), blocking=True):
+        queue = load_queue_unlocked_fn()
+        job = find_queue_command_job_unlocked_fn(queue, job_ref)
+        if job is None:
+            return {"status": "missing", "job_ref": job_ref}
+
+        if not set_pending_job_priority_unlocked_fn(job, requested_priority):
+            return {"status": "not_pending", "job_status": job["status"]}
+
+        save_queue_unlocked_fn(queue)
+        return {"status": "updated", "summary": summarize_job_fn(job)}
+
+
+def cancel_queue_command_job_locked(
+    job_ref: str,
+    *,
+    queue_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    load_queue_unlocked_fn: Callable[[], list[dict]],
+    find_queue_command_job_unlocked_fn: Callable[[list[dict], str], dict | None],
+    cancel_job_unlocked_fn: Callable[[dict], None],
+    trim_completed_jobs_fn: Callable[[list[dict]], list[dict]],
+    save_queue_unlocked_fn: Callable[[list[dict]], None],
+    summarize_job_fn: Callable[[dict], str],
+) -> dict:
+    with file_lock_fn(queue_lock_path_fn(), blocking=True):
+        queue = load_queue_unlocked_fn()
+        job = find_queue_command_job_unlocked_fn(queue, job_ref)
+        if job is None:
+            return {"status": "missing", "job_ref": job_ref}
+
+        if job["status"] != "pending":
+            return {"status": "not_pending", "job_status": job["status"]}
+
+        cancel_job_unlocked_fn(job)
+        save_queue_unlocked_fn(trim_completed_jobs_fn(queue))
+        return {"status": "canceled", "summary": summarize_job_fn(job)}
+
+
 def reclaim_stale_remote_validators_locked(
     *,
     queue_lock_path_fn: Callable[[], Path],
@@ -115,6 +192,97 @@ def reclaim_stale_remote_validators_locked(
         now_fn=now_fn,
         trim_line_fn=trim_line_fn,
     )
+
+
+def _scheduler_error_result(job: dict, exc: Exception, *, now_fn: Callable[[], str]) -> dict:
+    return {
+        "job_id": job["id"],
+        "branch": job["branch"],
+        "sha": job["sha"],
+        "priority": job["priority"],
+        "validation": job.get("validation", "full"),
+        "targets": job.get("targets", []),
+        "queued_at": job.get("queued_at", ""),
+        "completed_at": now_fn(),
+        "results": [
+            {
+                "target": "scheduler",
+                "status": "error",
+                "exit_code": -1,
+                "duration_secs": 0,
+                "stdout_tail": "",
+                "stderr_tail": str(exc),
+            }
+        ],
+        "overall": "fail",
+    }
+
+
+def drain_pending_jobs_locked(
+    config: dict,
+    *,
+    blocking: bool,
+    root: Path | str,
+    drain_lock_path_fn: Callable[[], Path],
+    file_lock_fn,
+    lock_busy_error_cls: type[Exception],
+    write_runner_info_fn: Callable[[dict], None],
+    clear_runner_info_fn: Callable[[], None],
+    reclaim_stale_remote_validators_fn: Callable[[dict], int],
+    claim_next_job_fn: Callable[[], dict | None],
+    process_job_fn: Callable[[dict, dict], dict],
+    save_result_fn: Callable[[dict], Path],
+    finalize_job_fn: Callable[[str, dict, Path], None],
+    print_result_fn: Callable[[dict, Path | None], None],
+    now_fn: Callable[[], str],
+    pid_fn: Callable[[], int] = os.getpid,
+) -> tuple[bool, bool]:
+    acquired = False
+    try:
+        with file_lock_fn(drain_lock_path_fn(), blocking=blocking):
+            acquired = True
+            runner_info = {
+                "pid": pid_fn(),
+                "root": str(root),
+                "started_at": now_fn(),
+                "active_job_id": None,
+                "active_branch": None,
+            }
+            write_runner_info_fn(runner_info)
+            any_failure = False
+
+            while True:
+                reclaim_stale_remote_validators_fn(config)
+                job = claim_next_job_fn()
+                if job is None:
+                    break
+
+                runner_info.update(
+                    {
+                        "active_job_id": job["id"],
+                        "active_branch": job["branch"],
+                        "updated_at": now_fn(),
+                    }
+                )
+                write_runner_info_fn(runner_info)
+
+                try:
+                    result = process_job_fn(job, config)
+                except Exception as exc:
+                    result = _scheduler_error_result(job, exc, now_fn=now_fn)
+
+                result_path = save_result_fn(result)
+                finalize_job_fn(job["id"], result, result_path)
+                print_result_fn(result, result_path)
+                if result["overall"] != "pass":
+                    any_failure = True
+
+            return True, any_failure
+    except lock_busy_error_cls:
+        return False, False
+    finally:
+        if acquired:
+            clear_runner_info_fn()
 
 
 def load_job_locked(

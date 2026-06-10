@@ -32,13 +32,16 @@
 
 #include <array>
 #include <cmath>
-#include <numbers>
 #include <vector>
+
+// Shared sine generator (test/support/) — harness PR 1B conversion.
+#include "support/audio_test_signals.hpp"
 
 #include "pulp_gain.hpp"
 #include "pulp_tone.hpp"
 
 using Catch::Matchers::WithinAbs;
+using pulp::test::audio::make_sine_vec;
 
 namespace {
 
@@ -49,16 +52,6 @@ constexpr std::array<double, 5> kSampleRates{
 // largest block sizes hosts hand us. Anything bigger than this is
 // platform-specific and out of scope for a cross-host matrix.
 constexpr std::array<int, 6> kBlockSizes{1, 16, 64, 256, 1024, 4096};
-
-std::vector<float> make_sine_vec(int samples, float freq, double sr) {
-    std::vector<float> v(static_cast<std::size_t>(samples));
-    for (int i = 0; i < samples; ++i) {
-        v[static_cast<std::size_t>(i)] = std::sin(
-            2.0f * std::numbers::pi_v<float> * freq
-            * static_cast<float>(i) / static_cast<float>(sr));
-    }
-    return v;
-}
 
 // Process `total_samples` through an effect-shaped host (2-in / 2-out),
 // driven in `block` chunks. Returns the interleaved L channel output.
