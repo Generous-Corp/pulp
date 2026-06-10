@@ -115,6 +115,41 @@ class DesktopCliTests(unittest.TestCase):
             ],
         )
 
+    def test_desktop_config_show_lines_preserve_summary_output(self) -> None:
+        desktop_config = {
+            "artifact_root": "/tmp/desktop-artifacts",
+            "publish_mode": "branch",
+            "publish_branch": "gh-pages",
+            "retention_days": 14,
+        }
+
+        self.assertEqual(
+            self.mod.desktop_config_show_lines(desktop_config),
+            [
+                "Desktop automation config:",
+                "  artifact_root: /tmp/desktop-artifacts",
+                "  publish_mode: branch",
+                "  publish_branch: gh-pages",
+                "  retention_days: 14",
+                "  target optional keys: target.<name>.(webview_driver|webdriver_url|debug_attach|debugger_command|video_capture|frame_stats)",
+            ],
+        )
+
+    def test_desktop_config_update_lines_preserve_config_path_output(self) -> None:
+        payload = {
+            "key": "retention_days",
+            "value": 7,
+            "config_path": "/tmp/local-ci/config.json",
+        }
+
+        self.assertEqual(
+            self.mod.desktop_config_update_lines(payload),
+            [
+                "Desktop automation config updated: retention_days = 7",
+                "  config: /tmp/local-ci/config.json",
+            ],
+        )
+
     def test_desktop_recent_lines_preserve_run_summary_output(self) -> None:
         run_summaries = [
             {
@@ -198,6 +233,34 @@ class DesktopCliTests(unittest.TestCase):
                 short_sha_fn=lambda value: value[:7],
             ),
             "No desktop proofs found.",
+        )
+
+    def test_desktop_publish_lines_preserve_report_output(self) -> None:
+        report = {
+            "run_count": 2,
+            "output_dir": "/tmp/publish",
+            "index_html": "/tmp/publish/index.html",
+            "index_json": "/tmp/publish/index.json",
+        }
+
+        self.assertEqual(
+            self.mod.desktop_publish_lines(report),
+            [
+                "Desktop publish report ready:",
+                "  runs: 2",
+                "  output_dir: /tmp/publish",
+                "  index_html: /tmp/publish/index.html",
+                "  index_json: /tmp/publish/index.json",
+            ],
+        )
+
+    def test_desktop_cleanup_lines_preserve_empty_and_truncated_output(self) -> None:
+        paths = [pathlib.Path(f"/tmp/bundle-{index}") for index in range(12)]
+
+        self.assertEqual(self.mod.desktop_cleanup_empty_line(), "Desktop cleanup: nothing to remove.")
+        self.assertEqual(
+            self.mod.desktop_cleanup_lines(paths),
+            ["Desktop cleanup removed 12 bundle(s)."] + [f"  /tmp/bundle-{index}" for index in range(10)],
         )
 
     def test_desktop_proof_lines_preserve_proof_summary_output(self) -> None:

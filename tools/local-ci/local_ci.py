@@ -4087,12 +4087,8 @@ def cmd_desktop_config_show(args: argparse.Namespace) -> int:
         print(json.dumps(desktop_cfg, indent=2))
         return 0
 
-    print("Desktop automation config:")
-    print(f"  artifact_root: {desktop_cfg['artifact_root']}")
-    print(f"  publish_mode: {desktop_cfg['publish_mode']}")
-    print(f"  publish_branch: {desktop_cfg['publish_branch']}")
-    print(f"  retention_days: {desktop_cfg['retention_days']}")
-    print("  target optional keys: target.<name>.(webview_driver|webdriver_url|debug_attach|debugger_command|video_capture|frame_stats)")
+    for line in _desktop_cli.desktop_config_show_lines(desktop_cfg):
+        print(line)
     return 0
 
 
@@ -4167,8 +4163,8 @@ def cmd_desktop_config_set(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"Desktop automation config updated: {key} = {payload['value']}")
-    print(f"  config: {payload['config_path']}")
+    for line in _desktop_cli.desktop_config_update_lines(payload):
+        print(line)
     return 0
 
 
@@ -4273,11 +4269,8 @@ def cmd_desktop_publish(args: argparse.Namespace) -> int:
         print(json.dumps(report, indent=2))
         return 0
 
-    print("Desktop publish report ready:")
-    print(f"  runs: {report['run_count']}")
-    print(f"  output_dir: {report['output_dir']}")
-    print(f"  index_html: {report['index_html']}")
-    print(f"  index_json: {report['index_json']}")
+    for line in _desktop_cli.desktop_publish_lines(report):
+        print(line)
     return 0
 
 
@@ -4296,7 +4289,7 @@ def cmd_desktop_cleanup(args: argparse.Namespace) -> int:
         keep_last=args.keep_last,
     )
     if not paths:
-        print("Desktop cleanup: nothing to remove.")
+        print(_desktop_cli.desktop_cleanup_empty_line())
         return 0
 
     for path in paths:
@@ -4310,9 +4303,8 @@ def cmd_desktop_cleanup(args: argparse.Namespace) -> int:
         print(json.dumps({"removed": [str(path) for path in paths]}, indent=2))
         return 0
 
-    print(f"Desktop cleanup removed {len(paths)} bundle(s).")
-    for path in paths[:10]:
-        print(f"  {path}")
+    for line in _desktop_cli.desktop_cleanup_lines(paths):
+        print(line)
     return 0
 
 
