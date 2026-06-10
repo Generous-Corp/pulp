@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04060"></a>
+## [0.406.0] - 2026-06-10
+
+- chore/cut v0.406.0 ([#3902](https://github.com/danielraffel/pulp/pull/3902))
+- feature/refactor local ci cleanup lines ([#3898](https://github.com/danielraffel/pulp/pull/3898))
+- feature/signalgraph rt noalloc ([#3889](https://github.com/danielraffel/pulp/pull/3889))
+- feature/refactor local ci footprint lines ([#3896](https://github.com/danielraffel/pulp/pull/3896))
+
 <a id="v04050"></a>
 ## [0.405.0] - 2026-06-10
 
@@ -4182,6 +4190,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.406.0]: https://github.com/danielraffel/pulp/releases/tag/v0.406.0
 [0.405.0]: https://github.com/danielraffel/pulp/releases/tag/v0.405.0
 [0.404.0]: https://github.com/danielraffel/pulp/releases/tag/v0.404.0
 [0.403.0]: https://github.com/danielraffel/pulp/releases/tag/v0.403.0
