@@ -816,3 +816,9 @@ jobs:
             artifacts/**/*
           draft: false
           prerelease: false
+          # Explicitly claim GitHub's "latest release" pointer. Without this,
+          # releases published after v0.395.0 (v0.397..v0.406) stayed off
+          # `releases/latest` — so `pulp upgrade`, the install script, and the
+          # repo's "Latest" badge all kept pointing at v0.395.0 while newer
+          # CLIs shipped. `make_latest: true` is the durable fix (2026-06-10).
+          make_latest: true
