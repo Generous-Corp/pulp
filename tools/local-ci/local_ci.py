@@ -3108,10 +3108,7 @@ def print_submission_metadata(metadata: dict) -> None:
 
 
 def remote_commit_error(target_name: str, host: str, job: dict) -> str:
-    return (
-        f"{target_name} cannot validate {short_sha(job['sha'])} on {host}: "
-        f"commit is not available on origin. Push the branch first or use --targets mac."
-    )
+    return _execution.remote_commit_error(target_name, host, job)
 
 
 def parse_progress_marker(line: str) -> dict:
@@ -3119,11 +3116,11 @@ def parse_progress_marker(line: str) -> dict:
 
 
 def prepared_state_root(target_name: str, validation: str) -> Path:
-    return state_dir() / "prepared" / target_name / normalize_validation_mode(validation)
+    return _execution.prepared_state_root(target_name, validation)
 
 
 def should_reuse_prepared_state(job: dict) -> bool:
-    return len(job.get("targets", [])) == 1
+    return _execution.should_reuse_prepared_state(job)
 
 
 def run_logged_command(

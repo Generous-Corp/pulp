@@ -46,6 +46,22 @@ class ExecutionTests(unittest.TestCase):
         )
         self.assertEqual(self.mod.parse_progress_marker("normal output\n"), {})
 
+    def test_validation_helper_policy_matches_contract(self) -> None:
+        job = {"sha": "abcdef1234567890", "targets": ["mac"]}
+        self.assertEqual(
+            self.mod.remote_commit_error("ubuntu", "ubuntu.local", job),
+            (
+                "ubuntu cannot validate abcdef123456 on ubuntu.local: "
+                "commit is not available on origin. Push the branch first or use --targets mac."
+            ),
+        )
+        self.assertEqual(
+            self.mod.prepared_state_root("mac", " SMOKE "),
+            self.mod.state_dir() / "prepared" / "mac" / "smoke",
+        )
+        self.assertTrue(self.mod.should_reuse_prepared_state({"targets": ["mac"]}))
+        self.assertFalse(self.mod.should_reuse_prepared_state({"targets": ["mac", "ubuntu"]}))
+
     def test_run_logged_command_starts_reader_before_writing_input(self) -> None:
         read_started = threading.Event()
         read_finished = threading.Event()

@@ -13,12 +13,21 @@ import threading
 import time
 from pathlib import Path
 
-from git_helpers import now_iso
+from git_helpers import now_iso, short_sha
 from io_utils import trim_line
+from normalize import normalize_validation_mode
+from state_paths import state_dir
 
 
 HEARTBEAT_INTERVAL_SECS = 15.0
 STUCK_IDLE_SECS = 90.0
+
+
+def remote_commit_error(target_name: str, host: str, job: dict) -> str:
+    return (
+        f"{target_name} cannot validate {short_sha(job['sha'])} on {host}: "
+        f"commit is not available on origin. Push the branch first or use --targets mac."
+    )
 
 
 def parse_progress_marker(line: str) -> dict:
@@ -42,6 +51,14 @@ def parse_progress_marker(line: str) -> dict:
     if stripped.startswith("__PULP_VALIDATOR_STARTED__:"):
         return {"validator_started_at": stripped.split(":", 1)[1]}
     return {}
+
+
+def prepared_state_root(target_name: str, validation: str) -> Path:
+    return state_dir() / "prepared" / target_name / normalize_validation_mode(validation)
+
+
+def should_reuse_prepared_state(job: dict) -> bool:
+    return len(job.get("targets", [])) == 1
 
 
 def run_logged_command(
