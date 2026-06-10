@@ -5,7 +5,8 @@ supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
 recent-completed selection,
-queue and result status line fragments, recent-completed result summaries,
+queue and result status line fragments, runner status line fragments,
+recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 completed-job state mutation, queue status grouping, and completed-queue
@@ -364,6 +365,14 @@ def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[s
     return lines
 
 
+def status_runner_line(runner_info: dict | None) -> str:
+    if not runner_info:
+        return "Runner: idle"
+    active_job = runner_info.get("active_job_id") or "?"
+    active_branch = runner_info.get("active_branch") or "?"
+    return f"Runner: pid={runner_info.get('pid', '?')} active=[{active_job}] {active_branch}"
+
+
 def recent_completed_status_line(job: dict, result: dict) -> str:
     targets = ", ".join(f"{item['target']}={item['status']}" for item in result.get("results", []))
     return (
@@ -371,6 +380,10 @@ def recent_completed_status_line(job: dict, result: dict) -> str:
         f"{result.get('overall', '?').upper()} [{targets}] "
         f"via {provenance_summary(result.get('provenance'))}"
     )
+
+
+def recent_completed_missing_result_line(job: dict) -> str:
+    return f"{summarize_job(job)} (result file missing)"
 
 
 def result_validation_line(result: dict) -> str | None:

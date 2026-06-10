@@ -2533,8 +2533,16 @@ def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[s
     return _queue_orchestrator.status_target_detail_lines(job, active_targets)
 
 
+def status_runner_line(runner_info: dict | None) -> str:
+    return _queue_orchestrator.status_runner_line(runner_info)
+
+
 def recent_completed_status_line(job: dict, result: dict) -> str:
     return _queue_orchestrator.recent_completed_status_line(job, result)
+
+
+def recent_completed_missing_result_line(job: dict) -> str:
+    return _queue_orchestrator.recent_completed_missing_result_line(job)
 
 
 def result_validation_line(result: dict) -> str | None:
@@ -4749,12 +4757,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
     print(f"State: {state_dir()}")
     print(f"Config: {config_path()}")
 
-    if runner:
-        active_job = runner.get("active_job_id") or "?"
-        active_branch = runner.get("active_branch") or "?"
-        print(f"\nRunner: pid={runner.get('pid', '?')} active=[{active_job}] {active_branch}")
-    else:
-        print("\nRunner: idle")
+    print(f"\n{status_runner_line(runner)}")
 
     if running:
         print(f"\nRunning ({len(running)}):")
@@ -4796,7 +4799,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 result = load_result(Path(result_file))
                 print(f"  {recent_completed_status_line(job, result)}")
             else:
-                print(f"  {summarize_job(job)} (result file missing)")
+                print(f"  {recent_completed_missing_result_line(job)}")
 
     branch = current_branch()
     if branch:

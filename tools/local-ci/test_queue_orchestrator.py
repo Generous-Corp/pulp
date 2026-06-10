@@ -199,6 +199,21 @@ class QueueOrchestratorTests(unittest.TestCase):
                 "  cleanup: terminated pid 123",
             ],
         )
+        self.assertEqual(self.mod.status_runner_line(None), "Runner: idle")
+        self.assertEqual(
+            self.mod.status_runner_line(
+                {
+                    "pid": 123,
+                    "active_job_id": "job123",
+                    "active_branch": "feature/q",
+                }
+            ),
+            "Runner: pid=123 active=[job123] feature/q",
+        )
+        self.assertEqual(
+            self.mod.status_runner_line({"pid": 123}),
+            "Runner: pid=123 active=[?] ?",
+        )
         self.assertEqual(
             self.mod.recent_completed_status_line(
                 {
@@ -219,6 +234,18 @@ class QueueOrchestratorTests(unittest.TestCase):
                 },
             ),
             "[done123] feature/q @ abcdef123456 PASS [mac=pass, linux=skip] via direct via local-ci",
+        )
+        self.assertEqual(
+            self.mod.recent_completed_missing_result_line(
+                {
+                    "id": "missing123",
+                    "branch": "feature/q",
+                    "sha": "abcdef1234567890",
+                    "priority": "normal",
+                    "targets": ["mac"],
+                }
+            ),
+            "[missing123] feature/q @ abcdef123456 priority=normal targets=mac (result file missing)",
         )
         self.assertLess(
             self.mod.job_sort_key({"id": "high", "priority": "high", "queued_at": "2"}),
