@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v03980"></a>
+## [0.398.0] - 2026-06-09
+
+- feat(midi): Linux BlueZ BLE MIDI backend + virtual MIDI-port merge (L13) ([#3824](https://github.com/danielraffel/pulp/pull/3824))
+- refactor(local-ci): extract stale validator lifecycle helper ([#3823](https://github.com/danielraffel/pulp/pull/3823))
+- feat(midi): WinRT BLE MIDI scan-probe backend + advisory compile-gate (W13 part 1) ([#3811](https://github.com/danielraffel/pulp/pull/3811))
+
 <a id="v03970"></a>
 ## [0.397.0] - 2026-06-09
 
@@ -4108,6 +4115,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.398.0]: https://github.com/danielraffel/pulp/releases/tag/v0.398.0
 [0.397.0]: https://github.com/danielraffel/pulp/releases/tag/v0.397.0
 [0.396.0]: https://github.com/danielraffel/pulp/releases/tag/v0.396.0
 [0.395.0]: https://github.com/danielraffel/pulp/releases/tag/v0.395.0
