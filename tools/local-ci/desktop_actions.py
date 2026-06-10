@@ -6,6 +6,70 @@ from pathlib import Path
 import shlex
 
 
+def desktop_action_artifact_paths(bundle_dir: Path, output_path: str | None = None) -> dict[str, Path]:
+    return {
+        "screenshot": Path(output_path).expanduser() if output_path else bundle_dir / "screenshots" / "window.png",
+        "before_screenshot": bundle_dir / "screenshots" / "before.png",
+        "diff_screenshot": bundle_dir / "screenshots" / "diff.png",
+        "ui_snapshot": bundle_dir / "ui-tree.json",
+        "stdout": bundle_dir / "stdout.log",
+        "stderr": bundle_dir / "stderr.log",
+    }
+
+
+def desktop_interaction_requested(
+    *,
+    click_point: str | None,
+    click_view_id: str | None,
+    click_view_type: str | None,
+    click_view_text: str | None,
+    click_view_label: str | None,
+) -> bool:
+    return any([click_point, click_view_id, click_view_type, click_view_text, click_view_label])
+
+
+def desktop_click_selector(
+    *,
+    click_point: str | None = None,
+    click_view_id: str | None = None,
+    click_view_type: str | None = None,
+    click_view_text: str | None = None,
+    click_view_label: str | None = None,
+    include_point: bool = True,
+) -> dict:
+    selector = {
+        "id": click_view_id,
+        "type": click_view_type,
+        "text": click_view_text,
+        "label": click_view_label,
+    }
+    if include_point:
+        selector["point"] = click_point
+    return selector
+
+
+def pulp_app_interaction_summary(
+    *,
+    click_point: str | None,
+    click_view_id: str | None,
+    click_view_type: str | None,
+    click_view_text: str | None,
+    click_view_label: str | None,
+) -> dict:
+    return {
+        "mode": "pulp-app",
+        "click": {
+            "selector": desktop_click_selector(
+                click_point=click_point,
+                click_view_id=click_view_id,
+                click_view_type=click_view_type,
+                click_view_text=click_view_text,
+                click_view_label=click_view_label,
+            )
+        },
+    }
+
+
 def count_view_tree_nodes(node: object) -> int:
     if not isinstance(node, dict):
         return 0
@@ -77,6 +141,33 @@ def resolve_view_tree_click_point(
     ]
     joined = ", ".join(filters) or "<none>"
     raise RuntimeError(f"No visible view matched click selector ({joined}).")
+
+
+def view_tree_inspector_summary(view_tree: dict) -> dict:
+    return {
+        "root_id": view_tree.get("id"),
+        "root_type": view_tree.get("type"),
+        "view_count": count_view_tree_nodes(view_tree),
+    }
+
+
+def content_size_from_window(window: dict) -> tuple[float, float]:
+    bounds = window.get("bounds", {})
+    return (
+        float(bounds.get("width", 0.0) or 0.0),
+        float(bounds.get("height", 0.0) or 0.0),
+    )
+
+
+def content_size_from_view_tree(
+    view_tree: dict,
+    fallback: tuple[float, float],
+) -> tuple[float, float]:
+    root_bounds = view_tree.get("bounds") if isinstance(view_tree.get("bounds"), dict) else {}
+    return (
+        float(root_bounds.get("width", fallback[0]) or fallback[0]),
+        float(root_bounds.get("height", fallback[1]) or fallback[1]),
+    )
 
 
 def screen_point_for_content_point(
