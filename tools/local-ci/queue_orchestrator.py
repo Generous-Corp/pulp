@@ -5,8 +5,8 @@ supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
-completed-job state mutation, and
-completed-queue retention. Higher-level queue mutation, locking, runner
+completed-job state mutation, queue status grouping, and completed-queue
+retention. Higher-level queue mutation, locking, runner
 liveness, result persistence, and drain orchestration remain in local_ci.py
 until later extraction slices.
 """
@@ -484,6 +484,13 @@ def trim_completed_jobs(queue: list[dict], *, keep_completed_jobs: int) -> list[
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
     return (-priority_value(job.get("priority", "normal")), job.get("queued_at", ""), job["id"])
+
+
+def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    pending = sorted([job for job in queue if job.get("status") == "pending"], key=job_sort_key)
+    running = [job for job in queue if job.get("status") == "running"]
+    completed = [job for job in queue if job.get("status") == "completed"]
+    return pending, running, completed
 
 
 def claim_next_job_unlocked(

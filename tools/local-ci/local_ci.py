@@ -2661,6 +2661,10 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
     return _queue_orchestrator.job_sort_key(job)
 
 
+def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    return _queue_orchestrator.queue_status_groups(queue)
+
+
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
     return _queue_lifecycle.reconcile_running_jobs_unlocked(
         queue,
@@ -4695,9 +4699,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
         return 1
 
     queue = load_queue()
-    pending = sorted([job for job in queue if job.get("status") == "pending"], key=job_sort_key)
-    running = [job for job in queue if job.get("status") == "running"]
-    completed = [job for job in queue if job.get("status") == "completed"]
+    pending, running, completed = queue_status_groups(queue)
     runner = current_runner_info()
 
     print(f"State: {state_dir()}")

@@ -126,6 +126,17 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.job_sort_key({"id": "high", "priority": "high", "queued_at": "2"}),
             self.mod.job_sort_key({"id": "low", "priority": "low", "queued_at": "1"}),
         )
+        pending, running, completed = self.mod.queue_status_groups(
+            [
+                {"id": "running", "status": "running"},
+                {"id": "pending-low", "status": "pending", "priority": "low", "queued_at": "1"},
+                {"id": "completed", "status": "completed"},
+                {"id": "pending-high", "status": "pending", "priority": "high", "queued_at": "2"},
+            ]
+        )
+        self.assertEqual([job["id"] for job in pending], ["pending-high", "pending-low"])
+        self.assertEqual([job["id"] for job in running], ["running"])
+        self.assertEqual([job["id"] for job in completed], ["completed"])
 
     def test_enqueue_duplicate_lookup_and_priority_bump_helpers(self) -> None:
         queue = [
