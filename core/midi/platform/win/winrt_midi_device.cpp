@@ -59,11 +59,10 @@ namespace init = ::Microsoft::Windows::Devices::Midi2::Initialization;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-// Process-wide cppwinrt apartment + SDK-runtime init. Idempotent: WinRT
-// reference-counts init/uninit per thread, and calling init_apartment more
-// than once on the same thread is benign. We init lazily so merely linking
-// the backend does not force apartment creation on hosts that never touch
-// MIDI.
+// Per-thread cppwinrt apartment + process-wide SDK-runtime init. WinRT
+// apartment state is per-thread, so each thread that enters this backend must
+// attempt init once. We still keep the MIDI Services SDK runtime initializer
+// alive process-wide.
 //
 // The Windows MIDI Services SDK additionally requires the desktop-app SDK
 // runtime to be brought up (via MidiDesktopAppSdkInitializer) before any
@@ -82,16 +81,17 @@ sdk_initializer() {
 }
 
 static void ensure_winrt_init() {
-    static std::once_flag once;
-    std::call_once(once, [] {
+    thread_local bool attempted = false;
+    if (!attempted) {
+        attempted = true;
         try {
             ::winrt::init_apartment(::winrt::apartment_type::multi_threaded);
         } catch (const ::winrt::hresult_error&) {
             // Already initialised on this thread with a different model, or
             // COM already up — both are fine for our consumer-only usage.
         }
-        (void)sdk_initializer();  // bring up the SDK runtime once
-    });
+    }
+    (void)sdk_initializer();  // bring up the SDK runtime once
 }
 
 static std::string hstring_to_utf8(const ::winrt::hstring& hs) {

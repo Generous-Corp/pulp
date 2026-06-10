@@ -6,7 +6,9 @@
 
 #include <choc/audio/choc_MIDI.h>
 
+#include <condition_variable>
 #include <map>
+#include <memory>
 #include <mutex>
 
 namespace pulp::midi {
@@ -19,9 +21,16 @@ struct BleMidiPortRegistry::Impl {
         MidiInputCallback callback;        // set on attach_input (host opened)
         MidiSysexCallback sysex_callback;  // set on attach_input
     };
+    struct OutputState {
+        std::mutex mu;
+        std::condition_variable idle;
+        std::function<void(const std::vector<uint8_t>&)> sink;  // central GATT write
+        bool closed = false;
+        std::size_t active = 0;
+    };
     struct OutputEntry {
         std::string name;
-        std::function<void(const std::vector<uint8_t>&)> sink;  // central GATT write
+        std::shared_ptr<OutputState> state;
     };
 
     std::map<std::string, InputEntry> inputs;
@@ -59,7 +68,10 @@ void BleMidiPortRegistry::register_output(
     std::lock_guard<std::mutex> lock(d.mu);
     auto& entry = d.outputs[port_id];
     entry.name = name;
-    entry.sink = std::move(sink);
+    if (!entry.state) entry.state = std::make_shared<Impl::OutputState>();
+    std::lock_guard<std::mutex> state_lock(entry.state->mu);
+    entry.state->closed = false;
+    entry.state->sink = std::move(sink);
 }
 
 void BleMidiPortRegistry::unregister_input(const std::string& port_id) {
@@ -69,9 +81,21 @@ void BleMidiPortRegistry::unregister_input(const std::string& port_id) {
 }
 
 void BleMidiPortRegistry::unregister_output(const std::string& port_id) {
-    auto& d = impl();
-    std::lock_guard<std::mutex> lock(d.mu);
-    d.outputs.erase(port_id);
+    std::shared_ptr<Impl::OutputState> state;
+    {
+        auto& d = impl();
+        std::lock_guard<std::mutex> lock(d.mu);
+        auto it = d.outputs.find(port_id);
+        if (it == d.outputs.end()) return;
+        state = it->second.state;
+        d.outputs.erase(it);
+    }
+
+    if (!state) return;
+    std::unique_lock<std::mutex> lock(state->mu);
+    state->closed = true;
+    state->idle.wait(lock, [&] { return state->active == 0; });
+    state->sink = nullptr;
 }
 
 void BleMidiPortRegistry::deliver_message(const std::string& port_id,
@@ -176,11 +200,50 @@ void BleMidiPortRegistry::detach_input(const std::string& port_id) {
 
 std::function<void(const std::vector<uint8_t>&)>
 BleMidiPortRegistry::output_sink(const std::string& port_id) const {
-    auto& d = impl();
-    std::lock_guard<std::mutex> lock(d.mu);
-    auto it = d.outputs.find(port_id);
-    if (it == d.outputs.end()) return {};
-    return it->second.sink;
+    std::weak_ptr<Impl::OutputState> state;
+    {
+        auto& d = impl();
+        std::lock_guard<std::mutex> lock(d.mu);
+        auto it = d.outputs.find(port_id);
+        if (it == d.outputs.end() || !it->second.state) return {};
+        {
+            std::lock_guard<std::mutex> state_lock(it->second.state->mu);
+            if (it->second.state->closed || !it->second.state->sink) return {};
+        }
+        state = it->second.state;
+    }
+
+    // Return a forwarding handle, not the central's raw sink. MidiOutput
+    // instances can outlive a BLE central; after unregister_output() the handle
+    // must become a no-op rather than retaining a stale lambda that captured the
+    // destroyed central.
+    return [state](const std::vector<uint8_t>& bytes) {
+        auto live = state.lock();
+        if (!live) return;
+
+        std::function<void(const std::vector<uint8_t>&)> sink;
+        {
+            std::lock_guard<std::mutex> lock(live->mu);
+            if (live->closed || !live->sink) return;
+            ++live->active;
+            sink = live->sink;
+        }
+
+        try {
+            sink(bytes);
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(live->mu);
+            --live->active;
+            if (live->active == 0) live->idle.notify_all();
+            throw;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(live->mu);
+            --live->active;
+            if (live->active == 0) live->idle.notify_all();
+        }
+    };
 }
 
 }  // namespace pulp::midi

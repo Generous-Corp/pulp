@@ -212,6 +212,8 @@ public:
     BluezBleMidiCentral() = default;
 
     ~BluezBleMidiCentral() override {
+        stop_scan();
+        disconnect_all();
         stop_worker();
     }
 
@@ -335,13 +337,17 @@ public:
     }
 
     bool connect(const std::string& id) override {
+        bool missing_peripheral = false;
         {
             std::lock_guard<std::mutex> lock(mu_);
             if (peripherals_.find(id) == peripherals_.end()) {
-                fire_state_locked(id, BleMidiConnectionState::Failed,
-                                  BleMidiError::PeripheralNotFound);
-                return false;
+                missing_peripheral = true;
             }
+        }
+        if (missing_peripheral) {
+            fire_state(id, BleMidiConnectionState::Failed,
+                       BleMidiError::PeripheralNotFound);
+            return false;
         }
         if (!ensure_connected()) {
             fire_state(id, BleMidiConnectionState::Failed,
@@ -485,7 +491,16 @@ private:
     }
 
     void ensure_worker() {
-        if (worker_running_.exchange(true)) return;
+        std::lock_guard<std::mutex> lock(worker_mu_);
+        if (worker_running_.load()) return;
+        if (worker_.joinable()) {
+            if (worker_.get_id() == std::this_thread::get_id()) {
+                worker_running_.store(true);
+                return;
+            }
+            worker_.join();
+        }
+        worker_running_.store(true);
         worker_ = std::thread([this] { worker_loop(); });
     }
 
@@ -512,8 +527,24 @@ private:
     }
 
     void stop_worker() {
-        if (!worker_running_.exchange(false)) return;
-        if (worker_.joinable()) worker_.join();
+        std::lock_guard<std::mutex> lock(worker_mu_);
+        worker_running_.store(false);
+        if (worker_.get_id() == std::this_thread::get_id()) {
+            return;
+        }
+        if (!worker_.joinable()) return;
+        worker_.join();
+    }
+
+    void disconnect_all() {
+        std::vector<std::string> ids;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            for (const auto& [id, entry] : peripherals_) {
+                if (entry.connected) ids.push_back(id);
+            }
+        }
+        for (const auto& id : ids) disconnect(id);
     }
 
     // ── BlueZ discovery ──────────────────────────────────────────────────────
@@ -834,11 +865,6 @@ private:
         }
         if (cb) cb(id, state, err);
     }
-    void fire_state_locked(const std::string& id, BleMidiConnectionState state,
-                           BleMidiError err) {
-        // Caller already holds mu_.
-        if (state_cb_) state_cb_(id, state, err);
-    }
 
     // call_method wrapper that captures the D-Bus error NAME on failure. The
     // facade's call_method returns false on a D-Bus error reply but does not
@@ -870,6 +896,7 @@ private:
 
     std::atomic<bool> scanning_{false};
     std::atomic<bool> worker_running_{false};
+    std::mutex worker_mu_;
     std::thread worker_;
 };
 

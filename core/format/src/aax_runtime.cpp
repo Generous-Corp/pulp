@@ -746,7 +746,9 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
         }
 
         state.midi_in.clear();
+        state.midi_in.clear_sysex();
         state.midi_out.clear();
+        state.midi_out.clear_sysex();
         if (definition.supports_midi_input) {
             decode_midi_node(context->midi_input_node, &state.midi_in);
         }

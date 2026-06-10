@@ -72,20 +72,18 @@ namespace wdb  = ::winrt::Windows::Devices::Bluetooth;
 namespace gatt = ::winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
 namespace wss  = ::winrt::Windows::Storage::Streams;
 
-// Lazy, idempotent MTA apartment init. WinRT reference-counts init/uninit
-// per thread; calling init_apartment more than once on the same thread is
-// benign. We init lazily so merely linking the backend does not force
-// apartment creation on hosts that never scan for BLE peripherals.
+// Lazy, idempotent MTA apartment init. WinRT apartment state is per-thread, so
+// each thread that enters the backend must attempt init once.
 void ensure_winrt_init() {
-    static std::once_flag once;
-    std::call_once(once, [] {
-        try {
-            ::winrt::init_apartment(::winrt::apartment_type::multi_threaded);
-        } catch (const ::winrt::hresult_error&) {
-            // Already initialised on this thread with a different model, or
-            // COM already up — both are fine for our consumer-only usage.
-        }
-    });
+    thread_local bool attempted = false;
+    if (attempted) return;
+    attempted = true;
+    try {
+        ::winrt::init_apartment(::winrt::apartment_type::multi_threaded);
+    } catch (const ::winrt::hresult_error&) {
+        // Already initialised on this thread with a different model, or
+        // COM already up — both are fine for our consumer-only usage.
+    }
 }
 
 // Parse the canonical 8-4-4-4-12 UUID string used by BleMidiUuids into a
@@ -278,17 +276,21 @@ public:
         // null for an unpaired device unless the advertisement cache is warm.
         // Require the id to have come from a scan (it is in peripherals_).
         uint64_t address = 0;
+        bool missing_peripheral = false;
         {
             std::lock_guard<std::mutex> lock(mu_);
             if (peripherals_.find(id) == peripherals_.end() ||
                 !address_from_id(id, address)) {
-                fire_state_locked(id, BleMidiConnectionState::Failed,
-                                  BleMidiError::PeripheralNotFound);
-                return false;
+                missing_peripheral = true;
             }
             if (connections_.find(id) != connections_.end()) {
                 return true;  // already connected — no-op.
             }
+        }
+        if (missing_peripheral) {
+            fire_state(id, BleMidiConnectionState::Failed,
+                       BleMidiError::PeripheralNotFound);
+            return false;
         }
 
         fire_state(id, BleMidiConnectionState::Connecting, BleMidiError::None);
@@ -613,11 +615,6 @@ private:
             cb = state_cb_;
         }
         if (cb) cb(id, state, err);
-    }
-    void fire_state_locked(const std::string& id, BleMidiConnectionState state,
-                           BleMidiError err) {
-        // Caller already holds mu_.
-        if (state_cb_) state_cb_(id, state, err);
     }
 
     std::string peripheral_name(const std::string& id) const {

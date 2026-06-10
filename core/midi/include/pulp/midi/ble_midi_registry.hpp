@@ -90,9 +90,9 @@ public:
     /// Detach the host's MidiInput delivery callback (on MidiInput::close()).
     void detach_input(const std::string& port_id);
 
-    /// Fetch the central's GATT-write sink for a BLE output port so the host's
-    /// MidiOutput can forward sent events. Returns an empty function if the port
-    /// is unknown.
+    /// Fetch a forwarding handle for a BLE output port so the host's MidiOutput
+    /// can forward sent events. Returns an empty function if the port is unknown;
+    /// a previously fetched handle becomes a no-op after unregister_output().
     std::function<void(const std::vector<uint8_t>&)> output_sink(
         const std::string& port_id) const;
 

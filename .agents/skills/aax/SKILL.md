@@ -142,6 +142,11 @@ The AAX bypass MIDI-thru helper must copy sidecar payloads with
 `MidiBuffer::add_sysex_copy()`; `MidiBuffer::SysexPayload` is deliberately
 not a movable raw `std::vector`.
 
+When clearing an AAX process block's MIDI buffers, clear both the short-event
+storage and the sysex sidecars. `MidiBuffer::clear()` resets short events only;
+call `clear_sysex()` on both input and output buffers before decoding the next
+block, or stale sidecar payloads can be re-emitted by a later block.
+
 When adding or changing any AAX MIDI input path, exercise this against a
 multi-packet sysex vector (at least one packet across the 4-byte boundary
 and one terminator-only packet) in a unit test. Shipping without the test
@@ -154,4 +159,4 @@ After any AAX-related change:
 1. Build with AAX disabled and confirm the repo still works normally.
 2. Build with `PULP_ENABLE_AAX=ON` against a developer-supplied SDK.
 3. Run `pulp validate` and `pulp validate --all` when the validator is installed.
-5. Recheck the user-facing guidance in `docs/guides/aax.md` if behavior changed.
+4. Recheck the user-facing guidance in `docs/guides/aax.md` if behavior changed.

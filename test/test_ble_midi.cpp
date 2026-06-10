@@ -13,8 +13,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace pulp::midi;
@@ -344,9 +349,95 @@ TEST_CASE("BleMidiPortRegistry output sink forwards sent bytes to the central",
     REQUIRE(written.size() == 1);
     REQUIRE(written[0] == std::vector<uint8_t>{0xB0, 7, 64});
 
+    std::vector<std::vector<uint8_t>> updated;
+    reg.register_output(id, "Out Test Updated",
+                        [&](const std::vector<uint8_t>& b) { updated.push_back(b); });
+    sink({0xB0, 7, 63});
+    REQUIRE(written.size() == 1);
+    REQUIRE(updated == std::vector<std::vector<uint8_t>>{{0xB0, 7, 63}});
+
     reg.unregister_output(id);
     REQUIRE_FALSE(reg.is_output(id));
     REQUIRE_FALSE(static_cast<bool>(reg.output_sink(id)));
+    sink({0xB0, 7, 65});
+    REQUIRE(written.size() == 1);
+    REQUIRE(updated.size() == 1);
+
+    reg.register_output(id, "Out Test Reopened",
+                        [&](const std::vector<uint8_t>& b) { written.push_back(b); });
+    sink({0xB0, 7, 66});
+    REQUIRE(written.size() == 1);
+
+    auto reopened_sink = reg.output_sink(id);
+    REQUIRE(static_cast<bool>(reopened_sink));
+    reopened_sink({0xB0, 7, 67});
+    REQUIRE(written.size() == 2);
+    REQUIRE(written[1] == std::vector<uint8_t>{0xB0, 7, 67});
+
+    reg.unregister_output(id);
+}
+
+TEST_CASE("BleMidiPortRegistry waits for in-flight output sends before unregister",
+          "[ble-midi][registry]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    const std::string id = "ble-midi-out:/test/dev_DD_registry_unregister_race";
+
+    std::mutex mu;
+    std::condition_variable cv;
+    bool sink_entered = false;
+    bool unregister_started = false;
+    bool release_sink = false;
+    std::atomic<bool> unregister_done{false};
+    std::vector<std::vector<uint8_t>> written;
+
+    reg.register_output(id, "Out Test Race",
+                        [&](const std::vector<uint8_t>& b) {
+                            std::unique_lock<std::mutex> lock(mu);
+                            sink_entered = true;
+                            cv.notify_all();
+                            cv.wait(lock, [&] { return release_sink; });
+                            written.push_back(b);
+                        });
+
+    auto sink = reg.output_sink(id);
+    REQUIRE(static_cast<bool>(sink));
+
+    std::thread sender([&] { sink({0xB0, 7, 80}); });
+    {
+        std::unique_lock<std::mutex> lock(mu);
+        cv.wait(lock, [&] { return sink_entered; });
+    }
+
+    std::thread unregisterer([&] {
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            unregister_started = true;
+            cv.notify_all();
+        }
+        reg.unregister_output(id);
+        unregister_done.store(true);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mu);
+        cv.wait(lock, [&] { return unregister_started; });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    REQUIRE_FALSE(unregister_done.load());
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        release_sink = true;
+        cv.notify_all();
+    }
+
+    sender.join();
+    unregisterer.join();
+    REQUIRE(unregister_done.load());
+    REQUIRE(written == std::vector<std::vector<uint8_t>>{{0xB0, 7, 80}});
+
+    sink({0xB0, 7, 81});
+    REQUIRE(written.size() == 1);
 }
 
 TEST_CASE("BleMidiPortRegistry deliver_message is a no-op for unknown / unopened "
