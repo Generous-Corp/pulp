@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <vector>
 #include <pulp/events/event_loop.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/state/store.hpp>
@@ -22,12 +23,15 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     using EntryList = std::vector<Entry>;
     using SharedEntries = std::shared_ptr<const EntryList>;
 
-    // CoW model: mutators rebuild and atomically swap a new shared_ptr;
-    // notify_rt() atomically loads the current snapshot and iterates it
-    // without taking entries_mutex. The mutex is only for add/remove
-    // serialization on non-RT threads.
+    // CoW model: mutators rebuild immutable snapshots on non-RT threads.
+    // RT readers load a raw pointer to the current snapshot so libstdc++'s
+    // atomic shared_ptr helpers cannot take an internal lock/allocation path
+    // inside set_value_rt(). Retired snapshots stay owned for the registry
+    // lifetime because listener mutation is rare and RT readers are lock-free.
     mutable std::mutex entries_mutex;
     SharedEntries entries;
+    std::vector<SharedEntries> retired_entries;
+    std::atomic<const EntryList*> entries_ptr{nullptr};
     std::atomic<std::uint64_t> next_id{1};
     std::atomic<pulp::events::EventLoop*> main_loop{nullptr};
 
@@ -43,31 +47,30 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     static constexpr std::size_t kRtQueueCapacity = 1024;
     pulp::runtime::SpscQueue<RtChange, kRtQueueCapacity> pending_rt;
 
-    SharedEntries load_snapshot() const {
-        return std::atomic_load_explicit(&entries, std::memory_order_acquire);
+    const EntryList* load_snapshot() const noexcept {
+        return entries_ptr.load(std::memory_order_acquire);
     }
 
     std::uint64_t add(ParamChangeCallback cb, ListenerThread thread) {
         const auto id = next_id.fetch_add(1, std::memory_order_relaxed);
         std::lock_guard lock(entries_mutex);
-        auto current =
-            std::atomic_load_explicit(&entries, std::memory_order_acquire);
+        const EntryList* current = entries.get();
         EntryList copy;
         copy.reserve((current ? current->size() : 0) + 1);
         if (current) copy = *current;
         copy.push_back({id, std::move(cb), thread});
-        std::atomic_store_explicit(
-            &entries,
-            std::make_shared<const EntryList>(std::move(copy)),
-            std::memory_order_release);
+
+        auto next = std::make_shared<const EntryList>(std::move(copy));
+        if (entries) retired_entries.push_back(entries);
+        entries = std::move(next);
+        entries_ptr.store(entries.get(), std::memory_order_release);
         return id;
     }
 
     void remove(std::uint64_t id) {
         if (id == 0) return;
         std::lock_guard lock(entries_mutex);
-        auto current =
-            std::atomic_load_explicit(&entries, std::memory_order_acquire);
+        const EntryList* current = entries.get();
         if (!current) return;
         EntryList copy;
         copy.reserve(current->size());
@@ -75,11 +78,15 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
             if (e.id != id) copy.push_back(e);
         }
         if (copy.size() == current->size()) return; // not found
-        std::atomic_store_explicit(
-            &entries,
-            copy.empty() ? SharedEntries{}
-                         : std::make_shared<const EntryList>(std::move(copy)),
-            std::memory_order_release);
+
+        if (entries) retired_entries.push_back(entries);
+        if (copy.empty()) {
+            entries.reset();
+            entries_ptr.store(nullptr, std::memory_order_release);
+        } else {
+            entries = std::make_shared<const EntryList>(std::move(copy));
+            entries_ptr.store(entries.get(), std::memory_order_release);
+        }
     }
 
     // Re-look-up + invoke at dispatch time so a token reset between
@@ -229,7 +236,7 @@ void StateStore::set_value(ParamID id, float value) {
     float clamped = std::clamp(value, param.range.min, param.range.max);
     values_[it->second].set(clamped);
 
-    // Wait-free fan-out: notify() does a single atomic-shared_ptr load and
+    // Wait-free fan-out: notify() does a single atomic pointer load and
     // iterates the const snapshot. Audio listeners run inline; Main
     // listeners route through the installed EventLoop (which allocates;
     // audio-thread callers must use set_value_rt() instead).

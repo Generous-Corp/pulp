@@ -678,8 +678,8 @@ bool get_interfaces(const std::string& server_name, const std::string& path,
             if (!r.recurse(arr)) return;
             while (arr.arg_type() != 0) {
                 std::string s;
-                if (arr.read_string(s)) out.push_back(s);
-                if (!arr.next()) break;
+                if (!arr.read_string(s)) break;
+                out.push_back(s);
             }
         });
 }

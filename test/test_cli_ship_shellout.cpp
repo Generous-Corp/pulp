@@ -682,7 +682,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-#ifndef _WIN32
+#if defined(__APPLE__)
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package with no plugin bundles reports zero artifacts",
                  "[cli][shellout][ship][package][coverage]") {
@@ -693,6 +693,23 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
     REQUIRE(contains(r.stdout_output, "Created 0 .pkg and 0 .dmg artifacts"));
+    REQUIRE(fs::exists(root / "artifacts"));
+    REQUIRE(fs::is_empty(root / "artifacts"));
+
+    fs::remove_all(root);
+}
+#elif defined(__linux__)
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package on Linux with no plugin bundles reports missing plugins",
+                 "[cli][shellout][ship][package][linux-package][coverage]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("package-empty-linux", true);
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stdout_output + r.stderr_output,
+                     "no VST3/CLAP/LV2 plugins found"));
     REQUIRE(fs::exists(root / "artifacts"));
     REQUIRE(fs::is_empty(root / "artifacts"));
 
