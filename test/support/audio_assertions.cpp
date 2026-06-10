@@ -226,35 +226,16 @@ CheckResult assert_null_near(const pulp::audio::BufferView<const float>& a,
     return result;
 }
 
-namespace {
-
-// Buffer has no const view(); adapter for the Buffer-taking overloads.
-struct ConstView {
-    std::vector<const float*> ptrs;
-    explicit ConstView(const pulp::audio::Buffer<float>& buffer)
-        : ptrs(buffer.num_channels()) {
-        for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch)
-            ptrs[ch] = buffer.channel(ch).data();
-    }
-    pulp::audio::BufferView<const float> view(
-        const pulp::audio::Buffer<float>& buffer) const {
-        return {ptrs.data(), buffer.num_channels(), buffer.num_samples()};
-    }
-};
-
-} // namespace
-
 CheckResult assert_null_near(const pulp::audio::Buffer<float>& a,
                              const pulp::audio::Buffer<float>& b,
                              double tolerance_dbfs) {
-    ConstView va(a), vb(b);
-    return assert_null_near(va.view(a), vb.view(b), tolerance_dbfs);
+    return assert_null_near(ConstBufferView(a), ConstBufferView(b),
+                            tolerance_dbfs);
 }
 
 CheckResult assert_channels_independent(
     const pulp::audio::Buffer<float>& buffer) {
-    ConstView v(buffer);
-    return assert_channels_independent(v.view(buffer));
+    return assert_channels_independent(ConstBufferView(buffer));
 }
 
 CheckResult assert_channels_independent(

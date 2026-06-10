@@ -1,35 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/headless.hpp>
-#include <cmath>
-#include <numbers>
+
+// Signal generation and RMS measurement use the shared harness helpers
+// (test/support/) — harness PR 1B conversion.
+#include "support/audio_metrics.hpp"
+#include "support/audio_test_signals.hpp"
 
 #include "pulp_effect.hpp"
 
 using Catch::Matchers::WithinAbs;
-
-// Helper: generate a sine wave buffer
-static pulp::audio::Buffer<float> make_sine(int channels, int samples,
-                                             float freq = 440.0f,
-                                             double sample_rate = 48000.0) {
-    pulp::audio::Buffer<float> buf(channels, samples);
-    for (int ch = 0; ch < channels; ++ch) {
-        for (int i = 0; i < samples; ++i) {
-            buf.channel(ch)[i] = std::sin(2.0f * std::numbers::pi_v<float> * freq * i / sample_rate);
-        }
-    }
-    return buf;
-}
-
-// Helper: compute RMS of a buffer channel
-static float rms(const pulp::audio::Buffer<float>& buf, int ch) {
-    float sum = 0.0f;
-    auto span = buf.channel(ch);
-    for (std::size_t i = 0; i < buf.num_samples(); ++i) {
-        sum += span[i] * span[i];
-    }
-    return std::sqrt(sum / static_cast<float>(buf.num_samples()));
-}
+using pulp::test::audio::analyze;
+using pulp::test::audio::make_sine;
 
 // Helper: process through headless host
 static void process_headless(pulp::format::HeadlessHost& host,
@@ -63,11 +45,11 @@ TEST_CASE("Golden: PulpEffect lowpass attenuates high frequencies", "[golden][pu
         process_headless(host, high_freq, out);
     }
 
-    float in_rms = rms(high_freq, 0);
-    float out_rms = rms(out, 0);
+    const double in_rms = analyze(high_freq, 48000.0).channels[0].rms;
+    const double out_rms = analyze(out, 48000.0).channels[0].rms;
 
     // Lowpass at 200 Hz should heavily attenuate 8 kHz
-    REQUIRE(out_rms < in_rms * 0.1f); // at least -20 dB attenuation
+    REQUIRE(out_rms < in_rms * 0.1); // at least -20 dB attenuation
 }
 
 TEST_CASE("Golden: PulpEffect bypass passes through unchanged", "[golden][pulpeffect]") {
@@ -105,9 +87,9 @@ TEST_CASE("Golden: PulpEffect lowpass preserves low frequencies", "[golden][pulp
         process_headless(host, low_freq, out);
     }
 
-    float in_rms = rms(low_freq, 0);
-    float out_rms = rms(out, 0);
+    const double in_rms = analyze(low_freq, 48000.0).channels[0].rms;
+    const double out_rms = analyze(out, 48000.0).channels[0].rms;
 
     // Lowpass at 5 kHz should barely attenuate 100 Hz
-    REQUIRE(out_rms > in_rms * 0.8f); // within ~2 dB
+    REQUIRE(out_rms > in_rms * 0.8); // within ~2 dB
 }
