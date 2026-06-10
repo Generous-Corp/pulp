@@ -245,6 +245,36 @@ class QueueOrchestratorTests(unittest.TestCase):
         )
         self.assertEqual(self.mod.recent_completed_jobs_for_status([{"id": "completed"}], limit=0), [])
 
+    def test_result_display_line_helpers(self) -> None:
+        result = {
+            "validation": "smoke",
+            "provenance": {
+                "execution_kind": "direct",
+                "direct_backend": "local-ci",
+            },
+            "results": [
+                {"target": "mac", "status": "pass", "duration_secs": 12.5},
+                {"target": "windows", "status": "fail"},
+            ],
+            "overall": "fail",
+        }
+
+        self.assertEqual(self.mod.result_validation_line(result), "  validation  smoke")
+        self.assertIsNone(self.mod.result_validation_line({"validation": "full"}))
+        self.assertEqual(self.mod.result_execution_line(result), "  execution   direct via local-ci")
+        self.assertEqual(
+            self.mod.result_target_lines(result),
+            [
+                "  mac         PASS          12.5s",
+                "  windows     FAIL          0s",
+            ],
+        )
+        self.assertEqual(
+            self.mod.target_result_line({"target": "ios", "status": "skip"}),
+            "  ios         SKIP          0s",
+        )
+        self.assertEqual(self.mod.result_overall_line(result), "  overall     FAIL")
+
     def test_enqueue_duplicate_lookup_and_priority_bump_helpers(self) -> None:
         queue = [
             {"id": "completed", "fingerprint": "same", "status": "completed", "priority": "low"},

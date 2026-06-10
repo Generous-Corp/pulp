@@ -5,8 +5,7 @@ supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
 recent-completed selection,
-queue status submission/target line fragments, recent-completed result
-summaries,
+queue and result status line fragments, recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 completed-job state mutation, queue status grouping, and completed-queue
@@ -372,6 +371,30 @@ def recent_completed_status_line(job: dict, result: dict) -> str:
         f"{result.get('overall', '?').upper()} [{targets}] "
         f"via {provenance_summary(result.get('provenance'))}"
     )
+
+
+def result_validation_line(result: dict) -> str | None:
+    validation = result.get("validation", "full")
+    if validation == "full":
+        return None
+    return f"  {'validation':10s}  {validation}"
+
+
+def result_execution_line(result: dict) -> str:
+    return f"  {'execution':10s}  {provenance_summary(result.get('provenance'))}"
+
+
+def target_result_line(item: dict) -> str:
+    icon = "PASS" if item["status"] == "pass" else item["status"].upper()
+    return f"  {item['target']:10s}  {icon:12s}  {item.get('duration_secs', 0)}s"
+
+
+def result_target_lines(result: dict) -> list[str]:
+    return [target_result_line(item) for item in result.get("results", [])]
+
+
+def result_overall_line(result: dict) -> str:
+    return f"  {'overall':10s}  {result['overall'].upper()}"
 
 
 def update_runner_info_active_targets(

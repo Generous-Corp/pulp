@@ -2537,6 +2537,26 @@ def recent_completed_status_line(job: dict, result: dict) -> str:
     return _queue_orchestrator.recent_completed_status_line(job, result)
 
 
+def result_validation_line(result: dict) -> str | None:
+    return _queue_orchestrator.result_validation_line(result)
+
+
+def result_execution_line(result: dict) -> str:
+    return _queue_orchestrator.result_execution_line(result)
+
+
+def target_result_line(item: dict) -> str:
+    return _queue_orchestrator.target_result_line(item)
+
+
+def result_target_lines(result: dict) -> list[str]:
+    return _queue_orchestrator.result_target_lines(result)
+
+
+def result_overall_line(result: dict) -> str:
+    return _queue_orchestrator.result_overall_line(result)
+
+
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
     return _queue_orchestrator.upsert_job_active_targets_unlocked(
         queue,
@@ -4270,13 +4290,13 @@ def save_result(result: dict) -> Path:
 def print_result(result: dict, result_path: Path | None = None) -> None:
     result = normalize_result(result)
     print(f"\n--- Result: [{result['job_id']}] {result['branch']} ---")
-    if result.get("validation", "full") != "full":
-        print(f"  {'validation':10s}  {result['validation']}")
-    print(f"  {'execution':10s}  {provenance_summary(result.get('provenance'))}")
-    for item in result["results"]:
-        icon = "PASS" if item["status"] == "pass" else item["status"].upper()
-        print(f"  {item['target']:10s}  {icon:12s}  {item.get('duration_secs', 0)}s")
-    print(f"  {'overall':10s}  {result['overall'].upper()}")
+    validation_line = result_validation_line(result)
+    if validation_line:
+        print(validation_line)
+    print(result_execution_line(result))
+    for line in result_target_lines(result):
+        print(line)
+    print(result_overall_line(result))
     if result_path:
         print(f"  Saved: {result_path}")
     print()
