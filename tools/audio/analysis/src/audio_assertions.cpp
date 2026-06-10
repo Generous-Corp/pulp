@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <span>
 #include <sstream>
 
 namespace pulp::test::audio {
@@ -242,6 +243,17 @@ CheckResult assert_channels_independent(
     CheckResult result;
     result.passed = true;
     constexpr double kIdenticalEpsilon = 1e-9;
+    // Two channels that are both effectively silent (or both an identical
+    // constant near zero) are trivially "sample-identical" but carry no signal
+    // to duplicate — that is not a routing bug, so it must not be flagged. Only
+    // identical content that carries real energy is a genuine duplication.
+    constexpr double kSilenceFloor = 1e-6; // ≈ -120 dBFS peak.
+    const auto channel_peak = [](std::span<const float> s) {
+        double peak = 0.0;
+        for (float v : s)
+            peak = std::max(peak, std::abs(static_cast<double>(v)));
+        return peak;
+    };
     std::ostringstream msg;
     for (std::size_t ch_a = 0; ch_a < buffer.num_channels(); ++ch_a) {
         for (std::size_t ch_b = ch_a + 1; ch_b < buffer.num_channels(); ++ch_b) {
@@ -255,7 +267,11 @@ CheckResult assert_channels_independent(
                     break;
                 }
             }
-            if (identical) {
+            // Skip the verdict for two silent channels: identical-but-empty is
+            // not a duplication.
+            const bool both_silent = channel_peak(sa) < kSilenceFloor &&
+                                     channel_peak(sb) < kSilenceFloor;
+            if (identical && !both_silent) {
                 result.passed = false;
                 msg << "ch" << ch_a << " and ch" << ch_b
                     << " are sample-identical (within 1e-9) across "

@@ -143,8 +143,10 @@ TEST_CASE("Tone regression: metrics artifact JSON carries schema and facts",
     REQUIRE(parsed["num_channels"].getInt64() == 2);
     REQUIRE(parsed["channels"].size() == 2);
     const auto ch0 = parsed["channels"][0];
-    REQUIRE(ch0["peak"].getFloat64() > 0.0);
-    REQUIRE(ch0["rms"].getFloat64() > 0.0);
+    // choc drops a redundant ".0", so a whole-number peak/rms parses back as
+    // int64 and getFloat64() would throw — use the coercing get<double>().
+    REQUIRE(ch0["peak"].get<double>() > 0.0);
+    REQUIRE(ch0["rms"].get<double>() > 0.0);
     REQUIRE(ch0["nan_samples"].getInt64() == 0);
     REQUIRE(ch0["clipped_samples"].getInt64() == 0);
 

@@ -17,6 +17,7 @@
 //   * Cmd+I (layout inspector) still works alongside Cmd+Shift+A (audio
 //     inspector) — no chord clobber.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/audio_probe.hpp>
@@ -137,6 +138,25 @@ TEST_CASE("AudioInspectorWindow meters reflect the probe snapshot",
     REQUIRE(panel.balance() < 0.0f);
     // Both channels carry energy → positive L/R level-match.
     REQUIRE(panel.lr_match() > 0.0f);
+}
+
+TEST_CASE("Audio Inspector meter fill is on the dBFS scale, not linear",
+          "[view][audio-inspector][audio-harness]") {
+    // The meter bar and its "… dBFS" label must agree: the fill maps linear
+    // amplitude through the same dBFS transform the label uses (−60 dBFS floor
+    // → empty bar, 0 dBFS → full bar), not the raw linear amplitude.
+    REQUIRE(dbfs_meter_fill(1.0f) == Catch::Approx(1.0f));   // 0 dBFS → full.
+    REQUIRE(dbfs_meter_fill(0.0f) == 0.0f);                  // silence → empty.
+    REQUIRE(dbfs_meter_fill(0.001f) == 0.0f);                // −60 dBFS → empty.
+
+    // Half amplitude is ≈ −6 dBFS, which on a −60..0 scale is 0.9, NOT the 0.5
+    // a linear meter would show — the assertion that distinguishes the two.
+    REQUIRE(dbfs_meter_fill(0.5f) == Catch::Approx(0.9f).margin(0.005f));
+    REQUIRE(dbfs_meter_fill(0.5f) > 0.6f); // decisively above the linear 0.5.
+
+    // Monotonic and clamped above full scale.
+    REQUIRE(dbfs_meter_fill(0.25f) < dbfs_meter_fill(0.5f));
+    REQUIRE(dbfs_meter_fill(2.0f) == Catch::Approx(1.0f)); // > 0 dBFS clamps to 1.
 }
 
 TEST_CASE("AudioInspectorWindow goes stale when the sequence stops advancing",

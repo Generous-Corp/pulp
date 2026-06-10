@@ -36,6 +36,28 @@ inline pulp::audio::Buffer<float> make_sine(int channels, int samples,
     return buf;
 }
 
+/// Sine-wave Buffer computed in **all-float** arithmetic (index and sample
+/// rate narrowed to float before the division, so the whole phase expression
+/// stays single-precision). Matches the local helper that `test_audio_support`
+/// originally used, whose stimulus differs bit-for-bit from `make_sine`'s
+/// double-promoted phase. Both are preserved verbatim so each converted suite
+/// keeps byte-identical stimulus.
+inline pulp::audio::Buffer<float> make_sine_f(int channels, int samples,
+                                              float freq = 440.0f,
+                                              double sample_rate = 48000.0,
+                                              float amplitude = 1.0f) {
+    pulp::audio::Buffer<float> buf(channels, samples);
+    for (int ch = 0; ch < channels; ++ch) {
+        for (int i = 0; i < samples; ++i) {
+            buf.channel(ch)[i] = amplitude *
+                std::sin(2.0f * std::numbers::pi_v<float> * freq *
+                         static_cast<float>(i) /
+                         static_cast<float>(sample_rate));
+        }
+    }
+    return buf;
+}
+
 /// Sine-wave vector. Same all-float expression as the determinism matrix's
 /// local helper (note: NOT bit-identical to make_sine, which promotes to
 /// double — both are preserved verbatim so converted suites keep their

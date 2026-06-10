@@ -56,15 +56,23 @@ CheckResult AudioContract::verify() const {
         return {true, msg.str()};
     }
 
-    // Leave a machine-readable record of what the signal looked like.
+    // Leave a machine-readable record of what the signal looked like. NOTE:
+    // this artifact always reflects the FULL-render metrics (result_.metrics),
+    // even when the failing check was a windowed / block-partition sub-view
+    // (e.g. expect_tone's held window) — the per-check message names the window
+    // it judged, so read the message for the sub-view and this artifact for the
+    // whole-render context.
     const auto artifact = write_metrics_artifact(result_.metrics,
                                                  result_.scenario);
     for (const auto& check : checks_) {
         if (!check.passed)
             msg << "contract '" << name_ << "': " << check.message << "\n";
     }
-    msg << "  scenario: " << result_.scenario << "\n"
-        << "  artifact: " << artifact.string();
+    msg << "  scenario: " << result_.scenario << "\n";
+    if (!artifact.empty())
+        msg << "  artifact: " << artifact.string();
+    else
+        msg << "  artifact: (write failed)";
     return {false, msg.str()};
 }
 
@@ -101,9 +109,12 @@ CheckResult expect_tone(const ScenarioResult& result, const ToneClaim& claim) {
     std::ostringstream label;
     label << "tone over held window [" << claim.window_start << ", "
           << claim.window_start + claim.window_frames << ")";
+    // assert_rms_between requires EVERY channel ≥ min_rms_dbfs, which already
+    // subsumes assert_not_silent (≥ min on at least one channel), so the
+    // not-silent check would be redundant here — the range claim is strictly
+    // stronger.
     return combine(label.str(),
-                   {assert_not_silent(metrics, claim.min_rms_dbfs),
-                    assert_rms_between(metrics, claim.min_rms_dbfs,
+                   {assert_rms_between(metrics, claim.min_rms_dbfs,
                                        claim.max_rms_dbfs),
                     assert_frequency_near(window.channel(0),
                                           result.sample_rate,

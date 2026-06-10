@@ -40,7 +40,7 @@ TEST_CASE("audio_metrics: full-scale sine has known peak/RMS/DC",
           "[audio-support][harness-1a]") {
     // 440 Hz @ 48 kHz, 4800 frames = exactly 44 cycles, so RMS is the ideal
     // 1/sqrt(2) and DC is ~0 without partial-cycle bias.
-    auto buf = make_sine(2, 4800, 440.0f, 48000.0);
+    auto buf = make_sine_f(2, 4800, 440.0f, 48000.0);
     auto m = analyze(buf, 48000.0);
 
     REQUIRE(m.num_channels == 2);
@@ -79,7 +79,7 @@ TEST_CASE("audio_metrics: DC offset is reported",
 
 TEST_CASE("audio_metrics: NaN and Inf samples are counted, not propagated",
           "[audio-support][harness-1a]") {
-    auto buf = make_sine(1, 1024, 440.0f, 48000.0, 0.5f);
+    auto buf = make_sine_f(1, 1024, 440.0f, 48000.0, 0.5f);
     buf.channel(0)[10] = std::numeric_limits<float>::quiet_NaN();
     buf.channel(0)[20] = std::numeric_limits<float>::infinity();
     buf.channel(0)[30] = -std::numeric_limits<float>::infinity();
@@ -116,7 +116,7 @@ TEST_CASE("audio_metrics: clipped samples are counted at the threshold",
 
 TEST_CASE("audio_metrics: silence runs are measured",
           "[audio-support][harness-1a]") {
-    auto buf = make_sine(1, 1000, 440.0f, 48000.0, 0.5f);
+    auto buf = make_sine_f(1, 1000, 440.0f, 48000.0, 0.5f);
     // Insert a 200-sample dropout (the plan's "standalone boundary went
     // silent for N consecutive blocks" signature, in miniature).
     for (int i = 300; i < 500; ++i) buf.channel(0)[i] = 0.0f;
@@ -140,7 +140,7 @@ TEST_CASE("audio_assertions: silence and non-silence",
     REQUIRE_FALSE(not_silent_check.passed);
     REQUIRE(not_silent_check.message.find("-inf dBFS") != std::string::npos);
 
-    auto tone = make_sine(2, 512, 440.0f, 48000.0, 0.5f);
+    auto tone = make_sine_f(2, 512, 440.0f, 48000.0, 0.5f);
     auto tone_m = analyze(tone, 48000.0);
     REQUIRE(assert_not_silent(tone_m, -60.0).passed);
     REQUIRE_FALSE(assert_silent(tone_m, -90.0).passed);
@@ -149,7 +149,7 @@ TEST_CASE("audio_assertions: silence and non-silence",
 TEST_CASE("audio_assertions: peak and RMS ranges",
           "[audio-support][harness-1a]") {
     // -6 dBFS sine: peak ≈ -6 dBFS, RMS ≈ -9 dBFS.
-    auto buf = make_sine(1, 4800, 440.0f, 48000.0, 0.501187f);
+    auto buf = make_sine_f(1, 4800, 440.0f, 48000.0, 0.501187f);
     auto m = analyze(buf, 48000.0);
 
     REQUIRE(assert_peak_between(m, -7.0, -5.0).passed);
@@ -165,7 +165,7 @@ TEST_CASE("audio_assertions: frequency estimate within cents tolerance",
     // Tolerance class: numeric. The zero-crossing estimator on a clean
     // 440 Hz sine over 9600 frames (88 cycles) should land well inside
     // ±5 cents.
-    auto buf = make_sine(1, 9600, 440.0f, 48000.0, 0.8f);
+    auto buf = make_sine_f(1, 9600, 440.0f, 48000.0, 0.8f);
     auto check = assert_frequency_near(buf.channel(0), 48000.0, 440.0, 5.0);
     INFO(check.message);
     REQUIRE(check.passed);
@@ -195,7 +195,7 @@ TEST_CASE("audio_assertions: sample-rate mismatch shows as pitch shift",
     // The plan's "chipmunk" regression: a 440 Hz tone rendered at 48 kHz but
     // played/analyzed as 96 kHz reads as 880 Hz. The helpers must make that
     // visible rather than vaguely "different".
-    auto buf = make_sine(1, 9600, 440.0f, 48000.0);
+    auto buf = make_sine_f(1, 9600, 440.0f, 48000.0);
     auto est = estimate_frequency(buf.channel(0), 96000.0);
     REQUIRE_THAT(est.hz, WithinRel(880.0, 0.01));
 }
@@ -204,8 +204,8 @@ TEST_CASE("audio_assertions: sample-rate mismatch shows as pitch shift",
 
 TEST_CASE("audio_assertions: null test detects exact and near matches",
           "[audio-support][harness-1a]") {
-    auto a = make_sine(2, 1024, 440.0f, 48000.0, 0.5f);
-    auto b = make_sine(2, 1024, 440.0f, 48000.0, 0.5f);
+    auto a = make_sine_f(2, 1024, 440.0f, 48000.0, 0.5f);
+    auto b = make_sine_f(2, 1024, 440.0f, 48000.0, 0.5f);
 
     REQUIRE(assert_null_near(a, b, -120.0).passed);
 
@@ -221,8 +221,8 @@ TEST_CASE("audio_assertions: null test detects exact and near matches",
 
 TEST_CASE("audio_assertions: null test rejects shape mismatch",
           "[audio-support][harness-1a]") {
-    auto a = make_sine(2, 512, 440.0f, 48000.0);
-    auto b = make_sine(1, 512, 440.0f, 48000.0);
+    auto a = make_sine_f(2, 512, 440.0f, 48000.0);
+    auto b = make_sine_f(1, 512, 440.0f, 48000.0);
     auto check = assert_null_near(a, b, -120.0);
     REQUIRE_FALSE(check.passed);
     REQUIRE(check.message.find("shape mismatch") != std::string::npos);
@@ -245,11 +245,37 @@ TEST_CASE("audio_assertions: duplicated channels are flagged",
     REQUIRE(assert_channels_independent(buf).passed);
 }
 
+TEST_CASE("audio_assertions: two silent channels are not flagged as duplicated",
+          "[audio-support][harness-1a]") {
+    // Two channels that are both silent are trivially sample-identical, but
+    // there is no signal to duplicate — that is not a routing bug.
+    pulp::audio::Buffer<float> silent(2, 512); // zero-initialized.
+    REQUIRE(assert_channels_independent(silent).passed);
+
+    // An identical near-zero constant on both channels is also not a duplication.
+    pulp::audio::Buffer<float> quiet_const(2, 512);
+    for (std::size_t i = 0; i < 512; ++i) {
+        quiet_const.channel(0)[i] = 1e-7f;
+        quiet_const.channel(1)[i] = 1e-7f;
+    }
+    REQUIRE(assert_channels_independent(quiet_const).passed);
+
+    // But two genuinely loud, identical channels still fire.
+    pulp::audio::Buffer<float> loud_dup(2, 512);
+    for (std::size_t i = 0; i < 512; ++i) {
+        const float v = std::sin(2.0f * std::numbers::pi_v<float> * 440.0f *
+                                 static_cast<float>(i) / 48000.0f);
+        loud_dup.channel(0)[i] = v;
+        loud_dup.channel(1)[i] = v;
+    }
+    REQUIRE_FALSE(assert_channels_independent(loud_dup).passed);
+}
+
 // ── signal summary ──────────────────────────────────────────────────────
 
 TEST_CASE("audio_metrics: summarize renders the agent-readable report",
           "[audio-support][harness-1a]") {
-    auto buf = make_sine(2, 9600, 220.0f, 48000.0, 0.5f);
+    auto buf = make_sine_f(2, 9600, 220.0f, 48000.0, 0.5f);
     auto m = analyze(buf, 48000.0);
     auto est = estimate_frequency(buf.channel(0), 48000.0);
     auto text = summarize(m, est);
@@ -272,7 +298,7 @@ TEST_CASE("audio_support: HeadlessHost render analyzed by the helpers",
     pulp::format::HeadlessHost host(pulp::examples::create_pulp_gain);
     host.prepare(48000.0, 1024);
 
-    auto in = make_sine(2, 1024, 440.0f, 48000.0, 0.5f);
+    auto in = make_sine_f(2, 1024, 440.0f, 48000.0, 0.5f);
     pulp::audio::Buffer<float> out(2, 1024);
     const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
     pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 1024);

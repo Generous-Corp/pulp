@@ -53,14 +53,21 @@ std::filesystem::path write_metrics_artifact(const BufferMetrics& metrics,
     if (name.empty())
         name = "scenario";
 
-    const auto dir =
-        std::filesystem::temp_directory_path() / "pulp-audio-metrics";
     std::error_code ec;
-    std::filesystem::create_directories(dir, ec); // best-effort; open() reports
+    const auto dir =
+        std::filesystem::temp_directory_path(ec) / "pulp-audio-metrics";
+    if (ec)
+        return {}; // no temp dir → nowhere to write.
+    std::filesystem::create_directories(dir, ec);
+    if (ec)
+        return {}; // could not create the artifact dir.
 
     const auto path = dir / (name + ".json");
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << metrics_to_json(metrics, scenario);
+    out.flush();
+    if (!out)
+        return {}; // open/write/flush failed — report no artifact, not a phantom.
     return path;
 }
 

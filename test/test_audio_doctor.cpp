@@ -253,3 +253,55 @@ TEST_CASE("Doctor: curve artifact round-trips", "[audio][doctor]") {
     REQUIRE(thd_parsed["harmonics"].isArray());
     CHECK(thd_parsed["harmonics"].size() >= 2);
 }
+
+TEST_CASE("Doctor: response guards an empty impulse reference window",
+          "[audio][doctor]") {
+    // The default reference is an impulse at frame 0. At offset 0 the input
+    // window contains it and the transfer curve is well-defined; at offset > 0
+    // the window misses the impulse, in_mag ≈ 0, and the bin-by-bin division
+    // would produce garbage. The buffer-level analyzer must reject that rather
+    // than silently return a meaningless curve.
+    constexpr int kFft = 1024;
+    constexpr int kRenderLen = kFft * 2; // room for an offset window.
+    auto impulse = make_impulse(/*channels=*/2, kRenderLen, 1.0f, /*position=*/0);
+    const double checkpoints[] = {1000.0};
+
+    ResponseOptions opts;
+    opts.fft_length = kFft;
+
+    // offset 0: the impulse is in the window, so the curve is computed.
+    opts.analysis_offset = 0;
+    REQUIRE_NOTHROW(response_relative_to_input(
+        std::as_const(impulse).view(), std::as_const(impulse).view(),
+        kSampleRate, checkpoints, opts));
+
+    // offset > 0: the impulse has fallen out of the reference window → guard.
+    opts.analysis_offset = kFft;
+    REQUIRE_THROWS_AS(
+        response_relative_to_input(std::as_const(impulse).view(),
+                                   std::as_const(impulse).view(), kSampleRate,
+                                   checkpoints, opts),
+        std::invalid_argument);
+}
+
+TEST_CASE("Doctor: THD rejects a DC-bin fundamental", "[audio][doctor]") {
+    // A fundamental that resolves to bin 0 has no energy after DC removal and
+    // would divide thd/thd+n by a near-zero floor. The analyzer must reject it.
+    constexpr int kFft = 1024;
+    const double tone = coherent_tone(64, kFft, kSampleRate);
+    auto signal = make_sine(/*channels=*/1, kFft, static_cast<float>(tone),
+                            kSampleRate, 0.5f);
+
+    ThdOptions topts;
+    topts.fft_length = kFft;
+
+    // A normal coherent tone resolves to a real bin and measures fine.
+    REQUIRE_NOTHROW(measure_thd(std::as_const(signal).view(), tone, kSampleRate,
+                                topts));
+
+    // A near-DC "fundamental" rounds to bin 0 and must be rejected.
+    const double dc_like = kSampleRate / kFft / 4.0; // < half a bin → bin 0.
+    REQUIRE_THROWS_AS(measure_thd(std::as_const(signal).view(), dc_like,
+                                  kSampleRate, topts),
+                      std::invalid_argument);
+}

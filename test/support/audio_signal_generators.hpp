@@ -77,10 +77,11 @@ pulp::audio::Buffer<float> make_swept_sine(int channels, int frames,
 /// Deterministic uniform white noise in [-amplitude, amplitude).
 ///
 /// PRNG (the whole determinism contract): xorshift64* seeded through one
-/// SplitMix64 scramble of `seed ^ channel-index mixing` so channel 0 and
+/// SplitMix64 scramble of `seed + 0x9E3779B97F4A7C15 * (channel + 1)` — an
+/// additive golden-ratio per-channel offset (NOT an XOR) — so channel 0 and
 /// channel 1 are decorrelated but each is fully reproducible from `seed`.
 /// Expression per sample: `x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
-/// u = x * 0x2545F4914F6CDD1D; sample = amplitude * (u / 2^63 - 1.0)`.
+/// u = x * 0x2545F4914F6CDD1D; sample = amplitude * ((u >> 11) / 2^53 * 2 - 1)`.
 /// A zero-state lock is impossible because SplitMix64 never yields 0 for
 /// distinct inputs mapped through its finalizer (we also OR in 1).
 pulp::audio::Buffer<float> make_white_noise(int channels, int frames,

@@ -68,12 +68,18 @@ BufferMetrics analyze(const pulp::audio::BufferView<const float>& buffer,
         std::uint64_t current_silence_run = 0;
 
         for (float sample : span) {
+            // A non-finite sample is a defect, not silence: it breaks any
+            // running silence stretch so two silent runs separated by a NaN/Inf
+            // glitch are not merged into one longer "silence" run. Count it,
+            // reset the run, and skip the accumulators it would poison.
             if (std::isnan(sample)) {
                 ++out.nan_samples;
-                continue; // NaN poisons accumulators; count it, skip it.
+                current_silence_run = 0;
+                continue;
             }
             if (std::isinf(sample)) {
                 ++out.inf_samples;
+                current_silence_run = 0;
                 continue;
             }
             const double s = sample;

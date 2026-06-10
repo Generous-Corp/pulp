@@ -2,8 +2,8 @@
 
 /// @file audio_inspector_window.hpp
 /// Separate developer Audio Inspector tool window — live signal observability
-/// (meters, probe-stage status, copied waveform, correlation/balance, device
-/// summary) built on the Phase 5 realtime probe.
+/// (meters, probe-stage status, copied waveform, L/R level-match/balance,
+/// device summary) built on the Phase 5 realtime probe.
 ///
 /// This is a SIBLING of `InspectorWindow` (the layout inspector), not a tab
 /// inside it. The two tools share window / command / visual primitives but own

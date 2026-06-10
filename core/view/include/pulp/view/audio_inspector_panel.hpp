@@ -62,6 +62,16 @@ private:
     bool live_ = false;
 };
 
+/// dBFS floor used by the inspector's meter fill (and the empty-bar anchor).
+inline constexpr float kInspectorMeterFloorDb = -60.0f;
+
+/// Map a linear amplitude (1.0 == full scale) to a 0..1 meter fill on the SAME
+/// dBFS scale the panel's text labels print, so a bar and its "… dBFS" label
+/// agree. `kInspectorMeterFloorDb` maps to an empty bar, 0 dBFS to a full bar;
+/// passing the raw linear amplitude to `Meter::set_level` would instead make
+/// the bar read amplitude while the label reads dBFS — two different scales.
+float dbfs_meter_fill(float linear);
+
 /// Audio Inspector content panel. Self-contained: build the widget tree once,
 /// then call `update()` each UI tick with the latest copied snapshot.
 class AudioInspectorPanel : public View {

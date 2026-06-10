@@ -33,6 +33,13 @@ const char* stage_name(audio::AudioProbeStage stage) {
 
 }  // namespace
 
+float dbfs_meter_fill(float linear) {
+    if (linear <= 1.0e-6f) return 0.0f;
+    const float db = 20.0f * std::log10(linear);
+    return std::clamp((db - kInspectorMeterFloorDb) / -kInspectorMeterFloorDb,
+                      0.0f, 1.0f);
+}
+
 // ── AudioWaveformView ───────────────────────────────────────────────────────
 
 AudioWaveformView::AudioWaveformView() {
@@ -241,9 +248,14 @@ void AudioInspectorPanel::update(Status status,
     }
 
     // Drive the visual meters with the snapshot levels (instantaneous, no
-    // ballistics decay needed for a live readout).
-    if (peak_meter_) peak_meter_->set_level(snapshot_.rms_max, snapshot_.peak_max);
-    if (rms_meter_) rms_meter_->set_level(snapshot_.rms_max, snapshot_.rms_max);
+    // ballistics decay needed for a live readout). Map amplitude through the
+    // same dBFS transform the labels use so the bar height matches the dBFS text.
+    if (peak_meter_)
+        peak_meter_->set_level(dbfs_meter_fill(snapshot_.rms_max),
+                               dbfs_meter_fill(snapshot_.peak_max));
+    if (rms_meter_)
+        rms_meter_->set_level(dbfs_meter_fill(snapshot_.rms_max),
+                              dbfs_meter_fill(snapshot_.rms_max));
 
     refresh_labels();
 }

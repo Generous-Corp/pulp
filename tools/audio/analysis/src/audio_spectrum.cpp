@@ -143,6 +143,21 @@ ResponseCurve response_relative_to_input(
     const auto in_mag = spectrum_magnitude(in_seg);
     const auto out_mag = spectrum_magnitude(out_seg);
 
+    // Guard a near-silent reference window. The default stimulus is an impulse
+    // at frame 0, so with analysis_offset > 0 the input window [offset, offset+N)
+    // no longer contains the impulse → in_mag ≈ 0, and the bin-by-bin division
+    // would yield garbage (huge +dB). Require the reference window to carry real
+    // energy so a caller can't silently get a meaningless transfer curve. A
+    // non-impulse reference (e.g. a decoded WAV) with offset > 0 is fine as long
+    // as its window is not empty.
+    double in_energy = 0.0;
+    for (double m : in_mag)
+        in_energy += m * m;
+    require(in_energy > kLinearFloor,
+            "reference (input) analysis window is effectively silent — an "
+            "impulse reference requires analysis_offset == 0; use "
+            "magnitude_spectrum_curve for an offset self-spectrum");
+
     ResponseCurve curve;
     curve.stimulus = "impulse";
     curve.window = options.window;
@@ -267,6 +282,9 @@ ThdResult measure_thd(const pulp::audio::BufferView<const float>& signal,
     thd.num_harmonics = options.num_harmonics;
 
     const int fund_bin = nearest_bin(fundamental_hz, bin_hz, bins);
+    // DC was removed, so a fundamental that resolves to bin 0 has no signal to
+    // measure against and would make thd/thd+n divide by a near-zero floor.
+    require(fund_bin >= 1, "fundamental_hz must resolve to a non-DC bin");
     const double fund_mag = mag[static_cast<std::size_t>(fund_bin)];
     thd.harmonics.push_back({1, fundamental_hz, fund_mag, 0.0});
 

@@ -86,8 +86,8 @@ Measure it like Plugin Doctor (offline Doctor):
 ```cpp
 auto curve = response_relative_to_input(sc, {50.0, 8000.0});
 REQUIRE(curve.attenuation_db_at(8000.0) >= 20.0);   // "drops ≥20 dB at 8 kHz"
-auto thd = measure_thd(/* steady bin-coherent sine through the processor */);
-// thd.thd_percent, thd.thd_plus_n, thd.harmonics[...]
+auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sine
+// thd.thd_percent(), thd.thd_plus_n, thd.harmonics[...]
 ```
 
 ## Discipline that keeps it trustworthy

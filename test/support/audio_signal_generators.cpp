@@ -23,12 +23,20 @@ std::uint64_t mix_seed(std::uint64_t seed, std::uint64_t channel) {
 }
 
 // xorshift64* step; returns uniform double in [-1.0, 1.0).
+//
+// Uses the top 53 bits (the double mantissa width): `u >> 11` is an integer in
+// [0, 2^53) that maps EXACTLY into a double, so `(u >> 11) / 2^53` is in [0, 1)
+// with no rounding, and `* 2 - 1` is provably in [-1, 1). Dividing the full
+// 64-bit `u` by 2^63 instead would double-round near the top of the range
+// (values close to 2^64 round up to 2^64 exactly), yielding 1.0 and breaking
+// the half-open contract.
 double next_uniform(std::uint64_t& state) {
     state ^= state >> 12;
     state ^= state << 25;
     state ^= state >> 27;
     const std::uint64_t u = state * 0x2545F4914F6CDD1DULL;
-    return static_cast<double>(u) / 9223372036854775808.0 - 1.0; // u/2^63 − 1
+    const double unit = static_cast<double>(u >> 11) / 9007199254740992.0; // /2^53
+    return unit * 2.0 - 1.0; // [-1.0, 1.0)
 }
 
 void require(bool ok, const char* what) {

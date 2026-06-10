@@ -32,6 +32,9 @@ std::string metrics_to_json(const BufferMetrics& metrics,
 /// `<temp>/pulp-audio-metrics/<sanitized-scenario>.json` (overwriting any
 /// previous run's artifact for the same scenario) and return the path.
 /// Scenario names are sanitized to [A-Za-z0-9._-] for the filename only.
+/// Returns an empty path if the temp dir is unavailable or the open/write
+/// fails — callers should treat an empty path as "no artifact written" rather
+/// than reporting a phantom successful write.
 std::filesystem::path write_metrics_artifact(const BufferMetrics& metrics,
                                              std::string_view scenario);
 
