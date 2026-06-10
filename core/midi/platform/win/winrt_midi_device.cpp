@@ -22,6 +22,7 @@
 
 #if defined(_WIN32) && defined(PULP_HAS_WINRT_MIDI)
 
+#include <pulp/midi/ble_midi_registry.hpp>
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_conversion.hpp>
@@ -30,6 +31,7 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -122,8 +124,20 @@ public:
     }
 
     bool open(const std::string& port_id, MidiInputCallback callback) override {
-        ensure_winrt_init();
         callback_ = std::move(callback);
+
+        // BLE-MIDI ports route through the BleMidiPortRegistry, not the Midi2
+        // endpoint API — a connected BLE peripheral's bytes come from the WinRT
+        // BLE central's GATT-notify decoder. Same merge as the mmeapi backend.
+        if (BleMidiPortRegistry::instance().is_input(port_id)) {
+            ble_port_id_ = port_id;
+            const bool attached = BleMidiPortRegistry::instance().attach_input(
+                port_id, callback_, sysex_callback_);
+            is_open_ = attached;
+            return attached;
+        }
+
+        ensure_winrt_init();
 
         try {
             session_ = m2::MidiSession::Create(L"Pulp MIDI Input");
@@ -161,6 +175,13 @@ public:
     }
 
     void close() override {
+        // BLE-MIDI input: detach from the registry; there is no Midi2 endpoint.
+        if (!ble_port_id_.empty()) {
+            BleMidiPortRegistry::instance().detach_input(ble_port_id_);
+            ble_port_id_.clear();
+            is_open_ = false;
+            return;
+        }
         try {
             if (connection_) {
                 if (message_token_) {
@@ -286,6 +307,9 @@ private:
     bool                       is_open_ = false;
     bool                       have_origin_ = false;
     uint64_t                   origin_ticks_ = 0;
+    // Non-empty when this input is a BLE-MIDI port routed through the
+    // BleMidiPortRegistry rather than a Midi2 endpoint connection.
+    std::string                ble_port_id_;
 };
 
 // ── WinrtMidiOutput ──────────────────────────────────────────────────────
@@ -295,6 +319,14 @@ public:
     ~WinrtMidiOutput() override { close(); }
 
     bool open(const std::string& port_id) override {
+        // BLE-MIDI output ports route through the registry's GATT-write sink,
+        // not the Midi2 endpoint API.
+        if (BleMidiPortRegistry::instance().is_output(port_id)) {
+            ble_sink_ = BleMidiPortRegistry::instance().output_sink(port_id);
+            is_open_ = static_cast<bool>(ble_sink_);
+            return is_open_;
+        }
+
         ensure_winrt_init();
         try {
             session_ = m2::MidiSession::Create(L"Pulp MIDI Output");
@@ -320,6 +352,12 @@ public:
     }
 
     void close() override {
+        // BLE-MIDI output: drop the registry sink; there is no Midi2 endpoint.
+        if (ble_sink_) {
+            ble_sink_ = nullptr;
+            is_open_ = false;
+            return;
+        }
         try {
             if (connection_ && session_) {
                 session_.DisconnectEndpointConnection(connection_.ConnectionId());
@@ -335,6 +373,15 @@ public:
     bool is_open() const override { return is_open_; }
 
     void send(const MidiEvent& event) override {
+        // BLE-MIDI: forward the raw message bytes to the central's GATT-write
+        // sink, which encodes a BLE-MIDI packet and performs WriteValueAsync.
+        if (ble_sink_) {
+            const auto* d = event.data();
+            int len = 3;
+            if ((d[0] & 0xF0) == 0xC0 || (d[0] & 0xF0) == 0xD0) len = 2;
+            ble_sink_(std::vector<uint8_t>(d, d + len));
+            return;
+        }
         if (!connection_) return;
         try {
             // Promote the MIDI 1.0 short message to a MIDI 2.0 channel-voice
@@ -359,6 +406,9 @@ private:
     m2::MidiSession            session_{nullptr};
     m2::MidiEndpointConnection connection_{nullptr};
     bool                       is_open_ = false;
+    // Non-empty when this output is a BLE-MIDI port routed through the
+    // BleMidiPortRegistry's GATT-write sink rather than a Midi2 endpoint.
+    std::function<void(const std::vector<uint8_t>&)> ble_sink_;
 };
 
 // ── WinrtMidiSystem ──────────────────────────────────────────────────────
@@ -373,11 +423,20 @@ public:
     }
 
     std::vector<MidiPortInfo> enumerate_inputs() override {
-        return enumerate_endpoints(/*want_input=*/true);
+        std::vector<MidiPortInfo> ports = enumerate_endpoints(/*want_input=*/true);
+        // Merge connected BLE-MIDI peripherals published by the WinRT BLE
+        // central — Windows MIDI Services does not auto-expose a GATT notify
+        // stream as a Midi2 endpoint, so the registry is the bridge.
+        auto ble = BleMidiPortRegistry::instance().list_inputs();
+        ports.insert(ports.end(), ble.begin(), ble.end());
+        return ports;
     }
 
     std::vector<MidiPortInfo> enumerate_outputs() override {
-        return enumerate_endpoints(/*want_input=*/false);
+        std::vector<MidiPortInfo> ports = enumerate_endpoints(/*want_input=*/false);
+        auto ble = BleMidiPortRegistry::instance().list_outputs();
+        ports.insert(ports.end(), ble.begin(), ble.end());
+        return ports;
     }
 
     std::unique_ptr<MidiInput> create_input() override {

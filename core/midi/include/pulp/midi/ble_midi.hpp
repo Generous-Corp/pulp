@@ -14,8 +14,10 @@
 //   Linux:        BlueZ (org.bluez.GattCharacteristic1 notifications) +
 //                 ALSA virtual port for output. Scaffold only in this
 //                 slice — the BlueZ D-Bus glue lands in a follow-up.
-//   Windows:      WinRT BluetoothLEAdvertisementWatcher +
-//                 GattCharacteristic.ValueChanged. Scaffold only.
+//   Windows:      WinRT BluetoothLEAdvertisementWatcher scan +
+//                 GATT FromBluetoothAddressAsync connect +
+//                 GattCharacteristic.ValueChanged notify, bridged into the
+//                 MidiSystem via the BleMidiPortRegistry.
 //   Android:      BluetoothLeScanner + BluetoothGatt notification
 //                 via the existing JNI bridge. Scaffold only.
 //

@@ -370,3 +370,94 @@ TEST_CASE("BleMidiPortRegistry attach_input rejects an unregistered port",
         "ble-midi-in:/test/never-registered-attach",
         [](const MidiEvent&) {}, [](const std::vector<uint8_t>&, double) {}));
 }
+
+// ── Windows port-merge contract (transport-free) ─────────────────────────────
+//
+// The WinRT BLE central registers a connected peripheral with the
+// BleMidiPortRegistry using the "ble-midi-in:<12-hex-address>" /
+// "ble-midi-out:<12-hex-address>" id convention (the 12-hex form is the
+// Windows peripheral id produced by address_to_id() from the 48-bit Bluetooth
+// address). The Windows MidiSystem (winmidi_device.cpp / winrt_midi_device.cpp)
+// then merges those ports and routes open() through the registry. The real
+// GATT connect/notify path needs BLE hardware and is QA-gated; these tests pin
+// the cross-platform seam the Windows backend drives, exactly the way the ALSA
+// tests above pin it for Linux. They run on every host.
+
+TEST_CASE("BleMidiPortRegistry round-trips a Windows-style BLE connection "
+          "(decoder in / GATT-write sink out)", "[ble-midi][registry][windows]") {
+    auto& reg = BleMidiPortRegistry::instance();
+    // 12-hex peripheral id == the Windows address_to_id() form.
+    const std::string peripheral = "aabbccddeeff";
+    const std::string in_id = "ble-midi-in:" + peripheral;
+    const std::string out_id = "ble-midi-out:" + peripheral;
+    const std::string name = "WinBLE Keyboard";
+
+    // What the WinRT central does on Connected: register input (decoder
+    // delivery target) + output (GATT-write sink). The sink encodes the bytes
+    // into a BLE-MIDI packet exactly as gatt_write() does on Windows.
+    std::vector<std::vector<uint8_t>> gatt_writes;
+    reg.register_input(in_id, name);
+    reg.register_output(out_id, name,
+        [&](const std::vector<uint8_t>& bytes) {
+            auto packet = encode_ble_midi_packet(bytes.data(), bytes.size(),
+                                                 /*timestamp_ms=*/0);
+            gatt_writes.push_back(packet);
+        });
+
+    // Both ports surface in the merged enumeration (what the MidiSystem
+    // insert()s into enumerate_inputs/outputs).
+    REQUIRE(reg.is_input(in_id));
+    REQUIRE(reg.is_output(out_id));
+    REQUIRE(find_port(reg.list_inputs(), in_id) != nullptr);
+    REQUIRE(find_port(reg.list_outputs(), out_id) != nullptr);
+
+    // Host opens the input (WinMidiInput::open → attach_input).
+    std::vector<MidiEvent> events;
+    REQUIRE(reg.attach_input(
+        in_id,
+        [&](const MidiEvent& e) { events.push_back(e); },
+        [&](const std::vector<uint8_t>&, double) {}));
+
+    // Inbound: the ValueChanged handler feeds the per-connection decoder, which
+    // delivers through deliver_message(). Drive the real decoder with a real
+    // BLE-MIDI notify packet (header + ts + Note On) to prove the wire path the
+    // Windows on_value_changed → decoder → registry chain uses.
+    const uint8_t notify_packet[] = { 0x80, 0x80, 0x90, 60, 100 };
+    BleMidiPacketDecoder decoder;
+    decoder.set_message_callback(
+        [&](const std::vector<uint8_t>& bytes, uint32_t ts_ms) {
+            reg.deliver_message(in_id, bytes,
+                                static_cast<double>(ts_ms) / 1000.0);
+        });
+    REQUIRE(decoder.decode(notify_packet, sizeof(notify_packet)));
+    REQUIRE(events.size() == 1);
+    REQUIRE(events[0].is_note_on());
+    REQUIRE(events[0].note() == 60);
+    REQUIRE(events[0].velocity() == 100);
+
+    // Outbound: host sends through WinMidiOutput::send → registry sink →
+    // encode_ble_midi_packet → WriteValueAsync. Assert the encoded packet
+    // round-trips back to the original message through the decoder.
+    auto sink = reg.output_sink(out_id);
+    REQUIRE(static_cast<bool>(sink));
+    sink({0xB0, 7, 64});  // CC#7 volume = 64
+    REQUIRE(gatt_writes.size() == 1);
+
+    std::vector<std::vector<uint8_t>> decoded_out;
+    BleMidiPacketDecoder out_dec;
+    out_dec.set_message_callback(
+        [&](const std::vector<uint8_t>& bytes, uint32_t) {
+            decoded_out.push_back(bytes);
+        });
+    REQUIRE(out_dec.decode(gatt_writes[0].data(), gatt_writes[0].size()));
+    REQUIRE(decoded_out.size() == 1);
+    REQUIRE(decoded_out[0] == std::vector<uint8_t>{0xB0, 7, 64});
+
+    // Disconnect tears the ports down (WinRT disconnect() → unregister_*).
+    reg.detach_input(in_id);
+    reg.unregister_input(in_id);
+    reg.unregister_output(out_id);
+    REQUIRE_FALSE(reg.is_input(in_id));
+    REQUIRE_FALSE(reg.is_output(out_id));
+    REQUIRE_FALSE(static_cast<bool>(reg.output_sink(out_id)));
+}

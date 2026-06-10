@@ -62,14 +62,19 @@ elseif(WIN32)
     target_sources(pulp-midi PRIVATE
         platform/win/winmidi_device.cpp
         platform/win/winrt_midi_device.cpp
-        # BLE MIDI — WinRT BluetoothLEAdvertisementWatcher scan backend.
-        # Unlike the WinRT MIDI 2.0 backend (winrt_midi_device.cpp), BLE
-        # GATT lives in Windows.Devices.Bluetooth* in the BASE Windows SDK
-        # cppwinrt projection, so no out-of-band vcpkg/NuGet dependency is
-        # needed — just the OS umbrella import libs below. This TU defines
+        # BLE MIDI — WinRT BluetoothLEAdvertisementWatcher scan +
+        # GATT connect/notify backend. Unlike the WinRT MIDI 2.0 backend
+        # (winrt_midi_device.cpp), BLE GATT lives in
+        # Windows.Devices.Bluetooth* / Windows.Devices.Bluetooth.
+        # GenericAttributeProfile and the byte-buffer helpers in
+        # Windows.Storage.Streams, all in the BASE Windows SDK cppwinrt
+        # projection — so no out-of-band vcpkg/NuGet dependency is needed,
+        # just the OS umbrella import libs below. This TU defines
         # create_ble_midi_central() for Windows, so it REPLACES
         # src/ble_midi_stub.cpp (linking both would duplicate the symbol).
-        # Scan-only in this slice; GATT connect/notify lands in a follow-up.
+        # Connected peripherals are published into the BleMidiPortRegistry,
+        # which winmidi_device.cpp / winrt_midi_device.cpp merge into the
+        # platform MidiSystem's port list.
         platform/win/ble_midi_win.cpp
     )
     target_link_libraries(pulp-midi PRIVATE
