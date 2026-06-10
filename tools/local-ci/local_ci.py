@@ -2669,6 +2669,10 @@ def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list
     return _queue_orchestrator.queue_status_groups(queue)
 
 
+def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int = 5) -> list[dict]:
+    return _queue_orchestrator.recent_completed_jobs_for_status(completed_jobs, limit=limit)
+
+
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
     return _queue_lifecycle.reconcile_running_jobs_unlocked(
         queue,
@@ -4781,9 +4785,10 @@ def cmd_status(_args: argparse.Namespace) -> int:
     else:
         print("\nNo pending jobs.")
 
-    if completed:
-        print(f"\nRecent ({min(len(completed), 5)}):")
-        for job in completed[-5:]:
+    recent_completed = recent_completed_jobs_for_status(completed)
+    if recent_completed:
+        print(f"\nRecent ({len(recent_completed)}):")
+        for job in recent_completed:
             result_file = job.get("result_file")
             if result_file and Path(result_file).exists():
                 result = load_result(Path(result_file))

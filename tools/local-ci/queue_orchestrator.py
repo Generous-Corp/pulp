@@ -3,7 +3,8 @@
 This module owns job identity, enqueue duplicate/priority policy, enqueue
 supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
-target-state status detail formatting, status active-target selection,
+target-state status detail formatting, status active-target selection and
+recent-completed selection,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 completed-job state mutation, queue status grouping, and completed-queue
@@ -503,6 +504,12 @@ def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list
     running = [job for job in queue if job.get("status") == "running"]
     completed = [job for job in queue if job.get("status") == "completed"]
     return pending, running, completed
+
+
+def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int = 5) -> list[dict]:
+    if limit <= 0:
+        return []
+    return completed_jobs[-limit:]
 
 
 def claim_next_job_unlocked(
