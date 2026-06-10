@@ -941,6 +941,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 |-------|---------|
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
+| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD) |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
 | `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
 | `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
@@ -968,11 +969,11 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-27 skills as of 2026-06-02. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+28 skills as of 2026-06-10. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 
-Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/create`, `/status`, `/validate`, `/design`, `/ship`, `/import-design`), skills, and hooks. The plugin manifest is at `.claude-plugin/plugin.json`. See `docs/guides/claude-code-plugin.md` for installation and full details.
+Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/create`, `/status`, `/validate`, `/design`, `/ship`, `/import-design`, `/audio-harness`), skills, and hooks. The plugin manifest is at `.claude-plugin/plugin.json`. See `docs/guides/claude-code-plugin.md` for installation and full details.
 
 ### CI Workflow
 

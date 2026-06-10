@@ -46,7 +46,9 @@ requires:
 audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, projects, project
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion
+build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, audio-harness
+
+`audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI (model/bundle tooling, intentionally no slash command, above). The `pulp audio validate …` harness CLI is a later phase; when it lands, upgrade `/audio-harness` to wrap it and add `/audio-inspect` for the live Audio Inspector window.
 
 ### 4. Update docs
 - [ ] Add/update section in `docs/reference/cli.md`
