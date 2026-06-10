@@ -67,6 +67,8 @@ namespace pulp::state { class PropertiesFile; }
 
 namespace pulp::view {
 
+class View;
+
 /// Opaque 32-bit command identifier. Apps define their own enum-style
 /// constants (e.g. `constexpr CommandID kFileOpen = 0x1001`). Zero is
 /// reserved for "no command".
@@ -227,5 +229,16 @@ private:
     std::vector<CommandHandler*> handlers_;
     ShortcutMap shortcuts_;
 };
+
+/// Install `registry` as the root view's single global-key dispatcher:
+/// assigns `root.on_global_key` to forward every key event into
+/// `registry.dispatch_key_event()`.
+///
+/// This is the one sanctioned writer of `View::on_global_key` in shells
+/// that adopt command routing — tools register `CommandHandler`s with the
+/// shared registry instead of competing for (and clobbering) the raw hook.
+/// The registry must outlive the root view, or the caller must clear
+/// `root.on_global_key` first.
+void route_global_keys(View& root, CommandRegistry& registry);
 
 } // namespace pulp::view

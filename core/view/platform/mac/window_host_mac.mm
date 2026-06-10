@@ -885,12 +885,10 @@ static void install_app_menu(NSString* appName) {
 
 // ── Keyboard input ───────────────────────────────────────────────
 
-// pulp #2128 follow-up — NSResponder routes Cmd-modified key chords
-// through performKeyEquivalent:, NOT keyDown:. Without this override,
-// every Cmd+,/Cmd+S/Cmd+? chord is consumed by the responder chain and
-// never reaches View::on_global_key OR the script global-key dispatcher,
-// so `registerShortcut(...)` callbacks and `window.addEventListener
-// ('keydown', ...)` listeners are silently dead for Cmd-modified chords.
+// pulp #2128 follow-up — NSResponder routes Cmd-modified chords through
+// performKeyEquivalent:, NOT keyDown:. Without this override every Cmd
+// chord is consumed by the responder chain before View::on_global_key or
+// the script dispatcher, leaving Cmd shortcut listeners silently dead.
 - (BOOL)performKeyEquivalent:(NSEvent*)event {
     if (!self.rootView) return NO;
     auto key  = key_code_from_ns(event.keyCode);
@@ -900,15 +898,17 @@ static void install_app_menu(NSString* appName) {
     gke.modifiers = mods;
     gke.is_down = true;
     gke.is_repeat = event.isARepeat;
-    if (self.rootView->on_global_key) self.rootView->on_global_key(gke);
-    // Fan out through the script runtime hook when that target is linked;
-    // core-only view consumers keep this as a no-op.
-    pulp::view::script_events::dispatch_global_key(static_cast<int>(key),
-                                                   mods,
-                                                   /*is_down=*/true);
-    // Return NO so the responder chain still considers standard menu
-    // shortcuts (Cmd+W close, Cmd+Q quit, etc.) — the bridge fan-out is
-    // additive, not consuming.
+    // Honor consumption: a chord the root hook claims (e.g. the shell's
+    // CommandRegistry dispatch) returns YES — no menu fallthrough, and no
+    // script fan-out so the command can't double-fire a JS 'keydown'.
+    if (self.rootView->on_global_key && self.rootView->on_global_key(gke)) {
+        [self setNeedsDisplay:YES];
+        return YES;
+    }
+    // Unconsumed: additive script fan-out (no-op when the script target is
+    // not linked); NO keeps menu shortcuts (Cmd+W, Cmd+Q) working.
+    pulp::view::script_events::dispatch_global_key(
+        static_cast<int>(key), mods, /*is_down=*/true);
     return NO;
 }
 

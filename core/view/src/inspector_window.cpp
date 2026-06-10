@@ -63,6 +63,13 @@ InspectorWindow::InspectorWindow(View& target_root, WindowManager* mgr,
 }
 
 InspectorWindow::~InspectorWindow() {
+    // RAII handler removal — the registry must never be left holding a
+    // pointer to a destroyed tool (dangling-handler dispatch is a UAF).
+    if (registry_) {
+        registry_->remove_handler(this);
+        registry_ = nullptr;
+    }
+
     // Remove highlight from target root
     if (highlight_ptr_) {
         target_root_.remove_child(highlight_ptr_);
@@ -142,6 +149,14 @@ void InspectorWindow::show() {
         opts.width = 320;
         opts.height = 500;
         opts.resizable = true;
+        // Tool-window close policy: closing the inspector must never stop
+        // the app. Safe for the programmatic path too — the macOS host's
+        // request_close() routes a non-initially_hidden window through
+        // performClose: → windowShouldClose:, where the secondary role
+        // skips the app-stop (window_host_mac.mm). We never set
+        // initially_hidden, so the hidden-close path (which always stops
+        // the app) is not reachable here.
+        opts.secondary_window = true;
 
         WindowType type = WindowType::inspector;
         opts.window_type = &type;
@@ -239,6 +254,40 @@ void InspectorWindow::select_view(View* view) {
     update_highlight();
 }
 
+void InspectorWindow::register_command_handler(CommandRegistry& registry) {
+    if (registry_ == &registry) return;
+    if (registry_) registry_->remove_handler(this);
+    registry_ = &registry;
+
+    CommandInfo info;
+    info.id = kToggleCommand;
+    info.name = "Toggle Layout Inspector";
+    info.category = "Developer";
+    info.default_key = KeyCode::i;
+    // Same chord as install_keyboard_shortcut(): Cmd+I on macOS, Ctrl+I
+    // elsewhere. register_command() respects a user rebind loaded into the
+    // ShortcutMap before this call.
+#ifdef __APPLE__
+    info.default_modifiers = kModCmd;
+#else
+    info.default_modifiers = kModCtrl;
+#endif
+    registry.register_command(info);
+    registry.add_handler(this);
+}
+
+std::vector<CommandID> InspectorWindow::commands() const {
+    return {kToggleCommand};
+}
+
+bool InspectorWindow::perform_command(CommandID id) {
+    if (id != kToggleCommand) return false;
+    toggle();
+    return true;
+}
+
+// DEPRECATED — see header. Single-tool direct assignment of the global-key
+// hook; new shells route through a CommandRegistry instead.
 void InspectorWindow::install_keyboard_shortcut() {
     target_root_.on_global_key = [this](const KeyEvent& event) -> bool {
         if (!event.is_down) return false;

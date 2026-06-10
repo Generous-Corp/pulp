@@ -6,6 +6,7 @@
 /// Uses existing multi-window infrastructure (WindowManager, WindowType::inspector).
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/command_registry.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/tree_view.hpp>
 #include <pulp/view/property_list.hpp>
@@ -38,10 +39,20 @@ private:
 
 /// Floating inspector window that displays the view hierarchy and properties
 /// of a target view tree in a separate OS window.
-class InspectorWindow {
+///
+/// Privately implements `CommandHandler` so the inspector can register its
+/// toggle command with a shell-owned `CommandRegistry` (see
+/// `register_command_handler`) without exposing the handler interface as
+/// public API.
+class InspectorWindow : private CommandHandler {
 public:
     using HostFactory = std::function<std::unique_ptr<WindowHost>(
         View& root, const WindowOptions& options)>;
+
+    /// Command id for the "Toggle Layout Inspector" action registered by
+    /// `register_command_handler()`. Stable so apps can reference it from
+    /// menus or a `KeyMappingEditor`. ASCII 'PLPI'.
+    static constexpr CommandID kToggleCommand = 0x504C5049;
 
     /// Construct an inspector targeting the given root view.
     /// @param target_root  The root of the view tree to inspect.
@@ -75,14 +86,38 @@ public:
     /// Select a specific view and update the property list.
     void select_view(View* view);
 
-    /// Install Cmd+I / Ctrl+I keyboard shortcut on the target root's on_global_key.
+    /// Register the toggle command (`kToggleCommand`, default chord
+    /// Cmd+I / Ctrl+I) with a caller-owned `CommandRegistry`. Preferred over
+    /// `install_keyboard_shortcut()`: the registry path composes with other
+    /// tools instead of clobbering `View::on_global_key`. RAII: the handler
+    /// is removed automatically in the destructor, so dispatch after this
+    /// window is destroyed simply finds no handler. The registry must
+    /// outlive this window (the destructor calls back into it).
+    /// Re-registering moves the handler to the new registry. Does NOT touch
+    /// `target_root_.on_global_key`; route the root key path once per shell
+    /// with `route_global_keys(root, registry)`.
+    void register_command_handler(CommandRegistry& registry);
+
+    /// Install Cmd+I / Ctrl+I keyboard shortcut on the target root's
+    /// on_global_key.
+    ///
+    /// DEPRECATED — direct assignment owns the entire global-key hook, so a
+    /// second tool installing its shortcut silently disables this one. New
+    /// shells should own a `CommandRegistry`, call `route_global_keys()`
+    /// once, and use `register_command_handler()` instead. Kept for
+    /// backward compatibility with single-tool callers.
     void install_keyboard_shortcut();
 
 private:
+    // CommandHandler (private base) — registry dispatch entry points.
+    std::vector<CommandID> commands() const override;
+    bool perform_command(CommandID id) override;
+
     View& target_root_;
     WindowManager* manager_ = nullptr;
     WindowHost* parent_host_ = nullptr;
     HostFactory host_factory_;
+    CommandRegistry* registry_ = nullptr;
 
     // Inspector window's own view tree
     std::unique_ptr<View> inspector_root_;

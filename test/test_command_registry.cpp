@@ -13,6 +13,7 @@
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/command_registry.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/inspector_window.hpp>
 #include <pulp/view/key_mapping_editor.hpp>
 
 #include <algorithm>
@@ -334,4 +335,102 @@ TEST_CASE("format_chord renders modifiers in canonical order",
     REQUIRE(format_chord(KeyCode::escape, kModCtrl | kModAlt) ==
             "Ctrl+Alt+Escape");
     REQUIRE(format_chord(KeyCode::unknown, 0) == "—");
+}
+
+// ── Phase 4: command routing for developer-tool windows ─────────────────
+
+namespace {
+
+// Same chord install_keyboard_shortcut() matched: Cmd+I (macOS) / Ctrl+I.
+#ifdef __APPLE__
+constexpr std::uint16_t kMainMod = kModCmd;
+#else
+constexpr std::uint16_t kMainMod = kModCtrl;
+#endif
+
+KeyEvent toggle_chord() {
+    KeyEvent e;
+    e.key = KeyCode::i;
+    e.modifiers = kMainMod;
+    e.is_down = true;
+    return e;
+}
+
+} // namespace
+
+TEST_CASE("route_global_keys installs registry dispatch as the root key path",
+          "[view][command_registry][devtools-routing]") {
+    CommandRegistry reg;
+    reg.register_command({kCmdSave, "Save", "File", KeyCode::s, kModCmd});
+    CountingHandler handler({kCmdSave});
+    reg.add_handler(&handler);
+
+    View root;
+    REQUIRE_FALSE(static_cast<bool>(root.on_global_key));
+    route_global_keys(root, reg);
+    REQUIRE(static_cast<bool>(root.on_global_key));
+
+    KeyEvent save;
+    save.key = KeyCode::s;
+    save.modifiers = kModCmd;
+    save.is_down = true;
+    REQUIRE(root.on_global_key(save));
+    REQUIRE(handler.calls_ == 1);
+
+    // Key-up and unbound chords fall through (host delivers them normally).
+    save.is_down = false;
+    REQUIRE_FALSE(root.on_global_key(save));
+    KeyEvent unbound;
+    unbound.key = KeyCode::z;
+    unbound.modifiers = kModCmd;
+    unbound.is_down = true;
+    REQUIRE_FALSE(root.on_global_key(unbound));
+    REQUIRE(handler.calls_ == 1);
+
+    reg.remove_handler(&handler);
+}
+
+TEST_CASE("InspectorWindow command handler toggles via the registry and "
+          "does not dangle after destruction",
+          "[view][command_registry][devtools-routing]") {
+    CommandRegistry reg;
+    View target_root;
+    int factory_calls = 0;
+
+    {
+        // nullptr-returning host factory keeps the toggle headless (show()
+        // handles a null host gracefully) while proving dispatch reached it.
+        InspectorWindow inspector(
+            target_root, nullptr, nullptr,
+            [&](View&, const WindowOptions&) -> std::unique_ptr<WindowHost> {
+                ++factory_calls;
+                return nullptr;
+            });
+        inspector.register_command_handler(reg);
+
+        // Registry path must not clobber the raw global-key hook.
+        REQUIRE_FALSE(static_cast<bool>(target_root.on_global_key));
+        REQUIRE(reg.handler_count() == 1);
+        REQUIRE(reg.shortcuts().find(KeyCode::i, kMainMod) ==
+                InspectorWindow::kToggleCommand);
+        REQUIRE(reg.command_info(InspectorWindow::kToggleCommand)->category ==
+                "Developer");
+
+        // Cmd/Ctrl+I routes to the inspector's handler: toggle → show().
+        REQUIRE(reg.dispatch_key_event(toggle_chord()));
+        REQUIRE(factory_calls == 1);
+
+        // Re-registering with the same registry must not double-add.
+        inspector.register_command_handler(reg);
+        REQUIRE(reg.handler_count() == 1);
+    }
+
+    // RAII: destroying the tool removed its handler. Dispatching the same
+    // chord again must not crash (no dangling handler) and must report
+    // unhandled. The command + chord stay registered for the next tool.
+    REQUIRE(reg.handler_count() == 0);
+    REQUIRE_FALSE(reg.dispatch_key_event(toggle_chord()));
+    REQUIRE(factory_calls == 1);
+    REQUIRE(reg.shortcuts().find(KeyCode::i, kMainMod) ==
+            InspectorWindow::kToggleCommand);
 }
