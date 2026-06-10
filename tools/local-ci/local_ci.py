@@ -2642,18 +2642,9 @@ def current_runner_info() -> dict | None:
 
 
 def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
-    runner = read_runner_info()
-    runner_pid = runner.get("pid") if runner else None
-    runner_alive = pid_alive(runner_pid)
-
-    if runner and not runner_alive:
-        clear_runner_info()
-        runner = None
-        runner_pid = None
-
-    return _queue_orchestrator.stale_running_jobs_for_runner_unlocked(
+    return _runner_state.stale_running_jobs_for_current_runner(
         queue,
-        runner_pid if runner else None,
+        stale_running_jobs_for_runner_unlocked_fn=_queue_orchestrator.stale_running_jobs_for_runner_unlocked,
     )
 
 

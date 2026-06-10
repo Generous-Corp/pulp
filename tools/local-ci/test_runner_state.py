@@ -91,6 +91,73 @@ class RunnerStateTests(unittest.TestCase):
             )
             self.assertTrue(info_path.exists())
 
+    def test_stale_running_jobs_for_current_runner_uses_live_runner_pid(self) -> None:
+        queue = [{"id": "current", "status": "running", "runner": {"pid": 123}}]
+        pid_calls: list[int | None] = []
+        clear_calls: list[bool] = []
+        selector_calls: list[tuple[list[dict], int | None]] = []
+        stale_jobs = [{"id": "stale"}]
+
+        def select(loaded_queue: list[dict], runner_pid: int | None) -> list[dict]:
+            selector_calls.append((loaded_queue, runner_pid))
+            return stale_jobs
+
+        result = self.mod.stale_running_jobs_for_current_runner(
+            queue,
+            read_runner_info_fn=lambda: {"pid": 123, "active_job_id": "job123"},
+            pid_alive_fn=lambda pid: pid_calls.append(pid) or True,
+            clear_runner_info_fn=lambda: clear_calls.append(True),
+            stale_running_jobs_for_runner_unlocked_fn=select,
+        )
+
+        self.assertIs(result, stale_jobs)
+        self.assertEqual(pid_calls, [123])
+        self.assertEqual(clear_calls, [])
+        self.assertEqual(selector_calls, [(queue, 123)])
+
+    def test_stale_running_jobs_for_current_runner_clears_dead_runner_pid(self) -> None:
+        queue = [{"id": "old", "status": "running", "runner": {"pid": 456}}]
+        clear_calls: list[bool] = []
+        selector_calls: list[tuple[list[dict], int | None]] = []
+
+        def select(loaded_queue: list[dict], runner_pid: int | None) -> list[dict]:
+            selector_calls.append((loaded_queue, runner_pid))
+            return loaded_queue
+
+        result = self.mod.stale_running_jobs_for_current_runner(
+            queue,
+            read_runner_info_fn=lambda: {"pid": 456, "active_job_id": "job-old"},
+            pid_alive_fn=lambda pid: False,
+            clear_runner_info_fn=lambda: clear_calls.append(True),
+            stale_running_jobs_for_runner_unlocked_fn=select,
+        )
+
+        self.assertIs(result, queue)
+        self.assertEqual(clear_calls, [True])
+        self.assertEqual(selector_calls, [(queue, None)])
+
+    def test_stale_running_jobs_for_current_runner_handles_missing_runner_info(self) -> None:
+        queue = [{"id": "old", "status": "running", "runner": {"pid": 456}}]
+        pid_calls: list[int | None] = []
+        clear_calls: list[bool] = []
+        selector_calls: list[tuple[list[dict], int | None]] = []
+
+        def select(loaded_queue: list[dict], runner_pid: int | None) -> list[dict]:
+            selector_calls.append((loaded_queue, runner_pid))
+            return []
+
+        self.mod.stale_running_jobs_for_current_runner(
+            queue,
+            read_runner_info_fn=lambda: None,
+            pid_alive_fn=lambda pid: pid_calls.append(pid) or False,
+            clear_runner_info_fn=lambda: clear_calls.append(True),
+            stale_running_jobs_for_runner_unlocked_fn=select,
+        )
+
+        self.assertEqual(pid_calls, [None])
+        self.assertEqual(clear_calls, [])
+        self.assertEqual(selector_calls, [(queue, None)])
+
 
 if __name__ == "__main__":
     unittest.main()
