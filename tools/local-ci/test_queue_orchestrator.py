@@ -403,6 +403,18 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.enqueue_command_result_line(job, created=False),
             "Already queued/running: [job123] feature/q @ abcdef123456 priority=normal targets=mac",
         )
+        self.assertEqual(
+            self.mod.drain_runner_active_line({"active_job_id": "abc123", "active_branch": "feature/live"}),
+            "Another local CI runner is active [abc123] feature/live.",
+        )
+        self.assertEqual(
+            self.mod.drain_runner_active_line({"active_job_id": "abc123"}),
+            "Another local CI runner is active [abc123] ?.",
+        )
+        self.assertEqual(
+            self.mod.drain_runner_active_line(None),
+            "Another local CI runner is active.",
+        )
 
     def test_runner_info_active_target_update_matches_active_job_only(self) -> None:
         info = {
