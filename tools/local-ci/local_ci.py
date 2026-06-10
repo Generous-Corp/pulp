@@ -2706,6 +2706,15 @@ def apply_local_ci_cleanup_plan(plan: dict) -> dict:
     return _cleanup.apply_local_ci_cleanup_plan(plan)
 
 
+def cleanup_plan_lines(plan: dict, *, dry_run: bool) -> list[str]:
+    return _cleanup.cleanup_plan_lines(
+        plan,
+        dry_run=dry_run,
+        format_size_fn=format_size_bytes,
+        describe_path_fn=describe_path_for_cleanup,
+    )
+
+
 def job_sort_key(job: dict) -> tuple[int, str, str]:
     return _queue_orchestrator.job_sort_key(job)
 
@@ -4341,26 +4350,8 @@ def print_local_ci_state_footprint(*, indent: str = "") -> None:
 
 
 def print_local_ci_cleanup_plan(plan: dict, *, dry_run: bool) -> None:
-    print("Local CI cleanup:\n")
-    print(
-        f"  reclaimable: {format_size_bytes(plan.get('total_bytes', 0))} "
-        f"across {plan.get('total_paths', 0)} path(s)"
-    )
-    for category in ("bundles", "logs", "results", "prepared"):
-        entries = (plan.get("categories") or {}).get(category) or []
-        if not entries:
-            continue
-        category_bytes = sum(int(entry.get("size_bytes", 0)) for entry in entries)
-        print(f"\n  {category}: {format_size_bytes(category_bytes)} across {len(entries)} path(s)")
-        for entry in entries[:10]:
-            print(f"    {describe_path_for_cleanup(Path(entry['path']))} ({format_size_bytes(entry.get('size_bytes', 0))})")
-        if len(entries) > 10:
-            print(f"    ... {len(entries) - 10} more")
-
-    if dry_run:
-        print("\n  dry run only; re-run with --apply to delete these paths")
-    else:
-        print("\n  applying cleanup now")
+    for line in cleanup_plan_lines(plan, dry_run=dry_run):
+        print(line)
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:

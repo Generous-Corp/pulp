@@ -20,7 +20,7 @@ and the matching contract tests in the same change.
 | `footprint.py` | Local-CI state-size accounting, cleanup entry descriptions, and state-footprint line fragments. | Cleanup candidate selection or deletion. |
 | `evidence_index.py` | Result-to-evidence normalization, latest passing target evidence, evidence index persistence, and evidence summaries. | Queue mutation, runner state, result creation, or target execution. |
 | `ssh_bundle.py` | Git bundle naming, local bundle creation, and SSH upload/progress/probe mechanics. | Target validation execution or queue orchestration. |
-| `cleanup.py` | Local-CI artifact cleanup planning/deletion and stale Windows validator cleanup mechanics. | Lock acquisition, runner ownership, or user-facing cleanup command output. |
+| `cleanup.py` | Local-CI artifact cleanup planning/deletion, cleanup-plan line fragments, and stale Windows validator cleanup mechanics. | Lock acquisition, runner ownership, or user-facing cleanup command ordering/output side effects. |
 | `desktop_artifacts.py` | Desktop automation artifact roots and run/publish bundle directory layout. | Report staging, rollup generation, pruning policy, or target execution. |
 | `reporting.py` | Desktop automation report staging, run/publish rollups, manifest scanning, proof summaries, and pruning selection. | Artifact directory layout, target execution, source preparation, or CLI output. |
 | `source_prep.py` | Exact-SHA desktop source requests, cache keys, launch-command rewriting, prepare manifests, and macOS/Linux/Windows prepared source materialization. | Desktop artifact layout, target execution, queue orchestration, or target probes. |
