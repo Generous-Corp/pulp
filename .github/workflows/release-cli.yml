@@ -391,6 +391,15 @@ jobs:
         # MCP launcher can resolve it on $PATH after install.
         run: |
           for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp; do
+            # Fail LOUD if a binary is missing. The strip itself is best-effort
+            # on macOS (below), which would otherwise SILENTLY swallow an
+            # absent binary — exactly how a skipped Rust `build/pulp` target hid
+            # until package_cli.py reported it a step later (2026-06-10). Catch
+            # it here with a clear message instead.
+            if [ ! -f "$bin" ]; then
+              echo "::error::expected release binary '$bin' is missing — the build did not produce it (e.g. 'build/pulp' means the Rust CLI target was skipped, usually a missing/broken cargo). Refusing to package an incomplete tarball." >&2
+              exit 1
+            fi
             if [ "${RUNNER_OS}" = "macOS" ]; then
               strip -x "$bin" 2>/dev/null || strip "$bin" 2>/dev/null || \
                 echo "note: strip skipped for $bin (non-fatal)"
