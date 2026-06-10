@@ -173,6 +173,9 @@ jobs:
         #     (left-to-right archive resolution; the chrome/m144 Skia
         #     archive references Fc* symbols that ld won't resolve from
         #     an earlier-positioned -lfontconfig). #1962 follow-up.
+        #   - tools/deps/manifest.json: release asset inventory must
+        #     include all require_gpu release Skia binaries, including
+        #     linux-arm64, when backfilling older tags.
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
@@ -180,6 +183,7 @@ jobs:
               tools/scripts/fetch_skia_for_release.py \
               core/canvas/CMakeLists.txt \
               tools/cli/CMakeLists.txt \
+              tools/deps/manifest.json \
               ; do
             url="https://raw.githubusercontent.com/${repo}/main/${path}"
             echo "Overlaying ${path} from ${url}"
