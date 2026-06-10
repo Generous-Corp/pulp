@@ -2531,6 +2531,10 @@ def enqueue_command_result_line(job: dict, *, created: bool) -> str:
     return _queue_orchestrator.enqueue_command_result_line(job, created=created)
 
 
+def drain_runner_active_line(runner_info: dict | None) -> str:
+    return _queue_orchestrator.drain_runner_active_line(runner_info)
+
+
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
     return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
 
@@ -4482,13 +4486,7 @@ def cmd_drain(_args: argparse.Namespace) -> int:
 
     acquired, any_failure = drain_pending_jobs(config, blocking=False)
     if not acquired:
-        runner = current_runner_info()
-        if runner and runner.get("active_job_id"):
-            print(
-                f"Another local CI runner is active [{runner['active_job_id']}] {runner.get('active_branch', '?')}."
-            )
-        else:
-            print("Another local CI runner is active.")
+        print(drain_runner_active_line(current_runner_info()))
         return 0
 
     notify("CI complete" + (" - PASSED" if not any_failure else " - FAILED"))

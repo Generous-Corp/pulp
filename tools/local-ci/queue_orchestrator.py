@@ -265,6 +265,15 @@ def enqueue_command_result_line(job: dict, *, created: bool) -> str:
     return f"{prefix}: {summarize_job(job)}"
 
 
+def drain_runner_active_line(runner_info: dict | None) -> str:
+    if runner_info and runner_info.get("active_job_id"):
+        return (
+            f"Another local CI runner is active [{runner_info['active_job_id']}] "
+            f"{runner_info.get('active_branch', '?')}."
+        )
+    return "Another local CI runner is active."
+
+
 def complete_job_with_result_unlocked(job: dict, result: dict, result_path: Path | str) -> None:
     job["status"] = "completed"
     job["completed_at"] = result["completed_at"]
