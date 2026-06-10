@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04040"></a>
+## [0.404.0] - 2026-06-10
+
+- feature/audio harness 5 rt probe ([#3864](https://github.com/danielraffel/pulp/pull/3864))
+- feature/refactor local ci status target states ([#3863](https://github.com/danielraffel/pulp/pull/3863))
+- feat: add sampler looper primitives ([#3808](https://github.com/danielraffel/pulp/pull/3808))
+- ci(release): tolerate pre-swap CLI backfills ([#3866](https://github.com/danielraffel/pulp/pull/3866))
+
 <a id="v04030"></a>
 ## [0.403.0] - 2026-06-09
 
@@ -4162,6 +4170,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.404.0]: https://github.com/danielraffel/pulp/releases/tag/v0.404.0
 [0.403.0]: https://github.com/danielraffel/pulp/releases/tag/v0.403.0
 [0.402.0]: https://github.com/danielraffel/pulp/releases/tag/v0.402.0
 [0.401.0]: https://github.com/danielraffel/pulp/releases/tag/v0.401.0
