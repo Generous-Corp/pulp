@@ -18,6 +18,7 @@
 #include "../tools/cli/tool_registry.hpp"
 
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -25,6 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -101,6 +103,32 @@ void write_file(const fs::path& path, const std::string& body) {
     fs::create_directories(path.parent_path());
     std::ofstream f(path, std::ios::binary);
     f << body;
+}
+
+std::string json_escape(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (unsigned char c : text) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[7] = {};
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+                break;
+        }
+    }
+    return out;
 }
 
 // Build a mock importer package (tar.gz) at <out>, containing an entrypoint
@@ -371,7 +399,7 @@ fs::path write_repo_registry(const fs::path& repo, const std::string& sha,
       "vendor_id": "framework-x",
       "importer_artifacts": {
         ")") + platform + R"(": {
-          "url_template": "file://)" + pkg.string() + R"(",
+          "url_template": "file://)" + json_escape(pkg.string()) + R"(",
           "archive_format": "tar.gz",
           "sha256": ")" + sha + R"("
         }

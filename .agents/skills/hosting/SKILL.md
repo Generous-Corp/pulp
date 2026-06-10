@@ -197,6 +197,10 @@ predictable output, no MIDI.
   should identify `<plugin>`, not the `seeAlso` object. Keep parser coverage
   in `test/test_plugin_info_metadata.cpp` or `test/test_lv2_host_discovery.cpp`
   when changing `core/host/src/scanner.cpp`.
+- LV2 invalid-bundle tests deliberately use placeholder `.so` / `.dylib` files.
+  Keep the loader's magic-byte preflight before `dlopen` / `LoadLibrary` so
+  invalid modules fail quickly and consistently on Windows instead of waiting
+  on the platform loader.
 
 ## Phase 0 contracts (PR #153)
 
