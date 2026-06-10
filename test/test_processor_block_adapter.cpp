@@ -239,4 +239,3 @@ TEST_CASE("process_processor_block restores sidecars when processor throws",
     REQUIRE_FALSE(pulp::format::process_processor_block(processor, block, scratch));
     REQUIRE(processor.param_events() == &previous_params);
 }
-

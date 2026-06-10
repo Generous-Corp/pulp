@@ -70,4 +70,3 @@ bool SamplePool::populate_channel_ptrs(const SamplePoolResolution& resolution,
 }
 
 }  // namespace pulp::audio
-

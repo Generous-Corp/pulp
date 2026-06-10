@@ -16,4 +16,3 @@ target_link_libraries(pulp-graph
         pulp::midi
         pulp::runtime
 )
-

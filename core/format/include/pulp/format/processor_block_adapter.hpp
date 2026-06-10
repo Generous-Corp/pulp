@@ -30,4 +30,3 @@ bool process_processor_block(Processor& processor,
                              ProcessorBlockAdapterScratch& scratch) noexcept;
 
 } // namespace pulp::format
-

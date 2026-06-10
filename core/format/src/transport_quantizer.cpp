@@ -278,4 +278,3 @@ void TransportQuantizer::remember(const ProcessContext& context,
 }
 
 }  // namespace pulp::format
-

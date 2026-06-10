@@ -116,8 +116,11 @@ Load command 3
 
         with mock.patch.object(pc.subprocess, "check_output", return_value=otool_output):
             with mock.patch.object(pc.subprocess, "check_call") as check_call:
-                with mock.patch.object(pc.subprocess, "run") as run:
-                    pc.fix_rpath_macos(binary)
+                with mock.patch.object(pc.shutil, "which", return_value="/usr/bin/codesign"):
+                    with mock.patch.object(
+                        pc.subprocess, "run", return_value=mock.Mock(returncode=0),
+                    ) as run:
+                        pc.fix_rpath_macos(binary)
 
         self.assertEqual(check_call.call_count, 2)
         check_call.assert_any_call(
@@ -136,10 +139,13 @@ Load command 3
                 str(binary),
             ]
         )
-        run.assert_called_once_with(
-            ["install_name_tool", "-add_rpath", "@loader_path", str(binary)],
-            check=False,
-        )
+        self.assertEqual(run.call_args_list, [
+            mock.call(
+                ["install_name_tool", "-add_rpath", "@loader_path", str(binary)],
+                check=False,
+            ),
+            mock.call(["codesign", "--force", "--sign", "-", str(binary)]),
+        ])
 
     def test_fix_rpath_macos_ignores_relative_rpath(self) -> None:
         otool_output = """
@@ -150,8 +156,9 @@ Load command 1
         """
         with mock.patch.object(pc.subprocess, "check_output", return_value=otool_output):
             with mock.patch.object(pc.subprocess, "check_call") as check_call:
-                with mock.patch.object(pc.subprocess, "run") as run:
-                    pc.fix_rpath_macos(pathlib.Path("/tmp/pulp"))
+                with mock.patch.object(pc.shutil, "which", return_value=None):
+                    with mock.patch.object(pc.subprocess, "run") as run:
+                        pc.fix_rpath_macos(pathlib.Path("/tmp/pulp"))
 
         check_call.assert_not_called()
         run.assert_called_once()
@@ -165,8 +172,9 @@ Load command 1
         """
         with mock.patch.object(pc.subprocess, "check_output", return_value=otool_output):
             with mock.patch.object(pc.subprocess, "check_call") as check_call:
-                with mock.patch.object(pc.subprocess, "run") as run:
-                    pc.fix_rpath_macos(pathlib.Path("/tmp/pulp"))
+                with mock.patch.object(pc.shutil, "which", return_value=None):
+                    with mock.patch.object(pc.subprocess, "run") as run:
+                        pc.fix_rpath_macos(pathlib.Path("/tmp/pulp"))
 
         check_call.assert_not_called()
         run.assert_called_once()

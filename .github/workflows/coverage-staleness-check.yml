@@ -163,33 +163,50 @@ jobs:
         run: |
           set -euo pipefail
           title="${TRACKING_TITLE}"
+
+          find_issue_by_title() {
+            local repo="$1"
+            local exact_title="$2"
+
+            gh api -X GET search/issues \
+              -f "q=repo:${repo} is:issue in:title ${exact_title}" |
+              TITLE="$exact_title" python3 -c 'import json, os, sys; title = os.environ["TITLE"]; items = json.load(sys.stdin).get("items", []); match = next((item for item in items if item.get("title") == title), {}); print(json.dumps({"number": match.get("number", ""), "state": match.get("state", "")}))'
+          }
+
           existing_json=$(
-            gh issue list --repo "$REPO" --state all \
-              --search "in:title \"${title}\"" \
-              --json number,title,state \
-              --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+            find_issue_by_title "$REPO" "$title"
           )
           existing=$(echo "$existing_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('number','') or '')")
           existing_state=$(echo "$existing_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('state','') or '')")
 
           if [ "$STALE" = "0" ]; then
-            if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+            if [ -n "${existing:-}" ] && [ "$existing_state" = "open" ]; then
               echo "Coverage freshness restored — closing #${existing}."
-              gh issue comment "$existing" --repo "$REPO" \
-                --body "Sweep on $(date -u +%Y-%m-%d\ %H:%M) found a fresh successful main coverage run. Closing."
-              gh issue close "$existing" --repo "$REPO" --reason completed
+              comment_body="Sweep on $(date -u +%Y-%m-%d\ %H:%M) found a fresh successful main coverage run. Closing."
+              gh api -X POST "repos/${REPO}/issues/${existing}/comments" \
+                -f body="$comment_body" >/dev/null
+              gh api -X PATCH "repos/${REPO}/issues/${existing}" \
+                -f state=closed \
+                -f state_reason=completed >/dev/null
             else
               echo "Fresh coverage and no open tracker — nothing to do."
             fi
             exit 0
           fi
 
+          body=$(cat body.md)
           if [ -z "${existing:-}" ]; then
             echo "Creating tracking issue."
-            gh issue create --repo "$REPO" --title "$title" --body-file body.md --label ci 2>&1 || \
-              gh issue create --repo "$REPO" --title "$title" --body-file body.md
+            gh api -X POST "repos/${REPO}/issues" \
+              -f title="$title" \
+              -f body="$body" \
+              -f "labels[]=ci" >/dev/null 2>&1 || \
+              gh api -X POST "repos/${REPO}/issues" \
+                -f title="$title" \
+                -f body="$body" >/dev/null
           else
             echo "Updating tracking issue #${existing}."
-            gh issue edit "$existing" --repo "$REPO" --body-file body.md
-            gh issue reopen "$existing" --repo "$REPO" 2>/dev/null || true
+            gh api -X PATCH "repos/${REPO}/issues/${existing}" \
+              -f body="$body" \
+              -f state=open >/dev/null
           fi

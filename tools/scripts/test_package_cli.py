@@ -72,8 +72,11 @@ Load command 2
 
         with mock.patch.object(pc.subprocess, "check_output", return_value=otool_output):
             with mock.patch.object(pc.subprocess, "check_call") as check_call:
-                with mock.patch.object(pc.subprocess, "run") as run:
-                    pc.fix_rpath_macos(binary)
+                with mock.patch.object(pc.shutil, "which", return_value="/usr/bin/codesign"):
+                    with mock.patch.object(
+                        pc.subprocess, "run", return_value=mock.Mock(returncode=0),
+                    ) as run:
+                        pc.fix_rpath_macos(binary)
 
         check_call.assert_called_once_with(
             [
@@ -83,10 +86,29 @@ Load command 2
                 str(binary),
             ]
         )
-        run.assert_called_once_with(
-            ["install_name_tool", "-add_rpath", "@loader_path", str(binary)],
-            check=False,
-        )
+        self.assertEqual(run.call_args_list, [
+            mock.call(
+                ["install_name_tool", "-add_rpath", "@loader_path", str(binary)],
+                check=False,
+            ),
+            mock.call(["codesign", "--force", "--sign", "-", str(binary)]),
+        ])
+
+    def test_fix_rpath_macos_fails_when_codesign_fails(self) -> None:
+        binary = pathlib.Path("/tmp/pulp")
+
+        with mock.patch.object(pc.subprocess, "check_output", return_value=""):
+            with mock.patch.object(pc.subprocess, "check_call"):
+                with mock.patch.object(pc.shutil, "which", return_value="/usr/bin/codesign"):
+                    with mock.patch.object(pc.subprocess, "run") as run:
+                        run.side_effect = [
+                            mock.Mock(returncode=0),
+                            mock.Mock(returncode=1),
+                        ]
+                        with self.assertRaises(SystemExit) as cm:
+                            pc.fix_rpath_macos(binary)
+
+        self.assertIn("codesign re-sign", str(cm.exception))
 
     def test_fix_rpath_linux_skips_when_patchelf_is_missing(self) -> None:
         out = io.StringIO()

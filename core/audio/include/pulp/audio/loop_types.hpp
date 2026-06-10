@@ -58,4 +58,3 @@ LoopValidationResult validate_loop_region(const LoopRegion& region,
                                           std::uint64_t min_loop_frames = 1) noexcept;
 
 }  // namespace pulp::audio
-

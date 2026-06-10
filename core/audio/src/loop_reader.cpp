@@ -104,4 +104,3 @@ float LoopReader::read_validated(BufferView<const float> source,
 }
 
 }  // namespace pulp::audio
-
