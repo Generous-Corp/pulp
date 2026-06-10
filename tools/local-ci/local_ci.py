@@ -2481,9 +2481,14 @@ def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
-    result = supersedence_result(job, superseded_by, reason)
-    result_path = save_result(result)
-    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
+    _queue_lifecycle.complete_superseded_job_unlocked(
+        job,
+        superseded_by,
+        reason,
+        supersedence_result_fn=supersedence_result,
+        save_result_fn=save_result,
+        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
+    )
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
@@ -2491,9 +2496,13 @@ def cancellation_result(job: dict, reason: str) -> dict:
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
-    result = cancellation_result(job, reason)
-    result_path = save_result(result)
-    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
+    _queue_lifecycle.complete_canceled_job_unlocked(
+        job,
+        reason,
+        cancellation_result_fn=cancellation_result,
+        save_result_fn=save_result,
+        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
+    )
 
 
 def summarize_job(job: dict) -> str:
