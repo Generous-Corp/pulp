@@ -145,6 +145,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 import cleanup as _cleanup  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
+import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
@@ -4493,30 +4494,8 @@ def cmd_desktop_smoke(args: argparse.Namespace) -> int:
         print(json.dumps(manifest, indent=2))
         return 0
 
-    print(f"Desktop smoke PASS for `{args.target}`")
-    print(f"  label: {manifest['label']}")
-    print(f"  pid: {manifest['pid']}")
-    if manifest["artifacts"].get("before_screenshot"):
-        print(f"  before_screenshot: {manifest['artifacts']['before_screenshot']}")
-    if manifest["artifacts"].get("diff_screenshot"):
-        print(f"  diff_screenshot: {manifest['artifacts']['diff_screenshot']}")
-    if manifest["artifacts"].get("image_change"):
-        image_change = manifest["artifacts"]["image_change"]
-        print(f"  image_change: changed={image_change.get('changed')} method={image_change.get('method')}")
-        bbox = image_change.get("bbox")
-        if bbox:
-            print(f"  image_change_bbox: {bbox['left']},{bbox['top']} -> {bbox['right']},{bbox['bottom']}")
-    print(f"  screenshot: {manifest['artifacts']['screenshot']}")
-    if manifest["artifacts"].get("ui_snapshot"):
-        print(f"  ui_snapshot: {manifest['artifacts']['ui_snapshot']}")
-    if manifest.get("interaction"):
-        if manifest["interaction"].get("mode"):
-            print(f"  interaction_mode: {manifest['interaction']['mode']}")
-        click = manifest["interaction"].get("click", {})
-        screen_point = click.get("screen_point") or {}
-        if "x" in screen_point and "y" in screen_point:
-            print(f"  click_screen_point: {screen_point.get('x')},{screen_point.get('y')}")
-    print(f"  bundle: {manifest['artifacts']['bundle_dir']}")
+    for line in _desktop_cli.desktop_action_success_lines("smoke", args.target, manifest):
+        print(line)
     return 0
 
 
@@ -4634,30 +4613,8 @@ def cmd_desktop_click(args: argparse.Namespace) -> int:
         print(json.dumps(manifest, indent=2))
         return 0
 
-    print(f"Desktop click PASS for `{args.target}`")
-    print(f"  label: {manifest['label']}")
-    print(f"  pid: {manifest['pid']}")
-    if manifest["artifacts"].get("before_screenshot"):
-        print(f"  before_screenshot: {manifest['artifacts']['before_screenshot']}")
-    if manifest["artifacts"].get("diff_screenshot"):
-        print(f"  diff_screenshot: {manifest['artifacts']['diff_screenshot']}")
-    if manifest["artifacts"].get("image_change"):
-        image_change = manifest["artifacts"]["image_change"]
-        print(f"  image_change: changed={image_change.get('changed')} method={image_change.get('method')}")
-        bbox = image_change.get("bbox")
-        if bbox:
-            print(f"  image_change_bbox: {bbox['left']},{bbox['top']} -> {bbox['right']},{bbox['bottom']}")
-    print(f"  screenshot: {manifest['artifacts']['screenshot']}")
-    if manifest["artifacts"].get("ui_snapshot"):
-        print(f"  ui_snapshot: {manifest['artifacts']['ui_snapshot']}")
-    if manifest.get("interaction"):
-        if manifest["interaction"].get("mode"):
-            print(f"  interaction_mode: {manifest['interaction']['mode']}")
-        click = manifest["interaction"].get("click", {})
-        screen_point = click.get("screen_point") or {}
-        if "x" in screen_point and "y" in screen_point:
-            print(f"  click_screen_point: {screen_point.get('x')},{screen_point.get('y')}")
-    print(f"  bundle: {manifest['artifacts']['bundle_dir']}")
+    for line in _desktop_cli.desktop_action_success_lines("click", args.target, manifest):
+        print(line)
     return 0
 
 
@@ -4767,13 +4724,8 @@ def cmd_desktop_inspect(args: argparse.Namespace) -> int:
         print(json.dumps(manifest, indent=2))
         return 0
 
-    print(f"Desktop inspect PASS for `{args.target}`")
-    print(f"  label: {manifest['label']}")
-    print(f"  pid: {manifest['pid']}")
-    print(f"  screenshot: {manifest['artifacts']['screenshot']}")
-    if manifest["artifacts"].get("ui_snapshot"):
-        print(f"  ui_snapshot: {manifest['artifacts']['ui_snapshot']}")
-    print(f"  bundle: {manifest['artifacts']['bundle_dir']}")
+    for line in _desktop_cli.desktop_action_success_lines("inspect", args.target, manifest):
+        print(line)
     return 0
 
 
