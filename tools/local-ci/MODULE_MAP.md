@@ -32,7 +32,7 @@ and the matching contract tests in the same change.
 | `macos_desktop.py` | macOS app bundle detection, Swift window-probe wrappers, window wait/capture/activation/click helpers, app quit, and process termination. | Desktop action orchestration, artifact manifest writing, source preparation, or queue orchestration. |
 | `windows_target.py` | Windows desktop target contracts, path safety, session-agent request payloads, and probe result formatting/readiness helpers. | SSH/PowerShell execution, desktop action execution, queue orchestration, or artifact layout. |
 | `windows_probe.py` | Windows SSH/PowerShell command execution helpers, remote file transfer/read/remove helpers, repo/session/tooling probes, remote tool installation, session-agent bootstrap/start, and CMake generator probing. | Windows target contract formatting, desktop action orchestration, queue orchestration, or artifact layout. |
-| `execution.py` | Subprocess output capture, progress marker parsing, heartbeat updates, optional command log writing, local/POSIX validation command construction, local validation runner orchestration, Windows validation script construction, job/target result construction and ordering, target task construction/execution/result collection, submission config resolution, SSH target execution planning, and target-neutral validation helper policy. | Windows checkout/probe execution, queue mutation, or desktop automation adapters. |
+| `execution.py` | Subprocess output capture, progress marker parsing, heartbeat updates, optional command log writing, local/POSIX validation command construction and runner orchestration, Windows validation script construction, job/target result construction and ordering, target task construction/execution/result collection, submission config resolution, SSH target execution planning, and target-neutral validation helper policy. | Windows checkout/probe execution, queue mutation, or desktop automation adapters. |
 
 ## Remaining `local_ci.py` Clusters
 
@@ -44,7 +44,7 @@ behind the contracts added in this slice.
 | --- | --- | --- |
 | Desktop target probes | Desktop doctor orchestration, launch adapters, and automation adapters. | later `execution.py` |
 | Queue orchestration | Remaining runner-state wrapper calls and other CLI-facing queue updates. | later queue modules |
-| Validation execution | Local, SSH, Windows, Linux, smoke/full validation commands and target status reporting beyond shared command execution and target-neutral helper policy. | `execution.py` |
+| Validation execution | Windows validation runner orchestration, remaining target status reporting, and cross-target validation glue beyond shared command execution and target-neutral helper policy. | `execution.py` |
 | CLI dispatch | Argument parser, subcommand routing, and user-facing command output. | `cli.py` or retained thin entrypoint |
 
 ## Behavior Contracts

@@ -3294,44 +3294,23 @@ def run_posix_ssh_validation(
     config: dict | None = None,
     report_progress=None,
 ) -> dict:
-    print(f"  [{target_name}] Running validation on {host}:{repo_path} @ {short_sha(job['sha'])}...")
-    log_path = prepare_target_log(job["id"], target_name)
-    if report_progress:
-        report_progress(
-            phase="connect",
-            host=host,
-            log_path=str(log_path),
-            last_output_at=now_iso(),
-            transport_mode="bundle",
-        )
-
-    try:
-        bundle_name, bundle_ref = sync_job_bundle_to_ssh_host(
-            host,
-            job,
-            report_progress=report_progress,
-            config=config,
-        )
-    except RuntimeError as exc:
-        return validation_error_result(target_name, str(exc), log_path=log_path, transport_mode="bundle")
-
-    cmd, validation = posix_ssh_validation_command(
+    return _execution.run_posix_ssh_validation(
         target_name,
         host,
         repo_path,
         job,
-        bundle_name=bundle_name,
-        bundle_ref=bundle_ref,
-        exclude_tests=exclude_tests,
-    )
-
-    run = run_logged_command(cmd, timeout=3600, log_path=log_path, report_progress=report_progress)
-    return validation_result_from_run(
-        target_name,
-        run,
-        log_path=log_path,
-        validation=validation,
-        transport_mode="bundle",
+        exclude_tests,
+        config,
+        report_progress,
+        print_fn=print,
+        short_sha_fn=short_sha,
+        prepare_target_log_fn=prepare_target_log,
+        now_iso_fn=now_iso,
+        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
+        posix_ssh_validation_command_fn=posix_ssh_validation_command,
+        run_logged_command_fn=run_logged_command,
+        validation_result_from_run_fn=validation_result_from_run,
+        validation_error_result_fn=validation_error_result,
     )
 
 
