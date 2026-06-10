@@ -8,6 +8,45 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04070"></a>
+## [0.407.0] - 2026-06-10
+
+- feature/audio harness 7 cli ([#3934](https://github.com/danielraffel/pulp/pull/3934))
+- ci/codesign fatal ([#3938](https://github.com/danielraffel/pulp/pull/3938))
+- ci/review followups ([#3937](https://github.com/danielraffel/pulp/pull/3937))
+- feature/refactor local ci process job runner ([#3935](https://github.com/danielraffel/pulp/pull/3935))
+- ci/strip fail loud ([#3936](https://github.com/danielraffel/pulp/pull/3936))
+- feature/refactor local ci windows validation runner ([#3932](https://github.com/danielraffel/pulp/pull/3932))
+- ci/coverage scheduled refresh ([#3933](https://github.com/danielraffel/pulp/pull/3933))
+- feature/refactor local ci posix validation runner ([#3931](https://github.com/danielraffel/pulp/pull/3931))
+- ci/release make latest ([#3930](https://github.com/danielraffel/pulp/pull/3930))
+- feature/refactor local ci local validation runner ([#3929](https://github.com/danielraffel/pulp/pull/3929))
+- feature/refactor local ci target task planning ([#3928](https://github.com/danielraffel/pulp/pull/3928))
+- feature/refactor local ci execution planning ([#3927](https://github.com/danielraffel/pulp/pull/3927))
+- feature/refactor local ci target task runner ([#3926](https://github.com/danielraffel/pulp/pull/3926))
+- feature/refactor local ci target result ordering ([#3925](https://github.com/danielraffel/pulp/pull/3925))
+- feature/refactor local ci target state snapshot ([#3924](https://github.com/danielraffel/pulp/pull/3924))
+- feature/refactor local ci target progress state ([#3923](https://github.com/danielraffel/pulp/pull/3923))
+- feature/refactor local ci initial target state ([#3922](https://github.com/danielraffel/pulp/pull/3922))
+- feature/refactor local ci completed target state ([#3921](https://github.com/danielraffel/pulp/pull/3921))
+- feature/refactor local ci job result helpers ([#3920](https://github.com/danielraffel/pulp/pull/3920))
+- feature/refactor local ci unreachable result helper ([#3919](https://github.com/danielraffel/pulp/pull/3919))
+- feature/refactor local ci windows validation script ([#3918](https://github.com/danielraffel/pulp/pull/3918))
+- feature/refactor local ci posix validation command ([#3917](https://github.com/danielraffel/pulp/pull/3917))
+- feature/refactor local ci local validation command ([#3916](https://github.com/danielraffel/pulp/pull/3916))
+- feature/refactor local ci validation error result ([#3915](https://github.com/danielraffel/pulp/pull/3915))
+- feature/refactor local ci validation result helper ([#3914](https://github.com/danielraffel/pulp/pull/3914))
+- feature/refactor local ci validation helper policy ([#3913](https://github.com/danielraffel/pulp/pull/3913))
+- feature/refactor local ci execution runner ([#3912](https://github.com/danielraffel/pulp/pull/3912))
+- feature/refactor local ci drain active line ([#3911](https://github.com/danielraffel/pulp/pull/3911))
+- feature/refactor local ci enqueue result line ([#3910](https://github.com/danielraffel/pulp/pull/3910))
+- feature/refactor local ci pr list lines ([#3909](https://github.com/danielraffel/pulp/pull/3909))
+- feature/refactor local ci evidence command lines ([#3908](https://github.com/danielraffel/pulp/pull/3908))
+- feature/refactor local ci log command lines ([#3907](https://github.com/danielraffel/pulp/pull/3907))
+- feature/refactor local ci queue command lines ([#3906](https://github.com/danielraffel/pulp/pull/3906))
+- fix/release cli package overlay ([#3901](https://github.com/danielraffel/pulp/pull/3901))
+- feature/param event ramp contract ([#3900](https://github.com/danielraffel/pulp/pull/3900))
+
 <a id="v04060"></a>
 ## [0.406.0] - 2026-06-10
 
@@ -4190,6 +4229,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.407.0]: https://github.com/danielraffel/pulp/releases/tag/v0.407.0
 [0.406.0]: https://github.com/danielraffel/pulp/releases/tag/v0.406.0
 [0.405.0]: https://github.com/danielraffel/pulp/releases/tag/v0.405.0
 [0.404.0]: https://github.com/danielraffel/pulp/releases/tag/v0.404.0
