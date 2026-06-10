@@ -5643,28 +5643,28 @@ target_include_directories(pulp-test-golden PRIVATE
 )
 catch_discover_tests(pulp-test-golden)
 
+# Audio observability harness PR 1A: offline metrics/assertions/summary
+# helpers (test/support/audio_*) + tests for the helpers themselves.
+add_executable(pulp-test-audio-support test_audio_support.cpp support/audio_metrics.cpp support/audio_assertions.cpp)
+target_link_libraries(pulp-test-audio-support PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-support PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
+catch_discover_tests(pulp-test-audio-support)
+
 # Audio determinism matrix (#48 / #356): SR × block-size sweep
 # asserting framework-layer invariants (unity pass-through, silence,
 # block-size invariance, re-prepare cleanliness) across the examples
 # that are known SR/block-independent today.
 add_executable(pulp-test-audio-matrix test_audio_determinism_matrix.cpp)
-target_link_libraries(pulp-test-audio-matrix PRIVATE
-    pulp::format pulp::signal Catch2::Catch2WithMain)
-target_include_directories(pulp-test-audio-matrix PRIVATE
-    ${CMAKE_SOURCE_DIR}/examples/pulp-gain
-    ${CMAKE_SOURCE_DIR}/examples/pulp-tone
-)
+target_link_libraries(pulp-test-audio-matrix PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-matrix)
 
 # Audio edge-case corpus (#49 / #356): zero-length blocks, denormals,
 # impulse position, DC extremes, param change between blocks,
 # re-prepare idempotency. Framework-layer contract only.
 add_executable(pulp-test-audio-edge-cases test_audio_edge_cases.cpp)
-target_link_libraries(pulp-test-audio-edge-cases PRIVATE
-    pulp::format pulp::signal Catch2::Catch2WithMain)
-target_include_directories(pulp-test-audio-edge-cases PRIVATE
-    ${CMAKE_SOURCE_DIR}/examples/pulp-gain
-)
+target_link_libraries(pulp-test-audio-edge-cases PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-edge-cases PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
 catch_discover_tests(pulp-test-audio-edge-cases)
 
 # Golden-file tests for PulpEffect (separate to avoid enum collision with PulpGain)
