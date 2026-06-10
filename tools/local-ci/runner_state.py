@@ -82,3 +82,22 @@ def stale_running_jobs_for_current_runner(
         queue,
         runner_pid if runner else None,
     )
+
+
+def update_current_runner_active_targets(
+    job_id: str,
+    active_targets: dict | None,
+    *,
+    update_runner_info_active_targets_fn: Callable[[dict, str, dict | None], bool],
+    current_runner_info_fn: Callable[[], dict | None] = current_runner_info,
+    write_runner_info_fn: Callable[[dict], None] = write_runner_info,
+) -> bool:
+    info = current_runner_info_fn()
+    if not info:
+        return False
+
+    if update_runner_info_active_targets_fn(info, job_id, active_targets):
+        write_runner_info_fn(info)
+        return True
+
+    return False

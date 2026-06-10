@@ -2707,17 +2707,19 @@ def write_runner_info(info: dict) -> None:
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
-    info = current_runner_info()
-    if not info:
-        return
+    def update_info(info: dict, current_job_id: str, current_active_targets: dict | None) -> bool:
+        return _queue_orchestrator.update_runner_info_active_targets(
+            info,
+            current_job_id,
+            current_active_targets,
+            now_iso_fn=now_iso,
+        )
 
-    if _queue_orchestrator.update_runner_info_active_targets(
-        info,
+    _runner_state.update_current_runner_active_targets(
         job_id,
         active_targets,
-        now_iso_fn=now_iso,
-    ):
-        write_runner_info(info)
+        update_runner_info_active_targets_fn=update_info,
+    )
 
 
 def clear_runner_info() -> None:
