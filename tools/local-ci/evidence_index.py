@@ -195,3 +195,17 @@ def print_evidence_summary(
         limit=limit,
         indent=indent,
     )
+
+
+def evidence_scope_header_line(branch: str | None, sha: str | None) -> str | None:
+    if branch:
+        return f"Evidence for branch `{branch}`:"
+    if sha:
+        return f"Evidence for sha `{short_sha(sha)}`:"
+    return None
+
+
+def evidence_empty_line(*, has_header: bool) -> str:
+    if has_header:
+        return "  (none)"
+    return "No local CI evidence recorded."

@@ -381,6 +381,14 @@ def print_evidence_summary(
     )
 
 
+def evidence_scope_header_line(branch: str | None, sha: str | None) -> str | None:
+    return evidence_index_module.evidence_scope_header_line(branch, sha)
+
+
+def evidence_empty_line(*, has_header: bool) -> str:
+    return evidence_index_module.evidence_empty_line(has_header=has_header)
+
+
 def save_config(config: dict) -> None:
     atomic_write_text(config_path(), json.dumps(config, indent=2) + "\n")
 
@@ -4726,21 +4734,13 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 def cmd_evidence(args: argparse.Namespace) -> int:
     branch = args.branch or current_branch()
-    printed_header = False
-
-    if branch:
-        print(f"Evidence for branch `{branch}`:")
-        printed_header = True
-    elif args.sha:
-        print(f"Evidence for sha `{short_sha(args.sha)}`:")
-        printed_header = True
+    header = evidence_scope_header_line(branch, args.sha)
+    if header:
+        print(header)
 
     found = print_evidence_summary(branch=branch, sha=args.sha, limit=args.limit)
     if not found:
-        if printed_header:
-            print("  (none)")
-        else:
-            print("No local CI evidence recorded.")
+        print(evidence_empty_line(has_header=header is not None))
         return 1
     return 0
 
