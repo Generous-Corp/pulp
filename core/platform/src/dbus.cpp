@@ -668,7 +668,7 @@ bool DBus::connect_a11y_bus() {
 }
 
 bool DBus::register_object(const std::string& path, IncomingHandler handler) {
-    if (!connect_session()) return false;
+    if (!connected()) return false;
     Impl& d = *impl_;
 
     // Fill the shared vtable in place: only message_function is needed (the
@@ -712,7 +712,7 @@ bool DBus::unregister_object(const std::string& path) {
 bool DBus::emit_signal(const std::string& path, const std::string& interface,
                        const std::string& member,
                        const std::function<void(Writer&)>& build_args) {
-    if (!connect_session()) return false;
+    if (!connected()) return false;
     Impl& d = *impl_;
 
     void* msg = d.msg_new_signal(path.c_str(), interface.c_str(), member.c_str());

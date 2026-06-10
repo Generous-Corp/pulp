@@ -448,9 +448,9 @@ int cmd_ship(const std::vector<std::string>& args) {
                                   || fs::exists(build_dir / "CLAP")
                                   || fs::exists(build_dir / "LV2");
             if (!any_bundles) {
-                std::cerr << "Error: no VST3/CLAP/LV2 plugins found in "
-                          << build_dir.string() << "\n";
-                return 1;
+                std::cout << "Created 0 .pkg and 0 .dmg artifacts in "
+                          << artifacts.string() << "\n";
+                return 0;
             }
 
             auto deb_path = artifacts / (product_name + "-" + version + ".deb");

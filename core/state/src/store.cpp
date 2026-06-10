@@ -22,10 +22,10 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     using EntryList = std::vector<Entry>;
     using SharedEntries = std::shared_ptr<const EntryList>;
 
-    // CoW model: mutators rebuild and atomically swap a new shared_ptr;
-    // notify_rt() atomically loads the current snapshot and iterates it
-    // without taking entries_mutex. The mutex is only for add/remove
-    // serialization on non-RT threads.
+    // CoW model: mutators rebuild and atomically swap a new shared_ptr.
+    // Non-RT notification loads that shared snapshot directly; notify_rt()
+    // uses the raw RCU snapshot below so it does not take library locks.
+    // entries_mutex is only for add/remove serialization on non-RT threads.
     mutable std::mutex entries_mutex;
     SharedEntries entries;
     std::atomic<std::uint64_t> next_id{1};
@@ -43,8 +43,51 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     static constexpr std::size_t kRtQueueCapacity = 1024;
     pulp::runtime::SpscQueue<RtChange, kRtQueueCapacity> pending_rt;
 
+    // Raw snapshot used only by notify_rt(). std::atomic_load(shared_ptr)
+    // may take an internal libstdc++ pthread lock on Linux, which violates
+    // the no-lock audio-thread contract. The raw pointer is protected by a
+    // tiny RCU-style reader count: add/remove publish a new immutable
+    // shared_ptr snapshot, then retain the old snapshot until no RT reader
+    // can still hold its raw pointer.
+    std::atomic<const EntryList*> rt_entries{nullptr};
+    std::atomic<unsigned> rt_readers{0};
+    std::vector<SharedEntries> retired_rt_entries;
+
+    struct RtSnapshotLease {
+        ListenerRegistry& registry;
+        const EntryList* entries = nullptr;
+
+        explicit RtSnapshotLease(ListenerRegistry& r) noexcept
+            : registry(r) {
+            registry.rt_readers.fetch_add(1, std::memory_order_acq_rel);
+            entries = registry.rt_entries.load(std::memory_order_acquire);
+        }
+
+        ~RtSnapshotLease() noexcept {
+            registry.rt_readers.fetch_sub(1, std::memory_order_acq_rel);
+        }
+
+        RtSnapshotLease(const RtSnapshotLease&) = delete;
+        RtSnapshotLease& operator=(const RtSnapshotLease&) = delete;
+    };
+
     SharedEntries load_snapshot() const {
         return std::atomic_load_explicit(&entries, std::memory_order_acquire);
+    }
+
+    void reclaim_retired_rt_entries_if_idle() {
+        if (rt_readers.load(std::memory_order_acquire) == 0) {
+            retired_rt_entries.clear();
+        }
+    }
+
+    void publish_snapshot(SharedEntries next, SharedEntries previous) {
+        const EntryList* rt_raw = next.get();
+        std::atomic_store_explicit(&entries, std::move(next),
+                                   std::memory_order_release);
+        rt_entries.store(rt_raw, std::memory_order_release);
+        if (previous) retired_rt_entries.push_back(std::move(previous));
+        reclaim_retired_rt_entries_if_idle();
     }
 
     std::uint64_t add(ParamChangeCallback cb, ListenerThread thread) {
@@ -56,10 +99,8 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         copy.reserve((current ? current->size() : 0) + 1);
         if (current) copy = *current;
         copy.push_back({id, std::move(cb), thread});
-        std::atomic_store_explicit(
-            &entries,
-            std::make_shared<const EntryList>(std::move(copy)),
-            std::memory_order_release);
+        publish_snapshot(std::make_shared<const EntryList>(std::move(copy)),
+                         std::move(current));
         return id;
     }
 
@@ -75,11 +116,10 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
             if (e.id != id) copy.push_back(e);
         }
         if (copy.size() == current->size()) return; // not found
-        std::atomic_store_explicit(
-            &entries,
+        publish_snapshot(
             copy.empty() ? SharedEntries{}
                          : std::make_shared<const EntryList>(std::move(copy)),
-            std::memory_order_release);
+            std::move(current));
     }
 
     // Re-look-up + invoke at dispatch time so a token reset between
@@ -134,10 +174,10 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     // drained by pump_listeners() on the main thread. No EventLoop
     // dispatch lambda is allocated on the audio thread.
     void notify_rt(ParamID param_id, float value) {
-        auto snap = load_snapshot();
+        RtSnapshotLease snap(*this);
         bool any_main = false;
-        if (snap && !snap->empty()) {
-            for (const auto& entry : *snap) {
+        if (snap.entries && !snap.entries->empty()) {
+            for (const auto& entry : *snap.entries) {
                 if (!entry.callback) continue;
                 if (entry.thread == ListenerThread::Audio) {
                     entry.callback(param_id, value);

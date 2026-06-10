@@ -25,6 +25,7 @@
 #include <pulp/host/dl_shim.hpp>
 #include "lv2_discovery.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <filesystem>
@@ -111,6 +112,34 @@ std::string resolve_lv2_binary(const std::string& bundle_dir) {
 } // namespace detail
 
 namespace {
+
+bool looks_like_loadable_module(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::array<unsigned char, 4> magic{};
+    in.read(reinterpret_cast<char*>(magic.data()),
+            static_cast<std::streamsize>(magic.size()));
+    const auto bytes = in.gcount();
+    if (bytes < 2) return false;
+
+#if defined(_WIN32)
+    return magic[0] == 'M' && magic[1] == 'Z';
+#elif defined(__APPLE__)
+    if (bytes < 4) return false;
+    return (magic[0] == 0xfe && magic[1] == 0xed && magic[2] == 0xfa
+            && (magic[3] == 0xce || magic[3] == 0xcf))
+        || (magic[0] == 0xce && magic[1] == 0xfa && magic[2] == 0xed
+            && magic[3] == 0xfe)
+        || (magic[0] == 0xcf && magic[1] == 0xfa && magic[2] == 0xed
+            && magic[3] == 0xfe)
+        || (magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba
+            && (magic[3] == 0xbe || magic[3] == 0xbf))
+        || (magic[0] == 0xbe && magic[1] == 0xba && magic[2] == 0xfe
+            && magic[3] == 0xca);
+#else
+    return bytes >= 4 && magic[0] == 0x7f && magic[1] == 'E'
+        && magic[2] == 'L' && magic[3] == 'F';
+#endif
+}
 
 class Lv2Slot final : public PluginSlot {
 public:
@@ -334,6 +363,10 @@ std::unique_ptr<PluginSlot> load_lv2_plugin(const PluginInfo& info) {
     std::string bin = detail::resolve_lv2_binary(info.path);
     if (bin.empty()) {
         runtime::log_error("LV2 load: no .so/.dylib found in bundle '{}'", info.path);
+        return nullptr;
+    }
+    if (!looks_like_loadable_module(bin)) {
+        runtime::log_error("LV2 load: not a loadable shared library: '{}'", bin);
         return nullptr;
     }
     void* handle = dlopen(bin.c_str(), RTLD_LAZY | RTLD_LOCAL);

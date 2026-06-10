@@ -2,9 +2,9 @@
 //
 // The backend registration API (set_backend/clear_backend/has_backend)
 // is compiled on every platform — on mac/iOS it's a no-op since those
-// platforms have a native built-in impl in file_dialog_mac.mm / the
-// iOS UIDocumentPicker backend. On non-Apple platforms (Windows,
-// Linux, Android) the open/save/folder dialog methods route through
+// platforms have a native built-in impl in file_dialog_mac.mm. On
+// non-Apple platforms (Windows, Linux, Android) the open/save/folder
+// dialog methods route through
 // the registered backend; without one every call returns an explicit
 // "no selection" (#301 P1 — replaces the old silent-nullopt stubs
 // so the JS bridge can distinguish "user cancelled" from "platform
@@ -21,7 +21,7 @@
 // headless callers must keep the documented "no backend → no selection"
 // contract. install_native_backend() references the portal factory, which
 // also force-links that TU.
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 #include <pulp/platform/dbus.hpp>
 #endif
 
@@ -34,7 +34,7 @@
 
 namespace pulp::platform {
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 // Defined in platform/linux/file_dialog_portal_linux.cpp. Referencing it here
 // forces that TU to link (static-lib object files with only static
 // initializers can otherwise be dropped).
@@ -59,10 +59,11 @@ void FileDialog::set_backend(Backend backend) {
 bool FileDialog::install_native_backend() {
     // Opt-in install of the platform's built-in backend. Linux: the
     // xdg-desktop-portal bridge, available only when libdbus is loadable.
+    // Windows: the IFileDialog COM backend.
     // Idempotent — leaves an already-installed (incl. host-set) backend in
-    // place. No-op elsewhere (macOS has a compiled-in native impl; iOS,
-    // Windows, and Android have no built-in backend yet).
-#if defined(__linux__)
+    // place. No-op elsewhere (macOS has a compiled-in native impl; iOS
+    // and Android have no built-in backend yet).
+#if defined(__linux__) && !defined(__ANDROID__)
     std::lock_guard lock(g_backend_mu);
     if (g_backend_installed) return true;
     if (!DBus::library_available()) return false;
