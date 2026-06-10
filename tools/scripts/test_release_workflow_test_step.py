@@ -280,6 +280,57 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertIn("missing.*\\.dll", run_block)
 
 
+class ReleaseCliBackfillOverlay(unittest.TestCase):
+    """Backfill overlays must not import current source lists into old tags."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = RELEASE_CLI.read_text(encoding="utf-8")
+
+    def _find_step_run(self, step_name: str) -> str:
+        pattern = re.compile(
+            rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
+            r"(?:(?!\n\s*-\s*name:).)*?"
+            r"\s*run:\s*(.+?)(?=\n\s*-\s*name:|\Z)",
+            re.DOTALL,
+        )
+        match = pattern.search(self.text)
+        self.assertIsNotNone(match, f"could not locate `{step_name}` step")
+        return match.group(1)
+
+    def test_backfill_overlay_keeps_cli_cmake_source_list_from_tag(self) -> None:
+        run_block = self._find_step_run(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        loop_match = re.search(
+            r"for path in\s+\\\n(?P<body>.*?)\n\s+; do",
+            run_block,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(loop_match, "could not locate overlay file loop")
+        overlay_paths = loop_match.group("body")
+        self.assertIn("tools/scripts/fetch_skia_for_release.py", overlay_paths)
+        self.assertIn("core/canvas/CMakeLists.txt", overlay_paths)
+        self.assertIn("tools/deps/manifest.json", overlay_paths)
+        self.assertNotIn(
+            "tools/cli/CMakeLists.txt",
+            overlay_paths,
+            "Backfills must not wholesale-overlay tools/cli/CMakeLists.txt: "
+            "main's add_executable() source list can reference .cpp files that "
+            "do not exist in older tags.",
+        )
+
+    def test_backfill_patches_only_cli_fontconfig_tail_link(self) -> None:
+        run_block = self._find_step_run(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        self.assertIn('Path("tools/cli/CMakeLists.txt")', run_block)
+        self.assertIn("target_link_libraries\\(pulp-cli PRIVATE", run_block)
+        self.assertIn("_PULP_CLI_FONTCONFIG", run_block)
+        self.assertIn("path.write_text(text", run_block)
+        self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
+
+
 class SignAndReleaseContentsWriteTest(unittest.TestCase):
     """#724: sign-and-release.yml must declare `contents: write` on its
     macOS job so the final `Create GitHub Release` step can call the
