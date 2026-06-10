@@ -15,6 +15,8 @@ assertions (audio_assertions)                            — CheckResult pass/fa
 artifacts (audio_artifacts)                              — JSON serialization of metrics + provenance
    ↓
 scenarios (render_scenario)                              — HeadlessHost block-loop renders + matrix sweeps
+   ↓
+contracts (audio_contracts)                              — named claims over one rendered scenario
 ```
 
 **No back-edges.** A layer may include layers above it in this list, never
@@ -46,3 +48,26 @@ Instruments use `.channels(0, 2)`, a `duration_ms(...)`, and
 sweeps pass a generator: `.input([](double sr, int ch, std::int64_t n) {
 return make_sine(ch, int(n), 440.0f, sr); })`, then `run_matrix(...)`.
 Partition checks: `assert_block_partition_invariant(scenario, {64, 128, 256})`.
+
+## Copy this contract
+
+A contract names the claim so failures are self-describing — the verdict
+message carries `contract '<name>':`, the scenario facts, and a metrics
+artifact path. New effects copy a fixture from `test_audio_contracts.cpp`:
+
+```cpp
+AudioContract contract("myeffect.bypass", scenario);   // renders once
+contract.expect(expect_passthrough(contract.result(), input))
+        .expect(expect_finite_and_unclipped(contract.result()))
+        .expect(assert_block_partition_invariant(scenario, {64, 128, 256}));
+const auto verdict = contract.verify();
+INFO(verdict.message);
+CHECK(verdict.passed);
+```
+
+Family helpers: `expect_passthrough` (unity/bypass), `expect_silence_preserved`
+(silence-in-silence-out, silent-without-MIDI), `expect_tone` (instrument
+pitch + level over a held window), `expect_finite_and_unclipped` (hygiene).
+Partition invariance is the existing `assert_block_partition_invariant`.
+Anything else: `.expect({condition, "message"})` — expectations are plain
+`CheckResult`s.
