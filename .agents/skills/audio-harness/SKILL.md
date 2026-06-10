@@ -102,19 +102,27 @@ auto thd = measure_thd(/* steady bin-coherent sine through the processor */);
 - **Layering is one-way.** Doctor may use scenarios + FFT; nothing below may
   include `audio_doctor`/`audio_contracts`.
 
-## Roadmap (planned — do NOT instruct using these until they land)
+## Live inspection (Audio Inspector window) — landed
 
-The harness plan
-(`planning/2026-06-09-audio-observability-and-validation-harness-plan.md`) adds two
-**runtime/UI** surfaces on top of this offline core, each of which must register
-its own plugin surface when it lands:
+For *live* signal inspection while a standalone app / hosted graph runs, there is
+a separate developer tool window: `pulp::view::AudioInspectorWindow`
+(`core/view/.../audio_inspector_window.hpp`). It is a sibling of the layout
+inspector, not a tab — open it via its `CommandRegistry` command
+`kToggleAudioInspector` (default Cmd/Ctrl+Shift+A, rebindable) or the
+`/audio-inspect` slash command. It shows meters (peak/RMS/clip/NaN-Inf/silence),
+the observed probe stage, a copied fixed-capacity waveform, channel balance + an
+L/R level-match ratio, and a device/runtime summary — all polled once per UI tick
+from a realtime-safe `AudioProbeSnapshot` (it never touches the audio thread). It
+honestly shows a "no probe" / "stale" state rather than faking zeros. Live data
+requires the standalone output-boundary tap, which is gated behind
+`PULP_ENABLE_AUDIO_PROBES`. NOTE: the "L/R match" is a level ratio, not a
+phase/Pearson correlation (the RT snapshot carries no inter-sample L*R term yet).
 
-- **Live Audio Inspector window** (separate dev tool window; meters / probe-stage
-  status / waveform over a realtime-safe `AudioProbeSnapshot`) — a rebindable
-  command via the existing `CommandRegistry`. Update this skill + add its slash
-  command when it ships.
+This is for *watching what is currently flowing*; controlled-stimulus measurement
+(response/THD/etc.) is the offline Doctor above.
+
+## Roadmap (planned — do NOT instruct using this until it lands)
+
 - **`pulp audio validate <verb>` CLI** (render / assert / summarize / compare /
   doctor over these analyzers) — nests under the existing `pulp audio` command.
   Update the `/audio-harness` command to wrap it when it ships.
-
-Until then, the harness is invoked as C++ test fixtures / `ctest` as above.
