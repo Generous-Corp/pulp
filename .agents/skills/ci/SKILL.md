@@ -54,6 +54,13 @@ Slice 6 (#551).
   build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
   new release/packaging workflow, configure with examples OFF (or a populated
   `SKIA_DIR`), or the design-tool Skia gate will block it.
+- **Release/SDK builds must pass `-DPULP_ENABLE_AUDIO_PROBES=OFF`.** The
+  standalone audio probe is a dev/example inspection surface and defaults ON
+  for local development, but shipped CLI, standalone, and SDK artifacts must
+  not export it. Keep `release-cli.yml`, `release-path-pr-gate.yml`,
+  `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
+  checkout-backed SDK configure paths aligned when touching release CMake
+  flags.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push

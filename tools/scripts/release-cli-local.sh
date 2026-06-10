@@ -34,6 +34,7 @@ step "Building macOS arm64"
 cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DPULP_BUILD_TESTS=OFF \
+    -DPULP_ENABLE_AUDIO_PROBES=OFF \
     -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5
 cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release 2>&1 | tail -3
 if [ ! -f "$MAC_BUILD_DIR/tools/cli/pulp" ]; then
@@ -83,6 +84,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntu "echo ok" &>/dev/null; then
     ssh ubuntu "cd ~/pulp && \
         cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
             -DPULP_BUILD_WEBVIEW=ON" 2>&1 | tail -5
 
     # Build
@@ -113,7 +115,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes win2 "echo ok" &>/dev/null; then
             --exclude='dist' --exclude='planning' \
             "$REPO_ROOT/" win2:~/pulp/
 
-        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5"
+        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF -DPULP_ENABLE_AUDIO_PROBES=OFF -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5"
         ssh win2 "cd ~/pulp && cmake --build build-cli --target pulp-cli --config Release 2>&1 | tail -5"
 
         if ssh win2 "if exist ~/pulp/build-cli/tools/cli/Release/pulp.exe (echo ok)" | grep -q ok; then

@@ -146,6 +146,7 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $REQUIRE_GPU \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash

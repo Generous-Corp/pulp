@@ -29,19 +29,13 @@ void AudioProbe::prepare(int max_channels,
     sequence_number_ = 0;
     clip_count_ = 0;
     nan_inf_count_ = 0;
+    clipped_blocks_ = 0;
+    nan_blocks_ = 0;
     callbacks_ = 0;
     silence_run_blocks_ = 0;
     dropped_capture_frames_ = 0;
 
-    // Publish an initial empty snapshot so a reader before the first callback
-    // sees coherent identity fields instead of a default-constructed sequence 0
-    // that looks like live data.
-    AudioProbeSnapshot init{};
-    init.sample_rate = sample_rate_;
-    init.channel_count = 0;
-    init.stage_id = stage_;
-    init.sequence_number = 0;
-    summary_buf_.write(init);
+    publish_empty_snapshot();
 }
 
 void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept {
@@ -58,6 +52,8 @@ void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept 
     snap.stage_id = stage_;
 
     bool block_silent = true;
+    bool block_had_clip = false;       // this block had >=1 clipped sample
+    bool block_had_nonfinite = false;  // this block had >=1 NaN/Inf sample
 
     for (int ch = 0; ch < channels; ++ch) {
         const float* samples = output.channel_ptr(static_cast<std::size_t>(ch));
@@ -67,12 +63,16 @@ void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept 
             const float x = samples[i];
             // NaN/Inf detection without exceptions or allocation.
             if (!std::isfinite(x)) {
-                ++nan_inf_count_;
+                ++nan_inf_count_;          // per-sample
+                block_had_nonfinite = true;
                 continue;  // do not fold a non-finite value into peak/RMS
             }
             const float ax = std::fabs(x);
             if (ax > peak) peak = ax;
-            if (ax > clip_ceiling_) ++clip_count_;
+            if (ax > clip_ceiling_) {
+                ++clip_count_;             // per-sample
+                block_had_clip = true;
+            }
             sum_sq += static_cast<double>(x) * static_cast<double>(x);
         }
         const float rms = frames > 0
@@ -88,6 +88,8 @@ void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept 
     if (channels == 0 || frames == 0) block_silent = true;
 
     ++callbacks_;
+    if (block_had_clip) ++clipped_blocks_;
+    if (block_had_nonfinite) ++nan_blocks_;
     if (block_silent) {
         ++silence_run_blocks_;
     } else {
@@ -117,6 +119,8 @@ void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept 
     snap.sequence_number = sequence_number_;
     snap.clip_count = clip_count_;
     snap.nan_inf_count = nan_inf_count_;
+    snap.clipped_blocks = clipped_blocks_;
+    snap.nan_blocks = nan_blocks_;
     snap.callbacks = callbacks_;
     snap.silence_run_blocks = silence_run_blocks_;
     snap.dropped_capture_frames = dropped_capture_frames_;
@@ -130,8 +134,10 @@ AudioStats AudioProbe::stats() {
     AudioStats out;
     out.callbacks = snap.callbacks;
     out.underruns = 0;  // not tracked by the output-boundary probe itself
-    out.clipped_blocks = snap.clip_count > 0 ? snap.clip_count : 0;
-    out.nan_blocks = snap.nan_inf_count;
+    // Per-BLOCK tallies (a block with >=1 clipped/non-finite sample counts
+    // once) — NOT the per-sample clip_count / nan_inf_count totals.
+    out.clipped_blocks = snap.clipped_blocks;
+    out.nan_blocks = snap.nan_blocks;
     // device_xruns / cpu_overloads are MIRRORS owned by the device — the host
     // populates them, the probe never does. Leave at zero here.
     return out;
@@ -154,10 +160,25 @@ void AudioProbe::reset() noexcept {
     sequence_number_ = 0;
     clip_count_ = 0;
     nan_inf_count_ = 0;
+    clipped_blocks_ = 0;
+    nan_blocks_ = 0;
     callbacks_ = 0;
     silence_run_blocks_ = 0;
     dropped_capture_frames_ = 0;
     if (capture_fifo_) capture_fifo_->reset();
+    publish_empty_snapshot();
+}
+
+void AudioProbe::publish_empty_snapshot() noexcept {
+    // Publish an empty snapshot so a reader before the first callback, or
+    // immediately after reset(), sees coherent identity fields and cleared
+    // counters instead of stale triple-buffer data.
+    AudioProbeSnapshot snap{};
+    snap.sample_rate = sample_rate_;
+    snap.channel_count = 0;
+    snap.stage_id = stage_;
+    snap.sequence_number = 0;
+    summary_buf_.write(snap);
 }
 
 }  // namespace pulp::audio

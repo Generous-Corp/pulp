@@ -352,6 +352,7 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         + " -DCMAKE_INSTALL_PREFIX=" + sdk_dir.string()
         + " -DPULP_BUILD_TESTS=OFF"
         + " -DPULP_BUILD_EXAMPLES=OFF"
+        + " -DPULP_ENABLE_AUDIO_PROBES=OFF"
         + " -DPULP_ENABLE_GPU=OFF";
     append_windows_visual_studio_generator_args(configure_cmd);
     if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {

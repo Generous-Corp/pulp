@@ -74,6 +74,13 @@ struct AudioProbeSnapshot {
     std::uint64_t clip_count = 0;
     /// Samples seen as NaN or Inf, summed over all blocks/channels.
     std::uint64_t nan_inf_count = 0;
+    /// BLOCKS that contained at least one clipped sample (per-block tally, not
+    /// the per-sample `clip_count`). This is what `AudioStats::clipped_blocks`
+    /// mirrors.
+    std::uint64_t clipped_blocks = 0;
+    /// BLOCKS that contained at least one NaN/Inf sample (per-block tally, not
+    /// the per-sample `nan_inf_count`). Mirrored by `AudioStats::nan_blocks`.
+    std::uint64_t nan_blocks = 0;
     /// Number of analyzed callbacks (blocks) since prepare().
     std::uint64_t callbacks = 0;
     /// Consecutive blocks (most recent run) below the silence threshold. Reset

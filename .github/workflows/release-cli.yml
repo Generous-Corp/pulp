@@ -329,6 +329,7 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $REQUIRE_GPU \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash
@@ -479,6 +480,7 @@ jobs:
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $REQUIRE_GPU \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full

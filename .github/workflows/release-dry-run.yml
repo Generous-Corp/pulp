@@ -42,6 +42,7 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
             -DPULP_REQUIRE_GPU_FOR_SDK=ON \
             -DPULP_BUILD_WEBVIEW=ON
         shell: bash

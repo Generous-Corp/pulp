@@ -915,9 +915,12 @@ falls through to the back-buffer capture unchanged. See the `screenshot` skill.
 ## Standalone audio-callback probe tap (Phase 5 observability harness)
 
 `StandaloneApp`'s audio callback carries an optional realtime output-boundary
-probe, gated behind the `PULP_ENABLE_AUDIO_PROBES` CMake option (default OFF).
-When ON, `start()` `prepare()`s `output_probe_` (the only place it allocates)
-and the callback calls `output_probe_.analyze_output(...)` immediately after
+probe, gated behind the `PULP_ENABLE_AUDIO_PROBES` CMake option. The default is
+ON for dev/example builds; release and SDK build paths pass
+`-DPULP_ENABLE_AUDIO_PROBES=OFF` so shipped standalone artifacts do not export
+the dev probe surface unless a developer opts in. When ON, `start()`
+`prepare()`s `output_probe_` (the only place it allocates) and the callback
+calls `output_probe_.analyze_output(...)` immediately after
 `processor_->process(...)` — the "standalone processor-output boundary." This
 is the first wired probe stage for "UI works, no sound" reports. Gotchas:
 

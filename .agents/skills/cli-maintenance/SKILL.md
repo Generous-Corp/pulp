@@ -1535,6 +1535,10 @@ Gotchas:
   fall-through to `pulp-cpp sdk install` (see `pulp-rs/src/cmd/sdk.rs`);
   the C++ `cmd_sdk` is a different code path with its own per-version
   `~/.pulp/sdk/<version>/` layout. #1814 fix lives only in `cmd_cache`.
+- **Checkout-backed SDK builds force dev probes off.** `ensure_checkout_sdk`
+  configures local SDK builds with `-DPULP_ENABLE_AUDIO_PROBES=OFF` so
+  `pulp sdk install --local` and checkout-backed standalone resolution do not
+  export the dev standalone audio-probe surface in cached SDK artifacts.
 - **If you bump `PULP_SDK_VERSION`, you do NOT need to manually
   invalidate `~/.pulp/cache`.** The new version means the filename
   misses on the old cache and the user gets a fresh download

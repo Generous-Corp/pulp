@@ -152,6 +152,10 @@ install command on supported hosts where the binary is absent.
   CLI is a build accelerator; it isn't.
 - **Release / signing** — Gradle through `pulp ship` is the only
   store-grade path. The CLI's `run` is debug-install only.
+- **Audio probe defaults** — generated Android app templates pass
+  `-DPULP_ENABLE_AUDIO_PROBES=OFF`; the standalone audio probes are a
+  dev/examples diagnostic surface, not something generated app builds
+  should ship accidentally.
 - **CI** — Pulp's CI runs on mixed-arch hosts (Linux ARM64 via
   `ssh ubuntu`, Windows ARM64 via `ssh win2`) where the CLI binary
   doesn't exist. CI scripts use `adb` / `gradle` directly.

@@ -185,9 +185,17 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             self.text,
         )
 
+    def test_cli_and_sdk_build_disable_audio_probes(self) -> None:
+        self.assertGreaterEqual(
+            self.text.count("-DPULP_ENABLE_AUDIO_PROBES=OFF"),
+            2,
+            "release-cli.yml must keep audio probes disabled for both the "
+            "CLI and SDK release configure steps.",
+        )
+
 
 class BuildWorkflowReleaseGate(unittest.TestCase):
-    """build.yml release-path PR gate must match the split SDK archives."""
+    """build.yml release-path PR gate must match release-cli.yml invariants."""
 
     def setUp(self) -> None:
         self.assertTrue(
@@ -195,6 +203,17 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
             f"missing workflow file: {BUILD_WORKFLOW}",
         )
         self.text = BUILD_WORKFLOW.read_text()
+
+    def _find_step_run(self, step_name: str) -> str:
+        pattern = re.compile(
+            rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
+            r"(?:(?!\n\s*-\s*name:).)*?"
+            r"\s*run:\s*(.+?)(?=\n\s*-\s*name:|\Z)",
+            re.DOTALL,
+        )
+        match = pattern.search(self.text)
+        self.assertIsNotNone(match, f"could not locate `{step_name}` step")
+        return match.group(1)
 
     def test_windows_release_gate_checks_view_core_archive(self) -> None:
         self.assertIn("sdk-staging/lib/pulp-view.lib", self.text)
@@ -204,6 +223,10 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
             "assert b'WebViewPanel'",
             self.text,
         )
+
+    def test_windows_release_gate_disables_audio_probes(self) -> None:
+        run_block = self._find_step_run("Configure (matches release-cli.yml)")
+        self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):

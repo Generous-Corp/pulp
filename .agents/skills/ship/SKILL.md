@@ -529,6 +529,12 @@ This applies to both `.github/workflows/release-cli.yml` and the local
 helper `tools/scripts/release-cli-local.sh`. If one changes without the
 other, GitHub releases and local release drills diverge.
 
+Release/SDK builds also pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and
+standalone artifacts do not ship the dev audio-probe surface. Keep
+`.github/workflows/release-cli.yml`, `.github/workflows/sign-and-release.yml`,
+and `tools/scripts/release-cli-local.sh` in sync when changing release
+configure flags.
+
 ### Shipyard pin drift between local tooling and release workflows
 
 Pulp's release automation depends on the pinned Shipyard CLI in two places:

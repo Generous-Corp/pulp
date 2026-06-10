@@ -152,6 +152,21 @@ class TestMain(unittest.TestCase):
         rc = vct.main(["--templates-root", str(templates_root)])
         self.assertEqual(rc, 0, "verify_create_templates must pass at HEAD")
 
+    def test_android_template_disables_audio_probes(self) -> None:
+        template = (
+            _HERE.parent
+            / "templates"
+            / "android"
+            / "app"
+            / "build.gradle.kts.template"
+        )
+        if not template.is_file():
+            self.skipTest(f"Android template missing at {template}")
+        self.assertIn(
+            "-DPULP_ENABLE_AUDIO_PROBES=OFF",
+            template.read_text(encoding="utf-8"),
+        )
+
     def test_fails_on_missing_root(self) -> None:
         rc = vct.main(["--templates-root", "/nonexistent/path/xyz"])
         self.assertEqual(rc, 1)
