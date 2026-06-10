@@ -3270,25 +3270,18 @@ def run_logged_command(
 
 
 def run_local_validation(job: dict, exclude_tests: str = "", report_progress=None) -> dict:
-    print(f"  [mac] Running local validation on {job['branch']} @ {short_sha(job['sha'])}...")
-    log_path = prepare_target_log(job["id"], "mac")
-    if report_progress:
-        report_progress(
-            phase="validate",
-            log_path=str(log_path),
-            last_output_at=now_iso(),
-            transport_mode="local",
-        )
-
-    cmd, validation = local_validation_command(job, exclude_tests)
-
-    run = run_logged_command(cmd, cwd=ROOT, timeout=3600, log_path=log_path, report_progress=report_progress)
-    return validation_result_from_run(
-        "mac",
-        run,
-        log_path=log_path,
-        validation=validation,
-        transport_mode="local",
+    return _execution.run_local_validation(
+        job,
+        exclude_tests,
+        report_progress,
+        root=ROOT,
+        print_fn=print,
+        short_sha_fn=short_sha,
+        prepare_target_log_fn=prepare_target_log,
+        now_iso_fn=now_iso,
+        local_validation_command_fn=local_validation_command,
+        run_logged_command_fn=run_logged_command,
+        validation_result_from_run_fn=validation_result_from_run,
     )
 
 
