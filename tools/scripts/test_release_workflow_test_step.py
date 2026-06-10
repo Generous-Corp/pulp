@@ -244,6 +244,20 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
 
+    def test_unix_preswap_backfills_alias_cpp_cli_to_primary_binary(self) -> None:
+        run_block = self._find_step_run("Normalize CLI binary layout (Unix)")
+        self.assertIn("[ ! -e build/pulp ]", run_block)
+        self.assertIn("[ -x build/tools/cli/pulp-cpp ]", run_block)
+        self.assertIn("cp -p build/tools/cli/pulp-cpp build/pulp", run_block)
+        self.assertIn("test -x build/pulp", run_block)
+
+    def test_windows_preswap_backfills_alias_cpp_cli_to_primary_binary(self) -> None:
+        run_block = self._find_step_run("Normalize CLI binary layout (Windows)")
+        self.assertIn("$primary = 'build/pulp.exe'", run_block)
+        self.assertIn("$cpp = 'build/tools/cli/Release/pulp-cpp.exe'", run_block)
+        self.assertIn("Copy-Item -Path $cpp -Destination $primary", run_block)
+        self.assertIn("Primary CLI binary missing after normalization", run_block)
+
     def test_unix_smoke_step_exercises_all_cli_binaries(self) -> None:
         run_block = self._find_step_run(
             "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)"

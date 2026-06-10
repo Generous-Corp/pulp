@@ -267,6 +267,39 @@ jobs:
         run: cmake --build build --config Release
         shell: bash
 
+      - name: Normalize CLI binary layout (Unix)
+        if: runner.os != 'Windows'
+        # Backfill compatibility: tags before the Rust CLI swap only build the
+        # C++ CLI delegate (`build/tools/cli/pulp-cpp`) and have no top-level
+        # `build/pulp`. Package those trees under the stable user-facing
+        # `pulp` name without changing current releases, where `build/pulp`
+        # already exists and remains the primary binary.
+        run: |
+          set -euo pipefail
+          if [ ! -e build/pulp ] && [ -x build/tools/cli/pulp-cpp ]; then
+            echo "Pre-swap CLI layout detected; copying pulp-cpp to build/pulp for packaging"
+            cp -p build/tools/cli/pulp-cpp build/pulp
+          fi
+          test -x build/pulp
+        shell: bash
+
+      - name: Normalize CLI binary layout (Windows)
+        if: runner.os == 'Windows'
+        # Same backfill compatibility as Unix, adjusted for Visual Studio's
+        # multi-config output directory.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $primary = 'build/pulp.exe'
+          $cpp = 'build/tools/cli/Release/pulp-cpp.exe'
+          if (!(Test-Path $primary) -and (Test-Path $cpp)) {
+              Write-Host 'Pre-swap CLI layout detected; copying pulp-cpp.exe to build/pulp.exe for packaging'
+              Copy-Item -Path $cpp -Destination $primary
+          }
+          if (!(Test-Path $primary)) {
+              throw "Primary CLI binary missing after normalization: $primary"
+          }
+        shell: pwsh
+
       # Phase 8: post-swap there are TWO CLI binaries shipping side by
       # side — `pulp` (Rust, the user-facing default) at the top of
       # the build dir, and `pulp-cpp` (C++, the fallthrough delegate
