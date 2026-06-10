@@ -65,6 +65,7 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
 - **Capacity-aware local queue draining is implemented and VM-slot-aware.** The current tartci/Shipyard path shares one rule: a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host), and only macOS/Darwin guests consume the `macos` VM slot. Linux Tart and Windows QEMU lanes use their own labels, supervisors, and caps; they do not reduce macOS free slots, though CPU/RAM can still need route weights or reservations.
 - **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R danielraffel/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
+- **Production required macOS route is VM-first (2026-06-10):** `PULP_LOCAL_MACOS_RUNS_ON_JSON=["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` and `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build-vm`. The VM supervisors advertise both `pulp-build` and `pulp-build-vm`; bare-metal `pulp-build` runners stay online but are excluded from the default route by the extra `pulp-build-vm` label. Full rollback: restore `PULP_LOCAL_MACOS_RUNS_ON_JSON` to `["self-hosted","pulp-build"]`, restore `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build`, and unload the VM LaunchAgents if the VM pool itself is unhealthy.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
@@ -167,7 +168,17 @@ main, reddening every PR's macOS gate.)
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
-3. **Graduate:** add persistent VM runners to the required `pulp-build` pool one stage at a time (or stage replacing bare-metal), distributed across hosts. Never point a required check at an empty label; preflight that the label has online runners. Keep at least one bare-metal fallback until the agreed observation window is green.
+3. **Graduated production default route (active 2026-06-10):** persistent VM supervisors now advertise `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm`, and Pulp's default required macOS selector requires that full set. Real `Build and Test` jobs have drained on both the controller VM runner and the secondary-host VM runner:
+   - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
+   - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
+   - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
+4. **Rollback path:** keep bare-metal fallback online. To route back to bare-metal:
+   ```bash
+   gh variable set -R danielraffel/pulp PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","pulp-build"]'
+   gh variable set -R danielraffel/pulp PULP_LOCAL_MAC_RUNNER_LABEL --body 'pulp-build'
+   launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner"
+   ssh <secondary-host> 'launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner-macos-pilot"'
+   ```
 
 ## Gotchas (hard-won)
 - **NEVER run signing/keychain tests on a non-VM host.** `check_notarization`/codesign tests call `security`/`codesign`/`notarytool`, which on an interactive host pop GUI keychain dialogs and can disrupt the default keychain. Run them **only in the disposable VM**. Never click "Reset To Defaults" on a keychain prompt on a real Mac; never wipe a host keychain.
