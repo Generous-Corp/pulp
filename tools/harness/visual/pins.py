@@ -29,8 +29,12 @@ FONT_SHA256 = {
 }
 
 RELEASE_ASSET_SHA256 = {
-    # chrome/m150 dropped the linux-arm64 slice; Linux arm64 stays on the
-    # m149 asset or rebuilds from source until the fork republishes it.
+    # linux-arm64 was backfilled onto the chrome/m150 release after the fork's
+    # build lane (skia-builder 634672f) was wired into create-release; must stay
+    # in lockstep with manifest.json (guarded by test_skia_linux_arm64_asset.py).
+    "linux-arm64": (
+        "4420a7a0dd040d6e4f07332aea3966d5d7b35cf23b02cb4501b5a877ca305aac"
+    ),
     "linux-x64": (
         "bb4d3a868a72560b25e467952bb7792d4af2bc9dcab1f77afca208b7b1f0d07b"
     ),
