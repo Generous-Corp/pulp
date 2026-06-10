@@ -75,6 +75,62 @@ pulp ship check
 
 Runs `codesign --verify --deep --strict` on each bundle.
 
+### Non-Interactive Keychain Access
+
+If `codesign` can list the Developer ID identity but signing fails with
+`errSecInternalComponent`, the private key is installed but the current process
+is not allowed to use it. GUI Terminal sessions may prompt and succeed while
+agents, CI jobs, launchd services, or other non-interactive shells fail.
+
+The durable setup is a dedicated signing keychain for automation. Export the
+Developer ID Application certificate and private key as a `.p12` from Keychain
+Access, then run this once from zsh:
+
+```bash
+KC="$HOME/Library/Keychains/pulp-signing.keychain-db"
+
+read -rs "KC_PW?New signing keychain password: "; echo
+security create-keychain -p "$KC_PW" "$KC"
+security set-keychain-settings -lut 21600 "$KC"
+security unlock-keychain -p "$KC_PW" "$KC"
+security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
+
+read -rs "P12_PW?Developer ID .p12 password: "; echo
+security import "/path/to/DeveloperIDApplication.p12" \
+  -k "$KC" \
+  -P "$P12_PW" \
+  -T /usr/bin/codesign \
+  -T /usr/bin/productsign \
+  -T /usr/bin/pkgbuild \
+  -T /usr/bin/productbuild
+
+security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PW" "$KC"
+unset KC_PW P12_PW
+security find-identity -v -p codesigning "$KC"
+```
+
+Before a non-interactive signing run, unlock that keychain and make sure it is
+in the user search list:
+
+```bash
+KC="$HOME/Library/Keychains/pulp-signing.keychain-db"
+read -rs "KC_PW?Signing keychain password: "; echo
+security unlock-keychain -p "$KC_PW" "$KC"
+security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
+unset KC_PW
+```
+
+For a personal machine that already has the Developer ID private key in the
+login keychain, this narrower repair is usually enough:
+
+```bash
+KC="$HOME/Library/Keychains/login.keychain-db"
+read -rs "LOGIN_PW?Mac login password: "; echo
+security unlock-keychain -p "$LOGIN_PW" "$KC"
+security set-key-partition-list -S apple-tool:,apple: -s -k "$LOGIN_PW" "$KC"
+unset LOGIN_PW
+```
+
 ## Step 4: Notarize
 
 The preferred CLI path uses an App Store Connect API key (`.p8`):
@@ -125,7 +181,8 @@ auto uuid = pulp::ship::notarize_submit_asc(
 //     "build/CLAP/MyPlugin.clap", "you@apple.id", "TEAMID",
 //     "@keychain:AC_PASSWORD");
 
-auto status = pulp::ship::notarize_check(*uuid);
+auto status = pulp::ship::notarize_check_asc(
+    *uuid, "/path/to/AuthKey_XXX.p8", "XXX", "5e8f0b95-...");
 pulp::ship::notarize_staple("build/CLAP/MyPlugin.clap");
 ```
 

@@ -29,6 +29,14 @@ std::optional<std::string> notarize_submit_asc(const std::string&, const std::st
     return std::nullopt;
 }
 NotarizationStatus notarize_check(const std::string&) { return {}; }
+NotarizationStatus notarize_check(const std::string&, const std::string&,
+                                  const std::string&, const std::string&) {
+    return {};
+}
+NotarizationStatus notarize_check_asc(const std::string&, const std::string&,
+                                      const std::string&, const std::string&) {
+    return {};
+}
 bool notarize_staple(const std::string&) { return false; }
 std::vector<std::string> list_signing_identities() { return {}; }
 bool create_pkg(const std::string&, const std::string&, const std::string&,

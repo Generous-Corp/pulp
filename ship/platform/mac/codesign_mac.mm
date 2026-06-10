@@ -8,6 +8,7 @@
 #include <sstream>
 #include <array>
 #include <filesystem>
+#include <iostream>
 #include <regex>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -146,8 +147,28 @@ bool codesign(const std::string& path, const std::string& identity,
     std::string cmd = "codesign --force --sign \"" + identity + "\" --timestamp --options runtime";
     if (!entitlements.empty())
         cmd += " --entitlements \"" + entitlements + "\"";
-    cmd += " \"" + path + "\" 2>/dev/null";
-    return exec_status(cmd) == 0;
+    cmd += " \"" + path + "\"";
+    auto r = pulp::platform::exec("/bin/sh", {"-c", cmd}, 120000);
+    if (r.exit_code == 0) return true;
+
+    auto output = r.stdout_output;
+    if (!r.stderr_output.empty()) {
+        if (!output.empty() && output.back() != '\n') output += '\n';
+        output += r.stderr_output;
+    }
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r'))
+        output.pop_back();
+    if (!output.empty())
+        std::cerr << output << "\n";
+    if (output.find("errSecInternalComponent") != std::string::npos) {
+        std::cerr
+            << "codesign: the signing identity was found, but this process "
+               "could not access the private key.\n"
+            << "  Configure the signing keychain partition list for Apple "
+               "tools, or import the Developer ID certificate into a dedicated "
+               "automation keychain.\n";
+    }
+    return false;
 }
 
 std::optional<std::string> notarize_submit(const std::string& path,
@@ -183,6 +204,30 @@ std::optional<std::string> notarize_submit_asc(const std::string& path,
 
 NotarizationStatus notarize_check(const std::string& request_uuid) {
     auto output = exec_cmd("xcrun notarytool info " + request_uuid + " 2>&1");
+    return detail::parse_notarytool_status(output);
+}
+
+NotarizationStatus notarize_check(const std::string& request_uuid,
+                                  const std::string& apple_id,
+                                  const std::string& team_id,
+                                  const std::string& password) {
+    auto output = exec_cmd("xcrun notarytool info " + request_uuid
+        + " --apple-id \"" + apple_id + "\""
+        + " --team-id \"" + team_id + "\""
+        + " --password \"" + password + "\""
+        + " 2>&1");
+    return detail::parse_notarytool_status(output);
+}
+
+NotarizationStatus notarize_check_asc(const std::string& request_uuid,
+                                      const std::string& key_path,
+                                      const std::string& key_id,
+                                      const std::string& issuer_id) {
+    auto output = exec_cmd("xcrun notarytool info " + request_uuid
+        + " --key \"" + key_path + "\""
+        + " --key-id \"" + key_id + "\""
+        + " --issuer \"" + issuer_id + "\""
+        + " 2>&1");
     return detail::parse_notarytool_status(output);
 }
 
@@ -302,6 +347,8 @@ bool codesign(const std::string&, const std::string&, const std::string&) { retu
 std::optional<std::string> notarize_submit(const std::string&, const std::string&, const std::string&, const std::string&) { return std::nullopt; }
 std::optional<std::string> notarize_submit_asc(const std::string&, const std::string&, const std::string&, const std::string&) { return std::nullopt; }
 NotarizationStatus notarize_check(const std::string&) { return {}; }
+NotarizationStatus notarize_check(const std::string&, const std::string&, const std::string&, const std::string&) { return {}; }
+NotarizationStatus notarize_check_asc(const std::string&, const std::string&, const std::string&, const std::string&) { return {}; }
 bool notarize_staple(const std::string&) { return false; }
 std::vector<std::string> list_signing_identities() { return {}; }
 bool create_pkg(const std::string&, const std::string&, const std::string&, const std::string&, const std::string&) { return false; }

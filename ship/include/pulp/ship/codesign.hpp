@@ -48,13 +48,23 @@ std::optional<std::string> notarize_submit_asc(const std::string& path,
                                                 const std::string& key_id,
                                                 const std::string& issuer_id);
 
-// Check notarization status
+// Check notarization status. Prefer the credentialed overload matching the
+// submit lane; Apple's notarytool requires credentials for `info` just as it
+// does for `submit` unless the host has a default notary profile configured.
 struct NotarizationStatus {
     bool complete = false;
     bool success = false;
     std::string message;
 };
 NotarizationStatus notarize_check(const std::string& request_uuid);
+NotarizationStatus notarize_check(const std::string& request_uuid,
+                                  const std::string& apple_id,
+                                  const std::string& team_id,
+                                  const std::string& password);
+NotarizationStatus notarize_check_asc(const std::string& request_uuid,
+                                      const std::string& key_path,
+                                      const std::string& key_id,
+                                      const std::string& issuer_id);
 
 // Staple the notarization ticket
 bool notarize_staple(const std::string& path);

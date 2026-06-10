@@ -88,6 +88,19 @@ TEST_CASE("Linux packaging exposes no-op signing surface honestly",
     REQUIRE_FALSE(status.success);
     REQUIRE(status.message.empty());
 
+    auto legacy_status = pulp::ship::notarize_check("request-id", "apple", "team", "password");
+    REQUIRE_FALSE(legacy_status.complete);
+    REQUIRE_FALSE(legacy_status.success);
+    REQUIRE(legacy_status.message.empty());
+
+    auto asc_status = pulp::ship::notarize_check_asc("request-id",
+                                                     "/tmp/AuthKey_TEST.p8",
+                                                     "TESTKEY123",
+                                                     "12345678-1234-1234-1234-123456789abc");
+    REQUIRE_FALSE(asc_status.complete);
+    REQUIRE_FALSE(asc_status.success);
+    REQUIRE(asc_status.message.empty());
+
     REQUIRE_FALSE(pulp::ship::notarize_staple("/tmp/missing"));
     REQUIRE(pulp::ship::list_signing_identities().empty());
     REQUIRE(pulp::ship::default_audio_entitlements().empty());

@@ -844,7 +844,10 @@ int cmd_ship(const std::vector<std::string>& args) {
                 : pulp::ship::notarize_submit(path, apple_id, team_id, password);
             if (!uuid) { std::cerr << "  Submission FAILED\n"; continue; }
             std::cout << "  Request UUID: " << *uuid << "\n";
-            auto status = pulp::ship::notarize_check(*uuid);
+            auto status = use_asc
+                ? pulp::ship::notarize_check_asc(*uuid, asc.key_path,
+                                                 asc.key_id, asc.issuer_id)
+                : pulp::ship::notarize_check(*uuid, apple_id, team_id, password);
             if (status.success) {
                 std::cout << "  Notarization succeeded. Stapling...\n";
                 if (pulp::ship::notarize_staple(path)) std::cout << "  Stapled " << name << "\n";
