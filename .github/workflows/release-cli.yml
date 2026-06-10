@@ -115,7 +115,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          # lfs: false — release-cli fetches the Skia binaries explicitly via
+          # fetch_skia_for_release.py (see "Fetch Skia prebuilt binaries" below;
+          # the LFS pull does NOT populate them). Pulling LFS here is redundant
+          # AND fails the checkout on the self-hosted macOS runners (git-lfs not
+          # configured there — the working main `macos` gate in build.yml also
+          # uses lfs: false). This was an 8-second checkout failure on
+          # pulp-studio-01 that blocked v0.400.0's darwin-arm64 leg.
+          lfs: false
           # On `workflow_dispatch`, prefer `source_ref` if the user supplied
           # one; otherwise check out the `version` tag they typed. On
           # push-tag triggers, fall through to the default (the tag ref).
