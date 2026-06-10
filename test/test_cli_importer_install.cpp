@@ -18,6 +18,7 @@
 #include "../tools/cli/tool_registry.hpp"
 
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -25,6 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -103,17 +105,27 @@ void write_file(const fs::path& path, const std::string& body) {
     f << body;
 }
 
-std::string json_escape(const std::string& text) {
+std::string json_escape(std::string_view text) {
     std::string out;
     out.reserve(text.size());
-    for (char c : text) {
+    for (unsigned char c : text) {
         switch (c) {
-            case '\\': out += "\\\\"; break;
             case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
             case '\n': out += "\\n"; break;
             case '\r': out += "\\r"; break;
             case '\t': out += "\\t"; break;
-            default: out += c; break;
+            default:
+                if (c < 0x20) {
+                    char buf[7] = {};
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+                break;
         }
     }
     return out;
@@ -387,7 +399,7 @@ fs::path write_repo_registry(const fs::path& repo, const std::string& sha,
       "vendor_id": "framework-x",
       "importer_artifacts": {
         ")") + platform + R"(": {
-          "url_template": ")" + json_escape(pkg.string()) + R"(",
+          "url_template": "file://)" + json_escape(pkg.string()) + R"(",
           "archive_format": "tar.gz",
           "sha256": ")" + sha + R"("
         }

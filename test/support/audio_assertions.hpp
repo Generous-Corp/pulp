@@ -67,7 +67,7 @@ CheckResult assert_null_near(const pulp::audio::BufferView<const float>& a,
                              double tolerance_dbfs = -120.0);
 
 /// @copydoc assert_null_near
-/// Convenience overload — Buffer has no const view() today.
+/// Convenience overload over owning buffers.
 CheckResult assert_null_near(const pulp::audio::Buffer<float>& a,
                              const pulp::audio::Buffer<float>& b,
                              double tolerance_dbfs = -120.0);

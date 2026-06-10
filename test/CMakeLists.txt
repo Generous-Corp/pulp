@@ -1870,7 +1870,7 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
-
+pulp_add_test_suite(pulp-test-signal-rt-safety SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp LIBRARIES pulp::signal)
 # Signal filter tests (P5 test-split — extracted from test_signal.cpp).
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
@@ -5608,75 +5608,75 @@ add_executable(pulp-test-matrix-effect test_matrix_effect.cpp)
 target_link_libraries(pulp-test-matrix-effect PRIVATE pulp::format Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-effect PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-matrix-effect)
-
 add_executable(pulp-test-matrix-compressor test_matrix_compressor.cpp)
 target_link_libraries(pulp-test-matrix-compressor PRIVATE pulp::format Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-compressor PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-compressor)
 catch_discover_tests(pulp-test-matrix-compressor)
-
 add_executable(pulp-test-matrix-tone test_matrix_tone.cpp)
 target_link_libraries(pulp-test-matrix-tone PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-tone PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-matrix-tone)
-
 add_executable(pulp-test-matrix-drums test_matrix_drums.cpp)
 target_link_libraries(pulp-test-matrix-drums PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-drums PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpDrums)
 catch_discover_tests(pulp-test-matrix-drums)
-
 add_executable(pulp-test-matrix-synth test_matrix_synth.cpp)
 target_link_libraries(pulp-test-matrix-synth PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-synth PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSynth)
 catch_discover_tests(pulp-test-matrix-synth)
-
 add_executable(pulp-test-matrix-sampler test_matrix_sampler.cpp)
 target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 
 # Harness support lib (test/support/audio_*): compiled once, targets link it.
-add_library(pulp-audio-test-support STATIC support/audio_metrics.cpp support/audio_assertions.cpp support/audio_artifacts.cpp)
+add_library(pulp-audio-test-support STATIC support/audio_metrics.cpp support/audio_assertions.cpp support/audio_artifacts.cpp support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/audio_doctor_artifacts.cpp)
 target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal)
 
-# Golden-file audio tests (uses HeadlessHost + PulpGain + PulpTone)
+# Harness suites — golden audio (PulpGain+PulpTone), tone regression (PR 1B),
+# render scenarios (PR 2), helper self-tests (PR 1A), and example contracts
+# (PR 3; effect contracts in their own TU over the kBypass enum collision).
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-golden)
-
-# Tone-render regression (harness PR 1B): PulpTone at 48 kHz across host block
-# sizes via the shared helpers; failures write a JSON metrics artifact.
 add_executable(pulp-test-audio-tone-regression test_audio_tone_regression.cpp)
 target_link_libraries(pulp-test-audio-tone-regression PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-tone-regression PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-tone-regression)
-
-# Harness helper self-tests (PR 1A)
+add_executable(pulp-test-render-scenario test_render_scenario.cpp)
+target_link_libraries(pulp-test-render-scenario PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+target_include_directories(pulp-test-render-scenario PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
+catch_discover_tests(pulp-test-render-scenario)
 add_executable(pulp-test-audio-support test_audio_support.cpp)
 target_link_libraries(pulp-test-audio-support PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-support PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
 catch_discover_tests(pulp-test-audio-support)
+add_executable(pulp-test-audio-contracts test_audio_contracts.cpp test_audio_contracts_effect.cpp)
+target_link_libraries(pulp-test-audio-contracts PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-contracts PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
+catch_discover_tests(pulp-test-audio-contracts)
+# Audio Doctor (offline analyzers — magnitude response + THD; harness Phase 7)
+add_executable(pulp-test-audio-doctor test_audio_doctor.cpp)
+target_link_libraries(pulp-test-audio-doctor PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-doctor PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
+catch_discover_tests(pulp-test-audio-doctor)
 
-# Audio determinism matrix (#48 / #356): SR × block-size sweep asserting
-# framework invariants (pass-through, silence, block invariance, re-prepare).
+# Audio determinism matrix (#48 / #356): SR × block sweep, framework invariants (pass-through, silence, block invariance, re-prepare).
 add_executable(pulp-test-audio-matrix test_audio_determinism_matrix.cpp)
 target_link_libraries(pulp-test-audio-matrix PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-matrix)
-
-# Audio edge-case corpus (#49 / #356): zero blocks, denormals, impulse pos,
-# DC extremes, mid-block param change, re-prepare. Framework contract only.
+# Audio edge-case corpus (#49 / #356): zero blocks, denormals, impulse pos, DC extremes, mid-block param change, re-prepare. Framework contract only.
 add_executable(pulp-test-audio-edge-cases test_audio_edge_cases.cpp)
 target_link_libraries(pulp-test-audio-edge-cases PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-edge-cases PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
 catch_discover_tests(pulp-test-audio-edge-cases)
-
 # Golden-file tests for PulpEffect (separate to avoid enum collision with PulpGain)
 add_executable(pulp-test-golden-effect test_golden_effect.cpp)
 target_link_libraries(pulp-test-golden-effect PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden-effect PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-golden-effect)
-
 # Negative-path tests (NaN, Inf, extreme sample rates, edge cases)
 add_executable(pulp-test-negative-path test_negative_path.cpp)
 target_link_libraries(pulp-test-negative-path PRIVATE pulp::format Catch2::Catch2WithMain)

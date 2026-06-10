@@ -2481,9 +2481,14 @@ def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
-    result = supersedence_result(job, superseded_by, reason)
-    result_path = save_result(result)
-    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
+    _queue_lifecycle.complete_superseded_job_unlocked(
+        job,
+        superseded_by,
+        reason,
+        supersedence_result_fn=supersedence_result,
+        save_result_fn=save_result,
+        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
+    )
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
@@ -2491,9 +2496,13 @@ def cancellation_result(job: dict, reason: str) -> dict:
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
-    result = cancellation_result(job, reason)
-    result_path = save_result(result)
-    _queue_orchestrator.complete_job_with_result_unlocked(job, result, result_path)
+    _queue_lifecycle.complete_canceled_job_unlocked(
+        job,
+        reason,
+        cancellation_result_fn=cancellation_result,
+        save_result_fn=save_result,
+        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
+    )
 
 
 def summarize_job(job: dict) -> str:
@@ -2502,6 +2511,14 @@ def summarize_job(job: dict) -> str:
 
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
     return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
+
+
+def status_active_targets(job: dict, runner_info: dict | None = None) -> dict | None:
+    return _queue_orchestrator.status_active_targets(job, runner_info)
+
+
+def target_state_detail_parts(state: dict) -> list[str]:
+    return _queue_orchestrator.target_state_detail_parts(state)
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
@@ -2646,6 +2663,14 @@ def apply_local_ci_cleanup_plan(plan: dict) -> dict:
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
     return _queue_orchestrator.job_sort_key(job)
+
+
+def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    return _queue_orchestrator.queue_status_groups(queue)
+
+
+def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int = 5) -> list[dict]:
+    return _queue_orchestrator.recent_completed_jobs_for_status(completed_jobs, limit=limit)
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
@@ -4611,19 +4636,11 @@ def cmd_list(_args: argparse.Namespace) -> int:
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
-    queue = load_queue()
-    runner = current_runner_info()
-
-    if job_ref:
-        return find_job_unlocked(queue, job_ref)
-
-    if runner and runner.get("active_job_id"):
-        return find_job_unlocked(queue, runner["active_job_id"])
-
-    completed = [job for job in queue if job.get("status") == "completed"]
-    if completed:
-        return completed[-1]
-    return None
+    return _queue_orchestrator.select_job_for_logs(
+        load_queue(),
+        current_runner_info(),
+        job_ref,
+    )
 
 
 def cmd_logs(args: argparse.Namespace) -> int:
@@ -4690,9 +4707,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
         return 1
 
     queue = load_queue()
-    pending = sorted([job for job in queue if job.get("status") == "pending"], key=job_sort_key)
-    running = [job for job in queue if job.get("status") == "running"]
-    completed = [job for job in queue if job.get("status") == "completed"]
+    pending, running, completed = queue_status_groups(queue)
     runner = current_runner_info()
 
     print(f"State: {state_dir()}")
@@ -4719,9 +4734,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 )
             if submission.get("provenance"):
                 print(f"    provenance: {provenance_summary(submission.get('provenance'))}")
-            active_targets = job.get("active_targets") or (
-                runner.get("active_targets") if runner and runner.get("active_job_id") == job["id"] else None
-            )
+            active_targets = status_active_targets(job, runner)
             target_summary = summarize_active_targets(active_targets, job.get("targets"))
             if target_summary:
                 print(f"    live targets: {target_summary}")
@@ -4729,31 +4742,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 state = (active_targets or {}).get(name)
                 if not state:
                     continue
-                details = []
-                if state.get("phase"):
-                    details.append(f"phase={state['phase']}")
-                if state.get("validation_mode"):
-                    details.append(f"mode={state['validation_mode']}")
-                if state.get("transport_mode"):
-                    details.append(f"transport={state['transport_mode']}")
-                if state.get("test_policy"):
-                    details.append(f"tests={state['test_policy']}")
-                if state.get("prepared_state"):
-                    details.append(f"prepared={state['prepared_state']}")
-                if state.get("wait_reason"):
-                    details.append(f"wait={state['wait_reason']}")
-                if state.get("cleanup_status"):
-                    details.append(f"cleanup={state['cleanup_status']}")
-                if state.get("last_output_at"):
-                    details.append(f"output={state['last_output_at']}")
-                if state.get("last_heartbeat_at"):
-                    details.append(f"heartbeat={state['last_heartbeat_at']}")
-                if state.get("quiet_for_secs") is not None:
-                    details.append(f"idle={state['quiet_for_secs']}s")
-                if state.get("liveness"):
-                    details.append(f"liveness={state['liveness']}")
-                if state.get("log_path"):
-                    details.append(f"log={Path(state['log_path']).name}")
+                details = target_state_detail_parts(state)
                 if details:
                     print(f"    {name}: " + ", ".join(details))
                 if state.get("last_line"):
@@ -4777,7 +4766,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 )
             if submission.get("provenance"):
                 print(f"    provenance: {provenance_summary(submission.get('provenance'))}")
-            active_targets = job.get("active_targets")
+            active_targets = status_active_targets(job)
             target_summary = summarize_active_targets(active_targets, job.get("targets"))
             if target_summary:
                 progress_at = job.get("last_progress_at") or job.get("requeued_at") or "?"
@@ -4786,31 +4775,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 state = (active_targets or {}).get(name)
                 if not state:
                     continue
-                details = []
-                if state.get("phase"):
-                    details.append(f"phase={state['phase']}")
-                if state.get("validation_mode"):
-                    details.append(f"mode={state['validation_mode']}")
-                if state.get("transport_mode"):
-                    details.append(f"transport={state['transport_mode']}")
-                if state.get("test_policy"):
-                    details.append(f"tests={state['test_policy']}")
-                if state.get("prepared_state"):
-                    details.append(f"prepared={state['prepared_state']}")
-                if state.get("wait_reason"):
-                    details.append(f"wait={state['wait_reason']}")
-                if state.get("cleanup_status"):
-                    details.append(f"cleanup={state['cleanup_status']}")
-                if state.get("last_output_at"):
-                    details.append(f"output={state['last_output_at']}")
-                if state.get("last_heartbeat_at"):
-                    details.append(f"heartbeat={state['last_heartbeat_at']}")
-                if state.get("quiet_for_secs") is not None:
-                    details.append(f"idle={state['quiet_for_secs']}s")
-                if state.get("liveness"):
-                    details.append(f"liveness={state['liveness']}")
-                if state.get("log_path"):
-                    details.append(f"log={Path(state['log_path']).name}")
+                details = target_state_detail_parts(state)
                 if details:
                     print(f"    {name}: " + ", ".join(details))
                 if state.get("last_line"):
@@ -4820,9 +4785,10 @@ def cmd_status(_args: argparse.Namespace) -> int:
     else:
         print("\nNo pending jobs.")
 
-    if completed:
-        print(f"\nRecent ({min(len(completed), 5)}):")
-        for job in completed[-5:]:
+    recent_completed = recent_completed_jobs_for_status(completed)
+    if recent_completed:
+        print(f"\nRecent ({len(recent_completed)}):")
+        for job in recent_completed:
             result_file = job.get("result_file")
             if result_file and Path(result_file).exists():
                 result = load_result(Path(result_file))

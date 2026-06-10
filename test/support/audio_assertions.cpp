@@ -229,13 +229,12 @@ CheckResult assert_null_near(const pulp::audio::BufferView<const float>& a,
 CheckResult assert_null_near(const pulp::audio::Buffer<float>& a,
                              const pulp::audio::Buffer<float>& b,
                              double tolerance_dbfs) {
-    return assert_null_near(ConstBufferView(a), ConstBufferView(b),
-                            tolerance_dbfs);
+    return assert_null_near(a.view(), b.view(), tolerance_dbfs);
 }
 
 CheckResult assert_channels_independent(
     const pulp::audio::Buffer<float>& buffer) {
-    return assert_channels_independent(ConstBufferView(buffer));
+    return assert_channels_independent(buffer.view());
 }
 
 CheckResult assert_channels_independent(

@@ -90,10 +90,82 @@ class QueueOrchestratorTests(unittest.TestCase):
             ),
             "mac=pass, windows=running",
         )
+        self.assertEqual(
+            self.mod.status_active_targets(
+                {"id": "job123", "active_targets": {"mac": {"status": "pass"}}},
+                {"active_job_id": "job123", "active_targets": {"mac": {"status": "running"}}},
+            ),
+            {"mac": {"status": "pass"}},
+        )
+        self.assertEqual(
+            self.mod.status_active_targets(
+                {"id": "job123"},
+                {"active_job_id": "job123", "active_targets": {"windows": {"status": "running"}}},
+            ),
+            {"windows": {"status": "running"}},
+        )
+        self.assertIsNone(
+            self.mod.status_active_targets(
+                {"id": "job123"},
+                {"active_job_id": "other", "active_targets": {"mac": {"status": "running"}}},
+            )
+        )
+        self.assertEqual(
+            self.mod.target_state_detail_parts(
+                {
+                    "phase": "build",
+                    "validation_mode": "smoke",
+                    "transport_mode": "ssh",
+                    "test_policy": "smoke",
+                    "prepared_state": "ready",
+                    "wait_reason": "queue",
+                    "cleanup_status": "done",
+                    "last_output_at": "2026-06-09T00:00:00Z",
+                    "last_heartbeat_at": "2026-06-09T00:01:00Z",
+                    "quiet_for_secs": 3,
+                    "liveness": "alive",
+                    "log_path": "/tmp/pulp/logs/windows.log",
+                }
+            ),
+            [
+                "phase=build",
+                "mode=smoke",
+                "transport=ssh",
+                "tests=smoke",
+                "prepared=ready",
+                "wait=queue",
+                "cleanup=done",
+                "output=2026-06-09T00:00:00Z",
+                "heartbeat=2026-06-09T00:01:00Z",
+                "idle=3s",
+                "liveness=alive",
+                "log=windows.log",
+            ],
+        )
         self.assertLess(
             self.mod.job_sort_key({"id": "high", "priority": "high", "queued_at": "2"}),
             self.mod.job_sort_key({"id": "low", "priority": "low", "queued_at": "1"}),
         )
+        pending, running, completed = self.mod.queue_status_groups(
+            [
+                {"id": "running", "status": "running"},
+                {"id": "pending-low", "status": "pending", "priority": "low", "queued_at": "1"},
+                {"id": "completed", "status": "completed"},
+                {"id": "pending-high", "status": "pending", "priority": "high", "queued_at": "2"},
+            ]
+        )
+        self.assertEqual([job["id"] for job in pending], ["pending-high", "pending-low"])
+        self.assertEqual([job["id"] for job in running], ["running"])
+        self.assertEqual([job["id"] for job in completed], ["completed"])
+        self.assertEqual(
+            [job["id"] for job in self.mod.recent_completed_jobs_for_status([{"id": str(i)} for i in range(7)])],
+            ["2", "3", "4", "5", "6"],
+        )
+        self.assertEqual(
+            [job["id"] for job in self.mod.recent_completed_jobs_for_status([{"id": str(i)} for i in range(7)], limit=2)],
+            ["5", "6"],
+        )
+        self.assertEqual(self.mod.recent_completed_jobs_for_status([{"id": "completed"}], limit=0), [])
 
     def test_enqueue_duplicate_lookup_and_priority_bump_helpers(self) -> None:
         queue = [
@@ -408,6 +480,14 @@ class QueueOrchestratorTests(unittest.TestCase):
             self.mod.find_job_unlocked(queue, "abc")
         with self.assertRaisesRegex(ValueError, "Multiple jobs match branch"):
             self.mod.find_job_unlocked(queue, "feature/a")
+
+        self.assertEqual(self.mod.select_job_for_logs(queue, None, "def333")["branch"], "feature/b")
+        self.assertEqual(
+            self.mod.select_job_for_logs(queue, {"active_job_id": "def333"}, None)["id"],
+            "def333",
+        )
+        self.assertEqual(self.mod.select_job_for_logs(queue, None, None)["id"], "abc222")
+        self.assertIsNone(self.mod.select_job_for_logs([{"id": "pending", "status": "pending"}], None, None))
 
         updated = self.mod.upsert_job_active_targets_unlocked(
             queue,

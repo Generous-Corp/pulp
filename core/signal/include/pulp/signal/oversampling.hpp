@@ -4,6 +4,7 @@
 #include <pulp/signal/halfband_iir.hpp>
 
 #include <array>
+#include <cstddef>
 #include <functional>
 #include <utility>
 
@@ -25,7 +26,10 @@ namespace pulp::signal {
 //     cascades two half-band stages.
 //
 // Switch with `set_kind()`. Both kinds share the same callback API so
-// callers don't need to know which filter is active.
+// callers don't need to know which filter is active. Configure factor,
+// sample rate, and kind outside the audio callback; `process()` and
+// `process_block()` do not allocate after construction/configuration as
+// long as the supplied callback is also allocation-free.
 //
 // macOS plan §2.2 — polyphase IIR integration into Oversampler.
 class Oversampler {
@@ -52,6 +56,8 @@ public:
     }
     void set_kind(Kind k) { kind_ = k; reset(); }
     Kind kind() const { return kind_; }
+    Factor factor() const { return factor_; }
+    int factor_value() const { return static_cast<int>(factor_); }
 
     // Process a single sample with oversampled callback.
     // The callback receives an upsampled sample and returns the processed
@@ -68,6 +74,17 @@ public:
     // realtime-safety guarantee; hot paths should use the templated overload.
     float process(float input, std::function<float(float)> callback) {
         return process_with_callback(input, callback);
+    }
+
+    // Process a contiguous block through the same callback. `input` and
+    // `output` may alias for in-place processing.
+    template <typename Callback>
+    void process_block(const float* input,
+                       float* output,
+                       std::size_t num_samples,
+                       Callback&& callback) {
+        for (std::size_t i = 0; i < num_samples; ++i)
+            output[i] = process(input[i], callback);
     }
 
     void reset() {
@@ -110,8 +127,8 @@ private:
     float process_fir_biquad(float input, Callback& callback) {
         const int n = factor_value(factor_);
         // Upsample: insert zeros.
-        std::array<float, 4> upsampled{};
-        upsampled[0] = input * n; // scale-up to preserve energy
+        std::array<float, static_cast<std::size_t>(Factor::x4)> upsampled{};
+        upsampled[0] = input * static_cast<float>(n); // scale-up to preserve energy
         for (int i = 0; i < n; ++i)
             upsampled[i] = aa_up_.process(upsampled[i]);
         for (int i = 0; i < n; ++i)
@@ -130,7 +147,7 @@ private:
 
     template <typename Callback>
     float process_polyphase_iir(float input, Callback& callback) {
-        if (factor_value(factor_) == 2) {
+        if (factor_ == Factor::x2) {
             // 1 in → 2 oversampled samples → 2 callback hits → 1 out.
             float u_lo = 0.f, u_hi = 0.f;
             hb_up_stage1_.process(input, u_lo, u_hi);

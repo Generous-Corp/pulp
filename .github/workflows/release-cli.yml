@@ -233,6 +233,23 @@ jobs:
       # Pulp's documented JS engine policy (CLAUDE.md) is QuickJS on
       # Linux, so the CLI must not link JSC-GTK at all. Issue #720.
       #
+      # Ensure the Rust toolchain is on PATH before configure. GitHub-hosted
+      # runners ship cargo on PATH; self-hosted runners (the bare-metal Studio
+      # Macs) have it at ~/.cargo/bin but a non-interactive job shell never
+      # sources the profile that adds it. Without cargo on PATH at CONFIGURE
+      # time, CMake's find_program(cargo) fails, the Rust `pulp` target is
+      # never wired up, and `build/pulp` (the user-facing CLI) silently never
+      # builds — it only surfaced downstream as
+      # `package_cli.py: FAIL: binary not at build/pulp`.
+      - name: Ensure Rust toolchain on PATH
+        if: runner.os != 'Windows'
+        run: |
+          if [ -d "$HOME/.cargo/bin" ]; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            echo "Added $HOME/.cargo/bin to PATH for cargo discovery"
+          fi
+        shell: bash
+
       # Build the CLI binary WITHOUT WebView; the SDK build below
       # reconfigures with WebView=ON so plugin authors still get the
       # WebView code in the SDK tarball.

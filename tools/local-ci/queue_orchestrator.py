@@ -3,10 +3,12 @@
 This module owns job identity, enqueue duplicate/priority policy, enqueue
 supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
+target-state status detail formatting, status active-target selection and
+recent-completed selection,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
-completed-job state mutation, and
-completed-queue retention. Higher-level queue mutation, locking, runner
+completed-job state mutation, queue status grouping, and completed-queue
+retention. Higher-level queue mutation, locking, runner
 liveness, result persistence, and drain orchestration remain in local_ci.py
 until later extraction slices.
 """
@@ -285,6 +287,42 @@ def summarize_active_targets(active_targets: dict | None, preferred_order: list[
     return ", ".join(parts)
 
 
+def status_active_targets(job: dict, runner_info: dict | None = None) -> dict | None:
+    active_targets = job.get("active_targets")
+    if active_targets:
+        return active_targets
+
+    if runner_info and runner_info.get("active_job_id") == job["id"]:
+        return runner_info.get("active_targets")
+
+    return None
+
+
+def target_state_detail_parts(state: dict) -> list[str]:
+    details = []
+    field_labels = [
+        ("phase", "phase"),
+        ("validation_mode", "mode"),
+        ("transport_mode", "transport"),
+        ("test_policy", "tests"),
+        ("prepared_state", "prepared"),
+        ("wait_reason", "wait"),
+        ("cleanup_status", "cleanup"),
+        ("last_output_at", "output"),
+        ("last_heartbeat_at", "heartbeat"),
+    ]
+    for field, label in field_labels:
+        if state.get(field):
+            details.append(f"{label}={state[field]}")
+    if state.get("quiet_for_secs") is not None:
+        details.append(f"idle={state['quiet_for_secs']}s")
+    if state.get("liveness"):
+        details.append(f"liveness={state['liveness']}")
+    if state.get("log_path"):
+        details.append(f"log={Path(state['log_path']).name}")
+    return details
+
+
 def update_runner_info_active_targets(
     info: dict,
     job_id: str,
@@ -461,6 +499,19 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
     return (-priority_value(job.get("priority", "normal")), job.get("queued_at", ""), job["id"])
 
 
+def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    pending = sorted([job for job in queue if job.get("status") == "pending"], key=job_sort_key)
+    running = [job for job in queue if job.get("status") == "running"]
+    completed = [job for job in queue if job.get("status") == "completed"]
+    return pending, running, completed
+
+
+def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int = 5) -> list[dict]:
+    if limit <= 0:
+        return []
+    return completed_jobs[-limit:]
+
+
 def claim_next_job_unlocked(
     queue: list[dict],
     *,
@@ -511,4 +562,17 @@ def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None
             f"Multiple jobs match branch '{job_ref}'. Use a job id or unique prefix."
         )
 
+    return None
+
+
+def select_job_for_logs(queue: list[dict], runner_info: dict | None, job_ref: str | None) -> dict | None:
+    if job_ref:
+        return find_job_unlocked(queue, job_ref)
+
+    if runner_info and runner_info.get("active_job_id"):
+        return find_job_unlocked(queue, runner_info["active_job_id"])
+
+    for job in reversed(queue):
+        if job.get("status") == "completed":
+            return job
     return None

@@ -132,7 +132,7 @@ TEST_CASE("FileDialog::install_native_backend honest-fail + idempotency",
     // macOS has a compiled-in native impl; install just reports has_backend().
     REQUIRE(installed == FileDialog::has_backend());
 #elif defined(_WIN32)
-    // Windows has a compiled-in IFileDialog backend.
+    // Windows ships an opt-in IFileDialog backend.
     REQUIRE(installed);
     REQUIRE(FileDialog::has_backend());
     REQUIRE(FileDialog::install_native_backend());

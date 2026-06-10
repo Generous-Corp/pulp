@@ -662,6 +662,11 @@ for (int i = 0; i < num_samples; ++i) {
         return shaper.process(s);
     });
 }
+
+// Or process a contiguous block with the same callback:
+os.process_block(input, output, num_samples, [&](float s) {
+    return shaper.process(s);
+});
 ```
 
 | Method | Description |
@@ -669,13 +674,16 @@ for (int i = 0; i < num_samples; ++i) {
 | `set_factor(Factor)` | `Factor::x2` or `Factor::x4`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |
+| `process_block(const float*, float*, size_t, callback)` | Process a contiguous block; input and output may alias. |
 | `reset()` | Clear filter states. |
 
-The anti-aliasing filters are lowpass Biquads set to `0.4 * base_sample_rate` at the oversampled rate. Energy is preserved by scaling the upsampled signal by the oversampling factor.
+The default anti-aliasing lane uses lowpass Biquads set to `0.4 * base_sample_rate` at the oversampled rate. `Kind::polyphase_iir` uses half-band IIR stages and cascades two stages for 4x oversampling. Energy is preserved by scaling the upsampled signal by the oversampling factor.
+
+`process()` and `process_block()` use a templated callback and fixed internal scratch storage. After construction/configuration, they do not allocate on the audio thread as long as the callback does not allocate. Configure factor, sample rate, and kind from `prepare()` or a control thread; those setters reset or reconfigure filter state.
+
+The oversampler does not latency-compensate its output. The Biquad lane has stateful IIR phase delay, and the polyphase lane inherits the half-band stage delay (about six samples per 2x half-band stage at that stage's input rate with the default coefficients). Compensate at the processor/plugin level when exact dry/wet alignment is required.
 
 **Sample rate dependency:** `set_sample_rate()` required.
-
-**Caveat:** The callback uses `std::function<float(float)>`, which may allocate on first use. In latency-critical paths, consider pre-allocating or using a lambda that captures by reference.
 
 ---
 

@@ -8,6 +8,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04020"></a>
+## [0.402.0] - 2026-06-09
+
+- feature/audio harness 2 render scenario ([#3852](https://github.com/danielraffel/pulp/pull/3852))
+- feature/refactor local ci log selection ([#3851](https://github.com/danielraffel/pulp/pull/3851))
+- feature/refactor local ci completion actions ([#3849](https://github.com/danielraffel/pulp/pull/3849))
+
+<a id="v04010"></a>
+## [0.401.0] - 2026-06-09
+
+- feature/devtools command routing ([#3847](https://github.com/danielraffel/pulp/pull/3847))
+- feature/refactor local ci command actions ([#3844](https://github.com/danielraffel/pulp/pull/3844))
+- ci/release cli macos strip ([#3846](https://github.com/danielraffel/pulp/pull/3846))
+- ci/release cli no lfs ([#3843](https://github.com/danielraffel/pulp/pull/3843))
+- ci(release): include manifest in backfill overlay ([#3837](https://github.com/danielraffel/pulp/pull/3837))
+- refactor(local-ci): extract runner active target update helper ([#3842](https://github.com/danielraffel/pulp/pull/3842))
+- test(audio): convert golden/matrix suites to shared helpers + tone regression scenario (harness PR 1B) ([#3841](https://github.com/danielraffel/pulp/pull/3841))
+- refactor(local-ci): extract runner stale selection helper ([#3838](https://github.com/danielraffel/pulp/pull/3838))
+
 <a id="v04000"></a>
 ## [0.400.0] - 2026-06-09
 
@@ -4131,6 +4150,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.402.0]: https://github.com/danielraffel/pulp/releases/tag/v0.402.0
+[0.401.0]: https://github.com/danielraffel/pulp/releases/tag/v0.401.0
 [0.400.0]: https://github.com/danielraffel/pulp/releases/tag/v0.400.0
 [0.399.0]: https://github.com/danielraffel/pulp/releases/tag/v0.399.0
 [0.398.0]: https://github.com/danielraffel/pulp/releases/tag/v0.398.0

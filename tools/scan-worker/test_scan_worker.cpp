@@ -96,7 +96,7 @@ std::string json_field(const std::string& key, const std::string& value) {
 }
 
 pulp::platform::ProcessResult run_worker(const std::vector<std::string>& args) {
-    return pulp::platform::exec(PULP_SCAN_WORKER_PATH, args, 5000);
+    return pulp::platform::exec(PULP_SCAN_WORKER_PATH, args, 30000);
 }
 
 } // namespace
