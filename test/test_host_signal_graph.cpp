@@ -8,6 +8,7 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1071,6 +1072,7 @@ TEST_CASE("SignalGraph connect_feedback allows cycles with one-block delay",
 namespace {
 class MidiForwarder final : public PluginSlot {
 public:
+    MidiForwarder() { last_seen_.attach_ump(&last_seen_ump_); }
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
     bool prepare(double, int) override { return true; }
@@ -1082,9 +1084,24 @@ public:
                  const pulp::host::ParameterEventQueue& /*pe*/,
                  int n) override {
         last_seen_.clear();
+        last_seen_.clear_sysex();
+        last_seen_ump_.clear();
         for (const auto& ev : midi_in) {
             last_seen_.add(ev);
             midi_out.add(ev);
+        }
+        for (const auto& sx : midi_in.sysex()) {
+            last_seen_.add_sysex_copy(sx.data.data(), sx.data.size(),
+                                      sx.sample_offset, sx.timestamp);
+            midi_out.add_sysex_copy(sx.data.data(), sx.data.size(),
+                                    sx.sample_offset, sx.timestamp);
+        }
+        if (const auto* in_ump = midi_in.ump()) {
+            auto* out_ump = midi_out.ump();
+            for (const auto& ev : *in_ump) {
+                last_seen_ump_.add(ev);
+                if (out_ump) out_ump->add(ev);
+            }
         }
         for (size_t c = 0; c < out.num_channels(); ++c) {
             std::memset(out.channel_ptr(c), 0, sizeof(float) * (size_t)n);
@@ -1103,9 +1120,52 @@ public:
     int latency_samples() const override { return 0; }
     int tail_samples() const override { return 0; }
     const pulp::midi::MidiBuffer& last_seen() const { return last_seen_; }
+    const pulp::midi::UmpBuffer& last_seen_ump() const { return last_seen_ump_; }
 private:
     PluginInfo info_ = make_plugin_info("MidiFwd", 0, 0, "MidiEffect");
     pulp::midi::MidiBuffer last_seen_;
+    pulp::midi::UmpBuffer last_seen_ump_;
+};
+
+class MidiFlooder final : public PluginSlot {
+public:
+    explicit MidiFlooder(std::size_t event_count) : event_count_(event_count) {}
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::host::ParameterEventQueue&,
+                 int n) override {
+        const auto block = static_cast<std::size_t>(std::max(1, n));
+        for (std::size_t i = 0; i < event_count_; ++i) {
+            auto ev = pulp::midi::MidiEvent::note_on(
+                0, static_cast<int>(i % 127), 100);
+            ev.sample_offset = static_cast<int32_t>(i % block);
+            midi_out.add(ev);
+        }
+        for (size_t c = 0; c < out.num_channels(); ++c) {
+            std::memset(out.channel_ptr(c), 0, sizeof(float) * static_cast<size_t>(n));
+        }
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+private:
+    PluginInfo info_ = make_plugin_info("MidiFlood", 0, 0, "MidiGenerator");
+    std::size_t event_count_ = 0;
 };
 } // namespace
 
@@ -1132,6 +1192,10 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     ev1.sample_offset = 16;
     in_events.add(ev0);
     in_events.add(ev1);
+    in_events.add_sysex({0xF0, 0x7D, 0x01, 0xF7}, 8, 1.25);
+    pulp::midi::UmpBuffer in_ump;
+    in_ump.add(pulp::midi::UmpPacket::note_on_2(0, 2, 67, 0x8000), 24);
+    in_events.attach_ump(&in_ump);
     REQUIRE(graph.inject_midi(mi, in_events));
 
     // Dummy audio (graph has no audio path; process() still runs).
@@ -1146,19 +1210,183 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     REQUIRE(fwd_ptr->last_seen().size() == 2);
     REQUIRE(fwd_ptr->last_seen()[0].sample_offset == 0);
     REQUIRE(fwd_ptr->last_seen()[1].sample_offset == 16);
+    REQUIRE(fwd_ptr->last_seen().sysex_size() == 1);
+    REQUIRE(fwd_ptr->last_seen().sysex()[0].data
+            == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+    REQUIRE(fwd_ptr->last_seen().sysex()[0].sample_offset == 8);
+    REQUIRE(fwd_ptr->last_seen_ump().size() == 1);
+    REQUIRE(fwd_ptr->last_seen_ump()[0].sample_offset == 24);
+    REQUIRE(fwd_ptr->last_seen_ump()[0].packet.channel() == 2);
+
+    // MidiOutput sink reports an incomplete copy when the caller has no UMP
+    // sidecar storage for the otherwise available UMP packets.
+    pulp::midi::MidiBuffer arrived_without_ump_storage;
+    REQUIRE_FALSE(graph.extract_midi(mo, arrived_without_ump_storage));
+    REQUIRE(arrived_without_ump_storage.size() == 2);
+    REQUIRE(arrived_without_ump_storage.sysex_size() == 1);
 
     // MidiOutput sink received the forwarded events.
     pulp::midi::MidiBuffer arrived;
+    pulp::midi::UmpBuffer arrived_ump;
+    arrived.attach_ump(&arrived_ump);
     REQUIRE(graph.extract_midi(mo, arrived));
     REQUIRE(arrived.size() == 2);
     REQUIRE(arrived[0].sample_offset == 0);
     REQUIRE(arrived[1].sample_offset == 16);
+    REQUIRE(arrived.sysex_size() == 1);
+    REQUIRE(arrived.sysex()[0].data
+            == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+    REQUIRE(arrived.sysex()[0].sample_offset == 8);
+    REQUIRE(arrived_ump.size() == 1);
+    REQUIRE(arrived_ump[0].sample_offset == 24);
+    REQUIRE(arrived_ump[0].packet.channel() == 2);
 
     arrived.clear();
+    arrived.clear_sysex();
+    arrived_ump.clear();
     graph.process(ov, iv, 32);
     REQUIRE(graph.extract_midi(mo, arrived));
     REQUIRE(arrived.empty());
+    REQUIRE(arrived.sysex_size() == 0);
+    REQUIRE(arrived_ump.empty());
     REQUIRE(fwd_ptr->last_seen().empty());
+    REQUIRE(fwd_ptr->last_seen().sysex_size() == 0);
+    REQUIRE(fwd_ptr->last_seen_ump().empty());
+
+    graph.release();
+}
+
+TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
+          "[host][graph][midi]") {
+    constexpr std::size_t event_capacity = ParameterEventQueue::kCapacity;
+    constexpr std::size_t sysex_capacity = 128;
+    constexpr std::size_t sysex_payload_capacity = 4096;
+
+    SignalGraph graph;
+    auto mi = graph.add_midi_input_node("keys");
+    auto mo = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect_midi(mi, mo));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    float in_sample = 0.f, out_sample = 0.f;
+    const float* in_ptrs[1]  = {&in_sample};
+    float*       out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 0, 32);
+    pulp::audio::BufferView<float>       ov(out_ptrs, 0, 32);
+
+    pulp::midi::MidiBuffer short_overflow;
+    for (std::size_t i = 0; i <= event_capacity; ++i) {
+        short_overflow.add(pulp::midi::MidiEvent::note_on(
+            0, static_cast<int>(i % 127), 100));
+    }
+    REQUIRE_FALSE(graph.inject_midi(mi, short_overflow));
+    graph.process(ov, iv, 32);
+    pulp::midi::MidiBuffer arrived;
+    REQUIRE_FALSE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived.size() == event_capacity);
+
+    pulp::midi::MidiBuffer sysex_count_overflow;
+    for (std::size_t i = 0; i <= sysex_capacity; ++i) {
+        sysex_count_overflow.add_sysex(
+            {0xF0, 0x7D, static_cast<uint8_t>(i & 0x7F), 0xF7},
+            0,
+            0.0);
+    }
+    REQUIRE_FALSE(graph.inject_midi(mi, sysex_count_overflow));
+    graph.process(ov, iv, 32);
+    arrived.clear();
+    arrived.clear_sysex();
+    REQUIRE_FALSE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived.sysex_size() == sysex_capacity);
+
+    pulp::midi::MidiBuffer oversized_sysex;
+    oversized_sysex.add_sysex(std::vector<uint8_t>(
+        sysex_payload_capacity + 1, uint8_t{0x7D}));
+    REQUIRE_FALSE(graph.inject_midi(mi, oversized_sysex));
+    graph.process(ov, iv, 32);
+    arrived.clear();
+    arrived.clear_sysex();
+    REQUIRE_FALSE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived.sysex_size() == 0);
+
+    pulp::midi::MidiBuffer ump_overflow;
+    pulp::midi::UmpBuffer in_ump;
+    for (std::size_t i = 0; i <= event_capacity; ++i) {
+        in_ump.add(pulp::midi::UmpPacket::note_on_2(
+            0, 2, static_cast<uint8_t>(i % 127), 0x8000), 0);
+    }
+    ump_overflow.attach_ump(&in_ump);
+    REQUIRE_FALSE(graph.inject_midi(mi, ump_overflow));
+    graph.process(ov, iv, 32);
+    arrived.clear();
+    arrived.clear_sysex();
+    pulp::midi::UmpBuffer arrived_ump;
+    arrived.attach_ump(&arrived_ump);
+    REQUIRE_FALSE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived_ump.size() == event_capacity);
+
+    pulp::midi::MidiBuffer missing_ump_extract;
+    REQUIRE_FALSE(graph.extract_midi(mo, missing_ump_extract));
+
+    SignalGraph fan_in_graph;
+    auto mi_a = fan_in_graph.add_midi_input_node("a");
+    auto mi_b = fan_in_graph.add_midi_input_node("b");
+    auto fan_in_out = fan_in_graph.add_midi_output_node("merged");
+    REQUIRE(fan_in_graph.connect_midi(mi_a, fan_in_out));
+    REQUIRE(fan_in_graph.connect_midi(mi_b, fan_in_out));
+    REQUIRE(fan_in_graph.prepare(48000.0, 32));
+    pulp::midi::MidiBuffer full_a;
+    pulp::midi::MidiBuffer full_b;
+    for (std::size_t i = 0; i < event_capacity; ++i) {
+        full_a.add(pulp::midi::MidiEvent::note_on(
+            0, static_cast<int>(i % 127), 100));
+        full_b.add(pulp::midi::MidiEvent::note_off(
+            0, static_cast<int>(i % 127), 0));
+    }
+    REQUIRE(fan_in_graph.inject_midi(mi_a, full_a));
+    REQUIRE(fan_in_graph.inject_midi(mi_b, full_b));
+    fan_in_graph.process(ov, iv, 32);
+    pulp::midi::MidiBuffer fan_in_arrived;
+    REQUIRE_FALSE(fan_in_graph.extract_midi(fan_in_out, fan_in_arrived));
+    REQUIRE(fan_in_arrived.size() == event_capacity);
+    fan_in_graph.release();
+
+    SignalGraph plugin_overflow_graph;
+    auto flood = plugin_overflow_graph.add_plugin_node(
+        std::make_unique<MidiFlooder>(event_capacity + 1), 0, 0, "flood");
+    auto flood_out = plugin_overflow_graph.add_midi_output_node("flood-out");
+    REQUIRE(plugin_overflow_graph.connect_midi(flood, flood_out));
+    REQUIRE(plugin_overflow_graph.prepare(48000.0, 32));
+    plugin_overflow_graph.process(ov, iv, 32);
+    pulp::midi::MidiBuffer flood_arrived;
+    REQUIRE_FALSE(plugin_overflow_graph.extract_midi(flood_out, flood_arrived));
+    REQUIRE(flood_arrived.size() == event_capacity);
+    plugin_overflow_graph.release();
+
+    SignalGraph plugin_chain_overflow_graph;
+    auto chain_flood = plugin_chain_overflow_graph.add_plugin_node(
+        std::make_unique<MidiFlooder>(event_capacity + 1), 0, 0, "chain-flood");
+    auto chain_fwd = plugin_chain_overflow_graph.add_plugin_node(
+        std::make_unique<MidiForwarder>(), 0, 0, "chain-fwd");
+    auto chain_out = plugin_chain_overflow_graph.add_midi_output_node("chain-out");
+    REQUIRE(plugin_chain_overflow_graph.connect_midi(chain_flood, chain_fwd));
+    REQUIRE(plugin_chain_overflow_graph.connect_midi(chain_fwd, chain_out));
+    REQUIRE(plugin_chain_overflow_graph.prepare(48000.0, 32));
+    plugin_chain_overflow_graph.process(ov, iv, 32);
+    pulp::midi::MidiBuffer chain_arrived;
+    REQUIRE_FALSE(plugin_chain_overflow_graph.extract_midi(chain_out, chain_arrived));
+    REQUIRE(chain_arrived.size() == event_capacity);
+    plugin_chain_overflow_graph.release();
+
+    pulp::midi::MidiBuffer one_event;
+    one_event.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    REQUIRE(graph.inject_midi(mi, one_event));
+    graph.process(ov, iv, 32);
+    pulp::midi::MidiBuffer limited_extract;
+    limited_extract.reserve(0);
+    limited_extract.set_realtime_capacity_limit(true);
+    REQUIRE_FALSE(graph.extract_midi(mo, limited_extract));
+    REQUIRE(limited_extract.dropped_event_count() == 1);
 
     graph.release();
 }

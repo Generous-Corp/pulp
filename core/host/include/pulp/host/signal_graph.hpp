@@ -18,6 +18,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -385,6 +386,10 @@ private:
         // and must survive the process() entry-clear.
         midi::MidiBuffer midi_in;
         midi::MidiBuffer midi_out;
+        midi::UmpBuffer midi_in_ump;
+        midi::UmpBuffer midi_out_ump;
+        bool midi_in_incomplete = false;
+        bool midi_out_incomplete = false;
 
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized slice in audio_rate_param_data, filled immediately
