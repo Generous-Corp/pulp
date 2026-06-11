@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import importlib.util
 import json
 import os
@@ -705,6 +706,69 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(final_snapshot["ubuntu"]["status"], "fail")
         self.assertEqual(final_snapshot["windows"]["status"], "pass")
         self.assertEqual(final_snapshot["ubuntu"]["completed_at"], "2026-06-10T00:00:05Z")
+
+    def test_save_result_persists_json_and_updates_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "results"
+            ensured = []
+            evidence_updates = []
+            result = {
+                "job_id": "job123",
+                "branch": "feature/result-store",
+                "sha": "a" * 40,
+                "priority": "normal",
+                "results": [],
+                "overall": "pass",
+            }
+
+            path = self.mod.save_result(
+                result,
+                ensure_state_dirs_fn=lambda: ensured.append(True) or results_dir.mkdir(parents=True),
+                results_dir_fn=lambda: results_dir,
+                update_evidence_index_fn=lambda payload, result_path: evidence_updates.append(
+                    (dict(payload), result_path)
+                ),
+                now_fn=lambda: datetime(2026, 6, 10, 1, 2, 3),
+            )
+
+            self.assertEqual(path.name, "20260610-010203-job123-feature-result-store.json")
+            self.assertEqual(json.loads(path.read_text()), result)
+            self.assertEqual(ensured, [True])
+            self.assertEqual(evidence_updates, [(result, path)])
+
+    def test_print_result_renders_lines_through_injected_helpers(self) -> None:
+        printed = []
+        result = {
+            "job_id": "job123",
+            "branch": "feature/result-store",
+            "validation": "smoke",
+            "results": [{"target": "mac", "status": "pass"}],
+            "overall": "pass",
+        }
+
+        self.mod.print_result(
+            result,
+            Path("result.json"),
+            normalize_result_fn=lambda payload: {**payload, "normalized": True},
+            result_validation_line_fn=lambda payload: "  validation  smoke" if payload["normalized"] else None,
+            result_execution_line_fn=lambda payload: "  execution   direct",
+            result_target_lines_fn=lambda payload: ["  mac         PASS          1.0s"],
+            result_overall_line_fn=lambda payload: "  overall     PASS",
+            print_fn=printed.append,
+        )
+
+        self.assertEqual(
+            printed,
+            [
+                "\n--- Result: [job123] feature/result-store ---",
+                "  validation  smoke",
+                "  execution   direct",
+                "  mac         PASS          1.0s",
+                "  overall     PASS",
+                "  Saved: result.json",
+                "",
+            ],
+        )
 
     def test_local_validation_command_builds_full_and_smoke_commands(self) -> None:
         full_cmd, full_validation = self.mod.local_validation_command(
