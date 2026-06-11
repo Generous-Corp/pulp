@@ -392,6 +392,12 @@ sequences and broader control/atom coverage are still in progress.
 5. Atom output port (present when `descriptor().produces_midi == true`)
 
 `run()` reads control-input port values into `StateStore` at the top of each buffer.
+LV2 control ports are block-rate current values, not scheduled sparse
+parameter events. The adapter still attaches an empty
+`ParameterEventQueue` before `Processor::process()` so
+`Processor::param_events()` is non-null, but control-port ingress does not
+consume sparse queue capacity; large host-block capacity for LV2 is ordinary
+control-port count/state update behavior.
 
 ### MIDI Routing
 

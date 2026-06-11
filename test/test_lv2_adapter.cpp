@@ -5,6 +5,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
 
 #include <array>
@@ -206,6 +207,11 @@ struct Lv2ProbeCapture {
     // Phase 3 — true if the LV2 run path set a (non-null) param-events queue on
     // the Processor before calling process(), proving the uniform sidecar.
     bool param_events_non_null = false;
+    std::size_t param_event_count = 0;
+    std::size_t param_event_capacity = 0;
+    bool param_event_overflowed = false;
+    std::uint32_t param_event_drops = 0;
+    float gain_seen_in_process = 0.0f;
 
     void reset() { *this = {}; }
 };
@@ -254,6 +260,14 @@ public:
         g_lv2_probe.last_sample_rate = context.sample_rate;
         g_lv2_probe.last_midi_count = midi_in.size();
         g_lv2_probe.param_events_non_null = (param_events() != nullptr);
+        if (auto* events = param_events()) {
+            g_lv2_probe.param_event_count = events->size();
+            g_lv2_probe.param_event_capacity = events->capacity();
+            g_lv2_probe.param_event_overflowed = events->overflowed();
+            g_lv2_probe.param_event_drops = events->dropped_event_count();
+        }
+        g_lv2_probe.gain_seen_in_process =
+            state().get_value(kLv2ProbeGainParam);
         for (const auto& ev : midi_in) {
             g_lv2_probe.first_status = ev.data()[0];
             g_lv2_probe.first_note = ev.size() > 1 ? ev.data()[1] : 0;
@@ -418,6 +432,12 @@ TEST_CASE("LV2 generic entry wires ports, audio, control values, and MIDI",
     // Phase 3 — the LV2 run path provides a uniform (non-null) param-events
     // queue to the Processor, matching VST3/CLAP/AUv3.
     REQUIRE(g_lv2_probe.param_events_non_null);
+    REQUIRE(g_lv2_probe.param_event_count == 0);
+    REQUIRE(g_lv2_probe.param_event_capacity ==
+            state::ParameterEventQueue::kCapacity);
+    REQUIRE_FALSE(g_lv2_probe.param_event_overflowed);
+    REQUIRE(g_lv2_probe.param_event_drops == 0);
+    REQUIRE(g_lv2_probe.gain_seen_in_process == 0.5f);
     REQUIRE(g_lv2_probe.last_num_samples == 4);
     REQUIRE(g_lv2_probe.last_sample_rate == 44100.0);
     REQUIRE(g_lv2_probe.last_midi_count == 1);

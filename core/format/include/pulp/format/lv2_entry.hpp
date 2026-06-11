@@ -63,6 +63,7 @@ inline LV2_Handle instantiate(
         delete inst;
         return nullptr;
     }
+    inst->processor->set_state_store(&inst->store);
 
     // Define parameters
     inst->processor->define_parameters(inst->store);
