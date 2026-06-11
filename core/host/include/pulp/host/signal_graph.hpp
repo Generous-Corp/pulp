@@ -319,7 +319,10 @@ public:
     // Clear all nodes and connections
     void clear();
 
-    // Gain for a Gain node (linear, not dB). Defaults to 1.0.
+    // Gain for a Gain node (linear, not dB). Defaults to 1.0. The setter is
+    // a UI/control-thread API; when prepared, it also updates the live
+    // snapshot's atomic gain so process() observes the change without
+    // re-prepare. The getter reads UI-owned graph state and is UI-thread-only.
     bool set_node_gain(NodeId id, float linear_gain);
     float node_gain(NodeId id) const;
 
@@ -493,6 +496,7 @@ private:
     std::vector<Connection> connections_;
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     NodeId next_id_ = 1;
+    std::vector<std::weak_ptr<CompiledGraph>> retired_snapshots_;
 
     // Audio-thread snapshot, published by prepare() / mutators. Uses the
     // deprecated-but-supported std::atomic_store/atomic_load free-function
@@ -504,6 +508,9 @@ private:
     bool has_path(NodeId from, NodeId to) const;
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
     void invalidate_live_();
+    void retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot);
+    void prune_retired_snapshots_();
+    void wait_for_retired_snapshots_();
     static void compute_latencies_for_(CompiledGraph& cg,
                                        const std::vector<Connection>& connections);
 };

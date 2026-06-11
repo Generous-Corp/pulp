@@ -30,6 +30,14 @@ live snapshot. **Never call them from the audio thread.**
 - `clear`
 - `prepare` / `release`
 
+### UI/control-thread live scalar updates
+
+- `set_node_gain(id, linear_gain)` writes the UI-owned graph state and,
+  when a prepared snapshot is live, stores the same value into the
+  snapshot-owned `std::atomic<float>` used by `process()`. It is safe
+  to call while the audio thread is processing, but it is still a
+  control-thread API and must not race other graph/topology mutations.
+
 ### Audio-thread-safe APIs (read-only or snapshot-mutating)
 
 - `process` — atomic-loads the snapshot once at entry; reads exclusively
@@ -47,6 +55,7 @@ These inspect `nodes_` / `connections_` directly. They must not be
 called from the audio thread:
 
 - `node` / `nodes` / `connections`
+- `node_gain(id)`
 - `processing_order`
 - `would_create_cycle`
 
@@ -54,7 +63,6 @@ called from the audio thread:
 
 - `latency_samples()` — returns a `std::atomic<int64_t>` load
 - `node_latency_samples(id)` — snapshot-backed
-- `node_gain(id)` — snapshot-backed
 
 ### Parameter control
 
@@ -119,9 +127,10 @@ thread drops its reference to the old snapshot. No dangling reads.
 
 ## When to `release()` vs `invalidate`
 
-- `release()` — full teardown. Stops each plugin via
-  `PluginSlot::release()`, nulls the snapshot. Pair with a subsequent
-  `prepare()` or destroy the graph.
+- `release()` — full teardown. Unpublishes the live snapshot first,
+  waits for any in-flight snapshot reader to drop it, then stops each
+  plugin via `PluginSlot::release()`. Pair with a subsequent `prepare()`
+  or destroy the graph.
 - Internal `invalidate_live_()` (triggered by mutators) — just nulls
   the snapshot. Doesn't touch plugin state.
 

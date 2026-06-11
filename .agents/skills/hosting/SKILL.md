@@ -233,6 +233,10 @@ rules:
   The published snapshot copies the shared_ptr, so a plugin survives
   past the removal of its GraphNode until the audio thread's stale
   snapshot reference drops. Do not stash raw plugin pointers.
+- **Release ordering.** `SignalGraph::release()` must unpublish the live
+  snapshot and wait for in-flight snapshot readers before calling
+  `PluginSlot::release()` or custom-node release callbacks. Do not move
+  release callbacks ahead of snapshot retirement.
 - **Live control scalars.** If a control-path setter updates state inside the
   already-published `CompiledGraph`, the audio-thread field must be RT-safe.
   `set_node_gain()` stores into a per-runtime `std::atomic<float>`; do not

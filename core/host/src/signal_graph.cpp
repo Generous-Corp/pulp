@@ -1,11 +1,11 @@
 // Signal Graph implementation.
 //
-// Phase 0B: audio-thread reads happen exclusively against an immutable
-// CompiledGraph snapshot, published via atomic<shared_ptr>. UI-thread
-// mutations (add_*, connect*, disconnect, remove_node, set_node_gain,
-// set_node_parameter) invalidate the snapshot; prepare() rebuilds a fresh
-// snapshot and atomic-swaps it in. See signal_graph.hpp for the mutation
-// protocol details.
+// Phase 0B: audio-thread reads happen against a CompiledGraph snapshot,
+// published via atomic<shared_ptr>. UI-thread topology mutations (add_*,
+// connect*, disconnect, remove_node) invalidate the snapshot; prepare()
+// rebuilds and atomic-swaps a fresh snapshot. Live control scalars such as
+// gain update through snapshot-owned atomics without requiring re-prepare.
+// See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/runtime/log.hpp>
@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 namespace pulp::host {
@@ -670,8 +671,35 @@ void SignalGraph::invalidate_live_() {
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
-    std::atomic_store_explicit(&live_, std::shared_ptr<CompiledGraph>(nullptr), std::memory_order_release);
+    retire_snapshot_(std::atomic_exchange_explicit(
+        &live_,
+        std::shared_ptr<CompiledGraph>(nullptr),
+        std::memory_order_acq_rel));
     total_latency_samples_.store(0, std::memory_order_relaxed);
+}
+
+void SignalGraph::retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot) {
+    if (snapshot) retired_snapshots_.emplace_back(snapshot);
+    prune_retired_snapshots_();
+}
+
+void SignalGraph::prune_retired_snapshots_() {
+    retired_snapshots_.erase(
+        std::remove_if(retired_snapshots_.begin(),
+                       retired_snapshots_.end(),
+                       [](const std::weak_ptr<CompiledGraph>& snapshot) {
+                           return snapshot.expired();
+                       }),
+        retired_snapshots_.end());
+}
+
+void SignalGraph::wait_for_retired_snapshots_() {
+    for (const auto& snapshot : retired_snapshots_) {
+        while (!snapshot.expired()) {
+            std::this_thread::yield();
+        }
+    }
+    prune_retired_snapshots_();
 }
 
 void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
@@ -916,11 +944,20 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
 
     auto cg = compile_(sample_rate, max_block_size);
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
-    std::atomic_store_explicit(&live_, std::move(cg), std::memory_order_release);
+    retire_snapshot_(std::atomic_exchange_explicit(
+        &live_,
+        std::move(cg),
+        std::memory_order_acq_rel));
     return true;
 }
 
 void SignalGraph::release() {
+    retire_snapshot_(std::atomic_exchange_explicit(
+        &live_,
+        std::shared_ptr<CompiledGraph>(nullptr),
+        std::memory_order_acq_rel));
+    wait_for_retired_snapshots_();
+
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
     // Phase 5 — release stateful custom instances (UI thread), mirroring the
     // plugin release above. The instance object stays alive until its snapshots
@@ -933,7 +970,6 @@ void SignalGraph::release() {
             type->release(n.custom_instance.get());
         }
     }
-    std::atomic_store_explicit(&live_, std::shared_ptr<CompiledGraph>(nullptr), std::memory_order_release);
     total_latency_samples_.store(0, std::memory_order_relaxed);
 }
 
