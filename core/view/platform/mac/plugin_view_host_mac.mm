@@ -5,6 +5,7 @@
 
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
@@ -134,7 +135,19 @@ void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
     if (!*drag_target) return;
     using namespace pulp::view::mac_geometry;
     auto local = to_local(pt, *drag_target, root);
-    if ((*drag_target)->focusable()) (*drag_target)->claim_input_focus();
+    if ((*drag_target)->focusable()) {
+        auto* focused = pulp::view::View::focused_input_;
+        if (focused != *drag_target) {
+            if (focused && view_is_in_tree(focused, root))
+                focused->on_focus_changed(false);
+            (*drag_target)->on_focus_changed(true);
+        }
+        (*drag_target)->claim_input_focus();
+    } else if (auto* focused = pulp::view::View::focused_input_;
+               focused && view_is_in_tree(focused, root)) {
+        focused->on_focus_changed(false);
+        focused->release_input_focus();
+    }
 
     pulp::view::MouseEvent me;
     me.position = local;
@@ -142,6 +155,7 @@ void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
     me.button = pulp::view::MouseButton::left;
     me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
     me.is_down = true;
+    me.phase = pulp::view::MousePhase::press;
     me.click_count = static_cast<int>(event.clickCount);
     (*drag_target)->on_mouse_event(me);
     (*drag_target)->on_mouse_down(local);
@@ -198,6 +212,7 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     up.button = pulp::view::MouseButton::left;
     up.modifiers = modifiers_from_ns_flags(event.modifierFlags);
     up.is_down = false;
+    up.phase = pulp::view::MousePhase::release;
     up.click_count = static_cast<int>(event.clickCount);
     (*drag_target)->on_mouse_event(up);
     for (auto* b = (*drag_target)->parent(); b; b = b->parent()) {
@@ -244,39 +259,59 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
   }
 }
 
-// Route a keyDown to the currently focused input widget — the embedded analog of
-// the standalone PulpView's key handling (window_host_mac.mm). Without this an
-// embedded TextEditor (e.g. an imported search field) never receives typing: the
-// host NSView is first responder but had no keyDown:, so characters were dropped.
-// A click already sets focus (claim_input_focus in mouseDown). Returns true when
-// a focused input consumed the event, so the caller only falls through to
-// [super keyDown:] (host menu shortcuts etc.) when nothing was focused.
-bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
+bool pulp_plugin_event_has_text_input_modifier(const pulp::view::KeyEvent& event) {
+    return event.isMainModifier() || event.isCtrlDown() || event.isAltDown();
+}
+
+pulp::view::KeyEvent pulp_plugin_key_event_from_ns(NSEvent* event) {
+    pulp::view::KeyEvent ke;
+    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
+    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+    ke.is_down = true;
+    ke.is_repeat = event.isARepeat;
+    return ke;
+}
+
+// Route a native key event to the currently focused input widget. The embedded
+// plugin views are shared by AU/VST3/CLAP editors, so keyboard parity belongs
+// here rather than in individual examples. Returns true only when the focused
+// widget consumed the key or accepted printable text.
+bool pulp_plugin_dispatch_focused_key(pulp::view::View* root,
+                                      NSEvent* event,
+                                      bool allow_text_input) {
   try {
     if (!root) return false;
     // Auto-clearing static: cleared by ~View when the focused widget is freed,
     // so this never derefs freed memory (pulp #1708 rationale).
     auto* fv = pulp::view::View::focused_input_;
     if (!fv) return false;
-    pulp::view::KeyEvent ke;
-    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
-    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
-    ke.is_down = true;
-    ke.is_repeat = event.isARepeat;
-    fv->on_key_event(ke);  // backspace / arrows / enter (TextEditor handles these)
-    // Printable characters → text insertion. (Full IME / marked-text via
-    // NSTextInputClient is a follow-up; this covers ASCII + most Latin typing.)
-    NSString* chars = event.characters;
-    if (chars.length > 0) {
-        unichar c0 = [chars characterAtIndex:0];
-        if (c0 >= 0x20 && c0 != 0x7f) {
-            pulp::view::TextInputEvent te;
-            te.text = chars.UTF8String;
-            fv->on_text_input(te);
+    using namespace pulp::view::mac_geometry;
+    if (!view_is_in_tree(fv, root)) return false;
+
+    const auto ke = pulp_plugin_key_event_from_ns(event);
+    if (fv->on_key_event(ke)) {
+        root->request_repaint();
+        return true;
+    }
+
+    if (allow_text_input && fv->accepts_text_input()
+        && !pulp_plugin_event_has_text_input_modifier(ke)) {
+        // Printable characters → text insertion. (Full IME / marked-text via
+        // NSTextInputClient is a follow-up; this covers ASCII + most Latin typing.)
+        NSString* chars = event.characters;
+        if (chars.length > 0) {
+            unichar c0 = [chars characterAtIndex:0];
+            if (c0 >= 0x20 && c0 != 0x7f) {
+                pulp::view::TextInputEvent te;
+                te.text = chars.UTF8String;
+                fv->on_text_input(te);
+                root->request_repaint();
+                return true;
+            }
         }
     }
-    root->request_repaint();
-    return true;
+
+    return false;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] keyDown handler threw: %s\n", e.what());
     return true;  // swallow; don't beep/propagate a half-handled key
@@ -284,6 +319,42 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     std::fprintf(stderr, "[plugin-view-host] keyDown handler threw (unknown)\n");
     return true;
   }
+}
+
+bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
+    if (pulp_plugin_dispatch_focused_key(root, event, /*allow_text_input=*/true)) {
+        return true;
+    }
+    if (!root) return false;
+    const auto ke = pulp_plugin_key_event_from_ns(event);
+    if (pulp::view::View::call_inspector_key_hook(ke)) {
+        root->request_repaint();
+        return true;
+    }
+    if (root->on_global_key && root->on_global_key(ke)) {
+        root->request_repaint();
+        return true;
+    }
+    pulp::view::script_events::dispatch_global_key(static_cast<int>(ke.key),
+                                                   ke.modifiers,
+                                                   /*is_down=*/true);
+    return false;
+}
+
+bool pulp_plugin_perform_key_equivalent(pulp::view::View* root, NSEvent* event) {
+    if (pulp_plugin_dispatch_focused_key(root, event, /*allow_text_input=*/false)) {
+        return true;
+    }
+    if (!root) return false;
+    const auto ke = pulp_plugin_key_event_from_ns(event);
+    if (root->on_global_key && root->on_global_key(ke)) {
+        root->request_repaint();
+        return true;
+    }
+    pulp::view::script_events::dispatch_global_key(static_cast<int>(ke.key),
+                                                   ke.modifiers,
+                                                   /*is_down=*/true);
+    return false;
 }
 
 } // namespace
@@ -294,6 +365,10 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
 
 - (BOOL)isFlipped { return NO; }
 - (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)acceptsFirstMouse:(NSEvent*)event { (void)event; return YES; }
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    return pulp_plugin_perform_key_equivalent(self.rootView, event) ? YES : NO;
+}
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
 }
@@ -307,6 +382,7 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
+    if (self.window.firstResponder != self) [self.window makeFirstResponder:self];
     pulp_plugin_mouse_down(self.rootView, event, [self localPoint:event], &_dragTarget);
     [self setNeedsDisplay:YES];
 }
@@ -701,6 +777,10 @@ private:
 }
 
 - (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)acceptsFirstMouse:(NSEvent*)event { (void)event; return YES; }
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    return pulp_plugin_perform_key_equivalent(self.rootView, event) ? YES : NO;
+}
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
 }
@@ -713,6 +793,7 @@ private:
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
+    if (self.window.firstResponder != self) [self.window makeFirstResponder:self];
     pulp_plugin_mouse_down(self.rootView, event, [self localPoint:event], &_dragTarget);
     if (self.rootView) self.rootView->request_repaint();
 }

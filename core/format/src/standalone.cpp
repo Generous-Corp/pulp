@@ -11,10 +11,12 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <thread>
 
 // WYSIWYG P6 FIX 5 — the dev inspector (Cmd+I overlay) is gated behind the
 // PULP_ENABLE_INSPECTOR compile flag (root CMake option, default ON for
@@ -412,6 +414,21 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     }
 
     if (!start()) return false;
+
+    if (effective_config.package_audit) {
+        const int timeout_seconds = std::max(1, effective_config.package_audit_timeout_seconds);
+        runtime::log_info("Standalone: package audit running for up to {} seconds",
+                          timeout_seconds);
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(timeout_seconds);
+        while (running_.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        runtime::log_info("Standalone: package audit complete");
+        stop();
+        return true;
+    }
 
     if (!processor_ || !processor_->has_editor()) {
         runtime::log_error("Standalone: processor has no editor");

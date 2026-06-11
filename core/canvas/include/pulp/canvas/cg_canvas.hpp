@@ -180,6 +180,8 @@ public:
                      float max_width = 0.0f) override;
     float measure_text(const std::string& text) override;
     TextMetrics measure_text_full(const std::string& text) override;
+    float text_x_for_byte(const std::string& text,
+                          std::size_t byte_index) override;
 
     // Canvas2D drop-shadow state (issue-1434 batch 7). CGContext exposes
     // sticky shadow state directly via CGContextSetShadowWithColor — we

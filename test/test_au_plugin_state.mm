@@ -241,6 +241,36 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
     CFRelease(saved);
 }
 
+TEST_CASE("AU v2 effect mirrors custom-editor StateStore writes to AU parameter storage",
+          "[au][auv2][state][editor]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    auto* processor = g_last_effect_processor;
+    REQUIRE(processor != nullptr);
+
+    processor->state().set_value(1, -18.0f);
+
+    AudioUnitParameterValue au_value = 0.0f;
+    REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, au_value) == noErr);
+    REQUIRE_THAT(au_value, WithinAbs(-18.0, 0.01));
+}
+
+TEST_CASE("AU v2 instrument mirrors custom-editor StateStore writes to AU parameter storage",
+          "[au][auv2][instrument][state][editor]") {
+    ScopedFactoryRegistration registration(create_instrument_processor);
+
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    auto* processor = g_last_instrument_processor;
+    REQUIRE(processor != nullptr);
+
+    processor->state().set_value(1, 1760.0f);
+
+    AudioUnitParameterValue au_value = 0.0f;
+    REQUIRE(instrument.GetParameter(1, kAudioUnitScope_Global, 0, au_value) == noErr);
+    REQUIRE_THAT(au_value, WithinAbs(1760.0, 0.01));
+}
+
 TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
           "[au][auv3][state]") {
     @autoreleasepool {

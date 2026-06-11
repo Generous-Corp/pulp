@@ -1169,6 +1169,35 @@ TEST_CASE("CoreGraphicsCanvas::clear_rect zeroes destination pixels",
         REQUIRE(pixels[i] == 0);
     }
 }
+
+TEST_CASE("CoreGraphicsCanvas text measurement tolerates invalid UTF-8",
+          "[canvas][cg][text][plugin]") {
+    constexpr int W = 32;
+    constexpr int H = 32;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_font("Inter", 13.0f);
+        const std::string invalid_utf8 = std::string("bad") + char(0xff) + "text";
+        REQUIRE_NOTHROW(canvas.measure_text(invalid_utf8));
+        REQUIRE_NOTHROW(canvas.measure_text_full(invalid_utf8));
+        REQUIRE_NOTHROW(canvas.fill_text(invalid_utf8, 2.0f, 18.0f));
+        REQUIRE(canvas.measure_text(invalid_utf8) > 0.0f);
+    }
+
+    CGContextRelease(ctx);
+}
 #endif  // __APPLE__
 
 // ── pulp #1737 — CSS font-variant → SkShaper Feature plumbing ─────────────

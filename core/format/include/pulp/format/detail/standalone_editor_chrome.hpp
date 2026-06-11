@@ -21,17 +21,17 @@ inline bool standalone_env_truthy(std::string_view name) {
     return environment_flag_truthy(name);
 }
 
-inline bool parse_positive_frame_delay(std::string_view value, int& frames) {
+inline bool parse_positive_int(std::string_view value, int& parsed) {
     if (value.empty() || value.front() == '+') return false;
 
-    int parsed = 0;
+    int value_int = 0;
     const char* first = value.data();
     const char* last = first + value.size();
-    auto result = std::from_chars(first, last, parsed);
-    if (result.ec != std::errc{} || result.ptr != last || parsed <= 0)
+    auto result = std::from_chars(first, last, value_int);
+    if (result.ec != std::errc{} || result.ptr != last || value_int <= 0)
         return false;
 
-    frames = parsed;
+    parsed = value_int;
     return true;
 }
 
@@ -49,8 +49,19 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
 
     if (auto frames = runtime::get_env("PULP_FRAMES")) {
         int parsed = 0;
-        if (parse_positive_frame_delay(*frames, parsed))
+        if (parse_positive_int(*frames, parsed))
             config.screenshot_frame_delay = parsed;
+    }
+
+    if (standalone_env_truthy("PULP_STANDALONE_PACKAGE_AUDIT")) {
+        config.package_audit = true;
+        config.headless = true;
+    }
+
+    if (auto seconds = runtime::get_env("PULP_STANDALONE_PACKAGE_AUDIT_SECONDS")) {
+        int parsed = 0;
+        if (parse_positive_int(*seconds, parsed))
+            config.package_audit_timeout_seconds = parsed;
     }
 
     if (!config.screenshot_path.empty())
@@ -60,7 +71,7 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
 }
 
 inline bool standalone_headless_requires_screenshot(const StandaloneConfig& config) {
-    return config.headless && config.screenshot_path.empty();
+    return config.headless && !config.package_audit && config.screenshot_path.empty();
 }
 
 struct StandaloneSettingsActions {

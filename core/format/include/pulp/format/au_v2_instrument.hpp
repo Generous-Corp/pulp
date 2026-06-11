@@ -1,10 +1,15 @@
 #pragma once
 
+#if __has_include(<AudioUnitSDK/MusicDeviceBase.h>)
+#define PULP_FORMAT_HAS_AUV2_INSTRUMENT 1
+
 #include <AudioUnitSDK/MusicDeviceBase.h>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/state/listener_token.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 #include <memory>
 #include <mutex>
@@ -57,12 +62,24 @@ public:
     Float64 GetLatency() override;
 
 private:
+    void publish_parameter_change_to_host(state::ParamID id, float value);
+
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
+    state::ListenerToken param_listener_token_;
+
+    // Sample-accurate parameter-event sidecar. AU v2 does not expose a
+    // scheduled/ramped parameter source through MusicDeviceBase today, so this
+    // queue is empty, but setting it each render keeps the Processor contract
+    // uniform with the effect adapter.
+    state::ParameterEventQueue param_events_;
 
     // Host accommodations, resolved once at init (host-quirks plan, P3).
     HostQuirks host_quirks_{};
     std::vector<float*> output_ptrs_;
+    std::vector<float> param_snapshot_;
+    std::vector<float> host_param_snapshot_;
+    bool host_param_snapshot_valid_ = false;
     std::mutex midi_mutex_;
     midi::MidiBuffer pending_midi_;
 
@@ -73,3 +90,7 @@ private:
 };
 
 } // namespace pulp::format::au
+
+#else
+#define PULP_FORMAT_HAS_AUV2_INSTRUMENT 0
+#endif

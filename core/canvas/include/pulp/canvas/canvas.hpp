@@ -1,5 +1,5 @@
 #pragma once
-
+#include <pulp/canvas/text_utf8.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -10,7 +10,6 @@
 #include <functional>
 
 namespace pulp::canvas {
-
 // ── Color ────────────────────────────────────────────────────────────────────
 
 struct Color {
@@ -744,7 +743,7 @@ public:
     /// Skia backend overrides this to query the shaped paragraph directly.
     virtual float text_x_for_byte(const std::string& text,
                                   std::size_t byte_index) {
-        return measure_text(text.substr(0, std::min(byte_index, text.size())));
+        return measure_text(text.substr(0, safe_utf8_prefix_size(text, byte_index)));
     }
 
     /// pulp #2163 / font v2 Slice 1.2.b — explicit, typed vertical-anchor

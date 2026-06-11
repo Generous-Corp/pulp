@@ -153,6 +153,15 @@ void SettingsPanel::build_audio_tab() {
     };
     audio_tab->add_child(std::move(out_combo));
 
+    audio_tab->add_child(make_section_label("Output Level"));
+    auto out_meter = std::make_unique<view::MultiMeter>();
+    output_meter_ = out_meter.get();
+    out_meter->set_channel_count(2);
+    out_meter->set_layout(view::MultiMeter::Layout::horizontal);
+    out_meter->set_display_style(view::MultiMeter::DisplayStyle::segmented);
+    out_meter->flex().preferred_height = 48.0f;
+    audio_tab->add_child(std::move(out_meter));
+
     // Input device
     auto input_label = make_section_label("Input Device");
     input_device_label_ = input_label.get();
@@ -162,6 +171,16 @@ void SettingsPanel::build_audio_tab() {
     in_combo->flex().preferred_height = 28.0f;
     in_combo->on_change = [this](int) { apply_config(); };
     audio_tab->add_child(std::move(in_combo));
+
+    // Input level meter
+    audio_tab->add_child(make_section_label("Input Level"));
+    auto meter = std::make_unique<view::MultiMeter>();
+    input_meter_ = meter.get();
+    meter->set_channel_count(2);
+    meter->set_layout(view::MultiMeter::Layout::horizontal);
+    meter->set_display_style(view::MultiMeter::DisplayStyle::segmented);
+    meter->flex().preferred_height = 48.0f;
+    audio_tab->add_child(std::move(meter));
 
     // Sample rate
     audio_tab->add_child(make_section_label("Sample Rate"));
@@ -189,25 +208,6 @@ void SettingsPanel::build_audio_tab() {
     auto lat = make_info_label("Latency: —");
     latency_label_ = lat.get();
     audio_tab->add_child(std::move(lat));
-
-    // Input level meter
-    audio_tab->add_child(make_section_label("Input Level"));
-    auto meter = std::make_unique<view::MultiMeter>();
-    input_meter_ = meter.get();
-    meter->set_channel_count(2);
-    meter->set_layout(view::MultiMeter::Layout::horizontal);
-    meter->set_display_style(view::MultiMeter::DisplayStyle::segmented);
-    meter->flex().preferred_height = 48.0f;
-    audio_tab->add_child(std::move(meter));
-
-    audio_tab->add_child(make_section_label("Output Level"));
-    auto out_meter = std::make_unique<view::MultiMeter>();
-    output_meter_ = out_meter.get();
-    out_meter->set_channel_count(2);
-    out_meter->set_layout(view::MultiMeter::Layout::horizontal);
-    out_meter->set_display_style(view::MultiMeter::DisplayStyle::segmented);
-    out_meter->flex().preferred_height = 48.0f;
-    audio_tab->add_child(std::move(out_meter));
 
     // Test tone section. Header line: "Test Signal" on the left, the "Sine Tone" switch on
     // the right; the frequency dropdown sits full-width on its own line below so it never

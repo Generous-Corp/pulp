@@ -106,6 +106,9 @@ public:
     // ── Event handling ────────────────────────────────────────────────────
 
     void on_mouse_event(const MouseEvent& event) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
     bool on_key_event(const KeyEvent& event) override;
     void on_text_input(const TextInputEvent& event) override;
     void on_focus_changed(bool gained) override;
@@ -160,6 +163,9 @@ private:
     float content_inset_left_ = 0.0f; ///< Extra left inset to clear a leading icon
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
     float caret_blink_time_ = 0.0f; ///< Accumulated time for caret blinking
+    bool selection_drag_active_ = false;
+    int selection_drag_anchor_ = 0;
+    bool suppress_next_legacy_mouse_down_ = false;
     int caret_blink_sub_ = -1;      ///< Frame-clock subscription that drives blink repaints while focused
     FrameClock* caret_blink_clock_ = nullptr;  ///< Clock the subscription lives on; cached so we can
                                                ///< always unsubscribe even after the editor is detached

@@ -49,6 +49,11 @@ struct StandaloneConfig {
     // When true, run_with_editor() avoids showing/activating the native
     // window. Use with screenshot_path for CI/test smoke runs.
     bool headless = false;
+    // Starts the standalone audio/MIDI runtime without constructing an editor
+    // window. Intended for packaged-app audits that need to prove the bundle
+    // launches from its shipped location without flashing UI.
+    bool package_audit = false;
+    int package_audit_timeout_seconds = 30;
     // When false, run_with_editor() hosts the editor directly and omits the
     // built-in Settings tab.
     bool show_settings_tab = true;

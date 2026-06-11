@@ -18,6 +18,8 @@
 //   - Plugin registration via PULP_REGISTER_PLUGIN
 
 #include <pulp/format/au_v2_adapter.hpp>
+
+#if PULP_FORMAT_HAS_AUV2_EFFECT
 #include <pulp/format/registry.hpp>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioUnitSDK/ComponentBase.h>
@@ -32,3 +34,7 @@
         explicit ClassName(AudioComponentInstance ci) : PulpAUEffect(ci) {} \
     }; \
     AUSDK_COMPONENT_ENTRY(ausdk::AUBaseFactory, ClassName)
+#else
+#define PULP_AU_PLUGIN(ClassName, factory_fn) \
+    static_assert(false, "PULP_AU_PLUGIN requires AudioUnitSDK headers")
+#endif

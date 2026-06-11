@@ -5,6 +5,7 @@
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioUnitSDK/AUOutputElement.h>
 #include <AudioToolbox/AudioToolbox.h>  // kAudioUnitProperty_CocoaUI, AudioUnitCocoaViewInfo
+#include <AudioToolbox/AudioUnitUtilities.h>
 #include <mach/mach_time.h>
 
 #include <pulp/format/au_v2_instrument.hpp>
@@ -13,6 +14,7 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <cstring>
 
@@ -33,6 +35,41 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
             // effect adapter (Codex review on #3226 — instrument was missed).
             const auto host_info = detect_host_info();
             host_quirks_ = resolved_quirks(host_info.type, host_info.version);
+
+            // Wire gesture callbacks for undo grouping support.
+            store_.set_gesture_callbacks(
+                [this](state::ParamID id) {
+                    AudioUnitEvent event;
+                    std::memset(&event, 0, sizeof(event));
+                    event.mEventType = kAudioUnitEvent_BeginParameterChangeGesture;
+                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                    event.mArgument.mParameter.mParameterID =
+                        static_cast<AudioUnitParameterID>(id);
+                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                    event.mArgument.mParameter.mElement = 0;
+                    AUEventListenerNotify(nullptr, nullptr, &event);
+                },
+                [this](state::ParamID id) {
+                    AudioUnitEvent event;
+                    std::memset(&event, 0, sizeof(event));
+                    event.mEventType = kAudioUnitEvent_EndParameterChangeGesture;
+                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                    event.mArgument.mParameter.mParameterID =
+                        static_cast<AudioUnitParameterID>(id);
+                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                    event.mArgument.mParameter.mElement = 0;
+                    AUEventListenerNotify(nullptr, nullptr, &event);
+                });
+
+            // Custom AU editors mutate Pulp's StateStore directly. Mirror those
+            // UI-side writes into the AU parameter system immediately so the
+            // next render block does not pull an older host value back over the
+            // edited StateStore value.
+            param_listener_token_ = store_.add_listener(
+                [this](state::ParamID id, float value) {
+                    publish_parameter_change_to_host(id, value);
+                },
+                state::ListenerThread::Main);
 
             for (const auto& param : store_.all_params()) {
                 Globals()->SetParameter(
@@ -134,6 +171,24 @@ OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope 
     return MusicDeviceBase::GetProperty(inID, inScope, inElement, outData);
 }
 
+void PulpAUInstrument::publish_parameter_change_to_host(state::ParamID id, float value)
+{
+    auto au_id = static_cast<AudioUnitParameterID>(id);
+    Globals()->SetParameter(au_id, value);
+
+    auto instance = GetComponentInstance();
+    if (instance == nullptr) return;
+
+    AudioUnitEvent event;
+    std::memset(&event, 0, sizeof(event));
+    event.mEventType = kAudioUnitEvent_ParameterValueChange;
+    event.mArgument.mParameter.mAudioUnit = instance;
+    event.mArgument.mParameter.mParameterID = au_id;
+    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+    event.mArgument.mParameter.mElement = 0;
+    AUEventListenerNotify(nullptr, nullptr, &event);
+}
+
 OSStatus PulpAUInstrument::Initialize()
 {
     auto result = MusicDeviceBase::Initialize();
@@ -206,17 +261,31 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     if (!processor_) return noErr;
 
-    for (const auto& param : store_.all_params()) {
+    auto params = store_.all_params();
+    param_snapshot_.resize(params.size());
+    const bool reset_host_snapshot =
+        !host_param_snapshot_valid_ || host_param_snapshot_.size() != params.size();
+    host_param_snapshot_.resize(params.size());
+    for (std::size_t i = 0; i < params.size(); ++i) {
         // AudioUnitSDK 1.4 renamed the RT-safe parameter read to
         // GetParameterRT; 1.3.0 uses GetParameter and is equivalent
         // (inline atomic load of a float). We pin to 1.3.0 on this
         // branch because AppleClang/libc++ on the GitHub-hosted macOS
         // runner doesn't ship std::expected yet — see issue #155. Flip
         // back to GetParameterRT when we can adopt 1.4+ again.
-        float value = Globals()->GetParameter(
-            static_cast<AudioUnitParameterID>(param.id));
-        store_.set_value(param.id, value);
+        const float host_value = Globals()->GetParameter(
+            static_cast<AudioUnitParameterID>(params[i].id));
+        const float previous_host =
+            reset_host_snapshot ? host_value : host_param_snapshot_[i];
+        float value = store_.get_value(params[i].id);
+        if (reset_host_snapshot || host_value != previous_host) {
+            store_.set_value_rt(params[i].id, host_value);
+            value = host_value;
+        }
+        param_snapshot_[i] = value;
+        host_param_snapshot_[i] = host_value;
     }
+    host_param_snapshot_valid_ = true;
 
     auto* output = GetOutput(0);
     AudioBufferList& outBL = output->PrepareBuffer(inNumberFrames);
@@ -237,6 +306,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         midi_in = std::move(pending_midi_);
         pending_midi_ = midi::MidiBuffer{};
     }
+    midi_in.sort();
 
     ProcessContext ctx;
     ctx.sample_rate = GetOutput(0)->GetStreamFormat().mSampleRate;
@@ -296,7 +366,28 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     }
     pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
 
-    processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    param_events_.clear();
+    processor_->set_param_events(&param_events_);
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    }
+
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        float post = store_.get_value(params[i].id);
+        if (post == param_snapshot_[i] && post == host_param_snapshot_[i]) continue;
+        publish_parameter_change_to_host(params[i].id, post);
+        host_param_snapshot_[i] = post;
+    }
+
+    if (processor_->consume_latency_changed_flag()) {
+        PropertyChanged(kAudioUnitProperty_Latency,
+                        kAudioUnitScope_Global, 0);
+    }
+    if (processor_->consume_tail_changed_flag()) {
+        PropertyChanged(kAudioUnitProperty_TailTime,
+                        kAudioUnitScope_Global, 0);
+    }
 
     return noErr;
 }

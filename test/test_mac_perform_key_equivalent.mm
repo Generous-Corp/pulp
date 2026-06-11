@@ -30,6 +30,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
+#include <memory>
 
 // PulpView interface — the Obj-C class window_host_mac.mm declares.
 // We don't link against it directly (it's bundled into pulp::view); the
@@ -38,11 +39,37 @@
 @property (nonatomic, assign) pulp::view::View* rootView;
 @end
 
+@interface PulpPluginView : NSView
+@property (nonatomic, assign) pulp::view::View* rootView;
+@end
+
 namespace {
 
 class TestRoot : public pulp::view::View {
 public:
     void paint(pulp::canvas::Canvas&) override {}
+};
+
+class TextSinkView : public pulp::view::View {
+public:
+    explicit TextSinkView(bool accepts_text) : accepts_text_(accepts_text) {
+        set_focusable(true);
+    }
+
+    bool accepts_text_input() const override { return accepts_text_; }
+    bool on_key_event(const pulp::view::KeyEvent&) override {
+        ++key_hits;
+        return false;
+    }
+    void on_text_input(const pulp::view::TextInputEvent&) override {
+        ++text_hits;
+    }
+
+    int key_hits = 0;
+    int text_hits = 0;
+
+private:
+    bool accepts_text_ = false;
 };
 
 // GlobalKeyDispatcher is a plain function pointer, so the script-dispatch
@@ -68,6 +95,19 @@ NSEvent* make_cmd_comma_event() {
                              keyCode:43];
 }
 
+NSEvent* make_plain_a_event() {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                            location:NSZeroPoint
+                       modifierFlags:0
+                           timestamp:0
+                        windowNumber:0
+                             context:nil
+                          characters:@"a"
+         charactersIgnoringModifiers:@"a"
+                           isARepeat:NO
+                             keyCode:0];
+}
+
 PulpView* make_pulp_view(pulp::view::View* root) {
     // Instantiate PulpView at runtime (class is registered by the static
     // initializer in window_host_mac.mm — pulp::view static linkage pulls
@@ -77,6 +117,15 @@ PulpView* make_pulp_view(pulp::view::View* root) {
     if (cls == nil) return nil;
     PulpView* view =
         [[(PulpView*)[cls alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)] autorelease];
+    view.rootView = root;
+    return view;
+}
+
+PulpPluginView* make_pulp_plugin_view(pulp::view::View* root) {
+    Class cls = NSClassFromString(@"PulpPluginView");
+    if (cls == nil) return nil;
+    PulpPluginView* view =
+        [[(PulpPluginView*)[cls alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)] autorelease];
     view.rootView = root;
     return view;
 }
@@ -182,4 +231,73 @@ TEST_CASE("performKeyEquivalent: no-op when rootView->on_global_key is null",
     script_events::set_global_key_dispatcher(nullptr);
     REQUIRE(handled == NO);
     REQUIRE(g_script_hits == 1);
+}
+
+TEST_CASE("PulpPluginView keyDown: focused non-text control does not swallow printable keys",
+          "[mac][platform][keyboard][plugin][musical-typing]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    int root_hits = 0;
+    root.on_global_key = [&](const KeyEvent&) -> bool {
+        ++root_hits;
+        return false;
+    };
+
+    auto sink = std::make_unique<TextSinkView>(false);
+    auto* sink_ptr = sink.get();
+    root.add_child(std::move(sink));
+    sink_ptr->claim_input_focus();
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) {
+        sink_ptr->release_input_focus();
+        WARN("PulpPluginView class not registered — skipping platform test");
+        return;
+    }
+
+    g_script_hits = 0;
+    script_events::set_global_key_dispatcher(&counting_script_dispatcher);
+    [view keyDown:make_plain_a_event()];
+    script_events::set_global_key_dispatcher(nullptr);
+    sink_ptr->release_input_focus();
+
+    REQUIRE(sink_ptr->key_hits == 1);
+    REQUIRE(sink_ptr->text_hits == 0);
+    REQUIRE(root_hits == 1);
+    REQUIRE(g_script_hits == 1);
+}
+
+TEST_CASE("PulpPluginView keyDown: focused text-capable control receives printable keys",
+          "[mac][platform][keyboard][plugin][text]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    int root_hits = 0;
+    root.on_global_key = [&](const KeyEvent&) -> bool {
+        ++root_hits;
+        return false;
+    };
+
+    auto sink = std::make_unique<TextSinkView>(true);
+    auto* sink_ptr = sink.get();
+    root.add_child(std::move(sink));
+    sink_ptr->claim_input_focus();
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) {
+        sink_ptr->release_input_focus();
+        return;
+    }
+
+    g_script_hits = 0;
+    script_events::set_global_key_dispatcher(&counting_script_dispatcher);
+    [view keyDown:make_plain_a_event()];
+    script_events::set_global_key_dispatcher(nullptr);
+    sink_ptr->release_input_focus();
+
+    REQUIRE(sink_ptr->key_hits == 1);
+    REQUIRE(sink_ptr->text_hits == 1);
+    REQUIRE(root_hits == 0);
+    REQUIRE(g_script_hits == 0);
 }

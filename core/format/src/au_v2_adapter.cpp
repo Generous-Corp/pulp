@@ -116,6 +116,16 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
                     AUEventListenerNotify(nullptr, nullptr, &event);
                 });
 
+            // Custom AU editors mutate Pulp's StateStore directly. Mirror those
+            // UI-side writes into the AU parameter system immediately so the
+            // next render block does not pull an older host value back over the
+            // edited StateStore value.
+            param_listener_token_ = store_.add_listener(
+                [this](state::ParamID id, float value) {
+                    publish_parameter_change_to_host(id, value);
+                },
+                state::ListenerThread::Main);
+
             // Set defaults in AU parameter system at construction time so hosts
             // can inspect them before Initialize() is called.
             for (const auto& param : store_.all_params()) {
@@ -254,6 +264,24 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
     return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);
 }
 
+void PulpAUEffect::publish_parameter_change_to_host(state::ParamID id, float value)
+{
+    auto au_id = static_cast<AudioUnitParameterID>(id);
+    SetParameter(au_id, value);
+
+    auto instance = GetComponentInstance();
+    if (instance == nullptr) return;
+
+    AudioUnitEvent event;
+    std::memset(&event, 0, sizeof(event));
+    event.mEventType = kAudioUnitEvent_ParameterValueChange;
+    event.mArgument.mParameter.mAudioUnit = instance;
+    event.mArgument.mParameter.mParameterID = au_id;
+    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+    event.mArgument.mParameter.mElement = 0;
+    AUEventListenerNotify(nullptr, nullptr, &event);
+}
+
 OSStatus PulpAUEffect::Initialize()
 {
     auto result = AUEffectBase::Initialize();
@@ -324,17 +352,30 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         return noErr;
     }
 
-    // Host → plugin: pull current parameter values into the store before
-    // processing. Also snapshot them so we can detect plugin-driven changes
-    // after process() returns.
+    // Host → plugin: pull current parameter values into the store only when the
+    // host value changed since the last block. Custom editors write StateStore
+    // first and mirror to the AU globals via a main-thread listener; blindly
+    // pulling every block can otherwise stomp a just-clicked UI value with the
+    // host's stale value until another UI event drains that listener.
     auto params = store_.all_params();
     param_snapshot_.resize(params.size());
+    const bool reset_host_snapshot =
+        !host_param_snapshot_valid_ || host_param_snapshot_.size() != params.size();
+    host_param_snapshot_.resize(params.size());
     for (std::size_t i = 0; i < params.size(); ++i) {
         auto au_id = static_cast<AudioUnitParameterID>(params[i].id);
-        float value = GetParameter(au_id);
-        store_.set_value(params[i].id, value);
+        const float host_value = GetParameter(au_id);
+        const float previous_host =
+            reset_host_snapshot ? host_value : host_param_snapshot_[i];
+        float value = store_.get_value(params[i].id);
+        if (reset_host_snapshot || host_value != previous_host) {
+            store_.set_value_rt(params[i].id, host_value);
+            value = host_value;
+        }
         param_snapshot_[i] = value;
+        host_param_snapshot_[i] = host_value;
     }
+    host_param_snapshot_valid_ = true;
 
     UInt32 in_channels = inBuffer.mNumberBuffers;
     UInt32 out_channels = outBuffer.mNumberBuffers;
@@ -495,17 +536,9 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // 01 slice 1.3.
     for (std::size_t i = 0; i < params.size(); ++i) {
         float post = store_.get_value(params[i].id);
-        if (post == param_snapshot_[i]) continue;
-        auto au_id = static_cast<AudioUnitParameterID>(params[i].id);
-        SetParameter(au_id, post);
-        AudioUnitEvent event;
-        std::memset(&event, 0, sizeof(event));
-        event.mEventType = kAudioUnitEvent_ParameterValueChange;
-        event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-        event.mArgument.mParameter.mParameterID = au_id;
-        event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-        event.mArgument.mParameter.mElement = 0;
-        AUEventListenerNotify(nullptr, nullptr, &event);
+        if (post == param_snapshot_[i] && post == host_param_snapshot_[i]) continue;
+        publish_parameter_change_to_host(params[i].id, post);
+        host_param_snapshot_[i] = post;
     }
 
     // Item 3.11 — push latency / tail change notifications the processor

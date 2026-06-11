@@ -1,5 +1,8 @@
 #pragma once
 
+#if __has_include(<AudioUnitSDK/AUMIDIEffectBase.h>)
+#define PULP_FORMAT_HAS_AUV2_EFFECT 1
+
 #include <AudioUnitSDK/AUMIDIEffectBase.h>
 
 #include <pulp/format/processor.hpp>
@@ -7,6 +10,7 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <memory>
@@ -137,8 +141,11 @@ protected:
     OSStatus HandleSysEx(const UInt8* inData, UInt32 inLength) override;
 
 private:
+    void publish_parameter_change_to_host(state::ParamID id, float value);
+
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
+    state::ListenerToken param_listener_token_;
 
     // Sample-accurate parameter-event sidecar, set on the Processor each block
     // so the param-events contract is uniform across formats (VST3/CLAP/AUv3
@@ -163,6 +170,11 @@ private:
     // Pre-process snapshot of parameter values; used to diff plugin-side
     // changes back to the host's parameter system (workstream 01 slice 1.3).
     std::vector<float> param_snapshot_;
+    // Last host-global values observed at the render boundary. This prevents a
+    // stale AU global from overwriting a just-clicked custom-editor StateStore
+    // value before the main-thread host mirror callback has drained.
+    std::vector<float> host_param_snapshot_;
+    bool host_param_snapshot_valid_ = false;
 
     // Item 1.3 — previous-block transport snapshot used to derive the
     // change flags (tempo_changed / time_sig_changed /
@@ -184,3 +196,7 @@ private:
 };
 
 } // namespace pulp::format::au
+
+#else
+#define PULP_FORMAT_HAS_AUV2_EFFECT 0
+#endif

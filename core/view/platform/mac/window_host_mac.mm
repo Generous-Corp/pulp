@@ -463,8 +463,7 @@ static void install_app_menu(NSString* appName) {
             pulp::view::MouseEvent me;
             me.position = {pt.x, pt.y};
             me.modifiers = mods;
-            me.is_down = true;
-            me.phase = pulp::view::MousePhase::press;
+            me.is_down = true; me.phase = pulp::view::MousePhase::press;
             // WYSIWYG P4 FIX 1 — pass this window's root so the installed hook
             // gates to the inspected canvas root; events in a secondary window
             // (the floating InspectorWindow) must not touch the canvas overlay.
@@ -495,7 +494,7 @@ static void install_app_menu(NSString* appName) {
                 me.position = local;
                 me.window_position = pt;
                 me.button = pulp::view::MouseButton::left;
-                me.is_down = true;
+                me.is_down = true; me.phase = pulp::view::MousePhase::press;
                 me.click_count = 1;
                 combo->on_mouse_event(me);
                 [self setNeedsDisplay:YES];
@@ -556,7 +555,7 @@ static void install_app_menu(NSString* appName) {
                     me.window_position = pt;
                     me.button = pulp::view::MouseButton::left;
                     me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-                    me.is_down = true;
+                    me.is_down = true; me.phase = pulp::view::MousePhase::press;
                     me.click_count = static_cast<int>(event.clickCount);
                     _dragTarget->on_mouse_event(me);
                     _dragTarget->on_mouse_down(local);
@@ -607,7 +606,7 @@ static void install_app_menu(NSString* appName) {
             me.window_position = pt;
             me.button = pulp::view::MouseButton::left;
             me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-            me.is_down = true;
+            me.is_down = true; me.phase = pulp::view::MousePhase::press;
             me.click_count = static_cast<int>(event.clickCount);
             _dragTarget->on_mouse_event(me);
             _dragTarget->on_mouse_down(local);
@@ -790,7 +789,7 @@ static void install_app_menu(NSString* appName) {
                 up_me.window_position = pt;
                 up_me.button = pulp::view::MouseButton::left;
                 up_me.modifiers = modifiers;
-                up_me.is_down = false;
+                up_me.is_down = false; up_me.phase = pulp::view::MousePhase::release;
                 up_me.click_count = static_cast<int>(event.clickCount);
                 _dragTarget->on_mouse_event(up_me);
                 for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {

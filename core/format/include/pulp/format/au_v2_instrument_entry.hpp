@@ -9,6 +9,8 @@
 //   PULP_AU_INSTRUMENT(MySynthAU, my_namespace::create_my_synth)
 
 #include <pulp/format/au_v2_instrument.hpp>
+
+#if PULP_FORMAT_HAS_AUV2_INSTRUMENT
 #include <pulp/format/registry.hpp>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioUnitSDK/ComponentBase.h>
@@ -23,3 +25,7 @@
         explicit ClassName(AudioComponentInstance ci) : PulpAUInstrument(ci) {} \
     }; \
     AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, ClassName)
+#else
+#define PULP_AU_INSTRUMENT(ClassName, factory_fn) \
+    static_assert(false, "PULP_AU_INSTRUMENT requires AudioUnitSDK headers")
+#endif

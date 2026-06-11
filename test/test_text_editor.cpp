@@ -7,6 +7,7 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include <memory>
+#include <stdexcept>
 
 using namespace pulp::view;
 using namespace pulp::canvas;
@@ -40,6 +41,14 @@ struct ShapedOffsetCanvas : RecordingCanvas {
     }
     float text_x_for_byte(const std::string& text, std::size_t byte_index) override {
         return 500.0f + static_cast<float>(std::min(byte_index, text.size()));
+    }
+};
+
+struct Utf8StrictCanvas : RecordingCanvas {
+    float measure_text(const std::string& text) override {
+        if (safe_utf8_prefix_size(text, text.size()) != text.size())
+            throw std::runtime_error("invalid utf8 text measured");
+        return 8.0f * static_cast<float>(text.size());
     }
 };
 
@@ -504,6 +513,30 @@ TEST_CASE("TextEditor caret X comes from shaped offsets, not summed glyph widths
     REQUIRE(rect.x > 400.0f);
 }
 
+TEST_CASE("TextEditor paint never measures split UTF-8 byte prefixes",
+          "[view][text_editor][paint][utf8]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_bounds({0, 0, 800, 30});
+    editor.set_text("cafe\xCC\x81 synth"); // "cafe" + combining acute
+
+    Utf8StrictCanvas canvas;
+    REQUIRE_NOTHROW(editor.paint(canvas));
+    REQUIRE_NOTHROW(canvas.text_x_for_byte(editor.text(), 5));
+}
+
+TEST_CASE("TextEditor multi-line offsets never measure split UTF-8 bytes",
+          "[view][text_editor][paint][utf8]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_bounds({0, 0, 800, 80});
+    editor.set_text("pad\ncafe\xCC\x81 arp");
+
+    Utf8StrictCanvas canvas;
+    REQUIRE_NOTHROW(editor.paint(canvas));
+}
+
 TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
           "[view][text_editor][paint][issue-493]") {
     TextEditor editor;
@@ -677,6 +710,78 @@ TEST_CASE("TextEditor mouse shift-click extends selection from the caret",
     key_up.position = {9.0f, 15};
     editor.on_mouse_event(key_up);
     REQUIRE(editor.selected_text() == "llo");
+}
+
+TEST_CASE("TextEditor mouse drag selects text",
+          "[view][text_editor][selection][drag]") {
+    TextEditor editor;
+    editor.set_text("hello world");
+    editor.set_bounds({0, 0, 200, 30});
+
+    constexpr float char_w = 13.0f * 0.6f;
+    MouseEvent press;
+    press.position = {9.0f + 2.0f * char_w, 15.0f};
+    press.is_down = true;
+    press.phase = MousePhase::press;
+    editor.on_mouse_event(press);
+    REQUIRE_FALSE(editor.has_selection());
+
+    MouseEvent drag = press;
+    drag.position = {9.0f + 7.0f * char_w, 15.0f};
+    drag.is_down = true;
+    drag.phase = MousePhase::drag;
+    editor.on_mouse_event(drag);
+
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "llo w");
+
+    MouseEvent release = drag;
+    release.is_down = false;
+    release.phase = MousePhase::release;
+    editor.on_mouse_event(release);
+
+    drag.position = {9.0f + 10.0f * char_w, 15.0f};
+    editor.on_mouse_event(drag);
+    REQUIRE(editor.selected_text() == "llo w");
+}
+
+TEST_CASE("TextEditor legacy mouse drag selects text",
+          "[view][text_editor][selection][drag]") {
+    TextEditor editor;
+    editor.set_text("hello world");
+    editor.set_bounds({0, 0, 200, 30});
+
+    constexpr float char_w = 13.0f * 0.6f;
+    editor.simulate_drag({9.0f + 2.0f * char_w, 15.0f},
+                         {9.0f + 7.0f * char_w, 15.0f},
+                         2);
+
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "llo w");
+}
+
+TEST_CASE("TextEditor host mouse press plus legacy drag selects text",
+          "[view][text_editor][selection][drag][plugin-host]") {
+    TextEditor editor;
+    editor.set_text("hello world");
+    editor.set_bounds({0, 0, 200, 30});
+
+    constexpr float char_w = 13.0f * 0.6f;
+    const Point press_pos{9.0f + 2.0f * char_w, 15.0f};
+    const Point drag_pos{9.0f + 7.0f * char_w, 15.0f};
+
+    // macOS WindowHost and PluginViewHost dispatch a rich press event, then
+    // the legacy widget callback. Drag ticks arrive through the legacy path.
+    MouseEvent press;
+    press.position = press_pos;
+    press.is_down = true;
+    press.phase = MousePhase::press;
+    editor.on_mouse_event(press);
+    editor.on_mouse_down(press_pos);
+    editor.on_mouse_drag(drag_pos);
+
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "llo w");
 }
 
 TEST_CASE("TextEditor mouse double-click selects the exact word under the cursor",

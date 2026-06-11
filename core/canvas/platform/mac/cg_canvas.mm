@@ -552,8 +552,19 @@ void CoreGraphicsCanvas::set_text_align(TextAlign align) {
 }
 
 static CTFontRef create_font_with_fallback(const std::string& family, float size) {
-    NSString* ns_font = [NSString stringWithUTF8String:family.c_str()];
+    bool owns_ns_font = false;
+    NSString* ns_font = [[NSString alloc] initWithBytes:family.data()
+                                                 length:family.size()
+                                               encoding:NSUTF8StringEncoding];
+    if (ns_font) {
+        owns_ns_font = true;
+    } else {
+        ns_font = @"Helvetica";
+    }
     CTFontRef font = CTFontCreateWithName((__bridge CFStringRef)ns_font, size, NULL);
+#if !__has_feature(objc_arc)
+    if (owns_ns_font) [ns_font release];
+#endif
     if (!font) {
         // Requested family not available — fall back to system font
         font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, size, NULL);
@@ -561,12 +572,43 @@ static CTFontRef create_font_with_fallback(const std::string& family, float size
     return font;
 }
 
+static NSString* create_lossy_ns_string(const std::string& text) {
+    NSString* ns_text = [[NSString alloc] initWithBytes:text.data()
+                                                 length:text.size()
+                                               encoding:NSUTF8StringEncoding];
+    if (ns_text) return ns_text;
+
+    std::string sanitized;
+    sanitized.reserve(text.size());
+    for (unsigned char c : text) {
+        if (c >= 0x20 && c < 0x7f) {
+            sanitized.push_back(static_cast<char>(c));
+        } else {
+            sanitized += "\xEF\xBF\xBD";
+        }
+    }
+    ns_text = [[NSString alloc] initWithBytes:sanitized.data()
+                                       length:sanitized.size()
+                                     encoding:NSUTF8StringEncoding];
+    if (ns_text) return ns_text;
+#if !__has_feature(objc_arc)
+    return [@"" retain];
+#else
+    return @"";
+#endif
+}
+
 void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
     @autoreleasepool {
-        NSString* ns_text = [NSString stringWithUTF8String:text.c_str()];
+        NSString* ns_text = create_lossy_ns_string(text);
 
         CTFontRef font = create_font_with_fallback(font_family_, font_size_);
-        if (!font) return;
+        if (!font) {
+#if !__has_feature(objc_arc)
+            [ns_text release];
+#endif
+            return;
+        }
 
         NSDictionary* attrs = @{
             (__bridge id)kCTFontAttributeName: (__bridge id)font,
@@ -618,6 +660,9 @@ void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
 
         CFRelease(line);
         CFRelease(font);
+#if !__has_feature(objc_arc)
+        [ns_text release];
+#endif
     }
 }
 
@@ -657,10 +702,15 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
     // strokeStyle as the fill colour.
     @autoreleasepool {
         if (text.empty()) return;
-        NSString* ns_text = [NSString stringWithUTF8String:text.c_str()];
+        NSString* ns_text = create_lossy_ns_string(text);
 
         CTFontRef font = create_font_with_fallback(font_family_, font_size_);
-        if (!font) return;
+        if (!font) {
+#if !__has_feature(objc_arc)
+            [ns_text release];
+#endif
+            return;
+        }
 
         NSDictionary* attrs = @{
             (__bridge id)kCTFontAttributeName: (__bridge id)font,
@@ -777,15 +827,23 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
 
         CFRelease(line);
         CFRelease(font);
+#if !__has_feature(objc_arc)
+        [ns_text release];
+#endif
     }
 }
 
 float CoreGraphicsCanvas::measure_text(const std::string& text) {
     @autoreleasepool {
-        NSString* ns_text = [NSString stringWithUTF8String:text.c_str()];
+        NSString* ns_text = create_lossy_ns_string(text);
 
         CTFontRef font = create_font_with_fallback(font_family_, font_size_);
-        if (!font) return 0;
+        if (!font) {
+#if !__has_feature(objc_arc)
+            [ns_text release];
+#endif
+            return 0;
+        }
 
         NSDictionary* attrs = @{
             (__bridge id)kCTFontAttributeName: (__bridge id)font
@@ -799,16 +857,24 @@ float CoreGraphicsCanvas::measure_text(const std::string& text) {
         CGFloat width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
         CFRelease(line);
         CFRelease(font);
+#if !__has_feature(objc_arc)
+        [ns_text release];
+#endif
         return static_cast<float>(width);
     }
 }
 
 Canvas::TextMetrics CoreGraphicsCanvas::measure_text_full(const std::string& text) {
     @autoreleasepool {
-        NSString* ns_text = [NSString stringWithUTF8String:text.c_str()];
+        NSString* ns_text = create_lossy_ns_string(text);
 
         CTFontRef font = create_font_with_fallback(font_family_, font_size_);
-        if (!font) return {};
+        if (!font) {
+#if !__has_feature(objc_arc)
+            [ns_text release];
+#endif
+            return {};
+        }
 
         NSDictionary* attrs = @{
             (__bridge id)kCTFontAttributeName: (__bridge id)font
@@ -830,8 +896,17 @@ Canvas::TextMetrics CoreGraphicsCanvas::measure_text_full(const std::string& tex
 
         CFRelease(line);
         CFRelease(font);
+#if !__has_feature(objc_arc)
+        [ns_text release];
+#endif
         return m;
     }
+}
+
+float CoreGraphicsCanvas::text_x_for_byte(const std::string& text,
+                                          std::size_t byte_index) {
+    const auto prefix_len = safe_utf8_prefix_size(text, byte_index);
+    return measure_text(text.substr(0, prefix_len));
 }
 
 // ── Canvas2D path builder (pulp #1322) ───────────────────────────────────────

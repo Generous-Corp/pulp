@@ -6002,7 +6002,9 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     target_compile_definitions(pulp-test-mac-platform-harness PRIVATE
         PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     catch_discover_tests(pulp-test-mac-platform-harness)
+endif()
 
+if(APPLE AND NOT PULP_IOS)
     # pulp #2088 — pin the invariant -[PulpView liveFocusedView] depends on:
     # ~View() must auto-clear focused_input_ (#1708 contract) so the
     # accessor can safely re-sync the ivar to nullptr before any deref.
@@ -6027,13 +6029,11 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
         "-framework AppKit"
     )
-    # PulpView's Obj-C class metadata only registers when the linker keeps
-    # window_host_mac.mm.o — but no C++ symbol the test references lives in
-    # that .o, so static-lib pruning drops it. Force-load the one specific
-    # object to register the class without dragging in every other .mm
-    # (which would duplicate-symbol on PulpAccessibilityElement).
+    # Force-load the specific host objects that register PulpView/PulpPluginView;
+    # static-lib pruning drops them because the test references no C++ symbol.
     target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
         "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view-core.dir/platform/mac/window_host_mac.mm.o"
+        "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view-core.dir/platform/mac/plugin_view_host_mac.mm.o"
     )
     catch_discover_tests(pulp-test-mac-perform-key-equivalent)
 endif()

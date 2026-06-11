@@ -10,6 +10,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/screenshot.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -50,6 +51,31 @@ std::unique_ptr<pulp::view::View> label(const std::string& t) {
     return std::make_unique<pulp::view::Label>(t);
 }
 
+pulp::view::TabPanel& settings_tabs(SettingsPanel& panel) {
+    for (std::size_t i = 0; i < panel.child_count(); ++i)
+        if (auto* tabs = dynamic_cast<pulp::view::TabPanel*>(panel.child_at(i)))
+            return *tabs;
+    REQUIRE(false);
+    static pulp::view::TabPanel never;
+    return never;
+}
+
+std::vector<std::string> direct_audio_child_signature(SettingsPanel& panel) {
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    REQUIRE(audio_tab != nullptr);
+
+    std::vector<std::string> out;
+    for (std::size_t i = 0; i < audio_tab->child_count(); ++i) {
+        auto* child = audio_tab->child_at(i);
+        if (auto* label = dynamic_cast<pulp::view::Label*>(child))
+            out.push_back(label->text());
+        else if (dynamic_cast<pulp::view::MultiMeter*>(child))
+            out.push_back("<meter>");
+    }
+    return out;
+}
+
 }  // namespace
 
 TEST_CASE("Processor::settings_sections defaults to none", "[format][settings]") {
@@ -72,6 +98,24 @@ TEST_CASE("A plugin contributes named settings sections with views", "[format][s
 TEST_CASE("SettingsPanel starts with host-owned Audio + MIDI tabs", "[format][settings]") {
     SettingsPanel panel;
     REQUIRE(panel.tab_count() == 2);  // Audio + MIDI
+}
+
+TEST_CASE("SettingsPanel Audio tab keeps meters next to their device selectors", "[format][settings]") {
+    SettingsPanel panel;
+    const auto signature = direct_audio_child_signature(panel);
+    const std::vector<std::string> expected_prefix = {
+        "Output Device",
+        "Output Level",
+        "<meter>",
+        "Input Device",
+        "Input Level",
+        "<meter>",
+        "Sample Rate",
+        "Buffer Size",
+        "Latency: \xE2\x80\x94",
+    };
+    REQUIRE(signature.size() >= expected_prefix.size());
+    REQUIRE(std::equal(expected_prefix.begin(), expected_prefix.end(), signature.begin()));
 }
 
 TEST_CASE("add_section appends plugin tabs after Audio/MIDI", "[format][settings]") {

@@ -253,7 +253,26 @@ void TextEditor::on_mouse_event(const MouseEvent& event) {
         scroll_offset_ = std::max(0.0f, scroll_offset_ + event.scroll_delta_y);
         return;
     }
-    if (!event.is_down) return;
+
+    if (event.isRelease()) {
+        selection_drag_active_ = false;
+        suppress_next_legacy_mouse_down_ = false;
+        return;
+    }
+
+    if (event.isDrag()) {
+        suppress_next_legacy_mouse_down_ = false;
+        if (!selection_drag_active_) return;
+        const int pos = char_index_at_point(event.position.x, event.position.y);
+        caret_position_ = pos;
+        selection_start_ = selection_drag_anchor_;
+        selection_end_ = pos;
+        request_repaint();
+        return;
+    }
+
+    if (!event.isPress()) return;
+    suppress_next_legacy_mouse_down_ = event.hasExplicitPhase();
 
     // char_index_at_point reads from the cached LayoutSnapshot; for
     // single-line that snapshot is one row of measured advances, so
@@ -264,6 +283,7 @@ void TextEditor::on_mouse_event(const MouseEvent& event) {
     if (event.click_count == 3) {
         // Triple-click: select all (line in multi-line)
         select_all();
+        selection_drag_active_ = false;
     } else if (event.click_count == 2) {
         // Double-click: select word
         int start = pos, end = pos;
@@ -272,15 +292,50 @@ void TextEditor::on_mouse_event(const MouseEvent& event) {
         selection_start_ = start;
         selection_end_ = end;
         caret_position_ = end;
+        selection_drag_active_ = false;
     } else if (event.isShiftDown()) {
         // Shift-click: extend selection
+        if (!has_selection()) selection_start_ = caret_position_;
+        selection_drag_anchor_ = selection_start_;
         selection_end_ = pos;
         caret_position_ = pos;
+        selection_drag_active_ = true;
     } else {
         // Single click: place caret
         caret_position_ = pos;
         selection_start_ = selection_end_ = pos;
+        selection_drag_anchor_ = pos;
+        selection_drag_active_ = true;
     }
+    request_repaint();
+}
+
+void TextEditor::on_mouse_down(Point pos) {
+    if (suppress_next_legacy_mouse_down_) {
+        suppress_next_legacy_mouse_down_ = false;
+        return;
+    }
+    MouseEvent event;
+    event.position = pos;
+    event.is_down = true;
+    event.phase = MousePhase::press;
+    on_mouse_event(event);
+}
+
+void TextEditor::on_mouse_drag(Point pos) {
+    MouseEvent event;
+    event.position = pos;
+    event.is_down = true;
+    event.phase = MousePhase::drag;
+    on_mouse_event(event);
+}
+
+void TextEditor::on_mouse_up(Point pos) {
+    MouseEvent event;
+    event.position = pos;
+    event.is_down = false;
+    event.phase = MousePhase::release;
+    on_mouse_event(event);
 }
 
 bool TextEditor::on_key_event(const KeyEvent& event) {
@@ -520,7 +575,11 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             }
 
             std::string candidate = current + c;
-            if (!current.empty() && canvas.measure_text(candidate) > inner_w) {
+            const bool candidate_is_utf8_boundary =
+                canvas::safe_utf8_prefix_size(candidate, candidate.size()) ==
+                candidate.size();
+            if (candidate_is_utf8_boundary && !current.empty() &&
+                canvas.measure_text(candidate) > inner_w) {
                 flush_line(i);
                 current_start = i;
             }
@@ -588,17 +647,13 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                 dst.baseline_y = dst.top_y + font_size_;
                 dst.inner_x = inner_x;
                 dst.line_height = line_h;
-                // O(N) single-char accumulation. Loses inter-glyph
-                // kerning vs full-prefix shaping, but the legacy
-                // substr-measure loop was O(N²) Skia-paragraph builds
-                // per paint — unshippable on the hot path.
+                // Use text_x_for_byte for every byte boundary so multi-byte
+                // UTF-8 prefixes are never measured as invalid one-byte slices.
+                // Backends with real shaping can return in-context cluster
+                // offsets; fallback backends snap to safe UTF-8 prefixes.
                 dst.x_offsets.resize(src.text.size() + 1);
-                dst.x_offsets[0] = 0.f;
-                float cum = 0.f;
-                for (size_t j = 0; j < src.text.size(); ++j) {
-                    cum += canvas.measure_text(std::string(1, src.text[j]));
-                    dst.x_offsets[j + 1] = cum;
-                }
+                for (size_t j = 0; j <= src.text.size(); ++j)
+                    dst.x_offsets[j] = canvas.text_x_for_byte(src.text, j);
                 last_layout_.lines.push_back(std::move(dst));
             }
             last_layout_key_ = key;

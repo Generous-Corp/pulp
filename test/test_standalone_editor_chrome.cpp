@@ -657,11 +657,11 @@ TEST_CASE("SettingsPanel updates input and output meters from audio bridges",
 
     panel.poll();
 
-    REQUIRE(meters[0]->channel_count() == 1);
+    REQUIRE(meters[0]->channel_count() == 2);
     REQUIRE(meters[0]->ballistics().channels[0].display_peak > 0.0f);
-    REQUIRE(meters[1]->channel_count() == 2);
+    REQUIRE(meters[0]->ballistics().channels[1].display_peak > 0.0f);
+    REQUIRE(meters[1]->channel_count() == 1);
     REQUIRE(meters[1]->ballistics().channels[0].display_peak > 0.0f);
-    REQUIRE(meters[1]->ballistics().channels[1].display_peak > 0.0f);
 }
 
 TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
@@ -1106,6 +1106,30 @@ TEST_CASE("Standalone headless CI without screenshot is rejected before launch",
     REQUIRE(config.screenshot_path.empty());
     REQUIRE(config.screenshot_frame_delay == 9);
     REQUIRE(standalone_headless_requires_screenshot(config));
+}
+
+TEST_CASE("Standalone package audit runs hidden without requiring a screenshot",
+          "[standalone][chrome][package-audit]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv audit("PULP_STANDALONE_PACKAGE_AUDIT");
+    ScopedEnv audit_seconds("PULP_STANDALONE_PACKAGE_AUDIT_SECONDS");
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+    screenshot.unset();
+    audit.set("1");
+    audit_seconds.set("7");
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+
+    REQUIRE(config.package_audit);
+    REQUIRE(config.headless);
+    REQUIRE(config.package_audit_timeout_seconds == 7);
+    REQUIRE(config.screenshot_path.empty());
+    REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
 }
 
 TEST_CASE("Standalone empty headless env vars are ignored",

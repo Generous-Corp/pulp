@@ -82,6 +82,18 @@ The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same `p
 
 ## Recent changes
 
+### Custom editor parameter writes vs host-global pulls
+
+AU v2 custom editors write `StateStore` first, then mirror the value into the
+host's AU parameter storage through a main-thread listener. If the render path
+blindly pulls every `GetParameter()` / `Globals()->GetParameter()` value into
+the store at the top of each block, a just-clicked UI value can be overwritten
+by the host's stale value until another UI event drains that listener. The AU
+effect and instrument adapters therefore keep a `host_param_snapshot_`: pull a
+host value into `StateStore` only when the host value changed since the last
+render block, and after `process()` publish any store value that differs from
+either the pre-process store snapshot or the last host snapshot.
+
 ### Param-events sidecar + RT-safety guard (native-components Phase 3)
 
 `ProcessBufferLists()` now `set_param_events(&param_events_)` before
