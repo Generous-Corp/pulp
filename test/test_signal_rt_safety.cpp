@@ -5,6 +5,7 @@
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/halfband_iir.hpp>
@@ -211,6 +212,55 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
         bias.reset();
         bias.set_sample_rate(48000.0f);
         ballistics.reset();
+    });
+}
+
+TEST_CASE("Prepared DryWetMixer push and mix are allocation-free within capacity",
+          "[signal][rt-safety]") {
+    DryWetMixer mixer;
+    mixer.prepare(2, 64);
+    mixer.set_mix(0.35f);
+    mixer.set_curve(MixCurve::EqualPower);
+
+    DryWetMixer latency_mixer;
+    latency_mixer.set_wet_latency(3);
+    latency_mixer.prepare(2, 64);
+    latency_mixer.set_mix(0.25f);
+    latency_mixer.set_curve(MixCurve::Linear);
+
+    std::array<float, 64> dry_l {};
+    std::array<float, 64> dry_r {};
+    std::array<float, 64> wet_l {};
+    std::array<float, 64> wet_r {};
+    std::array<float, 64> latency_wet_l {};
+    std::array<float, 64> latency_wet_r {};
+    for (std::size_t i = 0; i < dry_l.size(); ++i) {
+        dry_l[i] = static_cast<float>(i + 1) * 0.01f;
+        dry_r[i] = static_cast<float>(i + 1) * 0.02f;
+        wet_l[i] = 0.5f;
+        wet_r[i] = -0.25f;
+        latency_wet_l[i] = 0.2f;
+        latency_wet_r[i] = -0.1f;
+    }
+
+    const float* dry_channels[] = {dry_l.data(), dry_r.data()};
+    float* wet_channels[] = {wet_l.data(), wet_r.data()};
+    float* latency_wet_channels[] = {latency_wet_l.data(), latency_wet_r.data()};
+
+    require_allocates_no_memory([&] {
+        mixer.push_dry(dry_channels, 2, 64);
+        mixer.mix_wet(wet_channels, 2, 64);
+        mixer.set_mix(0.5f);
+        mixer.set_curve(MixCurve::Sqrt4_5dB);
+        mixer.push_dry(dry_channels, 1, 16);
+        mixer.mix_wet(wet_channels, 2, 64);
+        mixer.reset();
+
+        latency_mixer.push_dry(dry_channels, 2, 64);
+        latency_mixer.mix_wet(latency_wet_channels, 2, 64);
+        latency_mixer.reset();
+        latency_mixer.push_dry(nullptr, 0, 0);
+        latency_mixer.mix_wet(latency_wet_channels, 2, 64);
     });
 }
 

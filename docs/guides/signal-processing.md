@@ -83,24 +83,36 @@ Crossfades between dry and wet signals. Mix 0.0 = fully dry, 1.0 = fully wet.
 ```cpp
 signal::DryWetMixer mixer;
 mixer.set_mix(0.5f);  // 50/50
+mixer.prepare(max_channels, max_block_size);
 
-// Per-sample:
-float out = mixer.process(dry_sample, wet_sample);
+// Before running the wet processor:
+const float* dry_channels[] = {dry_left, dry_right};
+mixer.push_dry(dry_channels, 2, num_samples);
 
-// Per-buffer:
-mixer.process(dry_buf, wet_buf, output_buf, num_samples);
+// After the wet processor has written its output in-place:
+float* wet_channels[] = {wet_left, wet_right};
+mixer.mix_wet(wet_channels, 2, num_samples);
 ```
 
 | Method | Description |
 |---|---|
 | `set_mix(float)` | Set mix ratio. Clamped to [0, 1]. |
 | `mix()` | Current mix value. |
-| `process(float dry, float wet)` | Mix one sample pair. |
-| `process(dry*, wet*, out*, int)` | Mix buffers. |
+| `set_curve(MixCurve)` | Select the crossfade law. |
+| `set_wet_latency(int samples)` | Delay the dry path to compensate wet-path latency. |
+| `prepare(int max_channels, int max_block_size)` | Allocate internal dry/latency storage. |
+| `push_dry(float* const* dry, int channels, int samples)` | Capture dry input before wet processing. |
+| `mix_wet(float* const* wet, int channels, int samples)` | Mix captured dry into the wet buffer in-place. |
+| `reset()` | Clear delay/dry history. |
 
 Default mix: 1.0 (fully wet).
 
 **Sample rate dependency:** None.
+
+**Caveat:** `prepare()` and `set_wet_latency()` allocate or resize internal
+storage. Call them outside the audio callback. After `prepare()`, `push_dry()`,
+`mix_wet()`, `set_mix()`, `set_curve()`, and `reset()` are real-time safe for
+channel/block sizes within the prepared capacity.
 
 ---
 
