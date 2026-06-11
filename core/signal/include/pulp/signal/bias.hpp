@@ -7,6 +7,8 @@
 
 namespace pulp::signal {
 
+// RT contract: setters, reset(), set_sample_rate(), and process paths are
+// scalar-only and allocate no memory.
 class Bias {
 public:
     void set_bias(float b) { bias_ = b; }

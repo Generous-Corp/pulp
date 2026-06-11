@@ -2,6 +2,8 @@
 
 #include "harness/rt_allocation_probe.hpp"
 
+#include <pulp/signal/bias.hpp>
+#include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
 #include <pulp/signal/signal.hpp>
 #include <pulp/signal/oversampling.hpp>
@@ -101,6 +103,12 @@ TEST_CASE("Oversampler process_block is allocation-free after configuration",
 
 TEST_CASE("Scalar signal helpers are allocation-free after configuration",
           "[signal][rt-safety]") {
+    Bias bias;
+    bias.set_bias(0.1f);
+
+    DcBlocker<float> dc_blocker;
+    dc_blocker.set_pole(0.995f);
+
     Gain gain;
     gain.set_gain_linear(0.5f);
 
@@ -131,28 +139,63 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
     shaper.set_curve(WaveShaper::Curve::soft_clip);
     shaper.set_drive(2.0f);
 
+    Panner panner;
+    panner.set_pan(0.25f);
+    panner.set_law(PanLaw::Sin4_5dB);
+
     BallisticsFilter ballistics;
     ballistics.prepare(48000.0f);
     ballistics.set_attack_ms(2.0f);
     ballistics.set_release_ms(80.0f);
 
+    SmoothedValue<float> smoother(0.0f);
+    smoother.set_ramp_time(0.01f, 48000.0f);
+    smoother.set_target(1.0f);
+
+    LogRampedValue log_ramp(220.0f);
+    log_ramp.set_ramp_time(0.02f, 48000.0f);
+    log_ramp.set_target(880.0f);
+
     require_allocates_no_memory([&] {
         std::array<float, 64> samples {};
+        std::array<float, 64> dry {};
+        std::array<float, 64> wet {};
+        std::array<float, 64> mixed {};
         for (std::size_t i = 0; i < samples.size(); ++i) {
             const float input = static_cast<float>(i % 13) * 0.03f - 0.18f;
-            float value = gain.process(input);
+            float value = bias.process(input);
+            value = dc_blocker.process(value);
+            value = gain.process(value);
             value = mixer.process(value, osc.next());
             value = biquad.process(value);
             value = svf.process(value);
             value = phaser.process(value);
             value = shaper.process(value);
-            samples[i] = ballistics.process(value);
+            const auto stereo = panner.process(value);
+            float left = stereo.left;
+            float right = stereo.right;
+            panner.process(left, right);
+            const float smoothed = smoother.next();
+            const float log_smoothed = log_ramp.next();
+            osc.set_frequency(log_smoothed);
+            samples[i] = ballistics.process((left + right) * (0.5f + smoothed * 0.1f));
+            dry[i] = input;
+            wet[i] = samples[i];
         }
 
+        bias.process(samples.data(), static_cast<int>(samples.size()));
+        bias.process(samples.data(), mixed.data(), static_cast<int>(samples.size()));
+        dc_blocker.process(samples.data(), static_cast<int>(samples.size()));
         gain.process(samples.data(), static_cast<int>(samples.size()));
+        mixer.process(dry.data(), wet.data(), mixed.data(), static_cast<int>(mixed.size()));
         svf.process(samples.data(), static_cast<int>(samples.size()));
         phaser.process(samples.data(), static_cast<int>(samples.size()));
         shaper.process(samples.data(), static_cast<int>(samples.size()));
+        smoother.skip(16);
+        log_ramp.skip(16);
+        dc_blocker.reset();
+        bias.reset();
+        bias.set_sample_rate(48000.0f);
         ballistics.reset();
     });
 }

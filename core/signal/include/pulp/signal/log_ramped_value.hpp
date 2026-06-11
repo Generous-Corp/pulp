@@ -15,6 +15,9 @@ namespace pulp::signal {
 /// multiplicative approach so that equal time produces equal
 /// perceptual change across the range.
 ///
+/// RT contract: setters, `next()`, `skip()`, and query methods are scalar-only
+/// and allocate no memory.
+///
 /// @code
 /// LogRampedValue freq(440.0f);
 /// freq.set_ramp_time(0.05f, 44100.0f);
