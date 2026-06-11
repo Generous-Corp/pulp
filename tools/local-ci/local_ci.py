@@ -151,6 +151,7 @@ import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import desktop_commands_cli as _desktop_commands_cli  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
+import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
@@ -3671,165 +3672,40 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_install(args: argparse.Namespace) -> int:
-    try:
-        config = load_config()
-        target = resolve_desktop_target(config, args.target)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    artifact_root = Path(config["desktop_automation"]["artifact_root"])
-    ok, detail = _check_writable_dir(artifact_root)
-    if not ok:
-        print(f"Error: desktop artifact root is not writable: {detail}")
-        return 1
-
-    contract = desktop_target_contract(args.target, target)
-    remote_bootstrap_ready = target["target_type"] != "ssh"
-    remote_tooling_ready = target["target_type"] != "ssh"
-    remote_repo_checkout_ready = target["target_type"] != "ssh"
-    tooling_probe = None
-    tooling_installed: list[str] = []
-    repo_checkout_probe = None
-    if target["target_type"] == "ssh" and target["adapter"] == "windows-session-agent":
-        host = ensure_host_reachable(args.target, target, config.get("defaults", {}))
-        if host:
-            try:
-                bootstrap_result = bootstrap_windows_session_agent(host, contract)
-                probe = probe_windows_session_agent(host, contract)
-                remote_bootstrap_ready = bool(
-                    probe.get("task_present")
-                    and probe.get("agent_root_exists")
-                    and probe.get("jobs_dir_exists")
-                    and probe.get("results_dir_exists")
-                    and probe.get("script_exists")
-                )
-                contract = {
-                    **contract,
-                    "remote_root": bootstrap_result.get("remote_root", contract.get("remote_root")),
-                    "script_path": bootstrap_result.get("script_path", contract.get("script_path")),
-                }
-                install_bundle_sha = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=ROOT,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                ).stdout.strip()
-                install_bundle_job = {"id": uuid.uuid4().hex[:12], "sha": install_bundle_sha}
-                install_bundle_name, install_bundle_ref = sync_job_bundle_to_ssh_host(host, install_bundle_job)
-                tooling_result = ensure_windows_remote_tooling(host)
-                tooling_probe = tooling_result["probe"]
-                tooling_installed = tooling_result["installed"]
-                remote_tooling_ready = windows_remote_tooling_ready(tooling_probe)
-                repo_checkout_probe = ensure_windows_remote_repo_checkout(
-                    host,
-                    target.get("repo_path"),
-                    remote_url=git_origin_clone_url(ROOT),
-                    bundle_name=install_bundle_name,
-                    bundle_ref=install_bundle_ref,
-                )
-                remote_repo_checkout_ready = windows_repo_checkout_ready(repo_checkout_probe)
-                effective_repo_path = repo_checkout_probe.get("repo_path")
-                if effective_repo_path and effective_repo_path != target.get("repo_path"):
-                    update_target_repo_path(config, args.target, effective_repo_path)
-                    save_config(config)
-                    target = resolve_desktop_target(config, args.target)
-            except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
-                remote_bootstrap_ready = False
-                remote_tooling_ready = False
-                remote_repo_checkout_ready = False
-                print(f"Warning: remote bootstrap did not complete for `{args.target}`: {exc}")
-        else:
-            remote_bootstrap_ready = False
-            remote_tooling_ready = False
-            remote_repo_checkout_ready = False
-
-    receipt = {
-        "target": args.target,
-        "adapter": target["adapter"],
-        "bootstrap": target["bootstrap"],
-        "target_type": target["target_type"],
-        "host": target.get("host"),
-        "repo_path": target.get("repo_path"),
-        "artifact_root": str(artifact_root),
-        "capability_tier": target.get("capability_tier", "v1"),
-        "installed_at": now_iso(),
-        "remote_bootstrap_ready": remote_bootstrap_ready,
-        "remote_tooling_ready": remote_tooling_ready,
-        "remote_repo_checkout_ready": remote_repo_checkout_ready,
-        "tooling_probe": tooling_probe,
-        "repo_checkout_probe": repo_checkout_probe,
-        "contract": contract,
-    }
-    atomic_write_text(
-        desktop_target_receipt_path(args.target),
-        json.dumps(receipt, indent=2) + "\n",
+    return _desktop_setup_commands_cli.cmd_desktop_install(
+        args,
+        load_config_fn=load_config,
+        resolve_desktop_target_fn=resolve_desktop_target,
+        check_writable_dir_fn=_check_writable_dir,
+        desktop_target_contract_fn=desktop_target_contract,
+        ensure_host_reachable_fn=ensure_host_reachable,
+        bootstrap_windows_session_agent_fn=bootstrap_windows_session_agent,
+        probe_windows_session_agent_fn=probe_windows_session_agent,
+        subprocess_run_fn=subprocess.run,
+        root_path=ROOT,
+        new_install_job_id_fn=lambda: uuid.uuid4().hex[:12],
+        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
+        ensure_windows_remote_tooling_fn=ensure_windows_remote_tooling,
+        windows_remote_tooling_ready_fn=windows_remote_tooling_ready,
+        ensure_windows_remote_repo_checkout_fn=ensure_windows_remote_repo_checkout,
+        git_origin_clone_url_fn=git_origin_clone_url,
+        windows_repo_checkout_ready_fn=windows_repo_checkout_ready,
+        update_target_repo_path_fn=update_target_repo_path,
+        save_config_fn=save_config,
+        now_iso_fn=now_iso,
+        desktop_target_receipt_path_fn=desktop_target_receipt_path,
+        atomic_write_text_fn=atomic_write_text,
+        windows_tooling_detail_fn=windows_tooling_detail,
     )
-
-    print(f"Desktop target `{args.target}` prepared.")
-    print(f"  adapter: {target['adapter']}")
-    print(f"  bootstrap: {target['bootstrap']}")
-    print(f"  artifact_root: {artifact_root}")
-    if target["target_type"] == "ssh":
-        if remote_bootstrap_ready:
-            print("  remote bootstrap: ready")
-        else:
-            print("  remote bootstrap: pending; target profile recorded locally")
-        if target["adapter"] == "windows-session-agent":
-            if remote_tooling_ready:
-                git_detail = windows_tooling_detail(tooling_probe or {}, "git") if tooling_probe else "git ready"
-                print(f"  remote tooling: ready ({git_detail})")
-            else:
-                print("  remote tooling: pending; run `pulp ci-local desktop doctor windows` for remediation")
-            if tooling_installed:
-                print(f"  remote tooling installed: {', '.join(tooling_installed)}")
-            if repo_checkout_probe and repo_checkout_probe.get("repo_path"):
-                print(f"  remote repo checkout: {repo_checkout_probe['repo_path']}")
-        if contract.get("task_name"):
-            print(f"  task_name: {contract['task_name']}")
-        if contract.get("remote_root"):
-            print(f"  remote_root: {contract['remote_root']}")
-    else:
-        print("  remote bootstrap: not required for local target")
-    return 0
 
 
 def cmd_desktop_doctor(args: argparse.Namespace) -> int:
-    try:
-        config = load_config()
-        target = resolve_desktop_target(config, args.target)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    checks = desktop_doctor_checks(config, args.target)
-    all_ok = True
-    for check in checks:
-        if check.get("required", True):
-            all_ok = all_ok and check["ok"]
-    if getattr(args, "json", False):
-        payload = {
-            "target": args.target,
-            "adapter": target["adapter"],
-            "bootstrap": target["bootstrap"],
-            "ok": all_ok,
-            "checks": checks,
-        }
-        print(json.dumps(payload, indent=2))
-        return 0 if all_ok else 1
-    print(f"Desktop doctor for `{args.target}`")
-    print(f"  adapter: {target['adapter']}")
-    print(f"  bootstrap: {target['bootstrap']}")
-    for check in checks:
-        if check["ok"]:
-            status = "PASS"
-        elif not check.get("required", True):
-            status = "WARN"
-        else:
-            status = "FAIL"
-        print(f"  {status:4s}  {check['name']}: {check['detail']}")
-    return 0 if all_ok else 1
+    return _desktop_setup_commands_cli.cmd_desktop_doctor(
+        args,
+        load_config_fn=load_config,
+        resolve_desktop_target_fn=resolve_desktop_target,
+        desktop_doctor_checks_fn=desktop_doctor_checks,
+    )
 
 
 def cmd_desktop_status(args: argparse.Namespace) -> int:
