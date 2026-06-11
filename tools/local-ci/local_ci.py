@@ -149,6 +149,7 @@ import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
+import desktop_command_bindings as _desktop_command_bindings  # noqa: E402
 import desktop_commands_cli as _desktop_commands_cli  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
@@ -2479,81 +2480,23 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_install(args: argparse.Namespace) -> int:
-    return _desktop_setup_commands_cli.cmd_desktop_install(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        check_writable_dir_fn=_check_writable_dir,
-        desktop_target_contract_fn=desktop_target_contract,
-        ensure_host_reachable_fn=ensure_host_reachable,
-        bootstrap_windows_session_agent_fn=bootstrap_windows_session_agent,
-        probe_windows_session_agent_fn=probe_windows_session_agent,
-        subprocess_run_fn=subprocess.run,
-        root_path=ROOT,
-        new_install_job_id_fn=lambda: uuid.uuid4().hex[:12],
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        ensure_windows_remote_tooling_fn=ensure_windows_remote_tooling,
-        windows_remote_tooling_ready_fn=windows_remote_tooling_ready,
-        ensure_windows_remote_repo_checkout_fn=ensure_windows_remote_repo_checkout,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        windows_repo_checkout_ready_fn=windows_repo_checkout_ready,
-        update_target_repo_path_fn=update_target_repo_path,
-        save_config_fn=save_config,
-        now_iso_fn=now_iso,
-        desktop_target_receipt_path_fn=desktop_target_receipt_path,
-        atomic_write_text_fn=atomic_write_text,
-        windows_tooling_detail_fn=windows_tooling_detail,
-    )
+    return _desktop_command_bindings.cmd_desktop_install(globals(), args)
 
 
 def cmd_desktop_doctor(args: argparse.Namespace) -> int:
-    return _desktop_setup_commands_cli.cmd_desktop_doctor(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        desktop_doctor_checks_fn=desktop_doctor_checks,
-    )
+    return _desktop_command_bindings.cmd_desktop_doctor(globals(), args)
 
 
 def cmd_desktop_status(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_status(
-        args,
-        load_config_fn=load_config,
-        desktop_receipt_for_fn=desktop_receipt_for,
-        desktop_capabilities_for_fn=desktop_capabilities_for,
-        desktop_optional_capabilities_fn=desktop_optional_capabilities,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
-        desktop_proof_summaries_fn=desktop_proof_summaries,
-        normalize_desktop_optional_config_fn=normalize_desktop_optional_config,
-        desktop_target_contract_fn=desktop_target_contract,
-        desktop_publish_reports_fn=desktop_publish_reports,
-        desktop_status_lines_fn=_desktop_cli.desktop_status_lines,
-        short_sha_fn=short_sha,
-        windows_tooling_detail_fn=windows_tooling_detail,
-        windows_repo_checkout_detail_fn=windows_repo_checkout_detail,
-    )
+    return _desktop_command_bindings.cmd_desktop_status(globals(), args)
 
 
 def cmd_desktop_config_show(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_config_show(
-        args,
-        load_config_fn=load_config,
-        desktop_config_show_lines_fn=_desktop_cli.desktop_config_show_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_config_show(globals(), args)
 
 
 def cmd_desktop_config_set(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_config_set(
-        args,
-        load_config_fn=load_config,
-        save_config_fn=save_config,
-        config_path_fn=config_path,
-        normalize_publish_mode_fn=normalize_publish_mode,
-        parse_config_bool_fn=parse_config_bool,
-        normalize_desktop_config_fn=normalize_desktop_config,
-        desktop_config_update_lines_fn=_desktop_cli.desktop_config_update_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_config_set(globals(), args)
 
 
 def cmd_desktop_config(args: argparse.Namespace) -> int:
@@ -2561,92 +2504,35 @@ def cmd_desktop_config(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_recent(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_recent(
-        args,
-        load_config_fn=load_config,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
-        desktop_recent_lines_fn=_desktop_cli.desktop_recent_lines,
-        short_sha_fn=short_sha,
-    )
+    return _desktop_command_bindings.cmd_desktop_recent(globals(), args)
 
 
 def cmd_desktop_proof(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_proof(
-        args,
-        load_config_fn=load_config,
-        desktop_proof_summaries_fn=desktop_proof_summaries,
-        desktop_proof_empty_line_fn=_desktop_cli.desktop_proof_empty_line,
-        desktop_proof_lines_fn=_desktop_cli.desktop_proof_lines,
-        short_sha_fn=short_sha,
-    )
+    return _desktop_command_bindings.cmd_desktop_proof(globals(), args)
 
 
 def cmd_desktop_publish(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_publish(
-        args,
-        load_config_fn=load_config,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        stage_desktop_publish_report_fn=stage_desktop_publish_report,
-        desktop_publish_lines_fn=_desktop_cli.desktop_publish_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_publish(globals(), args)
 
 
 def cmd_desktop_cleanup(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_cleanup(
-        args,
-        load_config_fn=load_config,
-        prune_desktop_run_manifests_fn=prune_desktop_run_manifests,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        desktop_cleanup_empty_line_fn=_desktop_cli.desktop_cleanup_empty_line,
-        desktop_cleanup_lines_fn=_desktop_cli.desktop_cleanup_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_cleanup(globals(), args)
 
 
 def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
-    return _desktop_action_commands_cli.windows_requires_pulp_app_selectors(args)
+    return _desktop_command_bindings.windows_requires_pulp_app_selectors(globals(), args)
 
 
 def cmd_desktop_smoke(args: argparse.Namespace) -> int:
-    return _desktop_action_commands_cli.cmd_desktop_smoke(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        make_desktop_source_request_fn=make_desktop_source_request,
-        run_macos_local_smoke_fn=run_macos_local_smoke,
-        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action,
-        run_windows_session_agent_action_fn=run_windows_session_agent_action,
-        desktop_action_success_lines_fn=_desktop_cli.desktop_action_success_lines,
-        sys_platform=sys.platform,
-    )
+    return _desktop_command_bindings.cmd_desktop_smoke(globals(), args)
 
 
 def cmd_desktop_click(args: argparse.Namespace) -> int:
-    return _desktop_action_commands_cli.cmd_desktop_click(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        make_desktop_source_request_fn=make_desktop_source_request,
-        run_macos_local_smoke_fn=run_macos_local_smoke,
-        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action,
-        run_windows_session_agent_action_fn=run_windows_session_agent_action,
-        desktop_action_success_lines_fn=_desktop_cli.desktop_action_success_lines,
-        sys_platform=sys.platform,
-    )
+    return _desktop_command_bindings.cmd_desktop_click(globals(), args)
 
 
 def cmd_desktop_inspect(args: argparse.Namespace) -> int:
-    return _desktop_action_commands_cli.cmd_desktop_inspect(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        make_desktop_source_request_fn=make_desktop_source_request,
-        run_macos_local_smoke_fn=run_macos_local_smoke,
-        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action,
-        run_windows_session_agent_action_fn=run_windows_session_agent_action,
-        desktop_action_success_lines_fn=_desktop_cli.desktop_action_success_lines,
-        sys_platform=sys.platform,
-    )
+    return _desktop_command_bindings.cmd_desktop_inspect(globals(), args)
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:
