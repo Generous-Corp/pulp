@@ -167,6 +167,7 @@ import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import execution as _execution  # noqa: E402
+import execution_bindings as _execution_bindings  # noqa: E402
 
 HEARTBEAT_INTERVAL_SECS = _execution.HEARTBEAT_INTERVAL_SECS
 STUCK_IDLE_SECS = _execution.STUCK_IDLE_SECS
@@ -2284,18 +2285,11 @@ def run_logged_command(
 
 
 def run_local_validation(job: dict, exclude_tests: str = "", report_progress=None) -> dict:
-    return _execution.run_local_validation(
+    return _execution_bindings.run_local_validation(
+        globals(),
         job,
         exclude_tests,
         report_progress,
-        root=ROOT,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        prepare_target_log_fn=prepare_target_log,
-        now_iso_fn=now_iso,
-        local_validation_command_fn=local_validation_command,
-        run_logged_command_fn=run_logged_command,
-        validation_result_from_run_fn=validation_result_from_run,
     )
 
 
@@ -2308,7 +2302,8 @@ def run_posix_ssh_validation(
     config: dict | None = None,
     report_progress=None,
 ) -> dict:
-    return _execution.run_posix_ssh_validation(
+    return _execution_bindings.run_posix_ssh_validation(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -2316,15 +2311,6 @@ def run_posix_ssh_validation(
         exclude_tests,
         config,
         report_progress,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        prepare_target_log_fn=prepare_target_log,
-        now_iso_fn=now_iso,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        posix_ssh_validation_command_fn=posix_ssh_validation_command,
-        run_logged_command_fn=run_logged_command,
-        validation_result_from_run_fn=validation_result_from_run,
-        validation_error_result_fn=validation_error_result,
     )
 
 
@@ -2498,7 +2484,8 @@ def run_windows_ssh_validation(
     config: dict | None = None,
     report_progress=None,
 ) -> dict:
-    return _execution.run_windows_ssh_validation(
+    return _execution_bindings.run_windows_ssh_validation(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -2509,20 +2496,6 @@ def run_windows_ssh_validation(
         cmake_generator_instance,
         config,
         report_progress,
-        root=ROOT,
-        prepare_target_log_fn=prepare_target_log,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        validation_error_result_fn=validation_error_result,
-        ensure_windows_remote_repo_checkout_fn=ensure_windows_remote_repo_checkout,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        now_iso_fn=now_iso,
-        probe_windows_ssh_cmake_settings_fn=probe_windows_ssh_cmake_settings,
-        windows_validation_script_fn=windows_validation_script,
-        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
-        run_logged_command_fn=run_logged_command,
-        validation_result_from_run_fn=validation_result_from_run,
     )
 
 
