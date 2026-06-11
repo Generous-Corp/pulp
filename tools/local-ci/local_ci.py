@@ -182,6 +182,7 @@ import runner_state as _runner_state  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
 import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
+import ssh_bundle_bindings as _ssh_bundle_bindings  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
 import utility_command_bindings as _utility_command_bindings  # noqa: E402
@@ -195,98 +196,35 @@ LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target.LINUX_OPTIONAL_REMOTE_TOOLS
 
 
 def bundle_ref_name(job_id: str) -> str:
-    return _ssh_bundle.bundle_ref_name(job_id)
+    return _ssh_bundle_bindings.bundle_ref_name(globals(), job_id)
 
 
 def remote_bundle_name(job_id: str) -> str:
-    return _ssh_bundle.remote_bundle_name(job_id)
+    return _ssh_bundle_bindings.remote_bundle_name(globals(), job_id)
 
 
 def create_job_bundle(job: dict) -> Path:
-    return _ssh_bundle.create_job_bundle(
-        job,
-        ensure_state_dirs_fn=ensure_state_dirs,
-        bundles_dir_fn=bundles_dir,
-        bundle_build_lock=_BUNDLE_BUILD_LOCK,
-        root=ROOT,
-        run_fn=subprocess.run,
-    )
+    return _ssh_bundle_bindings.create_job_bundle(globals(), job)
 
 
 def config_for_bundle_probe(job: dict, config: dict | None = None) -> dict:
-    return _ssh_bundle.config_for_bundle_probe(
-        job,
-        config,
-        load_config_file_fn=load_config_file,
-        load_optional_config_fn=load_optional_config,
-    )
+    return _ssh_bundle_bindings.config_for_bundle_probe(globals(), job, config)
 
 
 def sync_job_bundle_to_ssh_host(host: str, job: dict, report_progress=None, config: dict | None = None) -> tuple[str, str]:
-    return _ssh_bundle.sync_job_bundle_to_ssh_host(
-        host,
-        job,
-        report_progress=report_progress,
-        config=config,
-        create_job_bundle_fn=create_job_bundle,
-        remote_bundle_name_fn=remote_bundle_name,
-        bundle_ref_name_fn=bundle_ref_name,
-        config_for_bundle_probe_fn=config_for_bundle_probe,
-        probe_uploaded_bundle_size_fn=probe_uploaded_bundle_size,
-        now_iso_fn=now_iso,
-        popen_fn=subprocess.Popen,
-        stdout_pipe=subprocess.PIPE,
-        stderr_pipe=subprocess.PIPE,
-        timeout_expired_type=subprocess.TimeoutExpired,
-        time_fn=time.time,
-    )
+    return _ssh_bundle_bindings.sync_job_bundle_to_ssh_host(globals(), host, job, report_progress, config)
 
 
 def target_name_for_ssh_host(config: dict, host: str) -> str | None:
-    for name, target_cfg in config.get("targets", {}).items():
-        if name == host or target_cfg.get("host") == host:
-            return name
-    return None
+    return _ssh_bundle_bindings.target_name_for_ssh_host(globals(), config, host)
 
 
 def ssh_host_uses_windows_shell(config: dict, host: str) -> bool:
-    target_name = target_name_for_ssh_host(config, host)
-    if target_name:
-        target_cfg = dict(config.get("targets", {}).get(target_name, {}))
-        repo_path = str(target_cfg.get("repo_path") or "")
-        if target_name.lower().startswith("win") or "\\" in repo_path:
-            return True
-    return host.lower().startswith("win")
+    return _ssh_bundle_bindings.ssh_host_uses_windows_shell(globals(), config, host)
 
 
 def probe_uploaded_bundle_size(host: str, remote_name: str, *, config: dict) -> int | None:
-    if ssh_host_uses_windows_shell(config, host):
-        cmd = [
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            host,
-            f"cmd /V:OFF /C if exist %USERPROFILE%\\{remote_name} for %I in (%USERPROFILE%\\{remote_name}) do @echo %~zI",
-        ]
-    else:
-        cmd = [
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            host,
-            f"sh -lc 'f=\"$HOME/{remote_name}\"; if [ -f \"$f\" ]; then wc -c < \"$f\"; fi'",
-        ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-    if result.returncode != 0:
-        return None
-    output = result.stdout.strip().splitlines()
-    if not output:
-        return None
-    value = output[-1].strip()
-    try:
-        return int(value)
-    except ValueError:
-        return None
+    return _ssh_bundle_bindings.probe_uploaded_bundle_size(globals(), host, remote_name, config=config)
 
 
 from io_utils import (  # noqa: E402  -- re-exported for in-file consumers

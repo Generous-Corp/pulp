@@ -775,6 +775,7 @@ jobs:
           # matches (one-time cost on the first Ninja run per runner;
           # the shared ccache stays warm regardless).
           gen=()
+          cmake_extra=()
           if [ "${RUNNER_OS}" = "macOS" ]; then
             command -v ninja >/dev/null 2>&1 || brew install ninja
             gen=(-G Ninja)
@@ -796,10 +797,17 @@ jobs:
               rm -rf "$PULP_BUILD_DIR"
             fi
           fi
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # MSBuild still evaluates some FetchContent subbuild paths through
+            # legacy MAX_PATH-limited metadata. Keep the dependency subbuild
+            # root short so nested wgpu prebuilt-populate targets configure
+            # reliably on GitHub-hosted Windows runners.
+            cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
           else
-            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
+            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
           fi
           # Mark the build in-progress; the Build step clears it on success, so a
           # build interrupted/cancelled before completion is detected next run
