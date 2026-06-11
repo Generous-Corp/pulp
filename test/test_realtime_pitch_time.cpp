@@ -368,6 +368,7 @@ TEST_CASE("RealtimePitchTimeProcessor process allocates nothing after prepare",
     RealtimePitchTimeProcessor proc;
     RealtimePitchTimeConfig config = quality_config(2);
     config.formant_mode = FormantMode::preserve;
+    config.max_block = 8192; // the block size this test drives (asserted in process())
     proc.prepare(kSr, config);
     proc.set_pitch_semitones(3.0f);
     proc.set_formant_semitones(-2.0f);
