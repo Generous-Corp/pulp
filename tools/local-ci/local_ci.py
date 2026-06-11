@@ -150,6 +150,7 @@ import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
+import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
@@ -3535,46 +3536,27 @@ def cmd_list(_args: argparse.Namespace) -> int:
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
-    return _queue_orchestrator.select_job_for_logs(
-        load_queue(),
-        current_runner_info(),
+    return _logs_cli.resolve_job_for_logs(
         job_ref,
+        load_queue_fn=load_queue,
+        current_runner_info_fn=current_runner_info,
+        select_job_for_logs_fn=_queue_orchestrator.select_job_for_logs,
     )
 
 
 def cmd_logs(args: argparse.Namespace) -> int:
-    try:
-        job = resolve_job_for_logs(args.job)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    if job is None:
-        print(missing_job_logs_line())
-        return 1
-
-    paths: list[Path]
-    if args.target:
-        path = target_log_path(job["id"], args.target)
-        paths = [path]
-    else:
-        log_dir = job_logs_dir(job["id"])
-        paths = sorted(log_dir.glob("*.log"))
-
-    if not paths:
-        print(missing_log_files_line(job))
-        return 1
-
-    print(f"{job_logs_header_line(job)}\n")
-    for path in paths:
-        print(log_section_header_line(path.stem))
-        lines = tail_lines(path, args.lines)
-        if lines:
-            print("".join(lines).rstrip())
-        else:
-            print(empty_log_line())
-        print()
-    return 0
+    return _logs_cli.cmd_logs(
+        args,
+        resolve_job_for_logs_fn=resolve_job_for_logs,
+        target_log_path_fn=target_log_path,
+        job_logs_dir_fn=job_logs_dir,
+        tail_lines_fn=tail_lines,
+        missing_job_logs_line_fn=missing_job_logs_line,
+        missing_log_files_line_fn=missing_log_files_line,
+        job_logs_header_line_fn=job_logs_header_line,
+        log_section_header_line_fn=log_section_header_line,
+        empty_log_line_fn=empty_log_line,
+    )
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:

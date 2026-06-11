@@ -24,6 +24,7 @@ and the matching contract tests in the same change.
 | `ssh_bundle.py` | Git bundle naming, local bundle creation, and SSH upload/progress/probe mechanics. | Target validation execution or queue orchestration. |
 | `cleanup.py` | Local-CI artifact cleanup planning/deletion, cleanup-plan line fragments, and stale Windows validator cleanup mechanics. | Lock acquisition, runner ownership, or command orchestration side effects. |
 | `cleanup_cli.py` | Cleanup command orchestration: running-job apply guard, cleanup-plan/footprint print ordering, deletion result rendering, and prepared-cache consequence notes. | Cleanup candidate selection/deletion, state-size accounting, queue mutation, runner ownership, or other command handlers. |
+| `logs_cli.py` | Logs command orchestration: active/latest job selection wrapper, target/all-log path selection, saved-log tail output ordering, and missing-log error rendering. | Queue mutation, runner-info persistence, log file writing, target execution, or other command handlers. |
 | `desktop_actions.py` | Desktop automation action helper policy: action artifact path layout, interaction detection/summaries, coordinate parsing, view-tree click selection, inspector summaries, content-size mapping, screen-point mapping, default labels, and view-tree counts. | Target execution, artifact persistence, report rollups, or OS-specific launch/probe helpers. |
 | `desktop_cli.py` | Desktop automation CLI line fragments for status, config, action success, recent-run, proof, publish, and cleanup output. | Target execution, artifact persistence, report rollups, proof selection, or desktop action policy. |
 | `desktop_artifacts.py` | Desktop automation artifact roots and run/publish bundle directory layout. | Report staging, rollup generation, pruning policy, or target execution. |
@@ -51,7 +52,7 @@ behind the contracts added in this slice.
 | Desktop action orchestration | Launch adapters, local/remote automation adapters, and desktop action command execution. Shared action helper policy is already isolated in `desktop_actions.py`. | later desktop automation module |
 | Queue orchestration | Remaining runner-state wrapper calls and other CLI-facing queue updates. | later queue modules |
 | Validation execution | Thin wrapper calls in `local_ci.py` plus any future execution-specific seams discovered while reducing the entrypoint. | `execution.py` |
-| CLI dispatch | Entrypoint wiring, command handler maps, and user-facing command output. Parser construction lives in `cli_parser.py`; parsed-command selection lives in `cli_dispatch.py`; cleanup command output lives in `cleanup_cli.py`. | `cli.py` or retained thin entrypoint |
+| CLI dispatch | Entrypoint wiring, command handler maps, and user-facing command output. Parser construction lives in `cli_parser.py`; parsed-command selection lives in `cli_dispatch.py`; cleanup command output lives in `cleanup_cli.py`; logs command output lives in `logs_cli.py`. | `cli.py` or retained thin entrypoint |
 
 ## Behavior Contracts
 
