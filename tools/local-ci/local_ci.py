@@ -145,6 +145,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 import cleanup as _cleanup  # noqa: E402
 import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
+import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
@@ -2709,13 +2710,7 @@ def cmd_desktop_config_set(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_config(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_config(
-        args,
-        commands={
-            "show": cmd_desktop_config_show,
-            "set": cmd_desktop_config_set,
-        },
-    )
+    return _cli_dispatch_bindings.cmd_desktop_config(globals(), args)
 
 
 def cmd_desktop_recent(args: argparse.Namespace) -> int:
@@ -2808,22 +2803,7 @@ def cmd_desktop_inspect(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:
-    return _cli_dispatch.dispatch_desktop_command(
-        args,
-        commands={
-            "install": cmd_desktop_install,
-            "doctor": cmd_desktop_doctor,
-            "status": cmd_desktop_status,
-            "config": cmd_desktop_config,
-            "recent": cmd_desktop_recent,
-            "proof": cmd_desktop_proof,
-            "publish": cmd_desktop_publish,
-            "cleanup": cmd_desktop_cleanup,
-            "smoke": cmd_desktop_smoke,
-            "click": cmd_desktop_click,
-            "inspect": cmd_desktop_inspect,
-        },
-    )
+    return _cli_dispatch_bindings.cmd_desktop(globals(), args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2838,38 +2818,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    return _cli_dispatch.dispatch_main_command(
-        args,
-        commands={
-            "enqueue": cmd_enqueue,
-            "drain": cmd_drain,
-            "run": cmd_run,
-            "ship": cmd_ship,
-            "check": cmd_check,
-            "list": cmd_list,
-            "bump": cmd_bump,
-            "cancel": cmd_cancel,
-            "logs": cmd_logs,
-            "cleanup": cmd_cleanup,
-            "evidence": cmd_evidence,
-            "status": cmd_status,
-            "desktop": cmd_desktop,
-        },
-        cloud_commands={
-            "workflows": cmd_cloud_workflows,
-            "defaults": cmd_cloud_defaults,
-            "history": cmd_cloud_history,
-            "compare": cmd_cloud_compare,
-            "recommend": cmd_cloud_recommend,
-            "run": cmd_cloud_run,
-            "status": cmd_cloud_status,
-        },
-        cloud_namespace_commands={
-            "doctor": cmd_cloud_namespace_doctor,
-            "setup": cmd_cloud_namespace_setup,
-        },
-        print_help=parser.print_help,
-    )
+    return _cli_dispatch_bindings.dispatch_main_command(globals(), args, parser.print_help)
 
 
 if __name__ == "__main__":

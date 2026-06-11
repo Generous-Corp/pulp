@@ -12,6 +12,7 @@ and the matching contract tests in the same change.
 | `state_paths.py` | State/config/log/bundle path resolution and state-directory creation. | Queue JSON contents, result schema, or target behavior. |
 | `cli_parser.py` | Argument parser construction for top-level, cloud, cleanup, evidence, and desktop subcommands. | Command handler dispatch, command execution, or user-facing output side effects. |
 | `cli_dispatch.py` | Parsed command dispatch for top-level, cloud, cloud namespace, and desktop subcommands. | Argument parser construction, command handler side effects, or command output formatting. |
+| `cli_dispatch_bindings.py` | Dependency binding between the `local_ci.py` facade and CLI dispatch helpers, preserving facade-level monkeypatch seams while moving command-handler maps out of the entrypoint. | Argument parser construction, command handler side effects, or command output formatting. |
 | `io_utils.py` | Atomic writes, file locks, log tailing, line trimming, artifact path polling, and image-change summaries. | CI state semantics or target orchestration. |
 | `normalize.py` | Priority, validation mode, desktop mode, boolean, adapter, and desktop config normalization. | Queue persistence or dispatch side effects. |
 | `provenance.py` | Stable direct/hosted provenance dictionaries and summaries for jobs and results. | GitHub or Shipyard API calls. |
@@ -68,7 +69,7 @@ behind the contracts added in this slice.
 | Desktop action orchestration | Launch adapters and local/remote automation adapters. Shared action helper policy is already isolated in `desktop_actions.py`; install/doctor command wrappers live in `desktop_setup_commands_cli.py`; smoke/click/inspect command wrappers live in `desktop_action_commands_cli.py`; desktop management command wrappers live in `desktop_commands_cli.py`. | later desktop automation module |
 | Queue orchestration | Remaining runner-state wrapper calls and other CLI-facing queue updates. | later queue modules |
 | Validation execution | Thin wrapper calls in `local_ci.py` plus any future execution-specific seams discovered while reducing the entrypoint. Runner and job-processing dependency wiring lives in `execution_bindings.py`. | `execution.py` |
-| CLI dispatch | Entrypoint wiring, command handler maps, and remaining user-facing command output. Parser construction lives in `cli_parser.py`; parsed-command selection lives in `cli_dispatch.py`; cleanup command output lives in `cleanup_cli.py`; logs command output lives in `logs_cli.py`; evidence command output lives in `evidence_cli.py`; bump/cancel command output lives in `queue_commands_cli.py`; top-level enqueue/drain/run/ship/check/list/status output lives in `local_ci_commands_cli.py`. | `cli.py` or retained thin entrypoint |
+| CLI dispatch | Entrypoint wiring and remaining user-facing command output. Parser construction lives in `cli_parser.py`; parsed-command selection lives in `cli_dispatch.py`; command-handler map wiring lives in `cli_dispatch_bindings.py`; cleanup command output lives in `cleanup_cli.py`; logs command output lives in `logs_cli.py`; evidence command output lives in `evidence_cli.py`; bump/cancel command output lives in `queue_commands_cli.py`; top-level enqueue/drain/run/ship/check/list/status output lives in `local_ci_commands_cli.py`. | `cli.py` or retained thin entrypoint |
 
 ## Behavior Contracts
 
