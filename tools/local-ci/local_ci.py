@@ -783,37 +783,23 @@ def publish_report_to_branch(config: dict, report: dict) -> dict:
 
 
 def make_desktop_source_request(args: argparse.Namespace) -> dict:
-    return _source_prep.make_desktop_source_request(
-        args,
-        normalize_desktop_source_mode_fn=normalize_desktop_source_mode,
-        current_branch_fn=current_branch,
-        current_sha_fn=current_sha,
-    )
+    return _source_prep_bindings.make_desktop_source_request(globals(), args)
 
 
 def desktop_source_cache_key(source_request: dict) -> str:
-    return _source_prep.desktop_source_cache_key(source_request)
+    return _source_prep_bindings.desktop_source_cache_key(globals(), source_request)
 
 
 def desktop_source_root(target_name: str, source_request: dict) -> Path:
-    return _source_prep.desktop_source_root(
-        target_name,
-        source_request,
-        state_dir_fn=state_dir,
-    )
+    return _source_prep_bindings.desktop_source_root(globals(), target_name, source_request)
 
 
 def _command_path_rewrite_candidate(token: str) -> Path | None:
-    return _source_prep.command_path_rewrite_candidate(token, root=ROOT)
+    return _source_prep_bindings.command_path_rewrite_candidate(globals(), token)
 
 
 def _rewrite_launch_command_for_mapper(command: str | None, mapper, *, windows: bool = False) -> str | None:
-    return _source_prep.rewrite_launch_command_for_mapper(
-        command,
-        mapper,
-        root=ROOT,
-        windows=windows,
-    )
+    return _source_prep_bindings.rewrite_launch_command_for_mapper(globals(), command, mapper, windows=windows)
 
 
 def _windows_command_join(parts: list[str]) -> str:
@@ -821,32 +807,27 @@ def _windows_command_join(parts: list[str]) -> str:
 
 
 def rewrite_launch_command_for_source_root(command: str | None, source_root: Path) -> str | None:
-    return _source_prep.rewrite_launch_command_for_source_root(command, source_root, root=ROOT)
+    return _source_prep_bindings.rewrite_launch_command_for_source_root(globals(), command, source_root)
 
 
 def rewrite_launch_command_for_posix_root(command: str | None, remote_root: str) -> str | None:
-    return _source_prep.rewrite_launch_command_for_posix_root(command, remote_root, root=ROOT)
+    return _source_prep_bindings.rewrite_launch_command_for_posix_root(globals(), command, remote_root)
 
 
 def rewrite_launch_command_for_windows_root(command: str | None, remote_root: str) -> str | None:
-    return _source_prep.rewrite_launch_command_for_windows_root(
-        command,
-        remote_root,
-        root=ROOT,
-        windows_path_join_fn=windows_path_join,
-    )
+    return _source_prep_bindings.rewrite_launch_command_for_windows_root(globals(), command, remote_root)
 
 
 def split_windows_prepare_commands(command: str) -> list[str]:
-    return _source_prep.split_windows_prepare_commands(command)
+    return _source_prep_bindings.split_windows_prepare_commands(globals(), command)
 
 
 def validate_windows_prepare_commands(commands: list[str]) -> None:
-    return _source_prep.validate_windows_prepare_commands(commands)
+    return _source_prep_bindings.validate_windows_prepare_commands(globals(), commands)
 
 
 def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | None) -> None:
-    return _source_prep.attach_desktop_source_to_manifest(manifest, source_context)
+    return _source_prep_bindings.attach_desktop_source_to_manifest(globals(), manifest, source_context)
 
 
 def slugify_token(value: str, *, max_len: int = 48) -> str:
