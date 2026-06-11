@@ -52,7 +52,7 @@ docs:
   - slug: audio-inspector
     path: guides/audio-inspector.md
     kind: guide
-    summary: Live Audio Inspector — RT output-boundary probe, floating dev window (Cmd/Ctrl+Shift+A, PULP_AUDIO_INSPECTOR, pulp run --audio-inspector), programmatic --audio-probe-json dump, dev-on/ship-off PULP_ENABLE_AUDIO_PROBES gating, live-vs-offline (Audio Doctor) distinction
+    summary: Live Audio Inspector — RT output-boundary probe, floating dev window (Cmd/Ctrl+Shift+A, PULP_AUDIO_INSPECTOR, pulp run --audio-inspector), programmatic --audio-probe-json dump and pulp_audio_probe_json MCP wrapper, dev-on/ship-off PULP_ENABLE_AUDIO_PROBES gating, live-vs-offline (Audio Doctor) distinction
 
   - slug: motion-observability
     path: guides/motion-observability.md

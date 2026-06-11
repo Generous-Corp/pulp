@@ -505,6 +505,21 @@ TEST_CASE("audio_probe_snapshot_to_json carries the documented fields and dBFS",
     REQUIRE(v["cpu_overloads"].get<std::int64_t>() == 2);
 }
 
+TEST_CASE("audio_probe_stage_name covers every public stage",
+          "[audio][probe][json][audio-inspector]") {
+    REQUIRE(audio_probe_stage_name(AudioProbeStage::kProcessorOutput)
+            == "processor_output");
+    REQUIRE(audio_probe_stage_name(AudioProbeStage::kStandaloneOutputBoundary)
+            == "standalone_output_boundary");
+    REQUIRE(audio_probe_stage_name(AudioProbeStage::kMeterBridge)
+            == "meter_bridge");
+    REQUIRE(audio_probe_stage_name(AudioProbeStage::kDeviceCallback)
+            == "device_callback");
+    REQUIRE(audio_probe_stage_name(AudioProbeStage::kGraphNode)
+            == "graph_node");
+    REQUIRE(audio_probe_stage_name(AudioProbeStage::kUnknown) == "unknown");
+}
+
 TEST_CASE("audio_probe_snapshot_to_json reports silence as null dBFS",
           "[audio][probe][json][audio-inspector]") {
     AudioProbeSnapshot snap;  // peak_max / rms_max default to 0 (true silence)

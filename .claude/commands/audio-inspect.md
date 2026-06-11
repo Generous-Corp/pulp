@@ -32,6 +32,19 @@ When you can't look at a window, read the probe as JSON:
 pulp run --audio-probe-json /tmp/probe.json   # headless one-shot dump + exit
 ```
 
+MCP clients can call the existing `pulp-mcp` server tool
+`pulp_audio_probe_json` for the same one-shot readout. That tool wraps
+`pulp run --audio-probe-json`, accepts optional `target` and `frames`
+arguments, and returns the probe object as `structuredContent`.
+
+Use this as the first live-health check for audio-dev work. A useful result has
+advancing `callbacks`; non-zero `peak_max` / `rms_max` when audio is expected;
+and zero clip/NaN counters. `callbacks > 0` with zero levels means the observed
+output boundary is silent, not that the probe is broken. Escalate to offline
+Audio Doctor or a scenario render when the live probe is healthy but the sound
+is still wrong, because this snapshot cannot prove response, THD, phase,
+latency, or tuning.
+
 This writes `output_probe().latest()` (+ the `AudioStats` subset) as a flat
 JSON object — `stage`, `sample_rate`, `block_size`, `channel_count`,
 `sequence_number`, `peak_max`/`rms_max`, `peak_dbfs`/`rms_dbfs` (null on true

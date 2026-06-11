@@ -1,79 +1,18 @@
 #pragma once
 
-#include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/runtime/log.hpp>
-#include <pulp/runtime/system.hpp>
 #include <pulp/view/window_host.hpp>
 
-#include <charconv>
 #include <functional>
 #include <memory>
 #include <string>
-#include <string_view>
-#include <system_error>
 #include <utility>
+#include <vector>
 
 namespace pulp::format::detail {
-
-inline bool standalone_env_truthy(std::string_view name) {
-    return environment_flag_truthy(name);
-}
-
-inline bool parse_positive_frame_delay(std::string_view value, int& frames) {
-    if (value.empty() || value.front() == '+') return false;
-
-    int parsed = 0;
-    const char* first = value.data();
-    const char* last = first + value.size();
-    auto result = std::from_chars(first, last, parsed);
-    if (result.ec != std::errc{} || result.ptr != last || parsed <= 0)
-        return false;
-
-    frames = parsed;
-    return true;
-}
-
-inline StandaloneConfig standalone_config_from_environment(StandaloneConfig config) {
-    if (standalone_env_truthy("PULP_HEADLESS")
-        || standalone_env_truthy("PULP_TEST_MODE")
-        || standalone_env_truthy("CI")) {
-        config.headless = true;
-    }
-
-    if (auto screenshot = runtime::get_env("PULP_SCREENSHOT");
-        screenshot && config.screenshot_path.empty()) {
-        config.screenshot_path = *screenshot;
-    }
-
-    if (auto frames = runtime::get_env("PULP_FRAMES")) {
-        int parsed = 0;
-        if (parse_positive_frame_delay(*frames, parsed))
-            config.screenshot_frame_delay = parsed;
-    }
-
-#if PULP_ENABLE_AUDIO_PROBES
-    // Programmatic live-probe readout for agents / CI. Mirrors how
-    // PULP_SCREENSHOT feeds screenshot_path; the one-shot dump shares the
-    // screenshot frame-delay machinery in run_with_editor().
-    if (auto probe_json = runtime::get_env("PULP_AUDIO_PROBE_JSON");
-        probe_json && config.audio_probe_json_path.empty()) {
-        config.audio_probe_json_path = *probe_json;
-    }
-    if (!config.audio_probe_json_path.empty())
-        config.headless = true;
-#endif
-
-    if (!config.screenshot_path.empty())
-        config.headless = true;
-
-    return config;
-}
-
-inline bool standalone_headless_requires_screenshot(const StandaloneConfig& config) {
-    return config.headless && config.screenshot_path.empty();
-}
 
 struct StandaloneSettingsActions {
     std::function<bool(const StandaloneConfig&)> apply_config;

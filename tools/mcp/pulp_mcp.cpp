@@ -58,6 +58,7 @@ using pulp_mcp::handle_audio_model_list;
 using pulp_mcp::handle_audio_model_activate;
 using pulp_mcp::handle_audio_read_bundle;
 using pulp_mcp::handle_audio_excerpt_find;
+using pulp_mcp::handle_audio_probe_json;
 
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ static std::string tools_list_json() {
 {"name":"pulp_audio_model_activate","description":"Activate an installed audio model by logical id.","inputSchema":{"type":"object","required":["model_id"],"properties":{"model_id":{"type":"string","description":"Registered audio model id"}}}},
 {"name":"pulp_audio_excerpt_find","description":"Run WAV-first excerpt-find with the deterministic null backend and create a bundle.","inputSchema":{"type":"object","required":["text","input_path"],"properties":{"text":{"type":"string","description":"Natural language excerpt query"},"input_path":{"type":"string","description":"File or directory path to scan"},"model_id":{"type":"string","description":"Optional registered audio model id"},"recursive":{"type":"boolean","description":"Recurse into input directories"},"top":{"type":"integer","description":"Maximum ranked results to return"},"window_ms":{"type":"integer","description":"Excerpt window size in milliseconds"},"hop_ms":{"type":"integer","description":"Window hop size in milliseconds"},"min_score":{"type":"number","description":"Minimum deterministic stub score threshold"},"max_candidates_per_file":{"type":"integer","description":"Per-file candidate cap before global ranking"},"bundle_out":{"type":"string","description":"Directory to create excerpt bundles in"}}}},
 {"name":"pulp_audio_read_bundle","description":"Read an excerpt-find artifact bundle and return parsed manifest/result summary.","inputSchema":{"type":"object","required":["bundle_path"],"properties":{"bundle_path":{"type":"string","description":"Path to an excerpt-find bundle directory"}}}},
+{"name":"pulp_audio_probe_json","description":"Run a standalone through `pulp run --audio-probe-json` and return live output-boundary probe metrics JSON. This uses the existing pulp-mcp server as a one-shot wrapper; it does not start a second MCP server or persistent live socket.","inputSchema":{"type":"object","properties":{"target":{"type":"string","description":"Optional standalone target name to pass to `pulp run`"},"frames":{"type":"integer","description":"Frame delay before reading the probe snapshot (default 90)"}}}},
 {"name":"pulp_screenshot","description":"Render a plugin UI to PNG (base64). Use --demo for a built-in demo or --script for a JS file.","inputSchema":{"type":"object","properties":{"script":{"type":"string","description":"Path to JS UI script"},"width":{"type":"integer","description":"Width in points (default 400)"},"height":{"type":"integer","description":"Height in points (default 300)"},"theme":{"type":"string","description":"Theme: dark, light, pro_audio"},"demo":{"type":"boolean","description":"Render built-in demo UI"}}}},
 {"name":"pulp_simulate_click","description":"Simulate a mouse click at coordinates on a demo UI and return the view tree JSON","inputSchema":{"type":"object","properties":{"x":{"type":"number","description":"X coordinate"},"y":{"type":"number","description":"Y coordinate"}}}},
 {"name":"pulp_get_view_tree","description":"Get the view tree as JSON for a demo UI","inputSchema":{"type":"object","properties":{}}},
@@ -204,6 +206,7 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_audio_model_activate") result = handle_audio_model_activate(args_json);
         else if (name == "pulp_audio_excerpt_find")   result = handle_audio_excerpt_find(args_json);
         else if (name == "pulp_audio_read_bundle")    result = handle_audio_read_bundle(args_json);
+        else if (name == "pulp_audio_probe_json")     result = handle_audio_probe_json(args_json);
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();

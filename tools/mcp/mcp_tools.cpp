@@ -14,14 +14,24 @@
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/service.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
+
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -57,6 +67,105 @@ bool valid_import_design_mode(const std::string& value) {
 
 bool valid_import_design_emit(const std::string& value) {
     return value == "js" || value == "ir-json" || value == "cpp";
+}
+
+fs::path source_build_cli_path(const fs::path& root) {
+    const auto build_dir = root / "build";
+    const auto cli_dir = build_dir / "tools" / "cli";
+    std::vector<fs::path> candidates = {
+        cli_dir / "pulp-cpp",
+        cli_dir / "pulp-cpp.exe",
+    };
+
+    for (const char* config : {"Release", "RelWithDebInfo", "Debug", "MinSizeRel"}) {
+        candidates.push_back(cli_dir / config / "pulp-cpp");
+        candidates.push_back(cli_dir / config / "pulp-cpp.exe");
+    }
+
+    candidates.push_back(build_dir / "pulp");
+    candidates.push_back(build_dir / "pulp.exe");
+
+    candidates.push_back(cli_dir / "pulp");
+    candidates.push_back(cli_dir / "pulp.exe");
+    for (const char* config : {"Release", "RelWithDebInfo", "Debug", "MinSizeRel"}) {
+        candidates.push_back(cli_dir / config / "pulp");
+        candidates.push_back(cli_dir / config / "pulp.exe");
+    }
+
+    for (const auto& candidate : candidates) {
+        if (fs::exists(candidate)) return candidate;
+    }
+    return build_dir / "pulp";
+}
+
+struct ProbeJsonTemp {
+    fs::path directory;
+    fs::path json_path;
+};
+
+std::string random_temp_suffix() {
+    static constexpr char hex[] = "0123456789abcdef";
+    std::random_device rd;
+    std::string out;
+    out.reserve(32);
+    for (int word = 0; word < 4; ++word) {
+        std::uint32_t value = rd();
+        for (int shift = 28; shift >= 0; shift -= 4)
+            out.push_back(hex[(value >> shift) & 0x0f]);
+    }
+    return out;
+}
+
+ProbeJsonTemp make_private_probe_json_temp(std::string& error) {
+    const auto base = fs::temp_directory_path();
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        auto dir = base / ("pulp-mcp-audio-probe-" + random_temp_suffix());
+#if defined(_WIN32)
+        std::error_code ec;
+        if (fs::create_directory(dir, ec)) {
+            fs::permissions(dir, fs::perms::owner_all,
+                            fs::perm_options::replace, ec);
+            return {dir, dir / "probe.json"};
+        }
+#else
+        if (::mkdir(dir.c_str(), S_IRWXU) == 0)
+            return {dir, dir / "probe.json"};
+        if (errno != EEXIST) {
+            error = "failed to create private temp directory for audio probe JSON";
+            return {};
+        }
+#endif
+    }
+    error = "failed to create private temp directory for audio probe JSON";
+    return {};
+}
+
+std::string read_text_file(const fs::path& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) return {};
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+bool normalize_structured_json(const std::string& text,
+                               std::string& normalized,
+                               std::string& error) {
+    try {
+        auto parsed = choc::json::parse(text);
+        if (!parsed.isObject() && !parsed.isArray()) {
+            error = "audio probe JSON root must be an object or array";
+            return false;
+        }
+        normalized = choc::json::toString(parsed, false);
+        return true;
+    } catch (const std::exception& e) {
+        error = std::string("failed to parse audio probe JSON: ") + e.what();
+        return false;
+    } catch (...) {
+        error = "failed to parse audio probe JSON";
+        return false;
+    }
 }
 
 fs::path pulp_home_path() {
@@ -289,6 +398,59 @@ std::string handle_audio_excerpt_find(const std::string& params_json) {
 
     auto result = pulp::tools::audio::run_excerpt_find(request);
     return json_tool_payload(pulp::tools::audio::to_json(result));
+}
+
+std::string handle_audio_probe_json(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+
+    int frames = 90;
+    auto frames_raw = extract_raw(params_json, "frames");
+    if (!frames_raw.empty() && frames_raw != "null") {
+        frames = extract_int(params_json, "frames", -1);
+        if (frames <= 0) {
+            return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: frames must be a positive integer\"}]}";
+        }
+    }
+
+    auto target = extract_string(params_json, "target");
+    if (!target.empty() && target.front() == '-') {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: target must be a standalone target name, not an option\"}]}";
+    }
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string("Error: " + temp_error) + "}]}";
+    }
+    auto output_path = temp.json_path;
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " run";
+    if (!target.empty()) cmd += " " + shell_quote(target);
+    cmd += " --audio-probe-json " + shell_quote(output_path.string());
+    cmd += " --frames " + std::to_string(frames);
+    cmd += " 2>&1";
+
+    auto output = exec(cmd);
+    auto probe_json = read_text_file(output_path);
+    std::error_code remove_ec;
+    fs::remove_all(temp.directory, remove_ec);
+
+    if (probe_json.empty()) {
+        std::string message = "Error: pulp run did not write audio probe JSON";
+        if (!output.empty()) message += "\n" + output;
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) + "}]}";
+    }
+    std::string normalized_json;
+    std::string parse_error;
+    if (!normalize_structured_json(probe_json, normalized_json, parse_error)) {
+        std::string message = "Error: " + parse_error + "\n" + probe_json;
+        if (!output.empty()) message += "\n" + output;
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) + "}]}";
+    }
+
+    return json_tool_payload(normalized_json);
 }
 
 }  // namespace pulp_mcp

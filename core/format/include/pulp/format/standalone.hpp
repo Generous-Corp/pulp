@@ -77,7 +77,8 @@ struct StandaloneConfig {
     // of the live Audio Inspector for agents and CI — distinct from the
     // offline `pulp audio validate` Doctor. Set via set_config() or by reading
     // PULP_AUDIO_PROBE_JSON. Only meaningful when PULP_ENABLE_AUDIO_PROBES is
-    // ON; ignored otherwise.
+    // ON; probes-off standalone builds reject this request before opening the
+    // editor so callers do not mistake an unsupported binary for silence.
     std::string audio_probe_json_path;
 
     // Item 3.5 (macOS plan) — built-in tempo source. The standalone host has

@@ -12,6 +12,50 @@ from the offline **Audio Doctor** (`pulp audio validate ...`), which analyses
 an already-rendered WAV file offline. Use the Inspector to watch a live host;
 use the Doctor to assert on a captured render in CI.
 
+## When to use it
+
+Use the Audio Inspector when the question is about a running host, not an
+offline render:
+
+- "Is this processor producing audio at all?"
+- "Did my parameter, MIDI, host graph, or importer change accidentally silence
+  the standalone output?"
+- "Are we clipping, producing NaN/Inf samples, or underrunning while the UI is
+  open?"
+- "Is the standalone host configured with the sample rate, block size, and
+  channel count I expected?"
+- "Can an agent get a quick machine-readable health check before deciding which
+  deeper audio test to run?"
+
+It is deliberately shallow and cheap. It does not prove frequency response,
+THD, phase, latency, tuning, or golden-file parity. For those, render a WAV or
+artifact bundle and use the offline Audio Doctor.
+
+## Quick developer smoke check
+
+For a human, the fastest path is the live window:
+
+```bash
+pulp run pulp-audio-inspector-demo --audio-inspector
+```
+
+For a quick terminal check, ask for JSON and inspect the counters:
+
+```bash
+pulp run pulp-audio-inspector-demo \
+  --audio-probe-json /tmp/pulp-audio-inspector-demo.json \
+  --frames 90
+
+jq '{callbacks, peak_max, rms_max, peak_dbfs, rms_dbfs, clip_count, nan_inf_count}' \
+  /tmp/pulp-audio-inspector-demo.json
+```
+
+For an app/plugin expected to output audio, a healthy smoke result usually has
+`callbacks > 0`, non-zero `peak_max` and `rms_max`, and zero `clip_count` /
+`nan_inf_count`. For an intentionally silent plugin, non-zero callbacks plus
+zero levels is still useful: it says the host is running and the observed stage
+is silent.
+
 ## What it observes
 
 The probe taps the standalone host at the *output boundary* — immediately
@@ -66,8 +110,10 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_AUDIO_PROBES=OFF
 ```
 
 When the option is OFF, the CLI flags still parse, but the standalone host has
-no probe to read, so `--audio-inspector` is a no-op and `--audio-probe-json`
-writes nothing.
+no probe to read. `--audio-inspector` is a no-op, and
+`--audio-probe-json` is unsupported in that binary: the standalone launch fails
+before the window opens, logs `PULP_ENABLE_AUDIO_PROBES=OFF`, and does not
+write JSON.
 
 ## Programmatic readout: `--audio-probe-json`
 
@@ -116,6 +162,84 @@ so a reader can distinguish true silence from a finite low level (JSON has no
 infinity literal). The snapshot→JSON mapping is the pure
 `pulp::audio::audio_probe_snapshot_to_json()` helper
 (`pulp/audio/audio_probe_json.hpp`).
+
+## Interpreting common JSON states
+
+| Result | Likely meaning | Next useful step |
+|---|---|---|
+| `callbacks == 0` | The host did not process audio before the dump. | Increase `--frames`; check standalone launch/device setup. |
+| `callbacks > 0`, `peak_max == 0`, `rms_max == 0`, dBFS fields are `null` | The observed output stage is truly silent. | If silence is unexpected, check MIDI/input routing, graph connections, bypass/mute params, or the processor's `process()` branch. |
+| `peak_max > 0`, `rms_max > 0`, zero error counters | Audio is flowing at the standalone output boundary. | Use the live window for visual inspection or Audio Doctor for deeper signal quality checks. |
+| `clip_count > 0` or `clipped_blocks > 0` | At least one sample hit/exceeded the clipping threshold. | Inspect gain staging and run an offline render if exact clipping location matters. |
+| `nan_inf_count > 0` or `nan_blocks > 0` | The DSP produced invalid floating-point samples. | Treat as a bug; inspect DSP math/state initialization near the changed code. |
+| `device_xruns > 0` or `cpu_overloads > 0` | The runtime/device reported stress while the host was running. | Recheck in Release, then profile or reduce realtime work. |
+| `sequence_number` stops advancing in the live window | The probe is stale; audio processing is idle or the host stopped publishing snapshots. | Check transport/device lifecycle before debugging DSP. |
+
+The JSON is a snapshot, not a log. If you need history, run a longer scenario
+or add a purpose-built trace around the suspected path.
+
+### MCP access
+
+The Claude/Codex-facing path uses the existing `pulp-mcp` binary. Call
+`pulp_audio_probe_json` to run the same `pulp run --audio-probe-json` one-shot
+flow and receive the probe object as `structuredContent`:
+
+```json
+{
+  "target": "pulp-audio-inspector-demo",
+  "frames": 90
+}
+```
+
+`target` is optional and maps to `pulp run <target>`. `frames` is optional and
+defaults to 90. This is not a second MCP server and not the future persistent
+live socket; it is the agent-friendly wrapper for the JSON dump that exists
+today.
+
+### Agent workflow
+
+An agent working on audio software should treat `pulp_audio_probe_json` as the
+first live-health check, not as a replacement for audio analysis:
+
+1. Call `pulp_audio_probe_json` with the standalone target under investigation.
+2. If the tool returns an error, report the launch/probe problem before making
+   DSP claims.
+3. If callbacks are zero, adjust the run length (`frames`) or inspect host
+   startup.
+4. If levels are silent but callbacks advance, debug routing, input stimulus,
+   bypass state, graph wiring, or the processor output path.
+5. If clipping or NaN/Inf counters are non-zero, prioritize DSP/gain/state bugs.
+6. If the snapshot is healthy but the user reports "sounds wrong", switch to
+   Audio Doctor or a scenario render; the live probe cannot diagnose spectral or
+   perceptual quality.
+
+## End-to-end demo harness
+
+The in-tree `pulp-audio-inspector-demo` example is the recommended live proof
+target. It uses `StandaloneApp::run_with_editor()` and emits a continuous sine
+tone from `Processor::process()`, so the output-boundary probe has non-silent
+data without a DAW, MIDI input, or a physical audio input.
+
+```bash
+# Programmatic proof: JSON should show non-zero peak/RMS and callbacks.
+pulp run pulp-audio-inspector-demo \
+  --audio-probe-json /tmp/pulp-audio-inspector-demo.json \
+  --frames 90
+
+# Visual proof: writes the main UI plus the inspector panel sibling capture.
+pulp run pulp-audio-inspector-demo \
+  --audio-inspector \
+  --screenshot /tmp/pulp-audio-inspector-demo.png \
+  --frames 90
+# -> /tmp/pulp-audio-inspector-demo.audio-inspector.png
+```
+
+The committed reference captures live under
+`examples/audio-inspector-demo/fixtures/` as `editor-main.png` and
+`audio-inspector-panel.png`.
+
+Use this demo for GUI end-to-end checks before changing the Inspector window,
+the `pulp run` flags, or the future live MCP socket path.
 
 ## Live vs offline at a glance
 
