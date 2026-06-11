@@ -153,6 +153,7 @@ import evidence_cli as _evidence_cli  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
+import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import execution as _execution  # noqa: E402
@@ -3496,33 +3497,20 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
-    try:
-        requested_priority = normalize_priority(args.priority)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    try:
-        result = bump_queue_command_job(args.job, requested_priority)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    exit_code, line = bump_queue_command_result_line(result, args.job)
-    print(line)
-    return exit_code
+    return _queue_commands_cli.cmd_bump(
+        args,
+        normalize_priority_fn=normalize_priority,
+        bump_queue_command_job_fn=bump_queue_command_job,
+        bump_queue_command_result_line_fn=bump_queue_command_result_line,
+    )
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
-    try:
-        result = cancel_queue_command_job(args.job)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    exit_code, line = cancel_queue_command_result_line(result, args.job)
-    print(line)
-    return exit_code
+    return _queue_commands_cli.cmd_cancel(
+        args,
+        cancel_queue_command_job_fn=cancel_queue_command_job,
+        cancel_queue_command_result_line_fn=cancel_queue_command_result_line,
+    )
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
