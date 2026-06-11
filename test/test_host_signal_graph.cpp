@@ -603,6 +603,199 @@ TEST_CASE("SignalGraph live gain Race is atomic while processing",
     graph.release();
 }
 
+namespace {
+class ReleaseOrderingPlugin final : public PluginSlot {
+public:
+    ReleaseOrderingPlugin(std::atomic<bool>& release_thread_started,
+                          std::atomic<bool>& process_entered,
+                          std::atomic<bool>& in_process,
+                          std::atomic<bool>& release_called,
+                          std::atomic<bool>& release_during_process)
+        : release_thread_started_(release_thread_started),
+          process_entered_(process_entered),
+          in_process_(in_process),
+          release_called_(release_called),
+          release_during_process_(release_during_process),
+          info_(make_plugin_info("ReleaseOrdering", 1, 1)) {}
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {
+        if (in_process_.load(std::memory_order_acquire)) {
+            release_during_process_.store(true, std::memory_order_release);
+        }
+        release_called_.store(true, std::memory_order_release);
+    }
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&,
+                 int n) override {
+        in_process_.store(true, std::memory_order_release);
+        process_entered_.store(true, std::memory_order_release);
+        while (!release_thread_started_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int i = 0; i < 100000
+             && !release_called_.load(std::memory_order_acquire);
+             ++i) {
+            std::this_thread::yield();
+        }
+        const size_t channels = std::min(out.num_channels(), in.num_channels());
+        for (size_t c = 0; c < out.num_channels(); ++c) {
+            float* dst = out.channel_ptr(c);
+            const float* src = c < channels ? in.channel_ptr(c) : nullptr;
+            if (src) std::memcpy(dst, src, sizeof(float) * static_cast<size_t>(n));
+            else std::memset(dst, 0, sizeof(float) * static_cast<size_t>(n));
+        }
+        in_process_.store(false, std::memory_order_release);
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    std::atomic<bool>& release_thread_started_;
+    std::atomic<bool>& process_entered_;
+    std::atomic<bool>& in_process_;
+    std::atomic<bool>& release_called_;
+    std::atomic<bool>& release_during_process_;
+    PluginInfo info_;
+};
+
+class LifetimeTrackedPlugin final : public PluginSlot {
+public:
+    explicit LifetimeTrackedPlugin(std::atomic<int>& destroyed)
+        : destroyed_(destroyed), info_(make_plugin_info("LifetimeTracked", 1, 1)) {}
+
+    ~LifetimeTrackedPlugin() override {
+        destroyed_.fetch_add(1, std::memory_order_release);
+    }
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&,
+                 int n) override {
+        const size_t channels = std::min(out.num_channels(), in.num_channels());
+        for (size_t c = 0; c < out.num_channels(); ++c) {
+            float* dst = out.channel_ptr(c);
+            const float* src = c < channels ? in.channel_ptr(c) : nullptr;
+            if (src) std::memcpy(dst, src, sizeof(float) * static_cast<size_t>(n));
+            else std::memset(dst, 0, sizeof(float) * static_cast<size_t>(n));
+        }
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    std::atomic<int>& destroyed_;
+    PluginInfo info_;
+};
+} // namespace
+
+TEST_CASE("SignalGraph release waits for in-flight snapshot process",
+          "[host][graph][race][tsan]") {
+    std::atomic<bool> release_thread_started{false};
+    std::atomic<bool> process_entered{false};
+    std::atomic<bool> in_process{false};
+    std::atomic<bool> release_called{false};
+    std::atomic<bool> release_during_process{false};
+
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "input");
+    auto plugin = graph.add_plugin_node(
+        std::make_unique<ReleaseOrderingPlugin>(release_thread_started,
+                                                process_entered,
+                                                in_process,
+                                                release_called,
+                                                release_during_process),
+        1,
+        1,
+        "plugin");
+    auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::vector<float> input_samples(32, 1.0f);
+    std::vector<float> output_samples(32, 0.0f);
+    const float* input_ptrs[1] = {input_samples.data()};
+    float* output_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs, 1, 32);
+    pulp::audio::BufferView<float> output_view(output_ptrs, 1, 32);
+
+    std::thread audio_thread([&] {
+        graph.process(output_view, input_view, 32);
+    });
+    while (!process_entered.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    SECTION("while snapshot is still live") {}
+    SECTION("after topology invalidates the live snapshot") {
+        REQUIRE(graph.disconnect(plugin, 0, output, 0));
+    }
+
+    std::thread release_thread([&] {
+        release_thread_started.store(true, std::memory_order_release);
+        graph.release();
+    });
+
+    audio_thread.join();
+    release_thread.join();
+
+    REQUIRE(release_called.load(std::memory_order_acquire));
+    REQUIRE_FALSE(release_during_process.load(std::memory_order_acquire));
+}
+
+TEST_CASE("SignalGraph retired snapshots do not own removed plugins",
+          "[host][graph][lifetime]") {
+    std::atomic<int> destroyed{0};
+
+    {
+        SignalGraph graph;
+        auto plugin = graph.add_plugin_node(
+            std::make_unique<LifetimeTrackedPlugin>(destroyed),
+            1,
+            1,
+            "plugin");
+        REQUIRE(plugin != 0);
+        REQUIRE(graph.prepare(48000.0, 32));
+
+        REQUIRE(graph.remove_node(plugin));
+        REQUIRE(destroyed.load(std::memory_order_acquire) == 1);
+    }
+
+    REQUIRE(destroyed.load(std::memory_order_acquire) == 1);
+}
+
 TEST_CASE("SignalGraph query helpers handle non-plugin and cleared nodes",
           "[host][graph][issue-493]") {
     SignalGraph graph;
