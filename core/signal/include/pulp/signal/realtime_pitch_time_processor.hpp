@@ -38,6 +38,7 @@
 #include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/noise_morpher.hpp>
+#include <pulp/signal/sinc_resampler.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include <pulp/signal/stn_decomposer.hpp>
@@ -73,6 +74,11 @@ struct RealtimePitchTimeConfig {
     /// textures stay natural instead of "tonalizing." Adds an STN pass per
     /// frame; off by default to keep the baseline path unchanged.
     bool noise_morphing = false;
+    /// Read the stretched stream with a Kaiser-windowed sinc kernel instead
+    /// of Catmull-Rom cubic — far deeper stopband, so the resample step of
+    /// pitch shifting folds back much less aliasing on large shifts and
+    /// bright material. Costs 2*half taps per output sample; off by default.
+    bool sinc_resampling = false;
 };
 
 class RealtimePitchTimeProcessor {
@@ -164,6 +170,10 @@ public:
             mag_scratch_.assign(static_cast<size_t>(spectral_bins), 0.0f);
             noise_env_.assign(static_cast<size_t>(config.channels) * spectral_bins, 0.0f);
             noise_spec_.assign(static_cast<size_t>(spectral_bins), std::complex<float>{});
+        }
+        if (config.sinc_resampling) {
+            resampler_.build();
+            tap_scratch_.assign(static_cast<size_t>(resampler_.taps()), 0.0f);
         }
         reset();
     }
@@ -434,7 +444,9 @@ private:
         }
     }
 
-    // Catmull-Rom interpolation of the stretched ring at read_pos_.
+    // Fractional read of the stretched ring at read_pos_ — Catmull-Rom
+    // cubic by default, or a Kaiser-windowed sinc kernel when enabled (lower
+    // aliasing on the pitch-shift resample step).
     void read_fractional(float* const* out, int i) {
         if (stretch_written_ < 4) {
             for (int ch = 0; ch < config_.channels; ++ch) out[ch][i] = 0.0f;
@@ -446,6 +458,20 @@ private:
         const auto clamp_idx = [&](std::int64_t p) {
             return static_cast<size_t>(std::clamp<std::int64_t>(p, 0, last) & ring_mask_);
         };
+        if (config_.sinc_resampling) {
+            const int taps = resampler_.taps();
+            const int half = resampler_.half_width();
+            for (int ch = 0; ch < config_.channels; ++ch) {
+                const float* ring = stretch_ring_.data() + static_cast<size_t>(ch) * ring_size_;
+                // Gather the kernel neighbourhood (i1-half+1 .. i1+half) from
+                // the ring with edge clamping, then apply the sinc kernel.
+                for (int k = 0; k < taps; ++k)
+                    tap_scratch_[static_cast<size_t>(k)] =
+                        ring[clamp_idx(i1 + k - half + 1)];
+                out[ch][i] = resampler_.apply(tap_scratch_.data(), t);
+            }
+            return;
+        }
         for (int ch = 0; ch < config_.channels; ++ch) {
             const float* ring = stretch_ring_.data() + static_cast<size_t>(ch) * ring_size_;
             const float p0 = ring[clamp_idx(i1 - 1)];
@@ -488,6 +514,10 @@ private:
     std::vector<float> mag_scratch_;
     std::vector<float> noise_env_;          // channels * spectral_bins
     std::vector<std::complex<float>> noise_spec_;
+
+    // Sinc resampler (allocated only when config_.sinc_resampling).
+    SincResampler resampler_;
+    std::vector<float> tap_scratch_;        // resampler_.taps() gather buffer
 
     int ring_size_ = 0;
     int ring_mask_ = 0;

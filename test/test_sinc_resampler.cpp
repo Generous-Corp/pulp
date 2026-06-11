@@ -62,6 +62,26 @@ TEST_CASE("SincResampler interpolates a band-limited sine accurately",
     REQUIRE(sinc_err < lin_err * 0.2); // and far better than linear
 }
 
+TEST_CASE("SincResampler apply() matches read() for a gathered neighbourhood",
+          "[signal][sinc]") {
+    SincResampler rs;
+    rs.build();
+    const int half = rs.half_width();
+    const int taps = rs.taps();
+    REQUIRE(taps == 2 * half);
+    auto x = sine(0.06, 500);
+    for (double frac = 0.0; frac < 1.0; frac += 0.13) {
+        const int i0 = 250;
+        // Gather the same neighbourhood read() uses: i0-half+1 .. i0+half.
+        std::vector<float> nb(static_cast<size_t>(taps));
+        for (int t = 0; t < taps; ++t)
+            nb[static_cast<size_t>(t)] = x[static_cast<size_t>(i0 + t - half + 1)];
+        const float via_apply = rs.apply(nb.data(), frac);
+        const float via_read = rs.read(x.data(), 500, i0 + frac);
+        REQUIRE_THAT(via_apply, WithinAbs(via_read, 1e-5f));
+    }
+}
+
 TEST_CASE("SincResampler stays bounded at buffer edges", "[signal][sinc]") {
     SincResampler rs;
     rs.build();

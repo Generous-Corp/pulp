@@ -63,7 +63,26 @@ public:
     }
 
     int half_width() const { return half_; }
+    int taps() const { return 2 * half_; }
     bool ready() const { return !table_.empty(); }
+
+    /// Apply the kernel at fractional phase `frac` (in [0,1)) to exactly
+    /// `taps()` contiguous samples, ordered from (i0-half+1) to (i0+half)
+    /// where the read point is at i0+frac. Lets a caller with its own buffer
+    /// layout (e.g. a power-of-two ring) gather the neighbourhood itself and
+    /// reuse the kernel. RT-safe.
+    float apply(const float* samples, double frac) const {
+        const int taps = 2 * half_;
+        const double ph = frac * phases_;
+        const int p0 = static_cast<int>(ph);
+        const float a = static_cast<float>(ph - p0);
+        const float* row0 = table_.data() + static_cast<size_t>(p0) * taps;
+        const float* row1 = table_.data() + static_cast<size_t>(p0 + 1) * taps;
+        float acc = 0.0f;
+        for (int t = 0; t < taps; ++t)
+            acc += (row0[t] + a * (row1[t] - row0[t])) * samples[t];
+        return acc;
+    }
 
     /// Read `src` at fractional position `pos` (in samples). The caller
     /// guarantees the kernel support `[floor(pos)-half+1, floor(pos)+half]`
