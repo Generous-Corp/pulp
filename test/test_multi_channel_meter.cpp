@@ -1,5 +1,7 @@
 #include <pulp/signal/multi_channel_meter.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -9,6 +11,35 @@
 
 using Catch::Matchers::WithinAbs;
 using namespace pulp::signal;
+
+TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after prepare",
+          "[signal][meter][rt-safety]") {
+    MultiChannelMeter meter;
+    meter.prepare(1000.0f, 2);
+
+    std::array<float, 10> left{};
+    std::array<float, 10> right{};
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        left[i] = (i == 3) ? 1.1f : 0.25f;
+        right[i] = (i % 2 == 0) ? -0.25f : 0.25f;
+    }
+
+    const float* channels[] = {left.data(), right.data()};
+    MultiChannelBallistics ballistics;
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        meter.process(channels, 2, static_cast<int>(left.size()));
+        const auto& snapshot = meter.snapshot();
+        ballistics.update(snapshot, 0.016f);
+        ballistics.clear_clips();
+        meter.reset();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(meter.snapshot().num_channels == 0);
+    REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
+}
 
 TEST_CASE("MultiChannelMeter process clamps to prepared channel count", "[signal][meter][issue-645]") {
     MultiChannelMeter meter;

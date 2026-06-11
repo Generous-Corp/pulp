@@ -1908,7 +1908,9 @@ pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
 # Multi-channel meter edge tests (#645)
-pulp_add_test_suite(pulp-test-multi-channel-meter LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-multi-channel-meter
+    SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
 target_link_libraries(pulp-test-dsl-processor PRIVATE
