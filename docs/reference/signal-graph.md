@@ -133,6 +133,9 @@ silently interpreted as current data.
 - **Process** runs on the audio thread over the snapshotted processing
   order. The snapshot is swapped under a lock-free publish so edits never
   tear the running order.
+- **Live controls and MIDI handoff** (`set_node_gain`, `inject_midi`,
+  `extract_midi`) are covered by the combined TSan-oriented graph race test
+  `"[host][graph][threading][race][tsan][midi]"`.
 - **Load** (`PluginSlot::load`) runs on a worker thread; the returned
   slot is handed to the graph only after it's fully loaded.
 

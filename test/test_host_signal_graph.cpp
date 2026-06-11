@@ -1866,6 +1866,117 @@ TEST_CASE("SignalGraph MIDI ingress and egress mailboxes are Race-free",
     graph.release();
 }
 
+TEST_CASE("SignalGraph live controls and MIDI handoff are TSan-clean together",
+          "[host][graph][threading][race][tsan][midi]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "audio-in");
+    auto gain = graph.add_gain_node("live-gain");
+    auto output = graph.add_output_node(1, "audio-out");
+    auto midi_in = graph.add_midi_input_node("keys");
+    auto midi_out = graph.add_midi_output_node("midi-out");
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::vector<float> input_buffer(32, 1.0f);
+    std::vector<float> output_buffer(32, 0.0f);
+    const float* input_ptrs[1] = {input_buffer.data()};
+    float* output_ptrs[1] = {output_buffer.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs, 1, 32);
+    pulp::audio::BufferView<float> output_view(output_ptrs, 1, 32);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> updates_active{false};
+    std::atomic<bool> saw_invalid_audio{false};
+    std::atomic<int> processed_blocks{0};
+    std::atomic<int> blocks_during_updates{0};
+    std::promise<void> audio_started;
+    auto started = audio_started.get_future();
+    std::promise<void> first_block_processed;
+    auto first_block = first_block_processed.get_future();
+
+    std::thread audio_thread([&] {
+        audio_started.set_value();
+        bool first_block_signalled = false;
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.process(output_view, input_view, 32);
+            processed_blocks.fetch_add(1, std::memory_order_relaxed);
+            if (updates_active.load(std::memory_order_acquire)) {
+                blocks_during_updates.fetch_add(1, std::memory_order_relaxed);
+            }
+            for (float sample : output_buffer) {
+                if (!std::isfinite(sample) || sample < -1.0e-6f
+                    || sample > 1.0f + 1.0e-6f) {
+                    saw_invalid_audio.store(true, std::memory_order_relaxed);
+                    break;
+                }
+            }
+            if (!first_block_signalled) {
+                first_block_processed.set_value();
+                first_block_signalled = true;
+            }
+        }
+    });
+
+    started.wait();
+    first_block.wait();
+
+    bool all_gain_updates_succeeded = true;
+    bool all_injects_succeeded = true;
+    bool all_extracts_succeeded = true;
+    bool saw_invalid_midi = false;
+    constexpr int kMinControlUpdates = 10000;
+    constexpr int kMinBlocksDuringUpdates = 4;
+    constexpr int kMaxControlUpdates = 1000000;
+    int update_count = 0;
+    updates_active.store(true, std::memory_order_release);
+    while ((update_count < kMinControlUpdates
+            || blocks_during_updates.load(std::memory_order_relaxed)
+                < kMinBlocksDuringUpdates)
+           && update_count < kMaxControlUpdates) {
+        const float live_gain =
+            static_cast<float>((update_count % 17) + 1) / 17.0f;
+        all_gain_updates_succeeded =
+            graph.set_node_gain(gain, live_gain) && all_gain_updates_succeeded;
+
+        pulp::midi::MidiBuffer events;
+        auto event = pulp::midi::MidiEvent::note_on(
+            0,
+            60 + (update_count % 12),
+            96);
+        event.sample_offset = update_count % 32;
+        events.add(event);
+        all_injects_succeeded =
+            graph.inject_midi(midi_in, events) && all_injects_succeeded;
+
+        pulp::midi::MidiBuffer extracted;
+        all_extracts_succeeded =
+            graph.extract_midi(midi_out, extracted) && all_extracts_succeeded;
+        if (extracted.size() > 1 || extracted.sysex_size() != 0) {
+            saw_invalid_midi = true;
+        }
+
+        if ((update_count % 64) == 0) std::this_thread::yield();
+        ++update_count;
+    }
+    updates_active.store(false, std::memory_order_release);
+
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(all_gain_updates_succeeded);
+    REQUIRE(all_injects_succeeded);
+    REQUIRE(all_extracts_succeeded);
+    REQUIRE(processed_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(blocks_during_updates.load(std::memory_order_relaxed)
+            >= kMinBlocksDuringUpdates);
+    REQUIRE_FALSE(saw_invalid_audio.load(std::memory_order_relaxed));
+    REQUIRE_FALSE(saw_invalid_midi);
+    graph.release();
+}
+
 // ── Phase 1E connect_automation test ────────────────────────────────────
 
 namespace {

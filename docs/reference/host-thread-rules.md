@@ -49,6 +49,12 @@ live snapshot. **Never call them from the audio thread.**
   `process()`. In typical flow, the UI thread injects MIDI and reads
   extracted events.
 
+The TSan-oriented graph tests pin the combined contract: one thread may run
+`SignalGraph::process()` while a control thread calls `set_node_gain()`,
+`inject_midi()`, and `extract_midi()` against the prepared snapshot. See
+`pulp-test-host-signal-graph` filter
+`"[host][graph][threading][race][tsan][midi]"`.
+
 ### UI-thread read-only accessors
 
 These inspect `nodes_` / `connections_` directly. They must not be
