@@ -32,6 +32,122 @@ class SourcePrepBindingsTests(unittest.TestCase):
         bindings.update(overrides)
         return bindings
 
+    def test_source_request_cache_root_and_rewrite_bind_dependencies(self):
+        captured = {}
+
+        def make_request(*args, **kwargs):
+            captured["make_request"] = (args, kwargs)
+            return {"mode": "live"}
+
+        def source_cache_key(source_request):
+            captured["cache_key"] = source_request
+            return "abc123"
+
+        def source_root(*args, **kwargs):
+            captured["source_root"] = (args, kwargs)
+            return Path("/state/desktop-source/mac/abc123")
+
+        def command_candidate(*args, **kwargs):
+            captured["candidate"] = (args, kwargs)
+            return Path("/repo/tool")
+
+        def rewrite_mapper(*args, **kwargs):
+            captured["mapper"] = (args, kwargs)
+            return "rewritten"
+
+        def rewrite_source(*args, **kwargs):
+            captured["source"] = (args, kwargs)
+            return "source-root"
+
+        def rewrite_posix(*args, **kwargs):
+            captured["posix"] = (args, kwargs)
+            return "posix-root"
+
+        def rewrite_windows(*args, **kwargs):
+            captured["windows"] = (args, kwargs)
+            return "windows-root"
+
+        def split_windows(command):
+            captured["split"] = command
+            return ["one", "two"]
+
+        def validate_windows(commands):
+            captured["validate"] = commands
+
+        def attach_manifest(manifest, source_context):
+            captured["attach"] = (manifest, source_context)
+
+        source_prep = types.SimpleNamespace(
+            make_desktop_source_request=make_request,
+            desktop_source_cache_key=source_cache_key,
+            desktop_source_root=source_root,
+            command_path_rewrite_candidate=command_candidate,
+            rewrite_launch_command_for_mapper=rewrite_mapper,
+            rewrite_launch_command_for_source_root=rewrite_source,
+            rewrite_launch_command_for_posix_root=rewrite_posix,
+            rewrite_launch_command_for_windows_root=rewrite_windows,
+            split_windows_prepare_commands=split_windows,
+            validate_windows_prepare_commands=validate_windows,
+            attach_desktop_source_to_manifest=attach_manifest,
+        )
+        bindings = self._bindings(
+            _source_prep=source_prep,
+            normalize_desktop_source_mode=object(),
+            current_branch=object(),
+            current_sha=object(),
+            state_dir=object(),
+            windows_path_join=object(),
+        )
+        args_obj = object()
+        request = {"sha": "abc"}
+        mapper = object()
+        manifest = {}
+        source_context = {"mode": "live"}
+
+        self.assertEqual(self.mod.make_desktop_source_request(bindings, args_obj), {"mode": "live"})
+        self.assertEqual(captured["make_request"][0], (args_obj,))
+        self.assertIs(captured["make_request"][1]["normalize_desktop_source_mode_fn"], bindings["normalize_desktop_source_mode"])
+        self.assertIs(captured["make_request"][1]["current_branch_fn"], bindings["current_branch"])
+        self.assertIs(captured["make_request"][1]["current_sha_fn"], bindings["current_sha"])
+
+        self.assertEqual(self.mod.desktop_source_cache_key(bindings, request), "abc123")
+        self.assertIs(captured["cache_key"], request)
+
+        self.assertEqual(self.mod.desktop_source_root(bindings, "mac", request), Path("/state/desktop-source/mac/abc123"))
+        self.assertEqual(captured["source_root"][0], ("mac", request))
+        self.assertIs(captured["source_root"][1]["state_dir_fn"], bindings["state_dir"])
+
+        self.assertEqual(self.mod.command_path_rewrite_candidate(bindings, "./tool"), Path("/repo/tool"))
+        self.assertEqual(captured["candidate"][0], ("./tool",))
+        self.assertEqual(captured["candidate"][1]["root"], self.root)
+
+        self.assertEqual(self.mod.rewrite_launch_command_for_mapper(bindings, "./tool", mapper, windows=True), "rewritten")
+        self.assertEqual(captured["mapper"][0], ("./tool", mapper))
+        self.assertEqual(captured["mapper"][1]["root"], self.root)
+        self.assertTrue(captured["mapper"][1]["windows"])
+
+        self.assertEqual(self.mod.rewrite_launch_command_for_source_root(bindings, "./tool", Path("/source")), "source-root")
+        self.assertEqual(captured["source"][0], ("./tool", Path("/source")))
+        self.assertEqual(captured["source"][1]["root"], self.root)
+
+        self.assertEqual(self.mod.rewrite_launch_command_for_posix_root(bindings, "./tool", "/remote"), "posix-root")
+        self.assertEqual(captured["posix"][0], ("./tool", "/remote"))
+        self.assertEqual(captured["posix"][1]["root"], self.root)
+
+        self.assertEqual(self.mod.rewrite_launch_command_for_windows_root(bindings, r".\tool.exe", r"C:\Pulp"), "windows-root")
+        self.assertEqual(captured["windows"][0], (r".\tool.exe", r"C:\Pulp"))
+        self.assertEqual(captured["windows"][1]["root"], self.root)
+        self.assertIs(captured["windows"][1]["windows_path_join_fn"], bindings["windows_path_join"])
+
+        self.assertEqual(self.mod.split_windows_prepare_commands(bindings, "one;two"), ["one", "two"])
+        self.assertEqual(captured["split"], "one;two")
+
+        self.mod.validate_windows_prepare_commands(bindings, ["one"])
+        self.assertEqual(captured["validate"], ["one"])
+
+        self.mod.attach_desktop_source_to_manifest(bindings, manifest, source_context)
+        self.assertEqual(captured["attach"], (manifest, source_context))
+
     def test_local_worktree_helpers_bind_root_and_subprocess(self):
         captured = {}
 
