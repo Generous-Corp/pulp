@@ -72,3 +72,92 @@ def resolve_git_ref_sha(ref: str) -> str:
 
 def short_sha(sha: str) -> str:
     return sha[:12] if sha else "?"
+
+
+def normalize_git_remote_for_http(remote_url: str | None) -> str | None:
+    value = (remote_url or "").strip()
+    if not value:
+        return None
+    if value.startswith("git@github.com:"):
+        repo_path = value[len("git@github.com:"):].rstrip("/")
+        if repo_path.endswith(".git"):
+            repo_path = repo_path[:-4]
+        return f"https://github.com/{repo_path}"
+    if value.startswith("https://github.com/") or value.startswith("http://github.com/"):
+        repo_path = value.split("github.com/", 1)[1].rstrip("/")
+        if repo_path.endswith(".git"):
+            repo_path = repo_path[:-4]
+        return f"https://github.com/{repo_path}"
+    return None
+
+
+def normalize_git_remote_for_clone(remote_url: str | None) -> str | None:
+    value = (remote_url or "").strip()
+    if not value:
+        return None
+    if value.startswith("git@github.com:"):
+        repo_path = value[len("git@github.com:"):].rstrip("/")
+        if repo_path.endswith(".git"):
+            return f"https://github.com/{repo_path}"
+        return f"https://github.com/{repo_path}.git"
+    if value.startswith("https://github.com/") or value.startswith("http://github.com/"):
+        repo_path = value.split("github.com/", 1)[1].rstrip("/")
+        if repo_path.endswith(".git"):
+            return f"https://github.com/{repo_path}"
+        return f"https://github.com/{repo_path}.git"
+    return None
+
+
+def git_origin_url(
+    repo_root: Path = ROOT,
+    *,
+    run_fn=None,
+) -> str | None:
+    run_fn = run_fn or subprocess.run
+    run = run_fn(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if run.returncode != 0:
+        return None
+    return run.stdout.strip()
+
+
+def git_origin_http_url(
+    repo_root: Path = ROOT,
+    *,
+    run_fn=None,
+) -> str | None:
+    return normalize_git_remote_for_http(git_origin_url(repo_root, run_fn=run_fn))
+
+
+def git_origin_clone_url(
+    repo_root: Path = ROOT,
+    *,
+    run_fn=None,
+) -> str | None:
+    return normalize_git_remote_for_clone(git_origin_url(repo_root, run_fn=run_fn))
+
+
+def run_git(
+    args: list[str],
+    *,
+    cwd: Path,
+    check: bool = True,
+    run_fn=None,
+) -> subprocess.CompletedProcess:
+    run_fn = run_fn or subprocess.run
+    run = run_fn(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if check and run.returncode != 0:
+        detail = (run.stderr or run.stdout or "").strip()
+        raise RuntimeError(f"git {' '.join(args)} failed: {detail or run.returncode}")
+    return run

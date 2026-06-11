@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import importlib.util
+import json
 import pathlib
 import tempfile
 import unittest
@@ -36,6 +37,31 @@ class DesktopArtifactsTests(unittest.TestCase):
 
         self.assertEqual(root, self.root / "desktop-artifacts")
         self.assertTrue(root.is_dir())
+
+    def test_desktop_receipt_helpers_read_target_receipts(self) -> None:
+        receipts_dir = self.root / "receipts"
+        receipt_path = self.mod.desktop_target_receipt_path(
+            "windows",
+            desktop_receipts_dir_fn=lambda: receipts_dir,
+        )
+        self.assertEqual(receipt_path, receipts_dir / "windows.json")
+        self.assertIsNone(
+            self.mod.desktop_receipt_for(
+                "windows",
+                desktop_target_receipt_path_fn=lambda name: receipts_dir / f"{name}.json",
+            )
+        )
+
+        receipts_dir.mkdir()
+        receipt_path.write_text(json.dumps({"target": "windows", "ready": True}) + "\n")
+
+        self.assertEqual(
+            self.mod.desktop_receipt_for(
+                "windows",
+                desktop_target_receipt_path_fn=lambda name: receipts_dir / f"{name}.json",
+            ),
+            {"target": "windows", "ready": True},
+        )
 
     def test_create_desktop_run_bundle_uses_stable_layout(self) -> None:
         bundle = self.mod.create_desktop_run_bundle(

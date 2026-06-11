@@ -114,6 +114,76 @@ class GitHelpersTests(unittest.TestCase):
         self.assertEqual(self.mod.short_sha("123"), "123")
         self.assertEqual(self.mod.short_sha("1234567890abcdef"), "1234567890ab")
 
+    def test_normalize_git_remotes_for_http_and_clone_urls(self) -> None:
+        self.assertEqual(
+            self.mod.normalize_git_remote_for_http("git@github.com:danielraffel/pulp.git"),
+            "https://github.com/danielraffel/pulp",
+        )
+        self.assertEqual(
+            self.mod.normalize_git_remote_for_http("https://github.com/danielraffel/pulp.git"),
+            "https://github.com/danielraffel/pulp",
+        )
+        self.assertEqual(
+            self.mod.normalize_git_remote_for_http("http://github.com/danielraffel/pulp"),
+            "https://github.com/danielraffel/pulp",
+        )
+        self.assertIsNone(self.mod.normalize_git_remote_for_http("/tmp/pulp.git"))
+
+        self.assertEqual(
+            self.mod.normalize_git_remote_for_clone("git@github.com:danielraffel/pulp.git"),
+            "https://github.com/danielraffel/pulp.git",
+        )
+        self.assertEqual(
+            self.mod.normalize_git_remote_for_clone("https://github.com/danielraffel/pulp"),
+            "https://github.com/danielraffel/pulp.git",
+        )
+        self.assertEqual(
+            self.mod.normalize_git_remote_for_clone("https://github.com/danielraffel/pulp.git"),
+            "https://github.com/danielraffel/pulp.git",
+        )
+        self.assertIsNone(self.mod.normalize_git_remote_for_clone("/tmp/pulp.git"))
+
+    def test_git_origin_url_helpers_return_normalized_urls_or_none(self) -> None:
+        ok = subprocess.CompletedProcess(
+            ["git"],
+            0,
+            stdout="git@github.com:danielraffel/pulp.git\n",
+            stderr="",
+        )
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return ok
+
+        self.assertEqual(self.mod.git_origin_url(self.root, run_fn=run), "git@github.com:danielraffel/pulp.git")
+        self.assertEqual(self.mod.git_origin_http_url(self.root, run_fn=run), "https://github.com/danielraffel/pulp")
+        self.assertEqual(self.mod.git_origin_clone_url(self.root, run_fn=run), "https://github.com/danielraffel/pulp.git")
+        self.assertTrue(all(call[0] == ["git", "remote", "get-url", "origin"] for call in calls))
+        self.assertTrue(all(call[1]["cwd"] == self.root for call in calls))
+
+        fail = subprocess.CompletedProcess(["git"], 1, stdout="", stderr="missing")
+        self.assertIsNone(self.mod.git_origin_url(self.root, run_fn=lambda *args, **kwargs: fail))
+        self.assertIsNone(self.mod.git_origin_http_url(self.root, run_fn=lambda *args, **kwargs: fail))
+        self.assertIsNone(self.mod.git_origin_clone_url(self.root, run_fn=lambda *args, **kwargs: fail))
+
+    def test_run_git_returns_completed_process_or_raises_detail(self) -> None:
+        ok = subprocess.CompletedProcess(["git"], 0, stdout="ok", stderr="")
+        fail = subprocess.CompletedProcess(["git"], 2, stdout="", stderr="bad")
+
+        with mock.patch.object(self.mod.subprocess, "run", return_value=ok) as run:
+            self.assertIs(self.mod.run_git(["status"], cwd=self.root), ok)
+        self.assertEqual(run.call_args.args[0], ["git", "status"])
+        self.assertEqual(run.call_args.kwargs["cwd"], self.root)
+        self.assertFalse(run.call_args.kwargs["check"])
+
+        self.assertIs(
+            self.mod.run_git(["status"], cwd=self.root, check=False, run_fn=lambda *args, **kwargs: fail),
+            fail,
+        )
+        with self.assertRaisesRegex(RuntimeError, "bad"):
+            self.mod.run_git(["status"], cwd=self.root, run_fn=lambda *args, **kwargs: fail)
+
 
 if __name__ == "__main__":
     unittest.main()
