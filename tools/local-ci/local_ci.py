@@ -159,6 +159,7 @@ import linux_target as _linux_target  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
+import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
@@ -1281,238 +1282,59 @@ def run_macos_local_smoke(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    bundle_dir = create_desktop_run_bundle(config, "mac", action_name)
-    action_paths = _desktop_actions.desktop_action_artifact_paths(bundle_dir, output_path)
-    screenshot_path = action_paths["screenshot"]
-    before_screenshot_path = action_paths["before_screenshot"]
-    diff_screenshot_path = action_paths["diff_screenshot"]
-    ui_snapshot_path = action_paths["ui_snapshot"]
-    log_path = action_paths["stdout"]
-    err_path = action_paths["stderr"]
-
-    interaction_requested = _desktop_actions.desktop_interaction_requested(
+    return _macos_desktop_action.run_macos_local_smoke(
+        config,
+        command,
+        action_name=action_name,
+        bundle_id=bundle_id,
+        label=label,
+        output_path=output_path,
+        capture_ui_snapshot=capture_ui_snapshot,
         click_point=click_point,
         click_view_id=click_view_id,
         click_view_type=click_view_type,
         click_view_text=click_view_text,
         click_view_label=click_view_label,
+        pulp_app_automation=pulp_app_automation,
+        capture_before=capture_before,
+        settle_secs=settle_secs,
+        timeout_secs=timeout_secs,
+        source_request=source_request,
+        create_desktop_run_bundle_fn=create_desktop_run_bundle,
+        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
+        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
+        macos_accessibility_trusted_fn=macos_accessibility_trusted,
+        now_iso_fn=now_iso,
+        prepare_macos_exact_sha_source_fn=prepare_macos_exact_sha_source,
+        quit_macos_bundle_id_fn=quit_macos_bundle_id,
+        sleep_fn=time.sleep,
+        run_fn=subprocess.run,
+        activate_macos_bundle_id_fn=activate_macos_bundle_id,
+        wait_for_macos_bundle_window_fn=wait_for_macos_bundle_window,
+        split_command_fn=shlex.split,
+        detect_macos_app_bundle_fn=detect_macos_app_bundle,
+        macos_bundle_id_for_app_path_fn=macos_bundle_id_for_app_path,
+        environ_copy_fn=os.environ.copy,
+        popen_fn=subprocess.Popen,
+        wait_for_macos_window_fn=wait_for_macos_window,
+        content_size_from_window_fn=_desktop_actions.content_size_from_window,
+        wait_for_path_fn=wait_for_path,
+        content_size_from_view_tree_fn=_desktop_actions.content_size_from_view_tree,
+        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
+        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
+        capture_macos_window_fn=capture_macos_window,
+        parse_coordinate_pair_fn=parse_coordinate_pair,
+        resolve_view_tree_click_point_fn=resolve_view_tree_click_point,
+        screen_point_for_content_point_fn=screen_point_for_content_point,
+        activate_macos_pid_fn=activate_macos_pid,
+        dispatch_macos_click_fn=dispatch_macos_click,
+        desktop_click_selector_fn=_desktop_actions.desktop_click_selector,
+        image_change_summary_fn=image_change_summary,
+        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
+        atomic_write_text_fn=atomic_write_text,
+        write_desktop_run_rollups_fn=write_desktop_run_rollups,
+        terminate_process_fn=terminate_process,
     )
-    use_pulp_app_automation = bool(pulp_app_automation and interaction_requested)
-    if use_pulp_app_automation and bundle_id:
-        raise RuntimeError("Pulp app automation requires a direct --command launch so automation env vars can be injected.")
-    if interaction_requested and not use_pulp_app_automation and not macos_accessibility_trusted():
-        raise RuntimeError("macOS desktop interaction requires Accessibility access for the terminal/runner.")
-    if (click_view_id or click_view_type or click_view_text or click_view_label) and not capture_ui_snapshot and not use_pulp_app_automation:
-        raise RuntimeError("View-targeted click requires --capture-ui-snapshot so the app writes a ViewInspector tree.")
-
-    started_at = now_iso()
-    source_context = dict(source_request or {})
-    launch_cwd: str | None = None
-    launch_command = command
-    if source_context.get("mode") == "exact-sha":
-        if bundle_id:
-            raise RuntimeError("Exact-SHA desktop source mode currently requires --command, not --bundle-id.")
-        if not command:
-            raise RuntimeError("Exact-SHA desktop source mode requires --command.")
-        source_context = prepare_macos_exact_sha_source(bundle_dir, "mac", command, source_context)
-        launch_cwd = source_context.get("launch_cwd")
-        launch_command = source_context.get("launch_command") or command
-    proc = None
-    pid = None
-    try:
-        if bundle_id:
-            if capture_ui_snapshot:
-                raise RuntimeError(
-                    "UI snapshot capture currently requires a direct launch command so PULP_VIEW_TREE_OUT can be injected."
-                )
-            log_path.write_text("")
-            err_path.write_text("")
-            quit_macos_bundle_id(bundle_id)
-            time.sleep(0.2)
-            subprocess.run(["open", "-b", bundle_id], capture_output=True, text=True, check=True)
-            time.sleep(0.75)
-            activate_macos_bundle_id(bundle_id)
-            time.sleep(0.75)
-            pid, window = wait_for_macos_bundle_window(bundle_id, timeout_secs)
-            launch_descriptor = {"bundle_id": bundle_id}
-        else:
-            args = shlex.split(launch_command or "")
-            if not args:
-                raise ValueError("Desktop smoke requires either --command or --bundle-id.")
-            app_bundle = detect_macos_app_bundle(launch_command)
-            if app_bundle is not None:
-                if capture_ui_snapshot:
-                    raise RuntimeError(
-                        "UI snapshot capture currently requires a direct launch command so PULP_VIEW_TREE_OUT can be injected."
-                    )
-                inferred_bundle_id = macos_bundle_id_for_app_path(app_bundle)
-                if not inferred_bundle_id:
-                    raise RuntimeError(f"Could not determine bundle id for app bundle `{app_bundle}`")
-                log_path.write_text("")
-                err_path.write_text("")
-                quit_macos_bundle_id(inferred_bundle_id)
-                time.sleep(0.2)
-                subprocess.run(["open", "-a", str(app_bundle)], capture_output=True, text=True, check=True)
-                time.sleep(0.75)
-                activate_macos_bundle_id(inferred_bundle_id)
-                time.sleep(0.75)
-                pid, window = wait_for_macos_bundle_window(inferred_bundle_id, timeout_secs)
-                launch_descriptor = {"bundle_id": inferred_bundle_id, "app_path": str(app_bundle)}
-            else:
-                stdout_handle = log_path.open("w")
-                stderr_handle = err_path.open("w")
-                env = os.environ.copy()
-                if capture_ui_snapshot:
-                    env["PULP_VIEW_TREE_OUT"] = str(ui_snapshot_path)
-                if use_pulp_app_automation:
-                    if click_point:
-                        env["PULP_AUTOMATION_CLICK_POINT"] = click_point
-                    if click_view_id:
-                        env["PULP_AUTOMATION_CLICK_VIEW_ID"] = click_view_id
-                    if click_view_type:
-                        env["PULP_AUTOMATION_CLICK_VIEW_TYPE"] = click_view_type
-                    if click_view_text:
-                        env["PULP_AUTOMATION_CLICK_VIEW_TEXT"] = click_view_text
-                    if click_view_label:
-                        env["PULP_AUTOMATION_CLICK_VIEW_LABEL"] = click_view_label
-                    if capture_before:
-                        env["PULP_AUTOMATION_BEFORE_OUT"] = str(before_screenshot_path)
-                    env["PULP_AUTOMATION_AFTER_OUT"] = str(screenshot_path)
-                    env["PULP_AUTOMATION_DELAY_MS"] = "1000"
-                    env["PULP_AUTOMATION_AFTER_DELAY_MS"] = str(max(0, int(settle_secs * 1000.0)))
-                    env["PULP_AUTOMATION_EXIT_AFTER"] = "1"
-                try:
-                    proc = subprocess.Popen(
-                        args,
-                        stdout=stdout_handle,
-                        stderr=stderr_handle,
-                        env=env,
-                        cwd=launch_cwd,
-                    )
-                finally:
-                    stdout_handle.close()
-                    stderr_handle.close()
-                pid = proc.pid
-                window = wait_for_macos_window(proc.pid, timeout_secs)
-                launch_descriptor = {"command": args}
-
-        inspector_summary = None
-        view_tree = None
-        content_size = _desktop_actions.content_size_from_window(window)
-        if capture_ui_snapshot and not use_pulp_app_automation:
-            wait_for_path(ui_snapshot_path, timeout_secs)
-            view_tree = json.loads(ui_snapshot_path.read_text())
-            content_size = _desktop_actions.content_size_from_view_tree(view_tree, content_size)
-            inspector_summary = _desktop_actions.view_tree_inspector_summary(view_tree)
-
-        interaction_summary = None
-        if use_pulp_app_automation:
-            if capture_before:
-                wait_for_path(before_screenshot_path, timeout_secs)
-            wait_for_path(screenshot_path, timeout_secs)
-            if capture_ui_snapshot:
-                wait_for_path(ui_snapshot_path, timeout_secs)
-                view_tree = json.loads(ui_snapshot_path.read_text())
-                content_size = _desktop_actions.content_size_from_view_tree(view_tree, content_size)
-                inspector_summary = _desktop_actions.view_tree_inspector_summary(view_tree)
-            interaction_summary = _desktop_actions.pulp_app_interaction_summary(
-                click_point=click_point,
-                click_view_id=click_view_id,
-                click_view_type=click_view_type,
-                click_view_text=click_view_text,
-                click_view_label=click_view_label,
-            )
-        else:
-            if interaction_requested and capture_before:
-                capture_macos_window(int(window["windowId"]), before_screenshot_path)
-
-            if interaction_requested:
-                if click_point:
-                    content_point = parse_coordinate_pair(click_point, flag_name="--click")
-                else:
-                    content_point = resolve_view_tree_click_point(
-                        view_tree or {},
-                        view_id=click_view_id,
-                        view_type=click_view_type,
-                        view_text=click_view_text,
-                        view_label=click_view_label,
-                    )
-                screen_point = screen_point_for_content_point(window, content_size, content_point)
-                activation_payload = activate_macos_pid(int(pid or 0)) if pid else {"activated": False}
-                dispatch_payload = dispatch_macos_click(*screen_point)
-                interaction_summary = {
-                    "mode": "desktop-event",
-                    "click": {
-                        "content_point": {"x": content_point[0], "y": content_point[1]},
-                        "screen_point": {"x": screen_point[0], "y": screen_point[1]},
-                        "selector": _desktop_actions.desktop_click_selector(
-                            click_view_id=click_view_id,
-                            click_view_type=click_view_type,
-                            click_view_text=click_view_text,
-                            click_view_label=click_view_label,
-                            include_point=False,
-                        ),
-                        "activation": activation_payload,
-                        "dispatch": dispatch_payload,
-                    }
-                }
-                if settle_secs > 0:
-                    time.sleep(settle_secs)
-
-            try:
-                capture_macos_window(int(window["windowId"]), screenshot_path)
-            except RuntimeError:
-                active_bundle_id = bundle_id or launch_descriptor.get("bundle_id")
-                if not active_bundle_id:
-                    raise
-                pid, window = wait_for_macos_bundle_window(active_bundle_id, min(timeout_secs, 2.0))
-                capture_macos_window(int(window["windowId"]), screenshot_path)
-        manifest = {
-            "target": "mac",
-            "adapter": "macos-local",
-            "action": action_name,
-            "label": label or (bundle_id or Path((launch_command or "").split()[0]).stem),
-            "pid": pid,
-            "started_at": started_at,
-            "completed_at": now_iso(),
-            "window": window,
-            **launch_descriptor,
-            "artifacts": {
-                "bundle_dir": str(bundle_dir),
-                "screenshot": str(screenshot_path),
-                "stdout": str(log_path),
-                "stderr": str(err_path),
-            },
-        }
-        if capture_before and interaction_requested:
-            manifest["artifacts"]["before_screenshot"] = str(before_screenshot_path)
-            if before_screenshot_path.exists() and screenshot_path.exists():
-                manifest["artifacts"]["image_change"] = image_change_summary(
-                    before_screenshot_path,
-                    screenshot_path,
-                    diff_output_path=diff_screenshot_path,
-                )
-                if diff_screenshot_path.exists():
-                    manifest["artifacts"]["diff_screenshot"] = str(diff_screenshot_path)
-        if inspector_summary is not None:
-            manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-            manifest["inspector"] = inspector_summary
-        if interaction_summary is not None:
-            manifest["interaction"] = interaction_summary
-        attach_desktop_source_to_manifest(manifest, source_context or source_request)
-        atomic_write_text(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
-        write_desktop_run_rollups(config, target_name="mac")
-        write_desktop_run_rollups(config)
-        return manifest
-    finally:
-        if proc is not None:
-            terminate_process(proc)
-        else:
-            active_bundle_id = bundle_id
-            if not active_bundle_id and 'launch_descriptor' in locals():
-                active_bundle_id = launch_descriptor.get("bundle_id")
-            if active_bundle_id:
-                quit_macos_bundle_id(active_bundle_id)
 
 
 def default_desktop_label(command: str | None, *, bundle_id: str | None = None) -> str:
