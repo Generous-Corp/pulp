@@ -2375,12 +2375,7 @@ def run_windows_ssh_validation(
 
 
 def config_for_job_execution(job: dict, config: dict) -> dict:
-    return _execution.config_for_job_execution(
-        job,
-        config,
-        load_config_file_fn=load_config_file,
-        warn_fn=print,
-    )
+    return _execution_bindings.config_for_job_execution(globals(), job, config)
 
 
 def submission_target_state(job: dict, target_name: str) -> dict:
@@ -2388,70 +2383,23 @@ def submission_target_state(job: dict, target_name: str) -> dict:
 
 
 def resolve_ssh_target_execution(job: dict, target_name: str, target_cfg: dict, defaults: dict) -> tuple[str | None, str | None]:
-    return _execution.resolve_ssh_target_execution(
-        job,
-        target_name,
-        target_cfg,
-        defaults,
-        ensure_host_reachable_fn=ensure_host_reachable,
-    )
+    return _execution_bindings.resolve_ssh_target_execution(globals(), job, target_name, target_cfg, defaults)
 
 
 def _build_target_tasks(job: dict, config: dict, progress_factory=None) -> list[tuple[str, Callable[[], dict]]]:
-    return _execution.build_target_tasks(
-        job,
-        config,
-        enabled_targets_fn=enabled_targets,
-        resolve_ssh_target_execution_fn=resolve_ssh_target_execution,
-        run_local_validation_fn=run_local_validation,
-        run_posix_ssh_validation_fn=run_posix_ssh_validation,
-        run_windows_ssh_validation_fn=run_windows_ssh_validation,
-        progress_factory=progress_factory,
-    )
+    return _execution_bindings.build_target_tasks(globals(), job, config, progress_factory)
 
 
 def process_job(job: dict, config: dict) -> dict:
-    return _execution.process_job(
-        job,
-        config,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        config_for_job_execution_fn=config_for_job_execution,
-        build_target_tasks_fn=_build_target_tasks,
-        target_state_snapshot_fn=target_state_snapshot,
-        update_runner_active_targets_fn=update_runner_active_targets,
-        update_job_active_targets_fn=update_job_active_targets,
-        updated_target_state_fn=updated_target_state,
-        initial_target_state_fn=initial_target_state,
-        completed_target_state_fn=completed_target_state,
-        now_iso_fn=now_iso,
-        run_target_tasks_fn=run_target_tasks,
-        completed_job_result_fn=completed_job_result,
-        sorted_target_results_fn=sorted_target_results,
-    )
+    return _execution_bindings.process_job(globals(), job, config)
 
 
 def save_result(result: dict) -> Path:
-    return _execution.save_result(
-        result,
-        ensure_state_dirs_fn=ensure_state_dirs,
-        results_dir_fn=results_dir,
-        update_evidence_index_fn=update_evidence_index,
-        now_fn=datetime.now,
-    )
+    return _execution_bindings.save_result(globals(), result)
 
 
 def print_result(result: dict, result_path: Path | None = None) -> None:
-    return _execution.print_result(
-        result,
-        result_path,
-        normalize_result_fn=normalize_result,
-        result_validation_line_fn=result_validation_line,
-        result_execution_line_fn=result_execution_line,
-        result_target_lines_fn=result_target_lines,
-        result_overall_line_fn=result_overall_line,
-        print_fn=print,
-    )
+    return _execution_bindings.print_result(globals(), result, result_path)
 
 
 def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
