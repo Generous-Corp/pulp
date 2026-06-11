@@ -68,6 +68,58 @@ TEST_CASE("bind_midi_note plays a note while a toggle is on", "[midi][bind]") {
     REQUIRE(out[1].is_note_off());
 }
 
+TEST_CASE("bind_midi_cc covers fader, range slider, and discrete controls",
+          "[midi][bind]") {
+    midi::MidiControlBus bus;
+    midi::MidiBuffer out;
+
+    view::Fader fader;
+    view::bind_midi_cc(fader, bus, 1, 7);
+    fader.on_change(0.5f);
+    bus.drain_into(out);
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].channel() == 1);
+    REQUIRE(out[0].cc_number() == 7);
+    REQUIRE(out[0].cc_value() == 64);
+
+    view::RangeSlider slider;
+    view::bind_midi_cc(slider, bus, 0, 10);
+    slider.on_change(1.0f);
+    out = midi::MidiBuffer{};
+    bus.drain_into(out);
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].cc_value() == 127);
+
+    view::ToggleButton button;
+    view::bind_midi_cc(button, bus, 0, 64);
+    button.on_toggle(true);
+    button.on_toggle(false);
+    out = midi::MidiBuffer{};
+    bus.drain_into(out);
+    REQUIRE(out.size() == 2);
+    REQUIRE(out[0].cc_value() == 127);
+    REQUIRE(out[1].cc_value() == 0);
+
+    view::Toggle toggle;
+    view::bind_midi_cc(toggle, bus, 0, 65);
+    toggle.on_toggle(true);
+    out = midi::MidiBuffer{};
+    bus.drain_into(out);
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].cc_number() == 65);
+
+    view::Toggle note_toggle;
+    view::bind_midi_note(note_toggle, bus, 0, 48, 90);
+    note_toggle.on_toggle(true);
+    note_toggle.on_toggle(false);
+    out = midi::MidiBuffer{};
+    bus.drain_into(out);
+    REQUIRE(out.size() == 2);
+    REQUIRE(out[0].is_note_on());
+    REQUIRE(out[0].note() == 48);
+    REQUIRE(out[1].is_note_off());
+}
+
 TEST_CASE("MidiParameterMap routes a mapped CC to its parameter", "[state][midi-map]") {
     state::StateStore store;
     populate(store);
@@ -116,4 +168,15 @@ TEST_CASE("MidiParameterMap omni channel + clear", "[state][midi-map]") {
     map.pump();
     map.handle_cc(store, 9, 30, 0);
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0f, 1e-3f)); // unchanged
+
+    // Clear with multiple mappings: only the targeted one is removed, the
+    // other is retained (exercises the remove-keep path).
+    map.set_mapping(0, 40, 1);
+    map.set_mapping(0, 41, 2);
+    map.pump();
+    map.clear(1);
+    map.pump();
+    map.handle_cc(store, 0, 40, 127); // cleared — no effect
+    map.handle_cc(store, 0, 41, 127); // retained — drives param 2
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(1.0f, 1e-3f));
 }
