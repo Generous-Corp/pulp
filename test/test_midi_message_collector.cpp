@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "harness/rt_allocation_probe.hpp"
 #include <pulp/midi/message_collector.hpp>
 
 #include <atomic>
@@ -81,6 +82,38 @@ TEST_CASE("MidiMessageCollector defers future events to subsequent block",
                                           /*sample_rate=*/48000.0);
     REQUIRE(drained2 == 1);
     REQUIRE(block2.size() == 1);
+}
+
+TEST_CASE("MidiMessageCollector drain is allocation-free with prepared output",
+          "[midi][collector][rt-safety]") {
+    MidiMessageCollector<32> collector;
+    REQUIRE(collector.push_now(note_on(0, 60, 100), /*ts=*/1.001));
+    REQUIRE(collector.push_now(note_on(0, 64, 90),  /*ts=*/1.004));
+
+    MidiBuffer out;
+    out.reserve(/*event_capacity=*/4);
+    out.set_realtime_capacity_limit(true);
+
+    std::size_t drained = 0;
+    std::size_t allocation_count = 0;
+    std::size_t allocated_bytes = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        drained = collector.drain_into(out,
+                                       /*block_start=*/1.000,
+                                       /*block_samples=*/512,
+                                       /*sample_rate=*/48000.0);
+        allocation_count = probe.allocation_count();
+        allocated_bytes = probe.allocated_bytes();
+    }
+
+    REQUIRE(drained == 2);
+    REQUIRE(out.size() == 2);
+    REQUIRE(out[0].sample_offset == 48);
+    REQUIRE(out[1].sample_offset == 192);
+    REQUIRE(allocation_count == 0);
+    REQUIRE(allocated_bytes == 0);
+    REQUIRE(out.dropped_event_count() == 0);
 }
 
 TEST_CASE("MidiMessageCollector survives concurrent producer / consumer",

@@ -32,6 +32,12 @@ struct UmpEvent {
 /// Ownership and lifetime mirror `MidiBuffer`/`MpeBuffer`: the format
 /// adapter owns the buffer, fills it before `process()`, passes a
 /// pointer to the processor, and clears it afterwards. Not thread-safe.
+///
+/// Realtime contract: reserve() storage and enable
+/// set_realtime_capacity_limit(true) before using add() on the audio thread.
+/// With the limit enabled, add() drops and counts overflow instead of growing
+/// the backing vector. Without that preparation, append operations may
+/// allocate and belong on a non-realtime path.
 class UmpBuffer {
 public:
     UmpBuffer() { events_.reserve(kInitialCapacity); }

@@ -15,6 +15,13 @@ namespace pulp::midi {
 /// (call sort()) before iterating in the audio callback. Supports
 /// range-based for loops.
 ///
+/// Realtime contract: the buffer is safe for audio-thread appends only after
+/// the owner has called reserve() with the worst-case block capacities and
+/// set_realtime_capacity_limit(true). In that mode add() and SysEx append
+/// helpers drop and count overflow instead of growing storage. Without that
+/// preparation, vector growth remains possible and callers must treat mutation
+/// as control/offline-thread work.
+///
 /// @code
 /// MidiBuffer buf;
 /// buf.add(MidiEvent::note_on(0, 60, 100));
