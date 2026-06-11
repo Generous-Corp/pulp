@@ -8,6 +8,7 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <algorithm>
 #include <array>
@@ -1514,6 +1515,87 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     REQUIRE(fwd_ptr->last_seen().empty());
     REQUIRE(fwd_ptr->last_seen().sysex_size() == 0);
     REQUIRE(fwd_ptr->last_seen_ump().empty());
+
+    graph.release();
+}
+
+TEST_CASE("SignalGraph preserves MPE-bearing UMP events through MIDI edges",
+          "[host][graph][midi][mpe]") {
+    SignalGraph graph;
+    auto mi = graph.add_midi_input_node("mpe");
+    auto fwd = std::make_unique<MidiForwarder>();
+    auto* fwd_ptr = fwd.get();
+    auto p = graph.add_plugin_node(std::move(fwd), 0, 0, "mpe-fwd");
+    auto mo = graph.add_midi_output_node("mpe-out");
+
+    REQUIRE(graph.connect_midi(mi, p));
+    REQUIRE(graph.connect_midi(p, mo));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    pulp::midi::MidiBuffer mpe_events;
+    pulp::midi::UmpBuffer mpe_ump;
+    mpe_ump.add(pulp::midi::UmpPacket::note_on_2(0, 1, 60, 0x8000), 3);
+    mpe_ump.add(pulp::midi::UmpPacket::per_note_pitch_bend(
+                    0, 1, 60, 0xC0000000u),
+                11);
+    mpe_ump.add(pulp::midi::UmpPacket::registered_per_note_cc(
+                    0, 1, 60, 74, 0xFFFFFFFFu),
+                19);
+    mpe_ump.add(pulp::midi::UmpPacket::per_note_management(
+                    0,
+                    1,
+                    60,
+                    pulp::midi::UmpPacket::kPerNoteDetachControllers),
+                27);
+    mpe_events.attach_ump(&mpe_ump);
+    REQUIRE(graph.inject_midi(mi, mpe_events));
+
+    float in_sample = 0.0f;
+    float out_sample = 0.0f;
+    const float* in_ptrs[1] = {&in_sample};
+    float* out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 0, 64);
+    pulp::audio::BufferView<float> ov(out_ptrs, 0, 64);
+    graph.process(ov, iv, 64);
+
+    REQUIRE(fwd_ptr->last_seen_ump().size() == 4);
+    REQUIRE(fwd_ptr->last_seen_ump()[0].sample_offset == 3);
+    REQUIRE(fwd_ptr->last_seen_ump()[1].packet.status() == 0x61);
+    REQUIRE(fwd_ptr->last_seen_ump()[2].packet.status() == 0x01);
+    REQUIRE(fwd_ptr->last_seen_ump()[3].packet.status() == 0xF1);
+
+    pulp::midi::MidiBuffer arrived;
+    pulp::midi::UmpBuffer arrived_ump;
+    arrived.attach_ump(&arrived_ump);
+    REQUIRE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived_ump.size() == 4);
+    REQUIRE(arrived_ump[0].sample_offset == 3);
+    REQUIRE(arrived_ump[1].sample_offset == 11);
+    REQUIRE(arrived_ump[2].sample_offset == 19);
+    REQUIRE(arrived_ump[3].sample_offset == 27);
+
+    pulp::midi::MpeVoiceTracker tracker;
+    pulp::midi::MpeBuffer derived;
+    int32_t current_sample_offset = 0;
+    pulp::midi::bind_tracker_to_buffer(tracker, derived, current_sample_offset);
+    for (const auto& ev : arrived_ump) {
+        current_sample_offset = ev.sample_offset;
+        REQUIRE(tracker.process(ev.packet));
+    }
+
+    REQUIRE(derived.size() == 3);
+    REQUIRE(derived[0].sample_offset == 3);
+    REQUIRE(derived[0].kind == pulp::midi::MpeExpressionEvent::Kind::NoteOn);
+    REQUIRE(derived[1].sample_offset == 11);
+    REQUIRE(derived[1].kind == pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE_THAT(derived[1].state.pitch_bend_semitones,
+                 WithinAbs(24.0f, 0.001f));
+    REQUIRE(derived[2].sample_offset == 19);
+    REQUIRE(derived[2].kind == pulp::midi::MpeExpressionEvent::Kind::Timbre);
+    REQUIRE_THAT(derived[2].state.timbre, WithinAbs(1.0f, 0.001f));
+    const auto* note = tracker.find(1, 60);
+    REQUIRE(note != nullptr);
+    REQUIRE(note->detached);
 
     graph.release();
 }

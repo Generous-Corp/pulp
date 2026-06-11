@@ -41,7 +41,12 @@ Four connection variants cover the non-audio-passthrough cases:
   MIDI in/out buffers (ports are ignored). Participates in cycle
   detection the same way audio edges do. `inject_midi(node, buf)` loads
   a `MidiInput`'s output before a block; `extract_midi(node, &out)`
-  reads the latest `MidiOutput` input snapshot after a block.
+  reads the latest `MidiOutput` input snapshot after a block. MIDI edges
+  preserve the full logical block: short MIDI events, SysEx sidecars, and an
+  attached `UmpBuffer`. MPE is derived from those events rather than stored as a
+  separate graph-owned sidecar, so route MIDI 1.0 MPE channel messages or MIDI
+  2.0 per-note UMP packets through the graph and derive `MpeBuffer` at the
+  processor/adapter boundary with `MpeVoiceTracker`.
 - `connect_feedback(from, port, to, port)` closes a cycle with an
   explicit one-block delay — the destination reads the source's previous
   block's output. Invisible to the topological sort and PDC so the
