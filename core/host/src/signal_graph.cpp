@@ -707,7 +707,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             rt.input_ptrs[c] = rt.input_data.data() + static_cast<size_t>(c) * max_block_size;
             rt.input_const_ptrs[c] = rt.input_ptrs[c];
         }
-        rt.gain = n.gain;  // copy UI-thread scalar into per-snapshot runtime
+        rt.gain = std::make_unique<std::atomic<float>>(n.gain);
         if (n.plugin) {
             for (const auto& p : n.plugin->parameters()) {
                 rt.param_bounds.push_back({
@@ -1307,7 +1307,9 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 break;
             }
             case NodeType::Gain: {
-                const float g = rt.gain;
+                const float g = rt.gain
+                    ? rt.gain->load(std::memory_order_relaxed)
+                    : 1.0f;
                 const int chs = std::min(
                     static_cast<int>(rt.input_ptrs.size()),
                     static_cast<int>(rt.output_ptrs.size()));
@@ -1386,16 +1388,17 @@ void SignalGraph::clear() {
 
 bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // Write the UI-thread-owned scalar on GraphNode so it survives future
-    // compile_() calls. Also reflect into the live snapshot's runtime (safe:
-    // the audio thread reads it once per block as a plain float load) so the
-    // change takes effect without a re-prepare.
+    // compile_() calls. Also reflect into the live snapshot's runtime through
+    // a per-runtime atomic so the change takes effect without a re-prepare.
     auto* n = const_cast<GraphNode*>(node(id));
     if (!n) return false;
     n->gain = linear_gain;
     auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
     if (cg) {
         auto it = cg->runtime.find(id);
-        if (it != cg->runtime.end()) it->second.gain = linear_gain;
+        if (it != cg->runtime.end() && it->second.gain) {
+            it->second.gain->store(linear_gain, std::memory_order_relaxed);
+        }
     }
     return true;
 }
