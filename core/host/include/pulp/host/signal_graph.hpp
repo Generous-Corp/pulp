@@ -19,6 +19,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -343,6 +344,27 @@ public:
     float get_node_parameter(NodeId id, uint32_t param_id) const;
 
 private:
+    struct MidiBlockSnapshot {
+        MidiBlockSnapshot();
+        MidiBlockSnapshot(const MidiBlockSnapshot& other);
+        MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other);
+        bool set_from_midi(const midi::MidiBuffer& src,
+                           uint64_t new_sequence,
+                           bool source_incomplete = false);
+        bool copy_to_midi(midi::MidiBuffer& dst) const;
+
+        midi::MidiBuffer events;
+        midi::UmpBuffer ump;
+        bool incomplete = false;
+        uint64_t sequence = 0;
+    };
+
+    struct MidiInputMailbox {
+        runtime::TripleBuffer<MidiBlockSnapshot> published;
+        MidiBlockSnapshot writer_scratch;
+        std::atomic<uint64_t> next_sequence{0};
+    };
+
     struct NodeRuntime {
         // Per-node output-port channel storage (interleaved per-port, flat).
         // data_ has size num_output_ports * max_block_size_; channel_ptrs_[p]
@@ -381,15 +403,18 @@ private:
         };
         std::vector<SparseAutomationAccum> sparse_automation_accum;
 
-        // MIDI scratch. Cleared at the start of each process() call except
-        // for MidiInput nodes, whose midi_out is populated by inject_midi()
-        // and must survive the process() entry-clear.
+        // MIDI scratch is audio-thread-owned. Control-thread ingress and
+        // egress use the mailboxes below so inject_midi()/extract_midi() do
+        // not race process() scratch mutation.
         midi::MidiBuffer midi_in;
         midi::MidiBuffer midi_out;
         midi::UmpBuffer midi_in_ump;
         midi::UmpBuffer midi_out_ump;
         bool midi_in_incomplete = false;
         bool midi_out_incomplete = false;
+        std::unique_ptr<MidiInputMailbox> midi_input_mailbox;
+        std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
+        uint64_t midi_input_sequence_seen = 0;
 
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized slice in audio_rate_param_data, filled immediately
@@ -461,6 +486,7 @@ private:
         double sample_rate = 0.0;  // item 4.6 — needed to convert
                                    // automation_smoothing_ms into samples.
         int64_t total_latency_samples = 0;
+        MidiBlockSnapshot midi_publish_scratch;
     };
 
     std::vector<GraphNode> nodes_;

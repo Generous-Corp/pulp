@@ -148,6 +148,40 @@ std::shared_ptr<void> make_custom_instance(const CustomNodeType& type) {
 
 } // namespace
 
+SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot() {
+    prepare_midi_block_storage(events, ump);
+}
+
+SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(
+    const MidiBlockSnapshot& other)
+    : MidiBlockSnapshot() {
+    *this = other;
+}
+
+SignalGraph::MidiBlockSnapshot&
+SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) {
+    if (this == &other) return *this;
+    set_from_midi(other.events, other.sequence, other.incomplete);
+    return *this;
+}
+
+bool SignalGraph::MidiBlockSnapshot::set_from_midi(
+    const midi::MidiBuffer& src,
+    uint64_t new_sequence,
+    bool source_incomplete) {
+    clear_midi_block(events);
+    sequence = new_sequence;
+    const bool copied_all = copy_midi_block(src, events);
+    incomplete = source_incomplete || !copied_all;
+    return !incomplete;
+}
+
+bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
+    midi::MidiBuffer& dst) const {
+    const bool copied_all = copy_midi_block(events, dst);
+    return copied_all && !incomplete;
+}
+
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     GraphNode node;
     node.id = next_id_++;
@@ -506,9 +540,18 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
-    clear_midi_block(it->second.midi_out);
-    const bool copied_all = copy_midi_block(events, it->second.midi_out);
-    it->second.midi_out_incomplete = !copied_all;
+    auto shape_it = cg->shapes.find(id);
+    if (shape_it == cg->shapes.end()
+        || shape_it->second.type != NodeType::MidiInput
+        || !it->second.midi_input_mailbox) {
+        return false;
+    }
+
+    auto& mailbox = *it->second.midi_input_mailbox;
+    const uint64_t sequence =
+        mailbox.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    const bool copied_all = mailbox.writer_scratch.set_from_midi(events, sequence);
+    mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
 }
 
@@ -517,8 +560,15 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
-    const bool copied_all = copy_midi_block(it->second.midi_in, out);
-    return copied_all && !it->second.midi_in_incomplete;
+    auto shape_it = cg->shapes.find(id);
+    if (shape_it == cg->shapes.end()
+        || shape_it->second.type != NodeType::MidiOutput
+        || !it->second.midi_output_mailbox) {
+        return false;
+    }
+
+    const auto& snapshot = it->second.midi_output_mailbox->read();
+    return snapshot.copy_to_midi(out);
 }
 
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
@@ -723,6 +773,14 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                                    runtime_it->second.midi_in_ump);
         prepare_midi_block_storage(runtime_it->second.midi_out,
                                    runtime_it->second.midi_out_ump);
+        if (n.type == NodeType::MidiInput) {
+            runtime_it->second.midi_input_mailbox =
+                std::make_unique<MidiInputMailbox>();
+        }
+        if (n.type == NodeType::MidiOutput) {
+            runtime_it->second.midi_output_mailbox =
+                std::make_unique<runtime::TripleBuffer<MidiBlockSnapshot>>();
+        }
 
         CompiledGraph::NodeShape shape{n.type, n.num_input_ports, n.num_output_ports};
         cg->shapes[n.id] = shape;
@@ -960,9 +1018,17 @@ void SignalGraph::process(audio::BufferView<float>& output,
         }
         rt.midi_in_incomplete = false;
         clear_midi_block(rt.midi_in);
-        if (shape.type != NodeType::MidiInput) {
-            clear_midi_block(rt.midi_out);
-            rt.midi_out_incomplete = false;
+        rt.midi_out_incomplete = false;
+        clear_midi_block(rt.midi_out);
+        if (shape.type == NodeType::MidiInput && rt.midi_input_mailbox) {
+            const auto& injected = rt.midi_input_mailbox->published.read();
+            if (injected.sequence != 0
+                && injected.sequence != rt.midi_input_sequence_seen) {
+                rt.midi_input_sequence_seen = injected.sequence;
+                if (!injected.copy_to_midi(rt.midi_out)) {
+                    rt.midi_out_incomplete = true;
+                }
+            }
         }
 
         // 1b. Gather MIDI from MIDI-flagged inbound connections.
@@ -1332,7 +1398,15 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 break;
             }
             case NodeType::MidiInput:
+                break;
             case NodeType::MidiOutput:
+                if (rt.midi_output_mailbox) {
+                    cg->midi_publish_scratch.set_from_midi(
+                        rt.midi_in,
+                        0,
+                        rt.midi_in_incomplete);
+                    rt.midi_output_mailbox->write(cg->midi_publish_scratch);
+                }
                 break;
             case NodeType::Custom:
                 if (auto custom_it = cg->custom_processors.find(id);
@@ -1367,9 +1441,9 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     sizeof(float) * static_cast<size_t>(num_samples));
     }
 
-    // Drain MidiInput nodes' midi_out so events injected for THIS block
-    // don't get re-consumed next block. inject_midi() runs before the
-    // next process() call to refill them.
+    // Drain MidiInput nodes' audio-thread scratch so events consumed for THIS
+    // block never carry over. inject_midi() publishes into the mailbox; the
+    // next process() call copies a new, unseen snapshot back into midi_out.
     for (auto& [nid, rt] : cg->runtime) {
         auto sit = cg->shapes.find(nid);
         if (sit != cg->shapes.end() && sit->second.type == NodeType::MidiInput) {

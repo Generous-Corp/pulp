@@ -36,10 +36,10 @@ live snapshot. **Never call them from the audio thread.**
   from it. Safe to call concurrently with any UI-thread mutator: in the
   worst case, the block after a mutation is silence until `prepare()`
   is re-called.
-- `inject_midi` / `extract_midi` — mutate snapshot-owned MIDI scratch
-  buffers; safe for the audio thread to call *before* the block
-  starts (`inject_midi`) and *after* it ends (`extract_midi`). In
-  typical flow, the UI thread injects MIDI and reads extracted events.
+- `inject_midi` / `extract_midi` — publish/read MIDI through
+  snapshot-owned lock-free mailboxes; safe to call concurrently with
+  `process()`. In typical flow, the UI thread injects MIDI and reads
+  extracted events.
 
 ### UI-thread read-only accessors
 

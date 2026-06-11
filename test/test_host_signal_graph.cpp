@@ -1487,6 +1487,110 @@ TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime
     REQUIRE(out.empty());
 }
 
+TEST_CASE("SignalGraph MIDI ingress and egress mailboxes allocate only at prepare",
+          "[host][graph][midi][rt-safety]") {
+    SignalGraph graph;
+    auto midi_in = graph.add_midi_input_node("keys");
+    auto midi_out = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    float in_sample = 0.f, out_sample = 0.f;
+    const float* in_ptrs[1] = {&in_sample};
+    float* out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 0, 32);
+    pulp::audio::BufferView<float> ov(out_ptrs, 0, 32);
+
+    pulp::midi::MidiBuffer events;
+    events.reserve(1);
+    events.add(pulp::midi::MidiEvent::note_on(0, 64, 100));
+
+    pulp::midi::MidiBuffer out;
+    out.reserve(1);
+
+    pulp::test::RtAllocationProbe probe;
+    REQUIRE(graph.inject_midi(midi_in, events));
+    graph.process(ov, iv, 32);
+    REQUIRE(graph.extract_midi(midi_out, out));
+
+    REQUIRE(probe.allocation_count() == 0);
+    REQUIRE(probe.allocated_bytes() == 0);
+    REQUIRE(out.size() == 1);
+}
+
+TEST_CASE("SignalGraph MIDI ingress and egress mailboxes are Race-free",
+          "[host][graph][midi][race][tsan]") {
+    SignalGraph graph;
+    auto midi_in = graph.add_midi_input_node("keys");
+    auto midi_out = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    float in_sample = 0.f, out_sample = 0.f;
+    const float* in_ptrs[1] = {&in_sample};
+    float* out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 0, 32);
+    pulp::audio::BufferView<float> ov(out_ptrs, 0, 32);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> updates_active{false};
+    std::atomic<int> processed_blocks{0};
+    std::atomic<int> blocks_during_updates{0};
+    std::thread audio_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.process(ov, iv, 32);
+            processed_blocks.fetch_add(1, std::memory_order_relaxed);
+            if (updates_active.load(std::memory_order_acquire)) {
+                blocks_during_updates.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    });
+
+    bool all_injects_succeeded = true;
+    bool all_extracts_succeeded = true;
+    bool saw_invalid_output = false;
+    constexpr int kMinMidiUpdates = 10000;
+    constexpr int kMinBlocksDuringUpdates = 4;
+    constexpr int kMaxMidiUpdates = 1000000;
+    int update_count = 0;
+    updates_active.store(true, std::memory_order_release);
+    while ((update_count < kMinMidiUpdates
+            || blocks_during_updates.load(std::memory_order_relaxed)
+                < kMinBlocksDuringUpdates)
+           && update_count < kMaxMidiUpdates) {
+        pulp::midi::MidiBuffer events;
+        auto ev = pulp::midi::MidiEvent::note_on(
+            0,
+            60 + (update_count % 12),
+            96);
+        ev.sample_offset = update_count % 32;
+        events.add(ev);
+        all_injects_succeeded =
+            graph.inject_midi(midi_in, events) && all_injects_succeeded;
+
+        pulp::midi::MidiBuffer out;
+        all_extracts_succeeded =
+            graph.extract_midi(midi_out, out) && all_extracts_succeeded;
+        if (out.size() > 1 || out.sysex_size() != 0) {
+            saw_invalid_output = true;
+        }
+        if ((update_count % 64) == 0) std::this_thread::yield();
+        ++update_count;
+    }
+    updates_active.store(false, std::memory_order_release);
+
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(all_injects_succeeded);
+    REQUIRE(all_extracts_succeeded);
+    REQUIRE(processed_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(blocks_during_updates.load(std::memory_order_relaxed)
+            >= kMinBlocksDuringUpdates);
+    REQUIRE_FALSE(saw_invalid_output);
+    graph.release();
+}
+
 // ── Phase 1E connect_automation test ────────────────────────────────────
 
 namespace {

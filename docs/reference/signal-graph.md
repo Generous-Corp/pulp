@@ -41,7 +41,7 @@ Four connection variants cover the non-audio-passthrough cases:
   MIDI in/out buffers (ports are ignored). Participates in cycle
   detection the same way audio edges do. `inject_midi(node, buf)` loads
   a `MidiInput`'s output before a block; `extract_midi(node, &out)`
-  drains a `MidiOutput`'s input after a block.
+  reads the latest `MidiOutput` input snapshot after a block.
 - `connect_feedback(from, port, to, port)` closes a cycle with an
   explicit one-block delay — the destination reads the source's previous
   block's output. Invisible to the topological sort and PDC so the
