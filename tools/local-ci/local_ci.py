@@ -154,6 +154,7 @@ import desktop_doctor as _desktop_doctor  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
+import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
@@ -3300,203 +3301,98 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 def resolve_submission_options(
     args: argparse.Namespace, command: str
 ) -> tuple[dict, str, str, list[str], str, str, dict]:
-    config = load_config()
-    branch = args.branch or current_branch()
-    if args.sha:
-        sha = args.sha
-    elif args.branch:
-        sha = resolve_git_ref_sha(branch)
-    else:
-        sha = current_sha()
-    targets = resolve_targets(config, parse_targets_arg(getattr(args, "targets", None)))
-    priority = normalize_priority(getattr(args, "priority", None) or default_priority_for(command, config))
-    validation = normalize_validation_mode("smoke" if getattr(args, "smoke", False) else "full")
-    submission = build_submission_metadata(
-        config,
-        branch,
-        sha,
-        targets,
-        priority,
-        validation,
-        allow_root_mismatch=bool(getattr(args, "allow_root_mismatch", False)),
-        allow_unreachable_targets=bool(getattr(args, "allow_unreachable_targets", False)),
+    return _local_ci_commands_cli.resolve_submission_options(
+        args,
+        command,
+        load_config_fn=load_config,
+        current_branch_fn=current_branch,
+        resolve_git_ref_sha_fn=resolve_git_ref_sha,
+        current_sha_fn=current_sha,
+        resolve_targets_fn=resolve_targets,
+        parse_targets_arg_fn=parse_targets_arg,
+        normalize_priority_fn=normalize_priority,
+        default_priority_for_fn=default_priority_for,
+        normalize_validation_mode_fn=normalize_validation_mode,
+        build_submission_metadata_fn=build_submission_metadata,
     )
-    return config, branch, sha, targets, priority, validation, submission
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
-    try:
-        _config, branch, sha, targets, priority, validation, submission = resolve_submission_options(args, "enqueue")
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    print_submission_metadata(submission)
-    job, created = enqueue_job(branch, sha, priority, targets, "enqueue", validation, submission=submission)
-    print(enqueue_command_result_line(job, created=created))
-    return 0
+    return _local_ci_commands_cli.cmd_enqueue(
+        args,
+        resolve_submission_options_fn=resolve_submission_options,
+        print_submission_metadata_fn=print_submission_metadata,
+        enqueue_job_fn=enqueue_job,
+        enqueue_command_result_line_fn=enqueue_command_result_line,
+    )
 
 
 def cmd_drain(_args: argparse.Namespace) -> int:
-    try:
-        config = load_config()
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    acquired, any_failure = drain_pending_jobs(config, blocking=False)
-    if not acquired:
-        print(drain_runner_active_line(current_runner_info()))
-        return 0
-
-    notify("CI complete" + (" - PASSED" if not any_failure else " - FAILED"))
-    return 1 if any_failure else 0
+    return _local_ci_commands_cli.cmd_drain(
+        _args,
+        load_config_fn=load_config,
+        drain_pending_jobs_fn=drain_pending_jobs,
+        current_runner_info_fn=current_runner_info,
+        drain_runner_active_line_fn=drain_runner_active_line,
+        notify_fn=notify,
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    try:
-        config, branch, sha, targets, priority, validation, submission = resolve_submission_options(args, "run")
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    print_submission_metadata(submission)
-
-    # Auto-dispatch Namespace for unreachable targets
-    failover_targets = submission.get("namespace_failover_targets", [])
-    if failover_targets:
-        ga_cfg = config.get("github_actions", {})
-        repository = ga_cfg.get("repository", "danielraffel/pulp")
-        print(f"\n⚠️  Namespace failover: dispatching {', '.join(failover_targets)} to Namespace")
-        try:
-            gh_workflow_dispatch(repository, "build.yml", branch, {"runner_provider": "namespace"})
-            print(f"  Dispatched Namespace run for {branch}")
-        except Exception as exc:
-            print(f"  Warning: Namespace dispatch failed: {exc}")
-
-    # Only run local targets (skip unreachable ones that were dispatched to Namespace)
-    local_targets = [t for t in targets if t not in failover_targets]
-    if local_targets:
-        job, created = enqueue_job(branch, sha, priority, local_targets, "run", validation, submission=submission)
-        print(enqueue_command_result_line(job, created=created))
-
-        result, exit_code = wait_for_job(job["id"], config)
-        if result is not None:
-            print_result(result, Path(load_job(job["id"])["result_file"]))
-    else:
-        print("All targets dispatched to Namespace — no local work to do.")
-        exit_code = 0
-
-    if failover_targets:
-        print(f"\nNote: {', '.join(failover_targets)} results are on Namespace.")
-        print(f"  Check with: python3 tools/local-ci/local_ci.py cloud status")
-
-    notify("CI run complete" + (" - PASSED" if exit_code == 0 else " - FAILED"))
-    return exit_code
+    return _local_ci_commands_cli.cmd_run(
+        args,
+        resolve_submission_options_fn=resolve_submission_options,
+        print_submission_metadata_fn=print_submission_metadata,
+        gh_workflow_dispatch_fn=gh_workflow_dispatch,
+        enqueue_job_fn=enqueue_job,
+        enqueue_command_result_line_fn=enqueue_command_result_line,
+        wait_for_job_fn=wait_for_job,
+        load_job_fn=load_job,
+        print_result_fn=print_result,
+        notify_fn=notify,
+    )
 
 
 def cmd_ship(args: argparse.Namespace) -> int:
-    try:
-        config, branch, sha, targets, priority, validation, submission = resolve_submission_options(args, "ship")
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        return 1
-    if validation != "full":
-        print("Error: ship only supports full validation. Use `run --smoke` or `check --smoke` for preflight.")
-        return 1
-
-    base = args.base or "main"
-    if branch == base:
-        print(f"Error: cannot ship {base} to itself. Checkout a feature branch first.")
-        return 1
-
-    if not gh_available():
-        print("Error: gh CLI not available or not authenticated. Run: gh auth login")
-        return 1
-
-    print(f"\n=== Shipping {branch} -> {base} ===\n")
-    print_submission_metadata(submission)
-    print(f"  Pushing {branch}...")
-    push = subprocess.run(
-        ["git", "push", "-u", "origin", branch],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
+    return _local_ci_commands_cli.cmd_ship(
+        args,
+        resolve_submission_options_fn=resolve_submission_options,
+        gh_available_fn=gh_available,
+        print_submission_metadata_fn=print_submission_metadata,
+        root=ROOT,
+        run_fn=subprocess.run,
+        gh_pr_create_fn=gh_pr_create,
+        enqueue_job_fn=enqueue_job,
+        summarize_job_fn=summarize_job,
+        wait_for_job_fn=wait_for_job,
+        gh_pr_comment_fn=gh_pr_comment,
+        format_ci_comment_fn=format_ci_comment,
+        gh_pr_merge_fn=gh_pr_merge,
+        notify_fn=notify,
     )
-    if push.returncode != 0:
-        print(f"  Push failed: {push.stderr.strip()}")
-        return 1
-
-    print("  Creating PR...")
-    pr_number = gh_pr_create(branch, base)
-    if pr_number is None:
-        print("  Failed to create or find PR.")
-        return 1
-    print(f"  PR #{pr_number} ready")
-
-    job, _created = enqueue_job(branch, sha, priority, targets, "ship", validation, submission=submission)
-    print(f"  Queueing CI: {summarize_job(job)}")
-    result, exit_code = wait_for_job(job["id"], config)
-    if result is None:
-        return 1
-
-    gh_pr_comment(pr_number, format_ci_comment(result))
-    if result["overall"] == "pass":
-        print(f"  All targets passed. Merging PR #{pr_number}...")
-        if gh_pr_merge(pr_number):
-            print(f"  PR #{pr_number} merged and branch deleted.")
-            notify(f"PR #{pr_number} shipped to {base}!")
-            return 0
-        print(f"  Merge failed. PR #{pr_number} is still open.")
-        notify(f"PR #{pr_number} CI passed but merge failed")
-        return 1
-
-    print(f"  CI failed. PR #{pr_number} left open for review.")
-    notify(f"PR #{pr_number} CI failed")
-    return exit_code
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    if not gh_available():
-        print("Error: gh CLI not available. Run: gh auth login")
-        return 1
-
-    pr_info = gh_pr_head(args.pr)
-    if pr_info is None:
-        return 1
-
-    pr_number, branch, sha = pr_info
-    print(f"  PR #{pr_number} -> branch: {branch} @ {short_sha(sha)}")
-
-    try:
-        config = load_config()
-        targets = resolve_targets(config, parse_targets_arg(args.targets))
-        priority = normalize_priority(args.priority or default_priority_for("check", config))
-        validation = normalize_validation_mode("smoke" if getattr(args, "smoke", False) else "full")
-        submission = build_submission_metadata(
-            config,
-            branch,
-            sha,
-            targets,
-            priority,
-            validation,
-            allow_root_mismatch=bool(getattr(args, "allow_root_mismatch", False)),
-            allow_unreachable_targets=bool(getattr(args, "allow_unreachable_targets", False)),
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    print_submission_metadata(submission)
-    job, _created = enqueue_job(branch, sha, priority, targets, "check", validation, submission=submission)
-    print(f"  Queueing CI: {summarize_job(job)}")
-    result, exit_code = wait_for_job(job["id"], config)
-    if result is None:
-        return 1
-
-    gh_pr_comment(pr_number, format_ci_comment(result))
-    notify("CI check complete" + (" - PASSED" if exit_code == 0 else " - FAILED"))
-    return exit_code
+    return _local_ci_commands_cli.cmd_check(
+        args,
+        gh_available_fn=gh_available,
+        gh_pr_head_fn=gh_pr_head,
+        short_sha_fn=short_sha,
+        load_config_fn=load_config,
+        resolve_targets_fn=resolve_targets,
+        parse_targets_arg_fn=parse_targets_arg,
+        normalize_priority_fn=normalize_priority,
+        default_priority_for_fn=default_priority_for,
+        normalize_validation_mode_fn=normalize_validation_mode,
+        build_submission_metadata_fn=build_submission_metadata,
+        print_submission_metadata_fn=print_submission_metadata,
+        enqueue_job_fn=enqueue_job,
+        summarize_job_fn=summarize_job,
+        wait_for_job_fn=wait_for_job,
+        gh_pr_comment_fn=gh_pr_comment,
+        format_ci_comment_fn=format_ci_comment,
+        notify_fn=notify,
+    )
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
@@ -3517,14 +3413,12 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
-    if not gh_available():
-        print("Error: gh CLI not available. Run: gh auth login")
-        return 1
-
-    prs = gh_pr_list_open()
-    for line in open_pr_list_lines(prs):
-        print(line)
-    return 0
+    return _local_ci_commands_cli.cmd_list(
+        _args,
+        gh_available_fn=gh_available,
+        gh_pr_list_open_fn=gh_pr_list_open,
+        open_pr_list_lines_fn=open_pr_list_lines,
+    )
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
@@ -3562,113 +3456,38 @@ def cmd_evidence(args: argparse.Namespace) -> int:
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
-    try:
-        config = load_config()
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    queue = load_queue()
-    pending, running, completed = queue_status_groups(queue)
-    runner = current_runner_info()
-
-    print(f"State: {state_dir()}")
-    print(f"Config: {config_path()}")
-
-    print(f"\n{status_runner_line(runner)}")
-
-    if running:
-        print(f"\nRunning ({len(running)}):")
-        for job in running:
-            print(f"  {summarize_job(job)} started {job.get('started_at', '?')}")
-            for line in status_submission_lines(job):
-                print(f"    {line}")
-            active_targets = status_active_targets(job, runner)
-            target_summary = summarize_active_targets(active_targets, job.get("targets"))
-            if target_summary:
-                print(f"    live targets: {target_summary}")
-            for line in status_target_detail_lines(job, active_targets):
-                print(f"    {line}")
-    else:
-        print("\nNo running jobs.")
-
-    if pending:
-        print(f"\nPending ({len(pending)}):")
-        for job in pending:
-            print(f"  {summarize_job(job)} queued {job.get('queued_at', '?')}")
-            for line in status_submission_lines(job):
-                print(f"    {line}")
-            active_targets = status_active_targets(job)
-            target_summary = summarize_active_targets(active_targets, job.get("targets"))
-            if target_summary:
-                progress_at = job.get("last_progress_at") or job.get("requeued_at") or "?"
-                print(f"    last known targets: {target_summary} (updated {progress_at})")
-            for line in status_target_detail_lines(job, active_targets):
-                print(f"    {line}")
-    else:
-        print("\nNo pending jobs.")
-
-    recent_completed = recent_completed_jobs_for_status(completed)
-    if recent_completed:
-        print(f"\nRecent ({len(recent_completed)}):")
-        for job in recent_completed:
-            result_file = job.get("result_file")
-            if result_file and Path(result_file).exists():
-                result = load_result(Path(result_file))
-                print(f"  {recent_completed_status_line(job, result)}")
-            else:
-                print(f"  {recent_completed_missing_result_line(job)}")
-
-    branch = current_branch()
-    if branch:
-        print(f"\nEvidence ({branch}):")
-        if not print_evidence_summary(branch=branch, limit=2, indent="  "):
-            print("  (none)")
-
-    cloud_records = list_cloud_records(limit=5)
-    all_cloud_records = list_cloud_records(limit=None)
-    cloud_config = load_optional_config()
-    cloud_settings_note = ""
-    cloud_settings = github_actions_settings_for_display(cloud_config)
-    try:
-        resolved_cloud_settings = resolve_github_actions_settings(cloud_config)
-        cloud_settings = resolved_cloud_settings
-    except ValueError as exc:
-        cloud_settings_note = str(exc)
-    default_workflow_key = cloud_settings.get("workflow", "build")
-    try:
-        default_provider, _default_provider_source = resolve_default_provider_for_workflow(
-            cloud_settings,
-            default_workflow_key,
-        )
-    except ValueError:
-        default_provider = cloud_settings.get("provider", "github-hosted")
-
-    print(
-        f"\nCloud defaults: workflow={default_workflow_key} provider={default_provider} "
-        "(`pulp ci-local cloud defaults` for selectors and sources)"
+    return _local_ci_commands_cli.cmd_status(
+        _args,
+        load_config_fn=load_config,
+        load_queue_fn=load_queue,
+        queue_status_groups_fn=queue_status_groups,
+        current_runner_info_fn=current_runner_info,
+        state_dir_fn=state_dir,
+        config_path_fn=config_path,
+        status_runner_line_fn=status_runner_line,
+        summarize_job_fn=summarize_job,
+        status_submission_lines_fn=status_submission_lines,
+        status_active_targets_fn=status_active_targets,
+        summarize_active_targets_fn=summarize_active_targets,
+        status_target_detail_lines_fn=status_target_detail_lines,
+        recent_completed_jobs_for_status_fn=recent_completed_jobs_for_status,
+        load_result_fn=load_result,
+        recent_completed_status_line_fn=recent_completed_status_line,
+        recent_completed_missing_result_line_fn=recent_completed_missing_result_line,
+        current_branch_fn=current_branch,
+        print_evidence_summary_fn=print_evidence_summary,
+        list_cloud_records_fn=list_cloud_records,
+        load_optional_config_fn=load_optional_config,
+        github_actions_settings_for_display_fn=github_actions_settings_for_display,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        resolve_default_provider_for_workflow_fn=resolve_default_provider_for_workflow,
+        print_billing_period_summary_fn=print_billing_period_summary,
+        estimate_billing_period_totals_fn=estimate_billing_period_totals,
+        cloud_record_summary_fn=cloud_record_summary,
+        print_state_footprint_fn=print_local_ci_state_footprint,
+        utmctl_vm_status_fn=utmctl_vm_status,
+        ssh_reachable_fn=ssh_reachable,
     )
-    if cloud_settings_note:
-        print(f"  note: {cloud_settings_note}")
-
-    if cloud_records:
-        print_billing_period_summary(estimate_billing_period_totals(all_cloud_records, cloud_config), indent="  ")
-        print("\nCloud (latest 5 known to this machine):")
-        for record in cloud_records:
-            print(f"  {cloud_record_summary(record, cloud_config)}")
-
-    print()
-    print_local_ci_state_footprint(indent="  ")
-
-    print("\nVM Status:")
-    for vm_name in ["Ubuntu 24.04 desktop", "Windows"]:
-        print(f"  {vm_name}: {utmctl_vm_status(vm_name) or 'not found'}")
-
-    for host in [target_cfg.get("host") for target_cfg in config.get("targets", {}).values() if target_cfg.get("type") == "ssh"]:
-        if host:
-            print(f"  ssh {host}: {'up' if ssh_reachable(host, 3) else 'down'}")
-
-    return 0
 
 
 def cmd_desktop_install(args: argparse.Namespace) -> int:
