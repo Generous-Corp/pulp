@@ -5736,7 +5736,9 @@ pulp_add_test_suite(pulp-test-ump-buffer-conversion
     LIBRARIES pulp::format)
 
 # MPE buffer + Processor sidecar tests
-pulp_add_test_suite(pulp-test-mpe-buffer LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-mpe-buffer
+    SOURCES test_mpe_buffer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::format)
 
 # MPE synth voice helpers (voice, allocator, glide detector)
 pulp_add_test_suite(pulp-test-mpe-synth-voice LIBRARIES pulp::midi)
