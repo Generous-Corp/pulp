@@ -28,7 +28,11 @@
 #include <pulp/signal/signal.hpp>
 #include <pulp/signal/sinc_resampler.hpp>
 #include <pulp/signal/spectrogram.hpp>
+#include <pulp/signal/spectral_frame_engine.hpp>
+#include <pulp/signal/stft.hpp>
+#include <pulp/signal/stn_decomposer.hpp>
 #include <pulp/signal/special_functions.hpp>
+#include <pulp/signal/transient_phase_policy.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/wavetable.hpp>
 #include <pulp/signal/windowing.hpp>
@@ -539,6 +543,108 @@ TEST_CASE("Prepared freeze and pitched delay helpers are allocation-free while p
         delay.set_feedback(0.25f);
         (void)delay.min_delay_samples();
         delay.reset();
+    });
+}
+
+TEST_CASE("Prepared spectral analysis helpers are allocation-free while processing",
+          "[signal][spectral][rt-safety]") {
+    Stft stft;
+    StftConfig stft_config;
+    stft_config.fft_size = 256;
+    stft_config.hop_size = 64;
+    stft.configure(stft_config);
+    std::array<float, 256> stft_input {};
+    for (std::size_t i = 0; i < stft_input.size(); ++i)
+        stft_input[i] = std::sin(static_cast<float>(i) * 0.05f);
+
+    SpectralFrameEngine engine;
+    SpectralFrameEngineConfig engine_config;
+    engine_config.fft_size = 256;
+    engine_config.analysis_hop = 64;
+    engine_config.channels = 2;
+    engine_config.max_block = 128;
+    engine_config.max_synthesis_hop = 128;
+    engine.prepare(engine_config);
+    std::array<float, 128> engine_in_l {};
+    std::array<float, 128> engine_in_r {};
+    std::array<float, 128> engine_out_l {};
+    std::array<float, 128> engine_out_r {};
+    for (std::size_t i = 0; i < engine_in_l.size(); ++i) {
+        engine_in_l[i] = std::sin(static_cast<float>(i) * 0.03f);
+        engine_in_r[i] = std::cos(static_cast<float>(i) * 0.04f);
+    }
+    const float* engine_inputs[] = {engine_in_l.data(), engine_in_r.data()};
+    float* engine_outputs[] = {engine_out_l.data(), engine_out_r.data()};
+
+    StnDecomposer stn;
+    StnConfig stn_config;
+    stn_config.num_bins = 129;
+    stn_config.time_median = 3;
+    stn_config.freq_median = 3;
+    stn.prepare(stn_config);
+    std::array<float, 129> magnitudes {};
+    for (std::size_t i = 0; i < magnitudes.size(); ++i)
+        magnitudes[i] = 1.0f + static_cast<float>(i % 11) * 0.1f;
+
+    TransientPhasePolicy transient;
+    TransientPhasePolicy::Config transient_config;
+    transient_config.fft_size = 256;
+    transient.prepare(transient_config);
+    std::array<std::complex<float>, 129> transient_l {};
+    std::array<std::complex<float>, 129> transient_r {};
+    std::complex<float>* mutable_transient_frames[] = {transient_l.data(), transient_r.data()};
+    const std::complex<float>* transient_frames[] = {transient_l.data(), transient_r.data()};
+    for (std::size_t i = 0; i < transient_l.size(); ++i) {
+        transient_l[i] = {1.0f + static_cast<float>(i % 7) * 0.01f, 0.0f};
+        transient_r[i] = {0.5f + static_cast<float>(i % 5) * 0.01f, 0.0f};
+    }
+
+    require_allocates_no_memory([&] {
+        (void)stft.push_samples(stft_input.data(), static_cast<int>(stft_input.size()));
+        (void)stft.latest_frame();
+        (void)stft.frame_ready();
+        (void)stft.num_bins();
+        (void)stft.fft_size();
+        (void)stft.hop_size();
+        Stft::to_db(magnitudes.data(), static_cast<int>(magnitudes.size()));
+        stft.reset();
+
+        engine.process(engine_inputs, engine_outputs, 128,
+                       [](std::complex<float>* const* frames, int bins) {
+                           frames[0][0] *= 0.99f;
+                           (void)bins;
+                       });
+        engine.analyze(engine_inputs, 128,
+                       [&](std::complex<float>* const* frames, int bins) {
+                           engine.synthesize_frame(frames, 64);
+                           (void)bins;
+                       });
+        const int available = engine.available_output();
+        engine.read_output(engine_outputs, std::min(available, 64));
+        (void)engine.latency_samples();
+        (void)engine.fft_size();
+        (void)engine.analysis_hop();
+        (void)engine.num_bins();
+        (void)engine.channels();
+        engine.reset();
+
+        for (int i = 0; i < 4; ++i) {
+            magnitudes[static_cast<std::size_t>(i)] += 0.5f;
+            const auto& masks = stn.process(magnitudes.data());
+            (void)masks.sines.data();
+            (void)masks.transients.data();
+            (void)masks.noise.data();
+        }
+        (void)stn.center_magnitude();
+        (void)stn.latency_frames();
+        (void)stn.num_bins();
+        stn.reset();
+
+        for (int i = 0; i < 12; ++i) {
+            mutable_transient_frames[0][static_cast<std::size_t>(i % 129)].real(2.0f);
+            (void)transient.analyze(transient_frames, 2, 129);
+        }
+        transient.reset();
     });
 }
 
