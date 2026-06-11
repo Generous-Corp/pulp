@@ -93,6 +93,52 @@ bind_parameter(XYPad& pad, state::StateStore& store, state::ParamID x_id, state:
         state::ListenerThread::Main));
 }
 
+/// Range slider ↔ parameter (normalized).
+[[nodiscard]] inline ParameterBinding
+bind_parameter(RangeSlider& slider, state::StateStore& store, state::ParamID id) {
+    slider.set_value(store.get_normalized(id));
+    slider.on_gesture_begin = [&store, id] { store.begin_gesture(id); };
+    slider.on_change = [&store, id](float v) { store.set_normalized(id, v); };
+    slider.on_gesture_end = [&store, id] { store.end_gesture(id); };
+    return ParameterBinding(store.add_listener(
+        [&slider, &store, id](state::ParamID changed, float) {
+            if (changed == id) slider.set_value(store.get_normalized(id));
+        },
+        state::ListenerThread::Main));
+}
+
+/// Toggle (switch) ↔ parameter, as a one-shot gesture per flip.
+[[nodiscard]] inline ParameterBinding
+bind_parameter(Toggle& toggle, state::StateStore& store, state::ParamID id) {
+    toggle.set_on(store.get_value(id) >= 0.5f);
+    toggle.on_toggle = [&store, id](bool on) {
+        store.begin_gesture(id);
+        store.set_value(id, on ? 1.0f : 0.0f);
+        store.end_gesture(id);
+    };
+    return ParameterBinding(store.add_listener(
+        [&toggle, &store, id](state::ParamID changed, float) {
+            if (changed == id) toggle.set_on(store.get_value(id) >= 0.5f);
+        },
+        state::ListenerThread::Main));
+}
+
+/// Checkbox ↔ parameter, as a one-shot gesture per flip.
+[[nodiscard]] inline ParameterBinding
+bind_parameter(Checkbox& box, state::StateStore& store, state::ParamID id) {
+    box.set_checked(store.get_value(id) >= 0.5f);
+    box.on_change = [&store, id](bool on) {
+        store.begin_gesture(id);
+        store.set_value(id, on ? 1.0f : 0.0f);
+        store.end_gesture(id);
+    };
+    return ParameterBinding(store.add_listener(
+        [&box, &store, id](state::ParamID changed, float) {
+            if (changed == id) box.set_checked(store.get_value(id) >= 0.5f);
+        },
+        state::ListenerThread::Main));
+}
+
 /// Toggle button ↔ parameter. A press is a complete one-shot gesture so
 /// the host records the discrete change.
 [[nodiscard]] inline ParameterBinding

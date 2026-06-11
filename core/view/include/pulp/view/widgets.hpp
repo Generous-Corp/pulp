@@ -702,6 +702,11 @@ public:
     /// number value() will return.
     std::function<void(float)> on_change;
 
+    /// Fired when an interactive drag begins / ends, so a binding can
+    /// bracket the edit in a host automation gesture.
+    std::function<void()> on_gesture_begin;
+    std::function<void()> on_gesture_end;
+
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;

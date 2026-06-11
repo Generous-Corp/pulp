@@ -933,9 +933,11 @@ void RangeSlider::update_from_position_(Point pos) {
 
 void RangeSlider::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) {
+        if (dragging_ && on_gesture_end) on_gesture_end();
         dragging_ = false;
         return;
     }
+    if (!dragging_ && on_gesture_begin) on_gesture_begin();
     dragging_ = true;
     update_from_position_(event.position);
 }

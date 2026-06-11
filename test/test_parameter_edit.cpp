@@ -131,6 +131,58 @@ TEST_CASE("bind_parameter records a toggle press as a one-shot gesture",
     REQUIRE(log.ends == std::vector<state::ParamID>{3});
 }
 
+TEST_CASE("bind_parameter records RangeSlider, Toggle, and Checkbox edits",
+          "[view][parameter-binding]") {
+    SECTION("RangeSlider drags a continuous gesture") {
+        state::StateStore store;
+        populate(store);
+        GestureLog log;
+        log.attach(store);
+        view::RangeSlider slider;
+        slider.set_bounds({0, 0, 200, 24});
+        auto b = view::bind_parameter(slider, store, 1);
+        // RangeSlider handles the rich on_mouse_event (its live host path).
+        auto ev = [](float x, bool down) {
+            view::MouseEvent e;
+            e.position = {x, 12};
+            e.is_down = down;
+            return e;
+        };
+        slider.on_mouse_event(ev(10, true));   // press
+        slider.on_mouse_drag({190, 12});       // move to the far end
+        slider.on_mouse_event(ev(190, false)); // release
+        REQUIRE(log.begins == std::vector<state::ParamID>{1});
+        REQUIRE(log.ends == std::vector<state::ParamID>{1});
+        REQUIRE(store.get_normalized(1) > 0.5f);
+    }
+    SECTION("Toggle flips as a one-shot gesture") {
+        state::StateStore store;
+        populate(store);
+        GestureLog log;
+        log.attach(store);
+        view::Toggle toggle;
+        toggle.set_bounds({0, 0, 48, 24});
+        auto b = view::bind_parameter(toggle, store, 3);
+        toggle.simulate_click({24, 12});
+        REQUIRE(store.get_value(3) >= 0.5f);
+        REQUIRE(log.begins == std::vector<state::ParamID>{3});
+        REQUIRE(log.ends == std::vector<state::ParamID>{3});
+    }
+    SECTION("Checkbox flips as a one-shot gesture") {
+        state::StateStore store;
+        populate(store);
+        GestureLog log;
+        log.attach(store);
+        view::Checkbox box;
+        box.set_bounds({0, 0, 24, 24});
+        auto b = view::bind_parameter(box, store, 3);
+        box.simulate_click({12, 12});
+        REQUIRE(store.get_value(3) >= 0.5f);
+        REQUIRE(log.begins == std::vector<state::ParamID>{3});
+        REQUIRE(log.ends == std::vector<state::ParamID>{3});
+    }
+}
+
 TEST_CASE("bind_parameter reflects host automation playback back to the widget",
           "[view][parameter-binding]") {
     state::StateStore store;
