@@ -173,9 +173,12 @@ previous_gain_ = state().get_value(kGain);
 cursor as event offsets are crossed. `ParamCursor` honors
 `ParameterEvent::ramp_duration_sample_frames` when you advance it to
 intermediate sample offsets, and `value_at(id, sample_offset)` can query an
-active ramp without moving the cursor. `ParamInfo::smoothing_ramp_seconds` and
-`format::ControlRateParamSmoother` provide an opt-in ramp for processors that
-want click-free block-rate changes without splitting into sub-blocks.
+active ramp without moving the cursor. The interpolation is independent of host
+block size, so a 2048- or 4096-sample block still uses the sparse event offsets
+as split points and lets the processor query ramp values inside the long span.
+`ParamInfo::smoothing_ramp_seconds` and `format::ControlRateParamSmoother`
+provide an opt-in ramp for processors that want click-free block-rate changes
+without splitting into sub-blocks.
 
 `ParameterEventQueue` is fixed-capacity and real-time safe. If more than
 1024 events arrive in one block, `push()` returns `false`, preserves the

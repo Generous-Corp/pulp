@@ -5,6 +5,7 @@
 // format adapters rely on when a plugin author does not override a hook.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
 
@@ -16,6 +17,7 @@
 #include <array>
 
 using namespace pulp::format;
+using Catch::Matchers::WithinAbs;
 
 namespace {
 
@@ -738,6 +740,81 @@ TEST_CASE("for_each_subblock ignores boundary events and slices input with outpu
     REQUIRE(input_starts[1] == 3);
     REQUIRE(lengths[1] == 5);
     REQUIRE(values[1] == 0.6f);
+}
+
+TEST_CASE("for_each_subblock keeps large-block ramp spans bounded and queryable",
+          "[format][params][subblock][ramp][capacity]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 12,
+        .name = "Depth",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+    store.set_value(12, 0.0f);
+
+    pulp::state::ParameterEventQueue events;
+    REQUIRE(events.push(pulp::state::ParameterEvent{
+        .param_id = 12,
+        .sample_offset = 1024,
+        .value = 1.0f,
+        .ramp_duration_sample_frames = 2048,
+    }));
+    REQUIRE(events.push(pulp::state::ParameterEvent{
+        .param_id = 12,
+        .sample_offset = 3072,
+        .value = 0.25f,
+    }));
+    events.sort();
+
+    std::array<float, 4096> in_samples{};
+    std::array<float, 4096> out_samples{};
+    const float* in_channels[1] = {in_samples.data()};
+    float* out_channels[1] = {out_samples.data()};
+    pulp::audio::BufferView<const float> input(in_channels, 1, 4096);
+    pulp::audio::BufferView<float> output(out_channels, 1, 4096);
+
+    std::array<std::size_t, 3> starts{};
+    std::array<std::size_t, 3> lengths{};
+    std::array<float, 3> values{};
+    std::array<float, 3> mid_values{};
+    int calls = 0;
+
+    {
+        pulp::runtime::ScopedNoAlloc guard;
+        pulp::format::for_each_subblock(
+            output, input, store, &events,
+            [&](pulp::audio::BufferView<float>& out,
+                const pulp::audio::BufferView<const float>&,
+                const pulp::state::ParamCursor& params) {
+                REQUIRE(calls < 3);
+                starts[static_cast<std::size_t>(calls)] =
+                    static_cast<std::size_t>(out.channel_ptr(0) - out_samples.data());
+                lengths[static_cast<std::size_t>(calls)] = out.num_samples();
+                values[static_cast<std::size_t>(calls)] = params.value(12);
+                mid_values[static_cast<std::size_t>(calls)] =
+                    params.value_at(12, static_cast<int32_t>(
+                                            starts[static_cast<std::size_t>(calls)]
+                                            + lengths[static_cast<std::size_t>(calls)] / 2));
+                ++calls;
+            });
+    }
+
+    REQUIRE(calls == 3);
+    REQUIRE(starts[0] == 0);
+    REQUIRE(lengths[0] == 1024);
+    REQUIRE_THAT(values[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(mid_values[0], WithinAbs(0.0f, 1e-6f));
+
+    REQUIRE(starts[1] == 1024);
+    REQUIRE(lengths[1] == 2048);
+    REQUIRE_THAT(values[1], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(mid_values[1], WithinAbs(0.5f, 1e-6f));
+
+    REQUIRE(starts[2] == 3072);
+    REQUIRE(lengths[2] == 1024);
+    REQUIRE_THAT(values[2], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(mid_values[2], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(store.get_value(12), WithinAbs(0.0f, 1e-6f));
 }
 
 TEST_CASE("ControlRateParamSmoother is bit-exact off and ramps when opted in",
