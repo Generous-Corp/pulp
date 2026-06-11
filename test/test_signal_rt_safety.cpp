@@ -6,8 +6,11 @@
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fast_math.hpp>
+#include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/matrix.hpp>
+#include <pulp/signal/multichannel_phase_coordinator.hpp>
+#include <pulp/signal/noise_morpher.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
 #include <pulp/signal/signal.hpp>
 #include <pulp/signal/special_functions.hpp>
@@ -15,6 +18,7 @@
 #include <pulp/signal/wavetable.hpp>
 
 #include <array>
+#include <complex>
 #include <cstddef>
 #include <vector>
 
@@ -379,6 +383,78 @@ TEST_CASE("Stateless math signal helpers are allocation-free",
         m3(0, 1) = 2.0f;
         m3(1, 2) = -1.0f;
         (void)determinant(m3);
+    });
+}
+
+TEST_CASE("Prepared phase and half-band helpers are allocation-free while processing",
+          "[signal][rt-safety]") {
+    HalfBandAllpassSection section(0.5f);
+    HalfBandUpsampler2x upsampler;
+    HalfBandDownsampler2x downsampler;
+
+    NoiseMorpher noise_morpher;
+    noise_morpher.prepare(8, 0x1234ull);
+    noise_morpher.prepare_masked_scratch();
+
+    MultichannelPhaseCoordinator coordinator;
+    coordinator.prepare(256, 2);
+
+    std::array<float, 8> envelope_a {};
+    std::array<float, 8> envelope_b {};
+    std::array<float, 8> mask {};
+    for (std::size_t i = 0; i < envelope_a.size(); ++i) {
+        envelope_a[i] = 0.1f + static_cast<float>(i) * 0.01f;
+        envelope_b[i] = 0.2f + static_cast<float>(i) * 0.02f;
+        mask[i] = (i % 2 == 0) ? 0.25f : 0.75f;
+    }
+    noise_morpher.push_envelope(envelope_a.data());
+
+    std::array<std::complex<float>, 8> noise_bins {};
+    std::array<float, 16> halfband_input {};
+    std::array<float, 32> up_output {};
+    std::array<float, 16> down_output {};
+    for (std::size_t i = 0; i < halfband_input.size(); ++i)
+        halfband_input[i] = static_cast<float>(i + 1) * 0.01f;
+
+    std::array<std::complex<float>, 129> left {};
+    std::array<std::complex<float>, 129> right {};
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        left[i] = {static_cast<float>(i) * 0.001f, static_cast<float>(i % 5) * 0.01f};
+        right[i] = {static_cast<float>(i) * 0.002f, static_cast<float>(i % 7) * 0.01f};
+    }
+    std::complex<float>* frames[] = {left.data(), right.data()};
+
+    require_allocates_no_memory([&] {
+        float lo = 0.0f;
+        float hi = 0.0f;
+        (void)section.process(0.25f);
+        section.set_coefficient(0.25f);
+        (void)section.coefficient();
+        section.reset();
+
+        (void)upsampler.sections_a();
+        (void)upsampler.sections_b();
+        upsampler.process(0.125f, lo, hi);
+        upsampler.process_block(halfband_input, up_output);
+        upsampler.reset();
+
+        (void)downsampler.sections_a();
+        (void)downsampler.sections_b();
+        (void)downsampler.process(lo, hi);
+        downsampler.process_block(up_output, down_output);
+        downsampler.reset();
+
+        (void)noise_morpher.num_bins();
+        noise_morpher.push_envelope(envelope_b.data());
+        noise_morpher.synthesize(0.5f, noise_bins.data());
+        noise_morpher.push_masked_envelope(envelope_b.data(), mask.data());
+        noise_morpher.advance();
+        noise_morpher.reset();
+
+        coordinator.process_group(frames, 129, 64, 64);
+        (void)coordinator.reference_magnitudes();
+        (void)coordinator.num_bins();
+        coordinator.reset();
     });
 }
 
