@@ -11,6 +11,11 @@ namespace pulp::signal {
 
 /// Filter coefficient generation utilities.
 ///
+/// RT contract: scalar biquad coefficient helpers return fixed-size values and
+/// are allocation-free, but they are still intended for prepare/control-rate
+/// use because retuning filters can reset state. Butterworth helpers return
+/// vectors and allocate cascade storage, so they are not audio-thread safe.
+///
 /// Generates biquad coefficients for standard filter types using the
 /// Audio EQ Cookbook formulas (Robert Bristow-Johnson).
 ///

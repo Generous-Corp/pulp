@@ -5,12 +5,15 @@
 
 namespace pulp::signal {
 
-// Window functions for FFT, spectral analysis, FIR filter design
+// Window functions for FFT, spectral analysis, FIR filter design.
+//
+// RT contract: generate() allocates and is prepare/design-time only. apply()
+// is allocation-free when callers pass a valid buffer and a precomputed window.
 class WindowFunction {
 public:
     enum class Type { rectangular, hann, hamming, blackman, flat_top, kaiser };
 
-    // Generate a window of the given size and type
+    // Generate a window of the given size and type. Not real-time safe.
     static std::vector<float> generate(int size, Type type, float param = 0.0f) {
         if (size <= 0) return {};
         if (size == 1) return {1.0f};
@@ -57,7 +60,7 @@ public:
         return w;
     }
 
-    // Apply a window to a buffer in-place
+    // Apply a precomputed window to a buffer in-place. Allocation-free.
     static void apply(float* buffer, const std::vector<float>& window) {
         for (size_t i = 0; i < window.size(); ++i)
             buffer[i] *= window[i];

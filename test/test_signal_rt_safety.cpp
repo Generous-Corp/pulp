@@ -6,16 +6,21 @@
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fast_math.hpp>
+#include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/matrix.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/noise_morpher.hpp>
+#include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
+#include <pulp/signal/simd_buffer.hpp>
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/special_functions.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/wavetable.hpp>
+#include <pulp/signal/windowing.hpp>
 
 #include <array>
 #include <complex>
@@ -383,6 +388,90 @@ TEST_CASE("Stateless math signal helpers are allocation-free",
         m3(0, 1) = 2.0f;
         m3(1, 2) = -1.0f;
         (void)determinant(m3);
+    });
+}
+
+TEST_CASE("Spectral design and SIMD utility hot paths are allocation-free after setup",
+          "[signal][rt-safety]") {
+    std::vector<float> window = WindowFunction::generate(16, WindowFunction::Type::hann);
+    std::array<float, 16> samples {};
+    for (std::size_t i = 0; i < samples.size(); ++i)
+        samples[i] = static_cast<float>(i + 1) * 0.01f;
+
+    ColorMapper mapper(ColorRamp::inferno);
+
+    FrequencyAxis axis;
+    axis.configure(1024, 48000.0f, FrequencyScale::logarithmic);
+
+    SpectrogramBuffer spectrogram;
+    spectrogram.configure(8, 4);
+    std::array<float, 8> magnitudes_db {-80.0f, -72.0f, -48.0f, -36.0f,
+                                        -24.0f, -18.0f, -6.0f, 0.0f};
+
+    AlignedBuffer aligned(8);
+    std::array<float, 8> aligned_source {};
+    for (std::size_t i = 0; i < aligned_source.size(); ++i)
+        aligned_source[i] = static_cast<float>(i) * 0.125f;
+
+    const std::vector<float> polynomial {1.0f, -2.0f, 0.5f, 0.25f};
+
+    require_allocates_no_memory([&] {
+        WindowFunction::apply(samples.data(), window);
+
+        auto color = mapper.map(0.5f);
+        mapper.set_ramp(ColorRamp::viridis);
+        color = mapper.map(static_cast<float>(color.r) / 255.0f);
+        (void)mapper.ramp();
+        (void)color;
+
+        const int display_bin = axis.display_to_bin(axis.bin_to_display(8));
+        const float hz = axis.display_to_hz(axis.hz_to_display(axis.bin_to_hz(display_bin)));
+        (void)axis.num_bins();
+        (void)axis.nyquist();
+        (void)axis.scale();
+        (void)hz;
+
+        spectrogram.push_column(magnitudes_db.data(), static_cast<int>(magnitudes_db.size()), mapper);
+        (void)spectrogram.pixels();
+        (void)spectrogram.write_column();
+        (void)spectrogram.frames_written();
+
+        aligned.copy_from(aligned_source.data(), aligned_source.size());
+        aligned.clear();
+        float sum = 0.0f;
+        for (float value : aligned)
+            sum += value;
+        aligned.resize(aligned.size());
+        (void)sum;
+
+        float poly = Polynomial::eval(polynomial, 0.25f);
+        poly += Polynomial::eval_complex(polynomial, {0.25f, 0.5f}).real();
+        const auto roots = Polynomial::roots_quadratic(1.0f, -3.0f, 2.0f);
+        poly += roots.first.real() + roots.second.real();
+
+        Mat2 m2;
+        m2.m[0][1] = 0.5f;
+        m2.m[1][0] = -0.25f;
+        const Mat2 m2_inv = m2.inverse();
+        poly += m2.determinant() + m2_inv.determinant();
+
+        Mat3 m3;
+        m3.m[0][1] = 0.25f;
+        m3.m[1][2] = -0.5f;
+        const Mat3 m3_product = m3 * Mat3::identity();
+        poly += m3_product.determinant();
+
+        auto low = FilterDesign::lowpass(1000.0f, 0.707f, 48000.0f);
+        auto high = FilterDesign::highpass(1000.0f, 0.707f, 48000.0f);
+        auto band = FilterDesign::bandpass(1200.0f, 1.0f, 48000.0f);
+        auto notch = FilterDesign::notch(1200.0f, 1.0f, 48000.0f);
+        auto allpass = FilterDesign::allpass(1400.0f, 0.8f, 48000.0f);
+        auto peak = FilterDesign::peaking_eq(900.0f, 1.1f, 3.0f, 48000.0f);
+        auto low_shelf = FilterDesign::low_shelf(250.0f, 2.0f, 48000.0f);
+        auto high_shelf = FilterDesign::high_shelf(6000.0f, -2.0f, 48000.0f);
+        poly += low.b0 + high.b0 + band.b0 + notch.b0 + allpass.b0
+              + peak.b0 + low_shelf.b0 + high_shelf.b0;
+        (void)poly;
     });
 }
 

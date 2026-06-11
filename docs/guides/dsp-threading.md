@@ -132,6 +132,15 @@ sequence-building helpers belong on control/offline threads. The UI-to-audio
 `drain_into()` path is allocation-free when the destination `MidiBuffer` has
 prepared capacity.
 
+Signal helper utilities use the same distinction. Stateless math, interpolation,
+denormal, fixed-size matrix, color/frequency mapping, and scalar coefficient
+calculation helpers are allocation-free. Helpers that create `std::vector`
+results, resize aligned buffers, generate FFT windows, design high-order filter
+cascades, configure spectrogram storage, or build FFT/convolution state are
+prepare/control/offline work. After that setup, documented hot operations such
+as precomputed window application, configured spectrogram column pushes, and
+aligned-buffer clear/copy are allocation-free.
+
 ## Block-scoped runtime contracts
 
 `pulp::format::ProcessBlock` is the additive runtime contract for

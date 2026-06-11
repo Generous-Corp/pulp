@@ -715,7 +715,7 @@ fft.magnitude_db(freq.data(), magnitudes.data(), 512);
 
 **Sample rate dependency:** None (operates in sample domain). To convert bin index to frequency: `bin * sample_rate / fft_size`.
 
-**Caveat:** The constructor allocates twiddle factor storage. Create `Fft` objects in `prepare()`, not on the audio thread. `forward()` and `inverse()` are real-time safe.
+**Caveat:** The constructor allocates twiddle factor storage. Create `Fft` objects in `prepare()`, not on the audio thread. `forward()`, `inverse()`, `forward_real()`, and magnitude helpers are real-time safe after construction when callers provide output buffers.
 
 ---
 
@@ -782,4 +782,14 @@ fft.forward_real(audio_buffer, freq.data());
 
 **Sample rate dependency:** None.
 
-**Caveat:** `generate()` allocates a vector. Call during `prepare()`, not on the audio thread.
+**Caveat:** `generate()` allocates a vector. Call during `prepare()`, not on the audio thread. `apply()` is real-time safe when passed a precomputed window.
+
+---
+
+### Spectrogram helpers
+
+`ColorMapper` and `FrequencyAxis` are fixed-state utilities for display-side spectral mapping. Their mapping methods are allocation-free. `SpectrogramBuffer::configure()` allocates pixel storage, so configure it off the audio thread; `push_column()` is allocation-free after configuration and can be used in bounded realtime or UI-adjacent analysis paths with caller-owned magnitude data.
+
+### Filter and polynomial design helpers
+
+Scalar `FilterDesign` biquad helpers return fixed-size coefficient structs and do not allocate, but they are intended for prepare/control-rate retuning because applying coefficients can reset processor state. Butterworth, Chebyshev, elliptic, and polynomial helpers that return `std::vector` allocate result storage and belong on prepare/control/offline threads.

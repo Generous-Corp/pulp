@@ -32,6 +32,10 @@ namespace pulp::signal {
 
 /// Chebyshev / Elliptic IIR design utilities.
 ///
+/// RT contract: these helpers allocate vectors and perform expensive design
+/// math. Run them on prepare/control/offline threads, then publish immutable
+/// coefficient cascades to audio-thread processors.
+///
 /// @code
 /// // 4th-order Chebyshev Type I lowpass, 1 dB passband ripple, 2 kHz cutoff
 /// auto cascade = IirDesign::chebyshev1_lowpass(4, 2000.0f, 1.0f, 44100.0f);

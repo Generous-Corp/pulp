@@ -20,6 +20,9 @@ struct SpectrogramColor {
 enum class ColorRamp { inferno, viridis, grayscale, heat };
 
 /// Maps a normalized value [0,1] to a color using a predefined ramp.
+///
+/// RT contract: map(), set_ramp(), and ramp() are allocation-free fixed-state
+/// operations.
 class ColorMapper {
 public:
     explicit ColorMapper(ColorRamp ramp = ColorRamp::inferno) : ramp_(ramp) {}
@@ -109,6 +112,8 @@ private:
 enum class FrequencyScale { linear, logarithmic, mel };
 
 /// Utilities for mapping FFT bins to display coordinates.
+///
+/// RT contract: configure() and all mapping helpers are allocation-free.
 class FrequencyAxis {
 public:
     /// Configure the axis for a given FFT size and sample rate.
@@ -193,6 +198,9 @@ private:
 
 /// Scrolling spectrogram buffer that accumulates STFT frames as rows.
 /// Each row is a time slice; columns are frequency bins mapped to colors.
+///
+/// RT contract: configure() allocates storage and is prepare/control-thread
+/// work. push_column() and accessors are allocation-free after configure().
 class SpectrogramBuffer {
 public:
     /// Configure the buffer.
