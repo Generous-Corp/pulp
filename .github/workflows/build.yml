@@ -68,8 +68,16 @@ jobs:
           # legs route to a label with no online runner and queue. The pilot labels
           # (pulp-build-{linux,windows}) are non-required, so a stuck pilot can't
           # block PRs.
-          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
-          EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || vars.PULP_LOCAL_WINDOWS_RUNS_ON_JSON || '' }}
+          WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
+          WORKFLOW_DISPATCH_WINDOWS_SELECTOR: ${{ inputs.windows_runner_selector_json || '' }}
+          LOCAL_LINUX_PRIMARY_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON || '' }}
+          LOCAL_LINUX_PRIMARY_CAPACITY: ${{ vars.PULP_LOCAL_LINUX_PRIMARY_CAPACITY || '1' }}
+          LOCAL_LINUX_OVERFLOW_CAPACITY: ${{ vars.PULP_LOCAL_LINUX_OVERFLOW_CAPACITY || '1' }}
+          LOCAL_WINDOWS_PRIMARY_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_PRIMARY_RUNS_ON_JSON || vars.PULP_LOCAL_WINDOWS_RUNS_ON_JSON || '' }}
+          LOCAL_WINDOWS_OVERFLOW_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_OVERFLOW_RUNS_ON_JSON || '' }}
+          LOCAL_WINDOWS_PRIMARY_CAPACITY: ${{ vars.PULP_LOCAL_WINDOWS_PRIMARY_CAPACITY || '1' }}
+          LOCAL_WINDOWS_OVERFLOW_CAPACITY: ${{ vars.PULP_LOCAL_WINDOWS_OVERFLOW_CAPACITY || '1' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
           # `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON` from these inputs so the
@@ -328,6 +336,128 @@ jobs:
                   )
                   return -1
 
+          def _local_selector_labels(selector_raw: str) -> set[str]:
+              try:
+                  selector = json.loads(selector_raw)
+              except json.JSONDecodeError as exc:
+                  sys.stderr.write(
+                      f"resolve-provider: ignoring invalid local selector "
+                      f"{selector_raw!r}: {exc}\n"
+                  )
+                  return set()
+              if isinstance(selector, str):
+                  labels = {selector}
+              elif isinstance(selector, list):
+                  labels = {str(item) for item in selector if str(item)}
+              else:
+                  return set()
+              if "self-hosted" not in labels:
+                  return set()
+              return labels
+
+          def _in_progress_jobs_for_selector(selector_raw: str) -> int:
+              # Linux/Windows local routing is decided before matrix jobs are
+              # queued. Unlike macOS, there is no useful queued-job fallback:
+              # once a Linux/Windows job is queued to a self-hosted label it
+              # cannot later spill to GitHub-hosted. The Linux/Windows runners
+              # are JIT ephemeral, so they are NOT visible as idle registered
+              # runners before a job is queued. Capacity is therefore:
+              # configured per-host capacity minus in-progress Build-and-Test
+              # jobs whose labels include this exact host selector.
+              if not REPOSITORY:
+                  return 0
+              wanted = _local_selector_labels(selector_raw)
+              if not wanted:
+                  return 0
+              current_run_id = os.environ.get("GITHUB_RUN_ID", "")
+              try:
+                  result = subprocess.run(
+                      [
+                          "gh", "api",
+                          f"repos/{REPOSITORY}/actions/runs?status=in_progress&per_page=100",
+                      ],
+                      check=True,
+                      capture_output=True,
+                      text=True,
+                      timeout=15,
+                  )
+                  runs = [
+                      run for run in json.loads(result.stdout or "{}").get("workflow_runs", [])
+                      if run.get("name") == "Build and Test"
+                      and str(run.get("id")) != str(current_run_id)
+                  ]
+                  count = 0
+                  for run_info in runs:
+                      jobs_result = subprocess.run(
+                          [
+                              "gh", "api",
+                              f"repos/{REPOSITORY}/actions/runs/{run_info['id']}/jobs?filter=latest&per_page=100",
+                          ],
+                          check=True,
+                          capture_output=True,
+                          text=True,
+                          timeout=15,
+                      )
+                      for job in json.loads(jobs_result.stdout or "{}").get("jobs", []):
+                          if job.get("status") != "in_progress":
+                              continue
+                          job_labels = {str(label) for label in job.get("labels", [])}
+                          if wanted.issubset(job_labels):
+                              count += 1
+                  return count
+              except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
+                  sys.stderr.write(
+                      f"resolve-provider: local in-progress probe failed "
+                      f"for {selector_raw!r}; falling back to hosted. ({exc})\n"
+                  )
+                  return 999999
+
+          def _capacity_from_env(name: str) -> int:
+              try:
+                  return max(0, int((os.environ.get(name) or "1").strip()))
+              except ValueError:
+                  return 0
+
+          def _choose_local_with_overflow(
+              *,
+              platform: str,
+              dispatch_selector_env: str,
+              primary_selector_env: str,
+              overflow_selector_env: str,
+              primary_capacity_env: str,
+              overflow_capacity_env: str,
+          ) -> tuple[str, str]:
+              dispatch_selector = (os.environ.get(dispatch_selector_env) or "").strip()
+              primary_selector = (os.environ.get(primary_selector_env) or "").strip()
+              overflow_selector = (os.environ.get(overflow_selector_env) or "").strip()
+              if dispatch_selector:
+                  return dispatch_selector, "operator-override"
+              if primary_selector:
+                  primary_capacity = _capacity_from_env(primary_capacity_env)
+                  primary_busy = _in_progress_jobs_for_selector(primary_selector)
+                  if primary_busy < primary_capacity:
+                      return primary_selector, (
+                          f"primary-local (BUSY={primary_busy} < CAP={primary_capacity})"
+                      )
+                  sys.stderr.write(
+                      f"resolve-provider: {platform} primary local has no "
+                      f"capacity: busy={primary_busy} capacity={primary_capacity} "
+                      f"selector={primary_selector}\n"
+                  )
+              if overflow_selector:
+                  overflow_capacity = _capacity_from_env(overflow_capacity_env)
+                  overflow_busy = _in_progress_jobs_for_selector(overflow_selector)
+                  if overflow_busy < overflow_capacity:
+                      return overflow_selector, (
+                          f"overflow-local (BUSY={overflow_busy} < CAP={overflow_capacity})"
+                      )
+                  sys.stderr.write(
+                      f"resolve-provider: {platform} overflow local has no "
+                      f"capacity: busy={overflow_busy} capacity={overflow_capacity} "
+                      f"selector={overflow_selector}\n"
+                  )
+              return "", "github-hosted-fallback"
+
           workflow_dispatch_selector = (
               os.environ.get("WORKFLOW_DISPATCH_MACOS_SELECTOR") or ""
           ).strip()
@@ -404,6 +534,35 @@ jobs:
           else:
               macos_provider = "local"
 
+          linux_selector, linux_route = _choose_local_with_overflow(
+              platform="Linux",
+              dispatch_selector_env="WORKFLOW_DISPATCH_LINUX_SELECTOR",
+              primary_selector_env="LOCAL_LINUX_PRIMARY_RUNS_ON_JSON",
+              overflow_selector_env="LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON",
+              primary_capacity_env="LOCAL_LINUX_PRIMARY_CAPACITY",
+              overflow_capacity_env="LOCAL_LINUX_OVERFLOW_CAPACITY",
+          )
+          windows_selector, windows_route = _choose_local_with_overflow(
+              platform="Windows",
+              dispatch_selector_env="WORKFLOW_DISPATCH_WINDOWS_SELECTOR",
+              primary_selector_env="LOCAL_WINDOWS_PRIMARY_RUNS_ON_JSON",
+              overflow_selector_env="LOCAL_WINDOWS_OVERFLOW_RUNS_ON_JSON",
+              primary_capacity_env="LOCAL_WINDOWS_PRIMARY_CAPACITY",
+              overflow_capacity_env="LOCAL_WINDOWS_OVERFLOW_CAPACITY",
+          )
+          os.environ["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"] = linux_selector
+          os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = windows_selector
+          print(
+              f"resolve-provider: Linux route = {linux_route}; "
+              f"selector = {linux_selector or 'github-hosted fallback'}",
+              file=sys.stderr,
+          )
+          print(
+              f"resolve-provider: Windows route = {windows_route}; "
+              f"selector = {windows_selector or 'github-hosted fallback'}",
+              file=sys.stderr,
+          )
+
           linux_runs_on = run([
               "--target-name", "Linux (x64)",
               "--mode", "provider",
@@ -428,7 +587,9 @@ jobs:
               "--namespace-env", "NAMESPACE_WINDOWS_RUNS_ON_JSON",
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
           ])
-          windows_provider = REQUESTED
+          windows_provider = (
+              "local" if windows_selector else REQUESTED
+          )
           # macOS leg uses `mode=provider` (same as Linux + Windows) so the
           # explicit selector env (EXPLICIT_MACOS_RUNNER_SELECTOR_JSON, which
           # falls back to the PULP_LOCAL_MACOS_RUNS_ON_JSON repo var) is
@@ -474,7 +635,7 @@ jobs:
                   "key": "linux",
                   "name": "Linux (x64)",
                   "runs_on_json": linux_runs_on,
-                  "provider": REQUESTED,
+                  "provider": "local" if linux_selector else REQUESTED,
               },
           ]
 
