@@ -180,6 +180,13 @@ as split points and lets the processor query ramp values inside the long span.
 provide an opt-in ramp for processors that want click-free block-rate changes
 without splitting into sub-blocks.
 
+SignalGraph automation follows the same split. Sparse `connect_automation()`
+delivers two source-block-relative control points per graph block; the
+processor decides whether to step, subblock, or interpolate them with
+`ParamCursor`. The sparse stream is not delayed for graph PDC. For modulation
+that must remain phase-aligned with a delayed audio path, use an audio-rate
+parameter and `connect_audio_rate_modulation()`.
+
 `ParameterEventQueue` is fixed-capacity and real-time safe. If more than
 1024 events arrive in one block, `push()` returns `false`, preserves the
 events already queued, and records the drop count for that block via

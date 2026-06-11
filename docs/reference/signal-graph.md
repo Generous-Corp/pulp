@@ -52,10 +52,10 @@ Four connection variants cover the non-audio-passthrough cases:
   block's output. Invisible to the topological sort and PDC so the
   runtime stays DAG-ordered.
 - `connect_automation(from, port, plugin, param, lo, hi)` samples a source
-  audio port at the start and end of the block and delivers sparse
-  `ParameterEvent`s into `PluginSlot::process()`. Sparse graph automation uses
-  two events per automated parameter, so large host blocks such as 2048 or 4096
-  samples do not consume one queue slot per sample.
+  audio port at the start and end of the block and delivers sparse,
+  source-block-relative `ParameterEvent`s into `PluginSlot::process()`. Sparse
+  graph automation uses two events per automated parameter, so large host
+  blocks such as 2048 or 4096 samples do not consume one queue slot per sample.
 - `connect_audio_rate_modulation(from, port, plugin, param, lo, hi)` declares
   a dense per-sample modulation edge. It is accepted only for continuous,
   automatable `HostParamInfo::rate == AudioRate` parameters, emits one
@@ -96,6 +96,14 @@ aligned. Query results with `SignalGraph::latency_samples()` (graph-wide
 total) and `node_latency_samples(id)` (alignment at a specific node).
 Feedback edges (`connect_feedback`) don't contribute to PDC — the
 one-block delay absorbs their alignment.
+Sparse automation edges do not contribute to PDC. They are control-rate
+source samples for the current graph block, delivered as two sparse control
+points. A plugin can use `ParamCursor` / `for_each_subblock()` to interpolate
+or render spans between those points, but the graph does not delay that sparse
+event stream to match a destination plugin's input latency. Use audio-rate
+modulation when a parameter stream must stay phase-aligned with a delayed
+audio path.
+
 Audio-rate modulation edges do contribute to PDC: when a parameter is driven
 from a lower-latency branch than the destination plugin's audio input, the
 graph delays the dense parameter-event stream by the same amount as an audio
@@ -106,8 +114,10 @@ connection.
 `set_node_parameter(node, id, value)` forwards a normalized value to the
 plugin via `PluginSlot::set_parameter()`; `get_node_parameter(node, id)`
 reads back. `connect_automation()` delivers two sparse control points per
-block for control-rate movement. `connect_audio_rate_modulation()` delivers
-sample-by-sample events for parameters explicitly marked audio-rate.
+block for control-rate movement; processors that need a smooth value between
+those points should use their normal parameter-ramp or subblock helpers.
+`connect_audio_rate_modulation()` delivers sample-by-sample events for
+parameters explicitly marked audio-rate.
 
 ## Persistence
 
