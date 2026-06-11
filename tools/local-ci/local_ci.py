@@ -154,6 +154,7 @@ import desktop_commands_cli as _desktop_commands_cli  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
 import desktop_probe_bindings as _desktop_probe_bindings  # noqa: E402
+import desktop_reporting_bindings as _desktop_reporting_bindings  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
@@ -778,15 +779,7 @@ def _run_git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.Co
 
 
 def publish_report_to_branch(config: dict, report: dict) -> dict:
-    return _reporting.publish_report_to_branch(
-        config,
-        report,
-        root=ROOT,
-        run_git_fn=_run_git,
-        reset_local_worktree_fn=_reset_local_worktree,
-        clear_directory_contents_fn=_clear_directory_contents,
-        git_origin_http_url_fn=git_origin_http_url,
-    )
+    return _desktop_reporting_bindings.publish_report_to_branch(globals(), config, report)
 
 
 def make_desktop_source_request(args: argparse.Namespace) -> dict:
@@ -867,34 +860,21 @@ def stage_desktop_publish_report(
     output_dir: Path | None = None,
     label: str | None = None,
 ) -> dict:
-    return _reporting.stage_desktop_publish_report(
+    return _desktop_reporting_bindings.stage_desktop_publish_report(
+        globals(),
         config,
         manifests,
         output_dir=output_dir,
         label=label,
-        create_desktop_publish_bundle_fn=create_desktop_publish_bundle,
-        now_iso_fn=now_iso,
-        atomic_write_text_fn=atomic_write_text,
-        write_desktop_publish_rollups_fn=write_desktop_publish_rollups,
-        publish_report_to_branch_fn=publish_report_to_branch,
     )
 
 
 def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:
-    return _reporting.desktop_publish_reports(
-        config,
-        limit=limit,
-        desktop_publish_root_fn=desktop_publish_root,
-    )
+    return _desktop_reporting_bindings.desktop_publish_reports(globals(), config, limit=limit)
 
 
 def write_desktop_publish_rollups(config: dict) -> None:
-    _reporting.write_desktop_publish_rollups(
-        config,
-        desktop_publish_root_fn=desktop_publish_root,
-        desktop_publish_reports_fn=desktop_publish_reports,
-        atomic_write_text_fn=atomic_write_text,
-    )
+    return _desktop_reporting_bindings.write_desktop_publish_rollups(globals(), config)
 
 
 def wait_for_path(path: Path, timeout_secs: float) -> Path:
@@ -914,11 +894,11 @@ def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
 
 
 def desktop_run_manifests(config: dict, *, target_name: str | None = None, action: str | None = None) -> list[dict]:
-    return _reporting.desktop_run_manifests(
+    return _desktop_reporting_bindings.desktop_run_manifests(
+        globals(),
         config,
         target_name=target_name,
         action=action,
-        desktop_artifact_root_fn=desktop_artifact_root,
     )
 
 
@@ -956,7 +936,8 @@ def desktop_proof_summaries(
     branch: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
-    return _reporting.desktop_proof_summaries(
+    return _desktop_reporting_bindings.desktop_proof_summaries(
+        globals(),
         config,
         target_name=target_name,
         action=action,
@@ -964,29 +945,15 @@ def desktop_proof_summaries(
         sha=sha,
         branch=branch,
         limit=limit,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
     )
 
 
 def desktop_rollup_dir(config: dict, target_name: str | None = None) -> Path:
-    return _reporting.desktop_rollup_dir(
-        config,
-        target_name,
-        desktop_artifact_root_fn=desktop_artifact_root,
-    )
+    return _desktop_reporting_bindings.desktop_rollup_dir(globals(), config, target_name)
 
 
 def write_desktop_run_rollups(config: dict, *, target_name: str | None = None) -> None:
-    _reporting.write_desktop_run_rollups(
-        config,
-        target_name=target_name,
-        desktop_rollup_dir_fn=desktop_rollup_dir,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
-        desktop_proof_summaries_fn=desktop_proof_summaries,
-        atomic_write_text_fn=atomic_write_text,
-    )
+    return _desktop_reporting_bindings.write_desktop_run_rollups(globals(), config, target_name=target_name)
 
 
 def prune_desktop_run_manifests(
@@ -996,12 +963,12 @@ def prune_desktop_run_manifests(
     older_than_days: int | None = None,
     keep_last: int | None = None,
 ) -> list[Path]:
-    return _reporting.prune_desktop_run_manifests(
+    return _desktop_reporting_bindings.prune_desktop_run_manifests(
+        globals(),
         config,
         target_name=target_name,
         older_than_days=older_than_days,
         keep_last=keep_last,
-        desktop_run_manifests_fn=desktop_run_manifests,
     )
 
 
