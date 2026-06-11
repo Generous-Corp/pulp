@@ -12,6 +12,8 @@
 #include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/fft_backend.hpp>
+#include <pulp/signal/freeze_hold.hpp>
+#include <pulp/signal/freeze_loop_sampler.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
@@ -19,6 +21,7 @@
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/noise_morpher.hpp>
 #include <pulp/signal/poly_math.hpp>
+#include <pulp/signal/pitched_feedback_delay.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
 #include <pulp/signal/resampler.hpp>
 #include <pulp/signal/simd_buffer.hpp>
@@ -55,6 +58,22 @@ struct RtProbeGain {
     void set_sample_rate(float sr) { sample_rate = sr; }
     float process(float input) { return input * gain; }
     void reset() { ++reset_count; }
+};
+
+class RtProbeLoopProcessor final : public FeedbackLoopProcessor {
+public:
+    int loop_latency_samples() const override { return 3; }
+    bool loop_is_frozen() const override { return frozen; }
+
+    void loop_process(const float* const* in, float* const* out, int num_samples) override {
+        for (int ch = 0; ch < channels; ++ch) {
+            for (int i = 0; i < num_samples; ++i)
+                out[ch][i] = in[ch][i] * 0.5f;
+        }
+    }
+
+    int channels = 1;
+    bool frozen = false;
 };
 
 void require_process_allocates_no_memory(Oversampler::Kind kind,
@@ -434,6 +453,92 @@ TEST_CASE("Multi-backend FFT and non-uniform convolver hot paths are allocation-
         (void)convolver.tail_block();
         (void)convolver.tail_multiplier();
         (void)convolver.is_loaded();
+    });
+}
+
+TEST_CASE("Prepared freeze and pitched delay helpers are allocation-free while processing",
+          "[signal][freeze][rt-safety]") {
+    FreezeHold freeze_hold;
+    FreezeHold::Config freeze_config;
+    freeze_config.fft_size = 256;
+    freeze_config.channels = 2;
+    freeze_config.analysis_hop = 64;
+    freeze_config.capture_frames = 3;
+    freeze_config.crossfade_frames = 2;
+    freeze_hold.prepare(freeze_config);
+
+    std::array<std::complex<float>, 129> freeze_left {};
+    std::array<std::complex<float>, 129> freeze_right {};
+    for (std::size_t i = 0; i < freeze_left.size(); ++i) {
+        freeze_left[i] = {1.0f + static_cast<float>(i) * 0.001f,
+                          static_cast<float>(i % 5) * 0.01f};
+        freeze_right[i] = {0.5f + static_cast<float>(i) * 0.001f,
+                           static_cast<float>(i % 7) * 0.01f};
+    }
+    std::complex<float>* freeze_frames[] = {freeze_left.data(), freeze_right.data()};
+
+    FreezeLoopSampler loop_sampler;
+    loop_sampler.prepare(2, 64, 8);
+    std::array<float, 32> loop_in_l {};
+    std::array<float, 32> loop_in_r {};
+    std::array<float, 32> loop_out_l {};
+    std::array<float, 32> loop_out_r {};
+    for (std::size_t i = 0; i < loop_in_l.size(); ++i) {
+        loop_in_l[i] = std::sin(static_cast<float>(i) * 0.1f);
+        loop_in_r[i] = std::cos(static_cast<float>(i) * 0.1f);
+    }
+    const float* loop_inputs[] = {loop_in_l.data(), loop_in_r.data()};
+    float* loop_outputs[] = {loop_out_l.data(), loop_out_r.data()};
+
+    PitchedFeedbackDelay delay;
+    PitchedFeedbackDelay::Config delay_config;
+    delay_config.channels = 2;
+    delay_config.max_delay_seconds = 0.1f;
+    delay_config.max_block = 64;
+    delay.prepare(48000.0, delay_config);
+    RtProbeLoopProcessor loop_processor;
+    loop_processor.channels = 2;
+    delay.set_loop_processor(&loop_processor);
+    delay.set_delay_ms(10.0f);
+    delay.set_feedback(0.5f);
+    std::array<float, 64> delay_in_l {};
+    std::array<float, 64> delay_in_r {};
+    std::array<float, 64> delay_out_l {};
+    std::array<float, 64> delay_out_r {};
+    delay_in_l[0] = 1.0f;
+    delay_in_r[0] = -1.0f;
+    const float* delay_inputs[] = {delay_in_l.data(), delay_in_r.data()};
+    float* delay_outputs[] = {delay_out_l.data(), delay_out_r.data()};
+
+    require_allocates_no_memory([&] {
+        for (int i = 0; i < 4; ++i)
+            freeze_hold.process_group(freeze_frames, 2, 129);
+        freeze_hold.set_frozen(true);
+        for (int i = 0; i < 4; ++i)
+            freeze_hold.process_group(freeze_frames, 2, 129);
+        freeze_hold.set_frozen(false);
+        freeze_hold.process_group(freeze_frames, 2, 129);
+        (void)freeze_hold.is_engaged();
+        (void)freeze_hold.is_latched();
+        freeze_hold.reset();
+
+        loop_sampler.write(loop_inputs, 32);
+        loop_sampler.freeze(16);
+        loop_sampler.read(loop_outputs, 16);
+        loop_sampler.release();
+        loop_sampler.read(loop_outputs, 16);
+        loop_sampler.reset();
+        (void)loop_sampler.channels();
+        (void)loop_sampler.frozen();
+        (void)loop_sampler.loop_length();
+
+        delay.process(delay_inputs, delay_outputs, 64);
+        loop_processor.frozen = true;
+        delay.process(delay_inputs, delay_outputs, 32);
+        delay.set_delay_sync(120.0, 0.25);
+        delay.set_feedback(0.25f);
+        (void)delay.min_delay_samples();
+        delay.reset();
     });
 }
 

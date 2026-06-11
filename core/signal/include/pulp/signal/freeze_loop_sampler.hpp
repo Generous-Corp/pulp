@@ -33,6 +33,10 @@ public:
     /// @param capacity    max samples per channel the record ring holds
     ///                    (must exceed the largest loop + crossfade + a block)
     /// @param crossfade   loop-boundary crossfade length in samples
+    /// RT contract: prepare(), snapshot(), and restore() allocate or copy
+    /// variable-size storage and are not audio-thread safe. After prepare(),
+    /// write(), freeze(), release(), read(), reset(), and accessors are
+    /// allocation-free for the prepared channel/capacity bounds.
     void prepare(int channels, int capacity, int crossfade) {
         channels_ = channels;
         capacity_ = std::max(capacity, crossfade + 2);
@@ -121,7 +125,7 @@ public:
 
     // ── snapshot / restore (plugin state recall) ──
     /// Serialize the frozen loop: [channels][loop_len][crossfade][play_pos]
-    /// then loop_len * channels floats. Empty when not frozen.
+    /// then loop_len * channels floats. Empty when not frozen. Not RT-safe.
     std::vector<float> snapshot() const {
         std::vector<float> out;
         if (!frozen_ || loop_len_ <= 0) return out;
@@ -138,7 +142,7 @@ public:
     }
 
     /// Restore a loop produced by snapshot(). Returns false on a malformed
-    /// or channel-mismatched blob (leaves the sampler unfrozen).
+    /// or channel-mismatched blob (leaves the sampler unfrozen). Not RT-safe.
     bool restore(const std::vector<float>& blob) {
         if (blob.size() < 4) { frozen_ = false; return false; }
         const int ch = static_cast<int>(blob[0]);
