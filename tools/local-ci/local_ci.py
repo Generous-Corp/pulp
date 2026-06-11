@@ -159,6 +159,7 @@ import io_utils as _io_utils  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
 import linux_desktop_bindings as _linux_desktop_bindings  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
+import local_ci_command_bindings as _local_ci_command_bindings  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
@@ -2442,98 +2443,27 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 def resolve_submission_options(
     args: argparse.Namespace, command: str
 ) -> tuple[dict, str, str, list[str], str, str, dict]:
-    return _local_ci_commands_cli.resolve_submission_options(
-        args,
-        command,
-        load_config_fn=load_config,
-        current_branch_fn=current_branch,
-        resolve_git_ref_sha_fn=resolve_git_ref_sha,
-        current_sha_fn=current_sha,
-        resolve_targets_fn=resolve_targets,
-        parse_targets_arg_fn=parse_targets_arg,
-        normalize_priority_fn=normalize_priority,
-        default_priority_for_fn=default_priority_for,
-        normalize_validation_mode_fn=normalize_validation_mode,
-        build_submission_metadata_fn=build_submission_metadata,
-    )
+    return _local_ci_command_bindings.resolve_submission_options(globals(), args, command)
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_enqueue(
-        args,
-        resolve_submission_options_fn=resolve_submission_options,
-        print_submission_metadata_fn=print_submission_metadata,
-        enqueue_job_fn=enqueue_job,
-        enqueue_command_result_line_fn=enqueue_command_result_line,
-    )
+    return _local_ci_command_bindings.cmd_enqueue(globals(), args)
 
 
 def cmd_drain(_args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_drain(
-        _args,
-        load_config_fn=load_config,
-        drain_pending_jobs_fn=drain_pending_jobs,
-        current_runner_info_fn=current_runner_info,
-        drain_runner_active_line_fn=drain_runner_active_line,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_drain(globals(), _args)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_run(
-        args,
-        resolve_submission_options_fn=resolve_submission_options,
-        print_submission_metadata_fn=print_submission_metadata,
-        gh_workflow_dispatch_fn=gh_workflow_dispatch,
-        enqueue_job_fn=enqueue_job,
-        enqueue_command_result_line_fn=enqueue_command_result_line,
-        wait_for_job_fn=wait_for_job,
-        load_job_fn=load_job,
-        print_result_fn=print_result,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_run(globals(), args)
 
 
 def cmd_ship(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_ship(
-        args,
-        resolve_submission_options_fn=resolve_submission_options,
-        gh_available_fn=gh_available,
-        print_submission_metadata_fn=print_submission_metadata,
-        root=ROOT,
-        run_fn=subprocess.run,
-        gh_pr_create_fn=gh_pr_create,
-        enqueue_job_fn=enqueue_job,
-        summarize_job_fn=summarize_job,
-        wait_for_job_fn=wait_for_job,
-        gh_pr_comment_fn=gh_pr_comment,
-        format_ci_comment_fn=format_ci_comment,
-        gh_pr_merge_fn=gh_pr_merge,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_ship(globals(), args)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_check(
-        args,
-        gh_available_fn=gh_available,
-        gh_pr_head_fn=gh_pr_head,
-        short_sha_fn=short_sha,
-        load_config_fn=load_config,
-        resolve_targets_fn=resolve_targets,
-        parse_targets_arg_fn=parse_targets_arg,
-        normalize_priority_fn=normalize_priority,
-        default_priority_for_fn=default_priority_for,
-        normalize_validation_mode_fn=normalize_validation_mode,
-        build_submission_metadata_fn=build_submission_metadata,
-        print_submission_metadata_fn=print_submission_metadata,
-        enqueue_job_fn=enqueue_job,
-        summarize_job_fn=summarize_job,
-        wait_for_job_fn=wait_for_job,
-        gh_pr_comment_fn=gh_pr_comment,
-        format_ci_comment_fn=format_ci_comment,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_check(globals(), args)
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
@@ -2554,12 +2484,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_list(
-        _args,
-        gh_available_fn=gh_available,
-        gh_pr_list_open_fn=gh_pr_list_open,
-        open_pr_list_lines_fn=open_pr_list_lines,
-    )
+    return _local_ci_command_bindings.cmd_list(globals(), _args)
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
@@ -2597,38 +2522,7 @@ def cmd_evidence(args: argparse.Namespace) -> int:
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_status(
-        _args,
-        load_config_fn=load_config,
-        load_queue_fn=load_queue,
-        queue_status_groups_fn=queue_status_groups,
-        current_runner_info_fn=current_runner_info,
-        state_dir_fn=state_dir,
-        config_path_fn=config_path,
-        status_runner_line_fn=status_runner_line,
-        summarize_job_fn=summarize_job,
-        status_submission_lines_fn=status_submission_lines,
-        status_active_targets_fn=status_active_targets,
-        summarize_active_targets_fn=summarize_active_targets,
-        status_target_detail_lines_fn=status_target_detail_lines,
-        recent_completed_jobs_for_status_fn=recent_completed_jobs_for_status,
-        load_result_fn=load_result,
-        recent_completed_status_line_fn=recent_completed_status_line,
-        recent_completed_missing_result_line_fn=recent_completed_missing_result_line,
-        current_branch_fn=current_branch,
-        print_evidence_summary_fn=print_evidence_summary,
-        list_cloud_records_fn=list_cloud_records,
-        load_optional_config_fn=load_optional_config,
-        github_actions_settings_for_display_fn=github_actions_settings_for_display,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        resolve_default_provider_for_workflow_fn=resolve_default_provider_for_workflow,
-        print_billing_period_summary_fn=print_billing_period_summary,
-        estimate_billing_period_totals_fn=estimate_billing_period_totals,
-        cloud_record_summary_fn=cloud_record_summary,
-        print_state_footprint_fn=print_local_ci_state_footprint,
-        utmctl_vm_status_fn=utmctl_vm_status,
-        ssh_reachable_fn=ssh_reachable,
-    )
+    return _local_ci_command_bindings.cmd_status(globals(), _args)
 
 
 def cmd_desktop_install(args: argparse.Namespace) -> int:
