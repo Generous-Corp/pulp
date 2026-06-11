@@ -38,6 +38,10 @@ void RunningStatusParser::reset() {
     sysex_buf_.clear();
 }
 
+void RunningStatusParser::reserve_sysex(std::size_t worst_case_body_bytes) {
+    sysex_buf_.reserve(worst_case_body_bytes);
+}
+
 void RunningStatusParser::feed(const uint8_t* data, std::size_t size) {
     for (std::size_t i = 0; i < size; ++i) {
         uint8_t b = data[i];

@@ -1496,7 +1496,9 @@ pulp_add_test_suite(pulp-test-resizable-shell LIBRARIES pulp::view)
 # ATK / AT-SPI mapping (workstream 04 slice 4.2a)
 pulp_add_test_suite(pulp-test-atk-mapping LIBRARIES pulp::view)
 # Running-status MIDI parser (workstream 02 slice 2.5)
-pulp_add_test_suite(pulp-test-running-status LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-running-status
+    SOURCES test_running_status.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 # Background scanner (workstream 03 slice 3.2)
 pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # Host parameter-event queue

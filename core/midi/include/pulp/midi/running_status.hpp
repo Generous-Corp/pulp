@@ -12,9 +12,21 @@
 //
 // Pure C++ — consumed by platform backends + unit-tested without any
 // MIDI device attached.
+//
+// RT-safety contract:
+//
+//   - Install callbacks and call reserve_sysex(N) before entering the MIDI
+//     callback, where N is the largest SysEx payload body the port accepts
+//     after F0 and before F7.
+//   - After that preparation, feed() and reset() do not allocate while SysEx
+//     payloads stay within the reserved size.
+//   - Callback objects and callback-owned destination storage are caller-owned.
+//     Keep them preconstructed and allocation-free when using this parser from
+//     realtime code.
 
 #include <pulp/midi/message.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -32,6 +44,10 @@ public:
 
     void on_short_message(ShortMessageSink sink) { short_sink_ = std::move(sink); }
     void on_sysex(SysexSink sink) { sysex_sink_ = std::move(sink); }
+
+    /// Prepare internal SysEx body storage for realtime use. The stored body
+    /// excludes the F0 start byte and F7 terminator.
+    void reserve_sysex(std::size_t worst_case_body_bytes);
 
     /// Feed a byte stream. Call from the MIDI I/O thread; the parser
     /// itself is single-threaded (one instance per input port).

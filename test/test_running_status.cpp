@@ -4,6 +4,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/running_status.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <vector>
 
 using namespace pulp::midi;
@@ -12,6 +17,40 @@ namespace {
 
 struct Captured {
     uint8_t status, d1, d2;
+};
+
+struct RtRunningStatusSink {
+    static constexpr std::size_t kMaxShorts = 8;
+    static constexpr std::size_t kMaxSysexMessages = 2;
+    static constexpr std::size_t kMaxSysexBytes = 8;
+
+    std::array<Captured, kMaxShorts> shorts{};
+    std::size_t short_count = 0;
+
+    struct Sysex {
+        std::array<uint8_t, kMaxSysexBytes> payload{};
+        std::size_t size = 0;
+    };
+    std::array<Sysex, kMaxSysexMessages> sysex{};
+    std::size_t sysex_count = 0;
+
+    void capture_short(const MidiEvent& e) noexcept {
+        REQUIRE(short_count < shorts.size());
+        const auto& m = e.message;
+        shorts[short_count++] = {
+            m.data()[0],
+            m.length() > 1 ? m.data()[1] : uint8_t(0),
+            m.length() > 2 ? m.data()[2] : uint8_t(0),
+        };
+    }
+
+    void capture_sysex(const uint8_t* data, std::size_t size) noexcept {
+        REQUIRE(sysex_count < sysex.size());
+        REQUIRE(size <= kMaxSysexBytes);
+        auto& message = sysex[sysex_count++];
+        message.size = size;
+        std::copy(data, data + size, message.payload.begin());
+    }
 };
 
 std::vector<Captured> parse(std::initializer_list<uint8_t> bytes) {
@@ -29,6 +68,53 @@ std::vector<Captured> parse(std::initializer_list<uint8_t> bytes) {
 }
 
 } // namespace
+
+TEST_CASE("running status reserved feed path is allocation-free",
+          "[midi][running-status][rt-safety]") {
+    RunningStatusParser p;
+    p.reserve_sysex(RtRunningStatusSink::kMaxSysexBytes);
+
+    RtRunningStatusSink sink;
+    p.on_short_message([&sink](const MidiEvent& e) noexcept {
+        sink.capture_short(e);
+    });
+    p.on_sysex([&sink](const uint8_t* data, std::size_t size) noexcept {
+        sink.capture_sysex(data, size);
+    });
+
+    const uint8_t first[] = {
+        0x90, 0x3C, 0x7F,
+        0x3D, 0x40,
+        0xF8,
+        0xF0, 0x7D, 0x01,
+    };
+    const uint8_t second[] = {
+        0x02, 0xF7,
+        0xF0, 0x7E,
+        0x90, 0x40, 0x7F,
+    };
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        p.feed(first, sizeof(first));
+        p.feed(second, sizeof(second));
+        p.reset();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(sink.short_count == 4);
+    REQUIRE(sink.shorts[0].status == 0x90);
+    REQUIRE(sink.shorts[0].d1 == 0x3C);
+    REQUIRE(sink.shorts[1].status == 0x90);
+    REQUIRE(sink.shorts[1].d1 == 0x3D);
+    REQUIRE(sink.shorts[2].status == 0xF8);
+    REQUIRE(sink.shorts[3].status == 0x90);
+    REQUIRE(sink.shorts[3].d1 == 0x40);
+    REQUIRE(sink.sysex_count == 1);
+    REQUIRE(sink.sysex[0].size == 3);
+    REQUIRE(sink.sysex[0].payload[0] == 0x7D);
+    REQUIRE(sink.sysex[0].payload[2] == 0x02);
+}
 
 TEST_CASE("single note-on is parsed", "[midi][running-status]") {
     auto v = parse({0x90, 0x3C, 0x7F});
