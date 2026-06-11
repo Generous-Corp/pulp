@@ -1882,6 +1882,7 @@ pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-spectral-primitives SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-noise-morpher LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-sinc-resampler LIBRARIES pulp::signal)
 # Multi-backend FFT facade (vdsp / kissfft / fftw3 / mkl). Verifies
 # selector helpers, env-var routing, round-trip on each available
 # backend, and cross-backend numerical equivalence.
@@ -1893,7 +1894,6 @@ pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
 pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
-
 # Multi-channel meter edge tests (#645)
 pulp_add_test_suite(pulp-test-multi-channel-meter LIBRARIES pulp::signal)
 
