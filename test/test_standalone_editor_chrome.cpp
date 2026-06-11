@@ -1085,6 +1085,26 @@ TEST_CASE("Standalone environment opts screenshot runs into hidden mode",
     REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
 }
 
+#if PULP_ENABLE_AUDIO_PROBES
+TEST_CASE("Standalone PULP_AUDIO_PROBE_JSON env arms a headless probe dump",
+          "[standalone][chrome][audio-inspector]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv probe_json("PULP_AUDIO_PROBE_JSON");
+    headless.unset();
+    screenshot.unset();           // probe-json alone, no screenshot requested
+    probe_json.set("/tmp/pulp-standalone-probe.json");
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+
+    // The dump is a headless one-shot like --screenshot, so it implies
+    // headless — but with an EMPTY screenshot path (no PNG forced).
+    REQUIRE(config.audio_probe_json_path == "/tmp/pulp-standalone-probe.json");
+    REQUIRE(config.headless);
+    REQUIRE(config.screenshot_path.empty());
+}
+#endif
+
 TEST_CASE("Standalone headless CI without screenshot is rejected before launch",
           "[standalone][chrome][issue-2515]") {
     ScopedEnv headless("PULP_HEADLESS");

@@ -53,6 +53,18 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
             config.screenshot_frame_delay = parsed;
     }
 
+#if PULP_ENABLE_AUDIO_PROBES
+    // Programmatic live-probe readout for agents / CI. Mirrors how
+    // PULP_SCREENSHOT feeds screenshot_path; the one-shot dump shares the
+    // screenshot frame-delay machinery in run_with_editor().
+    if (auto probe_json = runtime::get_env("PULP_AUDIO_PROBE_JSON");
+        probe_json && config.audio_probe_json_path.empty()) {
+        config.audio_probe_json_path = *probe_json;
+    }
+    if (!config.audio_probe_json_path.empty())
+        config.headless = true;
+#endif
+
     if (!config.screenshot_path.empty())
         config.headless = true;
 

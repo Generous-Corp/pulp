@@ -124,6 +124,7 @@ Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 | WASAPI device I/O | experimental | [audio](modules.md#audio) | |
 | ALSA device I/O | experimental | [audio](modules.md#audio) | |
 | AVAudioSession (iOS) | experimental | [audio](modules.md#audio) | |
+| Live Audio Inspector (RT output-boundary probe, dev window + JSON dump) | usable | [audio](modules.md#audio) | [audio-inspector](../guides/audio-inspector.md) |
 
 Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`
 

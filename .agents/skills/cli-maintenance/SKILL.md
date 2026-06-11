@@ -387,6 +387,19 @@ acceptance varies by implementation for signed prefixes, and the Rust-facing
 CLI surface should stay deterministic across platforms. Add regression tests
 for boundary spelling when changing these parsers.
 
+`pulp run` forwards each launcher flag two ways — as argv AND as an env var —
+so the standalone host picks up whichever it reads. When adding a flag here
+(`cmd_run_parse.cpp` parses into `ParseRunResult`; `cmd_run.cpp` exports the
+env var + builds argv via `assemble_launch_args`), wire BOTH and add the flag
+to the `print_help` text plus the `pulp run --help` shellout assertion in
+`test_cli_shellout.cpp` and the parser test in `test_cli_run_options.cpp`.
+The Audio Inspector flags follow this shape: `--audio-inspector` →
+`PULP_AUDIO_INSPECTOR=1` (does NOT imply headless); `--audio-probe-json <path>`
+→ `PULP_AUDIO_PROBE_JSON=<path>` (implies headless, like `--screenshot`). A
+bare `--audio-probe-json` run is headless but must NOT auto-assign a default
+screenshot PNG path — guard the headless-default branch on an empty probe-json
+path. See `docs/guides/audio-inspector.md`.
+
 ### Import-design artifact flags
 
 `pulp import-design --output <path>` is the destination for the primary

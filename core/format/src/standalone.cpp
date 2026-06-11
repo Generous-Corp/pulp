@@ -36,6 +36,7 @@
 #include <pulp/inspect/inspector_overlay.hpp>
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
+#include <pulp/audio/audio_probe_json.hpp>
 #include <pulp/view/audio_inspector_window.hpp>
 #include <pulp/view/command_registry.hpp>
 #endif
@@ -626,6 +627,30 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     detail::log_standalone_window_open(w, h, use_gpu, bridge->uses_script_ui(), chrome);
 
+#if PULP_ENABLE_AUDIO_PROBES
+    // ── Programmatic live-probe JSON dump (the agent/CI readout) ──
+    //
+    // Writes `output_probe().latest()` (+ the AudioStats subset) as a flat
+    // JSON object to `audio_probe_json_path`. Factored into a free function
+    // (audio_probe_snapshot_to_json) so the snapshot→JSON mapping is unit-
+    // tested without a device. Used as a side-effect of the screenshot
+    // one-shot when both are set, and drives a dedicated one-shot when only
+    // the JSON dump was requested. Empty path → no-op.
+    auto write_probe_json = [this](const std::string& path) {
+        if (path.empty()) return;
+        const auto json = audio::audio_probe_snapshot_to_json(
+            output_probe_.latest(), output_probe_.stats());
+        std::ofstream out(path, std::ios::binary);
+        out.write(json.data(), static_cast<std::streamsize>(json.size()));
+        if (out) {
+            runtime::log_info("Standalone: audio probe JSON written to {}", path);
+        } else {
+            runtime::log_error("Standalone: failed to write audio probe JSON to {}",
+                               path);
+        }
+    };
+#endif
+
     // ── Headless one-shot screenshot (SDK-codified, pulp #468 follow-up) ──
     //
     // When `effective_config.screenshot_path` is non-empty (set via
@@ -656,10 +681,16 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 #endif
         cap.capture_fn = [host, editor_view, w, h
 #if PULP_ENABLE_AUDIO_PROBES
-                          , audio_inspector_ptr, inspector_png_path
+                          , audio_inspector_ptr, inspector_png_path,
+                          write_probe_json,
+                          probe_json_path = effective_config.audio_probe_json_path
 #endif
         ] {
 #if PULP_ENABLE_AUDIO_PROBES
+            // Side-effect: dump the live probe metrics as JSON at the same
+            // frame the screenshot is taken (composes --screenshot with
+            // --audio-probe-json in a single headless run). No-op when unset.
+            write_probe_json(probe_json_path);
             // Side-effect: capture the inspector window's own surface at the
             // same frame, before the main window closes. capture_png() returns
             // empty on hosts without GPU capture — skip the write in that case.
@@ -704,6 +735,43 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_info("Standalone: screenshot mode armed — will capture to {} after {} frames",
                           effective_config.screenshot_path, cap.delay);
     }
+#if PULP_ENABLE_AUDIO_PROBES
+    // Probe-JSON-only one-shot: when --audio-probe-json was requested without
+    // --screenshot, reuse the same frame-delay machinery to let the audio path
+    // run a few blocks, then write the JSON and close. (When --screenshot is
+    // also set, the dump rode the screenshot capture_fn above instead.)
+    else if (!effective_config.audio_probe_json_path.empty()) {
+        auto* host = window.get();
+        detail::ScreenshotCapture cap;
+        cap.delay = effective_config.screenshot_frame_delay > 0
+            ? effective_config.screenshot_frame_delay : 30;
+        cap.path = effective_config.audio_probe_json_path;
+        // capture_fn writes the JSON itself and returns a single sentinel byte
+        // so ScreenshotCapture's empty-bytes guard doesn't fire; the file is
+        // already written, so we make the helper's own write a harmless
+        // overwrite of the same content.
+        cap.capture_fn = [write_probe_json,
+                          path = effective_config.audio_probe_json_path]()
+            -> std::vector<uint8_t> {
+            write_probe_json(path);
+            return {std::uint8_t{0}};  // non-empty sentinel; real write done above
+        };
+        // The helper would re-write `path` with the sentinel byte, clobbering
+        // the JSON. Leave its path empty so only our write lands; an empty
+        // path makes the helper's write a no-op (it reports via on_error,
+        // which we leave unset for this benign case).
+        cap.path.clear();
+        cap.close_fn = [host] { host->request_close(); };
+        auto prior = pre_screenshot_idle;
+        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+            if (prior) prior();
+            cap();
+        });
+        runtime::log_info(
+            "Standalone: audio-probe-json mode armed — will dump to {} after {} frames",
+            effective_config.audio_probe_json_path, cap.delay);
+    }
+#endif
 
     // Blocks until the window is closed. Most window-close paths have
     // already fired bridge->close(), but application-quit paths can return

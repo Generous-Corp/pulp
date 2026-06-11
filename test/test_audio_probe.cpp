@@ -11,13 +11,17 @@
 
 #include <pulp/audio/audio_boundary_report.hpp>
 #include <pulp/audio/audio_probe.hpp>
+#include <pulp/audio/audio_probe_json.hpp>
 #include <pulp/audio/audio_probe_snapshot.hpp>
 #include <pulp/audio/audio_stats.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <cmath>
 #include <limits>
@@ -445,4 +449,70 @@ TEST_CASE("Boundary report distinguishes processor / boundary / device faults",
         REQUIRE(report.text.find("Processor output: no probe") != std::string::npos);
         REQUIRE(report.text.find("Standalone boundary: no probe") != std::string::npos);
     }
+}
+
+// ── Live Audio Inspector programmatic readout: snapshot → JSON ──────────────
+//
+// `pulp run --audio-probe-json PATH` writes the live probe's latest snapshot
+// (plus the AudioStats subset) as a flat JSON object. The standalone host owns
+// the one-shot lifecycle; the snapshot→JSON mapping is factored into the pure
+// audio_probe_snapshot_to_json() helper so it is testable without a device.
+TEST_CASE("audio_probe_snapshot_to_json carries the documented fields and dBFS",
+          "[audio][probe][json][audio-inspector]") {
+    AudioProbeSnapshot snap;
+    snap.stage_id = AudioProbeStage::kStandaloneOutputBoundary;
+    snap.sample_rate = 48000.0;
+    snap.block_size = 256;
+    snap.channel_count = 2;
+    snap.sequence_number = 7;
+    snap.peak_max = 0.5f;   // → -6.0206 dBFS
+    snap.rms_max = 0.25f;   // → -12.0412 dBFS
+    snap.clip_count = 3;
+    snap.nan_inf_count = 1;
+    snap.clipped_blocks = 2;
+    snap.nan_blocks = 1;
+    snap.silence_run_blocks = 4;
+    snap.callbacks = 99;
+
+    AudioStats stats;
+    stats.underruns = 5;
+    stats.device_xruns = 6;
+    stats.cpu_overloads = 2;
+
+    const auto json = audio_probe_snapshot_to_json(snap, stats);
+    const auto v = choc::json::parse(json);
+
+    // choc serializes a whole-valued double (48000.0) as `48000` and parses
+    // it back as an int, so use the coercing get<T>() accessors rather than
+    // the strict getFloat64()/getInt64().
+    REQUIRE(v["stage"].getString() == "standalone_output_boundary");
+    REQUIRE(v["sample_rate"].get<double>() == 48000.0);
+    REQUIRE(v["block_size"].get<std::int64_t>() == 256);
+    REQUIRE(v["channel_count"].get<std::int64_t>() == 2);
+    REQUIRE(v["sequence_number"].get<std::int64_t>() == 7);
+    REQUIRE(v["peak_max"].get<double>() == Catch::Approx(0.5));
+    REQUIRE(v["rms_max"].get<double>() == Catch::Approx(0.25));
+    REQUIRE(v["peak_dbfs"].get<double>() == Catch::Approx(-6.0206).margin(1e-3));
+    REQUIRE(v["rms_dbfs"].get<double>() == Catch::Approx(-12.0412).margin(1e-3));
+    REQUIRE(v["clip_count"].get<std::int64_t>() == 3);
+    REQUIRE(v["nan_inf_count"].get<std::int64_t>() == 1);
+    REQUIRE(v["clipped_blocks"].get<std::int64_t>() == 2);
+    REQUIRE(v["nan_blocks"].get<std::int64_t>() == 1);
+    REQUIRE(v["silence_run_blocks"].get<std::int64_t>() == 4);
+    REQUIRE(v["callbacks"].get<std::int64_t>() == 99);
+    REQUIRE(v["underruns"].get<std::int64_t>() == 5);
+    REQUIRE(v["device_xruns"].get<std::int64_t>() == 6);
+    REQUIRE(v["cpu_overloads"].get<std::int64_t>() == 2);
+}
+
+TEST_CASE("audio_probe_snapshot_to_json reports silence as null dBFS",
+          "[audio][probe][json][audio-inspector]") {
+    AudioProbeSnapshot snap;  // peak_max / rms_max default to 0 (true silence)
+    AudioStats stats;
+    const auto v = choc::json::parse(audio_probe_snapshot_to_json(snap, stats));
+    // JSON has no infinity literal, so 0-linear maps to null, letting a reader
+    // tell true silence from a finite low level.
+    REQUIRE(v["peak_dbfs"].isVoid());
+    REQUIRE(v["rms_dbfs"].isVoid());
+    REQUIRE(v["stage"].getString() == "unknown");
 }

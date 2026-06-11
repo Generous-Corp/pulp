@@ -70,6 +70,16 @@ struct StandaloneConfig {
     // first React-driven layout + effects pass time to settle.
     int screenshot_frame_delay = 30;
 
+    // When non-empty, run_with_editor() arms the same one-shot frame-delay
+    // path as `screenshot_path` and, after the delay, writes the live output
+    // probe's latest snapshot (peak/RMS/dBFS/clip/NaN/silence counters) as a
+    // JSON object to this path, then exits. This is the programmatic readout
+    // of the live Audio Inspector for agents and CI — distinct from the
+    // offline `pulp audio validate` Doctor. Set via set_config() or by reading
+    // PULP_AUDIO_PROBE_JSON. Only meaningful when PULP_ENABLE_AUDIO_PROBES is
+    // ON; ignored otherwise.
+    std::string audio_probe_json_path;
+
     // Item 3.5 (macOS plan) — built-in tempo source. The standalone host has
     // no DAW providing transport, so it acts as one: it surfaces
     // `tempo_bpm` / time signature on every ProcessContext block, and

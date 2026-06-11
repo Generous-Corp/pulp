@@ -2300,6 +2300,9 @@ TEST_CASE("pulp run --help advertises the headless/screenshot/frames/watch flags
     REQUIRE(r.stdout_output.find("--screenshot") != std::string::npos);
     REQUIRE(r.stdout_output.find("--frames")     != std::string::npos);
     REQUIRE(r.stdout_output.find("--watch")      != std::string::npos);
+    // Live Audio Inspector discoverability (the human + agent launch paths).
+    REQUIRE(r.stdout_output.find("--audio-inspector")  != std::string::npos);
+    REQUIRE(r.stdout_output.find("--audio-probe-json") != std::string::npos);
     // Make sure the existing "active project build" line stays — the
     // root CMakeLists.txt regex test depends on it.
     REQUIRE(r.stdout_output.find("active project build") != std::string::npos);

@@ -19,6 +19,29 @@ shell's `CommandRegistry`:
   distinct from the layout inspector's `PLPI`.
 - Rebind it like any other command via the `KeyMappingEditor`; the binding
   persists through `ShortcutMap`.
+- Env var: launch with `PULP_AUDIO_INSPECTOR=1` to open the window at startup.
+- CLI: `pulp run --audio-inspector` (forwards the flag + sets the env var).
+  Composes with `--screenshot` to also capture the panel as
+  `<stem>.audio-inspector.png` in a headless run.
+
+### Programmatic readout (agents / CI)
+
+When you can't look at a window, read the probe as JSON:
+
+```bash
+pulp run --audio-probe-json /tmp/probe.json   # headless one-shot dump + exit
+```
+
+This writes `output_probe().latest()` (+ the `AudioStats` subset) as a flat
+JSON object — `stage`, `sample_rate`, `block_size`, `channel_count`,
+`sequence_number`, `peak_max`/`rms_max`, `peak_dbfs`/`rms_dbfs` (null on true
+silence), `clip_count`, `nan_inf_count`, `clipped_blocks`, `nan_blocks`,
+`silence_run_blocks`, `callbacks`, `underruns`, `device_xruns`,
+`cpu_overloads`. The mapping is the pure
+`pulp::audio::audio_probe_snapshot_to_json()` helper
+(`pulp/audio/audio_probe_json.hpp`), so it is unit-tested without a device.
+Both flags are gated by `PULP_ENABLE_AUDIO_PROBES` (dev-on, ship-off). See
+`docs/guides/audio-inspector.md`.
 
 A shell wires it once:
 

@@ -109,6 +109,18 @@ window. `StandaloneConfig::headless`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
 `run_with_editor()` fails before creating the host so tests cannot park a
 hidden live window forever.
 
+The `--audio-probe-json` / `PULP_AUDIO_PROBE_JSON` path (gated by
+`PULP_ENABLE_AUDIO_PROBES`) is a SECOND headless one-shot that reuses the same
+`screenshot_frame_delay` counter (`detail::ScreenshotCapture`): after the
+delay it writes `output_probe().latest()` as JSON via the pure
+`audio::audio_probe_snapshot_to_json()` helper, then closes the host. When a
+screenshot is ALSO requested the JSON write rides the screenshot `capture_fn`
+(same frame, before the window closes); when only the JSON dump is requested it
+drives a dedicated `ScreenshotCapture` with a cleared `path` so the helper's
+own byte-write is a no-op and only the JSON file lands. So a headless run
+without a screenshot path is valid as long as `audio_probe_json_path` is set —
+don't tighten the "headless requires screenshot" guard to also reject it.
+
 ## AU v3 controller lifecycle — runs on XPC queue, NOT main (Phase 3.5)
 
 The host invokes `-[PulpAUMacViewController createAudioUnitWithComponentDescription:error:]`
