@@ -467,7 +467,20 @@ conv.process(input, output, block_size);
 | Multi-Channel Meter | `multi_channel_meter.hpp` | Peak and RMS level measurement across multiple channels |
 | Oscillator | `oscillator.hpp` | Wavetable oscillator with sine, saw, square, triangle waveforms |
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
-| STFT | `stft.hpp` | Short-time Fourier Transform for overlap-add spectral processing |
+| STFT | `stft.hpp` | Short-time Fourier Transform for visualization (analysis-only; for processing use `spectral_frame_engine.hpp`) |
+
+#### Spectral processing
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Spectral Frame Engine | `spectral_frame_engine.hpp` | Streaming STFT analysis + overlap-add synthesis with coherent multichannel frame groups and variable synthesis hop |
+| Realtime Pitch/Time | `realtime_pitch_time_processor.hpp` | Phase-vocoder pitch shifting (fixed duration, exact reported latency) and independent time stretching, with transient preservation, formant follow/preserve, and freeze |
+| Phase Coordinator | `multichannel_phase_coordinator.hpp` | Laroche-Dolson phase propagation with identity peak locking, applied as one rotation per bin across a channel group — preserves inter-channel phase exactly |
+| Envelope Shifter | `spectral_envelope_shifter.hpp` | Cepstral spectral-envelope estimation (true-envelope refinement) and formant warping with exact unity bypass |
+| Transient Policy | `transient_phase_policy.hpp` | Spectral-flux transient detection (median + energy-relative gates) driving phase reset at onsets |
+| Freeze Hold | `freeze_hold.hpp` | Spectral freeze / infinite hold with de-looped phase evolution, click-free engage/release, and a no-mute latch policy |
+| Pitched Feedback Delay | `pitched_feedback_delay.hpp` | Delay with a latency-bearing processor inside the feedback loop, tempo sync, freeze-aware feedback gating, and a computed minimum delay |
+| Control Smoother | `latency_aware_control_smoother.hpp` | Closed-form one-pole smoothing with attack/release asymmetry, semitone/ratio domains, block-size-independent trajectories |
 | Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Kaiser window functions for FFT analysis |
 
 #### Math and utilities
