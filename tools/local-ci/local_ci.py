@@ -1652,54 +1652,27 @@ def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int =
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
-    return _queue_lifecycle.reconcile_running_jobs_unlocked(
-        queue,
-        stale_running_jobs_unlocked_fn=stale_running_jobs_unlocked,
-        stale_running_reconciliation_actions_unlocked_fn=_queue_orchestrator.stale_running_reconciliation_actions_unlocked,
-        supersede_job_unlocked_fn=supersede_job_unlocked,
-        requeue_stale_running_job_unlocked_fn=lambda job: _queue_orchestrator.requeue_stale_running_job_unlocked(
-            job,
-            now_iso_fn=now_iso,
-        ),
-    )
+    return _queue_bindings.reconcile_running_jobs_unlocked(globals(), queue)
 
 
 def read_runner_info() -> dict | None:
-    return _runner_state.read_runner_info()
+    return _queue_bindings.read_runner_info(globals())
 
 
 def pid_alive(pid: int | None) -> bool:
-    return _runner_state.pid_alive(pid)
+    return _queue_bindings.pid_alive(globals(), pid)
 
 
 def current_runner_info() -> dict | None:
-    return _runner_state.current_runner_info()
+    return _queue_bindings.current_runner_info(globals())
 
 
 def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
-    return _runner_state.stale_running_jobs_for_current_runner(
-        queue,
-        stale_running_jobs_for_runner_unlocked_fn=_queue_orchestrator.stale_running_jobs_for_runner_unlocked,
-    )
+    return _queue_bindings.stale_running_jobs_unlocked(globals(), queue)
 
 
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
-    _queue_lifecycle.update_job_target_state_locked(
-        job_id,
-        target_name,
-        fields,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        update_job_target_state_unlocked_fn=lambda queue, current_job_id, current_target_name, current_fields: _queue_orchestrator.update_job_target_state_unlocked(
-            queue,
-            current_job_id,
-            current_target_name,
-            current_fields,
-            now_iso_fn=now_iso,
-        ),
-        save_queue_unlocked_fn=save_queue_unlocked,
-    )
+    _queue_bindings.update_job_target_state(globals(), job_id, target_name, **fields)
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
@@ -1723,22 +1696,11 @@ def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dic
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
-    return _queue_lifecycle.reclaim_stale_remote_validators_locked(
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        collect_stale_windows_cleanup_candidates_unlocked_fn=collect_stale_windows_cleanup_candidates_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        reclaim_stale_remote_validator_candidates_fn=_cleanup.reclaim_stale_remote_validator_candidates,
-        cleanup_validator_fn=cleanup_stale_windows_validator,
-        update_job_target_state_fn=update_job_target_state,
-        now_fn=now_iso,
-        trim_line_fn=trim_line,
-    )
+    return _queue_bindings.reclaim_stale_remote_validators(globals(), _config)
 
 
 def write_runner_info(info: dict) -> None:
-    _runner_state.write_runner_info(info)
+    _queue_bindings.write_runner_info(globals(), info)
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -1746,7 +1708,7 @@ def update_runner_active_targets(job_id: str, active_targets: dict | None) -> No
 
 
 def clear_runner_info() -> None:
-    _runner_state.clear_runner_info()
+    _queue_bindings.clear_runner_info(globals())
 
 
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
