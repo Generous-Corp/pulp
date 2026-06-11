@@ -76,6 +76,30 @@ def desktop_run_manifests(
     )
 
 
+def normalize_desktop_proof_source_mode(bindings: Mapping[str, Any], mode: str | None) -> str:
+    return _binding(bindings, "_reporting").normalize_desktop_proof_source_mode(mode)
+
+
+def desktop_manifest_adapter(bindings: Mapping[str, Any], config: dict, manifest: dict) -> str:
+    return _binding(bindings, "_reporting").desktop_manifest_adapter(config, manifest)
+
+
+def desktop_manifest_run_status(bindings: Mapping[str, Any], manifest: dict) -> str:
+    return _binding(bindings, "_reporting").desktop_manifest_run_status(manifest)
+
+
+def desktop_manifest_source(bindings: Mapping[str, Any], manifest: dict) -> dict:
+    return _binding(bindings, "_reporting").desktop_manifest_source(manifest)
+
+
+def desktop_proof_scope_for_adapter(bindings: Mapping[str, Any], adapter: str) -> str:
+    return _binding(bindings, "_reporting").desktop_proof_scope_for_adapter(adapter)
+
+
+def desktop_run_summary(bindings: Mapping[str, Any], config: dict, manifest: dict) -> dict:
+    return _binding(bindings, "_reporting").desktop_run_summary(config, manifest)
+
+
 def desktop_proof_summaries(
     bindings: Mapping[str, Any],
     config: dict,

@@ -64,13 +64,6 @@ if str(SCRIPT_DIR) not in sys.path:
 WAIT_POLL_SECS = 3
 KEEP_COMPLETED_JOBS = 25
 _BUNDLE_BUILD_LOCK = threading.Lock()
-_SSH_TRANSIENT_PATTERNS = (
-    "Connection reset by peer",
-    "kex_exchange_identification",
-    "Connection closed by remote host",
-    "Connection timed out during banner exchange",
-    "ssh_exchange_identification",
-)
 WINDOWS_REQUIRED_REMOTE_TOOLS = {
     "git": {"winget_id": "Git.Git", "required": True},
 }
@@ -81,8 +74,7 @@ WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = "pulp-validate"
 
 
 def is_transient_ssh_failure_detail(detail: str) -> bool:
-    text = detail or ""
-    return any(pattern in text for pattern in _SSH_TRANSIENT_PATTERNS)
+    return _ssh_subprocess.is_transient_ssh_failure_detail(detail)
 
 
 def run_ssh_subprocess(
@@ -93,20 +85,15 @@ def run_ssh_subprocess(
     retries: int = 3,
     retry_delay_secs: float = 2.0,
 ) -> subprocess.CompletedProcess[str]:
-    attempt = 0
-    while True:
-        attempt += 1
-        result = subprocess.run(
-            args,
-            input=input,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        detail = "\n".join(part for part in [result.stderr.strip(), result.stdout.strip()] if part)
-        if result.returncode == 0 or attempt >= retries or not is_transient_ssh_failure_detail(detail):
-            return result
-        time.sleep(retry_delay_secs * attempt)
+    return _ssh_subprocess.run_ssh_subprocess(
+        args,
+        input=input,
+        timeout=timeout,
+        retries=retries,
+        retry_delay_secs=retry_delay_secs,
+        run_fn=subprocess.run,
+        sleep_fn=time.sleep,
+    )
 
 
 from state_paths import (  # noqa: E402  -- re-exported for in-file consumers
@@ -146,6 +133,7 @@ import cleanup as _cleanup  # noqa: E402
 import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
 import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
+import config_evidence_bindings as _config_evidence_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
@@ -153,21 +141,25 @@ import desktop_command_bindings as _desktop_command_bindings  # noqa: E402
 import desktop_commands_cli as _desktop_commands_cli  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
+import desktop_infra_bindings as _desktop_infra_bindings  # noqa: E402
 import desktop_probe_bindings as _desktop_probe_bindings  # noqa: E402
 import desktop_reporting_bindings as _desktop_reporting_bindings  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
+import desktop_support_bindings as _desktop_support_bindings  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
 import io_utils as _io_utils  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
 import linux_desktop_bindings as _linux_desktop_bindings  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
+import linux_target_bindings as _linux_target_bindings  # noqa: E402
 import local_ci_command_bindings as _local_ci_command_bindings  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
+import macos_window_bindings as _macos_window_bindings  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
@@ -183,13 +175,16 @@ import source_prep as _source_prep  # noqa: E402
 import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import ssh_bundle_bindings as _ssh_bundle_bindings  # noqa: E402
+import ssh_subprocess as _ssh_subprocess  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
 import utility_command_bindings as _utility_command_bindings  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
 import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
 import windows_probe as _windows_probe  # noqa: E402
+import windows_probe_bindings as _windows_probe_bindings  # noqa: E402
 import windows_target as _windows_target  # noqa: E402
+import windows_target_bindings as _windows_target_bindings  # noqa: E402
 
 LINUX_REQUIRED_REMOTE_TOOLS = _linux_target.LINUX_REQUIRED_REMOTE_TOOLS
 LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target.LINUX_OPTIONAL_REMOTE_TOOLS
@@ -267,24 +262,15 @@ from cli_parser import build_local_ci_parser  # noqa: E402
 
 
 def load_config() -> dict:
-    path = config_path()
-    return load_config_file(path)
+    return _config_evidence_bindings.load_config(globals())
 
 
 def load_config_file(path: str | os.PathLike[str]) -> dict:
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Local CI config not found at {path}. Copy tools/local-ci/config.example.json first."
-        )
-    return normalize_desktop_config(json.loads(path.read_text()))
+    return _config_evidence_bindings.load_config_file(globals(), path)
 
 
 def load_optional_config() -> dict | None:
-    path = config_path()
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
+    return _config_evidence_bindings.load_optional_config(globals())
 
 
 from github_workflows import (  # noqa: E402  -- re-exported for in-file consumers
@@ -327,15 +313,15 @@ from evidence_index import (  # noqa: E402  -- re-exported for tests and callers
 
 
 def load_evidence_index() -> dict:
-    return evidence_index_module.load_evidence_index()
+    return _config_evidence_bindings.load_evidence_index(globals())
 
 
 def update_evidence_index(result: dict, result_path: Path) -> None:
-    evidence_index_module.update_evidence_index(result, result_path)
+    return _config_evidence_bindings.update_evidence_index(globals(), result, result_path)
 
 
 def collect_evidence_groups(branch: str | None = None, sha: str | None = None) -> dict[str, list[dict]]:
-    return collect_evidence_groups_from_index(load_evidence_index(), branch=branch, sha=sha)
+    return _config_evidence_bindings.collect_evidence_groups(globals(), branch=branch, sha=sha)
 
 
 def print_evidence_summary(
@@ -345,23 +331,25 @@ def print_evidence_summary(
     limit: int = 3,
     indent: str = "",
 ) -> bool:
-    return evidence_index_module.print_evidence_summary_from_groups(
-        collect_evidence_groups(branch=branch, sha=sha),
+    return _config_evidence_bindings.print_evidence_summary(
+        globals(),
+        branch=branch,
+        sha=sha,
         limit=limit,
         indent=indent,
     )
 
 
 def evidence_scope_header_line(branch: str | None, sha: str | None) -> str | None:
-    return evidence_index_module.evidence_scope_header_line(branch, sha)
+    return _config_evidence_bindings.evidence_scope_header_line(globals(), branch, sha)
 
 
 def evidence_empty_line(*, has_header: bool) -> str:
-    return evidence_index_module.evidence_empty_line(has_header=has_header)
+    return _config_evidence_bindings.evidence_empty_line(globals(), has_header=has_header)
 
 
 def save_config(config: dict) -> None:
-    atomic_write_text(config_path(), json.dumps(config, indent=2) + "\n")
+    return _config_evidence_bindings.save_config(globals(), config)
 
 
 from job_queue import (  # noqa: E402  -- re-exported for in-file consumers
@@ -474,41 +462,35 @@ from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2
 
 
 def desktop_target_receipt_path(target_name: str) -> Path:
-    return _desktop_artifacts.desktop_target_receipt_path(
-        target_name,
-        desktop_receipts_dir_fn=desktop_receipts_dir,
-    )
+    return _desktop_support_bindings.desktop_target_receipt_path(globals(), target_name)
 
 
 def desktop_receipt_for(target_name: str) -> dict | None:
-    return _desktop_artifacts.desktop_receipt_for(
-        target_name,
-        desktop_target_receipt_path_fn=desktop_target_receipt_path,
-    )
+    return _desktop_support_bindings.desktop_receipt_for(globals(), target_name)
 
 
 def default_windows_session_task_name(target_name: str) -> str:
-    return _windows_target.default_windows_session_task_name(target_name)
+    return _windows_target_bindings.default_windows_session_task_name(globals(), target_name)
 
 
 def desktop_target_contract(target_name: str, target: dict) -> dict:
-    return _windows_target.desktop_target_contract(target_name, target)
+    return _windows_target_bindings.desktop_target_contract(globals(), target_name, target)
 
 
 def windows_path_join(*parts: str) -> str:
-    return _windows_target.windows_path_join(*parts)
+    return _windows_target_bindings.windows_path_join(globals(), *parts)
 
 
 def windows_default_repo_checkout_path(home_dir: str | None) -> str:
-    return _windows_target.windows_default_repo_checkout_path(home_dir)
+    return _windows_target_bindings.windows_default_repo_checkout_path(globals(), home_dir)
 
 
 def windows_repo_path_is_unsafe(repo_path: str | None, home_dir: str | None = None) -> bool:
-    return _windows_target.windows_repo_path_is_unsafe(repo_path, home_dir)
+    return _windows_target_bindings.windows_repo_path_is_unsafe(globals(), repo_path, home_dir)
 
 
 def update_target_repo_path(config: dict, target_name: str, repo_path: str) -> None:
-    return _windows_target.update_target_repo_path(config, target_name, repo_path)
+    return _windows_target_bindings.update_target_repo_path(globals(), config, target_name, repo_path)
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
@@ -516,7 +498,7 @@ def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
 
 
 def windows_repo_checkout_ready(probe: dict | None) -> bool:
-    return _windows_target.windows_repo_checkout_ready(probe)
+    return _windows_target_bindings.windows_repo_checkout_ready(globals(), probe)
 
 
 def ensure_windows_remote_repo_checkout(
@@ -556,7 +538,8 @@ def build_windows_session_agent_request(
     settle_secs: float,
     timeout_secs: float,
 ) -> dict:
-    return _windows_target.build_windows_session_agent_request(
+    return _windows_target_bindings.build_windows_session_agent_request(
+        globals(),
         target_name,
         contract,
         command,
@@ -573,34 +556,27 @@ def build_windows_session_agent_request(
         capture_before=capture_before,
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
-        default_desktop_label_fn=default_desktop_label,
     )
 
 
 def resolve_desktop_target(config: dict, target_name: str) -> dict:
-    desktop_targets = config.get("desktop_automation", {}).get("targets", {})
-    if target_name not in desktop_targets:
-        raise ValueError(f"Unknown desktop target '{target_name}'.")
-    target = desktop_targets[target_name]
-    if not target.get("enabled", True):
-        raise ValueError(f"Desktop target '{target_name}' is disabled.")
-    return target
+    return _desktop_support_bindings.resolve_desktop_target(globals(), config, target_name)
 
 
 def desktop_optional_capabilities(optional_cfg: dict | None) -> list[str]:
-    return _desktop_doctor.desktop_optional_capabilities(optional_cfg)
+    return _desktop_support_bindings.desktop_optional_capabilities(globals(), optional_cfg)
 
 
 def desktop_capabilities_for(adapter: str, tier: str, optional_cfg: dict | None = None) -> list[str]:
-    return _desktop_doctor.desktop_capabilities_for(adapter, tier, optional_cfg)
+    return _desktop_support_bindings.desktop_capabilities_for(globals(), adapter, tier, optional_cfg)
 
 
 def _desktop_check(name: str, ok: bool, detail: str, *, required: bool = True) -> dict:
-    return _desktop_doctor.desktop_check(name, ok, detail, required=required)
+    return _desktop_support_bindings.desktop_check(globals(), name, ok, detail, required=required)
 
 
 def _check_writable_dir(path: Path) -> tuple[bool, str]:
-    return _desktop_doctor.check_writable_dir(path)
+    return _desktop_support_bindings.check_writable_dir(globals(), path)
 
 
 def probe_windows_session_agent(host: str, contract: dict) -> dict:
@@ -620,11 +596,11 @@ def ensure_windows_remote_tooling(host: str, *, install_optional: bool = False) 
 
 
 def windows_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
-    return _windows_target.windows_tooling_detail(probe, tool_name, missing_hint=missing_hint)
+    return _windows_target_bindings.windows_tooling_detail(globals(), probe, tool_name, missing_hint=missing_hint)
 
 
 def windows_remote_tooling_ready(probe: dict) -> bool:
-    return _windows_target.windows_remote_tooling_ready(probe, required_tools=WINDOWS_REQUIRED_REMOTE_TOOLS)
+    return _windows_target_bindings.windows_remote_tooling_ready(globals(), probe)
 
 
 def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
@@ -632,7 +608,7 @@ def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
 
 
 def webdriver_status_url(base_url: str) -> str:
-    return _desktop_doctor.webdriver_status_url(base_url)
+    return _desktop_support_bindings.webdriver_status_url(globals(), base_url)
 
 
 def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
@@ -640,81 +616,75 @@ def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
 
 
 def desktop_artifact_root(config: dict) -> Path:
-    return _desktop_artifacts.desktop_artifact_root(config)
+    return _desktop_support_bindings.desktop_artifact_root(globals(), config)
 
 
 def windows_desktop_session_user(probe: dict | None) -> str:
-    return _windows_target.windows_desktop_session_user(probe)
+    return _windows_target_bindings.windows_desktop_session_user(globals(), probe)
 
 
 def windows_desktop_session_state(probe: dict | None) -> str:
-    return _windows_target.windows_desktop_session_state(probe)
+    return _windows_target_bindings.windows_desktop_session_state(globals(), probe)
 
 
 def windows_repo_checkout_detail(probe: dict | None, *, fallback_path: str | None = None) -> str:
-    return _windows_target.windows_repo_checkout_detail(probe, fallback_path=fallback_path)
+    return _windows_target_bindings.windows_repo_checkout_detail(globals(), probe, fallback_path=fallback_path)
 
 
 def create_desktop_run_bundle(config: dict, target_name: str, action: str) -> Path:
-    return _desktop_artifacts.create_desktop_run_bundle(config, target_name, action)
+    return _desktop_support_bindings.create_desktop_run_bundle(globals(), config, target_name, action)
 
 
 def desktop_publish_root(config: dict) -> Path:
-    return _desktop_artifacts.desktop_publish_root(config)
+    return _desktop_support_bindings.desktop_publish_root(globals(), config)
 
 
 def create_desktop_publish_bundle(config: dict) -> Path:
-    return _desktop_artifacts.create_desktop_publish_bundle(config)
+    return _desktop_support_bindings.create_desktop_publish_bundle(globals(), config)
 
 
 def probe_linux_launch_backend(host: str) -> dict:
-    return _linux_target.probe_linux_launch_backend(
-        host,
-        ssh_command_result_fn=ssh_command_result,
-    )
+    return _linux_target_bindings.probe_linux_launch_backend(globals(), host)
 
 
 def probe_linux_remote_tooling(host: str) -> dict:
-    return _linux_target.probe_linux_remote_tooling(
-        host,
-        ssh_command_result_fn=ssh_command_result,
-    )
+    return _linux_target_bindings.probe_linux_remote_tooling(globals(), host)
 
 
 def linux_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
-    return _linux_target.linux_tooling_detail(probe, tool_name, missing_hint=missing_hint)
+    return _linux_target_bindings.linux_tooling_detail(globals(), probe, tool_name, missing_hint=missing_hint)
 
 
 def linux_remote_tooling_ready(probe: dict) -> bool:
-    return _linux_target.linux_remote_tooling_ready(probe, required_tools=LINUX_REQUIRED_REMOTE_TOOLS)
+    return _linux_target_bindings.linux_remote_tooling_ready(globals(), probe)
 
 
 def normalize_git_remote_for_http(remote_url: str | None) -> str | None:
-    return _git_helpers.normalize_git_remote_for_http(remote_url)
+    return _desktop_infra_bindings.normalize_git_remote_for_http(globals(), remote_url)
 
 
 def normalize_git_remote_for_clone(remote_url: str | None) -> str | None:
-    return _git_helpers.normalize_git_remote_for_clone(remote_url)
+    return _desktop_infra_bindings.normalize_git_remote_for_clone(globals(), remote_url)
 
 
 def git_origin_http_url(repo_root: Path = ROOT) -> str | None:
-    return _git_helpers.git_origin_http_url(repo_root, run_fn=subprocess.run)
+    return _desktop_infra_bindings.git_origin_http_url(globals(), repo_root)
 
 
 def git_origin_clone_url(repo_root: Path = ROOT) -> str | None:
-    return _git_helpers.git_origin_clone_url(repo_root, run_fn=subprocess.run)
+    return _desktop_infra_bindings.git_origin_clone_url(globals(), repo_root)
 
 
 def _clear_directory_contents(path: Path) -> None:
-    return _reporting.clear_directory_contents(path)
+    return _desktop_infra_bindings.clear_directory_contents(globals(), path)
 
 
 def _copy_directory_contents(src: Path, dest: Path) -> None:
-    return _reporting.copy_directory_contents(src, dest)
+    return _desktop_infra_bindings.copy_directory_contents(globals(), src, dest)
 
 
 def _run_git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
-    return _git_helpers.run_git(args, cwd=cwd, check=check, run_fn=subprocess.run)
+    return _desktop_infra_bindings.run_git(globals(), args, cwd=cwd, check=check)
 
 
 def publish_report_to_branch(config: dict, report: dict) -> dict:
@@ -739,10 +709,6 @@ def _command_path_rewrite_candidate(token: str) -> Path | None:
 
 def _rewrite_launch_command_for_mapper(command: str | None, mapper, *, windows: bool = False) -> str | None:
     return _source_prep_bindings.rewrite_launch_command_for_mapper(globals(), command, mapper, windows=windows)
-
-
-def _windows_command_join(parts: list[str]) -> str:
-    return subprocess.list2cmdline(parts)
 
 
 def rewrite_launch_command_for_source_root(command: str | None, source_root: Path) -> str | None:
@@ -770,7 +736,7 @@ def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | Non
 
 
 def slugify_token(value: str, *, max_len: int = 48) -> str:
-    return _reporting.slugify_token(value, max_len=max_len)
+    return _desktop_infra_bindings.slugify_token(globals(), value, max_len=max_len)
 
 
 def stage_desktop_publish_report(
@@ -798,19 +764,19 @@ def write_desktop_publish_rollups(config: dict) -> None:
 
 
 def wait_for_path(path: Path, timeout_secs: float) -> Path:
-    return _io_utils.wait_for_path(path, timeout_secs)
+    return _desktop_infra_bindings.wait_for_path(globals(), path, timeout_secs)
 
 
 def count_view_tree_nodes(node: object) -> int:
-    return _desktop_actions.count_view_tree_nodes(node)
+    return _desktop_support_bindings.count_view_tree_nodes(globals(), node)
 
 
 def detect_macos_app_bundle(command: str | None) -> Path | None:
-    return _macos_desktop.detect_macos_app_bundle(command)
+    return _macos_window_bindings.detect_macos_app_bundle(globals(), command)
 
 
 def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
-    return _macos_desktop.macos_bundle_id_for_app_path(app_path)
+    return _macos_window_bindings.macos_bundle_id_for_app_path(globals(), app_path)
 
 
 def desktop_run_manifests(config: dict, *, target_name: str | None = None, action: str | None = None) -> list[dict]:
@@ -823,27 +789,27 @@ def desktop_run_manifests(config: dict, *, target_name: str | None = None, actio
 
 
 def normalize_desktop_proof_source_mode(mode: str | None) -> str:
-    return _reporting.normalize_desktop_proof_source_mode(mode)
+    return _desktop_reporting_bindings.normalize_desktop_proof_source_mode(globals(), mode)
 
 
 def desktop_manifest_adapter(config: dict, manifest: dict) -> str:
-    return _reporting.desktop_manifest_adapter(config, manifest)
+    return _desktop_reporting_bindings.desktop_manifest_adapter(globals(), config, manifest)
 
 
 def desktop_manifest_run_status(manifest: dict) -> str:
-    return _reporting.desktop_manifest_run_status(manifest)
+    return _desktop_reporting_bindings.desktop_manifest_run_status(globals(), manifest)
 
 
 def desktop_manifest_source(manifest: dict) -> dict:
-    return _reporting.desktop_manifest_source(manifest)
+    return _desktop_reporting_bindings.desktop_manifest_source(globals(), manifest)
 
 
 def desktop_proof_scope_for_adapter(adapter: str) -> str:
-    return _reporting.desktop_proof_scope_for_adapter(adapter)
+    return _desktop_reporting_bindings.desktop_proof_scope_for_adapter(globals(), adapter)
 
 
 def desktop_run_summary(config: dict, manifest: dict) -> dict:
-    return _reporting.desktop_run_summary(config, manifest)
+    return _desktop_reporting_bindings.desktop_run_summary(globals(), config, manifest)
 
 
 def desktop_proof_summaries(
@@ -893,68 +859,44 @@ def prune_desktop_run_manifests(
 
 
 def macos_window_probe_path() -> Path:
-    return _macos_desktop.macos_window_probe_path(SCRIPT_DIR)
+    return _macos_window_bindings.macos_window_probe_path(globals())
 
 
 def macos_window_info_for_pid(pid: int) -> dict:
-    return _macos_desktop.macos_window_info_for_pid(
-        pid,
-        probe_path_fn=macos_window_probe_path,
-        run_fn=subprocess.run,
-    )
+    return _macos_window_bindings.macos_window_info_for_pid(globals(), pid)
 
 
 def macos_window_info_for_bundle_id(bundle_id: str) -> dict:
-    return _macos_desktop.macos_window_info_for_bundle_id(
-        bundle_id,
-        probe_path_fn=macos_window_probe_path,
-        run_fn=subprocess.run,
-    )
+    return _macos_window_bindings.macos_window_info_for_bundle_id(globals(), bundle_id)
 
 
 def macos_accessibility_trusted() -> bool:
-    return _macos_desktop.macos_accessibility_trusted(
-        probe_path_fn=macos_window_probe_path,
-        run_fn=subprocess.run,
-    )
+    return _macos_window_bindings.macos_accessibility_trusted(globals())
 
 
 def wait_for_macos_window(pid: int, timeout_secs: float) -> dict:
-    return _macos_desktop.wait_for_macos_window(
-        pid,
-        timeout_secs,
-        macos_window_info_for_pid_fn=macos_window_info_for_pid,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-    )
+    return _macos_window_bindings.wait_for_macos_window(globals(), pid, timeout_secs)
 
 
 def wait_for_macos_bundle_window(bundle_id: str, timeout_secs: float) -> tuple[int, dict]:
-    return _macos_desktop.wait_for_macos_bundle_window(
-        bundle_id,
-        timeout_secs,
-        macos_window_info_for_bundle_id_fn=macos_window_info_for_bundle_id,
-        activate_macos_bundle_id_fn=activate_macos_bundle_id,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-    )
+    return _macos_window_bindings.wait_for_macos_bundle_window(globals(), bundle_id, timeout_secs)
 
 
 def capture_macos_window(window_id: int, output_path: Path) -> None:
-    _macos_desktop.capture_macos_window(
-        window_id,
-        output_path,
-        run_fn=subprocess.run,
-        sleep_fn=time.sleep,
-    )
+    _macos_window_bindings.capture_macos_window(globals(), window_id, output_path)
 
 
 def parse_coordinate_pair(value: str, *, flag_name: str) -> tuple[float, float]:
-    return _desktop_actions.parse_coordinate_pair(value, flag_name=flag_name)
+    return _desktop_support_bindings.parse_coordinate_pair(globals(), value, flag_name=flag_name)
 
 
 def iter_view_tree_nodes(node: object, *, offset_x: float = 0.0, offset_y: float = 0.0):
-    yield from _desktop_actions.iter_view_tree_nodes(node, offset_x=offset_x, offset_y=offset_y)
+    yield from _desktop_support_bindings.iter_view_tree_nodes(
+        globals(),
+        node,
+        offset_x=offset_x,
+        offset_y=offset_y,
+    )
 
 
 def resolve_view_tree_click_point(
@@ -965,7 +907,8 @@ def resolve_view_tree_click_point(
     view_text: str | None,
     view_label: str | None,
 ) -> tuple[float, float]:
-    return _desktop_actions.resolve_view_tree_click_point(
+    return _desktop_support_bindings.resolve_view_tree_click_point(
+        globals(),
         view_tree,
         view_id=view_id,
         view_type=view_type,
@@ -975,42 +918,27 @@ def resolve_view_tree_click_point(
 
 
 def screen_point_for_content_point(window: dict, content_size: tuple[float, float], content_point: tuple[float, float]) -> tuple[float, float]:
-    return _desktop_actions.screen_point_for_content_point(window, content_size, content_point)
+    return _desktop_support_bindings.screen_point_for_content_point(globals(), window, content_size, content_point)
 
 
 def activate_macos_pid(pid: int) -> dict:
-    return _macos_desktop.activate_macos_pid(
-        pid,
-        probe_path_fn=macos_window_probe_path,
-        run_fn=subprocess.run,
-    )
+    return _macos_window_bindings.activate_macos_pid(globals(), pid)
 
 
 def activate_macos_bundle_id(bundle_id: str) -> dict:
-    return _macos_desktop.activate_macos_bundle_id(
-        bundle_id,
-        run_fn=subprocess.run,
-    )
+    return _macos_window_bindings.activate_macos_bundle_id(globals(), bundle_id)
 
 
 def dispatch_macos_click(screen_x: float, screen_y: float) -> dict:
-    return _macos_desktop.dispatch_macos_click(
-        screen_x,
-        screen_y,
-        probe_path_fn=macos_window_probe_path,
-        run_fn=subprocess.run,
-    )
+    return _macos_window_bindings.dispatch_macos_click(globals(), screen_x, screen_y)
 
 
 def terminate_process(proc: subprocess.Popen, timeout_secs: float = 5.0) -> None:
-    _macos_desktop.terminate_process(proc, timeout_secs=timeout_secs)
+    _macos_window_bindings.terminate_process(globals(), proc, timeout_secs=timeout_secs)
 
 
 def quit_macos_bundle_id(bundle_id: str) -> None:
-    _macos_desktop.quit_macos_bundle_id(
-        bundle_id,
-        run_fn=subprocess.run,
-    )
+    _macos_window_bindings.quit_macos_bundle_id(globals(), bundle_id)
 
 
 def _local_worktree_matches(path: Path, sha: str) -> bool:
@@ -1113,30 +1041,26 @@ def run_macos_local_smoke(
 
 
 def default_desktop_label(command: str | None, *, bundle_id: str | None = None) -> str:
-    return _desktop_actions.default_desktop_label(command, bundle_id=bundle_id)
+    return _desktop_support_bindings.default_desktop_label(globals(), command, bundle_id=bundle_id)
 
 
 def remote_linux_bundle_relpath(target_name: str, action_name: str, bundle_dir: Path) -> str:
-    return _linux_target.remote_linux_bundle_relpath(target_name, action_name, bundle_dir)
+    return _linux_target_bindings.remote_linux_bundle_relpath(globals(), target_name, action_name, bundle_dir)
 
 
 def fetch_ssh_artifact(host: str, remote_path: str, local_path: Path, *, optional: bool = False, timeout: int = 60) -> bool:
-    return _linux_desktop_action.fetch_ssh_artifact(
+    return _linux_desktop_bindings.fetch_ssh_artifact(
+        globals(),
         host,
         remote_path,
         local_path,
         optional=optional,
         timeout=timeout,
-        run_fn=subprocess.run,
     )
 
 
 def cleanup_remote_ssh_dir(host: str, remote_dir_expr: str) -> None:
-    return _linux_desktop_action.cleanup_remote_ssh_dir(
-        host,
-        remote_dir_expr,
-        ssh_command_result_fn=ssh_command_result,
-    )
+    return _linux_desktop_bindings.cleanup_remote_ssh_dir(globals(), host, remote_dir_expr)
 
 
 def build_linux_xvfb_remote_command(
@@ -1155,7 +1079,8 @@ def build_linux_xvfb_remote_command(
     capture_before: bool,
     settle_secs: float,
 ) -> str:
-    return _linux_target.build_linux_xvfb_remote_command(
+    return _linux_target_bindings.build_linux_xvfb_remote_command(
+        globals(),
         repo_path,
         remote_bundle_relpath,
         command,
@@ -1183,7 +1108,8 @@ def build_linux_window_driver_remote_command(
     capture_before: bool,
     settle_secs: float,
 ) -> str:
-    return _linux_target.build_linux_window_driver_remote_command(
+    return _linux_target_bindings.build_linux_window_driver_remote_command(
+        globals(),
         repo_path,
         remote_bundle_relpath,
         command,
@@ -1192,7 +1118,6 @@ def build_linux_window_driver_remote_command(
         click_point=click_point,
         capture_before=capture_before,
         settle_secs=settle_secs,
-        parse_coordinate_pair_fn=parse_coordinate_pair,
     )
 
 
@@ -1902,7 +1827,7 @@ def run_posix_ssh_validation(
 
 
 def ps_literal(value: str) -> str:
-    return _windows_probe.ps_literal(value)
+    return _windows_probe_bindings.ps_literal(globals(), value)
 
 
 def windows_validation_script(
@@ -1938,40 +1863,27 @@ def validate_ci_branch_name(branch: str) -> str:
 
 
 def windows_ssh_powershell_command(host: str) -> list[str]:
-    return _windows_probe.windows_ssh_powershell_command(host)
+    return _windows_probe_bindings.windows_ssh_powershell_command(globals(), host)
 
 
 def run_windows_ssh_powershell(host: str, ps_script: str, *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
-    return _windows_probe.run_windows_ssh_powershell(
-        host,
-        ps_script,
-        timeout=timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _windows_probe_bindings.run_windows_ssh_powershell(globals(), host, ps_script, timeout=timeout)
 
 
 def parse_windows_ssh_json(stdout: str) -> dict:
-    return _windows_probe.parse_windows_ssh_json(stdout)
+    return _windows_probe_bindings.parse_windows_ssh_json(globals(), stdout)
 
 
 def windows_contract_expand_expression(raw_value: str) -> str:
-    return _windows_probe.windows_contract_expand_expression(raw_value, ps_literal_fn=ps_literal)
+    return _windows_probe_bindings.windows_contract_expand_expression(globals(), raw_value)
 
 
 def windows_session_agent_template_path() -> Path:
-    return _windows_probe.windows_session_agent_template_path(SCRIPT_DIR)
+    return _windows_probe_bindings.windows_session_agent_template_path(globals())
 
 
 def windows_ssh_write_text(host: str, remote_path: str, content: str) -> None:
-    return _windows_probe.windows_ssh_write_text(
-        host,
-        remote_path,
-        content,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        ps_literal_fn=ps_literal,
-    )
+    return _windows_probe_bindings.windows_ssh_write_text(globals(), host, remote_path, content)
 
 
 def windows_ssh_fetch_file(
@@ -1982,14 +1894,13 @@ def windows_ssh_fetch_file(
     optional: bool = False,
     timeout: int = 60,
 ) -> bool:
-    return _windows_probe.windows_ssh_fetch_file(
+    return _windows_probe_bindings.windows_ssh_fetch_file(
+        globals(),
         host,
         remote_path,
         local_path,
         optional=optional,
         timeout=timeout,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
     )
 
 
@@ -2000,46 +1911,25 @@ def windows_ssh_read_json(
     timeout: int = 30,
     optional: bool = False,
 ) -> dict | None:
-    return _windows_probe.windows_ssh_read_json(
+    return _windows_probe_bindings.windows_ssh_read_json(
+        globals(),
         host,
         remote_path,
         timeout=timeout,
         optional=optional,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
     )
 
 
 def windows_ssh_remove_path(host: str, remote_path: str) -> None:
-    return _windows_probe.windows_ssh_remove_path(
-        host,
-        remote_path,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-    )
+    return _windows_probe_bindings.windows_ssh_remove_path(globals(), host, remote_path)
 
 
 def bootstrap_windows_session_agent(host: str, contract: dict) -> dict:
-    return _windows_probe.bootstrap_windows_session_agent(
-        host,
-        contract,
-        windows_session_agent_template_path_fn=windows_session_agent_template_path,
-        windows_ssh_write_text_fn=windows_ssh_write_text,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        ps_literal_fn=ps_literal,
-    )
+    return _windows_probe_bindings.bootstrap_windows_session_agent(globals(), host, contract)
 
 
 def start_windows_session_agent_task(host: str, contract: dict) -> None:
-    return _windows_probe.start_windows_session_agent_task(
-        host,
-        contract,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        ps_literal_fn=ps_literal,
-    )
+    return _windows_probe_bindings.start_windows_session_agent_task(globals(), host, contract)
 
 
 def probe_windows_ssh_cmake_settings(
@@ -2048,14 +1938,12 @@ def probe_windows_ssh_cmake_settings(
     cmake_platform: str,
     cmake_generator_instance: str,
 ) -> tuple[str, str]:
-    return _windows_probe.probe_windows_ssh_cmake_settings(
+    return _windows_probe_bindings.probe_windows_ssh_cmake_settings(
+        globals(),
         host,
         cmake_generator,
         cmake_platform,
         cmake_generator_instance,
-        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
-        run_fn=subprocess.run,
-        ps_literal_fn=ps_literal,
     )
 
 
