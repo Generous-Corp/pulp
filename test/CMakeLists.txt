@@ -1494,7 +1494,9 @@ pulp_add_test_suite(pulp-test-running-status LIBRARIES pulp::midi)
 # Background scanner (workstream 03 slice 3.2)
 pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # Host parameter-event queue
-pulp_add_test_suite(pulp-test-parameter-event-queue LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-parameter-event-queue
+    SOURCES test_parameter_event_queue.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host)
 
 # TextShaper (PreText-style measure-once-reflow-forever)
 pulp_add_test_suite(pulp-test-text-shaper LIBRARIES pulp::canvas)

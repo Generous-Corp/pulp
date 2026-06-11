@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <pulp/host/parameter_event_queue.hpp>
 
 #include <utility>
@@ -76,4 +78,35 @@ TEST_CASE("ParameterEventQueue reports and resets overflow drops",
     REQUIRE_FALSE(q.overflowed());
     REQUIRE(q.dropped_event_count() == 0);
     REQUIRE(q.empty());
+}
+
+TEST_CASE("ParameterEventQueue hot operations are allocation-free",
+          "[host][parameter-event-queue][rt-safety]") {
+    ParameterEventQueue q;
+
+    std::size_t allocation_count = 0;
+    std::size_t allocated_bytes = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (std::size_t i = 0; i < q.capacity(); ++i) {
+            REQUIRE(q.push(ParameterEvent{
+                .param_id = static_cast<pulp::state::ParamID>(i % 17),
+                .sample_offset = static_cast<int32_t>(q.capacity() - i),
+                .value = static_cast<float>(i),
+            }));
+        }
+        REQUIRE_FALSE(q.push(ParameterEvent{.param_id = 99,
+                                            .sample_offset = 0,
+                                            .value = 1.0f}));
+        q.sort();
+        const auto events = q.events();
+        REQUIRE(events.size() == q.capacity());
+        q.clear();
+        REQUIRE(q.empty());
+        allocation_count = probe.allocation_count();
+        allocated_bytes = probe.allocated_bytes();
+    }
+
+    REQUIRE(allocation_count == 0);
+    REQUIRE(allocated_bytes == 0);
 }
