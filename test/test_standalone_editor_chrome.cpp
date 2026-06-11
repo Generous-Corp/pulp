@@ -1166,14 +1166,16 @@ TEST_CASE("Standalone audio probe JSON helpers write normalized snapshot files",
     std::filesystem::remove(out_path);
     REQUIRE(write_audio_probe_json_snapshot(out_path.string(), snap));
 
-    std::ifstream in(out_path, std::ios::binary);
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    const auto v = choc::json::parse(buffer.str());
-    REQUIRE(v["stage"].getString() == "standalone_output_boundary");
-    REQUIRE(v["callbacks"].get<std::int64_t>() == 17);
-    REQUIRE(v["clipped_blocks"].get<std::int64_t>() == 2);
-    REQUIRE(v["nan_blocks"].get<std::int64_t>() == 1);
+    {
+        std::ifstream in(out_path, std::ios::binary);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const auto v = choc::json::parse(buffer.str());
+        REQUIRE(v["stage"].getString() == "standalone_output_boundary");
+        REQUIRE(v["callbacks"].get<std::int64_t>() == 17);
+        REQUIRE(v["clipped_blocks"].get<std::int64_t>() == 2);
+        REQUIRE(v["nan_blocks"].get<std::int64_t>() == 1);
+    }
     std::filesystem::remove(out_path);
 
     REQUIRE_FALSE(write_audio_probe_json_snapshot("", snap));
