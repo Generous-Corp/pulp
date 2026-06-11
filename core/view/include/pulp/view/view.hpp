@@ -1254,12 +1254,8 @@ public:
     void set_animation_play_state(std::string kw)  { animation_play_state_ = std::move(kw); }
     const std::string& animation_play_state() const { return animation_play_state_; }
 
-    /// Opt this view into continuous (per-vsync) repaints. A custom view
-    /// whose content changes on its own — a live meter or spectrum, a value
-    /// that must track host automation, any self-animated drawing — must set
-    /// this, or the GPU host only repaints it on input/layout events and the
-    /// animation appears frozen. The host's frame loop ORs this across the
-    /// view tree (see view_needs_continuous_frames).
+    /// Opt a custom view into per-vsync repaints — required for live content
+    /// (meters/spectrum, automation-tracking values) or it looks frozen.
     void set_continuous_repaint(bool on) { wants_continuous_repaint_ = on; }
     bool wants_continuous_repaint() const { return wants_continuous_repaint_; }
 
