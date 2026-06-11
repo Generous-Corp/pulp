@@ -5,8 +5,11 @@
 
 namespace pulp::signal {
 
-// ADSR envelope generator
-// Real-time safe. Call note_on()/note_off(), then next() per sample.
+// ADSR envelope generator.
+//
+// RT contract: fixed-state and allocation-free. Call set_params() /
+// set_sample_rate() from prepare/control code, then note_on(), note_off(),
+// next(), apply_to_buffer(), reset(), and accessors are audio-thread safe.
 class Adsr {
 public:
     struct Params {

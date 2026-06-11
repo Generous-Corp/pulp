@@ -189,6 +189,10 @@ public:
     /// allocate. Pass the worst-case host block size; an input block of
     /// that many samples may produce up to `ceil(max_block * ratio) + 1`
     /// output samples.
+    /// RT contract: prepare() allocates filter tables, delay lines, and
+    /// scratch storage and is not audio-thread safe. After prepare(),
+    /// set_ratio(), reset(), process_block*(), max_output_for(), and accessors
+    /// are allocation-free for caller-provided input/output buffers.
     void prepare(double input_rate,
                  double output_rate,
                  std::size_t channels,

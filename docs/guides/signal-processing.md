@@ -44,6 +44,10 @@ Template parameter: `T` (default `float`). Also works with `double`.
 
 **Sample rate dependency:** `set_ramp_time()` must be called with the current sample rate.
 
+**Caveat:** Fixed-state and allocation-free. Configure ramp time outside the
+inner sample loop; `set_target()`, `next()`, `skip()`, and accessors are
+real-time safe.
+
 ---
 
 ### Gain
@@ -189,6 +193,10 @@ for (int i = 0; i < num_samples; ++i)
 Setting attack/decay/release to 0 causes instant transitions (rate = 1.0).
 
 **Sample rate dependency:** `set_sample_rate()` must be called before use.
+
+**Caveat:** Fixed-state and allocation-free. Configure parameters and sample
+rate from `prepare()` or control code; `note_on()`, `note_off()`, `next()`,
+buffer application, `reset()`, and accessors are real-time safe.
 
 ---
 
@@ -696,6 +704,18 @@ The default anti-aliasing lane uses lowpass Biquads set to `0.4 * base_sample_ra
 The oversampler does not latency-compensate its output. The Biquad lane has stateful IIR phase delay, and the polyphase lane inherits the half-band stage delay (about six samples per 2x half-band stage at that stage's input rate with the default coefficients). Compensate at the processor/plugin level when exact dry/wet alignment is required.
 
 **Sample rate dependency:** `set_sample_rate()` required.
+
+### Resampling Helpers
+
+`Resampler` is the arbitrary-ratio polyphase FIR sample-rate converter.
+`SincResampler` is a table-driven fractional-delay sinc interpolator used when
+callers already own the source-buffer traversal.
+
+`Resampler::prepare()` and `SincResampler::build()` allocate filter tables and
+delay/scratch storage. Run them outside the audio callback. After setup,
+`Resampler::set_ratio()`, `reset()`, `process_block*()`, `max_output_for()`,
+and accessors are allocation-free with caller-owned input/output buffers.
+`SincResampler::apply()` and `read()` are allocation-free after `build()`.
 
 ---
 

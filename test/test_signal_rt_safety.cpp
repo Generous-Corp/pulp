@@ -2,6 +2,7 @@
 
 #include "harness/rt_allocation_probe.hpp"
 
+#include <pulp/signal/adsr.hpp>
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
@@ -10,13 +11,16 @@
 #include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
+#include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/matrix.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/noise_morpher.hpp>
 #include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
+#include <pulp/signal/resampler.hpp>
 #include <pulp/signal/simd_buffer.hpp>
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/sinc_resampler.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/special_functions.hpp>
 #include <pulp/signal/oversampling.hpp>
@@ -261,6 +265,100 @@ TEST_CASE("Prepared DryWetMixer push and mix are allocation-free within capacity
         latency_mixer.reset();
         latency_mixer.push_dry(nullptr, 0, 0);
         latency_mixer.mix_wet(latency_wet_channels, 2, 64);
+    });
+}
+
+TEST_CASE("Envelope smoothing and resampler hot paths are allocation-free after setup",
+          "[signal][rt-safety]") {
+    Adsr envelope;
+    envelope.set_sample_rate(48000.0f);
+    envelope.set_params({0.001f, 0.005f, 0.6f, 0.01f});
+
+    LatencyAwareControlSmoother::Config smoother_config;
+    smoother_config.domain = LatencyAwareControlSmoother::Domain::semitone;
+    smoother_config.attack_seconds = 0.01f;
+    smoother_config.release_seconds = 0.02f;
+    LatencyAwareControlSmoother latency_smoother;
+    latency_smoother.prepare(48000.0, smoother_config);
+    latency_smoother.set_immediate(0.0f);
+
+    SincResampler sinc;
+    sinc.build(8, 64, 8.0);
+    std::array<float, 16> sinc_samples {};
+    for (std::size_t i = 0; i < sinc_samples.size(); ++i)
+        sinc_samples[i] = std::sin(static_cast<float>(i) * 0.1f);
+
+    Resampler resampler;
+    ResamplerQuality quality;
+    quality.stopband_db = 40.0;
+    quality.transition_fraction = 0.25;
+    quality.cutoff_fraction = 0.85;
+    quality.phases = 8;
+    resampler.prepare(48000.0, 44100.0, 1, 16, quality);
+    std::array<float, 16> resampler_input {};
+    std::array<float, 32> resampler_output {};
+    for (std::size_t i = 0; i < resampler_input.size(); ++i)
+        resampler_input[i] = static_cast<float>(i % 5) * 0.05f;
+    const float* resampler_inputs[] = {resampler_input.data()};
+    float* resampler_outputs[] = {resampler_output.data()};
+
+    require_allocates_no_memory([&] {
+        std::array<float, 16> mono {};
+        std::array<float, 16> left {};
+        std::array<float, 16> right {};
+        for (std::size_t i = 0; i < mono.size(); ++i) {
+            mono[i] = 1.0f;
+            left[i] = 0.5f;
+            right[i] = -0.5f;
+        }
+        float* envelope_channels[] = {left.data(), right.data()};
+
+        envelope.note_on();
+        (void)envelope.next();
+        envelope.apply_to_buffer(mono.data(), 0, static_cast<int>(mono.size()));
+        envelope.apply_to_buffer(envelope_channels, 2, 0, static_cast<int>(left.size()));
+        envelope.note_off();
+        (void)envelope.is_active();
+        (void)envelope.stage();
+        envelope.reset();
+
+        latency_smoother.set_target(7.0f);
+        (void)latency_smoother.value_at(12);
+        (void)latency_smoother.value_at(-4);
+        (void)latency_smoother.ratio_at(8);
+        (void)latency_smoother.advance(16);
+        (void)latency_smoother.target();
+        (void)latency_smoother.current();
+        (void)latency_smoother.is_settled(0.001f);
+        latency_smoother.set_immediate(-2.0f);
+
+        (void)sinc.half_width();
+        (void)sinc.taps();
+        (void)sinc.ready();
+        (void)sinc.apply(sinc_samples.data(), 0.25);
+        (void)sinc.read(sinc_samples.data(), static_cast<int>(sinc_samples.size()), 4.5);
+
+        resampler.set_ratio(48000.0, 44000.0);
+        (void)resampler.process_block_detailed(
+            resampler_inputs, resampler_input.size(),
+            resampler_outputs, resampler_output.size());
+        (void)resampler.process_block(
+            resampler_inputs, 4,
+            resampler_outputs, 8);
+        (void)resampler.process_block_mono_detailed(
+            resampler_input.data(), 4,
+            resampler_output.data(), 8);
+        (void)resampler.process_block_mono(
+            resampler_input.data(), 4,
+            resampler_output.data(), 8);
+        (void)resampler.max_output_for(16);
+        (void)resampler.taps_per_phase();
+        (void)resampler.phases();
+        (void)resampler.prototype_length();
+        (void)resampler.input_rate();
+        (void)resampler.output_rate();
+        (void)resampler.channels();
+        resampler.reset();
     });
 }
 
