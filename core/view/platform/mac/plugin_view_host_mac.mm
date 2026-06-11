@@ -1406,6 +1406,7 @@ private:
     // ── Continuous-frame / animation drivers (parity with MacGpuWindowHost) ──
     static bool view_needs_continuous_frames(View* view) {
         if (!view) return false;
+        if (view->wants_continuous_repaint()) return true;
         if (auto* k = dynamic_cast<Knob*>(view)) {
             if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
                 return true;

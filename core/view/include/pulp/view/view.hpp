@@ -1254,6 +1254,15 @@ public:
     void set_animation_play_state(std::string kw)  { animation_play_state_ = std::move(kw); }
     const std::string& animation_play_state() const { return animation_play_state_; }
 
+    /// Opt this view into continuous (per-vsync) repaints. A custom view
+    /// whose content changes on its own — a live meter or spectrum, a value
+    /// that must track host automation, any self-animated drawing — must set
+    /// this, or the GPU host only repaints it on input/layout events and the
+    /// animation appears frozen. The host's frame loop ORs this across the
+    /// view tree (see view_needs_continuous_frames).
+    void set_continuous_repaint(bool on) { wants_continuous_repaint_ = on; }
+    bool wants_continuous_repaint() const { return wants_continuous_repaint_; }
+
     /// pulp #1548 — RN textShadow per-attribute storage. Storage-only;
     /// SkPaint shadow integration is the deferred paint-time slice.
     /// Each slot is round-trippable so a commitUpdate that touches only
@@ -1610,6 +1619,7 @@ private:
     std::string isolation_;                // wontfix (no z-buffer)
     std::string resize_;                   // noop (no resize handles)
     std::string animation_play_state_;     // partial (storage only)
+    bool wants_continuous_repaint_ = false; // opt-in per-vsync repaint
     // pulp #1548 — RN textShadow* per-attribute storage slots. SkPaint
     // shadow integration deferred; storage path is round-trippable.
     std::string text_shadow_color_;
