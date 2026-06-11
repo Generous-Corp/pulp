@@ -153,6 +153,7 @@ import desktop_command_bindings as _desktop_command_bindings  # noqa: E402
 import desktop_commands_cli as _desktop_commands_cli  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
+import desktop_probe_bindings as _desktop_probe_bindings  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
@@ -571,14 +572,7 @@ def update_target_repo_path(config: dict, target_name: str, repo_path: str) -> N
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
-    return _windows_probe.probe_windows_repo_checkout(
-        host,
-        repo_path,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_repo_path_is_unsafe_fn=windows_repo_path_is_unsafe,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        ps_literal_fn=ps_literal,
-    )
+    return _desktop_probe_bindings.probe_windows_repo_checkout(globals(), host, repo_path)
 
 
 def windows_repo_checkout_ready(probe: dict | None) -> bool:
@@ -593,19 +587,13 @@ def ensure_windows_remote_repo_checkout(
     bundle_name: str | None = None,
     bundle_ref: str | None = None,
 ) -> dict:
-    return _windows_probe.ensure_windows_remote_repo_checkout(
+    return _desktop_probe_bindings.ensure_windows_remote_repo_checkout(
+        globals(),
         host,
         repo_path,
         remote_url=remote_url,
         bundle_name=bundle_name,
         bundle_ref=bundle_ref,
-        probe_windows_repo_checkout_fn=probe_windows_repo_checkout,
-        windows_repo_path_is_unsafe_fn=windows_repo_path_is_unsafe,
-        windows_default_repo_checkout_path_fn=windows_default_repo_checkout_path,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        ps_literal_fn=ps_literal,
     )
 
 
@@ -676,43 +664,19 @@ def _check_writable_dir(path: Path) -> tuple[bool, str]:
 
 
 def probe_windows_session_agent(host: str, contract: dict) -> dict:
-    return _windows_probe.probe_windows_session_agent(
-        host,
-        contract,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        ps_literal_fn=ps_literal,
-    )
+    return _desktop_probe_bindings.probe_windows_session_agent(globals(), host, contract)
 
 
 def probe_windows_remote_tooling(host: str) -> dict:
-    return _windows_probe.probe_windows_remote_tooling(
-        host,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-    )
+    return _desktop_probe_bindings.probe_windows_remote_tooling(globals(), host)
 
 
 def install_windows_remote_tool(host: str, package_id: str, *, timeout: int = 900) -> None:
-    return _windows_probe.install_windows_remote_tool(
-        host,
-        package_id,
-        timeout=timeout,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        ps_literal_fn=ps_literal,
-    )
+    return _desktop_probe_bindings.install_windows_remote_tool(globals(), host, package_id, timeout=timeout)
 
 
 def ensure_windows_remote_tooling(host: str, *, install_optional: bool = False) -> dict:
-    return _windows_probe.ensure_windows_remote_tooling(
-        host,
-        install_optional=install_optional,
-        required_tools=WINDOWS_REQUIRED_REMOTE_TOOLS,
-        optional_tools=WINDOWS_OPTIONAL_REMOTE_TOOLS,
-        probe_windows_remote_tooling_fn=probe_windows_remote_tooling,
-        install_windows_remote_tool_fn=install_windows_remote_tool,
-    )
+    return _desktop_probe_bindings.ensure_windows_remote_tooling(globals(), host, install_optional=install_optional)
 
 
 def windows_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
@@ -724,24 +688,7 @@ def windows_remote_tooling_ready(probe: dict) -> bool:
 
 
 def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
-    return _desktop_doctor.desktop_doctor_checks(
-        config,
-        target_name,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        desktop_target_contract_fn=desktop_target_contract,
-        desktop_receipt_for_fn=desktop_receipt_for,
-        macos_accessibility_trusted_fn=macos_accessibility_trusted,
-        ssh_reachable_fn=ssh_reachable,
-        ssh_failure_detail_fn=ssh_failure_detail,
-        probe_linux_launch_backend_fn=probe_linux_launch_backend,
-        probe_linux_remote_tooling_fn=probe_linux_remote_tooling,
-        probe_windows_session_agent_fn=probe_windows_session_agent,
-        probe_windows_remote_tooling_fn=probe_windows_remote_tooling,
-        probe_windows_repo_checkout_fn=probe_windows_repo_checkout,
-        platform=sys.platform,
-        which_fn=shutil.which,
-        probe_webdriver_endpoint_fn=probe_webdriver_endpoint,
-    )
+    return _desktop_probe_bindings.desktop_doctor_checks(globals(), config, target_name)
 
 
 def webdriver_status_url(base_url: str) -> str:
@@ -749,12 +696,7 @@ def webdriver_status_url(base_url: str) -> str:
 
 
 def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
-    return _desktop_doctor.probe_webdriver_endpoint(
-        base_url,
-        timeout=timeout,
-        request_cls=urllib.request.Request,
-        urlopen_fn=urllib.request.urlopen,
-    )
+    return _desktop_probe_bindings.probe_webdriver_endpoint(globals(), base_url, timeout=timeout)
 
 
 def desktop_artifact_root(config: dict) -> Path:
