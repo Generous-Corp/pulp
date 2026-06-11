@@ -149,6 +149,7 @@ import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
+import evidence_cli as _evidence_cli  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
@@ -3560,16 +3561,13 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:
-    branch = args.branch or current_branch()
-    header = evidence_scope_header_line(branch, args.sha)
-    if header:
-        print(header)
-
-    found = print_evidence_summary(branch=branch, sha=args.sha, limit=args.limit)
-    if not found:
-        print(evidence_empty_line(has_header=header is not None))
-        return 1
-    return 0
+    return _evidence_cli.cmd_evidence(
+        args,
+        current_branch_fn=current_branch,
+        evidence_scope_header_line_fn=evidence_scope_header_line,
+        print_evidence_summary_fn=print_evidence_summary,
+        evidence_empty_line_fn=evidence_empty_line,
+    )
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
