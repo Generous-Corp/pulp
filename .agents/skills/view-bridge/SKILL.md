@@ -960,3 +960,14 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
 - **Panel colors:** `canvas::Color` channels are floats in `[0,1]` — build panel
   colors with `Color::rgba8(r,g,b,a)`, NOT `Color{26,26,32,255}` brace-init,
   which Skia clamps to opaque white (the white-on-white panel bug).
+- **The editor idle pump drains the param store (automation → widgets).**
+  `make_scripted_idle_pump(bridge)` (in `gpu_host_select.hpp`, set as every
+  format's `set_idle_callback`) calls `bridge.store().pump_listeners()` each
+  vsync. This is what makes `bind_parameter`-bound widgets follow host
+  automation playback / host-side edits: `ListenerThread::Main` store changes
+  are queued (the adapter writes the store from the audio thread) and ONLY
+  fire on `pump_listeners()` on the UI thread. Without this drain, bound
+  widgets never move during playback. The idle callback also keeps the GPU
+  host's frame loop alive (`has_idle`), so the pump runs even when nothing
+  else is animating. A custom view that reads the store directly each frame
+  (not via `bind_parameter`) instead needs `View::set_continuous_repaint(true)`.

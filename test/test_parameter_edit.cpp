@@ -91,6 +91,25 @@ TEST_CASE("ParameterEdit ends an open gesture on destruction", "[state][paramete
     REQUIRE(log.ends == std::vector<state::ParamID>{1});
 }
 
+TEST_CASE("bind_parameter follows host automation playback after pump",
+          "[view][parameter-binding]") {
+    // The generic SDK path: the host writes the store (automation playback /
+    // a host-side edit), and pumping the store on the UI thread (the editor
+    // idle pump) propagates it to the bound widget so it visibly moves —
+    // exactly as if the user had dragged it.
+    state::StateStore store;
+    populate(store);
+    view::Knob knob;
+    auto binding = view::bind_parameter(knob, store, 1);
+    const float at_default = knob.value();                  // normalized(0) = 0.5
+    REQUIRE_THAT(at_default, WithinAbs(0.5f, 1e-5f));
+
+    store.set_value(1, 6.0f);                               // host automation
+    store.pump_listeners();                                  // editor idle pump (UI thread)
+    REQUIRE_THAT(knob.value(), WithinAbs(store.get_normalized(1), 1e-5f));
+    REQUIRE(knob.value() > at_default);                      // the widget moved to track it
+}
+
 TEST_CASE("bind_parameter records XY pad automation", "[view][parameter-binding]") {
     state::StateStore store;
     populate(store);
