@@ -579,7 +579,11 @@ TEST_CASE("PulpSampler serializes multiple controller loaders during process",
             peak_l = std::max(peak_l, std::abs(out_l[i]));
             peak_r = std::max(peak_r, std::abs(out_r[i]));
         }
-        std::this_thread::yield();
+        if ((block % 16) == 0) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        } else {
+            std::this_thread::yield();
+        }
     }
 
     const int mono_attempts_after = mono_attempts.load(std::memory_order_relaxed);

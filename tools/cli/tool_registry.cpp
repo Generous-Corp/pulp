@@ -185,10 +185,13 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
     if (format == "zip") {
         cmd = "powershell -Command \"Expand-Archive -Force -Path '"
               + archive.string() + "' -DestinationPath '" + dest.string() + "'\"";
+        auto r = pulp::platform::exec("cmd", {"/c", cmd}, 120000);
+        return r.exit_code == 0;
     } else if (format == "tar.gz" || format == "tar.xz") {
-        cmd = "tar xf \"" + archive.string() + "\" -C \"" + dest.string() + "\"";
+        auto r = pulp::platform::exec(
+            "tar", {"xf", archive.string(), "-C", dest.string()}, 120000);
+        return r.exit_code == 0;
     }
-    auto r = pulp::platform::exec("cmd", {"/c", cmd}, 120000);
 #else
     if (format == "zip") {
         cmd = "unzip -o -q '" + archive.string() + "' -d '" + dest.string() + "'";
@@ -198,9 +201,10 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
         cmd = "tar xJf '" + archive.string() + "' -C '" + dest.string() + "'";
     }
     auto r = pulp::platform::exec("/bin/sh", {"-c", cmd}, 120000);
+    return r.exit_code == 0;
 #endif
 
-    return r.exit_code == 0;
+    return false;
 }
 
 // ── Tool Location ──

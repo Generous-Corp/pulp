@@ -55,6 +55,25 @@ std::vector<mig::MigrationEntry> make_fixture() {
     };
 }
 
+int run_migration_index_codegen(const std::string& src_root,
+                                const fs::path& docs_dir,
+                                const fs::path& out_cpp) {
+    const auto script = (fs::path(src_root) / "tools/scripts/build_migration_index.py").string();
+#ifdef _WIN32
+    std::string cmd = std::string("\"\"") + PULP_PYTHON3_EXECUTABLE + "\" " +
+        "\"" + script + "\"" +
+        " --docs-dir \"" + docs_dir.string() + "\"" +
+        " --out \"" + out_cpp.string() + "\"\"";
+    return std::system(cmd.c_str());
+#else
+    std::string cmd = std::string("\"") + PULP_PYTHON3_EXECUTABLE + "\" " +
+        "\"" + script + "\"" +
+        " --docs-dir \"" + docs_dir.string() + "\"" +
+        " --out \"" + out_cpp.string() + "\"";
+    return std::system(cmd.c_str());
+#endif
+}
+
 }  // namespace
 
 // ── applies_if evaluator ────────────────────────────────────────────────────
@@ -270,11 +289,7 @@ TEST_CASE("build_migration_index.py - frontmatter -> embedded C++ round-trip",
     }
 
     auto out_cpp = tmp / "out.cpp";
-    std::string cmd = std::string("python3 ") +
-        std::string(src_root) + "/tools/scripts/build_migration_index.py" +
-        " --docs-dir " + (tmp / "docs").string() +
-        " --out "     + out_cpp.string();
-    int rc = std::system(cmd.c_str());
+    int rc = run_migration_index_codegen(src_root, tmp / "docs", out_cpp);
     REQUIRE(rc == 0);
 
     std::ifstream in(out_cpp);

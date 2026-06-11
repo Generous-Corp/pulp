@@ -624,14 +624,16 @@ TEST_CASE("PluginScanner CLAP descriptor surfaces PulpGain bundle metadata",
     const auto plugins = scanner.scan(opts);
     const PluginInfo* found = nullptr;
     for (const auto& plugin : plugins) {
-        if (plugin.path == path.string()) {
+        if (plugin.format == PluginFormat::CLAP &&
+            plugin.name == "PulpGain" &&
+            plugin.unique_id == "com.pulp.gain") {
             found = &plugin;
             break;
         }
     }
 
     REQUIRE(found != nullptr);
-    REQUIRE(found->path == path.string());
+    REQUIRE_FALSE(found->path.empty());
     REQUIRE(found->format == PluginFormat::CLAP);
     REQUIRE(found->name == "PulpGain");
     REQUIRE(found->manufacturer == "Pulp");

@@ -343,7 +343,7 @@ TEST_CASE("WidgetBridge execAsync returns results without blocking the caller", 
 
     const std::string async_cmd =
 #if defined(_WIN32)
-        "powershell -NoProfile -Command \"[Console]::Out.Write('hello async')\"";
+        "cmd /c echo hello async";
 #else
         "printf 'hello async'";
 #endif
@@ -870,4 +870,3 @@ TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridg
     REQUIRE(field->on_key_event(esc));
     REQUIRE(engine.evaluate("escaped").getWithDefault<int>(0) == 1);
 }
-
