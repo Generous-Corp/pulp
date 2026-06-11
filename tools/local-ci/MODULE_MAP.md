@@ -11,6 +11,7 @@ and the matching contract tests in the same change.
 | --- | --- | --- |
 | `state_paths.py` | State/config/log/bundle path resolution and state-directory creation. | Queue JSON contents, result schema, or target behavior. |
 | `cli_parser.py` | Argument parser construction for top-level, cloud, cleanup, evidence, and desktop subcommands. | Command handler dispatch, command execution, or user-facing output side effects. |
+| `cli_dispatch.py` | Parsed command dispatch for top-level, cloud, cloud namespace, and desktop subcommands. | Argument parser construction, command handler side effects, or command output formatting. |
 | `io_utils.py` | Atomic writes, file locks, log tailing, line trimming, and image-change summaries. | CI state semantics or target orchestration. |
 | `normalize.py` | Priority, validation mode, desktop mode, boolean, adapter, and desktop config normalization. | Queue persistence or dispatch side effects. |
 | `provenance.py` | Stable direct/hosted provenance dictionaries and summaries for jobs and results. | GitHub or Shipyard API calls. |
@@ -49,7 +50,7 @@ behind the contracts added in this slice.
 | Desktop action orchestration | Launch adapters, local/remote automation adapters, and desktop action command execution. Shared action helper policy is already isolated in `desktop_actions.py`. | later desktop automation module |
 | Queue orchestration | Remaining runner-state wrapper calls and other CLI-facing queue updates. | later queue modules |
 | Validation execution | Thin wrapper calls in `local_ci.py` plus any future execution-specific seams discovered while reducing the entrypoint. | `execution.py` |
-| CLI dispatch | Subcommand handler dispatch and user-facing command output. Parser construction now lives in `cli_parser.py`. | `cli.py` or retained thin entrypoint |
+| CLI dispatch | Entrypoint wiring, command handler maps, and user-facing command output. Parser construction lives in `cli_parser.py`; parsed-command selection lives in `cli_dispatch.py`. | `cli.py` or retained thin entrypoint |
 
 ## Behavior Contracts
 

@@ -143,6 +143,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 import cleanup as _cleanup  # noqa: E402
+import cli_dispatch as _cli_dispatch  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
@@ -4564,24 +4565,22 @@ def cmd_desktop_inspect(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:
-    commands = {
-        "install": cmd_desktop_install,
-        "doctor": cmd_desktop_doctor,
-        "status": cmd_desktop_status,
-        "config": cmd_desktop_config,
-        "recent": cmd_desktop_recent,
-        "proof": cmd_desktop_proof,
-        "publish": cmd_desktop_publish,
-        "cleanup": cmd_desktop_cleanup,
-        "smoke": cmd_desktop_smoke,
-        "click": cmd_desktop_click,
-        "inspect": cmd_desktop_inspect,
-    }
-    handler = commands.get(args.desktop_command)
-    if handler is None:
-        print("Error: desktop subcommand required (install, doctor, status, config, recent, proof, publish, cleanup, smoke, click, inspect)")
-        return 1
-    return handler(args)
+    return _cli_dispatch.dispatch_desktop_command(
+        args,
+        commands={
+            "install": cmd_desktop_install,
+            "doctor": cmd_desktop_doctor,
+            "status": cmd_desktop_status,
+            "config": cmd_desktop_config,
+            "recent": cmd_desktop_recent,
+            "proof": cmd_desktop_proof,
+            "publish": cmd_desktop_publish,
+            "cleanup": cmd_desktop_cleanup,
+            "smoke": cmd_desktop_smoke,
+            "click": cmd_desktop_click,
+            "inspect": cmd_desktop_inspect,
+        },
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -4596,52 +4595,38 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    commands = {
-        "enqueue": cmd_enqueue,
-        "drain": cmd_drain,
-        "run": cmd_run,
-        "ship": cmd_ship,
-        "check": cmd_check,
-        "list": cmd_list,
-        "bump": cmd_bump,
-        "cancel": cmd_cancel,
-        "logs": cmd_logs,
-        "cleanup": cmd_cleanup,
-        "evidence": cmd_evidence,
-        "status": cmd_status,
-        "desktop": cmd_desktop,
-    }
-
-    if args.command == "cloud":
-        if args.cloud_command == "workflows":
-            return cmd_cloud_workflows(args)
-        if args.cloud_command == "defaults":
-            return cmd_cloud_defaults(args)
-        if args.cloud_command == "history":
-            return cmd_cloud_history(args)
-        if args.cloud_command == "compare":
-            return cmd_cloud_compare(args)
-        if args.cloud_command == "recommend":
-            return cmd_cloud_recommend(args)
-        if args.cloud_command == "run":
-            return cmd_cloud_run(args)
-        if args.cloud_command == "status":
-            return cmd_cloud_status(args)
-        if args.cloud_command == "namespace":
-            if args.cloud_namespace_command == "doctor":
-                return cmd_cloud_namespace_doctor(args)
-            if args.cloud_namespace_command == "setup":
-                return cmd_cloud_namespace_setup(args)
-            print("Error: missing cloud namespace subcommand. Use `pulp ci-local cloud namespace doctor`.")
-            return 1
-        print("Error: missing cloud subcommand. Use `pulp ci-local cloud workflows`.")
-        return 1
-
-    if args.command in commands:
-        return commands[args.command](args)
-
-    parser.print_help()
-    return 1
+    return _cli_dispatch.dispatch_main_command(
+        args,
+        commands={
+            "enqueue": cmd_enqueue,
+            "drain": cmd_drain,
+            "run": cmd_run,
+            "ship": cmd_ship,
+            "check": cmd_check,
+            "list": cmd_list,
+            "bump": cmd_bump,
+            "cancel": cmd_cancel,
+            "logs": cmd_logs,
+            "cleanup": cmd_cleanup,
+            "evidence": cmd_evidence,
+            "status": cmd_status,
+            "desktop": cmd_desktop,
+        },
+        cloud_commands={
+            "workflows": cmd_cloud_workflows,
+            "defaults": cmd_cloud_defaults,
+            "history": cmd_cloud_history,
+            "compare": cmd_cloud_compare,
+            "recommend": cmd_cloud_recommend,
+            "run": cmd_cloud_run,
+            "status": cmd_cloud_status,
+        },
+        cloud_namespace_commands={
+            "doctor": cmd_cloud_namespace_doctor,
+            "setup": cmd_cloud_namespace_setup,
+        },
+        print_help=parser.print_help,
+    )
 
 
 if __name__ == "__main__":
