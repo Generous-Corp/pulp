@@ -44,6 +44,12 @@ per-block `ParameterEventQueue` and written with `StateStore::set_value_rt()`.
 Gesture events (`CLAP_EVENT_PARAM_GESTURE_BEGIN` / `END`) are forwarded to
 `StateStore::begin_gesture()` / `end_gesture()`.
 
+The per-block queue is fixed-capacity and real-time safe. If a host sends more
+than 1024 parameter value events in one block, the adapter keeps the first 1024
+sample-accurate points, records the overflow/drop count on the queue, and still
+writes every incoming value to `StateStore` so block-end reads observe the
+latest host value.
+
 The `params_flush()` extension callback handles the same events outside of `process()` (e.g., when the plugin is bypassed).
 
 **Plugin to host:** Before calling `Processor::process()`, the adapter snapshots all parameter values. After processing, it compares each value against the snapshot. Any changed parameters are emitted as `CLAP_EVENT_PARAM_VALUE` events via `out_events->try_push()`. This allows hosts to record automation from plugin-side changes.

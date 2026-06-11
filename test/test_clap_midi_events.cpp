@@ -36,6 +36,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 #if PULP_CLAP_PROCESS_RT_TRAP_TESTS
 #include "native_components/rt_test_scope.hpp"
@@ -357,6 +358,63 @@ public:
     }
 };
 
+class ObservingParamIngressProcessor : public Processor {
+public:
+    static constexpr state::ParamID kParamId = 9101;
+
+    bool observed_param_events_attached = false;
+    std::size_t observed_param_event_count = 0;
+    std::size_t observed_param_event_capacity = 0;
+    bool observed_param_event_overflowed = false;
+    std::uint32_t observed_param_event_drops = 0;
+    int32_t observed_first_sample_offset = -1;
+    int32_t observed_last_sample_offset = -1;
+    float observed_first_value = -1.0f;
+    float observed_last_value = -1.0f;
+    float observed_state_value = -1.0f;
+    int observed_num_samples = 0;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "ObservingParamIngressCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.observing-param-ingress";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({
+            .id = kParamId,
+            .name = "Observed Param",
+            .range = {0.0f, 1.0f, 0.0f, 0.0f},
+        });
+    }
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext& context) override {
+        observed_num_samples = context.num_samples;
+        observed_state_value = state().get_value(kParamId);
+        observed_param_events_attached = param_events() != nullptr;
+        if (auto* events = param_events()) {
+            observed_param_event_count = events->size();
+            observed_param_event_capacity = events->capacity();
+            observed_param_event_overflowed = events->overflowed();
+            observed_param_event_drops = events->dropped_event_count();
+            if (!events->empty()) {
+                const auto first = events->begin();
+                const auto last = events->end() - 1;
+                observed_first_sample_offset = first->sample_offset;
+                observed_first_value = first->value;
+                observed_last_sample_offset = last->sample_offset;
+                observed_last_value = last->value;
+            }
+        }
+    }
+};
+
 class ObservingSidecarProcessor : public Processor {
 public:
     bool opts_mpe = false;
@@ -500,6 +558,7 @@ public:
 CapturingProcessor* g_capturing = nullptr;
 EmittingProcessor*  g_emitting  = nullptr;
 ObservingMidiInProcessor* g_observing_midi_in = nullptr;
+ObservingParamIngressProcessor* g_observing_param_ingress = nullptr;
 ObservingSidecarProcessor* g_observing_sidecar = nullptr;
 OverflowingMidiOutProcessor* g_overflowing_midi_out = nullptr;
 ForwardingSysexProcessor* g_forwarding_sysex = nullptr;
@@ -536,6 +595,12 @@ std::unique_ptr<Processor> make_emitting() {
 std::unique_ptr<Processor> make_observing_midi_in() {
     auto up = std::make_unique<ObservingMidiInProcessor>();
     g_observing_midi_in = up.get();
+    return up;
+}
+
+std::unique_ptr<Processor> make_observing_param_ingress() {
+    auto up = std::make_unique<ObservingParamIngressProcessor>();
+    g_observing_param_ingress = up.get();
     return up;
 }
 
@@ -583,16 +648,16 @@ struct Harness {
     clap_audio_buffer_t audio_in{}, audio_out{};
     bool active = false;
 
-    explicit Harness(ProcessorFactory factory) {
+    explicit Harness(ProcessorFactory factory, uint32_t max_frames = kFrames) {
         plugin.factory = factory;
         plugin.plugin.plugin_data = &plugin;
         REQUIRE(clap_adapter::clap_init(&plugin.plugin));
-        REQUIRE(clap_adapter::clap_activate(&plugin.plugin, 48000.0, 32, kFrames));
+        REQUIRE(clap_adapter::clap_activate(&plugin.plugin, 48000.0, 32, max_frames));
         active = true;
-        in_left.assign(kFrames, 0.0f);
-        in_right.assign(kFrames, 0.0f);
-        out_left.assign(kFrames, 0.0f);
-        out_right.assign(kFrames, 0.0f);
+        in_left.assign(max_frames, 0.0f);
+        in_right.assign(max_frames, 0.0f);
+        out_left.assign(max_frames, 0.0f);
+        out_right.assign(max_frames, 0.0f);
         in_ptrs[0] = in_left.data();
         in_ptrs[1] = in_right.data();
         out_ptrs[0] = out_left.data();
@@ -1170,6 +1235,51 @@ TEST_CASE("CLAP param automation preserves all sample offsets while dual-writing
     REQUIRE(param_events[2].sample_offset == 48);
     REQUIRE(param_events[2].value == 0.75f);
     REQUIRE(g_capturing->state().get_value(CapturingProcessor::kParamId) == 0.75f);
+}
+
+TEST_CASE("CLAP parameter automation drops past realtime event capacity without growing",
+          "[clap][params][realtime][capacity]") {
+    static constexpr uint32_t kLargeBlockFrames = 4096;
+
+    Harness h(make_observing_param_ingress, kLargeBlockFrames);
+    REQUIRE(g_observing_param_ingress != nullptr);
+
+    InputEventList events;
+    for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity + 1; ++i) {
+        clap_event_param_value_t ev{};
+        ev.header = make_header(
+            sizeof(ev), CLAP_EVENT_PARAM_VALUE, static_cast<uint32_t>(i));
+        ev.param_id = ObservingParamIngressProcessor::kParamId;
+        ev.value = (i == 0) ? 0.25 : 0.5;
+        if (i == state::ParameterEventQueue::kCapacity) ev.value = 1.0;
+        events.push(ev);
+    }
+
+    REQUIRE(h.run_custom(&events, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         kLargeBlockFrames) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_observing_param_ingress->observed_num_samples
+            == static_cast<int>(kLargeBlockFrames));
+    REQUIRE(g_observing_param_ingress->observed_param_events_attached);
+    REQUIRE(g_observing_param_ingress->observed_param_event_count
+            == state::ParameterEventQueue::kCapacity);
+    REQUIRE(g_observing_param_ingress->observed_param_event_capacity
+            == state::ParameterEventQueue::kCapacity);
+    REQUIRE(g_observing_param_ingress->observed_param_event_overflowed);
+    REQUIRE(g_observing_param_ingress->observed_param_event_drops == 1);
+    REQUIRE(g_observing_param_ingress->observed_first_sample_offset == 0);
+    REQUIRE(g_observing_param_ingress->observed_first_value == 0.25f);
+    REQUIRE(g_observing_param_ingress->observed_last_sample_offset
+            == static_cast<int32_t>(state::ParameterEventQueue::kCapacity - 1));
+    REQUIRE(g_observing_param_ingress->observed_last_value == 0.5f);
+    REQUIRE(g_observing_param_ingress->observed_state_value == 1.0f);
+
+    REQUIRE(h.plugin.param_events.size() == state::ParameterEventQueue::kCapacity);
+    REQUIRE(h.plugin.param_events.capacity() == state::ParameterEventQueue::kCapacity);
+    REQUIRE(h.plugin.param_events.overflowed());
+    REQUIRE(h.plugin.param_events.dropped_event_count() == 1);
 }
 
 TEST_CASE("CLAP_EVENT_MIDI decodes CC into MidiBuffer",
