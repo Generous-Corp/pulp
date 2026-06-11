@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04170"></a>
+## [0.417.0] - 2026-06-10
+
+- fix/spectral frame edge norm ([#3978](https://github.com/danielraffel/pulp/pull/3978))
+
 <a id="v04160"></a>
 ## [0.416.0] - 2026-06-10
 
@@ -4293,6 +4298,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.417.0]: https://github.com/danielraffel/pulp/releases/tag/v0.417.0
 [0.416.0]: https://github.com/danielraffel/pulp/releases/tag/v0.416.0
 [0.415.0]: https://github.com/danielraffel/pulp/releases/tag/v0.415.0
 [0.414.0]: https://github.com/danielraffel/pulp/releases/tag/v0.414.0
