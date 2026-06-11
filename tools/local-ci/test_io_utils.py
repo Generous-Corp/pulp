@@ -24,6 +24,7 @@ from types import SimpleNamespace
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci.py")
+IO_UTILS_PATH = Path(__file__).with_name("io_utils.py")
 VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
 
 
@@ -33,6 +34,60 @@ def load_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def load_io_utils_module():
+    if str(IO_UTILS_PATH.parent) not in sys.path:
+        sys.path.insert(0, str(IO_UTILS_PATH.parent))
+    spec = importlib.util.spec_from_file_location("pulp_io_utils", IO_UTILS_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class IoUtilsDirectTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.mod = load_io_utils_module()
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_wait_for_path_returns_ready_path(self):
+        ready = Path(self.tmpdir.name) / "ready.txt"
+        ready.write_text("ok")
+
+        self.assertEqual(self.mod.wait_for_path(ready, 0.1), ready)
+
+    def test_wait_for_path_polls_until_ready(self):
+        ready = Path(self.tmpdir.name) / "eventual.txt"
+        current_time = [0.0]
+
+        def time_fn():
+            return current_time[0]
+
+        def sleep_fn(_interval):
+            current_time[0] += 0.1
+            ready.write_text("ok")
+
+        self.assertEqual(
+            self.mod.wait_for_path(ready, 0.5, time_fn=time_fn, sleep_fn=sleep_fn),
+            ready,
+        )
+
+    def test_wait_for_path_reports_timeout(self):
+        missing = Path(self.tmpdir.name) / "missing.txt"
+        current_time = [0.0]
+
+        def time_fn():
+            return current_time[0]
+
+        def sleep_fn(interval):
+            current_time[0] += interval
+
+        with self.assertRaisesRegex(RuntimeError, "timed out waiting for artifact"):
+            self.mod.wait_for_path(missing, 0.2, time_fn=time_fn, sleep_fn=sleep_fn)
 
 
 

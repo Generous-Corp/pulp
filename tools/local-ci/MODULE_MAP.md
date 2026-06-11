@@ -12,7 +12,7 @@ and the matching contract tests in the same change.
 | `state_paths.py` | State/config/log/bundle path resolution and state-directory creation. | Queue JSON contents, result schema, or target behavior. |
 | `cli_parser.py` | Argument parser construction for top-level, cloud, cleanup, evidence, and desktop subcommands. | Command handler dispatch, command execution, or user-facing output side effects. |
 | `cli_dispatch.py` | Parsed command dispatch for top-level, cloud, cloud namespace, and desktop subcommands. | Argument parser construction, command handler side effects, or command output formatting. |
-| `io_utils.py` | Atomic writes, file locks, log tailing, line trimming, and image-change summaries. | CI state semantics or target orchestration. |
+| `io_utils.py` | Atomic writes, file locks, log tailing, line trimming, artifact path polling, and image-change summaries. | CI state semantics or target orchestration. |
 | `normalize.py` | Priority, validation mode, desktop mode, boolean, adapter, and desktop config normalization. | Queue persistence or dispatch side effects. |
 | `provenance.py` | Stable direct/hosted provenance dictionaries and summaries for jobs and results. | GitHub or Shipyard API calls. |
 | `git_helpers.py` | Git/time helper seam: current branch/SHA/ref resolution, git-root discovery, short SHA formatting, GitHub remote URL normalization, origin URL lookup, and generic git subprocess execution. | Local-CI queue state, target execution, desktop report publishing policy, or GitHub API calls. |

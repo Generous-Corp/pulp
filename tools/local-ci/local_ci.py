@@ -154,6 +154,7 @@ import desktop_doctor as _desktop_doctor  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
+import io_utils as _io_utils  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
@@ -945,12 +946,7 @@ def write_desktop_publish_rollups(config: dict) -> None:
 
 
 def wait_for_path(path: Path, timeout_secs: float) -> Path:
-    deadline = time.time() + timeout_secs
-    while time.time() < deadline:
-        if path.exists():
-            return path
-        time.sleep(0.1)
-    raise RuntimeError(f"timed out waiting for artifact `{path}`")
+    return _io_utils.wait_for_path(path, timeout_secs)
 
 
 def count_view_tree_nodes(node: object) -> int:
