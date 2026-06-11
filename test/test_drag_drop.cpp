@@ -113,6 +113,18 @@ public:
     std::function<void()> close_callback;
 };
 
+class DefaultDragWindowHost final : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override {}
+    void set_close_callback(std::function<void()> cb) override { close_callback = std::move(cb); }
+    void run_event_loop() override {}
+
+    std::function<void()> close_callback;
+};
+
 class RecordingPluginViewHost final : public PluginViewHost {
 public:
     bool result = true;
@@ -133,6 +145,18 @@ public:
     }
 };
 
+class DefaultDragPluginViewHost final : public PluginViewHost {
+public:
+    NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override { size = {width, height}; }
+    Size get_size() const override { return size; }
+
+    Size size{};
+};
+
 FileDragRequest make_file_drag_request() {
     FileDragRequest request;
     request.file_paths = {"/tmp/frozen-loop.wav"};
@@ -150,6 +174,27 @@ TEST_CASE("View start_file_drag rejects empty file requests", "[view][dnd]") {
 
     CHECK_FALSE(root.start_file_drag({}));
     CHECK(host.calls == 0);
+}
+
+TEST_CASE("View start_file_drag returns false when no host can start a drag",
+          "[view][dnd]") {
+    View root;
+
+    CHECK_FALSE(root.start_file_drag(make_file_drag_request()));
+}
+
+TEST_CASE("WindowHost default start_file_drag rejects source dragging",
+          "[view][dnd]") {
+    DefaultDragWindowHost host;
+
+    CHECK_FALSE(host.start_file_drag(make_file_drag_request()));
+}
+
+TEST_CASE("PluginViewHost default start_file_drag rejects source dragging",
+          "[view][dnd]") {
+    DefaultDragPluginViewHost host;
+
+    CHECK_FALSE(host.start_file_drag(make_file_drag_request()));
 }
 
 TEST_CASE("View start_file_drag delegates to the attached window host", "[view][dnd]") {
