@@ -56,6 +56,39 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(self.mod.slugify_token("!!!"), "run")
         self.assertEqual(len(self.mod.slugify_token("x" * 80, max_len=12)), 12)
 
+    def test_directory_copy_and_clear_helpers_preserve_git_directory(self) -> None:
+        src = self.root / "src"
+        dest = self.root / "dest"
+        (src / "nested").mkdir(parents=True)
+        (src / "file.txt").write_text("file")
+        (src / "nested" / "child.txt").write_text("child")
+        (dest / ".git").mkdir(parents=True)
+        (dest / "old.txt").write_text("old")
+
+        self.mod.copy_directory_contents(src, dest)
+
+        self.assertEqual((dest / "file.txt").read_text(), "file")
+        self.assertEqual((dest / "nested" / "child.txt").read_text(), "child")
+
+        self.mod.clear_directory_contents(dest)
+
+        self.assertTrue((dest / ".git").is_dir())
+        self.assertFalse((dest / "file.txt").exists())
+        self.assertFalse((dest / "nested").exists())
+        self.assertFalse((dest / "old.txt").exists())
+
+    def test_stage_desktop_publish_report_rejects_empty_manifest_list(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires at least one run manifest"):
+            self.mod.stage_desktop_publish_report(
+                self.config,
+                [],
+                create_desktop_publish_bundle_fn=lambda _config: self.publish_root(self.config) / "unused",
+                now_iso_fn=lambda: "2026-05-22T12:01:00+00:00",
+                atomic_write_text_fn=self.atomic_write,
+                write_desktop_publish_rollups_fn=lambda _config: None,
+                publish_report_to_branch_fn=lambda _config, _report: {},
+            )
+
     def test_stage_desktop_publish_report_copies_artifacts_and_writes_index(self) -> None:
         bundle = self.root / "bundle"
         bundle.mkdir()

@@ -153,6 +153,7 @@ import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
+import git_helpers as _git_helpers  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
@@ -518,14 +519,17 @@ from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2
 
 
 def desktop_target_receipt_path(target_name: str) -> Path:
-    return desktop_receipts_dir() / f"{target_name}.json"
+    return _desktop_artifacts.desktop_target_receipt_path(
+        target_name,
+        desktop_receipts_dir_fn=desktop_receipts_dir,
+    )
 
 
 def desktop_receipt_for(target_name: str) -> dict | None:
-    path = desktop_target_receipt_path(target_name)
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
+    return _desktop_artifacts.desktop_receipt_for(
+        target_name,
+        desktop_target_receipt_path_fn=desktop_target_receipt_path,
+    )
 
 
 def default_windows_session_task_name(target_name: str) -> str:
@@ -790,100 +794,31 @@ def linux_remote_tooling_ready(probe: dict) -> bool:
 
 
 def normalize_git_remote_for_http(remote_url: str | None) -> str | None:
-    value = (remote_url or '').strip()
-    if not value:
-        return None
-    if value.startswith('git@github.com:'):
-        repo_path = value[len('git@github.com:'):].rstrip('/')
-        if repo_path.endswith('.git'):
-            repo_path = repo_path[:-4]
-        return f'https://github.com/{repo_path}'
-    if value.startswith('https://github.com/') or value.startswith('http://github.com/'):
-        prefix = 'https://github.com/' if 'github.com/' in value else None
-        repo_path = value.split('github.com/', 1)[1].rstrip('/')
-        if repo_path.endswith('.git'):
-            repo_path = repo_path[:-4]
-        return f'https://github.com/{repo_path}'
-    return None
+    return _git_helpers.normalize_git_remote_for_http(remote_url)
 
 
 def normalize_git_remote_for_clone(remote_url: str | None) -> str | None:
-    value = (remote_url or '').strip()
-    if not value:
-        return None
-    if value.startswith('git@github.com:'):
-        repo_path = value[len('git@github.com:'):].rstrip('/')
-        if repo_path.endswith('.git'):
-            return f'https://github.com/{repo_path}'
-        return f'https://github.com/{repo_path}.git'
-    if value.startswith('https://github.com/') or value.startswith('http://github.com/'):
-        repo_path = value.split('github.com/', 1)[1].rstrip('/')
-        if repo_path.endswith('.git'):
-            return f'https://github.com/{repo_path}'
-        return f'https://github.com/{repo_path}.git'
-    return None
+    return _git_helpers.normalize_git_remote_for_clone(remote_url)
 
 
 def git_origin_http_url(repo_root: Path = ROOT) -> str | None:
-    run = subprocess.run(
-        ['git', 'remote', 'get-url', 'origin'],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if run.returncode != 0:
-        return None
-    return normalize_git_remote_for_http(run.stdout.strip())
+    return _git_helpers.git_origin_http_url(repo_root, run_fn=subprocess.run)
 
 
 def git_origin_clone_url(repo_root: Path = ROOT) -> str | None:
-    run = subprocess.run(
-        ['git', 'remote', 'get-url', 'origin'],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if run.returncode != 0:
-        return None
-    return normalize_git_remote_for_clone(run.stdout.strip())
+    return _git_helpers.git_origin_clone_url(repo_root, run_fn=subprocess.run)
 
 
 def _clear_directory_contents(path: Path) -> None:
-    if not path.exists():
-        return
-    for child in path.iterdir():
-        if child.name == '.git':
-            continue
-        if child.is_dir():
-            shutil.rmtree(child, ignore_errors=True)
-        else:
-            child.unlink(missing_ok=True)
+    return _reporting.clear_directory_contents(path)
 
 
 def _copy_directory_contents(src: Path, dest: Path) -> None:
-    dest.mkdir(parents=True, exist_ok=True)
-    for child in src.iterdir():
-        target = dest / child.name
-        if child.is_dir():
-            shutil.copytree(child, target, dirs_exist_ok=True)
-        else:
-            shutil.copy2(child, target)
+    return _reporting.copy_directory_contents(src, dest)
 
 
 def _run_git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
-    run = subprocess.run(
-        ['git', *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if check and run.returncode != 0:
-        detail = (run.stderr or run.stdout or '').strip()
-        raise RuntimeError(f"git {' '.join(args)} failed: {detail or run.returncode}")
-    return run
+    return _git_helpers.run_git(args, cwd=cwd, check=check, run_fn=subprocess.run)
 
 
 def publish_report_to_branch(config: dict, report: dict) -> dict:

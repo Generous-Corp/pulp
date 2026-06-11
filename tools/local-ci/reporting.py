@@ -22,6 +22,28 @@ ARTIFACT_KEYS = (
 )
 
 
+def clear_directory_contents(path: Path) -> None:
+    if not path.exists():
+        return
+    for child in path.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
+def copy_directory_contents(src: Path, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for child in src.iterdir():
+        target = dest / child.name
+        if child.is_dir():
+            shutil.copytree(child, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(child, target)
+
+
 def publish_report_to_branch(
     config: dict,
     report: dict,
