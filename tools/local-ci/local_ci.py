@@ -172,6 +172,7 @@ STUCK_IDLE_SECS = _execution.STUCK_IDLE_SECS
 import reporting as _reporting  # noqa: E402
 import runner_state as _runner_state  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
+import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
@@ -1176,15 +1177,11 @@ def quit_macos_bundle_id(bundle_id: str) -> None:
 
 
 def _local_worktree_matches(path: Path, sha: str) -> bool:
-    return _source_prep.local_worktree_matches(path, sha, run_fn=subprocess.run)
+    return _source_prep_bindings.local_worktree_matches(globals(), path, sha)
 
 
 def _reset_local_worktree(path: Path) -> None:
-    return _source_prep.reset_local_worktree(
-        path,
-        root=ROOT,
-        run_fn=subprocess.run,
-    )
+    return _source_prep_bindings.reset_local_worktree(globals(), path)
 
 
 def prepare_macos_exact_sha_source(
@@ -1193,19 +1190,12 @@ def prepare_macos_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    return _source_prep.prepare_macos_exact_sha_source(
+    return _source_prep_bindings.prepare_macos_exact_sha_source(
+        globals(),
         bundle_dir,
         target_name,
         command,
         source_request,
-        root=ROOT,
-        desktop_source_root_fn=desktop_source_root,
-        local_worktree_matches_fn=_local_worktree_matches,
-        reset_local_worktree_fn=_reset_local_worktree,
-        run_fn=subprocess.run,
-        run_logged_command_fn=run_logged_command,
-        tail_lines_fn=tail_lines,
-        rewrite_launch_command_for_source_root_fn=rewrite_launch_command_for_source_root,
     )
 
 
@@ -1216,19 +1206,13 @@ def prepare_linux_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    return _source_prep.prepare_linux_exact_sha_source(
+    return _source_prep_bindings.prepare_linux_exact_sha_source(
+        globals(),
         bundle_dir,
         target_name,
         host,
         command,
         source_request,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        desktop_source_cache_key_fn=desktop_source_cache_key,
-        root=ROOT,
-        run_fn=subprocess.run,
-        fetch_ssh_artifact_fn=fetch_ssh_artifact,
-        rewrite_launch_command_for_posix_root_fn=rewrite_launch_command_for_posix_root,
     )
 
 
@@ -1239,23 +1223,13 @@ def prepare_windows_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    return _source_prep.prepare_windows_exact_sha_source(
+    return _source_prep_bindings.prepare_windows_exact_sha_source(
+        globals(),
         bundle_dir,
         target_name,
         host,
         command,
         source_request,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        desktop_source_cache_key_fn=desktop_source_cache_key,
-        root=ROOT,
-        ps_literal_fn=ps_literal,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        split_windows_prepare_commands_fn=split_windows_prepare_commands,
-        validate_windows_prepare_commands_fn=validate_windows_prepare_commands,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_ssh_fetch_file_fn=windows_ssh_fetch_file,
-        rewrite_launch_command_for_windows_root_fn=rewrite_launch_command_for_windows_root,
     )
 
 
