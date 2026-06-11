@@ -607,6 +607,7 @@ jobs:
             exit 1
           }
           size=$(wc -c < "$xml")
+          echo "coverage.cobertura.xml size: ${size} bytes"
           # A2 first cut: assertion logic extracted to
           # tools/scripts/verify_cobertura_xml.py so the inline-Python
           # heredoc isn't duplicated across the native + Python lanes
@@ -831,18 +832,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The run's created_at is when EVERY job in this run — including
-          # any leg still sitting in `queued` — was created. Ageing a
-          # queued leg from this timestamp is correct and needs no
-          # per-job `queued_at` (the jobs API does not expose one). It
-          # also means a leg already orphaned before this watchdog's
-          # first poll is still aged correctly.
-          run_created_at=$(
+          # Prefer run_started_at when available. GitHub keeps the same
+          # run id and created_at across a "rerun failed jobs" attempt,
+          # so ageing from created_at would immediately reap a healthy
+          # rerun of a leg that was queued for a long time on the prior
+          # attempt. Fresh normal runs still have run_started_at close to
+          # created_at; fall back to created_at only if the API omits it.
+          run_age_origin_at=$(
             gh api "repos/${REPO}/actions/runs/${RUN_ID}" \
-              --jq '.created_at' 2>/dev/null || echo ""
+              --jq '.run_started_at // .created_at // ""' 2>/dev/null || echo ""
           )
-          if [ -z "${run_created_at}" ]; then
-            echo "::warning::Could not read run created_at; watchdog cannot age queued legs. Exiting without action."
+          if [ -z "${run_age_origin_at}" ]; then
+            echo "::warning::Could not read run_started_at/created_at; watchdog cannot age queued legs. Exiting without action."
             exit 0
           fi
 
@@ -854,15 +855,15 @@ jobs:
               2>/dev/null || echo ""
           }
 
-          run_created_epoch=$(to_epoch "${run_created_at}")
-          if [ -z "${run_created_epoch}" ]; then
-            echo "::warning::Could not parse run created_at '${run_created_at}'; exiting without action."
+          run_age_origin_epoch=$(to_epoch "${run_age_origin_at}")
+          if [ -z "${run_age_origin_epoch}" ]; then
+            echo "::warning::Could not parse run age origin '${run_age_origin_at}'; exiting without action."
             exit 0
           fi
 
           echo "Repo:               ${REPO}"
           echo "Run id:             ${RUN_ID}"
-          echo "Run created_at:     ${run_created_at}"
+          echo "Run age origin:     ${run_age_origin_at}"
           echo "Queued grace:       ${QUEUED_GRACE_MINUTES} min"
           echo "Poll cadence:       ${POLL_SECONDS}s x ${MAX_POLLS}"
 
@@ -875,7 +876,8 @@ jobs:
             # Per-job: name <TAB> status. A coverage leg that has not
             # been assigned a runner has status=queued. The jobs API has
             # no per-job `queued_at`, so the leg is aged from the run's
-            # created_at (resolved once, above) — not a per-job field.
+            # run_started_at/created_at (resolved once, above) — not a
+            # per-job field.
             # Exclude the watchdog's own job so it can never reap itself.
             jobs_tsv=$(
               gh api --paginate \
@@ -913,8 +915,8 @@ jobs:
               [ "${job_status}" != "queued" ] && continue
 
               queued_legs=$((queued_legs + 1))
-              age_min=$(( (now_epoch - run_created_epoch) / 60 ))
-              echo "  poll ${poll}: '${job_name}' still queued (${age_min} min since run created)"
+              age_min=$(( (now_epoch - run_age_origin_epoch) / 60 ))
+              echo "  poll ${poll}: '${job_name}' still queued (${age_min} min since run age origin)"
               if [ "${age_min}" -ge "${QUEUED_GRACE_MINUTES}" ] && [ "${age_min}" -gt "${stuck_age_min}" ]; then
                 stuck_leg="${job_name}"
                 stuck_age_min="${age_min}"
@@ -1218,6 +1220,7 @@ jobs:
           native_required="${{ needs.classify.outputs.native_build_required }}"
           coverage_result="${{ needs.coverage.result }}"
           echo "native_required=${native_required}" >> "$GITHUB_OUTPUT"
+          echo "gate_ready=false" >> "$GITHUB_OUTPUT"
           if [ "$classify_result" != "success" ]; then
             echo "::error::classify failed; failing required coverage gate closed"; exit 1
           fi
@@ -1228,10 +1231,11 @@ jobs:
             echo "::error::coverage job result was $coverage_result; failing required coverage gate"; exit 1
           fi
           # native_required==true AND coverage succeeded: run the real diff-cover steps.
+          echo "gate_ready=true" >> "$GITHUB_OUTPUT"
           echo "Native coverage required and coverage job succeeded — running diff-cover."
 
       - uses: actions/checkout@v5
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         with:
           # diff-cover compares HEAD against --compare-branch using real
           # git history, so we need enough depth to include the merge
@@ -1243,7 +1247,7 @@ jobs:
           lfs: false
 
       - name: Ensure base branch is fetched
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         # actions/checkout fetches the PR head and the merge-ref but not
         # the full base branch history. diff-cover needs origin/<base>
         # to resolve --compare-branch, so fetch it explicitly.
@@ -1264,7 +1268,7 @@ jobs:
         # so if EVERY input is missing the merge step fails RED (see
         # "Merge per-OS Cobertura XMLs" below) rather than silently
         # passing the required gate.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         uses: actions/download-artifact@v6
         with:
           name: coverage-cobertura-${{ github.sha }}
@@ -1274,7 +1278,7 @@ jobs:
       - name: Download Cobertura XML from coverage job (macOS)
         # Always present — macOS is the one leg that runs on every event,
         # including `pull_request`.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         uses: actions/download-artifact@v6
         with:
           name: coverage-cobertura-macos-${{ github.sha }}
@@ -1284,7 +1288,7 @@ jobs:
       - name: Download Cobertura XML from coverage job (Windows)
         # Like the Linux artifact above: absent on `pull_request` events
         # (per-PR coverage is macOS-only), present on push / dispatch.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         uses: actions/download-artifact@v6
         with:
           name: coverage-cobertura-windows-${{ github.sha }}
@@ -1294,7 +1298,7 @@ jobs:
       - name: Install diff-cover
         # Pinned to >=9 for the --markdown-report flag; earlier
         # releases only supported --html-report.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         run: python3 -m pip install --user 'diff-cover>=9'
         shell: bash
 
@@ -1303,7 +1307,7 @@ jobs:
         # `coverage` job guards scripts/run_coverage.sh — run the
         # unit tests before we depend on the script in a live step
         # so a regression fails fast without waiting on diff-cover.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         run: python3 tools/scripts/test_coverage_diff_comment.py
         shell: bash
 
@@ -1313,7 +1317,7 @@ jobs:
         # regression in merge_cobertura would otherwise show up as
         # a confusing diff-cover number drift before anyone realised
         # the merge was the cause.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         run: python3 tools/scripts/test_merge_cobertura.py
         shell: bash
 
@@ -1346,7 +1350,7 @@ jobs:
         # (handled by the "Evaluate coverage gate preconditions" step)
         # gets a no-coverage green; everything that reaches this step
         # owes a real coverage report.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         shell: bash
         run: |
           set +e
@@ -1378,7 +1382,7 @@ jobs:
         # local pre-push hook + tools/scripts/local_diff_cover.sh stay
         # in lockstep with this gate. Edit there, not here, when raising
         # or lowering the floor.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         shell: bash
         run: |
           set +e
@@ -1441,7 +1445,7 @@ jobs:
         # test_coverage_tier_check.py exercises ctc.load_targets() which
         # imports yaml (issue #900). Also required by the per-tier gate
         # step below.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         run: python3 -m pip install --user 'pyyaml>=6'
         shell: bash
 
@@ -1450,7 +1454,7 @@ jobs:
         # coverage_diff_comment.py — unit tests run before the live
         # invocation so a regression in classify_file / aggregate /
         # render fails fast without requiring a full coverage run.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         run: python3 tools/scripts/test_coverage_tier_check.py
         shell: bash
 
@@ -1467,7 +1471,7 @@ jobs:
         # until we've observed a couple of cycles and confirmed the
         # tier definitions classify files correctly. Phase 2 flip
         # to required is a one-line removal of this continue-on-error.
-        if: steps.gate_preconditions.outputs.native_required == 'true'
+        if: steps.gate_preconditions.outputs.gate_ready == 'true'
         continue-on-error: true
         shell: bash
         run: |
@@ -1496,7 +1500,7 @@ jobs:
         # `always() && native_required` — render on diff-cover failure
         # (Codex #611 P2) but skip entirely on classifier-approved
         # skip-safe PRs, where there is no coverage report to comment on.
-        if: always() && steps.gate_preconditions.outputs.native_required == 'true'
+        if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
         run: |
           # Phase 3 landed: gate is required. --no-advisory flips the
           # banner to the required-gate form; the --flip-date argument
@@ -1535,12 +1539,11 @@ jobs:
         # development velocity for code the nightly cross-platform lane
         # already validates. The required check's name and its pass/fail
         # semantics for macOS-reachable code are untouched.
-        if: always() && steps.gate_preconditions.outputs.native_required == 'true'
+        if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
         shell: bash
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          # shellcheck disable=SC2016  # backticks below are literal Markdown
           set -euo pipefail
           # Changed files in this PR, base..HEAD. `origin/<base>` was
           # fetched by the "Ensure base branch is fetched" step above.
@@ -1577,10 +1580,10 @@ jobs:
               "${#PLATFORM_FILES[@]}"
             printf ' and are NOT covered by per-PR macOS coverage.**\n'
             printf '> They are validated by the nightly cross-platform lane'
-            printf ' (`cross-platform-check.yml`), not by this required diff-coverage gate.\n'
+            printf " (\`cross-platform-check.yml\`), not by this required diff-coverage gate.\n"
             printf '>\n'
             for f in "${PLATFORM_FILES[@]}"; do
-              printf '> - `%s`\n' "$f"
+              printf "> - \`%s\`\n" "$f"
             done
           } >> coverage-diff-comment.md
           echo "----- coverage-diff-comment.md (with platform note) -----"
@@ -1588,7 +1591,7 @@ jobs:
           echo "----- end comment -----"
 
       - name: Upload diff-cover report artifact
-        if: always() && steps.gate_preconditions.outputs.native_required == 'true'
+        if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: coverage-diff-${{ github.sha }}
@@ -1611,7 +1614,7 @@ jobs:
         # explanatory comment (Codex #611 P2); the fork guard stays.
         # Also gated on native_required — skip-safe PRs have no coverage
         # comment to post.
-        if: always() && steps.gate_preconditions.outputs.native_required == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        if: always() && steps.gate_preconditions.outputs.gate_ready == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
