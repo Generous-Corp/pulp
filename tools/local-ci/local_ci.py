@@ -161,6 +161,7 @@ import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import macos_desktop_action as _macos_desktop_action  # noqa: E402
+import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
@@ -1278,7 +1279,8 @@ def run_macos_local_smoke(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    return _macos_desktop_action.run_macos_local_smoke(
+    return _macos_desktop_bindings.run_macos_local_smoke(
+        globals(),
         config,
         command,
         action_name=action_name,
@@ -1296,40 +1298,6 @@ def run_macos_local_smoke(
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
         source_request=source_request,
-        create_desktop_run_bundle_fn=create_desktop_run_bundle,
-        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
-        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
-        macos_accessibility_trusted_fn=macos_accessibility_trusted,
-        now_iso_fn=now_iso,
-        prepare_macos_exact_sha_source_fn=prepare_macos_exact_sha_source,
-        quit_macos_bundle_id_fn=quit_macos_bundle_id,
-        sleep_fn=time.sleep,
-        run_fn=subprocess.run,
-        activate_macos_bundle_id_fn=activate_macos_bundle_id,
-        wait_for_macos_bundle_window_fn=wait_for_macos_bundle_window,
-        split_command_fn=shlex.split,
-        detect_macos_app_bundle_fn=detect_macos_app_bundle,
-        macos_bundle_id_for_app_path_fn=macos_bundle_id_for_app_path,
-        environ_copy_fn=os.environ.copy,
-        popen_fn=subprocess.Popen,
-        wait_for_macos_window_fn=wait_for_macos_window,
-        content_size_from_window_fn=_desktop_actions.content_size_from_window,
-        wait_for_path_fn=wait_for_path,
-        content_size_from_view_tree_fn=_desktop_actions.content_size_from_view_tree,
-        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
-        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
-        capture_macos_window_fn=capture_macos_window,
-        parse_coordinate_pair_fn=parse_coordinate_pair,
-        resolve_view_tree_click_point_fn=resolve_view_tree_click_point,
-        screen_point_for_content_point_fn=screen_point_for_content_point,
-        activate_macos_pid_fn=activate_macos_pid,
-        dispatch_macos_click_fn=dispatch_macos_click,
-        desktop_click_selector_fn=_desktop_actions.desktop_click_selector,
-        image_change_summary_fn=image_change_summary,
-        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
-        atomic_write_text_fn=atomic_write_text,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        terminate_process_fn=terminate_process,
     )
 
 
