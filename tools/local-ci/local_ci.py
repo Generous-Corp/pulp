@@ -177,6 +177,7 @@ import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
+import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
 import windows_probe as _windows_probe  # noqa: E402
 import windows_target as _windows_target  # noqa: E402
 
@@ -1425,7 +1426,8 @@ def run_windows_session_agent_action(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    return _windows_desktop_action.run_windows_session_agent_action(
+    return _windows_desktop_bindings.run_windows_session_agent_action(
+        globals(),
         config,
         target_name,
         target,
@@ -1444,32 +1446,6 @@ def run_windows_session_agent_action(
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
         source_request=source_request,
-        ensure_host_reachable_fn=ensure_host_reachable,
-        desktop_receipt_for_fn=desktop_receipt_for,
-        desktop_target_contract_fn=desktop_target_contract,
-        probe_windows_session_agent_fn=probe_windows_session_agent,
-        windows_desktop_session_user_fn=windows_desktop_session_user,
-        create_desktop_run_bundle_fn=create_desktop_run_bundle,
-        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
-        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
-        prepare_windows_exact_sha_source_fn=prepare_windows_exact_sha_source,
-        build_windows_session_agent_request_fn=build_windows_session_agent_request,
-        windows_path_join_fn=windows_path_join,
-        windows_ssh_write_text_fn=windows_ssh_write_text,
-        start_windows_session_agent_task_fn=start_windows_session_agent_task,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-        windows_ssh_read_json_fn=windows_ssh_read_json,
-        atomic_write_text_fn=atomic_write_text,
-        windows_ssh_fetch_file_fn=windows_ssh_fetch_file,
-        windows_ssh_remove_path_fn=windows_ssh_remove_path,
-        default_desktop_label_fn=default_desktop_label,
-        image_change_summary_fn=image_change_summary,
-        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
-        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
-        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        now_iso_fn=now_iso,
     )
 
 
