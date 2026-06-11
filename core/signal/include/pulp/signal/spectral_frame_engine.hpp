@@ -67,6 +67,24 @@ public:
         fft_ = Fft(config_.fft_size);
         window_ = WindowFunction::generate(config_.fft_size, config_.window);
 
+        // Steady-state OLA window-energy at a fully-overlapped sample for
+        // the analysis hop. Used to floor the per-sample normalization so
+        // partial-overlap samples at stream edges taper to zero instead of
+        // being amplified by division by a near-zero coverage (pulp #3975).
+        // The floor sits far below any real body coverage (down to a 4x
+        // sparser synthesis hop), so body samples normalize unchanged.
+        double steady = 0.0;
+        const int n = config_.fft_size, h = config_.analysis_hop;
+        const int center = n; // well inside the plateau
+        for (int j = -n / h - 1; j <= n / h + 1; ++j) {
+            const int idx = center - j * h - (n / 2);
+            if (idx >= 0 && idx < n) {
+                const float w = window_[static_cast<size_t>(idx)];
+                steady += static_cast<double>(w) * w;
+            }
+        }
+        min_norm_ = std::max(static_cast<float>(steady) * 0.25f, 1e-9f);
+
         // Output ring must hold the unfinalized span (fft_size) plus the
         // worst-case backlog a caller can create in one process() call.
         const int worst_frames_per_block =
@@ -234,7 +252,13 @@ private:
     void pop_one(float* const* out, int i) {
         assert(read_pos_ < available_);
         const auto idx = static_cast<size_t>(read_pos_ & ring_mask_);
-        const float norm = norm_ring_[idx];
+        // Floor only the stream-start partial-overlap region. Once a full FFT
+        // window has elapsed, per-sample normalization must remain exact for
+        // non-COLA windows/hops whose valid body coverage can dip below the
+        // startup floor.
+        const bool startup_edge = read_pos_ < config_.fft_size;
+        const float norm = startup_edge ? std::max(norm_ring_[idx], min_norm_)
+                                        : norm_ring_[idx];
         for (int ch = 0; ch < config_.channels; ++ch) {
             float* ring = output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
             out[ch][i] = norm > 1e-9f ? ring[idx] / norm : 0.0f;
@@ -267,6 +291,7 @@ private:
     int num_bins_ = 0;
     int ring_size_ = 0;
     int ring_mask_ = 0;
+    float min_norm_ = 1e-9f;  // OLA coverage floor for edge taper (#3975)
 
     std::vector<float> input_ring_;     // channels * fft_size
     std::vector<float> output_ring_;    // channels * ring_size

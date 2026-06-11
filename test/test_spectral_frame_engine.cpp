@@ -127,6 +127,59 @@ TEST_CASE("SpectralFrameEngine neutral reconstruction below -100 dBFS",
     REQUIRE(depth < -100.0);
 }
 
+TEST_CASE("SpectralFrameEngine tapers stream edges instead of spiking",
+          "[signal][spectral-frame-engine][issue-3975]") {
+    // Regression for #3975: the OLA normalization used to divide
+    // partial-overlap samples at the very start of the stream by a
+    // near-zero coverage, producing a full-scale spike in the first
+    // ~fft_size/hop samples. The whole output — including sample 0 —
+    // must stay within a small per-sample step for a sustained tone.
+    SpectralFrameEngineConfig config;
+    config.fft_size = 2048;
+    config.analysis_hop = 512;
+    SpectralFrameEngine engine;
+    engine.prepare(config);
+
+    auto in = make_tone_channels(1, 48000);
+    auto out = run_identity(engine, in, 480); // non-hop-aligned blocks
+
+    float max_step = 0.0f, peak = 0.0f;
+    for (size_t i = 1; i < out[0].size(); ++i) {
+        max_step = std::max(max_step, std::abs(out[0][i] - out[0][i - 1]));
+        peak = std::max(peak, std::abs(out[0][i]));
+    }
+    INFO("whole-stream max step: " << max_step << ", peak: " << peak);
+    // A 440+1237 Hz tone at 0.7 amp has per-sample steps well under 0.2;
+    // the old edge spike was ~2.0 (full-scale). Peak must not exceed the
+    // input amplitude envelope.
+    REQUIRE(max_step < 0.3f);
+    REQUIRE(peak < 1.0f);
+}
+
+TEST_CASE("SpectralFrameEngine preserves non-default steady-state body normalization",
+          "[signal][spectral-frame-engine][issue-3975]") {
+    for (auto window : {WindowFunction::Type::blackman, WindowFunction::Type::flat_top}) {
+        SpectralFrameEngineConfig config;
+        config.fft_size = 1024;
+        config.analysis_hop = 512;
+        config.window = window;
+        SpectralFrameEngine engine;
+        engine.prepare(config);
+
+        std::vector<std::vector<float>> in(1, std::vector<float>(32768, 1.0f));
+        auto out = run_identity(engine, in, 512);
+
+        float lo = 1e9f, hi = -1e9f;
+        for (int i = 8192; i < 24576; ++i) {
+            lo = std::min(lo, out[0][static_cast<size_t>(i)]);
+            hi = std::max(hi, out[0][static_cast<size_t>(i)]);
+        }
+        INFO("window index: " << static_cast<int>(window));
+        REQUIRE_THAT(lo, WithinAbs(1.0f, 1e-3f));
+        REQUIRE_THAT(hi, WithinAbs(1.0f, 1e-3f));
+    }
+}
+
 TEST_CASE("SpectralFrameEngine COLA flatness on DC", "[signal][spectral-frame-engine]") {
     SpectralFrameEngineConfig config;
     config.fft_size = 1024;
