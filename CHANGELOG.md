@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04250"></a>
+## [0.425.0] - 2026-06-11
+
+- feat(signal): FreezeLoopSampler — capture-and-loop time-domain freeze ([#4006](https://github.com/danielraffel/pulp/pull/4006))
+- refactor(local-ci): extract macos desktop facade bindings ([#4005](https://github.com/danielraffel/pulp/pull/4005))
+
 <a id="v04240"></a>
 ## [0.424.0] - 2026-06-11
 
@@ -4336,6 +4342,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.425.0]: https://github.com/danielraffel/pulp/releases/tag/v0.425.0
 [0.424.0]: https://github.com/danielraffel/pulp/releases/tag/v0.424.0
 [0.423.0]: https://github.com/danielraffel/pulp/releases/tag/v0.423.0
 [0.422.0]: https://github.com/danielraffel/pulp/releases/tag/v0.422.0

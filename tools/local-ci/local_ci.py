@@ -145,6 +145,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 import cleanup as _cleanup  # noqa: E402
 import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
+import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
@@ -156,25 +157,31 @@ import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
 import io_utils as _io_utils  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
+import linux_desktop_bindings as _linux_desktop_bindings  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
+import local_ci_command_bindings as _local_ci_command_bindings  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
+import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import execution as _execution  # noqa: E402
+import execution_bindings as _execution_bindings  # noqa: E402
 
 HEARTBEAT_INTERVAL_SECS = _execution.HEARTBEAT_INTERVAL_SECS
 STUCK_IDLE_SECS = _execution.STUCK_IDLE_SECS
 import reporting as _reporting  # noqa: E402
 import runner_state as _runner_state  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
+import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
+import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
 import windows_probe as _windows_probe  # noqa: E402
 import windows_target as _windows_target  # noqa: E402
 
@@ -1176,15 +1183,11 @@ def quit_macos_bundle_id(bundle_id: str) -> None:
 
 
 def _local_worktree_matches(path: Path, sha: str) -> bool:
-    return _source_prep.local_worktree_matches(path, sha, run_fn=subprocess.run)
+    return _source_prep_bindings.local_worktree_matches(globals(), path, sha)
 
 
 def _reset_local_worktree(path: Path) -> None:
-    return _source_prep.reset_local_worktree(
-        path,
-        root=ROOT,
-        run_fn=subprocess.run,
-    )
+    return _source_prep_bindings.reset_local_worktree(globals(), path)
 
 
 def prepare_macos_exact_sha_source(
@@ -1193,19 +1196,12 @@ def prepare_macos_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    return _source_prep.prepare_macos_exact_sha_source(
+    return _source_prep_bindings.prepare_macos_exact_sha_source(
+        globals(),
         bundle_dir,
         target_name,
         command,
         source_request,
-        root=ROOT,
-        desktop_source_root_fn=desktop_source_root,
-        local_worktree_matches_fn=_local_worktree_matches,
-        reset_local_worktree_fn=_reset_local_worktree,
-        run_fn=subprocess.run,
-        run_logged_command_fn=run_logged_command,
-        tail_lines_fn=tail_lines,
-        rewrite_launch_command_for_source_root_fn=rewrite_launch_command_for_source_root,
     )
 
 
@@ -1216,19 +1212,13 @@ def prepare_linux_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    return _source_prep.prepare_linux_exact_sha_source(
+    return _source_prep_bindings.prepare_linux_exact_sha_source(
+        globals(),
         bundle_dir,
         target_name,
         host,
         command,
         source_request,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        desktop_source_cache_key_fn=desktop_source_cache_key,
-        root=ROOT,
-        run_fn=subprocess.run,
-        fetch_ssh_artifact_fn=fetch_ssh_artifact,
-        rewrite_launch_command_for_posix_root_fn=rewrite_launch_command_for_posix_root,
     )
 
 
@@ -1239,23 +1229,13 @@ def prepare_windows_exact_sha_source(
     command: str,
     source_request: dict,
 ) -> dict:
-    return _source_prep.prepare_windows_exact_sha_source(
+    return _source_prep_bindings.prepare_windows_exact_sha_source(
+        globals(),
         bundle_dir,
         target_name,
         host,
         command,
         source_request,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        desktop_source_cache_key_fn=desktop_source_cache_key,
-        root=ROOT,
-        ps_literal_fn=ps_literal,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        split_windows_prepare_commands_fn=split_windows_prepare_commands,
-        validate_windows_prepare_commands_fn=validate_windows_prepare_commands,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_ssh_fetch_file_fn=windows_ssh_fetch_file,
-        rewrite_launch_command_for_windows_root_fn=rewrite_launch_command_for_windows_root,
     )
 
 
@@ -1406,7 +1386,8 @@ def run_linux_xvfb_remote_action(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    return _linux_desktop_action.run_linux_xvfb_remote_action(
+    return _linux_desktop_bindings.run_linux_xvfb_remote_action(
+        globals(),
         config,
         target_name,
         target,
@@ -1425,27 +1406,6 @@ def run_linux_xvfb_remote_action(
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
         source_request=source_request,
-        ensure_host_reachable_fn=ensure_host_reachable,
-        probe_linux_launch_backend_fn=probe_linux_launch_backend,
-        create_desktop_run_bundle_fn=create_desktop_run_bundle,
-        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
-        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
-        prepare_linux_exact_sha_source_fn=prepare_linux_exact_sha_source,
-        remote_linux_bundle_relpath_fn=remote_linux_bundle_relpath,
-        build_linux_xvfb_remote_command_fn=build_linux_xvfb_remote_command,
-        build_linux_window_driver_remote_command_fn=build_linux_window_driver_remote_command,
-        run_fn=subprocess.run,
-        fetch_ssh_artifact_fn=fetch_ssh_artifact,
-        cleanup_remote_ssh_dir_fn=cleanup_remote_ssh_dir,
-        default_desktop_label_fn=default_desktop_label,
-        image_change_summary_fn=image_change_summary,
-        parse_coordinate_pair_fn=parse_coordinate_pair,
-        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
-        atomic_write_text_fn=atomic_write_text,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        now_iso_fn=now_iso,
-        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
-        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
     )
 
 
@@ -1470,7 +1430,8 @@ def run_windows_session_agent_action(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    return _windows_desktop_action.run_windows_session_agent_action(
+    return _windows_desktop_bindings.run_windows_session_agent_action(
+        globals(),
         config,
         target_name,
         target,
@@ -1489,32 +1450,6 @@ def run_windows_session_agent_action(
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
         source_request=source_request,
-        ensure_host_reachable_fn=ensure_host_reachable,
-        desktop_receipt_for_fn=desktop_receipt_for,
-        desktop_target_contract_fn=desktop_target_contract,
-        probe_windows_session_agent_fn=probe_windows_session_agent,
-        windows_desktop_session_user_fn=windows_desktop_session_user,
-        create_desktop_run_bundle_fn=create_desktop_run_bundle,
-        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
-        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
-        prepare_windows_exact_sha_source_fn=prepare_windows_exact_sha_source,
-        build_windows_session_agent_request_fn=build_windows_session_agent_request,
-        windows_path_join_fn=windows_path_join,
-        windows_ssh_write_text_fn=windows_ssh_write_text,
-        start_windows_session_agent_task_fn=start_windows_session_agent_task,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-        windows_ssh_read_json_fn=windows_ssh_read_json,
-        atomic_write_text_fn=atomic_write_text,
-        windows_ssh_fetch_file_fn=windows_ssh_fetch_file,
-        windows_ssh_remove_path_fn=windows_ssh_remove_path,
-        default_desktop_label_fn=default_desktop_label,
-        image_change_summary_fn=image_change_summary,
-        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
-        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
-        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        now_iso_fn=now_iso,
     )
 
 
@@ -1575,14 +1510,7 @@ def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
-    _queue_lifecycle.complete_superseded_job_unlocked(
-        job,
-        superseded_by,
-        reason,
-        supersedence_result_fn=supersedence_result,
-        save_result_fn=save_result,
-        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
-    )
+    _queue_bindings.supersede_job_unlocked(globals(), job, superseded_by, reason)
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
@@ -1590,13 +1518,7 @@ def cancellation_result(job: dict, reason: str) -> dict:
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
-    _queue_lifecycle.complete_canceled_job_unlocked(
-        job,
-        reason,
-        cancellation_result_fn=cancellation_result,
-        save_result_fn=save_result,
-        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
-    )
+    _queue_bindings.cancel_job_unlocked(globals(), job, reason)
 
 
 def summarize_job(job: dict) -> str:
@@ -1736,15 +1658,7 @@ def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_ta
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
-    _queue_lifecycle.update_job_active_targets_locked(
-        job_id,
-        active_targets,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        upsert_job_active_targets_unlocked_fn=upsert_job_active_targets_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-    )
+    _queue_bindings.update_job_active_targets(globals(), job_id, active_targets)
 
 
 def enqueue_job(
@@ -1756,7 +1670,8 @@ def enqueue_job(
     validation: str,
     submission: dict | None = None,
 ) -> tuple[dict, bool]:
-    return _queue_lifecycle.enqueue_job_locked(
+    return _queue_bindings.enqueue_job(
+        globals(),
         branch,
         sha,
         priority,
@@ -1764,25 +1679,6 @@ def enqueue_job(
         mode,
         validation,
         submission=submission,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        normalize_priority_fn=normalize_priority,
-        normalize_validation_mode_fn=normalize_validation_mode,
-        make_fingerprint_fn=make_fingerprint,
-        find_active_job_by_fingerprint_unlocked_fn=_queue_orchestrator.find_active_job_by_fingerprint_unlocked,
-        bump_pending_job_priority_unlocked_fn=lambda existing, requested_priority: _queue_orchestrator.bump_pending_job_priority_unlocked(
-            existing,
-            requested_priority,
-            now_iso_fn=now_iso,
-        ),
-        make_job_fn=make_job,
-        pending_supersedence_candidates_unlocked_fn=_queue_orchestrator.pending_supersedence_candidates_unlocked,
-        supersede_job_unlocked_fn=supersede_job_unlocked,
-        trim_completed_jobs_fn=trim_completed_jobs,
-        normalize_job_fn=normalize_job,
     )
 
 
@@ -1801,35 +1697,11 @@ def trim_completed_jobs(queue: list[dict]) -> list[dict]:
 
 
 def bump_queue_command_job(job_ref: str, requested_priority: str) -> dict:
-    return _queue_lifecycle.bump_queue_command_job_locked(
-        job_ref,
-        requested_priority,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
-        set_pending_job_priority_unlocked_fn=lambda job, priority: _queue_orchestrator.set_pending_job_priority_unlocked(
-            job,
-            priority,
-            now_iso_fn=now_iso,
-        ),
-        save_queue_unlocked_fn=save_queue_unlocked,
-        summarize_job_fn=summarize_job,
-    )
+    return _queue_bindings.bump_queue_command_job(globals(), job_ref, requested_priority)
 
 
 def cancel_queue_command_job(job_ref: str) -> dict:
-    return _queue_lifecycle.cancel_queue_command_job_locked(
-        job_ref,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
-        cancel_job_unlocked_fn=cancel_job_unlocked,
-        trim_completed_jobs_fn=trim_completed_jobs,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        summarize_job_fn=summarize_job,
-    )
+    return _queue_bindings.cancel_queue_command_job(globals(), job_ref)
 
 
 def result_file_job_id(path: Path) -> str | None:
@@ -1978,19 +1850,7 @@ def write_runner_info(info: dict) -> None:
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
-    def update_info(info: dict, current_job_id: str, current_active_targets: dict | None) -> bool:
-        return _queue_orchestrator.update_runner_info_active_targets(
-            info,
-            current_job_id,
-            current_active_targets,
-            now_iso_fn=now_iso,
-        )
-
-    _runner_state.update_current_runner_active_targets(
-        job_id,
-        active_targets,
-        update_runner_info_active_targets_fn=update_info,
-    )
+    _queue_bindings.update_runner_active_targets(globals(), job_id, active_targets)
 
 
 def clear_runner_info() -> None:
@@ -2002,73 +1862,19 @@ def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None
 
 
 def load_job(job_id: str) -> dict | None:
-    return _queue_lifecycle.load_job_locked(
-        job_id,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        find_job_unlocked_fn=find_job_unlocked,
-        normalize_job_fn=normalize_job,
-    )
+    return _queue_bindings.load_job(globals(), job_id)
 
 
 def claim_next_job() -> dict | None:
-    return _queue_lifecycle.claim_next_job_locked(
-        root=ROOT,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        claim_next_job_unlocked_fn=lambda queue, *, runner: _queue_orchestrator.claim_next_job_unlocked(
-            queue,
-            runner=runner,
-            now_iso_fn=now_iso,
-        ),
-        normalize_job_fn=normalize_job,
-        pid_fn=os.getpid,
-    )
+    return _queue_bindings.claim_next_job(globals())
 
 
 def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
-    _queue_lifecycle.finalize_job_locked(
-        job_id,
-        result,
-        result_path,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        complete_job_unlocked_fn=lambda queue, current_job_id, current_result, current_result_path: _queue_orchestrator.complete_job_unlocked(
-            queue,
-            current_job_id,
-            current_result,
-            current_result_path,
-            now_iso_fn=now_iso,
-        ),
-        trim_completed_jobs_with_removed_ids_fn=trim_completed_jobs_with_removed_ids,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        collect_local_ci_cleanup_plan_fn=collect_local_ci_cleanup_plan,
-        apply_local_ci_cleanup_plan_fn=apply_local_ci_cleanup_plan,
-        keep_results=KEEP_COMPLETED_JOBS,
-        keep_logs=KEEP_COMPLETED_JOBS,
-        keep_bundles=0,
-        include_prepared=False,
-    )
+    _queue_bindings.finalize_job(globals(), job_id, result, result_path)
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
-    return _queue_lifecycle.wait_for_job_completion(
-        job_id,
-        config,
-        load_job_fn=load_job,
-        load_result_fn=load_result,
-        drain_pending_jobs_fn=drain_pending_jobs,
-        current_runner_info_fn=current_runner_info,
-        sleep_fn=time.sleep,
-        poll_secs=WAIT_POLL_SECS,
-    )
+    return _queue_bindings.wait_for_job(globals(), job_id, config)
 
 
 def notify(message: str) -> None:
@@ -2353,18 +2159,11 @@ def run_logged_command(
 
 
 def run_local_validation(job: dict, exclude_tests: str = "", report_progress=None) -> dict:
-    return _execution.run_local_validation(
+    return _execution_bindings.run_local_validation(
+        globals(),
         job,
         exclude_tests,
         report_progress,
-        root=ROOT,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        prepare_target_log_fn=prepare_target_log,
-        now_iso_fn=now_iso,
-        local_validation_command_fn=local_validation_command,
-        run_logged_command_fn=run_logged_command,
-        validation_result_from_run_fn=validation_result_from_run,
     )
 
 
@@ -2377,7 +2176,8 @@ def run_posix_ssh_validation(
     config: dict | None = None,
     report_progress=None,
 ) -> dict:
-    return _execution.run_posix_ssh_validation(
+    return _execution_bindings.run_posix_ssh_validation(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -2385,15 +2185,6 @@ def run_posix_ssh_validation(
         exclude_tests,
         config,
         report_progress,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        prepare_target_log_fn=prepare_target_log,
-        now_iso_fn=now_iso,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        posix_ssh_validation_command_fn=posix_ssh_validation_command,
-        run_logged_command_fn=run_logged_command,
-        validation_result_from_run_fn=validation_result_from_run,
-        validation_error_result_fn=validation_error_result,
     )
 
 
@@ -2567,7 +2358,8 @@ def run_windows_ssh_validation(
     config: dict | None = None,
     report_progress=None,
 ) -> dict:
-    return _execution.run_windows_ssh_validation(
+    return _execution_bindings.run_windows_ssh_validation(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -2578,20 +2370,6 @@ def run_windows_ssh_validation(
         cmake_generator_instance,
         config,
         report_progress,
-        root=ROOT,
-        prepare_target_log_fn=prepare_target_log,
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        validation_error_result_fn=validation_error_result,
-        ensure_windows_remote_repo_checkout_fn=ensure_windows_remote_repo_checkout,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        now_iso_fn=now_iso,
-        probe_windows_ssh_cmake_settings_fn=probe_windows_ssh_cmake_settings,
-        windows_validation_script_fn=windows_validation_script,
-        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
-        run_logged_command_fn=run_logged_command,
-        validation_result_from_run_fn=validation_result_from_run,
     )
 
 
@@ -2599,12 +2377,7 @@ def run_windows_ssh_validation(
 
 
 def config_for_job_execution(job: dict, config: dict) -> dict:
-    return _execution.config_for_job_execution(
-        job,
-        config,
-        load_config_file_fn=load_config_file,
-        warn_fn=print,
-    )
+    return _execution_bindings.config_for_job_execution(globals(), job, config)
 
 
 def submission_target_state(job: dict, target_name: str) -> dict:
@@ -2612,91 +2385,27 @@ def submission_target_state(job: dict, target_name: str) -> dict:
 
 
 def resolve_ssh_target_execution(job: dict, target_name: str, target_cfg: dict, defaults: dict) -> tuple[str | None, str | None]:
-    return _execution.resolve_ssh_target_execution(
-        job,
-        target_name,
-        target_cfg,
-        defaults,
-        ensure_host_reachable_fn=ensure_host_reachable,
-    )
+    return _execution_bindings.resolve_ssh_target_execution(globals(), job, target_name, target_cfg, defaults)
 
 
 def _build_target_tasks(job: dict, config: dict, progress_factory=None) -> list[tuple[str, Callable[[], dict]]]:
-    return _execution.build_target_tasks(
-        job,
-        config,
-        enabled_targets_fn=enabled_targets,
-        resolve_ssh_target_execution_fn=resolve_ssh_target_execution,
-        run_local_validation_fn=run_local_validation,
-        run_posix_ssh_validation_fn=run_posix_ssh_validation,
-        run_windows_ssh_validation_fn=run_windows_ssh_validation,
-        progress_factory=progress_factory,
-    )
+    return _execution_bindings.build_target_tasks(globals(), job, config, progress_factory)
 
 
 def process_job(job: dict, config: dict) -> dict:
-    return _execution.process_job(
-        job,
-        config,
-        print_fn=print,
-        short_sha_fn=short_sha,
-        config_for_job_execution_fn=config_for_job_execution,
-        build_target_tasks_fn=_build_target_tasks,
-        target_state_snapshot_fn=target_state_snapshot,
-        update_runner_active_targets_fn=update_runner_active_targets,
-        update_job_active_targets_fn=update_job_active_targets,
-        updated_target_state_fn=updated_target_state,
-        initial_target_state_fn=initial_target_state,
-        completed_target_state_fn=completed_target_state,
-        now_iso_fn=now_iso,
-        run_target_tasks_fn=run_target_tasks,
-        completed_job_result_fn=completed_job_result,
-        sorted_target_results_fn=sorted_target_results,
-    )
+    return _execution_bindings.process_job(globals(), job, config)
 
 
 def save_result(result: dict) -> Path:
-    return _execution.save_result(
-        result,
-        ensure_state_dirs_fn=ensure_state_dirs,
-        results_dir_fn=results_dir,
-        update_evidence_index_fn=update_evidence_index,
-        now_fn=datetime.now,
-    )
+    return _execution_bindings.save_result(globals(), result)
 
 
 def print_result(result: dict, result_path: Path | None = None) -> None:
-    return _execution.print_result(
-        result,
-        result_path,
-        normalize_result_fn=normalize_result,
-        result_validation_line_fn=result_validation_line,
-        result_execution_line_fn=result_execution_line,
-        result_target_lines_fn=result_target_lines,
-        result_overall_line_fn=result_overall_line,
-        print_fn=print,
-    )
+    return _execution_bindings.print_result(globals(), result, result_path)
 
 
 def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
-    return _queue_lifecycle.drain_pending_jobs_locked(
-        config,
-        blocking=blocking,
-        root=ROOT,
-        drain_lock_path_fn=drain_lock_path,
-        file_lock_fn=file_lock,
-        lock_busy_error_cls=LockBusyError,
-        write_runner_info_fn=write_runner_info,
-        clear_runner_info_fn=clear_runner_info,
-        reclaim_stale_remote_validators_fn=reclaim_stale_remote_validators,
-        claim_next_job_fn=claim_next_job,
-        process_job_fn=process_job,
-        save_result_fn=save_result,
-        finalize_job_fn=finalize_job,
-        print_result_fn=print_result,
-        now_fn=now_iso,
-        pid_fn=os.getpid,
-    )
+    return _queue_bindings.drain_pending_jobs(globals(), config, blocking=blocking)
 
 
 # ── GitHub Helpers ───────────────────────────────────────────────────────────
@@ -2734,98 +2443,27 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 def resolve_submission_options(
     args: argparse.Namespace, command: str
 ) -> tuple[dict, str, str, list[str], str, str, dict]:
-    return _local_ci_commands_cli.resolve_submission_options(
-        args,
-        command,
-        load_config_fn=load_config,
-        current_branch_fn=current_branch,
-        resolve_git_ref_sha_fn=resolve_git_ref_sha,
-        current_sha_fn=current_sha,
-        resolve_targets_fn=resolve_targets,
-        parse_targets_arg_fn=parse_targets_arg,
-        normalize_priority_fn=normalize_priority,
-        default_priority_for_fn=default_priority_for,
-        normalize_validation_mode_fn=normalize_validation_mode,
-        build_submission_metadata_fn=build_submission_metadata,
-    )
+    return _local_ci_command_bindings.resolve_submission_options(globals(), args, command)
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_enqueue(
-        args,
-        resolve_submission_options_fn=resolve_submission_options,
-        print_submission_metadata_fn=print_submission_metadata,
-        enqueue_job_fn=enqueue_job,
-        enqueue_command_result_line_fn=enqueue_command_result_line,
-    )
+    return _local_ci_command_bindings.cmd_enqueue(globals(), args)
 
 
 def cmd_drain(_args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_drain(
-        _args,
-        load_config_fn=load_config,
-        drain_pending_jobs_fn=drain_pending_jobs,
-        current_runner_info_fn=current_runner_info,
-        drain_runner_active_line_fn=drain_runner_active_line,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_drain(globals(), _args)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_run(
-        args,
-        resolve_submission_options_fn=resolve_submission_options,
-        print_submission_metadata_fn=print_submission_metadata,
-        gh_workflow_dispatch_fn=gh_workflow_dispatch,
-        enqueue_job_fn=enqueue_job,
-        enqueue_command_result_line_fn=enqueue_command_result_line,
-        wait_for_job_fn=wait_for_job,
-        load_job_fn=load_job,
-        print_result_fn=print_result,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_run(globals(), args)
 
 
 def cmd_ship(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_ship(
-        args,
-        resolve_submission_options_fn=resolve_submission_options,
-        gh_available_fn=gh_available,
-        print_submission_metadata_fn=print_submission_metadata,
-        root=ROOT,
-        run_fn=subprocess.run,
-        gh_pr_create_fn=gh_pr_create,
-        enqueue_job_fn=enqueue_job,
-        summarize_job_fn=summarize_job,
-        wait_for_job_fn=wait_for_job,
-        gh_pr_comment_fn=gh_pr_comment,
-        format_ci_comment_fn=format_ci_comment,
-        gh_pr_merge_fn=gh_pr_merge,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_ship(globals(), args)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_check(
-        args,
-        gh_available_fn=gh_available,
-        gh_pr_head_fn=gh_pr_head,
-        short_sha_fn=short_sha,
-        load_config_fn=load_config,
-        resolve_targets_fn=resolve_targets,
-        parse_targets_arg_fn=parse_targets_arg,
-        normalize_priority_fn=normalize_priority,
-        default_priority_for_fn=default_priority_for,
-        normalize_validation_mode_fn=normalize_validation_mode,
-        build_submission_metadata_fn=build_submission_metadata,
-        print_submission_metadata_fn=print_submission_metadata,
-        enqueue_job_fn=enqueue_job,
-        summarize_job_fn=summarize_job,
-        wait_for_job_fn=wait_for_job,
-        gh_pr_comment_fn=gh_pr_comment,
-        format_ci_comment_fn=format_ci_comment,
-        notify_fn=notify,
-    )
+    return _local_ci_command_bindings.cmd_check(globals(), args)
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
@@ -2846,12 +2484,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_list(
-        _args,
-        gh_available_fn=gh_available,
-        gh_pr_list_open_fn=gh_pr_list_open,
-        open_pr_list_lines_fn=open_pr_list_lines,
-    )
+    return _local_ci_command_bindings.cmd_list(globals(), _args)
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
@@ -2889,38 +2522,7 @@ def cmd_evidence(args: argparse.Namespace) -> int:
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
-    return _local_ci_commands_cli.cmd_status(
-        _args,
-        load_config_fn=load_config,
-        load_queue_fn=load_queue,
-        queue_status_groups_fn=queue_status_groups,
-        current_runner_info_fn=current_runner_info,
-        state_dir_fn=state_dir,
-        config_path_fn=config_path,
-        status_runner_line_fn=status_runner_line,
-        summarize_job_fn=summarize_job,
-        status_submission_lines_fn=status_submission_lines,
-        status_active_targets_fn=status_active_targets,
-        summarize_active_targets_fn=summarize_active_targets,
-        status_target_detail_lines_fn=status_target_detail_lines,
-        recent_completed_jobs_for_status_fn=recent_completed_jobs_for_status,
-        load_result_fn=load_result,
-        recent_completed_status_line_fn=recent_completed_status_line,
-        recent_completed_missing_result_line_fn=recent_completed_missing_result_line,
-        current_branch_fn=current_branch,
-        print_evidence_summary_fn=print_evidence_summary,
-        list_cloud_records_fn=list_cloud_records,
-        load_optional_config_fn=load_optional_config,
-        github_actions_settings_for_display_fn=github_actions_settings_for_display,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        resolve_default_provider_for_workflow_fn=resolve_default_provider_for_workflow,
-        print_billing_period_summary_fn=print_billing_period_summary,
-        estimate_billing_period_totals_fn=estimate_billing_period_totals,
-        cloud_record_summary_fn=cloud_record_summary,
-        print_state_footprint_fn=print_local_ci_state_footprint,
-        utmctl_vm_status_fn=utmctl_vm_status,
-        ssh_reachable_fn=ssh_reachable,
-    )
+    return _local_ci_command_bindings.cmd_status(globals(), _args)
 
 
 def cmd_desktop_install(args: argparse.Namespace) -> int:
@@ -3002,13 +2604,7 @@ def cmd_desktop_config_set(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_config(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_config(
-        args,
-        commands={
-            "show": cmd_desktop_config_show,
-            "set": cmd_desktop_config_set,
-        },
-    )
+    return _cli_dispatch_bindings.cmd_desktop_config(globals(), args)
 
 
 def cmd_desktop_recent(args: argparse.Namespace) -> int:
@@ -3101,22 +2697,7 @@ def cmd_desktop_inspect(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:
-    return _cli_dispatch.dispatch_desktop_command(
-        args,
-        commands={
-            "install": cmd_desktop_install,
-            "doctor": cmd_desktop_doctor,
-            "status": cmd_desktop_status,
-            "config": cmd_desktop_config,
-            "recent": cmd_desktop_recent,
-            "proof": cmd_desktop_proof,
-            "publish": cmd_desktop_publish,
-            "cleanup": cmd_desktop_cleanup,
-            "smoke": cmd_desktop_smoke,
-            "click": cmd_desktop_click,
-            "inspect": cmd_desktop_inspect,
-        },
-    )
+    return _cli_dispatch_bindings.cmd_desktop(globals(), args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3131,38 +2712,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    return _cli_dispatch.dispatch_main_command(
-        args,
-        commands={
-            "enqueue": cmd_enqueue,
-            "drain": cmd_drain,
-            "run": cmd_run,
-            "ship": cmd_ship,
-            "check": cmd_check,
-            "list": cmd_list,
-            "bump": cmd_bump,
-            "cancel": cmd_cancel,
-            "logs": cmd_logs,
-            "cleanup": cmd_cleanup,
-            "evidence": cmd_evidence,
-            "status": cmd_status,
-            "desktop": cmd_desktop,
-        },
-        cloud_commands={
-            "workflows": cmd_cloud_workflows,
-            "defaults": cmd_cloud_defaults,
-            "history": cmd_cloud_history,
-            "compare": cmd_cloud_compare,
-            "recommend": cmd_cloud_recommend,
-            "run": cmd_cloud_run,
-            "status": cmd_cloud_status,
-        },
-        cloud_namespace_commands={
-            "doctor": cmd_cloud_namespace_doctor,
-            "setup": cmd_cloud_namespace_setup,
-        },
-        print_help=parser.print_help,
-    )
+    return _cli_dispatch_bindings.dispatch_main_command(globals(), args, parser.print_help)
 
 
 if __name__ == "__main__":
