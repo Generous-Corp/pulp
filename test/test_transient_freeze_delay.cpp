@@ -292,6 +292,7 @@ TEST_CASE("PitchedFeedbackDelay echo spacing matches ms and sync settings",
           "[signal][pitched-delay]") {
     PitchedFeedbackDelay delay;
     PitchedFeedbackDelay::Config config;
+    config.max_block = 48000; // the block size this test drives (asserted in process())
     delay.prepare(kSr, config);
     delay.set_feedback(0.5f);
     delay.set_delay_ms(250.0f); // 12000 samples
