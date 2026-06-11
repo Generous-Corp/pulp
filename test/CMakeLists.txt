@@ -1429,7 +1429,9 @@ pulp_add_test_suite(pulp-test-midi-buffer-sysex LIBRARIES pulp::midi)
 # raw-byte MIDI transport. Tests aborted-sysex recovery (#406 codex P2),
 # realtime-inside-sysex passthrough (#239), runaway cap, and multi-read
 # accumulator state.
-pulp_add_test_suite(pulp-test-raw-midi-parser LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-raw-midi-parser
+    SOURCES test_raw_midi_parser.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 # Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial; cross-platform, Win cases #ifdef _WIN32).
 pulp_add_test_suite(pulp-test-winmidi-sysex LIBRARIES pulp::midi)
 # WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).

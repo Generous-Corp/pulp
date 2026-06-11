@@ -15,6 +15,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/raw_midi_parser.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+
 using namespace pulp::midi;
 
 namespace {
@@ -23,6 +29,35 @@ struct Captured {
     struct Short { uint8_t status, d1, d2; };
     std::vector<Short> shorts;
     std::vector<std::vector<uint8_t>> sysex;
+};
+
+struct RtRawMidiSink {
+    static constexpr std::size_t kMaxShorts = 8;
+    static constexpr std::size_t kMaxSysexMessages = 2;
+    static constexpr std::size_t kMaxSysexBytes = 8;
+
+    std::array<Captured::Short, kMaxShorts> shorts{};
+    std::size_t short_count = 0;
+
+    struct Sysex {
+        std::array<uint8_t, kMaxSysexBytes> payload{};
+        std::size_t size = 0;
+    };
+    std::array<Sysex, kMaxSysexMessages> sysex{};
+    std::size_t sysex_count = 0;
+
+    void capture_short(uint8_t status, uint8_t d1, uint8_t d2) noexcept {
+        REQUIRE(short_count < shorts.size());
+        shorts[short_count++] = {status, d1, d2};
+    }
+
+    void capture_sysex(const std::vector<uint8_t>& payload) noexcept {
+        REQUIRE(sysex_count < sysex.size());
+        REQUIRE(payload.size() <= kMaxSysexBytes);
+        auto& message = sysex[sysex_count++];
+        message.size = payload.size();
+        std::copy(payload.begin(), payload.end(), message.payload.begin());
+    }
 };
 
 Captured parse(std::initializer_list<uint8_t> bytes) {
@@ -39,6 +74,56 @@ Captured parse(std::initializer_list<uint8_t> bytes) {
 }
 
 } // namespace
+
+TEST_CASE("raw_midi_parser reserved feed path is allocation-free",
+          "[midi][raw_midi_parser][rt-safety]") {
+    RawMidiParserState state;
+    state.reserve_sysex(RtRawMidiSink::kMaxSysexBytes);
+
+    RtRawMidiSink sink;
+    RawMidiShortCallback on_short =
+        [&sink](uint8_t status, uint8_t d1, uint8_t d2) noexcept {
+            sink.capture_short(status, d1, d2);
+        };
+    RawMidiSysexCallback on_sysex =
+        [&sink](const std::vector<uint8_t>& payload) noexcept {
+            sink.capture_sysex(payload);
+        };
+
+    const uint8_t first[] = {
+        0x90, 0x3C, 0x7F,
+        0x3D, 0x40,
+        0xF0, 0x7D, 0x01,
+    };
+    const uint8_t second[] = {
+        0xF8,
+        0x02, 0xF7,
+        0xF0, 0x41, 0x10,
+        0x90, 0x40, 0x7F,
+    };
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        parse_raw_midi_bytes(first, sizeof(first), state, on_short, on_sysex);
+        parse_raw_midi_bytes(second, sizeof(second), state, on_short, on_sysex);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(sink.short_count == 4);
+    REQUIRE(sink.shorts[0].status == 0x90);
+    REQUIRE(sink.shorts[0].d1 == 0x3C);
+    REQUIRE(sink.shorts[1].status == 0x90);
+    REQUIRE(sink.shorts[1].d1 == 0x3D);
+    REQUIRE(sink.shorts[2].status == 0xF8);
+    REQUIRE(sink.shorts[3].status == 0x90);
+    REQUIRE(sink.shorts[3].d1 == 0x40);
+    REQUIRE(sink.sysex_count == 1);
+    REQUIRE(sink.sysex[0].size == 5);
+    REQUIRE(sink.sysex[0].payload[0] == 0xF0);
+    REQUIRE(sink.sysex[0].payload[4] == 0xF7);
+    REQUIRE_FALSE(state.sysex_in_progress);
+    REQUIRE(state.sysex_buffer.empty());
+}
 
 TEST_CASE("raw_midi_parser emits short messages cleanly",
           "[midi][raw_midi_parser]") {

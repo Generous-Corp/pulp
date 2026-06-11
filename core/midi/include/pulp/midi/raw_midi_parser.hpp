@@ -24,6 +24,16 @@
 // glitches. We drop the partial buffer and parse that status byte
 // as the start of a new message, rather than silently consuming the
 // next real message as sysex payload (#406 Codex P2).
+//
+// RT-safety contract:
+//
+//   - Call RawMidiParserState::reserve_sysex(N) before entering the MIDI
+//     callback, where N is the largest F0...F7 payload the transport accepts.
+//   - After that preparation, parse_raw_midi_bytes() does not allocate while
+//     SysEx payloads stay within the reserved size.
+//   - Callback objects and callback-owned destination storage are caller-owned.
+//     Keep them preconstructed and allocation-free when using this helper from
+//     realtime code.
 
 #pragma once
 
@@ -40,6 +50,12 @@ namespace pulp::midi {
 inline constexpr std::size_t kRawMidiSysexLimit = 64 * 1024;
 
 struct RawMidiParserState {
+    /// Prepare internal SysEx storage for realtime use. The reserve includes
+    /// the leading F0 and trailing F7 bytes.
+    void reserve_sysex(std::size_t worst_case_bytes) {
+        sysex_buffer.reserve(worst_case_bytes);
+    }
+
     std::vector<uint8_t> sysex_buffer;
     bool sysex_in_progress = false;
     uint8_t running_status = 0;
