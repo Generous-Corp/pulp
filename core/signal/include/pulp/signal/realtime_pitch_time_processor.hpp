@@ -37,12 +37,15 @@
 #include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
+#include <pulp/signal/noise_morpher.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
+#include <pulp/signal/stn_decomposer.hpp>
 #include <pulp/signal/transient_phase_policy.hpp>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <vector>
 
@@ -65,6 +68,11 @@ struct RealtimePitchTimeConfig {
     /// Phase reset at detected transients (Röbel DAFx 2003) — keeps
     /// attacks sharp under shift/stretch.
     bool transient_preservation = true;
+    /// Route the noise component (STN decomposition) through NoiseMorpher
+    /// instead of phase propagation, so stretched/shifted noise and
+    /// textures stay natural instead of "tonalizing." Adds an STN pass per
+    /// frame; off by default to keep the baseline path unchanged.
+    bool noise_morphing = false;
 };
 
 class RealtimePitchTimeProcessor {
@@ -135,6 +143,28 @@ public:
         drain_buf_.assign(static_cast<size_t>(config.channels)
                           * engine_config.max_synthesis_hop * 4, 0.0f);
         drain_ptrs_.resize(static_cast<size_t>(config.channels));
+
+        // Noise-morphing front end: STN decomposition over the spectrum
+        // plus one NoiseMorpher per channel. The STN mask is computed from
+        // channel 0 and shared across channels for a coherent split.
+        const int spectral_bins = fft_size_ / 2 + 1;
+        if (config.noise_morphing) {
+            StnConfig stn_config;
+            stn_config.num_bins = spectral_bins;
+            stn_config.time_median = quality ? 7 : 5;
+            stn_config.freq_median = quality ? 11 : 7;
+            stn_.prepare(stn_config);
+            noise_morphers_.resize(static_cast<size_t>(config.channels));
+            // Same seed across channels → coherent (mono-safe) noise phase:
+            // identical input yields identical output and the noise sums
+            // correctly to mono. The per-channel magnitude envelopes still
+            // give each channel its own colour.
+            for (int ch = 0; ch < config.channels; ++ch)
+                noise_morphers_[static_cast<size_t>(ch)].prepare(spectral_bins);
+            mag_scratch_.assign(static_cast<size_t>(spectral_bins), 0.0f);
+            noise_env_.assign(static_cast<size_t>(config.channels) * spectral_bins, 0.0f);
+            noise_spec_.assign(static_cast<size_t>(spectral_bins), std::complex<float>{});
+        }
         reset();
     }
 
@@ -251,6 +281,10 @@ public:
         coordinator_.reset();
         transient_.reset();
         freeze_.reset();
+        if (config_.noise_morphing) {
+            stn_.reset();
+            for (auto& m : noise_morphers_) m.reset();
+        }
         std::fill(stretch_ring_.begin(), stretch_ring_.end(), 0.0f);
         pitch_smoother_.set_immediate(pitch_smoother_.target());
         formant_smoother_.set_immediate(formant_smoother_.target());
@@ -314,6 +348,37 @@ private:
         // pitch/formant control downstream keeps working over the hold.
         freeze_.process_group(frames, config_.channels, bins);
 
+        // Morphing only helps when time/pitch scaling is actually engaged;
+        // at unity the baseline path is exactly transparent, so bypass the
+        // split (which would otherwise re-randomise the phase of low-energy
+        // bins and shallow the null).
+        const bool morph =
+            config_.noise_morphing && std::abs(stretch - 1.0f) > 1e-4f;
+
+        // Noise-morphing split: pull the noise component out of the vocoder
+        // path so phase propagation only sees the sines+transients (which it
+        // handles well); the noise is regenerated separately and added back
+        // after the tonal processing (so the coordinator never re-locks its
+        // random phase). The STN mask is computed from channel 0 and shared,
+        // giving a coherent split; per-channel morphers decorrelate the
+        // stereo noise. The mask carries the StnDecomposer's small inherent
+        // delay, applied to the current frame — inaudible for stationary
+        // noise (a finer time-alignment is a future refinement).
+        if (morph) {
+            for (int k = 0; k < bins; ++k)
+                mag_scratch_[static_cast<size_t>(k)] = std::abs(frames[0][k]);
+            const StnMasks& masks = stn_.process(mag_scratch_.data());
+            for (int ch = 0; ch < config_.channels; ++ch) {
+                std::complex<float>* f = frames[ch];
+                float* env = noise_env_.data() + static_cast<size_t>(ch) * bins;
+                for (int k = 0; k < bins; ++k) {
+                    const float nm = masks.noise[static_cast<size_t>(k)];
+                    env[k] = std::abs(f[k]) * nm;
+                    f[k] *= (1.0f - nm);
+                }
+            }
+        }
+
         const float reset_amount =
             config_.transient_preservation
                 ? transient_.analyze(frames, config_.channels, bins)
@@ -327,6 +392,22 @@ private:
             (config_.formant_mode == FormantMode::preserve ? pitch_ratio : 1.0f)
             / formant_ratio;
         envelope_.process_group(frames, config_.channels, bins, warp);
+
+        // Add the morphed noise back to the (now phase-propagated) tonal
+        // frame: each channel regenerates its noise from the captured
+        // envelope with fresh random phase, so successive synthesis frames
+        // are decorrelated and overlap-add to natural noise of the right
+        // colour at any stretch ratio.
+        if (morph) {
+            for (int ch = 0; ch < config_.channels; ++ch) {
+                std::complex<float>* f = frames[ch];
+                float* env = noise_env_.data() + static_cast<size_t>(ch) * bins;
+                NoiseMorpher& m = noise_morphers_[static_cast<size_t>(ch)];
+                m.push_envelope(env);
+                m.synthesize(1.0f, noise_spec_.data());
+                for (int k = 0; k < bins; ++k) f[k] += noise_spec_[static_cast<size_t>(k)];
+            }
+        }
 
         engine_.synthesize_frame(frames, hop);
         drain_engine();
@@ -400,6 +481,13 @@ private:
     FreezeHold freeze_;
     LatencyAwareControlSmoother pitch_smoother_;
     LatencyAwareControlSmoother formant_smoother_;
+
+    // Noise-morphing front end (allocated only when config_.noise_morphing).
+    StnDecomposer stn_;
+    std::vector<NoiseMorpher> noise_morphers_;
+    std::vector<float> mag_scratch_;
+    std::vector<float> noise_env_;          // channels * spectral_bins
+    std::vector<std::complex<float>> noise_spec_;
 
     int ring_size_ = 0;
     int ring_mask_ = 0;
