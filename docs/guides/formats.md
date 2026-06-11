@@ -147,7 +147,13 @@ The FUID must be generated once and never changed across versions. It is the sta
 
 ### Parameter Sync
 
-**Host to plugin:** During `process()`, the adapter reads `data.inputParameterChanges`. For each changed parameter, it reads the last point value (normalized 0-1) and writes it to `StateStore::set_normalized()`.
+**Host to plugin:** During `process()`, the adapter reads
+`data.inputParameterChanges`. Each point is denormalized, pushed into the
+per-block `ParameterEventQueue`, and written with
+`StateStore::set_normalized_rt()`. If a host sends more than 1024 points in one
+block, the adapter keeps the first 1024 sample-accurate points, records the
+overflow/drop count on the queue, and still writes every incoming point to
+`StateStore` so block-end reads observe the latest host value.
 
 **Plugin to host:** The adapter snapshots all parameter values before calling `Processor::process()`. After processing, any value that changed is:
 1. Written to `data.outputParameterChanges` as a normalized value (so the host can record automation)
