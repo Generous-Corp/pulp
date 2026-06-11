@@ -19,6 +19,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -60,6 +63,21 @@ struct EmitSink {
 
 void capture(const std::vector<std::uint8_t>& payload, void* user) {
     static_cast<EmitSink*>(user)->sysex.push_back(payload);
+}
+
+struct RtEmitSink {
+    std::array<std::array<std::uint8_t, 18>, 2> sysex{};
+    std::array<std::size_t, 2> sizes{};
+    std::size_t count = 0;
+};
+
+void capture_rt(const std::vector<std::uint8_t>& payload, void* user) {
+    auto* sink = static_cast<RtEmitSink*>(user);
+    const auto index = sink->count++;
+    sink->sizes[index] = payload.size();
+    for (std::size_t i = 0; i < payload.size(); ++i) {
+        sink->sysex[index][i] = payload[i];
+    }
 }
 
 } // namespace
@@ -323,4 +341,49 @@ TEST_CASE("UmpSysex7Reassembler: reserve() does not change state",
     r.reserve(1024);
     REQUIRE_FALSE(r.in_progress());
     REQUIRE(r.partial_size() == 0);
+}
+
+TEST_CASE("UmpSysex7Reassembler: reserved hot path is allocation-free",
+          "[midi][ump][sysex7][rt-safety]") {
+    UmpSysex7Reassembler r;
+    r.reserve(18);
+    RtEmitSink sink;
+
+    {
+        pulp::test::RtAllocationProbe probe;
+
+        REQUIRE(r.feed_packet(make_word0(0x1, 6, 0x01, 0x02),
+                              make_word1(0x03, 0x04, 0x05, 0x06),
+                              capture_rt, &sink) == Status::start);
+        REQUIRE(r.feed_packet(make_word0(0x2, 6, 0x07, 0x08),
+                              make_word1(0x09, 0x0A, 0x0B, 0x0C),
+                              capture_rt, &sink) == Status::continued);
+
+        // Complete single-packet sysex while the multi-packet accumulator is
+        // open. This exercises the prepared scratch buffer without disturbing
+        // the open accumulator.
+        REQUIRE(r.feed_packet(make_word0(0x0, 3, 0x55, 0x66),
+                              make_word1(0x77, 0, 0, 0),
+                              capture_rt, &sink) == Status::single_packet);
+
+        REQUIRE(r.feed_packet(make_word0(0x2, 3, 0x0D, 0x0E),
+                              make_word1(0x0F, 0, 0, 0),
+                              capture_rt, &sink) == Status::continued);
+        REQUIRE(r.feed_packet(make_word0(0x3, 3, 0x10, 0x11),
+                              make_word1(0x12, 0, 0, 0),
+                              capture_rt, &sink) == Status::ended);
+
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE_FALSE(r.in_progress());
+    REQUIRE(r.partial_size() == 0);
+    REQUIRE(sink.count == 2);
+    REQUIRE(sink.sizes[0] == 3);
+    REQUIRE(sink.sysex[0][0] == 0x55);
+    REQUIRE(sink.sysex[0][1] == 0x66);
+    REQUIRE(sink.sysex[0][2] == 0x77);
+    REQUIRE(sink.sizes[1] == 18);
+    REQUIRE(sink.sysex[1][0] == 0x01);
+    REQUIRE(sink.sysex[1][17] == 0x12);
 }

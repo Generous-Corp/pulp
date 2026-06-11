@@ -1110,7 +1110,9 @@ pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
 
 # macOS plan 8.2: UmpSysex7Reassembler — shared UMP type-0x3 reassembler
 # extracted from the inline AUv3 / CoreMIDI state machines. Header-only.
-pulp_add_test_suite(pulp-test-ump-sysex7-reassembler LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-ump-sysex7-reassembler
+    SOURCES test_ump_sysex7_reassembler.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 
 # macOS plan 8.1: UmpSession + UmpEndpoint + VirtualUmpEndpoint —
 # headless tests for the cross-platform session + virtual-endpoint

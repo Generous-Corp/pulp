@@ -61,12 +61,11 @@
 // RT-safety
 // =========
 //
-// `feed_packet()` may allocate inside the internal `std::vector` as
-// the payload grows past its current capacity. Callers that want
-// strict RT-safety should `reserve()` the worst-case sysex length up
-// front via `reserve(N)`. AU adapter render-thread use is already
-// allocating in this path today (pre-extraction), so this extraction
-// does not regress that property.
+// `feed_packet()` may allocate inside the internal `std::vector`s as
+// payload storage grows past current capacity. Callers that want strict
+// RT-safety should `reserve()` the worst-case sysex length up front via
+// `reserve(N)`. After that, start/continue/end, interleaved single-packet
+// sysex, orphan drops, reset(), and status queries do not allocate.
 //
 // Unit tests live in `test/test_ump_sysex7_reassembler.cpp`.
 
@@ -149,10 +148,10 @@ public:
             // genuinely possible: the UMP spec permits independent
             // sysex streams on different groups to interleave through
             // a single endpoint.
-            std::vector<std::uint8_t> scratch;
-            extract_bytes(word0, word1, size, scratch);
-            if (!scratch.empty() && emit) {
-                emit(scratch, user);
+            scratch_.clear();
+            extract_bytes(word0, word1, size, scratch_);
+            if (!scratch_.empty() && emit) {
+                emit(scratch_, user);
             }
             return Status::single_packet;
         }
@@ -202,9 +201,12 @@ public:
     std::size_t partial_size() const noexcept { return payload_.size(); }
 
     /// Reserve worst-case payload capacity to avoid allocations in the
-    /// hot path. Safe to call at port-open / prepare() time.
+    /// hot path. Safe to call at port-open / prepare() time. The single-
+    /// packet scratch buffer is also prepared here so interleaved complete
+    /// sysex packets do not allocate while another sysex is open.
     void reserve(std::size_t worst_case_bytes) {
         payload_.reserve(worst_case_bytes);
+        scratch_.reserve(worst_case_bytes < 6 ? 6 : worst_case_bytes);
     }
 
     /// Drop any in-progress sysex without emitting. Use on port-close
@@ -241,6 +243,7 @@ private:
     }
 
     std::vector<std::uint8_t> payload_;
+    std::vector<std::uint8_t> scratch_;
     bool in_progress_ = false;
 };
 
