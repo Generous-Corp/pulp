@@ -87,11 +87,21 @@ public:
 
 // ── Drag source ──────────────────────────────────────────────────────────────
 
-// Initiate a drag operation from a view
+// Request an outbound OS drag whose payload is one or more existing files.
+// Callers own producing the files before starting the drag; the platform host
+// only advertises them to the OS pasteboard / drag manager.
+struct FileDragRequest {
+    std::vector<std::string> file_paths;
+    Point root_position{};
+    std::string display_name;
+
+    [[nodiscard]] bool valid() const noexcept { return !file_paths.empty(); }
+};
+
+// Legacy placeholder retained for source compatibility. New code should use
+// FileDragRequest through View::start_file_drag().
 struct DragSource {
     DropData data;
-    // Platform-specific drag initiation (macOS: NSDraggingSession)
-    // Called by the view system when the user starts dragging
 };
 
 // ── Drag-drop registration ──────────────────────────────────────────────────

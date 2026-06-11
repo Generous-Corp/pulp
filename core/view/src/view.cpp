@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/drag_drop.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -812,6 +813,15 @@ void View::set_plugin_view_host(PluginViewHost* host) {
     for (auto& child : children_) {
         child->set_plugin_view_host(host);
     }
+}
+
+bool View::start_file_drag(const FileDragRequest& request) {
+    if (!request.valid()) return false;
+    if (plugin_view_host_ && plugin_view_host_->start_file_drag(request)) {
+        return true;
+    }
+    if (window_host_) return window_host_->start_file_drag(request);
+    return false;
 }
 
 void View::add_child(std::unique_ptr<View> child) {

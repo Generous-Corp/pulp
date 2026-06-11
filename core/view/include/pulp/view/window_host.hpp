@@ -141,6 +141,13 @@ public:
     virtual void* dawn_instance_handle() const { return nullptr; }
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
 
+    /// Start an outbound file drag from this host. Default false means the
+    /// platform host has not implemented source dragging.
+    virtual bool start_file_drag(const FileDragRequest& request) {
+        (void)request;
+        return false;
+    }
+
     /// Most recent whole-recording GPU *render* time in milliseconds for the
     /// last presented frame, or 0 when GPU timing is unavailable (CPU host,
     /// adapter without `timestamp-query`, or no sample landed yet).

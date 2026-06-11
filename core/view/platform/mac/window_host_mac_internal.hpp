@@ -23,8 +23,13 @@
 namespace pulp::view {
 class View;
 class ModalOverlay;
+struct FileDragRequest;
 struct WindowOptions;
 }  // namespace pulp::view
+
+namespace pulp::view::mac {
+bool start_file_drag_from_native_view(void* native_view, const FileDragRequest& request);
+}
 
 #ifdef __OBJC__
 

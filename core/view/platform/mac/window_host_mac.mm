@@ -1852,9 +1852,9 @@ public:
             [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
         }
     }
-
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) view_; }
+    bool start_file_drag(const FileDragRequest& request) override { return pulp::view::mac::start_file_drag_from_native_view((__bridge void*)view_, request); }
     ContentSize get_content_size() const override {
         NSSize size = view_ ? view_.bounds.size : NSZeroSize;
         return {
@@ -2082,9 +2082,9 @@ public:
             [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
         }
     }
-
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) metal_view_; }
+    bool start_file_drag(const FileDragRequest& request) override { return pulp::view::mac::start_file_drag_from_native_view((__bridge void*)metal_view_, request); }
     ContentSize get_content_size() const override {
         return {
             static_cast<uint32_t>(std::max(0.0f, width_)),

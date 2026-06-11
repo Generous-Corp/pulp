@@ -20,6 +20,23 @@
 // Store active legacy drop targets (DropTarget registration path).
 static std::unordered_map<void*, pulp::view::DropTarget*> g_drop_targets;
 
+@interface PulpFileDragSource : NSObject <NSDraggingSource>
+@end
+
+@implementation PulpFileDragSource
+- (NSDragOperation)draggingSession:(NSDraggingSession*)session
+    sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
+    (void)session;
+    (void)context;
+    return NSDragOperationCopy;
+}
+
+- (BOOL)ignoreModifierKeysForDraggingSession:(NSDraggingSession*)session {
+    (void)session;
+    return YES;
+}
+@end
+
 namespace pulp::view {
 
 // Translate an NSDraggingInfo pasteboard into a DropData (files take priority
@@ -56,6 +73,71 @@ static DragSession& mac_drag_session(const void* view) {
 }
 
 }  // namespace pulp::view
+
+namespace pulp::view::mac {
+
+static PulpFileDragSource* file_drag_source() {
+    static PulpFileDragSource* source = [[PulpFileDragSource alloc] init];
+    return source;
+}
+
+static NSImage* file_drag_image(NSString* path) {
+    NSImage* image = [[NSWorkspace sharedWorkspace] iconForFile:path];
+    if (!image) image = [NSImage imageNamed:NSImageNameMultipleDocuments];
+    [image setSize:NSMakeSize(32.0, 32.0)];
+    return image;
+}
+
+bool start_file_drag_from_native_view(void* native_view,
+                                      const FileDragRequest& request) {
+    if (!request.valid()) return false;
+
+    @autoreleasepool {
+        NSView* view = (__bridge NSView*)native_view;
+        if (!view) return false;
+
+        NSEvent* event = [NSApp currentEvent];
+        if (!event) return false;
+
+        NSMutableArray<NSDraggingItem*>* items = [NSMutableArray array];
+        const CGFloat view_height = view.bounds.size.height;
+        const NSPoint start = NSMakePoint(static_cast<CGFloat>(request.root_position.x),
+                                          view_height - static_cast<CGFloat>(request.root_position.y));
+
+        std::size_t index = 0;
+        for (const auto& path_string : request.file_paths) {
+            if (path_string.empty()) continue;
+            NSString* path = [NSString stringWithUTF8String:path_string.c_str()];
+            if (path.length == 0) continue;
+            if (![[NSFileManager defaultManager] fileExistsAtPath:path]) continue;
+
+            NSURL* url = [NSURL fileURLWithPath:path];
+            if (!url) continue;
+
+            NSDraggingItem* item = [[NSDraggingItem alloc] initWithPasteboardWriter:url];
+            const CGFloat offset = static_cast<CGFloat>(index) * 3.0;
+            NSRect frame = NSMakeRect(start.x - 16.0 + offset,
+                                      start.y - 16.0 - offset,
+                                      32.0,
+                                      32.0);
+            [item setDraggingFrame:frame contents:file_drag_image(path)];
+            [items addObject:item];
+            ++index;
+        }
+
+        if (items.count == 0) return false;
+
+        NSDraggingSession* session = [view beginDraggingSessionWithItems:items
+                                                                   event:event
+                                                                  source:file_drag_source()];
+        if (!session) return false;
+        session.animatesToStartingPositionsOnCancelOrFail = YES;
+        session.draggingFormation = NSDraggingFormationList;
+        return true;
+    }
+}
+
+}  // namespace pulp::view::mac
 
 // PulpView's full @interface is private to window_host_mac.mm; redeclare the
 // slice this category needs. These property declarations must match that file

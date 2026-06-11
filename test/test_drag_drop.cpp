@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/file_drop_zone.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/window_host.hpp>
 
 // XDND payload-parsing + coordinate-mapping helpers (Linux X11 producer). These
 // are pure (X11-free) free functions, so the cross-platform dnd suite exercises
@@ -86,6 +88,101 @@ TEST_CASE("DropTarget accepts files", "[view][dnd]") {
     REQUIRE(acceptor.on_drop(data, {50, 50}));
     REQUIRE(acceptor.dropped_files.size() == 1);
     REQUIRE(acceptor.dropped_files[0] == "/audio/kick.wav");
+}
+
+namespace {
+
+class RecordingWindowHost final : public WindowHost {
+public:
+    bool result = true;
+    int calls = 0;
+    FileDragRequest last;
+
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override {}
+    void set_close_callback(std::function<void()> cb) override { close_callback = std::move(cb); }
+    void run_event_loop() override {}
+    bool start_file_drag(const FileDragRequest& request) override {
+        ++calls;
+        last = request;
+        return result;
+    }
+
+    std::function<void()> close_callback;
+};
+
+class RecordingPluginViewHost final : public PluginViewHost {
+public:
+    bool result = true;
+    int calls = 0;
+    FileDragRequest last;
+    Size size{};
+
+    NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override { size = {width, height}; }
+    Size get_size() const override { return size; }
+    bool start_file_drag(const FileDragRequest& request) override {
+        ++calls;
+        last = request;
+        return result;
+    }
+};
+
+FileDragRequest make_file_drag_request() {
+    FileDragRequest request;
+    request.file_paths = {"/tmp/frozen-loop.wav"};
+    request.root_position = {12.0f, 34.0f};
+    request.display_name = "Frozen loop";
+    return request;
+}
+
+}  // namespace
+
+TEST_CASE("View start_file_drag rejects empty file requests", "[view][dnd]") {
+    View root;
+    RecordingWindowHost host;
+    root.set_window_host(&host);
+
+    CHECK_FALSE(root.start_file_drag({}));
+    CHECK(host.calls == 0);
+}
+
+TEST_CASE("View start_file_drag delegates to the attached window host", "[view][dnd]") {
+    View root;
+    RecordingWindowHost host;
+    root.set_window_host(&host);
+
+    const auto request = make_file_drag_request();
+    REQUIRE(root.start_file_drag(request));
+    CHECK(host.calls == 1);
+    CHECK(host.last.file_paths == request.file_paths);
+    CHECK(host.last.root_position.x == 12.0f);
+    CHECK(host.last.root_position.y == 34.0f);
+    CHECK(host.last.display_name == "Frozen loop");
+}
+
+TEST_CASE("View start_file_drag prefers plugin host and falls back to window host",
+          "[view][dnd]") {
+    View root;
+    RecordingPluginViewHost plugin_host;
+    RecordingWindowHost window_host;
+    root.set_plugin_view_host(&plugin_host);
+    root.set_window_host(&window_host);
+
+    const auto request = make_file_drag_request();
+    REQUIRE(root.start_file_drag(request));
+    CHECK(plugin_host.calls == 1);
+    CHECK(window_host.calls == 0);
+
+    plugin_host.result = false;
+    REQUIRE(root.start_file_drag(request));
+    CHECK(plugin_host.calls == 2);
+    CHECK(window_host.calls == 1);
 }
 
 // ── Native → view-tree drop dispatch (drag_drop.cpp) ─────────────────────────

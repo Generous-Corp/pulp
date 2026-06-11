@@ -16,8 +16,7 @@
 namespace pulp::view {
 
 class WindowHost;  // Forward declaration for View→Host back-reference
-class PluginViewHost;
-
+class PluginViewHost; struct FileDragRequest;
 class FrameClock;
 
 // Base class for all UI elements
@@ -1288,6 +1287,7 @@ public:
     /// Set by PluginViewHost when the root view is attached. Propagated to children.
     void set_plugin_view_host(PluginViewHost* host);
     PluginViewHost* plugin_view_host() const { return plugin_view_host_; }
+    [[nodiscard]] bool start_file_drag(const FileDragRequest& request);
 
     /// Background gradient (CSS background: linear-gradient / radial-gradient)
     void set_background_gradient_linear(float x0, float y0, float x1, float y1,

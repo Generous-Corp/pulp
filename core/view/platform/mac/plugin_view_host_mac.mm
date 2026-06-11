@@ -540,6 +540,11 @@ public:
         return (__bridge void*)view_;
     }
 
+    bool start_file_drag(const FileDragRequest& request) override {
+        return pulp::view::mac::start_file_drag_from_native_view((__bridge void*)view_,
+                                                                 request);
+    }
+
     void attach_to_parent(NativeViewHandle parent) override {
         @autoreleasepool {
             NSView* parent_view = (__bridge NSView*)parent;
@@ -901,6 +906,11 @@ public:
 
     NativeViewHandle native_handle() override {
         return (__bridge void*)metal_view_;
+    }
+
+    bool start_file_drag(const FileDragRequest& request) override {
+        return pulp::view::mac::start_file_drag_from_native_view((__bridge void*)metal_view_,
+                                                                 request);
     }
 
     void attach_to_parent(NativeViewHandle parent) override {

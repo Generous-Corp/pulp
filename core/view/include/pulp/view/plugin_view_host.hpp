@@ -63,6 +63,13 @@ public:
     // child views; callers must branch on attach_native_child_view().
     virtual NativeViewHandle native_handle() = 0;
 
+    /// Start an outbound file drag from this plugin editor host. Default false
+    /// means the platform host has not implemented source dragging.
+    virtual bool start_file_drag(const FileDragRequest& request) {
+        (void)request;
+        return false;
+    }
+
     // Attach this view to a parent native view (the DAW's editor window)
     virtual void attach_to_parent(NativeViewHandle parent) = 0;
 
