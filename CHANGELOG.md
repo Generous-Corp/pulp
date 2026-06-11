@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04210"></a>
+## [0.421.0] - 2026-06-11
+
+- feat(signal): noise-morphing path in RealtimePitchTimeProcessor (STN-routed) ([#3997](https://github.com/danielraffel/pulp/pull/3997))
+
 <a id="v04200"></a>
 ## [0.420.0] - 2026-06-10
 
@@ -4315,6 +4320,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.421.0]: https://github.com/danielraffel/pulp/releases/tag/v0.421.0
 [0.420.0]: https://github.com/danielraffel/pulp/releases/tag/v0.420.0
 [0.419.0]: https://github.com/danielraffel/pulp/releases/tag/v0.419.0
 [0.418.0]: https://github.com/danielraffel/pulp/releases/tag/v0.418.0
