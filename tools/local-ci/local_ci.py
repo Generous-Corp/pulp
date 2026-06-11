@@ -1346,11 +1346,11 @@ def run_windows_session_agent_action(
 
 
 def default_priority_for(command: str, config: dict) -> str:
-    return _queue_orchestrator.default_priority_for(command, config)
+    return _queue_bindings.default_priority_for(globals(), command, config)
 
 
 def make_fingerprint(branch: str, sha: str, targets: list[str], validation: str) -> str:
-    return _queue_orchestrator.make_fingerprint(branch, sha, targets, validation)
+    return _queue_bindings.make_fingerprint(globals(), branch, sha, targets, validation)
 
 
 def make_job(
@@ -1362,7 +1362,8 @@ def make_job(
     validation: str,
     submission: dict | None = None,
 ) -> dict:
-    return _queue_orchestrator.make_job(
+    return _queue_bindings.make_job(
+        globals(),
         branch,
         sha,
         priority,
@@ -1370,35 +1371,31 @@ def make_job(
         mode,
         validation,
         submission=submission,
-        now_iso_fn=now_iso,
-        uuid_hex_fn=lambda: uuid.uuid4().hex,
-        root=ROOT,
-        validate_branch_fn=validate_ci_branch_name,
     )
 
 
 def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
-    return _queue_orchestrator.supersedence_key(job)
+    return _queue_bindings.supersedence_key(globals(), job)
 
 
 def supersedence_identity_key(job: dict) -> tuple[str, str, str]:
-    return _queue_orchestrator.supersedence_identity_key(job)
+    return _queue_bindings.supersedence_identity_key(globals(), job)
 
 
 def jobs_share_supersedence_scope(newer_job: dict, older_job: dict) -> bool:
-    return _queue_orchestrator.jobs_share_supersedence_scope(newer_job, older_job)
+    return _queue_bindings.jobs_share_supersedence_scope(globals(), newer_job, older_job)
 
 
 def job_has_narrower_same_identity_scope(newer_job: dict, older_job: dict) -> bool:
-    return _queue_orchestrator.job_has_narrower_same_identity_scope(newer_job, older_job)
+    return _queue_bindings.job_has_narrower_same_identity_scope(globals(), newer_job, older_job)
 
 
 def supersedence_reason(newer_job: dict, older_job: dict) -> str | None:
-    return _queue_orchestrator.supersedence_reason(newer_job, older_job)
+    return _queue_bindings.supersedence_reason(globals(), newer_job, older_job)
 
 
 def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
-    return _queue_orchestrator.supersedence_result(job, superseded_by, reason, now_iso_fn=now_iso)
+    return _queue_bindings.supersedence_result(globals(), job, superseded_by, reason)
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
@@ -1406,7 +1403,7 @@ def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
-    return _queue_orchestrator.cancellation_result(job, reason, now_iso_fn=now_iso)
+    return _queue_bindings.cancellation_result(globals(), job, reason)
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
@@ -1414,58 +1411,55 @@ def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
 
 
 def summarize_job(job: dict) -> str:
-    return _queue_orchestrator.summarize_job(job)
+    return _queue_bindings.summarize_job(globals(), job)
 
 
 def bump_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
-    return _queue_orchestrator.bump_queue_command_result_line(result, job_ref)
+    return _queue_bindings.bump_queue_command_result_line(globals(), result, job_ref)
 
 
 def cancel_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
-    return _queue_orchestrator.cancel_queue_command_result_line(result, job_ref)
+    return _queue_bindings.cancel_queue_command_result_line(globals(), result, job_ref)
 
 
 def enqueue_command_result_line(job: dict, *, created: bool) -> str:
-    return _queue_orchestrator.enqueue_command_result_line(job, created=created)
+    return _queue_bindings.enqueue_command_result_line(globals(), job, created=created)
 
 
 def drain_runner_active_line(runner_info: dict | None) -> str:
-    return _queue_orchestrator.drain_runner_active_line(runner_info)
+    return _queue_bindings.drain_runner_active_line(globals(), runner_info)
 
 
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
-    return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
+    return _queue_bindings.summarize_active_targets(globals(), active_targets, preferred_order)
 
 
 def status_active_targets(job: dict, runner_info: dict | None = None) -> dict | None:
-    return _queue_orchestrator.status_active_targets(job, runner_info)
+    return _queue_bindings.status_active_targets(globals(), job, runner_info)
 
 
 def status_target_states(job: dict, active_targets: dict | None) -> list[tuple[str, dict]]:
-    return _queue_orchestrator.status_target_states(job, active_targets)
+    return _queue_bindings.status_target_states(globals(), job, active_targets)
 
 
 def status_submission_lines(job: dict) -> list[str]:
-    return _queue_orchestrator.status_submission_lines(job)
+    return _queue_bindings.status_submission_lines(globals(), job)
 
 
 def target_state_detail_parts(state: dict) -> list[str]:
-    return _queue_orchestrator.target_state_detail_parts(state)
+    return _queue_bindings.target_state_detail_parts(globals(), state)
 
 
 def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[str]:
-    return _queue_orchestrator.status_target_detail_lines(job, active_targets)
+    return _queue_bindings.status_target_detail_lines(globals(), job, active_targets)
 
 
 def initial_target_state(job_id: str, target_name: str, *, started_at: str) -> dict:
-    return _queue_orchestrator.initial_target_state(
-        started_at=started_at,
-        log_path=str(target_log_path(job_id, target_name)),
-    )
+    return _queue_bindings.initial_target_state(globals(), job_id, target_name, started_at=started_at)
 
 
 def updated_target_state(previous_state: dict | None, fields: dict) -> dict:
-    return _queue_orchestrator.updated_target_state(previous_state, fields)
+    return _queue_bindings.updated_target_state(globals(), previous_state, fields)
 
 
 def completed_target_state(
@@ -1476,77 +1470,74 @@ def completed_target_state(
     *,
     completed_at: str,
 ) -> dict:
-    return _queue_orchestrator.completed_target_state(
+    return _queue_bindings.completed_target_state(
+        globals(),
+        job_id,
+        target_name,
         result,
         previous_state,
         completed_at=completed_at,
-        default_log_path=str(target_log_path(job_id, target_name)),
     )
 
 
 def target_state_snapshot(target_states: dict[str, dict]) -> dict | None:
-    return _queue_orchestrator.target_state_snapshot(target_states)
+    return _queue_bindings.target_state_snapshot(globals(), target_states)
 
 
 def status_runner_line(runner_info: dict | None) -> str:
-    return _queue_orchestrator.status_runner_line(runner_info)
+    return _queue_bindings.status_runner_line(globals(), runner_info)
 
 
 def recent_completed_status_line(job: dict, result: dict) -> str:
-    return _queue_orchestrator.recent_completed_status_line(job, result)
+    return _queue_bindings.recent_completed_status_line(globals(), job, result)
 
 
 def recent_completed_missing_result_line(job: dict) -> str:
-    return _queue_orchestrator.recent_completed_missing_result_line(job)
+    return _queue_bindings.recent_completed_missing_result_line(globals(), job)
 
 
 def result_validation_line(result: dict) -> str | None:
-    return _queue_orchestrator.result_validation_line(result)
+    return _queue_bindings.result_validation_line(globals(), result)
 
 
 def result_execution_line(result: dict) -> str:
-    return _queue_orchestrator.result_execution_line(result)
+    return _queue_bindings.result_execution_line(globals(), result)
 
 
 def target_result_line(item: dict) -> str:
-    return _queue_orchestrator.target_result_line(item)
+    return _queue_bindings.target_result_line(globals(), item)
 
 
 def result_target_lines(result: dict) -> list[str]:
-    return _queue_orchestrator.result_target_lines(result)
+    return _queue_bindings.result_target_lines(globals(), result)
 
 
 def result_overall_line(result: dict) -> str:
-    return _queue_orchestrator.result_overall_line(result)
+    return _queue_bindings.result_overall_line(globals(), result)
 
 
 def missing_job_logs_line() -> str:
-    return _queue_orchestrator.missing_job_logs_line()
+    return _queue_bindings.missing_job_logs_line(globals())
 
 
 def missing_log_files_line(job: dict) -> str:
-    return _queue_orchestrator.missing_log_files_line(job)
+    return _queue_bindings.missing_log_files_line(globals(), job)
 
 
 def job_logs_header_line(job: dict) -> str:
-    return _queue_orchestrator.job_logs_header_line(job)
+    return _queue_bindings.job_logs_header_line(globals(), job)
 
 
 def log_section_header_line(target: str) -> str:
-    return _queue_orchestrator.log_section_header_line(target)
+    return _queue_bindings.log_section_header_line(globals(), target)
 
 
 def empty_log_line() -> str:
-    return _queue_orchestrator.empty_log_line()
+    return _queue_bindings.empty_log_line(globals())
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
-    return _queue_orchestrator.upsert_job_active_targets_unlocked(
-        queue,
-        job_id,
-        active_targets,
-        now_iso_fn=now_iso,
-    )
+    return _queue_bindings.upsert_job_active_targets_unlocked(globals(), queue, job_id, active_targets)
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -1575,17 +1566,11 @@ def enqueue_job(
 
 
 def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
-    return _queue_orchestrator.trim_completed_jobs_with_removed_ids(
-        queue,
-        keep_completed_jobs=KEEP_COMPLETED_JOBS,
-    )
+    return _queue_bindings.trim_completed_jobs_with_removed_ids(globals(), queue)
 
 
 def trim_completed_jobs(queue: list[dict]) -> list[dict]:
-    return _queue_orchestrator.trim_completed_jobs(
-        queue,
-        keep_completed_jobs=KEEP_COMPLETED_JOBS,
-    )
+    return _queue_bindings.trim_completed_jobs(globals(), queue)
 
 
 def bump_queue_command_job(job_ref: str, requested_priority: str) -> dict:
@@ -1640,15 +1625,15 @@ def cleanup_plan_lines(plan: dict, *, dry_run: bool) -> list[str]:
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
-    return _queue_orchestrator.job_sort_key(job)
+    return _queue_bindings.job_sort_key(globals(), job)
 
 
 def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
-    return _queue_orchestrator.queue_status_groups(queue)
+    return _queue_bindings.queue_status_groups(globals(), queue)
 
 
 def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int = 5) -> list[dict]:
-    return _queue_orchestrator.recent_completed_jobs_for_status(completed_jobs, limit=limit)
+    return _queue_bindings.recent_completed_jobs_for_status(globals(), completed_jobs, limit=limit)
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
@@ -1712,7 +1697,7 @@ def clear_runner_info() -> None:
 
 
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
-    return _queue_orchestrator.find_job_unlocked(queue, job_ref, statuses)
+    return _queue_bindings.find_job_unlocked(globals(), queue, job_ref, statuses)
 
 
 def load_job(job_id: str) -> dict | None:
@@ -2075,7 +2060,7 @@ def windows_validation_script(
 
 
 def validate_ci_branch_name(branch: str) -> str:
-    return _queue_orchestrator.validate_ci_branch_name(branch)
+    return _queue_bindings.validate_ci_branch_name(globals(), branch)
 
 
 def windows_ssh_powershell_command(host: str) -> list[str]:
