@@ -164,6 +164,7 @@ import macos_desktop as _macos_desktop  # noqa: E402
 import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
+import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import execution as _execution  # noqa: E402
@@ -1507,14 +1508,7 @@ def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
-    _queue_lifecycle.complete_superseded_job_unlocked(
-        job,
-        superseded_by,
-        reason,
-        supersedence_result_fn=supersedence_result,
-        save_result_fn=save_result,
-        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
-    )
+    _queue_bindings.supersede_job_unlocked(globals(), job, superseded_by, reason)
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
@@ -1522,13 +1516,7 @@ def cancellation_result(job: dict, reason: str) -> dict:
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
-    _queue_lifecycle.complete_canceled_job_unlocked(
-        job,
-        reason,
-        cancellation_result_fn=cancellation_result,
-        save_result_fn=save_result,
-        complete_job_with_result_unlocked_fn=_queue_orchestrator.complete_job_with_result_unlocked,
-    )
+    _queue_bindings.cancel_job_unlocked(globals(), job, reason)
 
 
 def summarize_job(job: dict) -> str:
@@ -1668,15 +1656,7 @@ def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_ta
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
-    _queue_lifecycle.update_job_active_targets_locked(
-        job_id,
-        active_targets,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        upsert_job_active_targets_unlocked_fn=upsert_job_active_targets_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-    )
+    _queue_bindings.update_job_active_targets(globals(), job_id, active_targets)
 
 
 def enqueue_job(
@@ -1688,7 +1668,8 @@ def enqueue_job(
     validation: str,
     submission: dict | None = None,
 ) -> tuple[dict, bool]:
-    return _queue_lifecycle.enqueue_job_locked(
+    return _queue_bindings.enqueue_job(
+        globals(),
         branch,
         sha,
         priority,
@@ -1696,25 +1677,6 @@ def enqueue_job(
         mode,
         validation,
         submission=submission,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        normalize_priority_fn=normalize_priority,
-        normalize_validation_mode_fn=normalize_validation_mode,
-        make_fingerprint_fn=make_fingerprint,
-        find_active_job_by_fingerprint_unlocked_fn=_queue_orchestrator.find_active_job_by_fingerprint_unlocked,
-        bump_pending_job_priority_unlocked_fn=lambda existing, requested_priority: _queue_orchestrator.bump_pending_job_priority_unlocked(
-            existing,
-            requested_priority,
-            now_iso_fn=now_iso,
-        ),
-        make_job_fn=make_job,
-        pending_supersedence_candidates_unlocked_fn=_queue_orchestrator.pending_supersedence_candidates_unlocked,
-        supersede_job_unlocked_fn=supersede_job_unlocked,
-        trim_completed_jobs_fn=trim_completed_jobs,
-        normalize_job_fn=normalize_job,
     )
 
 
@@ -1733,35 +1695,11 @@ def trim_completed_jobs(queue: list[dict]) -> list[dict]:
 
 
 def bump_queue_command_job(job_ref: str, requested_priority: str) -> dict:
-    return _queue_lifecycle.bump_queue_command_job_locked(
-        job_ref,
-        requested_priority,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
-        set_pending_job_priority_unlocked_fn=lambda job, priority: _queue_orchestrator.set_pending_job_priority_unlocked(
-            job,
-            priority,
-            now_iso_fn=now_iso,
-        ),
-        save_queue_unlocked_fn=save_queue_unlocked,
-        summarize_job_fn=summarize_job,
-    )
+    return _queue_bindings.bump_queue_command_job(globals(), job_ref, requested_priority)
 
 
 def cancel_queue_command_job(job_ref: str) -> dict:
-    return _queue_lifecycle.cancel_queue_command_job_locked(
-        job_ref,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        find_queue_command_job_unlocked_fn=_queue_orchestrator.find_queue_command_job_unlocked,
-        cancel_job_unlocked_fn=cancel_job_unlocked,
-        trim_completed_jobs_fn=trim_completed_jobs,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        summarize_job_fn=summarize_job,
-    )
+    return _queue_bindings.cancel_queue_command_job(globals(), job_ref)
 
 
 def result_file_job_id(path: Path) -> str | None:
@@ -1910,19 +1848,7 @@ def write_runner_info(info: dict) -> None:
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
-    def update_info(info: dict, current_job_id: str, current_active_targets: dict | None) -> bool:
-        return _queue_orchestrator.update_runner_info_active_targets(
-            info,
-            current_job_id,
-            current_active_targets,
-            now_iso_fn=now_iso,
-        )
-
-    _runner_state.update_current_runner_active_targets(
-        job_id,
-        active_targets,
-        update_runner_info_active_targets_fn=update_info,
-    )
+    _queue_bindings.update_runner_active_targets(globals(), job_id, active_targets)
 
 
 def clear_runner_info() -> None:
@@ -1934,73 +1860,19 @@ def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None
 
 
 def load_job(job_id: str) -> dict | None:
-    return _queue_lifecycle.load_job_locked(
-        job_id,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        find_job_unlocked_fn=find_job_unlocked,
-        normalize_job_fn=normalize_job,
-    )
+    return _queue_bindings.load_job(globals(), job_id)
 
 
 def claim_next_job() -> dict | None:
-    return _queue_lifecycle.claim_next_job_locked(
-        root=ROOT,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        reconcile_running_jobs_unlocked_fn=reconcile_running_jobs_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        claim_next_job_unlocked_fn=lambda queue, *, runner: _queue_orchestrator.claim_next_job_unlocked(
-            queue,
-            runner=runner,
-            now_iso_fn=now_iso,
-        ),
-        normalize_job_fn=normalize_job,
-        pid_fn=os.getpid,
-    )
+    return _queue_bindings.claim_next_job(globals())
 
 
 def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
-    _queue_lifecycle.finalize_job_locked(
-        job_id,
-        result,
-        result_path,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        complete_job_unlocked_fn=lambda queue, current_job_id, current_result, current_result_path: _queue_orchestrator.complete_job_unlocked(
-            queue,
-            current_job_id,
-            current_result,
-            current_result_path,
-            now_iso_fn=now_iso,
-        ),
-        trim_completed_jobs_with_removed_ids_fn=trim_completed_jobs_with_removed_ids,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        collect_local_ci_cleanup_plan_fn=collect_local_ci_cleanup_plan,
-        apply_local_ci_cleanup_plan_fn=apply_local_ci_cleanup_plan,
-        keep_results=KEEP_COMPLETED_JOBS,
-        keep_logs=KEEP_COMPLETED_JOBS,
-        keep_bundles=0,
-        include_prepared=False,
-    )
+    _queue_bindings.finalize_job(globals(), job_id, result, result_path)
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
-    return _queue_lifecycle.wait_for_job_completion(
-        job_id,
-        config,
-        load_job_fn=load_job,
-        load_result_fn=load_result,
-        drain_pending_jobs_fn=drain_pending_jobs,
-        current_runner_info_fn=current_runner_info,
-        sleep_fn=time.sleep,
-        poll_secs=WAIT_POLL_SECS,
-    )
+    return _queue_bindings.wait_for_job(globals(), job_id, config)
 
 
 def notify(message: str) -> None:
@@ -2583,24 +2455,7 @@ def print_result(result: dict, result_path: Path | None = None) -> None:
 
 
 def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
-    return _queue_lifecycle.drain_pending_jobs_locked(
-        config,
-        blocking=blocking,
-        root=ROOT,
-        drain_lock_path_fn=drain_lock_path,
-        file_lock_fn=file_lock,
-        lock_busy_error_cls=LockBusyError,
-        write_runner_info_fn=write_runner_info,
-        clear_runner_info_fn=clear_runner_info,
-        reclaim_stale_remote_validators_fn=reclaim_stale_remote_validators,
-        claim_next_job_fn=claim_next_job,
-        process_job_fn=process_job,
-        save_result_fn=save_result,
-        finalize_job_fn=finalize_job,
-        print_result_fn=print_result,
-        now_fn=now_iso,
-        pid_fn=os.getpid,
-    )
+    return _queue_bindings.drain_pending_jobs(globals(), config, blocking=blocking)
 
 
 # ── GitHub Helpers ───────────────────────────────────────────────────────────
