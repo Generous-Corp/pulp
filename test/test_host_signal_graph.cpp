@@ -2036,6 +2036,41 @@ TEST_CASE("SignalGraph connect_automation delivers two-point events per block",
     REQUIRE(std::abs(ev[1].value - 0.75f) < 1e-6f);
 }
 
+TEST_CASE("SignalGraph sparse automation remains bounded at large host blocks",
+          "[host][graph][automation][capacity]") {
+    constexpr int block_size = 4096;
+
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot = std::make_unique<MockAutomatable>();
+    auto* slot_ptr = slot.get();
+    auto plug = graph.add_plugin_node(std::move(slot), 0, 1, "auto");
+
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE(graph.prepare(48000.0, block_size));
+
+    std::vector<float> input_samples(block_size, 0.0f);
+    input_samples.front() = 0.125f;
+    input_samples.back() = 0.875f;
+    std::vector<float> output_samples(block_size, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, block_size);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, block_size);
+
+    graph.process(out_view, in_view, block_size);
+
+    const auto& events = slot_ptr->received();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE_THAT(events[0].value, WithinAbs(0.125f, 1e-6f));
+    REQUIRE(events[1].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[1].sample_offset == block_size - 1);
+    REQUIRE_THAT(events[1].value, WithinAbs(0.875f, 1e-6f));
+}
+
 TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
           "[host][graph][automation]") {
     SignalGraph graph;
@@ -2254,6 +2289,57 @@ TEST_CASE("SignalGraph audio-rate modulation delivers one event per sample",
         REQUIRE(events[static_cast<size_t>(i)].sample_offset == i);
         REQUIRE(std::abs(events[static_cast<size_t>(i)].value - expected[i]) < 1e-6f);
     }
+}
+
+TEST_CASE("SignalGraph audio-rate modulation validates large host-block capacity",
+          "[host][graph][automation][audio-rate][capacity]") {
+    SignalGraph max_capacity_graph;
+    auto max_capacity_input = max_capacity_graph.add_input_node(1, "in");
+    auto max_capacity_slot = std::make_unique<MockAutomatable>(ParamRate::AudioRate);
+    auto* max_capacity_slot_ptr = max_capacity_slot.get();
+    auto max_capacity_plugin = max_capacity_graph.add_plugin_node(
+        std::move(max_capacity_slot), 0, 1, "audio-rate");
+
+    REQUIRE(max_capacity_graph.connect_audio_rate_modulation(
+        max_capacity_input, 0, max_capacity_plugin, MockAutomatable::kParamId,
+        -1.0f, 1.0f));
+    REQUIRE(max_capacity_graph.prepare(
+        48000.0, static_cast<int>(ParameterEventQueue::kCapacity)));
+
+    std::vector<float> input_samples(ParameterEventQueue::kCapacity, 0.0f);
+    input_samples.front() = 0.0f;
+    input_samples.back() = 1.0f;
+    std::vector<float> output_samples(ParameterEventQueue::kCapacity, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(
+        in_ptrs, 1, static_cast<int>(ParameterEventQueue::kCapacity));
+    pulp::audio::BufferView<float> out_view(
+        out_ptrs, 1, static_cast<int>(ParameterEventQueue::kCapacity));
+
+    max_capacity_graph.process(
+        out_view, in_view, static_cast<int>(ParameterEventQueue::kCapacity));
+    const auto& events = max_capacity_slot_ptr->received();
+    REQUIRE(events.size() == ParameterEventQueue::kCapacity);
+    REQUIRE(events.front().sample_offset == 0);
+    REQUIRE_THAT(events.front().value, WithinAbs(-1.0f, 1e-6f));
+    REQUIRE(events.back().sample_offset ==
+            static_cast<int32_t>(ParameterEventQueue::kCapacity - 1));
+    REQUIRE_THAT(events.back().value, WithinAbs(1.0f, 1e-6f));
+
+    auto rejects_large_audio_rate_block = [](int block_size) {
+        SignalGraph graph;
+        auto in_node = graph.add_input_node(1, "in");
+        auto plug = graph.add_plugin_node(
+            std::make_unique<MockAutomatable>(ParamRate::AudioRate),
+            0, 1, "audio-rate");
+        REQUIRE(graph.connect_audio_rate_modulation(
+            in_node, 0, plug, MockAutomatable::kParamId, -1.0f, 1.0f));
+        REQUIRE_FALSE(graph.prepare(48000.0, block_size));
+    };
+
+    rejects_large_audio_rate_block(2048);
+    rejects_large_audio_rate_block(4096);
 }
 
 TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge order",

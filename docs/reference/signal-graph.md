@@ -53,11 +53,19 @@ Four connection variants cover the non-audio-passthrough cases:
   runtime stays DAG-ordered.
 - `connect_automation(from, port, plugin, param, lo, hi)` samples a source
   audio port at the start and end of the block and delivers sparse
-  `ParameterEvent`s into `PluginSlot::process()`.
+  `ParameterEvent`s into `PluginSlot::process()`. Sparse graph automation uses
+  two events per automated parameter, so large host blocks such as 2048 or 4096
+  samples do not consume one queue slot per sample.
 - `connect_audio_rate_modulation(from, port, plugin, param, lo, hi)` declares
   a dense per-sample modulation edge. It is accepted only for continuous,
   automatable `HostParamInfo::rate == AudioRate` parameters, emits one
-  `ParameterEvent` per sample, and participates in latency alignment.
+  `ParameterEvent` per sample, and participates in latency alignment. While the
+  plugin ABI still carries dense modulation through the fixed 1024-slot
+  `ParameterEventQueue`, `prepare()` fails closed when
+  `audio_rate_params * max_block_size + sparse_params * 2` would exceed that
+  capacity. For example, one dense lane is allowed at 1024 samples and rejected
+  at 2048/4096 samples until a separate dense modulation view replaces the
+  sparse-event transport for those blocks.
 - Sidechain is *not* a separate API: connect a secondary source to the
   plugin node's sidechain audio-port indices (e.g. `connect(side, 0, p,
   2)` when the plugin exposes ports 2/3 as its sidechain bus).
