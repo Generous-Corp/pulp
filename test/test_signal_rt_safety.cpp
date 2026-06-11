@@ -9,6 +9,7 @@
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/filter_design.hpp>
+#include <pulp/signal/fft.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
@@ -359,6 +360,41 @@ TEST_CASE("Envelope smoothing and resampler hot paths are allocation-free after 
         (void)resampler.output_rate();
         (void)resampler.channels();
         resampler.reset();
+    });
+}
+
+TEST_CASE("FFT and simple convolver hot paths are allocation-free after setup",
+          "[signal][fft][rt-safety]") {
+    Fft fft(16);
+    std::array<std::complex<float>, 16> complex_samples {};
+    std::array<float, 16> real_samples {};
+    std::array<float, 16> magnitudes {};
+    std::array<float, 16> magnitudes_db {};
+    for (std::size_t i = 0; i < complex_samples.size(); ++i) {
+        real_samples[i] = std::sin(static_cast<float>(i) * 0.2f);
+        complex_samples[i] = {real_samples[i], static_cast<float>(i % 3) * 0.1f};
+    }
+
+    Convolver convolver;
+    const std::array<float, 4> impulse {0.5f, 0.25f, 0.125f, 0.0f};
+    convolver.load_ir(impulse.data(), static_cast<int>(impulse.size()), 8);
+    std::array<float, 16> convolver_input {};
+    std::array<float, 16> convolver_output {};
+    for (std::size_t i = 0; i < convolver_input.size(); ++i)
+        convolver_input[i] = (i == 0) ? 1.0f : 0.0f;
+
+    require_allocates_no_memory([&] {
+        fft.forward(complex_samples.data());
+        fft.inverse(complex_samples.data());
+        fft.forward_real(real_samples.data(), complex_samples.data());
+        fft.magnitude(complex_samples.data(), magnitudes.data(), static_cast<int>(magnitudes.size()));
+        fft.magnitude_db(complex_samples.data(), magnitudes_db.data(), static_cast<int>(magnitudes_db.size()));
+        (void)fft.size();
+
+        for (float sample : convolver_input)
+            (void)convolver.process(sample);
+        convolver.process(convolver_input.data(), convolver_output.data(), static_cast<int>(convolver_input.size()));
+        convolver.reset();
     });
 }
 
