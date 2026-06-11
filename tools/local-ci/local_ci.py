@@ -156,6 +156,7 @@ import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
 import io_utils as _io_utils  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
+import linux_desktop_bindings as _linux_desktop_bindings  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
@@ -1380,7 +1381,8 @@ def run_linux_xvfb_remote_action(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    return _linux_desktop_action.run_linux_xvfb_remote_action(
+    return _linux_desktop_bindings.run_linux_xvfb_remote_action(
+        globals(),
         config,
         target_name,
         target,
@@ -1399,27 +1401,6 @@ def run_linux_xvfb_remote_action(
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
         source_request=source_request,
-        ensure_host_reachable_fn=ensure_host_reachable,
-        probe_linux_launch_backend_fn=probe_linux_launch_backend,
-        create_desktop_run_bundle_fn=create_desktop_run_bundle,
-        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
-        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
-        prepare_linux_exact_sha_source_fn=prepare_linux_exact_sha_source,
-        remote_linux_bundle_relpath_fn=remote_linux_bundle_relpath,
-        build_linux_xvfb_remote_command_fn=build_linux_xvfb_remote_command,
-        build_linux_window_driver_remote_command_fn=build_linux_window_driver_remote_command,
-        run_fn=subprocess.run,
-        fetch_ssh_artifact_fn=fetch_ssh_artifact,
-        cleanup_remote_ssh_dir_fn=cleanup_remote_ssh_dir,
-        default_desktop_label_fn=default_desktop_label,
-        image_change_summary_fn=image_change_summary,
-        parse_coordinate_pair_fn=parse_coordinate_pair,
-        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
-        atomic_write_text_fn=atomic_write_text,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        now_iso_fn=now_iso,
-        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
-        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
     )
 
 
