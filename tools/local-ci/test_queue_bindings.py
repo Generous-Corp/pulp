@@ -27,6 +27,7 @@ class QueueBindingsTests(unittest.TestCase):
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),
             "_queue_orchestrator": orchestrator or types.SimpleNamespace(),
             "_runner_state": types.SimpleNamespace(),
+            "_cleanup": types.SimpleNamespace(),
             "ROOT": Path("/repo"),
             "KEEP_COMPLETED_JOBS": 17,
             "WAIT_POLL_SECS": 0.25,
@@ -40,6 +41,7 @@ class QueueBindingsTests(unittest.TestCase):
             "load_queue_unlocked",
             "save_queue_unlocked",
             "reconcile_running_jobs_unlocked",
+            "stale_running_jobs_unlocked",
             "normalize_priority",
             "normalize_validation_mode",
             "make_fingerprint",
@@ -70,6 +72,10 @@ class QueueBindingsTests(unittest.TestCase):
             "LockBusyError",
             "supersedence_result",
             "cancellation_result",
+            "collect_stale_windows_cleanup_candidates_unlocked",
+            "cleanup_stale_windows_validator",
+            "update_job_target_state",
+            "trim_line",
         ]:
             bindings[name] = object()
         return bindings
@@ -221,6 +227,96 @@ class QueueBindingsTests(unittest.TestCase):
         self.assertFalse(captured["drain"][1]["blocking"])
         self.assertIs(captured["drain"][1]["root"], bindings["ROOT"])
         self.assertIs(captured["drain"][1]["pid_fn"], bindings["os"].getpid)
+
+    def test_reconcile_and_target_state_bind_queue_runner_dependencies(self):
+        captured = {}
+
+        def reconcile_running_jobs_unlocked(queue, **kwargs):
+            captured["reconcile"] = (queue, kwargs)
+            return queue, True
+
+        def requeue(job, *, now_iso_fn):
+            captured["requeue"] = (job, now_iso_fn)
+
+        def update_job_target_state_locked(*args, **kwargs):
+            captured["target_state"] = (args, kwargs)
+
+        def update_job_target_state_unlocked(queue, job_id, target_name, fields, *, now_iso_fn):
+            captured["target_unlocked"] = (queue, job_id, target_name, fields, now_iso_fn)
+            return True
+
+        lifecycle = types.SimpleNamespace(
+            reconcile_running_jobs_unlocked=reconcile_running_jobs_unlocked,
+            update_job_target_state_locked=update_job_target_state_locked,
+        )
+        orchestrator = types.SimpleNamespace(
+            stale_running_reconciliation_actions_unlocked=object(),
+            requeue_stale_running_job_unlocked=requeue,
+            update_job_target_state_unlocked=update_job_target_state_unlocked,
+        )
+        bindings = self._bindings(lifecycle=lifecycle, orchestrator=orchestrator)
+
+        queue = [{"id": "job1"}]
+        self.assertEqual(self.mod.reconcile_running_jobs_unlocked(bindings, queue), (queue, True))
+        self.assertIs(captured["reconcile"][1]["stale_running_jobs_unlocked_fn"], bindings["stale_running_jobs_unlocked"])
+        self.assertIs(captured["reconcile"][1]["supersede_job_unlocked_fn"], bindings["supersede_job_unlocked"])
+        captured["reconcile"][1]["requeue_stale_running_job_unlocked_fn"]({"id": "stale"})
+        self.assertEqual(captured["requeue"], ({"id": "stale"}, bindings["now_iso"]))
+
+        self.mod.update_job_target_state(bindings, "job1", "mac", status="running")
+        self.assertEqual(captured["target_state"][0], ("job1", "mac", {"status": "running"}))
+        captured["target_state"][1]["update_job_target_state_unlocked_fn"]([], "job1", "mac", {"status": "pass"})
+        self.assertEqual(captured["target_unlocked"][4], bindings["now_iso"])
+
+    def test_runner_state_facade_bindings_delegate_to_runner_state_module(self):
+        calls = []
+
+        runner_state = types.SimpleNamespace(
+            read_runner_info=lambda: calls.append("read") or {"pid": 123},
+            pid_alive=lambda pid: calls.append(("pid", pid)) or True,
+            current_runner_info=lambda: calls.append("current") or {"pid": 456},
+            stale_running_jobs_for_current_runner=lambda queue, **kwargs: calls.append(("stale", queue, kwargs)) or [{"id": "old"}],
+            write_runner_info=lambda info: calls.append(("write", info)),
+            clear_runner_info=lambda: calls.append("clear"),
+        )
+        orchestrator = types.SimpleNamespace(stale_running_jobs_for_runner_unlocked=object())
+        bindings = self._bindings(orchestrator=orchestrator)
+        bindings["_runner_state"] = runner_state
+
+        self.assertEqual(self.mod.read_runner_info(bindings), {"pid": 123})
+        self.assertTrue(self.mod.pid_alive(bindings, 789))
+        self.assertEqual(self.mod.current_runner_info(bindings), {"pid": 456})
+        self.assertEqual(self.mod.stale_running_jobs_unlocked(bindings, [{"id": "run"}]), [{"id": "old"}])
+        self.mod.write_runner_info(bindings, {"pid": 1})
+        self.mod.clear_runner_info(bindings)
+
+        self.assertEqual(calls[0:3], ["read", ("pid", 789), "current"])
+        self.assertEqual(calls[3][0], "stale")
+        self.assertIs(calls[3][2]["stale_running_jobs_for_runner_unlocked_fn"], orchestrator.stale_running_jobs_for_runner_unlocked)
+        self.assertEqual(calls[4:], [("write", {"pid": 1}), "clear"])
+
+    def test_reclaim_stale_remote_validators_binds_cleanup_dependencies(self):
+        captured = {}
+
+        def reclaim_stale_remote_validators_locked(**kwargs):
+            captured["kwargs"] = kwargs
+            return 2
+
+        lifecycle = types.SimpleNamespace(reclaim_stale_remote_validators_locked=reclaim_stale_remote_validators_locked)
+        cleanup = types.SimpleNamespace(reclaim_stale_remote_validator_candidates=object())
+        bindings = self._bindings(lifecycle=lifecycle)
+        bindings["_cleanup"] = cleanup
+
+        self.assertEqual(self.mod.reclaim_stale_remote_validators(bindings, {"targets": {}}), 2)
+        self.assertIs(
+            captured["kwargs"]["collect_stale_windows_cleanup_candidates_unlocked_fn"],
+            bindings["collect_stale_windows_cleanup_candidates_unlocked"],
+        )
+        self.assertIs(captured["kwargs"]["cleanup_validator_fn"], bindings["cleanup_stale_windows_validator"])
+        self.assertIs(captured["kwargs"]["update_job_target_state_fn"], bindings["update_job_target_state"])
+        self.assertIs(captured["kwargs"]["now_fn"], bindings["now_iso"])
+        self.assertIs(captured["kwargs"]["trim_line_fn"], bindings["trim_line"])
+        self.assertIs(captured["kwargs"]["reclaim_stale_remote_validator_candidates_fn"], cleanup.reclaim_stale_remote_validator_candidates)
 
 
 if __name__ == "__main__":

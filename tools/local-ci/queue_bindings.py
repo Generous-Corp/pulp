@@ -126,6 +126,87 @@ def cancel_queue_command_job(bindings: Mapping[str, Any], job_ref: str) -> dict:
     )
 
 
+def reconcile_running_jobs_unlocked(bindings: Mapping[str, Any], queue: list[dict]) -> tuple[list[dict], bool]:
+    queue_orchestrator = _binding(bindings, "_queue_orchestrator")
+
+    return _binding(bindings, "_queue_lifecycle").reconcile_running_jobs_unlocked(
+        queue,
+        stale_running_jobs_unlocked_fn=_binding(bindings, "stale_running_jobs_unlocked"),
+        stale_running_reconciliation_actions_unlocked_fn=queue_orchestrator.stale_running_reconciliation_actions_unlocked,
+        supersede_job_unlocked_fn=_binding(bindings, "supersede_job_unlocked"),
+        requeue_stale_running_job_unlocked_fn=lambda job: queue_orchestrator.requeue_stale_running_job_unlocked(
+            job,
+            now_iso_fn=_binding(bindings, "now_iso"),
+        ),
+    )
+
+
+def read_runner_info(bindings: Mapping[str, Any]) -> dict | None:
+    return _binding(bindings, "_runner_state").read_runner_info()
+
+
+def pid_alive(bindings: Mapping[str, Any], pid: int | None) -> bool:
+    return _binding(bindings, "_runner_state").pid_alive(pid)
+
+
+def current_runner_info(bindings: Mapping[str, Any]) -> dict | None:
+    return _binding(bindings, "_runner_state").current_runner_info()
+
+
+def stale_running_jobs_unlocked(bindings: Mapping[str, Any], queue: list[dict]) -> list[dict]:
+    return _binding(bindings, "_runner_state").stale_running_jobs_for_current_runner(
+        queue,
+        stale_running_jobs_for_runner_unlocked_fn=_binding(
+            bindings,
+            "_queue_orchestrator",
+        ).stale_running_jobs_for_runner_unlocked,
+    )
+
+
+def update_job_target_state(bindings: Mapping[str, Any], job_id: str, target_name: str, **fields) -> None:
+    _binding(bindings, "_queue_lifecycle").update_job_target_state_locked(
+        job_id,
+        target_name,
+        fields,
+        queue_lock_path_fn=_binding(bindings, "queue_lock_path"),
+        file_lock_fn=_binding(bindings, "file_lock"),
+        load_queue_unlocked_fn=_binding(bindings, "load_queue_unlocked"),
+        update_job_target_state_unlocked_fn=lambda queue, current_job_id, current_target_name, current_fields: _binding(
+            bindings,
+            "_queue_orchestrator",
+        ).update_job_target_state_unlocked(
+            queue,
+            current_job_id,
+            current_target_name,
+            current_fields,
+            now_iso_fn=_binding(bindings, "now_iso"),
+        ),
+        save_queue_unlocked_fn=_binding(bindings, "save_queue_unlocked"),
+    )
+
+
+def reclaim_stale_remote_validators(bindings: Mapping[str, Any], config: dict) -> int:
+    return _binding(bindings, "_queue_lifecycle").reclaim_stale_remote_validators_locked(
+        queue_lock_path_fn=_binding(bindings, "queue_lock_path"),
+        file_lock_fn=_binding(bindings, "file_lock"),
+        load_queue_unlocked_fn=_binding(bindings, "load_queue_unlocked"),
+        collect_stale_windows_cleanup_candidates_unlocked_fn=_binding(
+            bindings,
+            "collect_stale_windows_cleanup_candidates_unlocked",
+        ),
+        save_queue_unlocked_fn=_binding(bindings, "save_queue_unlocked"),
+        reclaim_stale_remote_validator_candidates_fn=_binding(bindings, "_cleanup").reclaim_stale_remote_validator_candidates,
+        cleanup_validator_fn=_binding(bindings, "cleanup_stale_windows_validator"),
+        update_job_target_state_fn=_binding(bindings, "update_job_target_state"),
+        now_fn=_binding(bindings, "now_iso"),
+        trim_line_fn=_binding(bindings, "trim_line"),
+    )
+
+
+def write_runner_info(bindings: Mapping[str, Any], info: dict) -> None:
+    _binding(bindings, "_runner_state").write_runner_info(info)
+
+
 def update_runner_active_targets(bindings: Mapping[str, Any], job_id: str, active_targets: dict | None) -> None:
     def update_info(info: dict, current_job_id: str, current_active_targets: dict | None) -> bool:
         return _binding(bindings, "_queue_orchestrator").update_runner_info_active_targets(
@@ -140,6 +221,10 @@ def update_runner_active_targets(bindings: Mapping[str, Any], job_id: str, activ
         active_targets,
         update_runner_info_active_targets_fn=update_info,
     )
+
+
+def clear_runner_info(bindings: Mapping[str, Any]) -> None:
+    _binding(bindings, "_runner_state").clear_runner_info()
 
 
 def load_job(bindings: Mapping[str, Any], job_id: str) -> dict | None:
