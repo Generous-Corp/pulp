@@ -1867,23 +1867,23 @@ def print_submission_metadata(metadata: dict) -> None:
 
 
 def remote_commit_error(target_name: str, host: str, job: dict) -> str:
-    return _execution.remote_commit_error(target_name, host, job)
+    return _execution_bindings.remote_commit_error(globals(), target_name, host, job)
 
 
 def parse_progress_marker(line: str) -> dict:
-    return _execution.parse_progress_marker(line)
+    return _execution_bindings.parse_progress_marker(globals(), line)
 
 
 def prepared_state_root(target_name: str, validation: str) -> Path:
-    return _execution.prepared_state_root(target_name, validation)
+    return _execution_bindings.prepared_state_root(globals(), target_name, validation)
 
 
 def should_reuse_prepared_state(job: dict) -> bool:
-    return _execution.should_reuse_prepared_state(job)
+    return _execution_bindings.should_reuse_prepared_state(globals(), job)
 
 
 def local_validation_command(job: dict, exclude_tests: str = "") -> tuple[list[str], str]:
-    return _execution.local_validation_command(job, exclude_tests)
+    return _execution_bindings.local_validation_command(globals(), job, exclude_tests)
 
 
 def posix_ssh_validation_command(
@@ -1896,7 +1896,8 @@ def posix_ssh_validation_command(
     bundle_ref: str,
     exclude_tests: str = "",
 ) -> tuple[list[str], str]:
-    return _execution.posix_ssh_validation_command(
+    return _execution_bindings.posix_ssh_validation_command(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -1916,7 +1917,8 @@ def validation_result_from_run(
     transport_mode: str,
     timeout_secs: int = 3600,
 ) -> dict:
-    return _execution.validation_result_from_run(
+    return _execution_bindings.validation_result_from_run(
+        globals(),
         target_name,
         run,
         log_path=log_path,
@@ -1933,7 +1935,8 @@ def validation_error_result(
     log_path: Path,
     transport_mode: str,
 ) -> dict:
-    return _execution.validation_error_result(
+    return _execution_bindings.validation_error_result(
+        globals(),
         target_name,
         detail,
         log_path=log_path,
@@ -1942,24 +1945,19 @@ def validation_error_result(
 
 
 def unreachable_target_result(target_name: str, detail: str = "Host unreachable") -> dict:
-    return _execution.unreachable_target_result(target_name, detail)
+    return _execution_bindings.unreachable_target_result(globals(), target_name, detail)
 
 
 def target_exception_result(target_name: str, exc: Exception) -> dict:
-    return _execution.target_exception_result(target_name, exc)
+    return _execution_bindings.target_exception_result(globals(), target_name, exc)
 
 
 def completed_job_result(job: dict, results: list[dict]) -> dict:
-    return _execution.completed_job_result(
-        job,
-        results,
-        completed_at=now_iso(),
-        provenance=normalize_provenance(job.get("provenance")),
-    )
+    return _execution_bindings.completed_job_result(globals(), job, results)
 
 
 def sorted_target_results(results: list[dict]) -> list[dict]:
-    return _execution.sorted_target_results(results)
+    return _execution_bindings.sorted_target_results(globals(), results)
 
 
 def run_target_tasks(
@@ -1967,11 +1965,7 @@ def run_target_tasks(
     *,
     on_target_complete: Callable[[str, dict], None],
 ) -> list[dict]:
-    return _execution.run_target_tasks(
-        tasks,
-        exception_result_fn=target_exception_result,
-        on_target_complete=on_target_complete,
-    )
+    return _execution_bindings.run_target_tasks(globals(), tasks, on_target_complete=on_target_complete)
 
 
 def run_logged_command(
@@ -1985,7 +1979,8 @@ def run_logged_command(
     heartbeat_interval_secs: float = HEARTBEAT_INTERVAL_SECS,
     stuck_idle_secs: float = STUCK_IDLE_SECS,
 ) -> dict:
-    return _execution.run_logged_command(
+    return _execution_bindings.run_logged_command(
+        globals(),
         cmd,
         cwd=cwd,
         input_text=input_text,
@@ -2044,7 +2039,8 @@ def windows_validation_script(
     resolved_platform: str,
     resolved_generator_instance: str,
 ) -> tuple[str, str]:
-    return _execution.windows_validation_script(
+    return _execution_bindings.windows_validation_script(
+        globals(),
         target_name,
         host,
         effective_repo_path,
@@ -2055,7 +2051,6 @@ def windows_validation_script(
         cmake_generator=cmake_generator,
         resolved_platform=resolved_platform,
         resolved_generator_instance=resolved_generator_instance,
-        ps_literal_fn=ps_literal,
     )
 
 
@@ -2220,7 +2215,7 @@ def config_for_job_execution(job: dict, config: dict) -> dict:
 
 
 def submission_target_state(job: dict, target_name: str) -> dict:
-    return _execution.submission_target_state(job, target_name)
+    return _execution_bindings.submission_target_state(globals(), job, target_name)
 
 
 def resolve_ssh_target_execution(job: dict, target_name: str, target_cfg: dict, defaults: dict) -> tuple[str | None, str | None]:

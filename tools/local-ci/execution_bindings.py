@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import builtins
+from pathlib import Path
 from typing import Any
 
 
@@ -13,6 +14,145 @@ def _binding(bindings: Mapping[str, Any], name: str) -> Any:
 
 def _print_binding(bindings: Mapping[str, Any]) -> Any:
     return bindings.get("print", builtins.print)
+
+
+def remote_commit_error(bindings: Mapping[str, Any], target_name: str, host: str, job: dict) -> str:
+    return _binding(bindings, "_execution").remote_commit_error(target_name, host, job)
+
+
+def parse_progress_marker(bindings: Mapping[str, Any], line: str) -> dict:
+    return _binding(bindings, "_execution").parse_progress_marker(line)
+
+
+def prepared_state_root(bindings: Mapping[str, Any], target_name: str, validation: str) -> Path:
+    return _binding(bindings, "_execution").prepared_state_root(target_name, validation)
+
+
+def should_reuse_prepared_state(bindings: Mapping[str, Any], job: dict) -> bool:
+    return _binding(bindings, "_execution").should_reuse_prepared_state(job)
+
+
+def local_validation_command(bindings: Mapping[str, Any], job: dict, exclude_tests: str = "") -> tuple[list[str], str]:
+    return _binding(bindings, "_execution").local_validation_command(job, exclude_tests)
+
+
+def posix_ssh_validation_command(
+    bindings: Mapping[str, Any],
+    target_name: str,
+    host: str,
+    repo_path: str,
+    job: dict,
+    *,
+    bundle_name: str,
+    bundle_ref: str,
+    exclude_tests: str = "",
+) -> tuple[list[str], str]:
+    return _binding(bindings, "_execution").posix_ssh_validation_command(
+        target_name,
+        host,
+        repo_path,
+        job,
+        bundle_name=bundle_name,
+        bundle_ref=bundle_ref,
+        exclude_tests=exclude_tests,
+    )
+
+
+def validation_result_from_run(
+    bindings: Mapping[str, Any],
+    target_name: str,
+    run: dict,
+    *,
+    log_path: Path,
+    validation: str,
+    transport_mode: str,
+    timeout_secs: int = 3600,
+) -> dict:
+    return _binding(bindings, "_execution").validation_result_from_run(
+        target_name,
+        run,
+        log_path=log_path,
+        validation=validation,
+        transport_mode=transport_mode,
+        timeout_secs=timeout_secs,
+    )
+
+
+def validation_error_result(
+    bindings: Mapping[str, Any],
+    target_name: str,
+    detail: str,
+    *,
+    log_path: Path,
+    transport_mode: str,
+) -> dict:
+    return _binding(bindings, "_execution").validation_error_result(
+        target_name,
+        detail,
+        log_path=log_path,
+        transport_mode=transport_mode,
+    )
+
+
+def unreachable_target_result(bindings: Mapping[str, Any], target_name: str, detail: str = "Host unreachable") -> dict:
+    return _binding(bindings, "_execution").unreachable_target_result(target_name, detail)
+
+
+def target_exception_result(bindings: Mapping[str, Any], target_name: str, exc: Exception) -> dict:
+    return _binding(bindings, "_execution").target_exception_result(target_name, exc)
+
+
+def completed_job_result(bindings: Mapping[str, Any], job: dict, results: list[dict]) -> dict:
+    return _binding(bindings, "_execution").completed_job_result(
+        job,
+        results,
+        completed_at=_binding(bindings, "now_iso")(),
+        provenance=_binding(bindings, "normalize_provenance")(job.get("provenance")),
+    )
+
+
+def sorted_target_results(bindings: Mapping[str, Any], results: list[dict]) -> list[dict]:
+    return _binding(bindings, "_execution").sorted_target_results(results)
+
+
+def run_target_tasks(
+    bindings: Mapping[str, Any],
+    tasks: list[tuple[str, Callable[[], dict]]],
+    *,
+    on_target_complete: Callable[[str, dict], None],
+) -> list[dict]:
+    return _binding(bindings, "_execution").run_target_tasks(
+        tasks,
+        exception_result_fn=_binding(bindings, "target_exception_result"),
+        on_target_complete=on_target_complete,
+    )
+
+
+def run_logged_command(
+    bindings: Mapping[str, Any],
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    input_text: str | None = None,
+    timeout: int = 3600,
+    log_path: Path | None = None,
+    report_progress=None,
+    heartbeat_interval_secs: float | None = None,
+    stuck_idle_secs: float | None = None,
+) -> dict:
+    execution = _binding(bindings, "_execution")
+    return execution.run_logged_command(
+        cmd,
+        cwd=cwd,
+        input_text=input_text,
+        timeout=timeout,
+        log_path=log_path,
+        report_progress=report_progress,
+        heartbeat_interval_secs=execution.HEARTBEAT_INTERVAL_SECS
+        if heartbeat_interval_secs is None
+        else heartbeat_interval_secs,
+        stuck_idle_secs=execution.STUCK_IDLE_SECS if stuck_idle_secs is None else stuck_idle_secs,
+    )
 
 
 def run_local_validation(
@@ -107,6 +247,35 @@ def run_windows_ssh_validation(
     )
 
 
+def windows_validation_script(
+    bindings: Mapping[str, Any],
+    target_name: str,
+    host: str,
+    effective_repo_path: str,
+    job: dict,
+    *,
+    bundle_name: str,
+    bundle_ref: str,
+    exclude_tests: str,
+    cmake_generator: str,
+    resolved_platform: str,
+    resolved_generator_instance: str,
+) -> tuple[str, str]:
+    return _binding(bindings, "_execution").windows_validation_script(
+        target_name,
+        host,
+        effective_repo_path,
+        job,
+        bundle_name=bundle_name,
+        bundle_ref=bundle_ref,
+        exclude_tests=exclude_tests,
+        cmake_generator=cmake_generator,
+        resolved_platform=resolved_platform,
+        resolved_generator_instance=resolved_generator_instance,
+        ps_literal_fn=_binding(bindings, "ps_literal"),
+    )
+
+
 def config_for_job_execution(bindings: Mapping[str, Any], job: dict, config: dict) -> dict:
     return _binding(bindings, "_execution").config_for_job_execution(
         job,
@@ -114,6 +283,10 @@ def config_for_job_execution(bindings: Mapping[str, Any], job: dict, config: dic
         load_config_file_fn=_binding(bindings, "load_config_file"),
         warn_fn=_print_binding(bindings),
     )
+
+
+def submission_target_state(bindings: Mapping[str, Any], job: dict, target_name: str) -> dict:
+    return _binding(bindings, "_execution").submission_target_state(job, target_name)
 
 
 def resolve_ssh_target_execution(
