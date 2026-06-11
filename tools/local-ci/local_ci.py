@@ -154,6 +154,7 @@ import desktop_doctor as _desktop_doctor  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
+import linux_desktop_action as _linux_desktop_action  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
 import local_ci_commands_cli as _local_ci_commands_cli  # noqa: E402
 import logs_cli as _logs_cli  # noqa: E402
@@ -1522,26 +1523,22 @@ def remote_linux_bundle_relpath(target_name: str, action_name: str, bundle_dir: 
 
 
 def fetch_ssh_artifact(host: str, remote_path: str, local_path: Path, *, optional: bool = False, timeout: int = 60) -> bool:
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["scp", f"{host}:{remote_path}", str(local_path)],
-        capture_output=True,
-        text=True,
+    return _linux_desktop_action.fetch_ssh_artifact(
+        host,
+        remote_path,
+        local_path,
+        optional=optional,
         timeout=timeout,
+        run_fn=subprocess.run,
     )
-    if result.returncode == 0 and local_path.exists():
-        return True
-    if optional:
-        return False
-    detail = result.stderr.strip() or result.stdout.strip() or f"scp exited {result.returncode}"
-    raise RuntimeError(f"Failed to copy `{remote_path}` from {host}: {detail}")
 
 
 def cleanup_remote_ssh_dir(host: str, remote_dir_expr: str) -> None:
-    try:
-        ssh_command_result(host, f"rm -rf {remote_dir_expr}", timeout=20)
-    except Exception:
-        pass
+    return _linux_desktop_action.cleanup_remote_ssh_dir(
+        host,
+        remote_dir_expr,
+        ssh_command_result_fn=ssh_command_result,
+    )
 
 
 def build_linux_xvfb_remote_command(
@@ -1622,180 +1619,47 @@ def run_linux_xvfb_remote_action(
     timeout_secs: float,
     source_request: dict | None = None,
 ) -> dict:
-    host = ensure_host_reachable(target_name, target, config.get("defaults", {}))
-    if not host:
-        raise RuntimeError(f"Desktop target `{target_name}` is not reachable over SSH.")
-    repo_path = target.get("repo_path")
-    if not repo_path:
-        raise RuntimeError(f"Desktop target `{target_name}` is missing repo_path.")
-    launch_backend = probe_linux_launch_backend(host)
-    if launch_backend.get("mode") == "missing":
-        raise RuntimeError(
-            f"Desktop target `{target_name}` needs xvfb-run or an existing desktop display session."
-        )
-    interaction_requested = _desktop_actions.desktop_interaction_requested(
+    return _linux_desktop_action.run_linux_xvfb_remote_action(
+        config,
+        target_name,
+        target,
+        command,
+        action_name=action_name,
+        label=label,
+        output_path=output_path,
+        pulp_app_automation=pulp_app_automation,
+        capture_ui_snapshot=capture_ui_snapshot,
         click_point=click_point,
         click_view_id=click_view_id,
         click_view_type=click_view_type,
         click_view_text=click_view_text,
         click_view_label=click_view_label,
+        capture_before=capture_before,
+        settle_secs=settle_secs,
+        timeout_secs=timeout_secs,
+        source_request=source_request,
+        ensure_host_reachable_fn=ensure_host_reachable,
+        probe_linux_launch_backend_fn=probe_linux_launch_backend,
+        create_desktop_run_bundle_fn=create_desktop_run_bundle,
+        desktop_action_artifact_paths_fn=_desktop_actions.desktop_action_artifact_paths,
+        desktop_interaction_requested_fn=_desktop_actions.desktop_interaction_requested,
+        prepare_linux_exact_sha_source_fn=prepare_linux_exact_sha_source,
+        remote_linux_bundle_relpath_fn=remote_linux_bundle_relpath,
+        build_linux_xvfb_remote_command_fn=build_linux_xvfb_remote_command,
+        build_linux_window_driver_remote_command_fn=build_linux_window_driver_remote_command,
+        run_fn=subprocess.run,
+        fetch_ssh_artifact_fn=fetch_ssh_artifact,
+        cleanup_remote_ssh_dir_fn=cleanup_remote_ssh_dir,
+        default_desktop_label_fn=default_desktop_label,
+        image_change_summary_fn=image_change_summary,
+        parse_coordinate_pair_fn=parse_coordinate_pair,
+        attach_desktop_source_to_manifest_fn=attach_desktop_source_to_manifest,
+        atomic_write_text_fn=atomic_write_text,
+        write_desktop_run_rollups_fn=write_desktop_run_rollups,
+        now_iso_fn=now_iso,
+        view_tree_inspector_summary_fn=_desktop_actions.view_tree_inspector_summary,
+        pulp_app_interaction_summary_fn=_desktop_actions.pulp_app_interaction_summary,
     )
-    if not pulp_app_automation:
-        if capture_ui_snapshot:
-            raise RuntimeError("linux-xvfb desktop inspect supports UI snapshots only with --pulp-app-automation.")
-        if any([click_view_id, click_view_type, click_view_text, click_view_label]):
-            raise RuntimeError("linux-xvfb view-target selectors currently require --pulp-app-automation.")
-
-    bundle_dir = create_desktop_run_bundle(config, target_name, action_name)
-    action_paths = _desktop_actions.desktop_action_artifact_paths(bundle_dir, output_path)
-    screenshot_path = action_paths["screenshot"]
-    before_screenshot_path = action_paths["before_screenshot"]
-    diff_screenshot_path = action_paths["diff_screenshot"]
-    ui_snapshot_path = action_paths["ui_snapshot"]
-    log_path = action_paths["stdout"]
-    err_path = action_paths["stderr"]
-    pid_path = bundle_dir / "pid.txt"
-    window_id_path = bundle_dir / "window-id.txt"
-    window_title_path = bundle_dir / "window-title.txt"
-    started_at = now_iso()
-    remote_bundle_relpath = remote_linux_bundle_relpath(target_name, action_name, bundle_dir)
-    remote_bundle_copy_root = f"~/{remote_bundle_relpath}"
-    remote_bundle_cleanup_expr = f'"$HOME/{remote_bundle_relpath}"'
-    source_context = dict(source_request or {})
-    if source_context.get("mode") == "exact-sha":
-        source_context = prepare_linux_exact_sha_source(bundle_dir, target_name, host, command, source_context)
-    launch_cwd = source_context.get("launch_cwd") or repo_path
-    launch_command = source_context.get("launch_command") or command
-    if pulp_app_automation:
-        remote_cmd = build_linux_xvfb_remote_command(
-            repo_path,
-            remote_bundle_relpath,
-            launch_command,
-            launch_backend=launch_backend,
-            launch_cwd=launch_cwd,
-            capture_ui_snapshot=capture_ui_snapshot,
-            click_point=click_point,
-            click_view_id=click_view_id,
-            click_view_type=click_view_type,
-            click_view_text=click_view_text,
-            click_view_label=click_view_label,
-            capture_before=capture_before,
-            settle_secs=settle_secs,
-        )
-    else:
-        remote_cmd = build_linux_window_driver_remote_command(
-            repo_path,
-            remote_bundle_relpath,
-            launch_command,
-            launch_backend=launch_backend,
-            launch_cwd=launch_cwd,
-            click_point=click_point,
-            capture_before=capture_before,
-            settle_secs=settle_secs,
-        )
-
-    remote_cmd = 'export PATH="$HOME/.local/bin:$PATH"; ' + remote_cmd
-    run = subprocess.run(
-        ["ssh", host, "bash", "-lc", shlex.quote(remote_cmd)],
-        capture_output=True,
-        text=True,
-        timeout=max(30, int(timeout_secs + settle_secs + 20)),
-    )
-    log_path.write_text(run.stdout or "")
-    err_path.write_text(run.stderr or "")
-
-    remote_screenshot = remote_bundle_copy_root + "/screenshots/window.png"
-    remote_before = remote_bundle_copy_root + "/screenshots/before.png"
-    remote_ui = remote_bundle_copy_root + "/ui-tree.json"
-    remote_stdout = remote_bundle_copy_root + "/stdout.log"
-    remote_stderr = remote_bundle_copy_root + "/stderr.log"
-    remote_pid = remote_bundle_copy_root + "/pid.txt"
-    remote_window_id = remote_bundle_copy_root + "/window-id.txt"
-    remote_window_title = remote_bundle_copy_root + "/window-title.txt"
-
-    try:
-        fetch_ssh_artifact(host, remote_stdout, log_path, optional=True)
-        fetch_ssh_artifact(host, remote_stderr, err_path, optional=True)
-        fetch_ssh_artifact(host, remote_screenshot, screenshot_path)
-        fetch_ssh_artifact(host, remote_pid, pid_path, optional=True)
-        fetch_ssh_artifact(host, remote_window_id, window_id_path, optional=True)
-        fetch_ssh_artifact(host, remote_window_title, window_title_path, optional=True)
-        if capture_before:
-            fetch_ssh_artifact(host, remote_before, before_screenshot_path, optional=not pulp_app_automation)
-        if capture_ui_snapshot:
-            fetch_ssh_artifact(host, remote_ui, ui_snapshot_path)
-    finally:
-        cleanup_remote_ssh_dir(host, remote_bundle_cleanup_expr)
-
-    if run.returncode != 0:
-        detail = err_path.read_text(errors="replace").strip() or log_path.read_text(errors="replace").strip() or f"remote command exited {run.returncode}"
-        raise RuntimeError(detail)
-
-    pid_value = None
-    if pid_path.exists():
-        try:
-            pid_value = int(pid_path.read_text().strip())
-        except ValueError:
-            pid_value = None
-
-    manifest = {
-        "target": target_name,
-        "adapter": target["adapter"],
-        "action": action_name,
-        "label": label or default_desktop_label(command),
-        "pid": pid_value,
-        "host": host,
-        "repo_path": repo_path,
-        "command": launch_command,
-        "started_at": started_at,
-        "completed_at": now_iso(),
-        "artifacts": {
-            "bundle_dir": str(bundle_dir),
-            "screenshot": str(screenshot_path),
-            "stdout": str(log_path),
-            "stderr": str(err_path),
-            "remote_bundle_dir": remote_bundle_copy_root,
-        },
-    }
-    if window_id_path.exists() or window_title_path.exists():
-        manifest["window"] = {}
-        if window_id_path.exists():
-            manifest["window"]["window_id"] = window_id_path.read_text().strip()
-        if window_title_path.exists():
-            manifest["window"]["title"] = window_title_path.read_text().strip()
-    if capture_before and before_screenshot_path.exists() and screenshot_path.exists():
-        manifest["artifacts"]["before_screenshot"] = str(before_screenshot_path)
-        manifest["artifacts"]["image_change"] = image_change_summary(
-            before_screenshot_path,
-            screenshot_path,
-            diff_output_path=diff_screenshot_path,
-        )
-        if diff_screenshot_path.exists():
-            manifest["artifacts"]["diff_screenshot"] = str(diff_screenshot_path)
-    if capture_ui_snapshot and ui_snapshot_path.exists():
-        view_tree = json.loads(ui_snapshot_path.read_text())
-        manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-        manifest["inspector"] = _desktop_actions.view_tree_inspector_summary(view_tree)
-    if interaction_requested:
-        if pulp_app_automation:
-            manifest["interaction"] = _desktop_actions.pulp_app_interaction_summary(
-                click_point=click_point,
-                click_view_id=click_view_id,
-                click_view_type=click_view_type,
-                click_view_text=click_view_text,
-                click_view_label=click_view_label,
-            )
-        else:
-            click_summary = {"point": click_point}
-            if click_point:
-                content_x, content_y = parse_coordinate_pair(click_point, flag_name="--click")
-                click_summary["content_point"] = {"x": content_x, "y": content_y}
-            manifest["interaction"] = {"mode": "x11-window-driver", "click": click_summary}
-    attach_desktop_source_to_manifest(manifest, source_context or source_request)
-    atomic_write_text(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
-    write_desktop_run_rollups(config, target_name=target_name)
-    write_desktop_run_rollups(config)
-    return manifest
 
 
 def run_windows_session_agent_action(
