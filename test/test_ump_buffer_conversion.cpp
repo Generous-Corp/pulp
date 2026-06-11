@@ -6,6 +6,8 @@
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 using namespace pulp::midi;
 using Catch::Approx;
 
@@ -267,6 +269,57 @@ TEST_CASE("midi1_to_ump preserves sample offsets and group metadata",
     REQUIRE(out[1].sample_offset == 256);
     REQUIRE(out[1].packet.group() == 7);
     REQUIRE(out[1].packet.data_32() == 0xFE000000u);
+}
+
+TEST_CASE("UMP conversion helpers are allocation-free with prepared destinations",
+          "[midi][ump][rt-safety]") {
+    MidiBuffer midi_in;
+    midi_in.reserve(4, 0);
+    midi_in.set_realtime_capacity_limit(true);
+
+    auto note = MidiEvent::note_on(1, 60, 100);
+    note.sample_offset = 8;
+    auto bend = MidiEvent::pitch_bend(2, 0x2000);
+    bend.sample_offset = 16;
+    auto cc = MidiEvent::cc(3, 74, 127);
+    cc.sample_offset = 24;
+    midi_in.add(note);
+    midi_in.add(bend);
+    midi_in.add(cc);
+
+    UmpBuffer ump_out;
+    ump_out.reserve(midi_in.size());
+    ump_out.set_realtime_capacity_limit(true);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        midi1_to_ump(midi_in, ump_out, 6);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(ump_out.size() == midi_in.size());
+    REQUIRE(ump_out[0].packet.group() == 6);
+    REQUIRE(ump_out[0].sample_offset == 8);
+    REQUIRE(ump_out[1].sample_offset == 16);
+    REQUIRE(ump_out[2].sample_offset == 24);
+
+    MidiBuffer midi_out;
+    midi_out.reserve(ump_out.size(), 0);
+    midi_out.set_realtime_capacity_limit(true);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        ump_to_midi1(ump_out, midi_out);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(midi_out.size() == midi_in.size());
+    REQUIRE(midi_out[0].is_note_on());
+    REQUIRE(midi_out[0].sample_offset == 8);
+    REQUIRE(midi_out[1].is_pitch_bend());
+    REQUIRE(midi_out[1].sample_offset == 16);
+    REQUIRE(midi_out[2].is_cc());
+    REQUIRE(midi_out[2].sample_offset == 24);
 }
 
 TEST_CASE("ump_to_midi1_event converts MIDI2 edge values",

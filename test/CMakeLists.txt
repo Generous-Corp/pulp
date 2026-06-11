@@ -5731,7 +5731,9 @@ else()
 endif()
 
 # UMP buffer + MIDI 1.0 <-> UMP conversion + UMP-aware MpeVoiceTracker
-pulp_add_test_suite(pulp-test-ump-buffer-conversion LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-ump-buffer-conversion
+    SOURCES test_ump_buffer_conversion.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::format)
 
 # MPE buffer + Processor sidecar tests
 pulp_add_test_suite(pulp-test-mpe-buffer LIBRARIES pulp::format)
