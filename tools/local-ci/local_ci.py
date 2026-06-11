@@ -183,6 +183,7 @@ import source_prep as _source_prep  # noqa: E402
 import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
+import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
 import utility_command_bindings as _utility_command_bindings  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
 import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
@@ -1732,94 +1733,47 @@ def notify(message: str) -> None:
 
 
 def ssh_probe(host: str, timeout: int = 5) -> subprocess.CompletedProcess[str]:
-    return _target_preflight.ssh_probe(
-        host,
-        timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _target_preflight_bindings.ssh_probe(globals(), host, timeout)
 
 
 def ssh_reachable(host: str, timeout: int = 5) -> bool:
-    return _target_preflight.ssh_reachable(
-        host,
-        timeout,
-        ssh_probe_fn=ssh_probe,
-    )
+    return _target_preflight_bindings.ssh_reachable(globals(), host, timeout)
 
 
 def ssh_failure_detail(host: str, timeout: int = 5) -> str:
-    return _target_preflight.ssh_failure_detail(
-        host,
-        timeout,
-        ssh_probe_fn=ssh_probe,
-    )
+    return _target_preflight_bindings.ssh_failure_detail(globals(), host, timeout)
 
 
 def ssh_command_result(host: str, remote_cmd: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    return _target_preflight.ssh_command_result(
-        host,
-        remote_cmd,
-        timeout=timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _target_preflight_bindings.ssh_command_result(globals(), host, remote_cmd, timeout=timeout)
 
 
 def utmctl_vm_status(vm_name: str) -> str | None:
-    return _target_preflight.utmctl_vm_status(
-        vm_name,
-        run_fn=subprocess.run,
-    )
+    return _target_preflight_bindings.utmctl_vm_status(globals(), vm_name)
 
 
 def utmctl_start(vm_name: str) -> bool:
-    return _target_preflight.utmctl_start(
-        vm_name,
-        run_fn=subprocess.run,
-    )
+    return _target_preflight_bindings.utmctl_start(globals(), vm_name)
 
 
 def ensure_host_reachable(target_name: str, target_cfg: dict, defaults: dict) -> str | None:
-    return _target_preflight.ensure_host_reachable(
-        target_name,
-        target_cfg,
-        defaults,
-        ssh_reachable_fn=ssh_reachable,
-        utmctl_vm_status_fn=utmctl_vm_status,
-        utmctl_start_fn=utmctl_start,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-        print_fn=print,
-    )
+    return _target_preflight_bindings.ensure_host_reachable(globals(), target_name, target_cfg, defaults)
 
 
 def config_source_name(path: Path) -> str:
-    return _target_preflight.config_source_name(
-        path,
-        environ=os.environ,
-        shared_config_path_fn=shared_config_path,
-    )
+    return _target_preflight_bindings.config_source_name(globals(), path)
 
 
 def config_material_for_targets(config: dict, targets: list[str]) -> dict:
-    return _target_preflight.config_material_for_targets(config, targets)
+    return _target_preflight_bindings.config_material_for_targets(globals(), config, targets)
 
 
 def find_material_config_drift(targets: list[str]) -> list[str]:
-    return _target_preflight.find_material_config_drift(
-        targets,
-        shared_config_path_fn=shared_config_path,
-        worktree_config_path_fn=worktree_config_path,
-        config_material_for_targets_fn=config_material_for_targets,
-    )
+    return _target_preflight_bindings.find_material_config_drift(globals(), targets)
 
 
 def preflight_target_host_state(target_name: str, target_cfg: dict, defaults: dict) -> dict:
-    return _target_preflight.preflight_target_host_state(
-        target_name,
-        target_cfg,
-        defaults,
-        ssh_reachable_fn=ssh_reachable,
-    )
+    return _target_preflight_bindings.preflight_target_host_state(globals(), target_name, target_cfg, defaults)
 
 
 def build_submission_metadata(
@@ -1833,7 +1787,8 @@ def build_submission_metadata(
     allow_root_mismatch: bool,
     allow_unreachable_targets: bool,
 ) -> dict:
-    return _target_preflight.build_submission_metadata(
+    return _target_preflight_bindings.build_submission_metadata(
+        globals(),
         config,
         branch,
         sha,
@@ -1842,25 +1797,11 @@ def build_submission_metadata(
         validation,
         allow_root_mismatch=allow_root_mismatch,
         allow_unreachable_targets=allow_unreachable_targets,
-        root=ROOT,
-        cwd_fn=Path.cwd,
-        git_root_for_fn=git_root_for,
-        config_path_fn=config_path,
-        config_source_name_fn=config_source_name,
-        preflight_target_host_state_fn=preflight_target_host_state,
-        find_material_config_drift_fn=find_material_config_drift,
-        normalize_provenance_fn=normalize_provenance,
-        environ=os.environ,
     )
 
 
 def print_submission_metadata(metadata: dict) -> None:
-    return _target_preflight.print_submission_metadata(
-        metadata,
-        short_sha_fn=short_sha,
-        provenance_summary_fn=provenance_summary,
-        print_fn=print,
-    )
+    return _target_preflight_bindings.print_submission_metadata(globals(), metadata)
 
 
 # ── Validation Runners ───────────────────────────────────────────────────────
