@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04240"></a>
+## [0.424.0] - 2026-06-11
+
+- feat(signal): optional sinc resampling in RealtimePitchTimeProcessor ([#4004](https://github.com/danielraffel/pulp/pull/4004))
+- refactor(local-ci): move artifact wait helper to io utils ([#4002](https://github.com/danielraffel/pulp/pull/4002))
+
+<a id="v04230"></a>
+## [0.423.0] - 2026-06-11
+
+- feat(signal): Kaiser-windowed sinc resampler primitive ([#4000](https://github.com/danielraffel/pulp/pull/4000))
+
+<a id="v04220"></a>
+## [0.422.0] - 2026-06-11
+
+- fix(host): wait for SignalGraph readers before release ([#3999](https://github.com/danielraffel/pulp/pull/3999))
+
 <a id="v04210"></a>
 ## [0.421.0] - 2026-06-11
 
@@ -4320,6 +4336,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.424.0]: https://github.com/danielraffel/pulp/releases/tag/v0.424.0
+[0.423.0]: https://github.com/danielraffel/pulp/releases/tag/v0.423.0
+[0.422.0]: https://github.com/danielraffel/pulp/releases/tag/v0.422.0
 [0.421.0]: https://github.com/danielraffel/pulp/releases/tag/v0.421.0
 [0.420.0]: https://github.com/danielraffel/pulp/releases/tag/v0.420.0
 [0.419.0]: https://github.com/danielraffel/pulp/releases/tag/v0.419.0
