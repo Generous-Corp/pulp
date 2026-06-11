@@ -6,7 +6,10 @@
 namespace pulp::signal {
 
 // Moog-style ladder filter (4-pole, 24dB/oct)
-// Non-linear, self-oscillating at high resonance
+// Non-linear, self-oscillating at high resonance.
+//
+// RT contract: setters, process paths, and reset are scalar/fixed-array only
+// and allocate no memory.
 class LadderFilter {
 public:
     void set_sample_rate(float sr) { sample_rate_ = sr; }

@@ -5,7 +5,10 @@
 namespace pulp::signal {
 
 // Linkwitz-Riley crossover filter (4th order, -6dB at crossover)
-// Provides lowpass and highpass outputs that sum flat
+// Provides lowpass and highpass outputs that sum flat.
+//
+// RT contract: coefficient updates, process, and reset are fixed-state only and
+// allocate no memory.
 class LinkwitzRiley {
 public:
     void set_frequency(float hz, float sample_rate) {

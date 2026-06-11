@@ -8,7 +8,10 @@
 namespace pulp::signal {
 
 // Feedback Delay Network (FDN) reverb
-// 4-channel FDN with Hadamard mixing matrix
+// 4-channel FDN with Hadamard mixing matrix.
+//
+// RT contract: `prepare()` allocates delay-line storage. After preparation,
+// setters, `process()`, and `reset()` allocate no memory.
 class Reverb {
 public:
     void prepare(float sample_rate) {

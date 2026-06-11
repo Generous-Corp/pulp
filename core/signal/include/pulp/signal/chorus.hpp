@@ -6,7 +6,10 @@
 
 namespace pulp::signal {
 
-// Stereo chorus effect using modulated delay lines
+// Stereo chorus effect using modulated delay lines.
+//
+// RT contract: `prepare()` allocates delay-line storage. After preparation,
+// setters, `process()`, and `reset()` allocate no memory.
 class Chorus {
 public:
     void prepare(float sample_rate) {

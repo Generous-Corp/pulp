@@ -6,7 +6,10 @@
 namespace pulp::signal {
 
 // Noise gate / expander
-// Attenuates signal below threshold with configurable attack/release
+// Attenuates signal below threshold with configurable attack/release.
+//
+// RT contract: setters, process paths, and reset are scalar-only and allocate
+// no memory.
 class NoiseGate {
 public:
     struct Params {

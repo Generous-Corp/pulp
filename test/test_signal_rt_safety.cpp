@@ -233,6 +233,115 @@ TEST_CASE("Prepared storage-backed signal helpers are allocation-free while proc
     });
 }
 
+TEST_CASE("Dynamics and filter signal helpers are allocation-free after configuration",
+          "[signal][rt-safety]") {
+    Compressor compressor;
+    Compressor::Params compressor_params;
+    compressor_params.threshold_db = -18.0f;
+    compressor_params.ratio = 3.0f;
+    compressor_params.attack_ms = 1.0f;
+    compressor_params.release_ms = 80.0f;
+    compressor.set_params(compressor_params);
+    compressor.set_sample_rate(48000.0f);
+    compressor.set_sidechain_hpf_hz(120.0f);
+    compressor.set_lookahead_ms(1.0f);
+
+    Limiter limiter;
+    limiter.set_sample_rate(48000.0f);
+    limiter.set_threshold_db(-1.0f);
+    limiter.set_release_ms(25.0f);
+
+    NoiseGate gate;
+    NoiseGate::Params gate_params;
+    gate_params.threshold_db = -45.0f;
+    gate_params.ratio = 8.0f;
+    gate_params.attack_ms = 0.2f;
+    gate_params.release_ms = 60.0f;
+    gate.set_params(gate_params);
+    gate.set_sample_rate(48000.0f);
+
+    LadderFilter ladder;
+    ladder.set_sample_rate(48000.0f);
+    ladder.set_frequency(1400.0f);
+    ladder.set_resonance(0.45f);
+
+    LinkwitzRiley crossover;
+    crossover.set_frequency(1200.0f, 48000.0f);
+
+    TptFilter tpt;
+    tpt.prepare(48000.0f);
+    tpt.set_cutoff(800.0f);
+
+    require_allocates_no_memory([&] {
+        std::array<float, 64> signal {};
+        std::array<float, 64> sidechain {};
+        for (std::size_t i = 0; i < signal.size(); ++i) {
+            signal[i] = (static_cast<float>(i % 17) - 8.0f) * 0.05f;
+            sidechain[i] = (static_cast<float>(i % 11) - 5.0f) * 0.07f;
+        }
+
+        for (std::size_t i = 0; i < signal.size(); ++i) {
+            float value = compressor.process_with_sidechain(signal[i], sidechain[i]);
+            value = limiter.process(value);
+            value = gate.process(value);
+            value = ladder.process(value);
+            const auto split = crossover.process(value);
+            tpt.set_cutoff(500.0f + static_cast<float>(i) * 10.0f);
+            const auto tpt_out = tpt.process(split.low + split.high);
+            signal[i] = tpt_out.lowpass + tpt_out.highpass + tpt_out.allpass * 0.1f;
+        }
+
+        compressor.process(signal.data(), static_cast<int>(signal.size()));
+        compressor.process_with_sidechain(signal.data(), sidechain.data(), static_cast<int>(signal.size()));
+        limiter.process(signal.data(), static_cast<int>(signal.size()));
+        gate.process(signal.data(), static_cast<int>(signal.size()));
+        ladder.process(signal.data(), static_cast<int>(signal.size()));
+        (void)compressor.latency_samples();
+        (void)compressor.gain_reduction_db();
+        (void)tpt.cutoff();
+        (void)tpt.process_lowpass(0.1f);
+        (void)tpt.process_highpass(0.1f);
+        (void)tpt.process_allpass(0.1f);
+        compressor.reset();
+        limiter.reset();
+        gate.reset();
+        ladder.reset();
+        crossover.reset();
+        tpt.reset();
+    });
+}
+
+TEST_CASE("Prepared delay effect helpers are allocation-free while processing",
+          "[signal][rt-safety]") {
+    Chorus chorus;
+    chorus.prepare(48000.0f);
+    chorus.set_rate(0.8f);
+    chorus.set_depth(0.4f);
+    chorus.set_mix(0.35f);
+    chorus.set_delay_ms(12.0f);
+
+    Reverb reverb;
+    reverb.prepare(48000.0f);
+    reverb.set_decay(1.5f);
+    reverb.set_damping(0.45f);
+    reverb.set_mix(0.2f);
+
+    bool output_stayed_finite = false;
+    require_allocates_no_memory([&] {
+        float accumulator = 0.0f;
+        for (int i = 0; i < 96; ++i) {
+            const float input = i == 0 ? 1.0f : 0.0f;
+            const auto chorus_out = chorus.process(input);
+            const auto reverb_out = reverb.process(chorus_out.left + chorus_out.right);
+            accumulator += reverb_out.left + reverb_out.right;
+        }
+        output_stayed_finite = std::isfinite(accumulator);
+        chorus.reset();
+        reverb.reset();
+    });
+    REQUIRE(output_stayed_finite);
+}
+
 TEST_CASE("ProcessorChain and wavetable playback are allocation-free after setup",
           "[signal][rt-safety]") {
     ProcessorChain<Gain, Biquad, WaveShaper> chain;

@@ -9,7 +9,12 @@
 namespace pulp::signal {
 
 // Feed-forward compressor with adjustable attack/release.
-// Real-time safe. Operates on single samples.
+//
+// RT contract: parameter setters and sample/buffer process paths allocate no
+// memory except `set_sample_rate()` / `set_lookahead_ms()` may allocate or
+// resize the lookahead delay line. Configure lookahead off the audio thread;
+// after that, process paths, `latency_samples()`, `gain_reduction_db()`, and
+// `reset()` allocate no memory.
 //
 // Sidechain HPF (item 2.4 of macOS plan): when `set_sidechain_hpf_hz`
 // is non-zero, the level-detection path runs the sidechain signal
@@ -193,7 +198,9 @@ private:
     }
 };
 
-// Brickwall limiter — hard limit at threshold with lookahead-free design
+// Brickwall limiter — hard limit at threshold with lookahead-free design.
+// RT contract: setters, process paths, and reset are scalar-only and allocate
+// no memory.
 class Limiter {
 public:
     void set_threshold_db(float db) { threshold_ = std::pow(10.0f, db / 20.0f); }
