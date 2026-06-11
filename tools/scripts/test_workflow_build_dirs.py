@@ -59,6 +59,16 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
 
+    def test_windows_ctest_logs_upload_runs_after_windows_ctest(self) -> None:
+        text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+
+        windows_test = "- name: Test (Windows — UTF-8 code page wrapped)"
+        windows_upload = "- name: Upload ctest logs on Windows failure"
+        self.assertIn(windows_test, text)
+        self.assertIn(windows_upload, text)
+        self.assertLess(text.index(windows_test), text.index(windows_upload))
+        self.assertIn("if: failure() && runner.os == 'Windows'", text)
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 

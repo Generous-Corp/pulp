@@ -948,6 +948,18 @@ jobs:
           if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
+      - name: Upload ctest logs on Windows failure
+        # The generic upload step above runs before the Windows-only ctest step.
+        # Keep this second upload after Windows ctest so LastTest.log is preserved
+        # when the Windows leg is the first failing step.
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ctest-logs-${{ matrix.key }}
+          path: ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
       # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.
