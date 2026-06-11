@@ -23,9 +23,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve-macos-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+    steps:
+      - id: resolve
+        env:
+          RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
+          LOCAL_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
+          NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          if [ -n "${RELEASE_JSON:-}" ]; then
+            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing release dry-run via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
+          elif [ -n "${LOCAL_JSON:-}" ]; then
+            echo "runs_on_json=${LOCAL_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing release dry-run via self-hosted PULP_LOCAL_MACOS_RUNS_ON_JSON: ${LOCAL_JSON}"
+          elif [ -n "${NAMESPACE_JSON:-}" ]; then
+            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing release dry-run through Namespace: ${NAMESPACE_JSON}"
+          else
+            echo 'runs_on_json=["macos-15"]' >> "$GITHUB_OUTPUT"
+            echo "Routing release dry-run through GitHub-hosted macos-15"
+          fi
+
   dry-run:
+    needs: resolve-macos-runner
     name: Release dry-run (darwin-arm64, no publish)
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
     steps:
       - uses: actions/checkout@v5
 

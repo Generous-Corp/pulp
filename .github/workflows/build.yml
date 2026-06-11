@@ -1169,12 +1169,15 @@ jobs:
   # This job mirrors release-cli.yml's CLI-build configure on windows-latest
   # for every PR so MSVC errors block merge instead of silently failing at
   # tag-push time. Build-only; no test step — release-cli.yml doesn't run
-  # tests either, and the main matrix above already covers Windows tests on
-  # Namespace.
+  # tests either, and the main matrix above already covers Windows tests.
+  #
+  # Keep the default on windows-latest for x64 release fidelity. It is routable
+  # through PULP_WINDOWS_MSVC_RELEASE_GATE_RUNS_ON_JSON once a local Windows
+  # runner intentionally matches the release architecture/toolchain.
   windows-msvc-release-gate:
     needs: classify
     if: needs.classify.outputs.native_build_required == 'true'
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(vars.PULP_WINDOWS_MSVC_RELEASE_GATE_RUNS_ON_JSON || '"windows-latest"') }}
     name: Windows MSVC release-path gate
     steps:
       - uses: actions/checkout@v5
