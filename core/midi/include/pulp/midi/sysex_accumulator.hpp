@@ -23,6 +23,17 @@
 // The accumulator is not thread-safe; wrap it per-port. Android's MIDI
 // receiver is single-threaded per device, so the per-port model fits.
 //
+// RT-safety contract:
+//
+//   - Call reserve(N) before entering the audio/MIDI callback, where N is at
+//     least the largest F0...F7 payload the port will accept.
+//   - After that preparation, feed(), reset(), in_progress(), and
+//     partial_size() do not allocate while messages stay within the reserved
+//     size.
+//   - The emit callback and its destination storage are caller-owned. Keep
+//     the SysexEmitFn object and any payload consumer preconstructed and
+//     allocation-free when using this accumulator from realtime code.
+//
 // Unit tests live in test/test_sysex_accumulator.cpp — see that file
 // for coverage of the edge cases referenced in the state machine above.
 
@@ -42,6 +53,12 @@ using SysexEmitFn =
 
 class SysexAccumulator {
 public:
+    /// Prepare internal payload storage for realtime use. `worst_case_bytes`
+    /// includes the leading F0 and trailing F7 bytes.
+    void reserve(std::size_t worst_case_bytes) {
+        buffer_.reserve(worst_case_bytes);
+    }
+
     /// Feed a single byte through the state machine. Invokes `emit`
     /// when a complete or aborted SysEx is assembled. Realtime bytes
     /// (0xF8-0xFE) pass through without affecting state — they should

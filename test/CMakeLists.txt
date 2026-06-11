@@ -1095,7 +1095,9 @@ pulp_add_test_suite(pulp-test-frame-fill LIBRARIES pulp::audio)
 
 # #86: SysExAccumulator — cross-platform MIDI SysEx aggregation state
 # machine shared by Android/ALSA/Windows/iOS MIDI backends. Header-only.
-pulp_add_test_suite(pulp-test-sysex-accumulator LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-sysex-accumulator
+    SOURCES test_sysex_accumulator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 
 # #3327 L4: MonotonicMidiClock — seconds-since-open MIDI input timestamps,
 # the cross-platform helper that replaced ALSA's hardcoded 0.0 stamps.
