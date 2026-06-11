@@ -6,6 +6,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <pulp/format/ara.hpp>
 #include <pulp/format/param_processing.hpp>
 #include <pulp/format/processor.hpp>
@@ -794,4 +796,66 @@ TEST_CASE("ControlRateParamSmoother handles invalid rates reset and skip",
     smoother.skip(99);
     REQUIRE(smoother.current() == 1.0f);
     REQUIRE_FALSE(smoother.is_smoothing());
+}
+
+TEST_CASE("Parameter processing helpers are allocation-free after setup",
+          "[format][params][rt-safety]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 11,
+        .name = "Drive",
+        .range = {0.0f, 1.0f, 0.25f, 0.0f},
+        .smoothing_ramp_seconds = 0.004f,
+    });
+    store.set_value(11, 0.25f);
+
+    pulp::state::ParameterEventQueue events;
+    REQUIRE(events.push({11, 0, 0.25f}));
+    REQUIRE(events.push({11, 16, 0.75f}));
+    REQUIRE(events.push({11, 32, 0.50f}));
+    events.sort();
+
+    std::array<pulp::state::ParamSnapshotEntry, 1> initial{{
+        {11, 0.25f},
+    }};
+
+    std::array<float, 64> in_samples{};
+    std::array<float, 64> out_samples{};
+    const float* in_channels[1] = {in_samples.data()};
+    float* out_channels[1] = {out_samples.data()};
+    pulp::audio::BufferView<const float> input(in_channels, 1, in_samples.size());
+    pulp::audio::BufferView<float> output(out_channels, 1, out_samples.size());
+
+    pulp::format::ControlRateParamSmoother smoother;
+    const auto* info = store.info(11);
+    REQUIRE(info != nullptr);
+    smoother.prepare(*info, 1000.0, 0.25f);
+    smoother.set_target(1.0f);
+
+    int calls = 0;
+    std::size_t allocation_count = 0;
+    std::size_t allocated_bytes = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        pulp::state::ParamCursor cursor(store, &events, initial);
+        pulp::format::for_each_subblock(
+            output, input, &events, cursor,
+            [&](pulp::audio::BufferView<float>& out,
+                const pulp::audio::BufferView<const float>&,
+                const pulp::state::ParamCursor& params) {
+                ++calls;
+                const auto value = params.value(11);
+                for (std::size_t i = 0; i < out.num_samples(); ++i) {
+                    out.channel_ptr(0)[i] = value * smoother.next();
+                }
+                smoother.skip(1);
+            });
+        smoother.reset(0.0f);
+        allocation_count = probe.allocation_count();
+        allocated_bytes = probe.allocated_bytes();
+    }
+
+    REQUIRE(calls == 3);
+    REQUIRE(allocation_count == 0);
+    REQUIRE(allocated_bytes == 0);
 }

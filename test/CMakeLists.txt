@@ -1254,7 +1254,9 @@ pulp_add_test_suite(pulp-test-processor-ara-hook LIBRARIES pulp::format)
 # latency / tail change notification (workstream 03 items 3.7, 3.8, 3.11).
 pulp_add_test_suite(pulp-test-processor-layout-latency LIBRARIES pulp::format)
 # Processor and descriptor default contracts
-pulp_add_test_suite(pulp-test-processor-defaults LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-processor-defaults
+    SOURCES test_processor_defaults.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::format)
 # Item 1.3 AudioPlayHead transport-extension helpers used by every
 # format adapter (VST3, AU v2 / v3, CLAP) to derive `ProcessContext::bar`
 # and the three change flags (tempo_changed / time_sig_changed /
