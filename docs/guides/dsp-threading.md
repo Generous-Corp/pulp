@@ -106,10 +106,14 @@ If you want the parameter change to take effect *within* a block
 (automation splits, smooth ramps), use the parameter-event helpers
 instead of polling atomics inside the loop:
 
-* `param_events()` exposes the host-delivered `ParameterEventQueue`
-  for the current block.
+* `param_events()` exposes the host-delivered sparse
+  `ParameterEventQueue` for the current block.
 * `ParameterEventQueue` is fixed-capacity; excess events are dropped,
   counted for the current block, and never trigger audio-thread allocation.
+* `format::EventBlock::audio_rate_modulations` carries dense
+  per-sample audio-rate parameter lanes for ProcessBlock-native runtimes.
+  These lanes are separate from `ParameterEventQueue`; do not expand a
+  dense lane into one event per sample.
 * `format::ParamCursor` advances parameter values at sample offsets and
   interpolates active `ramp_duration_sample_frames` events.
 * `format::for_each_subblock()` slices the audio block at parameter
@@ -124,7 +128,9 @@ new graph, offline-render, sampler, and generated-audio paths. It does
 not replace `Processor::process()` yet. It packages the existing
 `ProcessContext` with fixed-capacity `BusBufferSet`, non-owning
 `EventBlock`, caller-owned `BlockScratch`, explicit `ProcessMode`,
-render speed, and reset/bypass/tail/transport-jump flags.
+render speed, and reset/bypass/tail/transport-jump flags. `EventBlock`
+keeps sparse `ParameterEventQueue` automation and dense
+`AudioRateModulationView` lanes as separate borrowed views.
 
 The contract is deliberately non-owning: bus audio is borrowed from the
 host or renderer, event containers are owned by adapters, and scratch
@@ -173,8 +179,9 @@ publication/lifetime policy, audio-buffer routing, feedback delay storage, and
 active main output bus, allows output-only instrument blocks, publishes
 EventBlock sidecars for the duration of the call, restores any previous
 Processor sidecar pointers, and preserves the distinction between no EventBlock
-and an EventBlock with an empty parameter queue. It does not change the
-Processor vtable.
+and an EventBlock with an empty parameter queue. Dense audio-rate modulation
+lanes are not collapsed into legacy `Processor::param_events()`. It does not
+change the Processor vtable.
 
 `pulp::audio::rt_safety_contract.hpp` is the machine-checkable sampler/looper
 RT-safety label table. It classifies representative public DSP helpers as

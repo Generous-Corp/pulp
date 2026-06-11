@@ -226,16 +226,32 @@ struct EventDropCounters {
     std::uint32_t ump_packets = 0;
     std::uint32_t mpe_events = 0;
     std::uint32_t graph_events = 0;
+    std::uint32_t audio_rate_modulations = 0;
 
     bool any() const noexcept {
-        return parameter_events != 0 || midi_events != 0 || sysex_events != 0 ||
-               ump_packets != 0 || mpe_events != 0 || graph_events != 0;
+        return parameter_events != 0 || audio_rate_modulations != 0 ||
+               midi_events != 0 || sysex_events != 0 || ump_packets != 0 ||
+               mpe_events != 0 || graph_events != 0;
     }
 
     std::uint32_t total() const noexcept {
-        return parameter_events + midi_events + sysex_events + ump_packets +
-               mpe_events + graph_events;
+        return parameter_events + audio_rate_modulations + midi_events +
+               sysex_events + ump_packets + mpe_events + graph_events;
     }
+};
+
+/// Non-owning dense per-sample parameter-modulation lane.
+///
+/// Values are already in the destination parameter's plain value domain, one
+/// value per process frame. ProcessBlock-native runtimes can consume these
+/// without expanding audio-rate modulation into sparse ParameterEventQueue
+/// entries. The pointed-to sample storage is caller-owned.
+struct AudioRateModulationView {
+    std::uint32_t param_id = 0;
+    std::span<const float> values;
+
+    bool empty() const noexcept { return values.empty(); }
+    std::size_t size() const noexcept { return values.size(); }
 };
 
 /// Non-owning view of all sparse events visible to one process block.
@@ -255,6 +271,7 @@ struct EventBlock {
     const midi::MpeBuffer* mpe_input = nullptr;
     const midi::UmpBuffer* ump_input = nullptr;
     EventDropCounters drops;
+    std::span<const AudioRateModulationView> audio_rate_modulations;
 
     std::span<const state::ParameterEvent> parameters() const noexcept {
         return parameter_events ? parameter_events->events()
@@ -273,6 +290,10 @@ struct EventBlock {
         return midi_out ? midi_out->size() : 0;
     }
 
+    std::size_t audio_rate_modulation_count() const noexcept {
+        return audio_rate_modulations.size();
+    }
+
     std::size_t sysex_event_count() const noexcept {
         return midi_in ? midi_in->sysex_size() : 0;
     }
@@ -280,7 +301,8 @@ struct EventBlock {
     bool empty() const noexcept {
         return parameter_event_count() == 0 && midi_input_event_count() == 0 &&
                midi_output_event_count() == 0 && sysex_event_count() == 0 &&
-               mpe_input == nullptr && ump_input == nullptr && !drops.any();
+               mpe_input == nullptr && ump_input == nullptr &&
+               audio_rate_modulations.empty() && !drops.any();
     }
 };
 
@@ -307,9 +329,15 @@ struct ProcessBlock {
     bool has_scratch() const noexcept { return scratch != nullptr; }
 
     bool validate() const noexcept {
+        if (mode != ProcessMode::Realtime && mode != ProcessMode::Offline) return false;
         if (sample_rate <= 0.0 || !std::isfinite(sample_rate) || frame_count == 0) return false;
         if (render_speed <= 0.0 || !std::isfinite(render_speed)) return false;
         if (buses && !buses->validate_frame_count(frame_count)) return false;
+        if (events) {
+            for (const auto& lane : events->audio_rate_modulations) {
+                if (lane.values.size() != frame_count) return false;
+            }
+        }
         if (transport) {
             if (transport->num_samples != 0 &&
                 transport->num_samples != static_cast<int>(frame_count)) {

@@ -147,6 +147,13 @@ TEST_CASE("ProcessBlock event and bus hot views do not allocate",
     pulp::state::ParameterEventQueue parameter_events;
     REQUIRE(parameter_events.push({2, 21, 0.25f, 0}));
     REQUIRE(parameter_events.push({1, 3, 0.75f, 8}));
+    std::array<float, 64> dense_values{};
+    for (std::size_t i = 0; i < dense_values.size(); ++i) {
+        dense_values[i] = static_cast<float>(i) / static_cast<float>(dense_values.size());
+    }
+    std::array<pulp::format::AudioRateModulationView, 1> dense_lanes{{
+        {2, std::span<const float>(dense_values.data(), dense_values.size())},
+    }};
 
     pulp::midi::MidiBuffer midi_in;
     auto note = pulp::midi::MidiEvent::note_on(0, 60, 100);
@@ -167,6 +174,8 @@ TEST_CASE("ProcessBlock event and bus hot views do not allocate",
     events.midi_out = &midi_out;
     events.mpe_input = &mpe_input;
     events.ump_input = &ump_input;
+    events.audio_rate_modulations = std::span<const pulp::format::AudioRateModulationView>(
+        dense_lanes.data(), dense_lanes.size());
 
     parameter_events.sort();
     midi_in.sort();
@@ -176,6 +185,8 @@ TEST_CASE("ProcessBlock event and bus hot views do not allocate",
 
     bool block_valid = false;
     std::size_t parameter_count = 0;
+    std::size_t audio_rate_modulation_count = 0;
+    std::size_t dense_sample_count = 0;
     std::size_t midi_count = 0;
     std::size_t sysex_count = 0;
     bool events_empty = true;
@@ -190,6 +201,10 @@ TEST_CASE("ProcessBlock event and bus hot views do not allocate",
         block.events = &events;
         block_valid = block.validate();
         parameter_count = events.parameter_event_count();
+        audio_rate_modulation_count = events.audio_rate_modulation_count();
+        for (const auto& lane : events.audio_rate_modulations) {
+            dense_sample_count += lane.size();
+        }
         midi_count = events.midi_input_event_count();
         sysex_count = events.sysex_event_count();
         events_empty = events.empty();
@@ -199,6 +214,8 @@ TEST_CASE("ProcessBlock event and bus hot views do not allocate",
     require_no_alloc(allocations);
     REQUIRE(block_valid);
     REQUIRE(parameter_count == 2);
+    REQUIRE(audio_rate_modulation_count == 1);
+    REQUIRE(dense_sample_count == 64);
     REQUIRE(midi_count == 2);
     REQUIRE(sysex_count == 1);
     REQUIRE_FALSE(events_empty);

@@ -133,7 +133,7 @@ multiple modulation sources in its own processing layer.
 
 ## Sample-Accurate Automation
 
-Format adapters preserve host automation points in a per-block
+Format adapters preserve sparse host automation points in a per-block
 `ParameterEventQueue` and expose it during `Processor::process()`:
 
 ```cpp
@@ -184,6 +184,14 @@ events already queued, and records the drop count for that block via
 resets the overflow counters. Format adapters drop excess events instead of
 allocating or resizing on the audio thread; legacy block-end `StateStore`
 writes still reflect the host's latest value.
+
+Dense audio-rate modulation is a separate ProcessBlock-native contract:
+`format::EventBlock::audio_rate_modulations` holds borrowed
+`AudioRateModulationView` lanes with one plain-domain value per frame. Do not
+encode those lanes as one `ParameterEventQueue` entry per sample. The legacy
+`process_processor_block()` adapter leaves dense lanes out of
+`Processor::param_events()` until a processor opts into a ProcessBlock-native
+path.
 
 ## Binding (UI Integration)
 

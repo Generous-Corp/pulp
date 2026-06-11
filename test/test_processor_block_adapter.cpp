@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 
 namespace {
@@ -213,6 +214,32 @@ TEST_CASE("process_processor_block preserves EventBlock parameter fallback seman
     REQUIRE(buses.add_output("main", output.view()));
 
     pulp::format::EventBlock events;
+    auto block = block_with_buses(buses);
+    block.events = &events;
+
+    RecordingProcessor processor;
+    pulp::format::ProcessorBlockAdapterScratch scratch;
+    REQUIRE(pulp::format::process_processor_block(processor, block, scratch));
+    REQUIRE(processor.observed_params == &scratch.empty_parameter_events);
+    REQUIRE(processor.observed_params->empty());
+}
+
+TEST_CASE("process_processor_block keeps dense modulation out of legacy param events",
+          "[format][process-block][processor-adapter]") {
+    pulp::audio::Buffer<float> output(2, 64);
+    pulp::format::BusBufferSet buses;
+    REQUIRE(buses.add_output("main", output.view()));
+
+    std::array<float, 64> dense_values{};
+    dense_values[0] = 0.25f;
+    dense_values[63] = 0.75f;
+    std::array<pulp::format::AudioRateModulationView, 1> dense_lanes{{
+        {99, std::span<const float>(dense_values.data(), dense_values.size())},
+    }};
+
+    pulp::format::EventBlock events;
+    events.audio_rate_modulations = std::span<const pulp::format::AudioRateModulationView>(
+        dense_lanes.data(), dense_lanes.size());
     auto block = block_with_buses(buses);
     block.events = &events;
 
