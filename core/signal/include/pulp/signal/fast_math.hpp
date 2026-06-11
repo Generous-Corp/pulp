@@ -12,6 +12,9 @@ namespace pulp::signal {
 
 /// Fast approximations of common math functions optimized for audio DSP.
 ///
+/// RT contract: all functions are stateless scalar math helpers and allocate no
+/// memory.
+///
 /// These trade precision for speed — typically accurate to 3-5 decimal
 /// places, which is more than sufficient for audio processing where
 /// the output is ultimately quantized to 16/24/32-bit samples.

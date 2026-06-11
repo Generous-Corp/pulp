@@ -9,7 +9,10 @@
 
 namespace pulp::signal {
 
-/// NxN matrix stored in row-major order
+/// NxN matrix stored in row-major order.
+///
+/// RT contract: fixed-size matrix construction, element access, arithmetic,
+/// transpose, determinants, transforms, and comparison allocate no memory.
 template<int N>
 struct Matrix {
     std::array<float, N * N> data{};

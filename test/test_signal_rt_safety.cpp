@@ -4,8 +4,13 @@
 
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/dc_blocker.hpp>
+#include <pulp/signal/denormal.hpp>
+#include <pulp/signal/fast_math.hpp>
+#include <pulp/signal/interpolator.hpp>
+#include <pulp/signal/matrix.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/special_functions.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/wavetable.hpp>
 
@@ -308,6 +313,72 @@ TEST_CASE("Dynamics and filter signal helpers are allocation-free after configur
         ladder.reset();
         crossover.reset();
         tpt.reset();
+    });
+}
+
+TEST_CASE("Stateless math signal helpers are allocation-free",
+          "[signal][rt-safety]") {
+    require_allocates_no_memory([&] {
+        std::array<float, 16> samples {};
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            const float x = static_cast<float>(i) * 0.125f - 1.0f;
+            float value = FastMath::tanh(x);
+            value += FastMath::sin(x) + FastMath::cos(x);
+            value += FastMath::exp2(x) + FastMath::log2(static_cast<float>(i + 1));
+            value += FastMath::pow(static_cast<float>(i + 1) * 0.25f, 0.75f);
+            value += FastMath::db_to_gain(-6.0f) + FastMath::gain_to_db(0.5f);
+            value += FastMath::rcp(static_cast<float>(i + 1));
+            value += FastMath::rsqrt(static_cast<float>(i + 1));
+            value += FastMath::clamp_unit(x) + FastMath::soft_clip(x);
+
+            value += Interpolator::linear(0.25f, x, x + 1.0f);
+            value += Interpolator::hermite(0.5f, x - 1.0f, x, x + 1.0f, x + 2.0f);
+            value += Interpolator::lagrange(0.5f, x - 1.0f, x, x + 1.0f, x + 2.0f);
+            value += Interpolator::sinc6(0.25f, x - 2.0f, x - 1.0f, x, x + 1.0f, x + 2.0f, x + 3.0f);
+
+            value += sinc(x) + bessel_i0(std::abs(x));
+            value += gamma_fn(static_cast<float>(i + 1) * 0.25f + 1.0f);
+            value += erf_fn(x) + erfc_fn(x);
+            value += lanczos(x, 3);
+            value += db_to_linear(-12.0f) + linear_to_db(0.25f);
+            value += freq_to_midi(440.0f) + midi_to_freq(69.0f);
+            value += static_cast<float>(special::elliptic_K(0.25));
+            value += static_cast<float>(special::elliptic_E(0.25));
+            value += static_cast<float>(special::jacobi_nome(0.25));
+            double sn = 0.0;
+            double cn = 0.0;
+            double dn = 0.0;
+            special::jacobi_sncndn(0.2, 0.25, &sn, &cn, &dn);
+            value += static_cast<float>(sn + cn + dn);
+
+            samples[i] = snap_to_zero(value);
+        }
+
+        snap_to_zero(samples.data(), static_cast<int>(samples.size()));
+        (void)snap_threshold<float>();
+        (void)is_denormal(std::numeric_limits<float>::denorm_min());
+
+        Matrix4 transform_matrix =
+            translation_matrix(1.0f, 2.0f, 3.0f)
+            * rotation_z(0.25f)
+            * rotation_y(0.5f)
+            * rotation_x(0.75f)
+            * scale_matrix(2.0f, 3.0f, 4.0f);
+        transform_matrix = transform_matrix + Matrix4::zero();
+        transform_matrix = transform_matrix.transposed().transposed();
+        const auto scaled = transform_matrix * 0.5f;
+        const Vec3 transformed = transform(scaled, Vec3{1.0f, 2.0f, 3.0f});
+        (void)transformed;
+        (void)(scaled == scaled);
+
+        Matrix2 m2 = Matrix2::identity();
+        m2(0, 1) = 2.0f;
+        (void)determinant(m2);
+
+        Matrix3 m3 = Matrix3::identity();
+        m3(0, 1) = 2.0f;
+        m3(1, 2) = -1.0f;
+        (void)determinant(m3);
     });
 }
 

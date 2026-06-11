@@ -34,6 +34,10 @@ inline constexpr T snap_threshold() { return T(1e-15); }
 
 /// Returns 0 if |x| < snap_threshold, else x. Branchless on most compilers
 /// (compiles to a `cmpltps` + `andps` pair on x86-SSE).
+///
+/// RT contract: `snap_threshold()`, scalar/buffer `snap_to_zero()`, and
+/// `is_denormal()` are allocation-free. `is_denormal()` is intended for
+/// diagnostics, not audio hot paths.
 template<typename T>
 inline T snap_to_zero(T x) {
 #if PULP_DSP_ENABLE_SNAP_TO_ZERO
