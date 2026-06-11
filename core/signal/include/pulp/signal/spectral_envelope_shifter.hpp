@@ -50,6 +50,10 @@ class SpectralEnvelopeShifter {
 public:
     SpectralEnvelopeShifter() = default;
 
+    /// RT contract: prepare() allocates FFT and scratch/envelope storage and is
+    /// not audio-thread safe. After prepare(), num_bins(), order(), and
+    /// process_group() are allocation-free for the prepared FFT size; the frame
+    /// pointers must reference exactly num_bins() bins.
     void prepare(const SpectralEnvelopeShifterConfig& config) {
         assert(config.fft_size >= 256 && (config.fft_size & (config.fft_size - 1)) == 0);
         config_ = config;

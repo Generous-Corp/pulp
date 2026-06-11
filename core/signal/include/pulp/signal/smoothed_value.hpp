@@ -25,6 +25,10 @@ public:
     SmoothedValue() = default;
     explicit SmoothedValue(T initial) : current_(initial), target_(initial) {}
 
+    /// RT contract: this helper stores only scalar state and allocates no
+    /// memory. set_ramp_time(), set_target(), set_immediate(), next(), skip(),
+    /// and accessors are audio-thread safe when externally synchronized like
+    /// any other mutable control object.
     // Set the smoothing time in seconds and sample rate
     void set_ramp_time(T seconds, T sample_rate) {
         ramp_samples_ = static_cast<int>(seconds * sample_rate);

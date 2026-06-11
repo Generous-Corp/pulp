@@ -23,11 +23,13 @@
 #include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/pitched_feedback_delay.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
+#include <pulp/signal/realtime_pitch_time_processor.hpp>
 #include <pulp/signal/resampler.hpp>
 #include <pulp/signal/simd_buffer.hpp>
 #include <pulp/signal/signal.hpp>
 #include <pulp/signal/sinc_resampler.hpp>
 #include <pulp/signal/spectrogram.hpp>
+#include <pulp/signal/spectral_envelope_shifter.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/stn_decomposer.hpp>
@@ -645,6 +647,86 @@ TEST_CASE("Prepared spectral analysis helpers are allocation-free while processi
             (void)transient.analyze(transient_frames, 2, 129);
         }
         transient.reset();
+    });
+}
+
+TEST_CASE("Prepared spectral envelope shifter is allocation-free while processing",
+          "[signal][spectral][rt-safety]") {
+    SpectralEnvelopeShifter shifter;
+    SpectralEnvelopeShifterConfig config;
+    config.fft_size = 256;
+    config.true_envelope_iterations = 2;
+    shifter.prepare(config);
+
+    std::array<std::complex<float>, 129> left {};
+    std::array<std::complex<float>, 129> right {};
+    std::complex<float>* frames[] = {left.data(), right.data()};
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        left[i] = {1.0f + static_cast<float>(i % 9) * 0.02f, 0.0f};
+        right[i] = {0.8f + static_cast<float>(i % 7) * 0.02f, 0.0f};
+    }
+
+    require_allocates_no_memory([&] {
+        shifter.process_group(frames, 2, shifter.num_bins(), 1.15f);
+        (void)shifter.num_bins();
+        (void)shifter.order();
+    });
+}
+
+TEST_CASE("Prepared realtime pitch/time processor is allocation-free while processing",
+          "[signal][spectral][rt-safety]") {
+    RealtimePitchTimeConfig pitch_config;
+    pitch_config.mode = PitchTimeMode::realtime_pitch;
+    pitch_config.quality = PitchTimeQuality::low_latency;
+    pitch_config.channels = 2;
+    pitch_config.max_block = 256;
+    pitch_config.max_pitch_semitones = 12.0f;
+    pitch_config.formant_mode = FormantMode::preserve;
+    pitch_config.noise_morphing = true;
+    pitch_config.sinc_resampling = true;
+
+    RealtimePitchTimeProcessor pitch;
+    pitch.prepare(48000.0, pitch_config);
+    pitch.set_pitch_semitones(3.0f);
+    pitch.set_formant_semitones(-2.0f);
+    pitch.set_frozen(false);
+
+    std::array<float, 256> in_l {};
+    std::array<float, 256> in_r {};
+    std::array<float, 256> out_l {};
+    std::array<float, 256> out_r {};
+    for (std::size_t i = 0; i < in_l.size(); ++i) {
+        in_l[i] = std::sin(static_cast<float>(i) * 0.025f);
+        in_r[i] = std::cos(static_cast<float>(i) * 0.031f);
+    }
+    const float* inputs[] = {in_l.data(), in_r.data()};
+    float* outputs[] = {out_l.data(), out_r.data()};
+
+    RealtimePitchTimeConfig stretch_config = pitch_config;
+    stretch_config.mode = PitchTimeMode::time_stretch;
+    stretch_config.max_time_ratio = 1.5f;
+    stretch_config.noise_morphing = false;
+    stretch_config.sinc_resampling = false;
+
+    RealtimePitchTimeProcessor stretch;
+    stretch.prepare(48000.0, stretch_config);
+    stretch.set_time_ratio(1.25f);
+    stretch.set_formant_mode(FormantMode::follow);
+
+    require_allocates_no_memory([&] {
+        for (int block = 0; block < 10; ++block)
+            pitch.process(inputs, outputs, static_cast<int>(in_l.size()));
+        (void)pitch.latency_samples();
+        (void)pitch.fft_size();
+        (void)pitch.is_frozen();
+        pitch.reset();
+
+        for (int block = 0; block < 6; ++block)
+            stretch.feed(inputs, static_cast<int>(in_l.size()));
+        const int available = stretch.available_stretched();
+        stretch.read_stretched(outputs, std::min(available, static_cast<int>(out_l.size())));
+        (void)stretch.achieved_time_ratio();
+        stretch.reset();
     });
 }
 
