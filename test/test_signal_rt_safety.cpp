@@ -4,12 +4,14 @@
 
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/bias.hpp>
+#include <pulp/signal/convolver_non_uniform.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/fft_backend.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
@@ -395,6 +397,43 @@ TEST_CASE("FFT and simple convolver hot paths are allocation-free after setup",
             (void)convolver.process(sample);
         convolver.process(convolver_input.data(), convolver_output.data(), static_cast<int>(convolver_input.size()));
         convolver.reset();
+    });
+}
+
+TEST_CASE("Multi-backend FFT and non-uniform convolver hot paths are allocation-free after setup",
+          "[signal][fft][rt-safety]") {
+    MultiBackendFft multi_fft(16, FftBackend::kissfft);
+    std::array<std::complex<float>, 16> fft_samples {};
+    for (std::size_t i = 0; i < fft_samples.size(); ++i)
+        fft_samples[i] = {std::sin(static_cast<float>(i) * 0.25f),
+                          std::cos(static_cast<float>(i) * 0.125f)};
+
+    NonUniformPartitionedConvolver convolver;
+    std::array<float, 32> impulse {};
+    impulse[0] = 0.5f;
+    impulse[1] = 0.25f;
+    impulse[8] = 0.125f;
+    impulse[16] = 0.0625f;
+    convolver.load_ir(impulse.data(), impulse.size(), 8, 2);
+    std::array<float, 8> input {};
+    std::array<float, 8> output {};
+    input[0] = 1.0f;
+
+    require_allocates_no_memory([&] {
+        multi_fft.forward(fft_samples.data());
+        multi_fft.inverse(fft_samples.data());
+        (void)multi_fft.size();
+        (void)multi_fft.backend();
+
+        convolver.process(input.data(), output.data(), input.size());
+        convolver.process(input.data(), output.data(), input.size());
+        convolver.reset();
+        (void)convolver.latency();
+        (void)convolver.block_size();
+        (void)convolver.head_samples();
+        (void)convolver.tail_block();
+        (void)convolver.tail_multiplier();
+        (void)convolver.is_loaded();
     });
 }
 

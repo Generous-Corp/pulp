@@ -53,6 +53,11 @@ namespace pulp::signal {
 /// multiplier K (default 4). The "head" handles the first
 /// `head_partitions × B` IR samples at block size B; the "tail"
 /// handles the remainder at block size K·B.
+///
+/// RT contract: load_ir() and invalidating IR swaps allocate/rebuild FFT
+/// storage and are not audio-thread safe. process(), reset(), latency(), and
+/// accessors are allocation-free after a valid IR is loaded and callers pass
+/// exactly block_size() samples.
 class NonUniformPartitionedConvolver {
 public:
     NonUniformPartitionedConvolver() = default;

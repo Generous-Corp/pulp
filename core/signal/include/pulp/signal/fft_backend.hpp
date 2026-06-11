@@ -59,6 +59,11 @@ FftBackend resolve_fft_backend(FftBackend hint = FftBackend::auto_) noexcept;
 
 /// Multi-backend FFT. Pinned at construction to a single backend so the
 /// audio thread never has to branch on backend selection during process().
+///
+/// RT contract: construction/destruction and backend availability probes may
+/// load libraries, allocate plans, or throw, so run them off the audio thread.
+/// forward(), inverse(), size(), and backend() are allocation-free after
+/// construction when callers provide a valid buffer.
 class MultiBackendFft {
 public:
     /// Construct for a given power-of-2 size. backend=auto_ picks via
