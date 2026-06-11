@@ -3156,28 +3156,26 @@ def process_job(job: dict, config: dict) -> dict:
 
 
 def save_result(result: dict) -> Path:
-    ensure_state_dirs()
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    branch_slug = result["branch"].replace("/", "-")
-    path = results_dir() / f"{ts}-{result['job_id']}-{branch_slug}.json"
-    path.write_text(json.dumps(result, indent=2) + "\n")
-    update_evidence_index(result, path)
-    return path
+    return _execution.save_result(
+        result,
+        ensure_state_dirs_fn=ensure_state_dirs,
+        results_dir_fn=results_dir,
+        update_evidence_index_fn=update_evidence_index,
+        now_fn=datetime.now,
+    )
 
 
 def print_result(result: dict, result_path: Path | None = None) -> None:
-    result = normalize_result(result)
-    print(f"\n--- Result: [{result['job_id']}] {result['branch']} ---")
-    validation_line = result_validation_line(result)
-    if validation_line:
-        print(validation_line)
-    print(result_execution_line(result))
-    for line in result_target_lines(result):
-        print(line)
-    print(result_overall_line(result))
-    if result_path:
-        print(f"  Saved: {result_path}")
-    print()
+    return _execution.print_result(
+        result,
+        result_path,
+        normalize_result_fn=normalize_result,
+        result_validation_line_fn=result_validation_line,
+        result_execution_line_fn=result_execution_line,
+        result_target_lines_fn=result_target_lines,
+        result_overall_line_fn=result_overall_line,
+        print_fn=print,
+    )
 
 
 def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
