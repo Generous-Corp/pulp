@@ -710,6 +710,17 @@ TEST_CASE("MCP audio probe JSON validates frames before shelling out",
     REQUIRE(option_target.find("Unknown tool") == std::string::npos);
 }
 
+TEST_CASE("MCP audio probe JSON reports missing project roots",
+          "[mcp][tools][audio][coverage]") {
+    TempDir temp;
+    ScopedCurrentPath cwd(temp.path);
+
+    auto response = handle_request(tool_call("54", "pulp_audio_probe_json"));
+    require_contains(response, R"JSON("id":54)JSON");
+    require_contains(response, "Error: not in a Pulp project");
+    REQUIRE(response.find("Unknown tool") == std::string::npos);
+}
+
 TEST_CASE("MCP build and test handlers quote project paths and filters",
           "[mcp][tools][shell][coverage]") {
 #if defined(_WIN32)
@@ -1331,6 +1342,39 @@ TEST_CASE("MCP audio probe JSON rejects malformed child output",
     require_contains(response, "Error: failed to parse audio probe JSON");
     REQUIRE(response.find(R"JSON("structuredContent")JSON") == std::string::npos);
     REQUIRE(response.find(R"JSON("code":-32601)JSON") == std::string::npos);
+#endif
+}
+
+TEST_CASE("MCP audio probe JSON reports child runs that write no JSON",
+          "[mcp][tools][audio][coverage]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::filesystem::create_directories(project.path / "build");
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+
+    const auto cli = project.path / "build" / "tools" / "cli" / "pulp-cpp";
+    std::filesystem::create_directories(cli.parent_path());
+    {
+        std::ofstream script(cli);
+        script << "#!/bin/sh\n"
+               << "printf 'probe script ran without output file\\n'\n";
+    }
+    std::filesystem::permissions(
+        cli,
+        std::filesystem::perms::owner_exec |
+            std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+
+    ScopedCurrentPath cwd(project.path);
+    auto response = handle_request(tool_call("55", "pulp_audio_probe_json"));
+    require_contains(response, R"JSON("id":55)JSON");
+    require_contains(response, "Error: pulp run did not write audio probe JSON");
+    require_contains(response, "probe script ran without output file");
+    REQUIRE(response.find(R"JSON("structuredContent")JSON") == std::string::npos);
 #endif
 }
 

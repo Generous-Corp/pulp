@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 
@@ -1133,6 +1134,28 @@ TEST_CASE("Standalone frame delay env accepts only positive plain integers",
     REQUIRE(frames == 99);
 }
 
+TEST_CASE("Standalone delayed action fires exactly once after the configured delay",
+          "[standalone][chrome][audio-inspector]") {
+    DelayedAction action;
+    action.delay = 2;
+    int actions = 0;
+    int closes = 0;
+    action.action_fn = [&] { ++actions; };
+    action.close_fn = [&] { ++closes; };
+
+    action();
+    REQUIRE(actions == 0);
+    REQUIRE(closes == 0);
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+}
+
 #if PULP_ENABLE_AUDIO_PROBES
 TEST_CASE("Standalone audio probe JSON helpers write normalized snapshot files",
           "[standalone][chrome][audio-inspector]") {
@@ -1179,6 +1202,16 @@ TEST_CASE("Standalone audio probe JSON helpers write normalized snapshot files",
     std::filesystem::remove(out_path);
 
     REQUIRE_FALSE(write_audio_probe_json_snapshot("", snap));
+    REQUIRE_FALSE(write_audio_probe_json_snapshot(
+        std::filesystem::temp_directory_path().string(), snap));
+
+    pulp::audio::AudioProbe probe;
+    probe.prepare(1, 8, 44100.0, pulp::audio::AudioProbeStage::kMeterBridge);
+    const auto wrapper_path = std::filesystem::temp_directory_path() /
+                              "pulp-audio-probe-wrapper.json";
+    std::filesystem::remove(wrapper_path);
+    REQUIRE(write_audio_probe_json_file(wrapper_path.string(), probe));
+    std::filesystem::remove(wrapper_path);
 }
 
 TEST_CASE("Standalone PULP_AUDIO_PROBE_JSON env arms a headless probe dump",
