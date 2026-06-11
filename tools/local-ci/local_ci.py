@@ -143,6 +143,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 import cleanup as _cleanup  # noqa: E402
+import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
@@ -3262,51 +3263,32 @@ def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
 
 
 def print_local_ci_state_footprint(*, indent: str = "") -> None:
-    for line in state_footprint_lines(local_ci_state_footprint(), indent=indent):
-        print(line)
+    return _cleanup_cli.print_local_ci_state_footprint(
+        local_ci_state_footprint_fn=local_ci_state_footprint,
+        state_footprint_lines_fn=state_footprint_lines,
+        indent=indent,
+    )
 
 
 def print_local_ci_cleanup_plan(plan: dict, *, dry_run: bool) -> None:
-    for line in cleanup_plan_lines(plan, dry_run=dry_run):
-        print(line)
+    return _cleanup_cli.print_local_ci_cleanup_plan(
+        plan,
+        dry_run=dry_run,
+        cleanup_plan_lines_fn=cleanup_plan_lines,
+    )
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
-    queue = load_queue()
-    running = [job for job in queue if job.get("status") == "running"]
-    if args.apply and running:
-        print("Error: cleanup --apply is blocked while local CI jobs are running.")
-        return 1
-
-    plan = collect_local_ci_cleanup_plan(
-        queue,
-        keep_results=args.keep_results,
-        keep_logs=args.keep_logs,
-        keep_bundles=args.keep_bundles,
-        include_prepared=args.include_prepared,
+    return _cleanup_cli.cmd_cleanup(
+        args,
+        load_queue_fn=load_queue,
+        collect_cleanup_plan_fn=collect_local_ci_cleanup_plan,
+        apply_cleanup_plan_fn=apply_local_ci_cleanup_plan,
+        print_cleanup_plan_fn=print_local_ci_cleanup_plan,
+        print_state_footprint_fn=print_local_ci_state_footprint,
+        format_size_fn=format_size_bytes,
+        describe_path_fn=describe_path_for_cleanup,
     )
-    print_local_ci_cleanup_plan(plan, dry_run=not args.apply)
-
-    if not args.apply:
-        print_local_ci_state_footprint(indent="  ")
-        if args.include_prepared:
-            print("  note: prepared cleanup removes cached build/install state and later reruns will rebuild it.")
-        return 0
-
-    result = apply_local_ci_cleanup_plan(plan)
-    print(
-        f"\n  removed: {len(result.get('removed', []))} path(s), "
-        f"{format_size_bytes(result.get('removed_bytes', 0))}"
-    )
-    if result.get("failed"):
-        print(f"  failed: {len(result['failed'])} path(s)")
-        for failure in result["failed"][:10]:
-            print(f"    {describe_path_for_cleanup(Path(failure['path']))}: {failure['error']}")
-        return 1
-    print_local_ci_state_footprint(indent="  ")
-    if args.include_prepared:
-        print("  note: prepared cleanup removes cached build/install state and later reruns will rebuild it.")
-    return 0
 
 
 def resolve_submission_options(
