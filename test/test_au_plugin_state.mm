@@ -12,9 +12,11 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 #import "../core/format/src/au_audio_unit.h"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -385,6 +387,108 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
         REQUIRE([unit pulpLastParameterEventSampleOffsetAtIndex:1] == 5);
         REQUIRE([unit pulpLastParameterEventRampDurationAtIndex:1] == 2);
         REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:1], WithinAbs(-12.0f, 1e-6f));
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 render events drop past realtime parameter capacity without growing",
+          "[au][auv3][params][realtime][capacity]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        processor->state().set_value(1, 0.0f);
+
+        constexpr std::size_t kCapacity =
+            pulp::state::ParameterEventQueue::kCapacity;
+        constexpr UInt32 kFrames = static_cast<UInt32>(kCapacity + 1);
+        unit.maximumFramesToRender = kFrames;
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        std::array<float, kFrames> left{};
+        std::array<float, kFrames> right{};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left.data();
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right.data();
+
+        std::array<AURenderEvent, kCapacity + 1> events{};
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            auto& event = events[i];
+            event.parameter.eventSampleTime = static_cast<AUEventSampleTime>(200 + i);
+            event.parameter.eventType = AURenderEventParameter;
+            event.parameter.rampDurationSampleFrames = 0;
+            event.parameter.parameterAddress = 1;
+            event.parameter.value = -30.0f;
+            event.head.next = (i + 1 < events.size()) ? &events[i + 1] : nullptr;
+        }
+        events[0].parameter.value = -6.0f;
+        events[kCapacity - 1].parameter.value = -18.0f;
+        events[kCapacity].parameter.value = 24.0f;
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+        timestamp.mSampleTime = 200;
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        auto status = block(&flags,
+                            &timestamp,
+                            kFrames,
+                            0,
+                            &output.list,
+                            &events[0],
+                            nil);
+        REQUIRE(status == noErr);
+
+        REQUIRE(processor->process_count == 1);
+        REQUIRE(processor->had_param_events);
+        REQUIRE(processor->last_param_events.size() == kCapacity);
+        REQUIRE(processor->last_param_events.front().sample_offset == 0);
+        REQUIRE_THAT(processor->last_param_events.front().value, WithinAbs(-6.0f, 1e-6f));
+        REQUIRE(processor->last_param_events.back().sample_offset ==
+                static_cast<int32_t>(kCapacity - 1));
+        REQUIRE_THAT(processor->last_param_events.back().value, WithinAbs(-18.0f, 1e-6f));
+        REQUIRE_THAT(processor->gain_seen_in_process, WithinAbs(24.0f, 1e-6f));
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(24.0f, 1e-6f));
+
+        REQUIRE([unit pulpLastParameterEventCount] == kCapacity);
+        REQUIRE([unit pulpLastParameterEventCapacity] == kCapacity);
+        REQUIRE([unit pulpLastParameterEventsOverflowed] == YES);
+        REQUIRE([unit pulpLastParameterEventDropCount] == 1);
+        REQUIRE([unit pulpLastParameterEventSampleOffsetAtIndex:0] == 0);
+        REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:0], WithinAbs(-6.0f, 1e-6f));
+        REQUIRE([unit pulpLastParameterEventSampleOffsetAtIndex:kCapacity - 1] ==
+                static_cast<int32_t>(kCapacity - 1));
+        REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:kCapacity - 1],
+                     WithinAbs(-18.0f, 1e-6f));
 
         [unit deallocateRenderResources];
         [unit release];

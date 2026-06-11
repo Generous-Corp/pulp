@@ -43,6 +43,9 @@ class StateStore;
 // assert ramp-event payload survives the AUParameterTree → ParameterEventQueue
 // translation in `au_adapter.mm`.
 - (NSUInteger)pulpLastParameterEventCount;
+- (NSUInteger)pulpLastParameterEventCapacity;
+- (BOOL)pulpLastParameterEventsOverflowed;
+- (uint32_t)pulpLastParameterEventDropCount;
 - (uint32_t)pulpLastParameterEventParamIDAtIndex:(NSUInteger)index;
 - (int32_t)pulpLastParameterEventSampleOffsetAtIndex:(NSUInteger)index;
 - (int32_t)pulpLastParameterEventRampDurationAtIndex:(NSUInteger)index;

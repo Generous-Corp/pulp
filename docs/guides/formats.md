@@ -255,6 +255,12 @@ Instruments have zero audio inputs and one audio output. MIDI is received via `H
 
 **Host to plugin (instruments):** `Render()` reads parameters via `Globals()->GetParameterRT()`.
 
+**Parameter event model:** AU v2 exposes current parameter values through the
+AU parameter store rather than a render-event list. The effect adapter attaches
+an empty `ParameterEventQueue` before `Processor::process()` so plugins see the
+same non-null queue contract as other adapters, but AU v2 parameter changes are
+block-rate `StateStore` values today.
+
 **Plugin to host:** Parameter output changes are not yet emitted back to the AU host. Initial defaults are set via `Globals()->SetParameter()` during `Initialize()`.
 
 **Gesture callbacks (effects):** The adapter wires `StateStore` gesture callbacks to `AUEventListenerNotify()` with `kAudioUnitEvent_BeginParameterChangeGesture` and `kAudioUnitEvent_EndParameterChangeGesture` event types.
@@ -348,6 +354,15 @@ AU v3 mirrors the AU v2 state contract through `AUAudioUnit.fullState`:
 - **Load:** `setFullState:` reads `"pulpState"` and restores both layers.
   Older blobs that contain only raw `StateStore` data still load and call
   `deserialize_plugin_state()` with empty bytes.
+
+### Parameter Events
+
+AU v3 receives sample-accurate `AURenderEventParameter` and
+`AURenderEventParameterRamp` events in the render event list. The adapter writes
+each event into the realtime `ParameterEventQueue` and also updates
+`StateStore` with the latest value. The queue is fixed-capacity; events beyond
+capacity are dropped from the sparse queue and counted as overflow, while the
+latest value still reaches `StateStore` for block-rate reads.
 
 ---
 
