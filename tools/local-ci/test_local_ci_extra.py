@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import io
 import json
 import os
@@ -17,16 +17,14 @@ from contextlib import nullcontext, redirect_stdout
 from datetime import datetime, timezone
 from unittest import mock
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = pathlib.Path(__file__).with_name("local_ci.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci_extra", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH, module_name="pulp_local_ci_extra", add_module_dir=True)
 
 
 class LocalCiPureHelperTests(unittest.TestCase):
