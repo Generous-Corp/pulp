@@ -25,6 +25,7 @@ store the filled-in script and `.daw-bench.json` manifest under
 python3 tools/scripts/check_daw_bench_evidence.py \
     docs/validation/daw-bench/results/YYYY-MM-DD \
     --require-any
+python3 tools/scripts/check_host_matrix_evidence.py
 python3 tools/scripts/summarize_daw_bench_results.py \
     docs/validation/daw-bench/results \
     --require-any
