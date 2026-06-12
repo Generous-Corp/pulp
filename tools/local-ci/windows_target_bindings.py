@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-
-def _binding(bindings: dict, name: str):
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def windows_required_remote_tools(bindings: dict) -> dict:

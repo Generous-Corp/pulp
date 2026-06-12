@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def format_size_bytes(bindings: Mapping[str, Any], value: int | float | None) -> str:

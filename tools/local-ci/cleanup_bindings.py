@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def result_file_job_id(bindings: Mapping[str, Any], path: Any) -> str | None:

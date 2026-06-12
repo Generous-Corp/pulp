@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def run_windows_session_agent_action(

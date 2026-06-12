@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def normalize_git_remote_for_http(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:

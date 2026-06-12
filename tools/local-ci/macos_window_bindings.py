@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
-
-def _binding(bindings: dict, name: str):
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def detect_macos_app_bundle(bindings: dict, command: str | None) -> Path | None:

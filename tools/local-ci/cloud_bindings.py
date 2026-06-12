@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from functools import update_wrapper
 from typing import Any
 
+from binding_utils import binding as _binding
+
 
 CLOUD_HELPER_EXPORTS = (
     "billing_note_text",
@@ -71,10 +73,6 @@ CLOUD_HELPER_EXPORTS = (
     "summarize_runner_selector",
     "update_cloud_record_from_run",
 )
-
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
 
 
 def cmd_cloud_workflows(bindings: Mapping[str, Any], args: Any) -> int:

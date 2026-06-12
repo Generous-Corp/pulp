@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def supersede_job_unlocked(bindings: Mapping[str, Any], job: dict, superseded_by: str, reason: str) -> None:

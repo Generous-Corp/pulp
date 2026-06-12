@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-def _binding(bindings: dict, name: str):
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def bundle_ref_name(bindings: dict, job_id: str) -> str:

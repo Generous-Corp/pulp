@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def tail_lines(bindings: Mapping[str, Any], path: Path, limit: int = 80) -> list[str]:

@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def resolve_submission_options(bindings: Mapping[str, Any], args: Any, command: str) -> tuple[dict, str, str, list[str], str, str, dict]:

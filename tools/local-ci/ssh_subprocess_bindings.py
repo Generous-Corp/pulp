@@ -6,9 +6,7 @@ from collections.abc import Mapping
 import subprocess
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def is_transient_ssh_failure_detail(bindings: Mapping[str, Any], detail: str) -> bool:

@@ -7,9 +7,7 @@ import builtins
 from pathlib import Path
 from typing import Any
 
-
-def _binding(bindings: Mapping[str, Any], name: str) -> Any:
-    return bindings[name]
+from binding_utils import binding as _binding
 
 
 def _print_binding(bindings: Mapping[str, Any]) -> Any:
