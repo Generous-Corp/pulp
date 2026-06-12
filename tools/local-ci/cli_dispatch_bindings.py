@@ -6,6 +6,14 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+CLI_DISPATCH_EXPORTS = (
+    "cmd_desktop_config",
+    "cmd_desktop",
+    "dispatch_main_command",
+)
 
 
 def cmd_desktop_config(bindings: Mapping[str, Any], args: Any) -> int:
@@ -70,3 +78,7 @@ def dispatch_main_command(bindings: Mapping[str, Any], args: Any, print_help: Ca
         },
         print_help=print_help,
     )
+
+
+def install_cli_dispatch_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLI_DISPATCH_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

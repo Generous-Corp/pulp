@@ -133,6 +133,17 @@ class CliDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["main_kwargs"]["cloud_commands"]["run"], bindings["cmd_cloud_run"])
         self.assertIs(captured["main_kwargs"]["cloud_namespace_commands"]["doctor"], bindings["cmd_cloud_namespace_doctor"])
 
+    def test_install_cli_dispatch_helpers_wires_named_exports(self):
+        bindings, captured = self._bindings()
+        args = object()
+
+        self.mod.install_cli_dispatch_helpers(bindings, ("cmd_desktop", "dispatch_main_command"))
+
+        self.assertEqual(bindings["cmd_desktop"](args), 22)
+        self.assertEqual(bindings["dispatch_main_command"](args, lambda: None), 33)
+        self.assertIs(captured["desktop_args"], args)
+        self.assertIs(captured["main_args"], args)
+
 
 if __name__ == "__main__":
     unittest.main()

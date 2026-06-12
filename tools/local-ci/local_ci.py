@@ -32,7 +32,6 @@ Queueing model:
 
 from __future__ import annotations
 
-import argparse
 from collections import deque
 from collections.abc import Callable
 import fcntl
@@ -428,10 +427,6 @@ def windows_validation_script(
     )
 
 
-def validate_ci_branch_name(branch: str) -> str:
-    return _queue_bindings.validate_ci_branch_name(globals(), branch)
-
-
 def run_windows_ssh_validation(
     target_name: str,
     host: str,
@@ -490,10 +485,6 @@ def print_result(result: dict, result_path: Path | None = None) -> None:
     return _execution_bindings.print_result(globals(), result, result_path)
 
 
-def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
-    return _queue_bindings.drain_pending_jobs(globals(), config, blocking=blocking)
-
-
 # ── GitHub Helpers ───────────────────────────────────────────────────────────
 
 
@@ -503,14 +494,7 @@ _utility_command_bindings.install_utility_command_helpers(globals())
 _local_ci_command_bindings.install_local_ci_command_helpers(globals())
 
 _desktop_command_bindings.install_desktop_command_helpers(globals())
-
-
-def cmd_desktop_config(args: argparse.Namespace) -> int:
-    return _cli_dispatch_bindings.cmd_desktop_config(globals(), args)
-
-
-def cmd_desktop(args: argparse.Namespace) -> int:
-    return _cli_dispatch_bindings.cmd_desktop(globals(), args)
+_cli_dispatch_bindings.install_cli_dispatch_helpers(globals())
 
 
 def main() -> int:
