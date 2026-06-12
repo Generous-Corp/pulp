@@ -6,7 +6,7 @@ from collections.abc import Callable
 import json
 from pathlib import Path
 
-from macos_desktop_action_interaction import macos_desktop_event_interaction_summary
+from macos_desktop_action_capture import complete_macos_desktop_action_capture
 from macos_desktop_action_launch import launch_macos_desktop_action
 from macos_desktop_action_manifest import build_macos_action_manifest
 
@@ -141,65 +141,44 @@ def run_macos_local_smoke(
         window = launch_result["window"]
         launch_descriptor = launch_result["launch_descriptor"]
 
-        inspector_summary = None
-        view_tree = None
-        content_size = content_size_from_window_fn(window)
-        if capture_ui_snapshot and not use_pulp_app_automation:
-            wait_for_path_fn(ui_snapshot_path, timeout_secs)
-            view_tree = json.loads(ui_snapshot_path.read_text())
-            content_size = content_size_from_view_tree_fn(view_tree, content_size)
-            inspector_summary = view_tree_inspector_summary_fn(view_tree)
-
-        interaction_summary = None
-        if use_pulp_app_automation:
-            if capture_before:
-                wait_for_path_fn(before_screenshot_path, timeout_secs)
-            wait_for_path_fn(screenshot_path, timeout_secs)
-            if capture_ui_snapshot:
-                wait_for_path_fn(ui_snapshot_path, timeout_secs)
-                view_tree = json.loads(ui_snapshot_path.read_text())
-                content_size = content_size_from_view_tree_fn(view_tree, content_size)
-                inspector_summary = view_tree_inspector_summary_fn(view_tree)
-            interaction_summary = pulp_app_interaction_summary_fn(
-                click_point=click_point,
-                click_view_id=click_view_id,
-                click_view_type=click_view_type,
-                click_view_text=click_view_text,
-                click_view_label=click_view_label,
-            )
-        else:
-            if interaction_requested and capture_before:
-                capture_macos_window_fn(int(window["windowId"]), before_screenshot_path)
-
-            if interaction_requested:
-                interaction_summary = macos_desktop_event_interaction_summary(
-                    window=window,
-                    content_size=content_size,
-                    pid=pid,
-                    click_point=click_point,
-                    click_view_id=click_view_id,
-                    click_view_type=click_view_type,
-                    click_view_text=click_view_text,
-                    click_view_label=click_view_label,
-                    view_tree=view_tree,
-                    parse_coordinate_pair_fn=parse_coordinate_pair_fn,
-                    resolve_view_tree_click_point_fn=resolve_view_tree_click_point_fn,
-                    screen_point_for_content_point_fn=screen_point_for_content_point_fn,
-                    activate_macos_pid_fn=activate_macos_pid_fn,
-                    dispatch_macos_click_fn=dispatch_macos_click_fn,
-                    desktop_click_selector_fn=desktop_click_selector_fn,
-                )
-                if settle_secs > 0:
-                    sleep_fn(settle_secs)
-
-            try:
-                capture_macos_window_fn(int(window["windowId"]), screenshot_path)
-            except RuntimeError:
-                active_bundle_id = bundle_id or launch_descriptor.get("bundle_id")
-                if not active_bundle_id:
-                    raise
-                pid, window = wait_for_macos_bundle_window_fn(active_bundle_id, min(timeout_secs, 2.0))
-                capture_macos_window_fn(int(window["windowId"]), screenshot_path)
+        capture_result = complete_macos_desktop_action_capture(
+            window=window,
+            pid=pid,
+            bundle_id=bundle_id,
+            launch_descriptor=launch_descriptor,
+            capture_ui_snapshot=capture_ui_snapshot,
+            use_pulp_app_automation=use_pulp_app_automation,
+            interaction_requested=interaction_requested,
+            capture_before=capture_before,
+            settle_secs=settle_secs,
+            timeout_secs=timeout_secs,
+            click_point=click_point,
+            click_view_id=click_view_id,
+            click_view_type=click_view_type,
+            click_view_text=click_view_text,
+            click_view_label=click_view_label,
+            screenshot_path=screenshot_path,
+            before_screenshot_path=before_screenshot_path,
+            ui_snapshot_path=ui_snapshot_path,
+            content_size_from_window_fn=content_size_from_window_fn,
+            wait_for_path_fn=wait_for_path_fn,
+            content_size_from_view_tree_fn=content_size_from_view_tree_fn,
+            view_tree_inspector_summary_fn=view_tree_inspector_summary_fn,
+            pulp_app_interaction_summary_fn=pulp_app_interaction_summary_fn,
+            capture_macos_window_fn=capture_macos_window_fn,
+            parse_coordinate_pair_fn=parse_coordinate_pair_fn,
+            resolve_view_tree_click_point_fn=resolve_view_tree_click_point_fn,
+            screen_point_for_content_point_fn=screen_point_for_content_point_fn,
+            activate_macos_pid_fn=activate_macos_pid_fn,
+            dispatch_macos_click_fn=dispatch_macos_click_fn,
+            desktop_click_selector_fn=desktop_click_selector_fn,
+            wait_for_macos_bundle_window_fn=wait_for_macos_bundle_window_fn,
+            sleep_fn=sleep_fn,
+        )
+        pid = capture_result["pid"]
+        window = capture_result["window"]
+        inspector_summary = capture_result["inspector_summary"]
+        interaction_summary = capture_result["interaction_summary"]
 
         manifest = build_macos_action_manifest(
             action_name=action_name,
