@@ -153,6 +153,136 @@ TEST_CASE("PluginDescriptor bus helpers read only the first bus",
     REQUIRE(d.output_buses[1].optional);
 }
 
+TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
+          "[format][processor-defaults][process-buffers][phase2]") {
+    std::array<BusBufferView<const float>, 2> inputs{{
+        {
+            .info = {
+                .name = "Main In",
+                .index = 0,
+                .direction = BusDirection::Input,
+                .role = BusRole::Main,
+                .declared_channels = 2,
+                .optional = false,
+                .active = false,
+            },
+            .buffer = {},
+        },
+        {
+            .info = {
+                .name = "Sidechain",
+                .index = 1,
+                .direction = BusDirection::Input,
+                .role = BusRole::Sidechain,
+                .declared_channels = 1,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    std::array<BusBufferView<float>, 1> outputs{{
+        {
+            .info = {
+                .name = "Main Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = 2,
+                .optional = false,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        BusBufferSet<const float>{std::span(inputs)},
+        BusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.inputs.size() == 2);
+    REQUIRE(buffers.inputs.count(BusRole::Sidechain) == 1);
+    REQUIRE(buffers.inputs.active_count() == 0);
+    REQUIRE(buffers.outputs.active_count() == 0);
+    REQUIRE(buffers.main_input() == nullptr);
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE(buffers.main_output() == nullptr);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers rejects active null channel pointers",
+          "[format][processor-defaults][process-buffers][phase2]") {
+    std::array<float, 4> left{};
+    const float* active_input_channels[] = {left.data(), nullptr};
+
+    BusBufferView<const float> active_input{
+        .info = {
+            .name = "Main In",
+            .index = 0,
+            .direction = BusDirection::Input,
+            .role = BusRole::Main,
+            .declared_channels = 2,
+            .optional = false,
+            .active = true,
+        },
+        .buffer = pulp::audio::BufferView<const float>(
+            active_input_channels, 2, left.size()),
+    };
+
+    REQUIRE(active_input.matches_declared_layout());
+    REQUIRE_FALSE(active_input.has_channel_storage());
+
+    std::array<BusBufferView<const float>, 1> inputs{{active_input}};
+    std::array<BusBufferView<float>, 0> outputs{};
+    ProcessBuffers buffers{
+        BusBufferSet<const float>{std::span(inputs)},
+        BusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.main_input() != nullptr);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE_FALSE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
+          "[format][processor-defaults][process-buffers][phase2]") {
+    std::array<float, 4> sidechain{};
+    const float* sidechain_channels[] = {sidechain.data()};
+
+    BusBufferView<const float> inactive_sidechain_with_storage{
+        .info = {
+            .name = "Sidechain",
+            .index = 1,
+            .direction = BusDirection::Input,
+            .role = BusRole::Sidechain,
+            .declared_channels = 1,
+            .optional = true,
+            .active = false,
+        },
+        .buffer = pulp::audio::BufferView<const float>(
+            sidechain_channels, 1, sidechain.size()),
+    };
+
+    REQUIRE_FALSE(inactive_sidechain_with_storage.matches_declared_layout());
+    REQUIRE(inactive_sidechain_with_storage.has_channel_storage());
+
+    std::array<BusBufferView<const float>, 1> inputs{{
+        inactive_sidechain_with_storage,
+    }};
+    std::array<BusBufferView<float>, 0> outputs{};
+    ProcessBuffers buffers{
+        BusBufferSet<const float>{std::span(inputs)},
+        BusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE_FALSE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
 TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independently",
           "[format][processor-defaults][flags]") {
     PluginDescriptor d;
