@@ -176,13 +176,28 @@ def prepare_target_log(job_id: str, target_name: str) -> Path:
     return _state_path_bindings.prepare_target_log(globals(), job_id, target_name)
 
 
-from footprint import (  # noqa: E402  -- re-exported for in-file consumers
-    format_size_bytes,
-    path_size_bytes,
-    local_ci_state_footprint,
-    state_footprint_lines,
-    describe_path_for_cleanup,
-)
+import footprint as _footprint  # noqa: E402
+import footprint_bindings as _footprint_bindings  # noqa: E402
+
+
+def format_size_bytes(value: int | float | None) -> str:
+    return _footprint_bindings.format_size_bytes(globals(), value)
+
+
+def path_size_bytes(path: Path) -> int:
+    return _footprint_bindings.path_size_bytes(globals(), path)
+
+
+def local_ci_state_footprint() -> dict:
+    return _footprint_bindings.local_ci_state_footprint(globals())
+
+
+def state_footprint_lines(footprint: dict, *, indent: str = "") -> list[str]:
+    return _footprint_bindings.state_footprint_lines(globals(), footprint, indent=indent)
+
+
+def describe_path_for_cleanup(path: Path) -> str:
+    return _footprint_bindings.describe_path_for_cleanup(globals(), path)
 
 import cleanup as _cleanup  # noqa: E402
 import cleanup_bindings as _cleanup_bindings  # noqa: E402
@@ -207,9 +222,11 @@ import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import desktop_support_bindings as _desktop_support_bindings  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
+import git_helpers_bindings as _git_helpers_bindings  # noqa: E402
 import github_workflows as _github_workflows  # noqa: E402
 import github_workflow_bindings as _github_workflow_bindings  # noqa: E402
 import io_utils as _io_utils  # noqa: E402
+import io_utils_bindings as _io_utils_bindings  # noqa: E402
 import job_queue as _job_queue  # noqa: E402
 import job_queue_bindings as _job_queue_bindings  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
@@ -297,24 +314,56 @@ def probe_uploaded_bundle_size(host: str, remote_name: str, *, config: dict) -> 
     return _ssh_bundle_bindings.probe_uploaded_bundle_size(globals(), host, remote_name, config=config)
 
 
-from io_utils import (  # noqa: E402  -- re-exported for in-file consumers
-    LockBusyError,
-    tail_lines,
-    trim_line,
-    atomic_write_text,
-    image_change_summary,
-    file_lock,
-)
+from io_utils import LockBusyError  # noqa: E402  -- re-exported for callers catching the facade class
 
 
-from git_helpers import (  # noqa: E402  -- re-exported for in-file consumers
-    now_iso,
-    current_branch,
-    current_sha,
-    git_root_for,
-    resolve_git_ref_sha,
-    short_sha,
-)
+def tail_lines(path: Path, limit: int = 80) -> list[str]:
+    return _io_utils_bindings.tail_lines(globals(), path, limit)
+
+
+def trim_line(value: str, max_len: int = 160) -> str:
+    return _io_utils_bindings.trim_line(globals(), value, max_len)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    return _io_utils_bindings.atomic_write_text(globals(), path, text)
+
+
+def image_change_summary(before_path: Path, after_path: Path, *, diff_output_path: Path | None = None) -> dict:
+    return _io_utils_bindings.image_change_summary(
+        globals(),
+        before_path,
+        after_path,
+        diff_output_path=diff_output_path,
+    )
+
+
+def file_lock(path: Path, *, blocking: bool):
+    return _io_utils_bindings.file_lock(globals(), path, blocking=blocking)
+
+
+def now_iso() -> str:
+    return _git_helpers_bindings.now_iso(globals())
+
+
+def current_branch() -> str:
+    return _git_helpers_bindings.current_branch(globals())
+
+
+def current_sha() -> str:
+    return _git_helpers_bindings.current_sha(globals())
+
+
+def git_root_for(path: Path) -> Path | None:
+    return _git_helpers_bindings.git_root_for(globals(), path)
+
+
+def resolve_git_ref_sha(ref: str) -> str:
+    return _git_helpers_bindings.resolve_git_ref_sha(globals(), ref)
+
+
+def short_sha(sha: str) -> str:
+    return _git_helpers_bindings.short_sha(globals(), sha)
 
 
 from normalize import (  # noqa: E402  -- re-exported for in-file consumers
