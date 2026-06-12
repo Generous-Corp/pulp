@@ -128,6 +128,13 @@ predictable output, no MIDI.
 
 ## Signal graph gotchas
 
+- `SignalGraph` dispatches plugin nodes through the additive
+  `PluginSlot::process(format::ProcessBuffers&, ...)` overload. The default
+  implementation projects the active main input/output bus back to the legacy
+  `process(output, input, ...)` callback, and still calls legacy processing with
+  empty audio views for MIDI-only slots. Override the `ProcessBuffers` overload
+  when a hosted format or fixture needs direct bus metadata for sidechains,
+  auxes, surround, or multi-output products.
 - `connect()` returns `false` on cycle — always check. `would_create_cycle`
   lets you preview without mutating.
 - `processing_order()` is recomputed each call; cache it in the audio
@@ -433,11 +440,10 @@ contract now is:
   `Contents/Resources/moduleinfo.json`, normalized to a 32-char
   lowercase hex string. Read via `scanner_vst3.cpp` — **no dlopen at
   scan time**. This is deliberate: opening random VST3 bundles during
-  a bulk scan used to crash on Visage/JUCE-based plugins with
-  duplicate ObjC classes and on plugins whose `bundleEntry()` requires
-  a real `CFBundleRef`. moduleinfo.json is Steinberg's declarative
-  discovery format (VST 3.7+) and lets us read identity without
-  running any plugin code.
+  a bulk scan used to crash on plugins with duplicate ObjC classes and on
+  plugins whose `bundleEntry()` requires a real `CFBundleRef`. moduleinfo.json
+  is Steinberg's declarative discovery format (VST 3.7+) and lets us read
+  identity without running any plugin code.
 - **LV2**: the plugin URI from `manifest.ttl` (the same URI
   `plugin_slot_lv2.cpp` uses at load time to pick a descriptor).
   Parsed via a tiny regex — we deliberately don't pull in
