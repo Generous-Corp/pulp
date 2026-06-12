@@ -1,12 +1,37 @@
-"""Bindings from the local_ci facade to cloud/GitHub helpers."""
+"""Compatibility installer for local_ci cloud/GitHub facade bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-from binding_utils import binding as _binding
 from binding_utils import install_module_attrs
+from cloud_command_bindings import (
+    cmd_cloud_compare,
+    cmd_cloud_defaults,
+    cmd_cloud_history,
+    cmd_cloud_namespace_doctor,
+    cmd_cloud_namespace_setup,
+    cmd_cloud_recommend,
+    cmd_cloud_run,
+    cmd_cloud_status,
+    cmd_cloud_workflows,
+)
+from cloud_github_bindings import (
+    gh_available,
+    gh_pr_comment,
+    gh_pr_create,
+    gh_pr_head,
+    gh_pr_list_open,
+    gh_pr_merge,
+    gh_run_view,
+    gh_workflow_dispatch,
+)
+from cloud_record_bindings import (
+    cloud_record_summary,
+    format_ci_comment,
+    list_cloud_records,
+    open_pr_list_lines,
+)
 
 
 CLOUD_HELPER_EXPORTS = (
@@ -94,96 +119,6 @@ CLOUD_HELPER_EXPORTS = (
     "summarize_runner_selector",
     "update_cloud_record_from_run",
 )
-
-
-def cmd_cloud_workflows(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_workflows(args)
-
-
-def cmd_cloud_defaults(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_defaults(args)
-
-
-def cmd_cloud_history(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_history(args)
-
-
-def cmd_cloud_compare(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_compare(args)
-
-
-def cmd_cloud_recommend(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_recommend(args)
-
-
-def cmd_cloud_run(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_run(args)
-
-
-def cmd_cloud_status(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_status(args)
-
-
-def cmd_cloud_namespace_doctor(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_namespace_doctor(args)
-
-
-def cmd_cloud_namespace_setup(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_cloud").cmd_cloud_namespace_setup(args)
-
-
-def gh_available(bindings: Mapping[str, Any]) -> bool:
-    return _binding(bindings, "_cloud").gh_available()
-
-
-def gh_workflow_dispatch(
-    bindings: Mapping[str, Any],
-    repository: str,
-    workflow_file: str,
-    ref: str,
-    fields: dict[str, str],
-) -> None:
-    return _binding(bindings, "_cloud").gh_workflow_dispatch(repository, workflow_file, ref, fields)
-
-
-def gh_run_view(bindings: Mapping[str, Any], repository: str, run_id: int) -> dict | None:
-    return _binding(bindings, "_cloud").gh_run_view(repository, run_id)
-
-
-def gh_pr_create(bindings: Mapping[str, Any], branch: str, base: str = "main") -> int | None:
-    return _binding(bindings, "_cloud").gh_pr_create(branch, base)
-
-
-def gh_pr_comment(bindings: Mapping[str, Any], pr_number: int, body: str) -> bool:
-    return _binding(bindings, "_cloud").gh_pr_comment(pr_number, body)
-
-
-def gh_pr_merge(bindings: Mapping[str, Any], pr_number: int, method: str = "squash") -> bool:
-    return _binding(bindings, "_cloud").gh_pr_merge(pr_number, method)
-
-
-def gh_pr_list_open(bindings: Mapping[str, Any]) -> list[dict]:
-    return _binding(bindings, "_cloud").gh_pr_list_open()
-
-
-def gh_pr_head(bindings: Mapping[str, Any], pr_ref: str) -> tuple[int, str, str] | None:
-    return _binding(bindings, "_cloud").gh_pr_head(pr_ref)
-
-
-def list_cloud_records(bindings: Mapping[str, Any], limit: int | None = None) -> list[dict]:
-    return _binding(bindings, "_cloud").list_cloud_records(limit=limit)
-
-
-def cloud_record_summary(bindings: Mapping[str, Any], record: dict, config: dict | None = None) -> str:
-    return _binding(bindings, "_cloud").cloud_record_summary(record, config)
-
-
-def format_ci_comment(bindings: Mapping[str, Any], result: dict) -> str:
-    return _binding(bindings, "_cloud").format_ci_comment(result)
-
-
-def open_pr_list_lines(bindings: Mapping[str, Any], prs: list[dict]) -> list[str]:
-    return _binding(bindings, "_cloud").open_pr_list_lines(prs)
 
 
 def install_cloud_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLOUD_HELPER_EXPORTS) -> None:

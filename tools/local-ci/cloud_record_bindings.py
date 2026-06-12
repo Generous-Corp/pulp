@@ -1,0 +1,24 @@
+"""Bindings from the local_ci facade to cloud record and formatting helpers."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from binding_utils import binding as _binding
+
+
+def list_cloud_records(bindings: Mapping[str, Any], limit: int | None = None) -> list[dict]:
+    return _binding(bindings, "_cloud").list_cloud_records(limit=limit)
+
+
+def cloud_record_summary(bindings: Mapping[str, Any], record: dict, config: dict | None = None) -> str:
+    return _binding(bindings, "_cloud").cloud_record_summary(record, config)
+
+
+def format_ci_comment(bindings: Mapping[str, Any], result: dict) -> str:
+    return _binding(bindings, "_cloud").format_ci_comment(result)
+
+
+def open_pr_list_lines(bindings: Mapping[str, Any], prs: list[dict]) -> list[str]:
+    return _binding(bindings, "_cloud").open_pr_list_lines(prs)
