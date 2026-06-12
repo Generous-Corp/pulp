@@ -73,6 +73,20 @@ midi::MidiEvent decode_midi_event(uint8_t inStatus,
                                   uint8_t inData1,
                                   uint8_t inData2) noexcept;
 
+/// Build the AU v2 render-path ProcessContext fields that are independent of
+/// host callbacks. AU v2 render callbacks are always realtime; offline bounce
+/// intent is not surfaced by the v2 SDK, so hosts that need explicit offline
+/// hints should use AU v3 or another adapter that provides that signal.
+inline ProcessContext make_render_process_context(double sample_rate,
+                                                  int num_samples) noexcept {
+    ProcessContext ctx;
+    ctx.sample_rate = sample_rate;
+    ctx.num_samples = num_samples;
+    ctx.process_mode = ProcessMode::Realtime;
+    ctx.render_speed_hint = RenderSpeedHint::Realtime;
+    return ctx;
+}
+
 class PulpAUEffect : public ausdk::AUMIDIEffectBase {
 public:
     explicit PulpAUEffect(AudioComponentInstance ci);

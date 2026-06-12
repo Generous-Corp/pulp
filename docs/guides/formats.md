@@ -600,9 +600,12 @@ truth rather than inferring mode from transport. VST3 maps
 `ProcessSetup::processMode == kOffline` to `ProcessMode::Offline` with a
 faster-than-realtime render hint. CLAP has no equivalent process-mode field, so
 its adapter reports realtime mode and realtime render speed unless a future CLAP
-extension exposes stronger host intent. Bypass, tail-drain, reset, and
-transport-jump flags stay explicit `ProcessContext` metadata and should be
-covered where the host API can actually deliver them.
+extension exposes stronger host intent. AU v2 effect and instrument render
+callbacks also report realtime mode and realtime render speed because the v2 SDK
+does not surface offline-bounce intent to `ProcessBufferLists()` / `Render()`;
+AU v3 mirrors that explicit realtime render-path contract. Bypass, tail-drain,
+reset, and transport-jump flags stay explicit `ProcessContext` metadata and
+should be covered where the host API can actually deliver them.
 
 ---
 

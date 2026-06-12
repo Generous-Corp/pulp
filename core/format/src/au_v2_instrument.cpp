@@ -239,11 +239,9 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         pending_midi_ = midi::MidiBuffer{};
     }
 
-    ProcessContext ctx;
-    ctx.sample_rate = GetOutput(0)->GetStreamFormat().mSampleRate;
-    ctx.num_samples = static_cast<int>(inNumberFrames);
-    ctx.process_mode = ProcessMode::Realtime;
-    ctx.render_speed_hint = RenderSpeedHint::Realtime;
+    ProcessContext ctx = make_render_process_context(
+        GetOutput(0)->GetStreamFormat().mSampleRate,
+        static_cast<int>(inNumberFrames));
 
     // Item 1.3 — populate transport fields from the host callbacks
     // (kAudioUnitProperty_HostCallbacks). Same wiring as PulpAUEffect
