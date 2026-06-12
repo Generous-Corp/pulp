@@ -9,6 +9,7 @@ import unittest
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci.py")
+LOCAL_CI_DIR = MODULE_PATH.parent
 
 
 class LocalCiFacadeBindingTests(unittest.TestCase):
@@ -55,6 +56,45 @@ class LocalCiFacadeBindingTests(unittest.TestCase):
                     break
 
         self.assertEqual(offenders, [])
+
+    def test_private_implementation_imports_are_binding_dependencies_only(self) -> None:
+        tree = ast.parse(MODULE_PATH.read_text())
+        binding_sources = "\n".join(
+            path.read_text()
+            for path in LOCAL_CI_DIR.glob("*_bindings.py")
+            if not path.name.startswith("test_")
+        )
+        implementation_imports: dict[str, int] = {}
+
+        for node in tree.body:
+            if not isinstance(node, ast.Import):
+                continue
+            for alias in node.names:
+                if (
+                    alias.asname
+                    and alias.asname.startswith("_")
+                    and not alias.asname.endswith("_bindings")
+                ):
+                    implementation_imports[alias.asname] = node.lineno
+
+        missing_binding_consumers = [
+            f"{alias}:{lineno}"
+            for alias, lineno in implementation_imports.items()
+            if alias not in binding_sources
+        ]
+        direct_facade_uses: list[str] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Attribute):
+                    continue
+                value = child.value
+                if isinstance(value, ast.Name) and value.id in implementation_imports:
+                    direct_facade_uses.append(f"{value.id}.{child.attr}:{child.lineno}")
+
+        self.assertEqual(missing_binding_consumers, [])
+        self.assertEqual(direct_facade_uses, [])
 
     @staticmethod
     def _references_binding_module(node: ast.FunctionDef) -> bool:
