@@ -13,6 +13,18 @@ cmake_minimum_required(VERSION 3.20)
 set(_repo_root "${CMAKE_CURRENT_LIST_DIR}/../..")
 get_filename_component(_repo_root "${_repo_root}" ABSOLUTE)
 
+file(READ "${_repo_root}/tools/cmake/PulpDependencies.cmake" _deps_cmake)
+set(_helper_include_line "include($\{CMAKE_CURRENT_SOURCE_DIR\}/tools/cmake/PulpFetchContent.cmake)")
+string(FIND "${_deps_cmake}" "${_helper_include_line}" _helper_include)
+string(FIND "${_deps_cmake}" "include(FetchContent)" _fetchcontent_include)
+if(_helper_include LESS 0 OR _fetchcontent_include LESS 0
+   OR NOT _helper_include LESS _fetchcontent_include)
+    message(FATAL_ERROR
+        "PulpFetchContent.cmake must be included before include(FetchContent) "
+        "so FETCHCONTENT_BASE_DIR is configured before CMake initializes "
+        "FetchContent's default _deps path.")
+endif()
+
 # Simulate the Windows branch without requiring a Windows host.
 set(WIN32 TRUE)
 
