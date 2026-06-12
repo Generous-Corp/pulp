@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-import json
 
+from desktop_action_command_flow import (
+    emit_desktop_action_command_result,
+    load_desktop_action_command_context,
+    run_desktop_action_command_runner,
+)
 from desktop_action_dispatch import desktop_inspect_runner
-
-
-def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
-    for line in lines:
-        print_fn(line)
 
 
 def cmd_desktop_inspect(
@@ -27,13 +26,15 @@ def cmd_desktop_inspect(
     sys_platform: str,
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-        target = resolve_desktop_target_fn(config, args.target)
-        source_request = make_desktop_source_request_fn(args)
-    except (FileNotFoundError, ValueError) as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, target, source_request, status = load_desktop_action_command_context(
+        args,
+        load_config_fn=load_config_fn,
+        resolve_desktop_target_fn=resolve_desktop_target_fn,
+        make_desktop_source_request_fn=make_desktop_source_request_fn,
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
     runner, error = desktop_inspect_runner(
         args=args,
@@ -49,15 +50,15 @@ def cmd_desktop_inspect(
         print_fn(f"Error: {error}")
         return 1
 
-    try:
-        manifest = runner()
-    except Exception as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    manifest, status = run_desktop_action_command_runner(runner, print_fn=print_fn)
+    if status is not None:
+        return status
 
-    if getattr(args, "json", False):
-        print_fn(json.dumps(manifest, indent=2))
-        return 0
-
-    _print_lines(desktop_action_success_lines_fn("inspect", args.target, manifest), print_fn=print_fn)
-    return 0
+    return emit_desktop_action_command_result(
+        action_name="inspect",
+        target_name=args.target,
+        manifest=manifest,
+        json_output=getattr(args, "json", False),
+        desktop_action_success_lines_fn=desktop_action_success_lines_fn,
+        print_fn=print_fn,
+    )
