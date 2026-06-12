@@ -121,6 +121,26 @@ instead of polling atomics inside the loop:
 * `format::ControlRateParamSmoother` follows the parameter's configured
   `smoothing_ramp_seconds` for control-rate smoothing.
 
+MIDI block buffers follow the same bounded-storage rule. Adapter-owned
+`midi::MidiBuffer` and `midi::UmpBuffer` instances must reserve their
+worst-case event/SysEx capacities before the callback and enable
+`set_realtime_capacity_limit(true)` if they append on the audio thread.
+Prepared buffers drop and count overflow instead of growing vectors.
+Unprepared buffer mutation, SysEx payload allocation, MIDI file editing, and
+sequence-building helpers belong on control/offline threads. The UI-to-audio
+`midi::MidiMessageCollector` uses a fixed-capacity SPSC queue; its audio-thread
+`drain_into()` path is allocation-free when the destination `MidiBuffer` has
+prepared capacity.
+
+Signal helper utilities use the same distinction. Stateless math, interpolation,
+denormal, fixed-size matrix, color/frequency mapping, and scalar coefficient
+calculation helpers are allocation-free. Helpers that create `std::vector`
+results, resize aligned buffers, generate FFT windows, design high-order filter
+cascades, configure spectrogram storage, or build FFT/convolution state are
+prepare/control/offline work. After that setup, documented hot operations such
+as precomputed window application, configured spectrogram column pushes, and
+aligned-buffer clear/copy are allocation-free.
+
 ## Block-scoped runtime contracts
 
 `pulp::format::ProcessBlock` is the additive runtime contract for

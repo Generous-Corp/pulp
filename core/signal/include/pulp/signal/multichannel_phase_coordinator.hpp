@@ -28,6 +28,9 @@
 
 namespace pulp::signal {
 
+/// RT contract: `prepare()` allocates internal phase/magnitude storage and must
+/// run off the audio thread. After preparation, `reset()`, queries, and
+/// `process_group()` allocate no memory for the prepared bin/channel counts.
 class MultichannelPhaseCoordinator {
 public:
     MultichannelPhaseCoordinator() = default;

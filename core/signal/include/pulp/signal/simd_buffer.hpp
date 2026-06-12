@@ -23,7 +23,12 @@ namespace pulp::signal {
 /// Alignment in bytes for SIMD operations (covers AVX-512)
 static constexpr size_t kSimdAlignment = 64;
 
-/// RAII aligned buffer with SIMD-friendly access
+/// RAII aligned buffer with SIMD-friendly access.
+///
+/// RT contract: construction, destruction, move assignment, and resize() may
+/// allocate or free memory, except resize(size()) which is a no-op. clear(),
+/// copy_from(), element access, iteration, and same-size resize are
+/// allocation-free after storage has been allocated.
 class AlignedBuffer {
 public:
     AlignedBuffer() = default;

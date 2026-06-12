@@ -370,6 +370,50 @@ TEST_CASE("pulp run accepts boundary frame count values",
     REQUIRE(args == std::vector<std::string>{"--frames", "2147483647"});
 }
 
+TEST_CASE("pulp run --audio-inspector parses and forwards without implying headless",
+          "[cli][run][audio-inspector]") {
+    auto r = parse_run_options({"--audio-inspector"});
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_inspector);
+    REQUIRE_FALSE(r.headless);  // a dev may want the visible inspector window
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{"--audio-inspector"});
+
+    // Composes with --screenshot (which implies headless) for CI capture.
+    auto ci = parse_run_options({"--audio-inspector", "--screenshot", "/tmp/i.png"});
+    REQUIRE(ci.audio_inspector);
+    REQUIRE(ci.headless);
+    auto ci_args = assemble_launch_args(ci);
+    REQUIRE(ci_args == std::vector<std::string>{
+        "--headless", "--screenshot", "/tmp/i.png", "--audio-inspector",
+    });
+}
+
+TEST_CASE("pulp run --audio-probe-json implies headless and forwards the path",
+          "[cli][run][audio-inspector]") {
+    auto r = parse_run_options({"--audio-probe-json", "/tmp/probe.json"});
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_probe_json_path == "/tmp/probe.json");
+    REQUIRE(r.headless);  // one-shot dump + exit, like --screenshot
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{
+        "--headless", "--audio-probe-json", "/tmp/probe.json",
+    });
+
+    auto eq = parse_run_options({"--audio-probe-json=/tmp/p2.json"});
+    REQUIRE(eq.audio_probe_json_path == "/tmp/p2.json");
+    REQUIRE(eq.headless);
+}
+
+TEST_CASE("pulp run --audio-probe-json without a path is a parse error",
+          "[cli][run][audio-inspector]") {
+    REQUIRE_FALSE(parse_run_options({"--audio-probe-json"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-probe-json", "--frames"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-probe-json="}).error.empty());
+}
+
 TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
           "[cli][run][coverage]") {
     auto r = parse_run_options({"--standalone", "demo"});

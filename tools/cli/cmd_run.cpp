@@ -18,14 +18,17 @@
 
 namespace {
 
-constexpr const char* kHeadlessEnv   = "PULP_HEADLESS";
-constexpr const char* kScreenshotEnv = "PULP_SCREENSHOT";
-constexpr const char* kFramesEnv     = "PULP_FRAMES";
+constexpr const char* kHeadlessEnv       = "PULP_HEADLESS";
+constexpr const char* kScreenshotEnv     = "PULP_SCREENSHOT";
+constexpr const char* kFramesEnv         = "PULP_FRAMES";
+constexpr const char* kAudioInspectorEnv = "PULP_AUDIO_INSPECTOR";
+constexpr const char* kAudioProbeJsonEnv = "PULP_AUDIO_PROBE_JSON";
 
 void print_help() {
     std::cout
         << "pulp run — launch a standalone Pulp application\n\n"
-           "Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>] [--watch] [-- args...]\n\n"
+           "Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>]\n"
+           "                [--watch] [--audio-inspector] [--audio-probe-json <file>] [-- args...]\n\n"
            "If no target is specified, finds the first standalone binary in the\n"
            "active project build. Arguments after `--` are passed to the launched\n"
            "application.\n\n"
@@ -40,12 +43,22 @@ void print_help() {
            "                          PULP_FRAMES=<n>.)\n"
            "  --watch                 Re-launch the binary on source changes.\n"
            "                          Composes with --headless / --screenshot.\n"
+           "  --audio-inspector       Open the live Audio Inspector window (RT output\n"
+           "                          probe). (Forwarded as --audio-inspector and\n"
+           "                          PULP_AUDIO_INSPECTOR=1.) Composes with --screenshot.\n"
+           "  --audio-probe-json <file>\n"
+           "                          Write the live probe metrics as JSON to <file>\n"
+           "                          after rendering, then exit. (Forwarded as\n"
+           "                          --audio-probe-json <file> and\n"
+           "                          PULP_AUDIO_PROBE_JSON=<file>. Implies --headless.)\n"
            "  -h, --help              Show this help and exit.\n\n"
            "Examples:\n"
            "  pulp run                                # launch first standalone\n"
            "  pulp run pulp-gain                       # launch a specific target\n"
            "  pulp run --headless --screenshot ui.png  # CI-friendly headless render\n"
-           "  pulp run --watch                         # re-launch on file change\n";
+           "  pulp run --watch                         # re-launch on file change\n"
+           "  pulp run --audio-inspector               # open the live Audio Inspector\n"
+           "  pulp run --audio-probe-json probe.json   # dump live probe metrics + exit\n";
 }
 
 // Set or clear an env var portably. value="" clears it.
@@ -93,8 +106,10 @@ int cmd_run(const std::vector<std::string>& args) {
 
     // If --headless was requested but no screenshot path given, pick a
     // sensible default so the simplest "pulp run --headless" still does
-    // something useful in CI.
-    if (opts.headless && opts.screenshot_path.empty()) {
+    // something useful in CI. A bare --audio-probe-json run is headless but
+    // only wants the JSON dump, so don't force a PNG capture in that case.
+    if (opts.headless && opts.screenshot_path.empty()
+        && opts.audio_probe_json_path.empty()) {
         std::string base = opts.target_name.empty() ? "pulp-run" : opts.target_name;
         opts.screenshot_path = (build_dir / (base + ".png")).string();
     }
@@ -221,6 +236,9 @@ int cmd_run(const std::vector<std::string>& args) {
     if (opts.headless) set_env(kHeadlessEnv, "1");
     if (!opts.screenshot_path.empty()) set_env(kScreenshotEnv, opts.screenshot_path);
     if (opts.frames != 1) set_env(kFramesEnv, std::to_string(opts.frames));
+    if (opts.audio_inspector) set_env(kAudioInspectorEnv, "1");
+    if (!opts.audio_probe_json_path.empty())
+        set_env(kAudioProbeJsonEnv, opts.audio_probe_json_path);
 
     auto launch_args = assemble_launch_args(opts);
 

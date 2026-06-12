@@ -275,6 +275,34 @@ TEST_CASE("DryWetMixer handles nonpositive and over-channel latency edges",
     REQUIRE_THAT(wet_zero_channels[1], WithinAbs(50.0f, 1e-6f));
 }
 
+TEST_CASE("DryWetMixer handles empty dry pushes and grows prepared dry storage",
+          "[dsp][dry_wet][codecov]") {
+    DryWetMixer mixer;
+    mixer.set_mix(0.0f);
+    mixer.prepare(1, 2);
+
+    float dry_a[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    float dry_b[] = {5.0f, 6.0f, 7.0f, 8.0f};
+    const float* dry_ptrs[] = {dry_a, dry_b};
+
+    float wet_a[] = {10.0f, 10.0f, 10.0f, 10.0f};
+    float wet_b[] = {20.0f, 20.0f, 20.0f, 20.0f};
+    float* wet_ptrs[] = {wet_a, wet_b};
+
+    mixer.push_dry(dry_ptrs, 2, 0);
+    mixer.mix_wet(wet_ptrs, 2, 4);
+    REQUIRE_THAT(wet_a[0], WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(wet_b[0], WithinAbs(20.0f, 1e-6f));
+
+    mixer.push_dry(dry_ptrs, 2, 4);
+    mixer.mix_wet(wet_ptrs, 2, 4);
+
+    REQUIRE_THAT(wet_a[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(wet_a[3], WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(wet_b[0], WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(wet_b[3], WithinAbs(8.0f, 1e-6f));
+}
+
 // ── ProcessorDuplicator ─────────────────────────────────────────────────
 
 // Simple gain processor for testing

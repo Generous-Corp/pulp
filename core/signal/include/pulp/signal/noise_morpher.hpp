@@ -32,6 +32,10 @@
 
 namespace pulp::signal {
 
+/// RT contract: `prepare()` and `prepare_masked_scratch()` allocate storage and
+/// must run off the audio thread. After preparation, `reset()`,
+/// `push_envelope()`, `advance()`, `synthesize()`, and
+/// `push_masked_envelope()` allocate no memory for the prepared bin count.
 class NoiseMorpher {
 public:
     void prepare(int num_bins, std::uint64_t seed = 0x9e3779b97f4a7c15ull) {

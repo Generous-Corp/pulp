@@ -50,6 +50,10 @@ public:
 
     explicit Stft(const StftConfig& config) { configure(config); }
 
+    /// RT contract: configure() allocates FFT/window/ring/frame storage and is
+    /// not audio-thread safe. After configure(), push_samples(), latest_frame(),
+    /// frame_ready(), accessors, to_db(), and reset() are allocation-free.
+    /// latest_magnitude_db() returns a vector copy and is not RT-safe.
     void configure(const StftConfig& config) {
         assert(config.fft_size >= 256 && config.fft_size <= 8192);
         assert((config.fft_size & (config.fft_size - 1)) == 0); // power of 2
@@ -117,7 +121,7 @@ public:
         }
     }
 
-    /// Get the latest frame magnitudes in dB.
+    /// Get the latest frame magnitudes in dB. Not RT-safe; returns a vector.
     std::vector<float> latest_magnitude_db(float floor_db = -120.0f) const {
         auto db = frame_.magnitude;
         to_db(db.data(), static_cast<int>(db.size()), floor_db);

@@ -15,6 +15,9 @@ namespace pulp::signal {
 /// The TPT structure is unconditionally stable under modulation,
 /// making it ideal for filter FM and fast cutoff sweeps.
 ///
+/// RT contract: `prepare()`, cutoff modulation, process paths, queries, and
+/// reset are fixed-state only and allocate no memory.
+///
 /// @code
 /// TptFilter filt;
 /// filt.prepare(44100.0f);

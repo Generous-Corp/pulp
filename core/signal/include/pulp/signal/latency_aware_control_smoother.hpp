@@ -38,6 +38,10 @@ public:
         float release_seconds = 0.05f;  // toward smaller values
     };
 
+    /// RT contract: fixed-state and allocation-free. prepare() does not
+    /// allocate, but should be called from prepare/control code. set_target(),
+    /// set_immediate(), value_at(), ratio_at(), advance(), and accessors are
+    /// audio-thread safe.
     void prepare(double sample_rate, const Config& config) {
         assert(sample_rate > 0.0);
         config_ = config;

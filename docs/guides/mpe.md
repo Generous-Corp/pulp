@@ -98,6 +98,21 @@ opts in. Other adapters still deliver the standard `MidiBuffer` path only, so
 MPE-aware processors should continue to handle ordinary MIDI input as their
 fallback.
 
+## SignalGraph routing
+
+`SignalGraph` does not carry a separate graph-owned `MpeBuffer`. Graph MIDI
+edges preserve the block event stream that MPE is derived from: MIDI 1.0
+channel messages, SysEx sidecars, and attached `UmpBuffer` packets. That means
+MIDI 1.0 MPE channel messages and MIDI 2.0 per-note UMP expression packets can
+pass through `connect_midi()` routes without losing sample offsets or per-note
+payloads.
+
+At plugin/adapter boundaries, processors that opt into MPE still consume the
+derived `Processor::mpe_input()` sidecar. Hosts or adapters that need an
+`MpeBuffer` after graph routing should run the routed `MidiBuffer` and attached
+`UmpBuffer` through `MpeVoiceTracker`, the same way format adapters derive MPE
+for processors.
+
 ## MIDI 2.0 UMP sidecar
 
 Plugins that want native MIDI 2.0 resolution — 16-bit velocity, per-note

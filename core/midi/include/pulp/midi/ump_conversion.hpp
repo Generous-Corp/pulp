@@ -9,8 +9,10 @@
 ///     with v7==0 staying 0 for note-off semantics.
 ///   - 14-bit → 32-bit: center-biased expansion.
 ///
-/// These helpers are deliberately header-only and allocation-free on the
-/// hot path; the only allocation is in the destination buffer's append.
+/// These helpers are deliberately header-only and allocation-free apart from
+/// destination-buffer append behavior. For realtime use, reserve the
+/// destination MidiBuffer/UmpBuffer and enable its realtime capacity limit so
+/// overflow is counted instead of growing storage.
 
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>

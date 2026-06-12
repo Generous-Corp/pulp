@@ -3,6 +3,7 @@
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/quirk_apply.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 #include <public.sdk/source/vst/hosting/eventlist.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 
@@ -83,6 +84,7 @@ struct TestVst3Config {
     bool mutate_gain_in_process = false;
     bool emit_midi_out = false;
     bool veto_bus_layout = false;  // is_bus_layout_supported() always returns false
+    bool capture_param_event_vector = true;
     int latency_samples = 0;
 };
 
@@ -155,6 +157,14 @@ public:
     std::vector<uint8_t> last_sysex_payload;
     std::vector<pulp::state::ParameterEvent> last_param_events;
     bool had_param_events = false;
+    std::size_t last_param_event_count = 0;
+    std::size_t last_param_event_capacity = 0;
+    bool last_param_event_overflowed = false;
+    std::uint32_t last_param_event_drops = 0;
+    int32_t first_param_event_offset = -1;
+    int32_t last_param_event_offset = -1;
+    float first_param_event_value = 0.0f;
+    float last_param_event_value = 0.0f;
     float gain_seen_in_process = 0.0f;
     static TestVst3Processor* g_last_processor;
     static TestVst3Config g_next_config;
@@ -189,8 +199,30 @@ void TestVst3Processor::process(
     }
     had_param_events = (param_events() != nullptr);
     last_param_events.clear();
+    last_param_event_count = 0;
+    last_param_event_capacity = 0;
+    last_param_event_overflowed = false;
+    last_param_event_drops = 0;
+    first_param_event_offset = -1;
+    last_param_event_offset = -1;
+    first_param_event_value = 0.0f;
+    last_param_event_value = 0.0f;
     if (auto* events = param_events()) {
-        for (const auto& event : *events) last_param_events.push_back(event);
+        last_param_event_count = events->size();
+        last_param_event_capacity = events->capacity();
+        last_param_event_overflowed = events->overflowed();
+        last_param_event_drops = events->dropped_event_count();
+        if (!events->empty()) {
+            const auto first = events->begin();
+            const auto last = events->end() - 1;
+            first_param_event_offset = first->sample_offset;
+            first_param_event_value = first->value;
+            last_param_event_offset = last->sample_offset;
+            last_param_event_value = last->value;
+        }
+        if (config_.capture_param_event_vector) {
+            for (const auto& event : *events) last_param_events.push_back(event);
+        }
     }
     gain_seen_in_process = state().get_value(kGainParamId);
 
@@ -609,6 +641,100 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(out_event.noteOn.channel == 1);
     REQUIRE(out_event.noteOn.pitch == 64);
     REQUIRE_THAT(out_event.noteOn.velocity, WithinAbs(100.0f / 127.0f, 1e-6f));
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 parameter automation drops past realtime event capacity without growing",
+          "[vst3][params][realtime][capacity]") {
+    static constexpr Steinberg::int32 kLargeBlockFrames = 4096;
+
+    TestVst3Config config;
+    config.capture_param_event_vector = false;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kLargeBlockFrames;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ParameterChanges input_params(1);
+    Steinberg::int32 param_index = 0;
+    auto* gain_queue = input_params.addParameterData(kGainParamId, param_index);
+    REQUIRE(gain_queue != nullptr);
+    Steinberg::int32 point_index = 0;
+    for (std::size_t i = 0; i < pulp::state::ParameterEventQueue::kCapacity + 1; ++i) {
+        const double normalized = (i == pulp::state::ParameterEventQueue::kCapacity)
+            ? 1.0
+            : 0.5;
+        REQUIRE(gain_queue->addPoint(static_cast<Steinberg::int32>(i),
+                                     normalized,
+                                     point_index) == Steinberg::kResultTrue);
+    }
+
+    Steinberg::Vst::ParameterChanges output_params(1);
+    Steinberg::Vst::EventList input_events(0);
+    Steinberg::Vst::EventList output_events(0);
+
+    std::vector<float> in_l(kLargeBlockFrames, 0.0f);
+    std::vector<float> in_r(kLargeBlockFrames, 0.0f);
+    std::vector<float> out_l(kLargeBlockFrames, 0.0f);
+    std::vector<float> out_r(kLargeBlockFrames, 0.0f);
+
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kLargeBlockFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+    data.outputParameterChanges = &output_params;
+    data.inputEvents = &input_events;
+    data.outputEvents = &output_events;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    REQUIRE(test_processor->process_count == 1);
+    REQUIRE(test_processor->last_context.num_samples == kLargeBlockFrames);
+    REQUIRE(test_processor->had_param_events);
+    REQUIRE(test_processor->last_param_event_count
+            == pulp::state::ParameterEventQueue::kCapacity);
+    REQUIRE(test_processor->last_param_event_capacity
+            == pulp::state::ParameterEventQueue::kCapacity);
+    REQUIRE(test_processor->last_param_event_overflowed);
+    REQUIRE(test_processor->last_param_event_drops == 1);
+    REQUIRE(test_processor->first_param_event_offset == 0);
+    REQUIRE_THAT(test_processor->first_param_event_value, WithinAbs(-18.0f, 1e-5f));
+    REQUIRE(test_processor->last_param_event_offset
+            == static_cast<int32_t>(pulp::state::ParameterEventQueue::kCapacity - 1));
+    REQUIRE_THAT(test_processor->last_param_event_value, WithinAbs(-18.0f, 1e-5f));
+    REQUIRE_THAT(test_processor->gain_seen_in_process, WithinAbs(24.0f, 1e-5f));
+
+    REQUIRE(processor.last_input_param_events().size()
+            == pulp::state::ParameterEventQueue::kCapacity);
+    REQUIRE(processor.last_input_param_events().capacity()
+            == pulp::state::ParameterEventQueue::kCapacity);
+    REQUIRE(processor.last_input_param_events().overflowed());
+    REQUIRE(processor.last_input_param_events().dropped_event_count() == 1);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

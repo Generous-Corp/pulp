@@ -5,6 +5,10 @@
 // Ordering contract: events are sorted by sample_offset ascending before
 // being handed to consumers. Callers that append events unordered must call
 // sort() before passing the queue on.
+//
+// Realtime contract: fixed-capacity storage only. push(), clear(), sort(),
+// iteration, and events() do not allocate; overflow is reported through
+// overflowed() / dropped_event_count() and the extra event is dropped.
 
 #include <pulp/state/parameter.hpp>
 #include <array>

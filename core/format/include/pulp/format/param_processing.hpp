@@ -1,6 +1,11 @@
 #pragma once
 
 // Processor-facing helpers for sample-accurate parameter work.
+//
+// Realtime contract: after callers provide the output/input views,
+// StateStore, and any ParameterEventQueue storage, for_each_subblock() and
+// ControlRateParamSmoother hot operations do not allocate. prepare() belongs
+// off the audio thread when sample-rate/configuration changes happen.
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/signal/smoothed_value.hpp>

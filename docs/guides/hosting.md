@@ -76,6 +76,13 @@ latencies along each path and inserts delay lines on the shorter paths so
 signals stay phase-aligned where they recombine. Feedback loops need an
 explicit delay (there's no acausal solver).
 
+Automation has two rates with different latency behavior. Sparse
+`connect_automation()` delivers two source-block-relative control points per
+block and does not participate in PDC; processors may interpolate those points
+with `ParamCursor` or subblock helpers. Dense
+`connect_audio_rate_modulation()` is the PDC-aligned path for parameters that
+must track a delayed audio branch sample by sample.
+
 ## CLI
 
 Two commands surface hosting in the CLI:

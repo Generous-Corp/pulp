@@ -31,7 +31,6 @@ namespace pulp::signal {
 // `process_block()` do not allocate after construction/configuration as
 // long as the supplied callback is also allocation-free.
 //
-// macOS plan §2.2 — polyphase IIR integration into Oversampler.
 class Oversampler {
 public:
     enum class Factor { x2 = 2, x4 = 4 };
@@ -44,6 +43,12 @@ public:
 
     Oversampler() { configure_filters(); }
 
+    /// RT contract: set_factor(), set_sample_rate(), set_kind(), and reset()
+    /// are setup/control operations that mutate filter state and should run
+    /// outside the audio callback. After configuration, the templated
+    /// process() and process_block() paths are allocation-free when the
+    /// supplied callback is also allocation-free. The std::function overload is
+    /// source-compatible but does not make heap-backed callbacks RT-safe.
     void set_factor(Factor f) {
         factor_ = f;
         configure_filters();

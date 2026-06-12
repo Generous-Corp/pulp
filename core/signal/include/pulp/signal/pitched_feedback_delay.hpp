@@ -54,6 +54,10 @@ public:
         int max_block = 4096;
     };
 
+    /// RT contract: prepare() allocates ring/chunk storage and is not
+    /// audio-thread safe. After prepare(), reset(), setters, min_delay_samples(),
+    /// and process() are allocation-free for blocks no larger than
+    /// Config::max_block. The loop processor callback must also be RT-safe.
     void prepare(double sample_rate, const Config& config) {
         assert(sample_rate > 0.0 && config.channels >= 1);
         config_ = config;

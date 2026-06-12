@@ -31,6 +31,9 @@ enum class PanLaw {
 
 // Stereo panner with selectable pan law.
 // pan = -1 (full left), 0 (centre), +1 (full right)
+//
+// RT contract: setters, gain computation, and process paths are scalar-only and
+// allocate no memory.
 class Panner {
 public:
     void set_pan(float pan) { pan_ = std::clamp(pan, -1.0f, 1.0f); }

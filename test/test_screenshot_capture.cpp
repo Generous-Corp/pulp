@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include <vector>
 
 using pulp::format::detail::ScreenshotCapture;
+using pulp::format::detail::DelayedAction;
 
 namespace {
 
@@ -265,4 +267,59 @@ TEST_CASE("ScreenshotCapture captures immediately for non-positive delays",
 
     std::filesystem::remove(zero_path);
     std::filesystem::remove(negative_path);
+}
+
+TEST_CASE("DelayedAction waits delay frames before firing side effect",
+          "[issue-468][screenshot][audio-inspector]") {
+    int actions = 0;
+    int closes = 0;
+    DelayedAction action;
+    action.delay = 4;
+    action.action_fn = [&] { ++actions; };
+    action.close_fn = [&] { ++closes; };
+
+    for (int i = 0; i < 3; ++i) {
+        action();
+        REQUIRE(actions == 0);
+        REQUIRE(closes == 0);
+    }
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+}
+
+TEST_CASE("DelayedAction survives copies and shares the frame counter",
+          "[issue-468][screenshot][audio-inspector]") {
+    int actions = 0;
+    int closes = 0;
+    DelayedAction action;
+    action.delay = 3;
+    action.action_fn = [&] { ++actions; };
+    action.close_fn = [&] { ++closes; };
+
+    std::function<void()> wrapped = action;
+    wrapped();
+    wrapped();
+    REQUIRE(actions == 0);
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+}
+
+TEST_CASE("DelayedAction closes even when no action is installed",
+          "[issue-468][screenshot][audio-inspector]") {
+    int closes = 0;
+    DelayedAction action;
+    action.delay = 1;
+    action.close_fn = [&] { ++closes; };
+
+    action();
+    REQUIRE(closes == 1);
+    REQUIRE(*action.captured);
 }

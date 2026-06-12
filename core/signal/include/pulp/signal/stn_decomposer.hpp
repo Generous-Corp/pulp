@@ -53,6 +53,10 @@ struct StnMasks {
 
 class StnDecomposer {
 public:
+    /// RT contract: prepare() allocates history, scratch, and mask storage and
+    /// is not audio-thread safe. After prepare(), process(), center_magnitude(),
+    /// latency_frames(), reset(), and accessors are allocation-free for the
+    /// prepared num_bins/window sizes.
     void prepare(const StnConfig& config) {
         assert(config.num_bins > 0);
         assert(config.time_median >= 1 && (config.time_median % 2) == 1);

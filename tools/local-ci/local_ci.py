@@ -183,6 +183,7 @@ import source_prep as _source_prep  # noqa: E402
 import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
+import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
 import utility_command_bindings as _utility_command_bindings  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
 import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
@@ -1732,94 +1733,47 @@ def notify(message: str) -> None:
 
 
 def ssh_probe(host: str, timeout: int = 5) -> subprocess.CompletedProcess[str]:
-    return _target_preflight.ssh_probe(
-        host,
-        timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _target_preflight_bindings.ssh_probe(globals(), host, timeout)
 
 
 def ssh_reachable(host: str, timeout: int = 5) -> bool:
-    return _target_preflight.ssh_reachable(
-        host,
-        timeout,
-        ssh_probe_fn=ssh_probe,
-    )
+    return _target_preflight_bindings.ssh_reachable(globals(), host, timeout)
 
 
 def ssh_failure_detail(host: str, timeout: int = 5) -> str:
-    return _target_preflight.ssh_failure_detail(
-        host,
-        timeout,
-        ssh_probe_fn=ssh_probe,
-    )
+    return _target_preflight_bindings.ssh_failure_detail(globals(), host, timeout)
 
 
 def ssh_command_result(host: str, remote_cmd: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    return _target_preflight.ssh_command_result(
-        host,
-        remote_cmd,
-        timeout=timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _target_preflight_bindings.ssh_command_result(globals(), host, remote_cmd, timeout=timeout)
 
 
 def utmctl_vm_status(vm_name: str) -> str | None:
-    return _target_preflight.utmctl_vm_status(
-        vm_name,
-        run_fn=subprocess.run,
-    )
+    return _target_preflight_bindings.utmctl_vm_status(globals(), vm_name)
 
 
 def utmctl_start(vm_name: str) -> bool:
-    return _target_preflight.utmctl_start(
-        vm_name,
-        run_fn=subprocess.run,
-    )
+    return _target_preflight_bindings.utmctl_start(globals(), vm_name)
 
 
 def ensure_host_reachable(target_name: str, target_cfg: dict, defaults: dict) -> str | None:
-    return _target_preflight.ensure_host_reachable(
-        target_name,
-        target_cfg,
-        defaults,
-        ssh_reachable_fn=ssh_reachable,
-        utmctl_vm_status_fn=utmctl_vm_status,
-        utmctl_start_fn=utmctl_start,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-        print_fn=print,
-    )
+    return _target_preflight_bindings.ensure_host_reachable(globals(), target_name, target_cfg, defaults)
 
 
 def config_source_name(path: Path) -> str:
-    return _target_preflight.config_source_name(
-        path,
-        environ=os.environ,
-        shared_config_path_fn=shared_config_path,
-    )
+    return _target_preflight_bindings.config_source_name(globals(), path)
 
 
 def config_material_for_targets(config: dict, targets: list[str]) -> dict:
-    return _target_preflight.config_material_for_targets(config, targets)
+    return _target_preflight_bindings.config_material_for_targets(globals(), config, targets)
 
 
 def find_material_config_drift(targets: list[str]) -> list[str]:
-    return _target_preflight.find_material_config_drift(
-        targets,
-        shared_config_path_fn=shared_config_path,
-        worktree_config_path_fn=worktree_config_path,
-        config_material_for_targets_fn=config_material_for_targets,
-    )
+    return _target_preflight_bindings.find_material_config_drift(globals(), targets)
 
 
 def preflight_target_host_state(target_name: str, target_cfg: dict, defaults: dict) -> dict:
-    return _target_preflight.preflight_target_host_state(
-        target_name,
-        target_cfg,
-        defaults,
-        ssh_reachable_fn=ssh_reachable,
-    )
+    return _target_preflight_bindings.preflight_target_host_state(globals(), target_name, target_cfg, defaults)
 
 
 def build_submission_metadata(
@@ -1833,7 +1787,8 @@ def build_submission_metadata(
     allow_root_mismatch: bool,
     allow_unreachable_targets: bool,
 ) -> dict:
-    return _target_preflight.build_submission_metadata(
+    return _target_preflight_bindings.build_submission_metadata(
+        globals(),
         config,
         branch,
         sha,
@@ -1842,48 +1797,34 @@ def build_submission_metadata(
         validation,
         allow_root_mismatch=allow_root_mismatch,
         allow_unreachable_targets=allow_unreachable_targets,
-        root=ROOT,
-        cwd_fn=Path.cwd,
-        git_root_for_fn=git_root_for,
-        config_path_fn=config_path,
-        config_source_name_fn=config_source_name,
-        preflight_target_host_state_fn=preflight_target_host_state,
-        find_material_config_drift_fn=find_material_config_drift,
-        normalize_provenance_fn=normalize_provenance,
-        environ=os.environ,
     )
 
 
 def print_submission_metadata(metadata: dict) -> None:
-    return _target_preflight.print_submission_metadata(
-        metadata,
-        short_sha_fn=short_sha,
-        provenance_summary_fn=provenance_summary,
-        print_fn=print,
-    )
+    return _target_preflight_bindings.print_submission_metadata(globals(), metadata)
 
 
 # ── Validation Runners ───────────────────────────────────────────────────────
 
 
 def remote_commit_error(target_name: str, host: str, job: dict) -> str:
-    return _execution.remote_commit_error(target_name, host, job)
+    return _execution_bindings.remote_commit_error(globals(), target_name, host, job)
 
 
 def parse_progress_marker(line: str) -> dict:
-    return _execution.parse_progress_marker(line)
+    return _execution_bindings.parse_progress_marker(globals(), line)
 
 
 def prepared_state_root(target_name: str, validation: str) -> Path:
-    return _execution.prepared_state_root(target_name, validation)
+    return _execution_bindings.prepared_state_root(globals(), target_name, validation)
 
 
 def should_reuse_prepared_state(job: dict) -> bool:
-    return _execution.should_reuse_prepared_state(job)
+    return _execution_bindings.should_reuse_prepared_state(globals(), job)
 
 
 def local_validation_command(job: dict, exclude_tests: str = "") -> tuple[list[str], str]:
-    return _execution.local_validation_command(job, exclude_tests)
+    return _execution_bindings.local_validation_command(globals(), job, exclude_tests)
 
 
 def posix_ssh_validation_command(
@@ -1896,7 +1837,8 @@ def posix_ssh_validation_command(
     bundle_ref: str,
     exclude_tests: str = "",
 ) -> tuple[list[str], str]:
-    return _execution.posix_ssh_validation_command(
+    return _execution_bindings.posix_ssh_validation_command(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -1916,7 +1858,8 @@ def validation_result_from_run(
     transport_mode: str,
     timeout_secs: int = 3600,
 ) -> dict:
-    return _execution.validation_result_from_run(
+    return _execution_bindings.validation_result_from_run(
+        globals(),
         target_name,
         run,
         log_path=log_path,
@@ -1933,7 +1876,8 @@ def validation_error_result(
     log_path: Path,
     transport_mode: str,
 ) -> dict:
-    return _execution.validation_error_result(
+    return _execution_bindings.validation_error_result(
+        globals(),
         target_name,
         detail,
         log_path=log_path,
@@ -1942,24 +1886,19 @@ def validation_error_result(
 
 
 def unreachable_target_result(target_name: str, detail: str = "Host unreachable") -> dict:
-    return _execution.unreachable_target_result(target_name, detail)
+    return _execution_bindings.unreachable_target_result(globals(), target_name, detail)
 
 
 def target_exception_result(target_name: str, exc: Exception) -> dict:
-    return _execution.target_exception_result(target_name, exc)
+    return _execution_bindings.target_exception_result(globals(), target_name, exc)
 
 
 def completed_job_result(job: dict, results: list[dict]) -> dict:
-    return _execution.completed_job_result(
-        job,
-        results,
-        completed_at=now_iso(),
-        provenance=normalize_provenance(job.get("provenance")),
-    )
+    return _execution_bindings.completed_job_result(globals(), job, results)
 
 
 def sorted_target_results(results: list[dict]) -> list[dict]:
-    return _execution.sorted_target_results(results)
+    return _execution_bindings.sorted_target_results(globals(), results)
 
 
 def run_target_tasks(
@@ -1967,11 +1906,7 @@ def run_target_tasks(
     *,
     on_target_complete: Callable[[str, dict], None],
 ) -> list[dict]:
-    return _execution.run_target_tasks(
-        tasks,
-        exception_result_fn=target_exception_result,
-        on_target_complete=on_target_complete,
-    )
+    return _execution_bindings.run_target_tasks(globals(), tasks, on_target_complete=on_target_complete)
 
 
 def run_logged_command(
@@ -1985,7 +1920,8 @@ def run_logged_command(
     heartbeat_interval_secs: float = HEARTBEAT_INTERVAL_SECS,
     stuck_idle_secs: float = STUCK_IDLE_SECS,
 ) -> dict:
-    return _execution.run_logged_command(
+    return _execution_bindings.run_logged_command(
+        globals(),
         cmd,
         cwd=cwd,
         input_text=input_text,
@@ -2044,7 +1980,8 @@ def windows_validation_script(
     resolved_platform: str,
     resolved_generator_instance: str,
 ) -> tuple[str, str]:
-    return _execution.windows_validation_script(
+    return _execution_bindings.windows_validation_script(
+        globals(),
         target_name,
         host,
         effective_repo_path,
@@ -2055,7 +1992,6 @@ def windows_validation_script(
         cmake_generator=cmake_generator,
         resolved_platform=resolved_platform,
         resolved_generator_instance=resolved_generator_instance,
-        ps_literal_fn=ps_literal,
     )
 
 
@@ -2220,7 +2156,7 @@ def config_for_job_execution(job: dict, config: dict) -> dict:
 
 
 def submission_target_state(job: dict, target_name: str) -> dict:
-    return _execution.submission_target_state(job, target_name)
+    return _execution_bindings.submission_target_state(globals(), job, target_name)
 
 
 def resolve_ssh_target_execution(job: dict, target_name: str, target_cfg: dict, defaults: dict) -> tuple[str | None, str | None]:

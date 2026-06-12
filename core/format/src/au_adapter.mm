@@ -210,6 +210,9 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 - (uint32_t)pulpBypassParameterId;
 
 - (NSUInteger)pulpLastParameterEventCount;
+- (NSUInteger)pulpLastParameterEventCapacity;
+- (BOOL)pulpLastParameterEventsOverflowed;
+- (uint32_t)pulpLastParameterEventDropCount;
 - (uint32_t)pulpLastParameterEventParamIDAtIndex:(NSUInteger)index;
 - (int32_t)pulpLastParameterEventSampleOffsetAtIndex:(NSUInteger)index;
 - (int32_t)pulpLastParameterEventRampDurationAtIndex:(NSUInteger)index;
@@ -976,6 +979,18 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 
 - (NSUInteger)pulpLastParameterEventCount {
     return static_cast<NSUInteger>(_bridge.param_events.size());
+}
+
+- (NSUInteger)pulpLastParameterEventCapacity {
+    return static_cast<NSUInteger>(_bridge.param_events.capacity());
+}
+
+- (BOOL)pulpLastParameterEventsOverflowed {
+    return _bridge.param_events.overflowed() ? YES : NO;
+}
+
+- (uint32_t)pulpLastParameterEventDropCount {
+    return _bridge.param_events.dropped_event_count();
 }
 
 - (uint32_t)pulpLastParameterEventParamIDAtIndex:(NSUInteger)index {

@@ -1,6 +1,11 @@
 #pragma once
 
 // Special mathematical functions for DSP and filter design.
+//
+// RT contract: the scalar free functions and nested `special::*` helpers are
+// stateless and allocate no memory. They may be computationally expensive and
+// are often better suited to prepare/design paths, but allocation behavior is
+// fixed.
 
 #include <algorithm>
 #include <cmath>

@@ -14,6 +14,9 @@ namespace pulp::signal {
 /// All functions take a fractional position and neighboring samples.
 /// Use with delay lines, wavetable oscillators, and resamplers.
 ///
+/// RT contract: all interpolation functions are stateless scalar helpers and
+/// allocate no memory.
+///
 /// @code
 /// // In a delay line read:
 /// float frac = delay - std::floor(delay);

@@ -40,6 +40,9 @@ public:
         float strength = 1.0f;
     };
 
+    /// RT contract: prepare() allocates the previous-magnitude buffer and is
+    /// not audio-thread safe. After prepare(), analyze() and reset() are
+    /// allocation-free for the prepared FFT size.
     void prepare(const Config& config) {
         assert(config.fft_size >= 256 && (config.fft_size & (config.fft_size - 1)) == 0);
         config_ = config;

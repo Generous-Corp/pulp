@@ -44,6 +44,12 @@ per-block `ParameterEventQueue` and written with `StateStore::set_value_rt()`.
 Gesture events (`CLAP_EVENT_PARAM_GESTURE_BEGIN` / `END`) are forwarded to
 `StateStore::begin_gesture()` / `end_gesture()`.
 
+The per-block queue is fixed-capacity and real-time safe. If a host sends more
+than 1024 parameter value events in one block, the adapter keeps the first 1024
+sample-accurate points, records the overflow/drop count on the queue, and still
+writes every incoming value to `StateStore` so block-end reads observe the
+latest host value.
+
 The `params_flush()` extension callback handles the same events outside of `process()` (e.g., when the plugin is bypassed).
 
 **Plugin to host:** Before calling `Processor::process()`, the adapter snapshots all parameter values. After processing, it compares each value against the snapshot. Any changed parameters are emitted as `CLAP_EVENT_PARAM_VALUE` events via `out_events->try_push()`. This allows hosts to record automation from plugin-side changes.
@@ -141,7 +147,13 @@ The FUID must be generated once and never changed across versions. It is the sta
 
 ### Parameter Sync
 
-**Host to plugin:** During `process()`, the adapter reads `data.inputParameterChanges`. For each changed parameter, it reads the last point value (normalized 0-1) and writes it to `StateStore::set_normalized()`.
+**Host to plugin:** During `process()`, the adapter reads
+`data.inputParameterChanges`. Each point is denormalized, pushed into the
+per-block `ParameterEventQueue`, and written with
+`StateStore::set_normalized_rt()`. If a host sends more than 1024 points in one
+block, the adapter keeps the first 1024 sample-accurate points, records the
+overflow/drop count on the queue, and still writes every incoming point to
+`StateStore` so block-end reads observe the latest host value.
 
 **Plugin to host:** The adapter snapshots all parameter values before calling `Processor::process()`. After processing, any value that changed is:
 1. Written to `data.outputParameterChanges` as a normalized value (so the host can record automation)
@@ -243,6 +255,12 @@ Instruments have zero audio inputs and one audio output. MIDI is received via `H
 
 **Host to plugin (instruments):** `Render()` reads parameters via `Globals()->GetParameterRT()`.
 
+**Parameter event model:** AU v2 exposes current parameter values through the
+AU parameter store rather than a render-event list. The effect adapter attaches
+an empty `ParameterEventQueue` before `Processor::process()` so plugins see the
+same non-null queue contract as other adapters, but AU v2 parameter changes are
+block-rate `StateStore` values today.
+
 **Plugin to host:** Parameter output changes are not yet emitted back to the AU host. Initial defaults are set via `Globals()->SetParameter()` during `Initialize()`.
 
 **Gesture callbacks (effects):** The adapter wires `StateStore` gesture callbacks to `AUEventListenerNotify()` with `kAudioUnitEvent_BeginParameterChangeGesture` and `kAudioUnitEvent_EndParameterChangeGesture` event types.
@@ -337,6 +355,15 @@ AU v3 mirrors the AU v2 state contract through `AUAudioUnit.fullState`:
   Older blobs that contain only raw `StateStore` data still load and call
   `deserialize_plugin_state()` with empty bytes.
 
+### Parameter Events
+
+AU v3 receives sample-accurate `AURenderEventParameter` and
+`AURenderEventParameterRamp` events in the render event list. The adapter writes
+each event into the realtime `ParameterEventQueue` and also updates
+`StateStore` with the latest value. The queue is fixed-capacity; events beyond
+capacity are dropped from the sparse queue and counted as overflow, while the
+latest value still reaches `StateStore` for block-rate reads.
+
 ---
 
 ## LV2
@@ -380,6 +407,12 @@ sequences and broader control/atom coverage are still in progress.
 5. Atom output port (present when `descriptor().produces_midi == true`)
 
 `run()` reads control-input port values into `StateStore` at the top of each buffer.
+LV2 control ports are block-rate current values, not scheduled sparse
+parameter events. The adapter still attaches an empty
+`ParameterEventQueue` before `Processor::process()` so
+`Processor::param_events()` is non-null, but control-port ingress does not
+consume sparse queue capacity; large host-block capacity for LV2 is ordinary
+control-port count/state update behavior.
 
 ### MIDI Routing
 

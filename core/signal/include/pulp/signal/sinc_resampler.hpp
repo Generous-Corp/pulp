@@ -21,6 +21,9 @@
 /// neighbouring input samples weighted by the kernel evaluated at their
 /// distance from `p`. Real-time-safe after build(); no allocation in
 /// `read()`.
+///
+/// RT contract: build() allocates the kernel table and is not audio-thread
+/// safe. apply(), read(), and accessors are allocation-free after build().
 
 #include <cmath>
 #include <cstddef>

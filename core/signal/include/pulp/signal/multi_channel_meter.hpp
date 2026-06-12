@@ -4,6 +4,12 @@
 /// Multi-channel metering: peak, RMS, LUFS (momentary/short-term/integrated),
 /// stereo correlation, clip detection. All computations are lock-free and
 /// suitable for the audio thread.
+///
+/// RT contract: `prepare()` initializes fixed-size accumulator state and may be
+/// called off the audio thread. After preparation, `process()`, `snapshot()`,
+/// and `reset()` allocate no memory for channel counts up to
+/// kMaxMeterChannels. `MultiChannelBallistics::update()` and `clear_clips()`
+/// also use fixed storage and allocate no memory.
 
 #include <array>
 #include <cmath>

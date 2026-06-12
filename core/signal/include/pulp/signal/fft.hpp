@@ -14,9 +14,14 @@
 
 namespace pulp::signal {
 
-// Radix-2 FFT — in-place, decimation-in-time
+// Radix-2 FFT — in-place, decimation-in-time.
 // Size must be a power of 2.
 // On Apple platforms, uses vDSP for significantly faster large transforms.
+//
+// RT contract: construction/destruction allocate or release twiddle/vDSP
+// storage and are prepare/control-thread work. forward(), inverse(),
+// forward_real(), magnitude(), magnitude_db(), and size() are allocation-free
+// after construction when callers provide valid input/output buffers.
 class Fft {
 public:
     Fft() = default;
@@ -231,7 +236,11 @@ private:
 
 // ── Convolver ────────────────────────────────────────────────────────────────
 
-// Simple frequency-domain convolver using overlap-add
+// Simple frequency-domain convolver using overlap-add.
+//
+// RT contract: load_ir() allocates FFT and overlap-add buffers and is not
+// audio-thread safe. process(), buffer process(), and reset() are
+// allocation-free after a valid impulse response has been loaded.
 class Convolver {
 public:
     // Load an impulse response

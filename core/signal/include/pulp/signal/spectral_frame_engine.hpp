@@ -53,6 +53,12 @@ class SpectralFrameEngine {
 public:
     SpectralFrameEngine() = default;
 
+    /// RT contract: prepare() allocates FFT/window/ring/frame storage and is
+    /// not audio-thread safe. After prepare(), process(), analyze(),
+    /// synthesize_frame(), available_output(), read_output(), reset(), and
+    /// accessors are allocation-free for blocks no larger than max_block and
+    /// synthesis hops no larger than max_synthesis_hop. The callback must also
+    /// be RT-safe.
     void prepare(const SpectralFrameEngineConfig& config) {
         assert(config.fft_size >= 256 && config.fft_size <= 16384);
         assert((config.fft_size & (config.fft_size - 1)) == 0);

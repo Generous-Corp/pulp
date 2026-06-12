@@ -22,5 +22,6 @@ std::string handle_audio_model_list(const std::string& params_json);
 std::string handle_audio_model_activate(const std::string& params_json);
 std::string handle_audio_read_bundle(const std::string& params_json);
 std::string handle_audio_excerpt_find(const std::string& params_json);
+std::string handle_audio_probe_json(const std::string& params_json);
 
 }  // namespace pulp_mcp

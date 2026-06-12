@@ -5,8 +5,10 @@ namespace pulp::signal {
 /// One-pole DC blocker (first-order high-pass).
 ///
 /// Removes DC offset and very-low-frequency drift from an audio stream
-/// without measurably altering the audio band. Real-time safe; no
-/// allocations.
+/// without measurably altering the audio band.
+///
+/// RT contract: `set_pole()`, `reset()`, and process paths are scalar-only and
+/// allocate no memory.
 ///
 /// Transfer function: H(z) = (1 - z^-1) / (1 - p * z^-1)
 /// where p is the pole position (default 0.995 → ~3.5 Hz corner at 44.1 kHz).

@@ -8,6 +8,7 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <algorithm>
 #include <array>
@@ -1518,6 +1519,87 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     graph.release();
 }
 
+TEST_CASE("SignalGraph preserves MPE-bearing UMP events through MIDI edges",
+          "[host][graph][midi][mpe]") {
+    SignalGraph graph;
+    auto mi = graph.add_midi_input_node("mpe");
+    auto fwd = std::make_unique<MidiForwarder>();
+    auto* fwd_ptr = fwd.get();
+    auto p = graph.add_plugin_node(std::move(fwd), 0, 0, "mpe-fwd");
+    auto mo = graph.add_midi_output_node("mpe-out");
+
+    REQUIRE(graph.connect_midi(mi, p));
+    REQUIRE(graph.connect_midi(p, mo));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    pulp::midi::MidiBuffer mpe_events;
+    pulp::midi::UmpBuffer mpe_ump;
+    mpe_ump.add(pulp::midi::UmpPacket::note_on_2(0, 1, 60, 0x8000), 3);
+    mpe_ump.add(pulp::midi::UmpPacket::per_note_pitch_bend(
+                    0, 1, 60, 0xC0000000u),
+                11);
+    mpe_ump.add(pulp::midi::UmpPacket::registered_per_note_cc(
+                    0, 1, 60, 74, 0xFFFFFFFFu),
+                19);
+    mpe_ump.add(pulp::midi::UmpPacket::per_note_management(
+                    0,
+                    1,
+                    60,
+                    pulp::midi::UmpPacket::kPerNoteDetachControllers),
+                27);
+    mpe_events.attach_ump(&mpe_ump);
+    REQUIRE(graph.inject_midi(mi, mpe_events));
+
+    float in_sample = 0.0f;
+    float out_sample = 0.0f;
+    const float* in_ptrs[1] = {&in_sample};
+    float* out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 0, 64);
+    pulp::audio::BufferView<float> ov(out_ptrs, 0, 64);
+    graph.process(ov, iv, 64);
+
+    REQUIRE(fwd_ptr->last_seen_ump().size() == 4);
+    REQUIRE(fwd_ptr->last_seen_ump()[0].sample_offset == 3);
+    REQUIRE(fwd_ptr->last_seen_ump()[1].packet.status() == 0x61);
+    REQUIRE(fwd_ptr->last_seen_ump()[2].packet.status() == 0x01);
+    REQUIRE(fwd_ptr->last_seen_ump()[3].packet.status() == 0xF1);
+
+    pulp::midi::MidiBuffer arrived;
+    pulp::midi::UmpBuffer arrived_ump;
+    arrived.attach_ump(&arrived_ump);
+    REQUIRE(graph.extract_midi(mo, arrived));
+    REQUIRE(arrived_ump.size() == 4);
+    REQUIRE(arrived_ump[0].sample_offset == 3);
+    REQUIRE(arrived_ump[1].sample_offset == 11);
+    REQUIRE(arrived_ump[2].sample_offset == 19);
+    REQUIRE(arrived_ump[3].sample_offset == 27);
+
+    pulp::midi::MpeVoiceTracker tracker;
+    pulp::midi::MpeBuffer derived;
+    int32_t current_sample_offset = 0;
+    pulp::midi::bind_tracker_to_buffer(tracker, derived, current_sample_offset);
+    for (const auto& ev : arrived_ump) {
+        current_sample_offset = ev.sample_offset;
+        REQUIRE(tracker.process(ev.packet));
+    }
+
+    REQUIRE(derived.size() == 3);
+    REQUIRE(derived[0].sample_offset == 3);
+    REQUIRE(derived[0].kind == pulp::midi::MpeExpressionEvent::Kind::NoteOn);
+    REQUIRE(derived[1].sample_offset == 11);
+    REQUIRE(derived[1].kind == pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+    REQUIRE_THAT(derived[1].state.pitch_bend_semitones,
+                 WithinAbs(24.0f, 0.001f));
+    REQUIRE(derived[2].sample_offset == 19);
+    REQUIRE(derived[2].kind == pulp::midi::MpeExpressionEvent::Kind::Timbre);
+    REQUIRE_THAT(derived[2].state.timbre, WithinAbs(1.0f, 0.001f));
+    const auto* note = tracker.find(1, 60);
+    REQUIRE(note != nullptr);
+    REQUIRE(note->detached);
+
+    graph.release();
+}
+
 TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
           "[host][graph][midi]") {
     constexpr std::size_t event_capacity = ParameterEventQueue::kCapacity;
@@ -1784,6 +1866,117 @@ TEST_CASE("SignalGraph MIDI ingress and egress mailboxes are Race-free",
     graph.release();
 }
 
+TEST_CASE("SignalGraph live controls and MIDI handoff are TSan-clean together",
+          "[host][graph][threading][race][tsan][midi]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "audio-in");
+    auto gain = graph.add_gain_node("live-gain");
+    auto output = graph.add_output_node(1, "audio-out");
+    auto midi_in = graph.add_midi_input_node("keys");
+    auto midi_out = graph.add_midi_output_node("midi-out");
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::vector<float> input_buffer(32, 1.0f);
+    std::vector<float> output_buffer(32, 0.0f);
+    const float* input_ptrs[1] = {input_buffer.data()};
+    float* output_ptrs[1] = {output_buffer.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs, 1, 32);
+    pulp::audio::BufferView<float> output_view(output_ptrs, 1, 32);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> updates_active{false};
+    std::atomic<bool> saw_invalid_audio{false};
+    std::atomic<int> processed_blocks{0};
+    std::atomic<int> blocks_during_updates{0};
+    std::promise<void> audio_started;
+    auto started = audio_started.get_future();
+    std::promise<void> first_block_processed;
+    auto first_block = first_block_processed.get_future();
+
+    std::thread audio_thread([&] {
+        audio_started.set_value();
+        bool first_block_signalled = false;
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.process(output_view, input_view, 32);
+            processed_blocks.fetch_add(1, std::memory_order_relaxed);
+            if (updates_active.load(std::memory_order_acquire)) {
+                blocks_during_updates.fetch_add(1, std::memory_order_relaxed);
+            }
+            for (float sample : output_buffer) {
+                if (!std::isfinite(sample) || sample < -1.0e-6f
+                    || sample > 1.0f + 1.0e-6f) {
+                    saw_invalid_audio.store(true, std::memory_order_relaxed);
+                    break;
+                }
+            }
+            if (!first_block_signalled) {
+                first_block_processed.set_value();
+                first_block_signalled = true;
+            }
+        }
+    });
+
+    started.wait();
+    first_block.wait();
+
+    bool all_gain_updates_succeeded = true;
+    bool all_injects_succeeded = true;
+    bool all_extracts_succeeded = true;
+    bool saw_invalid_midi = false;
+    constexpr int kMinControlUpdates = 10000;
+    constexpr int kMinBlocksDuringUpdates = 4;
+    constexpr int kMaxControlUpdates = 1000000;
+    int update_count = 0;
+    updates_active.store(true, std::memory_order_release);
+    while ((update_count < kMinControlUpdates
+            || blocks_during_updates.load(std::memory_order_relaxed)
+                < kMinBlocksDuringUpdates)
+           && update_count < kMaxControlUpdates) {
+        const float live_gain =
+            static_cast<float>((update_count % 17) + 1) / 17.0f;
+        all_gain_updates_succeeded =
+            graph.set_node_gain(gain, live_gain) && all_gain_updates_succeeded;
+
+        pulp::midi::MidiBuffer events;
+        auto event = pulp::midi::MidiEvent::note_on(
+            0,
+            60 + (update_count % 12),
+            96);
+        event.sample_offset = update_count % 32;
+        events.add(event);
+        all_injects_succeeded =
+            graph.inject_midi(midi_in, events) && all_injects_succeeded;
+
+        pulp::midi::MidiBuffer extracted;
+        all_extracts_succeeded =
+            graph.extract_midi(midi_out, extracted) && all_extracts_succeeded;
+        if (extracted.size() > 1 || extracted.sysex_size() != 0) {
+            saw_invalid_midi = true;
+        }
+
+        if ((update_count % 64) == 0) std::this_thread::yield();
+        ++update_count;
+    }
+    updates_active.store(false, std::memory_order_release);
+
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(all_gain_updates_succeeded);
+    REQUIRE(all_injects_succeeded);
+    REQUIRE(all_extracts_succeeded);
+    REQUIRE(processed_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(blocks_during_updates.load(std::memory_order_relaxed)
+            >= kMinBlocksDuringUpdates);
+    REQUIRE_FALSE(saw_invalid_audio.load(std::memory_order_relaxed));
+    REQUIRE_FALSE(saw_invalid_midi);
+    graph.release();
+}
+
 // ── Phase 1E connect_automation test ────────────────────────────────────
 
 namespace {
@@ -1952,6 +2145,81 @@ TEST_CASE("SignalGraph connect_automation delivers two-point events per block",
     REQUIRE(std::abs(ev[0].value - 0.25f) < 1e-6f);
     REQUIRE(ev[1].sample_offset == 63);
     REQUIRE(std::abs(ev[1].value - 0.75f) < 1e-6f);
+}
+
+TEST_CASE("SignalGraph sparse automation remains bounded at large host blocks",
+          "[host][graph][automation][capacity]") {
+    constexpr int block_size = 4096;
+
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot = std::make_unique<MockAutomatable>();
+    auto* slot_ptr = slot.get();
+    auto plug = graph.add_plugin_node(std::move(slot), 0, 1, "auto");
+
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE(graph.prepare(48000.0, block_size));
+
+    std::vector<float> input_samples(block_size, 0.0f);
+    input_samples.front() = 0.125f;
+    input_samples.back() = 0.875f;
+    std::vector<float> output_samples(block_size, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, block_size);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, block_size);
+
+    graph.process(out_view, in_view, block_size);
+
+    const auto& events = slot_ptr->received();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE_THAT(events[0].value, WithinAbs(0.125f, 1e-6f));
+    REQUIRE(events[1].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[1].sample_offset == block_size - 1);
+    REQUIRE_THAT(events[1].value, WithinAbs(0.875f, 1e-6f));
+}
+
+TEST_CASE("SignalGraph sparse automation stays source-block relative under PDC",
+          "[host][graph][automation][pdc]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto latency = graph.add_plugin_node(
+        std::make_unique<MockLatencyPlugin>(2, 1), 1, 1, "latency");
+    auto slot = std::make_unique<MockAutomatable>();
+    auto* slot_ptr = slot.get();
+    auto target = graph.add_plugin_node(std::move(slot), 1, 1, "target");
+    auto out_node = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(in_node, 0, latency, 0));
+    REQUIRE(graph.connect(latency, 0, target, 0));
+    REQUIRE(graph.connect_automation(
+        in_node, 0, target, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE(graph.connect(target, 0, out_node, 0));
+
+    REQUIRE(graph.prepare(48000.0, 4));
+    REQUIRE(graph.node_latency_samples(target) == 2);
+    REQUIRE(graph.latency_samples() == 2);
+
+    std::vector<float> input_samples{1.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> output_samples(4, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+
+    const auto& events = slot_ptr->received();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE_THAT(events[0].value, WithinAbs(1.0f, 1e-6f));
+    REQUIRE(events[1].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[1].sample_offset == 3);
+    REQUIRE_THAT(events[1].value, WithinAbs(0.0f, 1e-6f));
 }
 
 TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
@@ -2172,6 +2440,57 @@ TEST_CASE("SignalGraph audio-rate modulation delivers one event per sample",
         REQUIRE(events[static_cast<size_t>(i)].sample_offset == i);
         REQUIRE(std::abs(events[static_cast<size_t>(i)].value - expected[i]) < 1e-6f);
     }
+}
+
+TEST_CASE("SignalGraph audio-rate modulation validates large host-block capacity",
+          "[host][graph][automation][audio-rate][capacity]") {
+    SignalGraph max_capacity_graph;
+    auto max_capacity_input = max_capacity_graph.add_input_node(1, "in");
+    auto max_capacity_slot = std::make_unique<MockAutomatable>(ParamRate::AudioRate);
+    auto* max_capacity_slot_ptr = max_capacity_slot.get();
+    auto max_capacity_plugin = max_capacity_graph.add_plugin_node(
+        std::move(max_capacity_slot), 0, 1, "audio-rate");
+
+    REQUIRE(max_capacity_graph.connect_audio_rate_modulation(
+        max_capacity_input, 0, max_capacity_plugin, MockAutomatable::kParamId,
+        -1.0f, 1.0f));
+    REQUIRE(max_capacity_graph.prepare(
+        48000.0, static_cast<int>(ParameterEventQueue::kCapacity)));
+
+    std::vector<float> input_samples(ParameterEventQueue::kCapacity, 0.0f);
+    input_samples.front() = 0.0f;
+    input_samples.back() = 1.0f;
+    std::vector<float> output_samples(ParameterEventQueue::kCapacity, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(
+        in_ptrs, 1, static_cast<int>(ParameterEventQueue::kCapacity));
+    pulp::audio::BufferView<float> out_view(
+        out_ptrs, 1, static_cast<int>(ParameterEventQueue::kCapacity));
+
+    max_capacity_graph.process(
+        out_view, in_view, static_cast<int>(ParameterEventQueue::kCapacity));
+    const auto& events = max_capacity_slot_ptr->received();
+    REQUIRE(events.size() == ParameterEventQueue::kCapacity);
+    REQUIRE(events.front().sample_offset == 0);
+    REQUIRE_THAT(events.front().value, WithinAbs(-1.0f, 1e-6f));
+    REQUIRE(events.back().sample_offset ==
+            static_cast<int32_t>(ParameterEventQueue::kCapacity - 1));
+    REQUIRE_THAT(events.back().value, WithinAbs(1.0f, 1e-6f));
+
+    auto rejects_large_audio_rate_block = [](int block_size) {
+        SignalGraph graph;
+        auto in_node = graph.add_input_node(1, "in");
+        auto plug = graph.add_plugin_node(
+            std::make_unique<MockAutomatable>(ParamRate::AudioRate),
+            0, 1, "audio-rate");
+        REQUIRE(graph.connect_audio_rate_modulation(
+            in_node, 0, plug, MockAutomatable::kParamId, -1.0f, 1.0f));
+        REQUIRE_FALSE(graph.prepare(48000.0, block_size));
+    };
+
+    rejects_large_audio_rate_block(2048);
+    rejects_large_audio_rate_block(4096);
 }
 
 TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge order",

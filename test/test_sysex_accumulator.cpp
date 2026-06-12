@@ -12,8 +12,13 @@
 
 #include <pulp/midi/sysex_accumulator.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <vector>
 
 using pulp::midi::SysexAccumulator;
@@ -26,6 +31,30 @@ struct Emit {
     std::vector<std::vector<std::uint8_t>> aborted;
 };
 
+struct RtEmitSink {
+    static constexpr std::size_t kMaxMessages = 4;
+    static constexpr std::size_t kMaxBytes = 16;
+
+    struct Message {
+        std::array<std::uint8_t, kMaxBytes> payload{};
+        std::size_t size = 0;
+        bool complete = false;
+    };
+
+    std::array<Message, kMaxMessages> messages{};
+    std::size_t count = 0;
+
+    void capture(const std::vector<std::uint8_t>& payload,
+                 bool is_complete) noexcept {
+        REQUIRE(count < messages.size());
+        REQUIRE(payload.size() <= kMaxBytes);
+        auto& message = messages[count++];
+        message.size = payload.size();
+        message.complete = is_complete;
+        std::copy(payload.begin(), payload.end(), message.payload.begin());
+    }
+};
+
 auto make_callback(Emit& e) {
     return [&](const std::vector<std::uint8_t>& payload, bool complete) {
         if (complete) e.complete.push_back(payload);
@@ -34,6 +63,49 @@ auto make_callback(Emit& e) {
 }
 
 } // namespace
+
+TEST_CASE("SysexAccumulator: reserved feed path is allocation-free",
+          "[midi][sysex][rt-safety]") {
+    SysexAccumulator acc;
+    acc.reserve(RtEmitSink::kMaxBytes);
+
+    RtEmitSink sink;
+    pulp::midi::SysexEmitFn emit =
+        [&sink](const std::vector<std::uint8_t>& payload, bool complete) noexcept {
+            sink.capture(payload, complete);
+        };
+
+    const std::uint8_t complete[] = {0xF0, 0x7D, 0x01, 0x02, 0xF7};
+    const std::uint8_t aborted_and_recovered[] = {
+        0xF0, 0x41, 0x10,
+        0xF8,
+        0x90, 0x40, 0x7F,
+        0xF0, 0x7E, 0x7F, 0xF7,
+    };
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        acc.feed(complete, sizeof(complete), emit);
+        acc.feed(aborted_and_recovered, sizeof(aborted_and_recovered), emit);
+        acc.reset();
+        REQUIRE_FALSE(acc.in_progress());
+        REQUIRE(acc.partial_size() == 0);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(sink.count == 3);
+    REQUIRE(sink.messages[0].complete);
+    REQUIRE(sink.messages[0].size == 5);
+    REQUIRE(sink.messages[0].payload[0] == 0xF0);
+    REQUIRE(sink.messages[0].payload[4] == 0xF7);
+    REQUIRE_FALSE(sink.messages[1].complete);
+    REQUIRE(sink.messages[1].size == 3);
+    REQUIRE(sink.messages[1].payload[0] == 0xF0);
+    REQUIRE(sink.messages[1].payload[2] == 0x10);
+    REQUIRE(sink.messages[2].complete);
+    REQUIRE(sink.messages[2].size == 4);
+    REQUIRE(sink.messages[2].payload[3] == 0xF7);
+}
 
 TEST_CASE("SysexAccumulator: single-packet complete sysex",
           "[midi][sysex][issue-86]") {

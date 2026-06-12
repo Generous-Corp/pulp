@@ -102,6 +102,29 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             r.watch = true;
             continue;
         }
+        if (a == "--audio-inspector") {
+            r.audio_inspector = true;
+            continue;
+        }
+        if (a == "--audio-probe-json") {
+            r.headless = true;  // implies --headless (one-shot dump + exit)
+            if (i + 1 < args.size() && !args[i + 1].empty() && args[i + 1][0] != '-') {
+                r.audio_probe_json_path = args[++i];
+            } else {
+                r.error = "--audio-probe-json requires a path argument";
+                return r;
+            }
+            continue;
+        }
+        if (a.rfind("--audio-probe-json=", 0) == 0) {
+            r.headless = true;
+            r.audio_probe_json_path = a.substr(std::string("--audio-probe-json=").size());
+            if (r.audio_probe_json_path.empty()) {
+                r.error = "--audio-probe-json= requires a non-empty path";
+                return r;
+            }
+            continue;
+        }
 
         if (r.target_name.empty() && !a.empty() && a[0] != '-') {
             r.target_name = a;
@@ -126,6 +149,13 @@ std::vector<std::string> assemble_launch_args(const ParseRunResult& opts) {
     if (opts.frames != 1) {
         out.push_back("--frames");
         out.push_back(std::to_string(opts.frames));
+    }
+    if (opts.audio_inspector) {
+        out.push_back("--audio-inspector");
+    }
+    if (!opts.audio_probe_json_path.empty()) {
+        out.push_back("--audio-probe-json");
+        out.push_back(opts.audio_probe_json_path);
     }
     for (const auto& a : opts.user_pass_through) {
         out.push_back(a);

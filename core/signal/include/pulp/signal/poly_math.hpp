@@ -13,6 +13,10 @@ namespace pulp::signal {
 
 /// Polynomial evaluation and manipulation utilities.
 ///
+/// RT contract: eval(), eval_complex(), roots_quadratic(), and fixed-size
+/// matrix operations are allocation-free. Helpers that return std::vector
+/// allocate result storage and are design/control-thread utilities.
+///
 /// @code
 /// // Evaluate polynomial: 3x^2 + 2x + 1
 /// float y = Polynomial::eval({1.0f, 2.0f, 3.0f}, x); // coeffs[0] = constant
@@ -65,7 +69,7 @@ struct Polynomial {
         }
     }
 
-    /// Multiply two polynomials (convolution of coefficients).
+    /// Multiply two polynomials (convolution of coefficients). Not RT-safe.
     static std::vector<float> multiply(const std::vector<float>& a,
                                         const std::vector<float>& b) {
         if (a.empty() || b.empty()) return {};
@@ -78,7 +82,7 @@ struct Polynomial {
         return result;
     }
 
-    /// Add two polynomials.
+    /// Add two polynomials. Not RT-safe.
     static std::vector<float> add(const std::vector<float>& a,
                                    const std::vector<float>& b) {
         auto& longer = (a.size() >= b.size()) ? a : b;
@@ -90,14 +94,14 @@ struct Polynomial {
         return result;
     }
 
-    /// Scale all coefficients by a constant.
+    /// Scale all coefficients by a constant. Not RT-safe.
     static std::vector<float> scale(const std::vector<float>& p, float s) {
         std::vector<float> result(p.size());
         for (size_t i = 0; i < p.size(); ++i) result[i] = p[i] * s;
         return result;
     }
 
-    /// Derivative of a polynomial.
+    /// Derivative of a polynomial. Not RT-safe.
     static std::vector<float> derivative(const std::vector<float>& p) {
         if (p.size() <= 1) return {0};
         std::vector<float> result(p.size() - 1);

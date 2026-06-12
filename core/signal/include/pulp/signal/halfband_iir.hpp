@@ -93,6 +93,9 @@ namespace pulp::signal {
 /// asks for.
 ///
 /// Stable for |a| < 1.
+///
+/// RT contract: setters, queries, `process()`, and `reset()` are fixed-state
+/// and allocate no memory.
 class HalfBandAllpassSection {
 public:
     HalfBandAllpassSection() = default;
@@ -193,6 +196,10 @@ inline float run_path(std::vector<HalfBandAllpassSection>& path, float x) {
 /// polyphase outputs are interleaved as (out_lo, out_hi) — out_lo is
 /// time-aligned with x (after the filter's group delay), out_hi is
 /// the new sample inserted between successive inputs.
+///
+/// RT contract: constructors allocate section storage. `sections_*()`,
+/// `process()`, `process_block()`, and `reset()` allocate no memory after
+/// construction.
 class HalfBandUpsampler2x {
 public:
     HalfBandUpsampler2x()
@@ -253,6 +260,10 @@ private:
 /// of the input rate, this drops the rate by 2 while keeping
 /// aliasing below the design's stopband floor (> 80 dB with the
 /// default coefficients).
+///
+/// RT contract: constructors allocate section storage. `sections_*()`,
+/// `process()`, `process_block()`, and `reset()` allocate no memory after
+/// construction.
 class HalfBandDownsampler2x {
 public:
     HalfBandDownsampler2x()

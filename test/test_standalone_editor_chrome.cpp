@@ -1,9 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/detail/standalone_audio_probe_json.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1084,6 +1091,164 @@ TEST_CASE("Standalone environment opts screenshot runs into hidden mode",
     REQUIRE(config.screenshot_frame_delay == 2);
     REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
 }
+
+TEST_CASE("Standalone environment preserves explicit config over env defaults",
+          "[standalone][chrome][audio-inspector]") {
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv frames("PULP_FRAMES");
+    ScopedEnv probe_json("PULP_AUDIO_PROBE_JSON");
+    screenshot.set("/tmp/env-shot.png");
+    frames.set("7");
+    probe_json.set("/tmp/env-probe.json");
+
+    StandaloneConfig base;
+    base.screenshot_path = "/tmp/config-shot.png";
+    base.audio_probe_json_path = "/tmp/config-probe.json";
+    base.screenshot_frame_delay = 11;
+
+    auto config = standalone_config_from_environment(base);
+
+    REQUIRE(config.screenshot_path == "/tmp/config-shot.png");
+    REQUIRE(config.audio_probe_json_path == "/tmp/config-probe.json");
+    REQUIRE(config.screenshot_frame_delay == 7);
+    REQUIRE(config.headless);
+    REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
+}
+
+TEST_CASE("Standalone frame delay env accepts only positive plain integers",
+          "[standalone][chrome][audio-inspector]") {
+    int frames = 99;
+    REQUIRE(parse_positive_frame_delay("1", frames));
+    REQUIRE(frames == 1);
+    REQUIRE(parse_positive_frame_delay("2147483647", frames));
+    REQUIRE(frames == 2147483647);
+
+    frames = 99;
+    REQUIRE_FALSE(parse_positive_frame_delay("", frames));
+    REQUIRE_FALSE(parse_positive_frame_delay("+1", frames));
+    REQUIRE_FALSE(parse_positive_frame_delay("0", frames));
+    REQUIRE_FALSE(parse_positive_frame_delay("-1", frames));
+    REQUIRE_FALSE(parse_positive_frame_delay("12x", frames));
+    REQUIRE_FALSE(parse_positive_frame_delay("12.5", frames));
+    REQUIRE_FALSE(parse_positive_frame_delay("999999999999999999999", frames));
+    REQUIRE(frames == 99);
+}
+
+TEST_CASE("Standalone delayed action fires exactly once after the configured delay",
+          "[standalone][chrome][audio-inspector]") {
+    DelayedAction action;
+    action.delay = 2;
+    int actions = 0;
+    int closes = 0;
+    action.action_fn = [&] { ++actions; };
+    action.close_fn = [&] { ++closes; };
+
+    action();
+    REQUIRE(actions == 0);
+    REQUIRE(closes == 0);
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+
+    action();
+    REQUIRE(actions == 1);
+    REQUIRE(closes == 1);
+}
+
+#if PULP_ENABLE_AUDIO_PROBES
+TEST_CASE("Standalone audio probe JSON helpers write normalized snapshot files",
+          "[standalone][chrome][audio-inspector]") {
+    pulp::audio::AudioProbeSnapshot snap;
+    snap.stage_id = pulp::audio::AudioProbeStage::kStandaloneOutputBoundary;
+    snap.sample_rate = 44100.0;
+    snap.block_size = 64;
+    snap.channel_count = 1;
+    snap.sequence_number = 3;
+    snap.peak_max = 0.25f;
+    snap.rms_max = 0.125f;
+    snap.callbacks = 17;
+    snap.clipped_blocks = 2;
+    snap.nan_blocks = 1;
+
+    auto stats = stats_for_probe_json_snapshot(snap);
+    REQUIRE(stats.callbacks == 17);
+    REQUIRE(stats.clipped_blocks == 2);
+    REQUIRE(stats.nan_blocks == 1);
+
+    const auto shot = (std::filesystem::temp_directory_path() /
+                       "pulp-helper-main.png")
+                          .string();
+    REQUIRE(audio_inspector_screenshot_path(shot)
+            == (std::filesystem::temp_directory_path() /
+                "pulp-helper-main.audio-inspector.png")
+                   .string());
+
+    const auto out_path = std::filesystem::temp_directory_path() /
+                          "pulp-audio-probe-helper.json";
+    std::filesystem::remove(out_path);
+    REQUIRE(write_audio_probe_json_snapshot(out_path.string(), snap));
+
+    {
+        std::ifstream in(out_path, std::ios::binary);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const auto v = choc::json::parse(buffer.str());
+        REQUIRE(v["stage"].getString() == "standalone_output_boundary");
+        REQUIRE(v["callbacks"].get<std::int64_t>() == 17);
+        REQUIRE(v["clipped_blocks"].get<std::int64_t>() == 2);
+        REQUIRE(v["nan_blocks"].get<std::int64_t>() == 1);
+    }
+    std::filesystem::remove(out_path);
+
+    REQUIRE_FALSE(write_audio_probe_json_snapshot("", snap));
+    REQUIRE_FALSE(write_audio_probe_json_snapshot(
+        std::filesystem::temp_directory_path().string(), snap));
+
+    pulp::audio::AudioProbe probe;
+    probe.prepare(1, 8, 44100.0, pulp::audio::AudioProbeStage::kMeterBridge);
+    const auto wrapper_path = std::filesystem::temp_directory_path() /
+                              "pulp-audio-probe-wrapper.json";
+    std::filesystem::remove(wrapper_path);
+    REQUIRE(write_audio_probe_json_file(wrapper_path.string(), probe));
+    std::filesystem::remove(wrapper_path);
+}
+
+TEST_CASE("Standalone PULP_AUDIO_PROBE_JSON env arms a headless probe dump",
+          "[standalone][chrome][audio-inspector]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv probe_json("PULP_AUDIO_PROBE_JSON");
+    headless.unset();
+    screenshot.unset();           // probe-json alone, no screenshot requested
+    probe_json.set("/tmp/pulp-standalone-probe.json");
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+
+    // The dump is a headless one-shot like --screenshot, so it implies
+    // headless — but with an EMPTY screenshot path (no PNG forced).
+    REQUIRE(config.audio_probe_json_path == "/tmp/pulp-standalone-probe.json");
+    REQUIRE(config.headless);
+    REQUIRE(config.screenshot_path.empty());
+    REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
+    REQUIRE_FALSE(standalone_probe_json_requested_but_disabled(config));
+}
+#else
+TEST_CASE("Standalone probe JSON requests are rejected when probes are disabled",
+          "[standalone][chrome][audio-inspector]") {
+    ScopedEnv probe_json("PULP_AUDIO_PROBE_JSON");
+    probe_json.set("/tmp/pulp-standalone-probe.json");
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+    REQUIRE(config.audio_probe_json_path == "/tmp/pulp-standalone-probe.json");
+    REQUIRE(config.headless);
+    REQUIRE(standalone_probe_json_requested_but_disabled(config));
+
+    probe_json.unset();
+    config.audio_probe_json_path = "/tmp/pulp-standalone-probe.json";
+    REQUIRE(standalone_probe_json_requested_but_disabled(config));
+}
+#endif
 
 TEST_CASE("Standalone headless CI without screenshot is rejected before launch",
           "[standalone][chrome][issue-2515]") {

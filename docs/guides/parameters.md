@@ -173,9 +173,19 @@ previous_gain_ = state().get_value(kGain);
 cursor as event offsets are crossed. `ParamCursor` honors
 `ParameterEvent::ramp_duration_sample_frames` when you advance it to
 intermediate sample offsets, and `value_at(id, sample_offset)` can query an
-active ramp without moving the cursor. `ParamInfo::smoothing_ramp_seconds` and
-`format::ControlRateParamSmoother` provide an opt-in ramp for processors that
-want click-free block-rate changes without splitting into sub-blocks.
+active ramp without moving the cursor. The interpolation is independent of host
+block size, so a 2048- or 4096-sample block still uses the sparse event offsets
+as split points and lets the processor query ramp values inside the long span.
+`ParamInfo::smoothing_ramp_seconds` and `format::ControlRateParamSmoother`
+provide an opt-in ramp for processors that want click-free block-rate changes
+without splitting into sub-blocks.
+
+SignalGraph automation follows the same split. Sparse `connect_automation()`
+delivers two source-block-relative control points per graph block; the
+processor decides whether to step, subblock, or interpolate them with
+`ParamCursor`. The sparse stream is not delayed for graph PDC. For modulation
+that must remain phase-aligned with a delayed audio path, use an audio-rate
+parameter and `connect_audio_rate_modulation()`.
 
 `ParameterEventQueue` is fixed-capacity and real-time safe. If more than
 1024 events arrive in one block, `push()` returns `false`, preserves the

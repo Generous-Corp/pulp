@@ -391,6 +391,12 @@ commands:
       - name: --watch
         kind: flag
         description: Re-launch the binary on source-file changes. Composes with --headless / --screenshot.
+      - name: --audio-inspector
+        kind: flag
+        description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.
+      - name: --audio-probe-json
+        kind: option
+        description: Write the live probe metrics as JSON to <file> after rendering, then exit; implies --headless. Forwarded as --audio-probe-json <file> and PULP_AUDIO_PROBE_JSON=<file> env var.
     docs: reference/cli.md#run
 
   - name: upgrade

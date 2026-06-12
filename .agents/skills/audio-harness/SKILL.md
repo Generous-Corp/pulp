@@ -133,6 +133,45 @@ on launch by setting `PULP_AUDIO_INSPECTOR` in the environment:
 PULP_AUDIO_INSPECTOR=1 ./build/examples/<app>/pulp-<app>
 ```
 
+CLI shortcuts (resolve the standalone binary + set the env vars for you):
+
+```bash
+pulp run --audio-inspector                    # open the live inspector window
+pulp run --audio-probe-json /tmp/probe.json   # headless: dump probe JSON + exit
+```
+
+For MCP clients, use the existing `pulp-mcp` tool `pulp_audio_probe_json`
+instead of creating a new MCP server. It is a one-shot wrapper around
+`pulp run --audio-probe-json`, accepts optional `target` and `frames`, and
+returns the probe object as `structuredContent`.
+
+Agent triage pattern:
+
+1. Start with `pulp_audio_probe_json` for the target you are debugging.
+2. If the tool errors or no JSON is written, report a launch/probe problem, not
+   a DSP conclusion.
+3. If `callbacks == 0`, increase `frames` or inspect standalone startup/device
+   lifecycle.
+4. If callbacks advance but `peak_max == 0` and `rms_max == 0`, treat the
+   observed output boundary as truly silent; debug routing, input stimulus,
+   bypass/mute state, graph wiring, or the processor output branch.
+5. If `clip_count`/`clipped_blocks` or `nan_inf_count`/`nan_blocks` are non-zero,
+   prioritize DSP/gain/state initialization bugs.
+6. If the live snapshot is healthy but the user says the sound is wrong, switch
+   to an offline render + Audio Doctor; this probe cannot prove THD, response,
+   phase, latency, or perceptual quality.
+
+`--audio-probe-json` is the **programmatic readout** for agents: it writes
+`output_probe().latest()` (+ the `AudioStats` subset) as a flat JSON object —
+`stage`, `sample_rate`, `block_size`, `channel_count`, `sequence_number`,
+`peak_max`/`rms_max`, `peak_dbfs`/`rms_dbfs` (null on true silence),
+`clip_count`, `nan_inf_count`, `clipped_blocks`, `nan_blocks`,
+`silence_run_blocks`, `callbacks`, then exits. The mapping is the pure
+`pulp::audio::audio_probe_snapshot_to_json()` helper
+(`pulp/audio/audio_probe_json.hpp`); the frame delay reuses `--frames` /
+`PULP_FRAMES`. This is the *live* counterpart to the offline
+`pulp audio validate` Doctor below. See `docs/guides/audio-inspector.md`.
+
 `PULP_AUDIO_INSPECTOR` also enables the probe's capture ring (sized to the panel
 display width), so the inspector paints a live *waveform* and not just meters —
 the default probe config is summary-only. The toggle routes through a

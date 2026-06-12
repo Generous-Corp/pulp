@@ -207,6 +207,8 @@ pulp run MyApp -- --arg1                            # pass arguments to the laun
 pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
 pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
 pulp run --watch                                    # re-launch on source-file changes
+pulp run --audio-inspector                          # open the live Audio Inspector window
+pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
 ```
 
 Searches the active project's build output:
@@ -232,6 +234,27 @@ These flags are intended for CI auto-validation: any plugin standalone
 that respects `PULP_HEADLESS` / `PULP_SCREENSHOT` / `PULP_FRAMES` (or
 the matching argv flags) can be exercised end-to-end on every PR
 without a real window or virtual display.
+
+#### Live Audio Inspector flags
+
+The live Audio Inspector is a floating developer window that observes the
+realtime output-boundary probe (peak/RMS/dBFS, clip/NaN counts, silence
+runs). See the [Audio Inspector guide](../guides/audio-inspector.md) for
+the full picture, including the in-app `Cmd/Ctrl+Shift+A` chord and the
+dev-on/ship-off `PULP_ENABLE_AUDIO_PROBES` gating.
+
+- `--audio-inspector` — open the live Audio Inspector window. Forwarded
+  as `--audio-inspector` and via `PULP_AUDIO_INSPECTOR=1`. Does not imply
+  `--headless` (a dev may want the visible window); composes with
+  `--screenshot`, which then also captures the panel as
+  `<stem>.audio-inspector.png`.
+- `--audio-probe-json <file>` — the programmatic readout: after the
+  frame delay, write the live probe's latest snapshot as a flat JSON
+  object to `<file>`, then exit. Implies `--headless`. Forwarded as
+  `--audio-probe-json <file>` and via `PULP_AUDIO_PROBE_JSON=<file>`.
+  This is distinct from the offline `pulp audio validate` Doctor: the
+  Inspector reads *live* metrics from a running host, the Doctor analyses
+  a rendered WAV offline.
 
 ### cache
 

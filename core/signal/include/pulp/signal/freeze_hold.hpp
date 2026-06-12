@@ -48,6 +48,10 @@ public:
         float phase_jitter = 0.015f;
     };
 
+    /// RT contract: prepare() allocates capture/hold storage and is not
+    /// audio-thread safe. After prepare(), reset(), set_frozen(), accessors,
+    /// and process_group() are allocation-free for the prepared channel/bin
+    /// counts.
     void prepare(const Config& config) {
         assert(config.fft_size >= 256 && (config.fft_size & (config.fft_size - 1)) == 0);
         assert(config.channels >= 1 && config.capture_frames >= 2);

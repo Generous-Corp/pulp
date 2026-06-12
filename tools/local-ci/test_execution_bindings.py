@@ -30,6 +30,7 @@ class ExecutionBindingsTests(unittest.TestCase):
             "short_sha",
             "prepare_target_log",
             "now_iso",
+            "normalize_provenance",
             "local_validation_command",
             "run_logged_command",
             "validation_result_from_run",
@@ -67,10 +68,132 @@ class ExecutionBindingsTests(unittest.TestCase):
             "result_execution_line",
             "result_target_lines",
             "result_overall_line",
+            "target_exception_result",
+            "ps_literal",
         ]:
             bindings[name] = object()
         bindings["datetime"] = types.SimpleNamespace(now=object())
         return bindings
+
+    def test_simple_execution_helpers_delegate_and_bind_facade_dependencies(self):
+        captured = {}
+
+        def completed_job_result(job, results, *, completed_at, provenance):
+            captured["completed"] = (job, results, completed_at, provenance)
+            return {"overall": "pass"}
+
+        def run_target_tasks(tasks, *, exception_result_fn, on_target_complete):
+            captured["tasks"] = (tasks, exception_result_fn, on_target_complete)
+            return [{"target": "mac"}]
+
+        def run_logged_command(cmd, **kwargs):
+            captured["logged"] = (cmd, kwargs)
+            return {"exit_code": 0}
+
+        def windows_validation_script(*args, **kwargs):
+            captured["windows_script"] = (args, kwargs)
+            return "script", "full"
+
+        execution = types.SimpleNamespace(
+            HEARTBEAT_INTERVAL_SECS=15.0,
+            STUCK_IDLE_SECS=90.0,
+            remote_commit_error=lambda target, host, job: f"{target}:{host}:{job['id']}",
+            parse_progress_marker=lambda line: {"line": line},
+            prepared_state_root=lambda target, validation: Path(f"/prepared/{target}/{validation}"),
+            should_reuse_prepared_state=lambda job: job.get("reuse", False),
+            local_validation_command=lambda job, exclude_tests="": ([job["id"], exclude_tests], job.get("validation", "full")),
+            posix_ssh_validation_command=lambda *args, **kwargs: (list(args), kwargs["exclude_tests"]),
+            validation_result_from_run=lambda *args, **kwargs: {"validation": args, **kwargs},
+            validation_error_result=lambda *args, **kwargs: {"error": args, **kwargs},
+            unreachable_target_result=lambda target, detail="Host unreachable": {"target": target, "detail": detail},
+            target_exception_result=lambda target, exc: {"target": target, "error": str(exc)},
+            completed_job_result=completed_job_result,
+            sorted_target_results=lambda results: list(reversed(results)),
+            run_target_tasks=run_target_tasks,
+            run_logged_command=run_logged_command,
+            windows_validation_script=windows_validation_script,
+            submission_target_state=lambda job, target: {"job": job["id"], "target": target},
+        )
+        bindings = self._bindings("unused", lambda: None)
+        bindings["_execution"] = execution
+        bindings["now_iso"] = lambda: "now"
+        bindings["normalize_provenance"] = lambda provenance: {"normalized": provenance}
+        bindings["target_exception_result"] = object()
+        bindings["ps_literal"] = object()
+
+        self.assertEqual(self.mod.remote_commit_error(bindings, "mac", "host", {"id": "job"}), "mac:host:job")
+        self.assertEqual(self.mod.parse_progress_marker(bindings, "line"), {"line": "line"})
+        self.assertEqual(self.mod.prepared_state_root(bindings, "mac", "full"), Path("/prepared/mac/full"))
+        self.assertTrue(self.mod.should_reuse_prepared_state(bindings, {"reuse": True}))
+        self.assertEqual(self.mod.local_validation_command(bindings, {"id": "job", "validation": "smoke"}, "slow"), (["job", "slow"], "smoke"))
+        self.assertEqual(
+            self.mod.posix_ssh_validation_command(
+                bindings,
+                "ubuntu",
+                "host",
+                "/repo",
+                {"id": "job"},
+                bundle_name="bundle",
+                bundle_ref="ref",
+                exclude_tests="slow",
+            )[1],
+            "slow",
+        )
+        self.assertEqual(
+            self.mod.validation_result_from_run(
+                bindings,
+                "mac",
+                {"exit_code": 0},
+                log_path=Path("/log"),
+                validation="full",
+                transport_mode="local",
+            )["timeout_secs"],
+            3600,
+        )
+        self.assertEqual(
+            self.mod.validation_error_result(
+                bindings,
+                "mac",
+                "detail",
+                log_path=Path("/log"),
+                transport_mode="local",
+            )["transport_mode"],
+            "local",
+        )
+        self.assertEqual(self.mod.unreachable_target_result(bindings, "ubuntu"), {"target": "ubuntu", "detail": "Host unreachable"})
+        self.assertEqual(self.mod.target_exception_result(bindings, "mac", RuntimeError("boom")), {"target": "mac", "error": "boom"})
+        self.assertEqual(self.mod.completed_job_result(bindings, {"id": "job", "provenance": "p"}, [{"target": "mac"}]), {"overall": "pass"})
+        self.assertEqual(captured["completed"][2], "now")
+        self.assertEqual(captured["completed"][3], {"normalized": "p"})
+        self.assertEqual(self.mod.sorted_target_results(bindings, [1, 2]), [2, 1])
+        complete = object()
+        self.assertEqual(self.mod.run_target_tasks(bindings, [("mac", lambda: {})], on_target_complete=complete), [{"target": "mac"}])
+        self.assertIs(captured["tasks"][1], bindings["target_exception_result"])
+        self.assertIs(captured["tasks"][2], complete)
+        self.assertEqual(
+            self.mod.run_logged_command(bindings, ["cmd"], heartbeat_interval_secs=1.5, stuck_idle_secs=2.5),
+            {"exit_code": 0},
+        )
+        self.assertEqual(captured["logged"][1]["heartbeat_interval_secs"], 1.5)
+        self.assertEqual(captured["logged"][1]["stuck_idle_secs"], 2.5)
+        self.assertEqual(
+            self.mod.windows_validation_script(
+                bindings,
+                "windows",
+                "host",
+                r"C:\Repo",
+                {"id": "job"},
+                bundle_name="bundle",
+                bundle_ref="ref",
+                exclude_tests="slow",
+                cmake_generator="Ninja",
+                resolved_platform="ARM64",
+                resolved_generator_instance=r"C:\VS",
+            ),
+            ("script", "full"),
+        )
+        self.assertIs(captured["windows_script"][1]["ps_literal_fn"], bindings["ps_literal"])
+        self.assertEqual(self.mod.submission_target_state(bindings, {"id": "job"}, "mac"), {"job": "job", "target": "mac"})
 
     def test_run_local_validation_binds_facade_dependencies(self):
         captured = {}

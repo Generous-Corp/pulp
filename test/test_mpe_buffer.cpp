@@ -5,6 +5,8 @@
 #include <pulp/midi/mpe_buffer.hpp>
 #include <vector>
 
+#include "harness/rt_allocation_probe.hpp"
+
 using namespace pulp::midi;
 using Kind = MpeExpressionEvent::Kind;
 using Catch::Approx;
@@ -211,6 +213,56 @@ TEST_CASE("bind_tracker_to_buffer uses the latest referenced sample offset",
     REQUIRE(buffer[0].kind == Kind::NoteOn);
     REQUIRE(buffer[1].sample_offset == 99);
     REQUIRE(buffer[1].kind == Kind::NoteOff);
+}
+
+TEST_CASE("MpeBuffer callback appends are allocation-free after reserve",
+          "[midi][mpe][rt-safety]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.reserve(4);
+    buffer.set_realtime_capacity_limit(true);
+    const auto prepared_capacity = buffer.capacity();
+    REQUIRE(prepared_capacity >= 4);
+
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+
+        offset = 4;
+        REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+        offset = 8;
+        REQUIRE(tracker.process(MidiEvent::pitch_bend(1, 16383)));
+        offset = 12;
+        REQUIRE(tracker.process(channel_pressure(1, 64)));
+        offset = 16;
+        REQUIRE(tracker.process(MidiEvent::cc(1, 74, 100)));
+
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(buffer.size() == 4);
+    REQUIRE(buffer.dropped_event_count() == 0);
+    REQUIRE(buffer[0].kind == Kind::NoteOn);
+    REQUIRE(buffer[0].sample_offset == 4);
+    REQUIRE(buffer[3].kind == Kind::Timbre);
+    REQUIRE(buffer[3].sample_offset == 16);
+
+    while (buffer.size() < prepared_capacity) {
+        REQUIRE(buffer.add({100, Kind::Pressure, {}}));
+    }
+    REQUIRE(buffer.dropped_event_count() == 0);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        offset = 20;
+        REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(buffer.size() == prepared_capacity);
+    REQUIRE(buffer.dropped_event_count() == 1);
 }
 
 TEST_CASE("MpeVoiceTracker UMP manager and member events feed callbacks",

@@ -1,4 +1,5 @@
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
@@ -36,6 +37,8 @@
 #include <pulp/inspect/inspector_overlay.hpp>
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
+#include <pulp/audio/audio_probe_json.hpp>
+#include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/view/audio_inspector_window.hpp>
 #include <pulp/view/command_registry.hpp>
 #endif
@@ -404,6 +407,14 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
 
 bool StandaloneApp::run_with_editor(bool use_gpu) {
     const auto effective_config = detail::standalone_config_from_environment(config_);
+#if !PULP_ENABLE_AUDIO_PROBES
+    if (detail::standalone_probe_json_requested_but_disabled(effective_config)) {
+        runtime::log_error(
+            "Standalone: audio probe JSON requested but "
+            "PULP_ENABLE_AUDIO_PROBES=OFF");
+        return false;
+    }
+#endif
     if (detail::standalone_headless_requires_screenshot(effective_config)) {
         runtime::log_error(
             "Standalone: headless/CI mode requires a screenshot path; "
@@ -626,6 +637,20 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     detail::log_standalone_window_open(w, h, use_gpu, bridge->uses_script_ui(), chrome);
 
+#if PULP_ENABLE_AUDIO_PROBES
+    // ── Programmatic live-probe JSON dump (the agent/CI readout) ──
+    //
+    // Writes `output_probe().latest()` (+ the AudioStats subset) as a flat
+    // JSON object to `audio_probe_json_path`. Factored into a free function
+    // (audio_probe_snapshot_to_json) so the snapshot→JSON mapping is unit-
+    // tested without a device. Used as a side-effect of the screenshot
+    // one-shot when both are set, and drives a dedicated one-shot when only
+    // the JSON dump was requested. Empty path → no-op.
+    auto write_probe_json = [this](const std::string& path) {
+        detail::write_audio_probe_json_file(path, output_probe_);
+    };
+#endif
+
     // ── Headless one-shot screenshot (SDK-codified, pulp #468 follow-up) ──
     //
     // When `effective_config.screenshot_path` is non-empty (set via
@@ -647,19 +672,22 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         // inspector is open. Lets a headless run prove the live panel loaded
         // (PULP_AUDIO_INSPECTOR=1 --screenshot X.png yields X.audio-inspector.png).
         const std::string inspector_png_path = [&] {
-            std::filesystem::path p(effective_config.screenshot_path);
-            return (p.parent_path() /
-                    (p.stem().string() + ".audio-inspector" +
-                     p.extension().string()))
-                .string();
+            return detail::audio_inspector_screenshot_path(
+                effective_config.screenshot_path);
         }();
 #endif
         cap.capture_fn = [host, editor_view, w, h
 #if PULP_ENABLE_AUDIO_PROBES
-                          , audio_inspector_ptr, inspector_png_path
+                          , audio_inspector_ptr, inspector_png_path,
+                          write_probe_json,
+                          probe_json_path = effective_config.audio_probe_json_path
 #endif
         ] {
 #if PULP_ENABLE_AUDIO_PROBES
+            // Side-effect: dump the live probe metrics as JSON at the same
+            // frame the screenshot is taken (composes --screenshot with
+            // --audio-probe-json in a single headless run). No-op when unset.
+            write_probe_json(probe_json_path);
             // Side-effect: capture the inspector window's own surface at the
             // same frame, before the main window closes. capture_png() returns
             // empty on hosts without GPU capture — skip the write in that case.
@@ -704,6 +732,34 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_info("Standalone: screenshot mode armed — will capture to {} after {} frames",
                           effective_config.screenshot_path, cap.delay);
     }
+#if PULP_ENABLE_AUDIO_PROBES
+    // Probe-JSON-only one-shot: when --audio-probe-json was requested without
+    // --screenshot, reuse the same frame-delay machinery to let the audio path
+    // run a few blocks, then write the JSON and close. (When --screenshot is
+    // also set, the dump rode the screenshot capture_fn above instead.)
+    else if (!effective_config.audio_probe_json_path.empty()) {
+        auto* host = window.get();
+        detail::DelayedAction cap;
+        cap.delay = effective_config.screenshot_frame_delay > 0
+            ? effective_config.screenshot_frame_delay : 30;
+        // JSON-only mode has no image bytes to validate or file to write through
+        // ScreenshotCapture. Use the same delayed one-shot state machine, but
+        // make the JSON dump itself the side effect.
+        cap.action_fn = [write_probe_json,
+                         path = effective_config.audio_probe_json_path]() {
+            write_probe_json(path);
+        };
+        cap.close_fn = [host] { host->request_close(); };
+        auto prior = pre_screenshot_idle;
+        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+            if (prior) prior();
+            cap();
+        });
+        runtime::log_info(
+            "Standalone: audio-probe-json mode armed — will dump to {} after {} frames",
+            effective_config.audio_probe_json_path, cap.delay);
+    }
+#endif
 
     // Blocks until the window is closed. Most window-close paths have
     // already fired bridge->close(), but application-quit paths can return

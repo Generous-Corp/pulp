@@ -1,6 +1,7 @@
 # Pulp test suite — Catch2
 
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpTestSuite.cmake)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_rt_contract_tests.cmake")
 find_package(Python3 COMPONENTS Interpreter QUIET)
 # Build check (no Catch2 dependency)
 add_executable(pulp-test-build-check test_build_check.cpp)
@@ -1093,10 +1094,6 @@ pulp_add_test_suite(pulp-test-audio-focus LIBRARIES pulp::audio)
 # Header-only math, so no library link required beyond Catch2.
 pulp_add_test_suite(pulp-test-frame-fill LIBRARIES pulp::audio)
 
-# #86: SysExAccumulator — cross-platform MIDI SysEx aggregation state
-# machine shared by Android/ALSA/Windows/iOS MIDI backends. Header-only.
-pulp_add_test_suite(pulp-test-sysex-accumulator LIBRARIES pulp::midi)
-
 # #3327 L4: MonotonicMidiClock — seconds-since-open MIDI input timestamps,
 # the cross-platform helper that replaced ALSA's hardcoded 0.0 stamps.
 pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
@@ -1107,10 +1104,6 @@ pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
 # manually (requires a real adapter + a paired peripheral); these
 # tests pin the deterministic codec + the stub central behaviour.
 pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
-
-# macOS plan 8.2: UmpSysex7Reassembler — shared UMP type-0x3 reassembler
-# extracted from the inline AUv3 / CoreMIDI state machines. Header-only.
-pulp_add_test_suite(pulp-test-ump-sysex7-reassembler LIBRARIES pulp::midi)
 
 # macOS plan 8.1: UmpSession + UmpEndpoint + VirtualUmpEndpoint —
 # headless tests for the cross-platform session + virtual-endpoint
@@ -1253,8 +1246,6 @@ pulp_add_test_suite(pulp-test-processor-ara-hook LIBRARIES pulp::format)
 # Processor bus-layout validation + processBlock precision contract +
 # latency / tail change notification (workstream 03 items 3.7, 3.8, 3.11).
 pulp_add_test_suite(pulp-test-processor-layout-latency LIBRARIES pulp::format)
-# Processor and descriptor default contracts
-pulp_add_test_suite(pulp-test-processor-defaults LIBRARIES pulp::format)
 # Item 1.3 AudioPlayHead transport-extension helpers used by every
 # format adapter (VST3, AU v2 / v3, CLAP) to derive `ProcessContext::bar`
 # and the three change flags (tempo_changed / time_sig_changed /
@@ -1419,11 +1410,6 @@ pulp_add_test_suite(pulp-test-ios-background-audio-flag LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-midi-buffer-ump LIBRARIES pulp::midi)
 # MidiBuffer SysEx sidecar (workstream 01 — full MIDI vocabulary)
 pulp_add_test_suite(pulp-test-midi-buffer-sysex LIBRARIES pulp::midi)
-# Raw MIDI byte-stream parser — shared by ALSA raw-midi and any future
-# raw-byte MIDI transport. Tests aborted-sysex recovery (#406 codex P2),
-# realtime-inside-sysex passthrough (#239), runaway cap, and multi-read
-# accumulator state.
-pulp_add_test_suite(pulp-test-raw-midi-parser LIBRARIES pulp::midi)
 # Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial; cross-platform, Win cases #ifdef _WIN32).
 pulp_add_test_suite(pulp-test-winmidi-sysex LIBRARIES pulp::midi)
 # WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).
@@ -1489,12 +1475,8 @@ pulp_add_test_suite(pulp-test-tempo-hook LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-resizable-shell LIBRARIES pulp::view)
 # ATK / AT-SPI mapping (workstream 04 slice 4.2a)
 pulp_add_test_suite(pulp-test-atk-mapping LIBRARIES pulp::view)
-# Running-status MIDI parser (workstream 02 slice 2.5)
-pulp_add_test_suite(pulp-test-running-status LIBRARIES pulp::midi)
 # Background scanner (workstream 03 slice 3.2)
 pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
-# Host parameter-event queue
-pulp_add_test_suite(pulp-test-parameter-event-queue LIBRARIES pulp::host)
 
 # TextShaper (PreText-style measure-once-reflow-forever)
 pulp_add_test_suite(pulp-test-text-shaper LIBRARIES pulp::canvas)
@@ -1870,7 +1852,6 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-rt-safety SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp LIBRARIES pulp::signal)
 # Signal filter tests (P5 test-split — extracted from test_signal.cpp).
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
@@ -1895,8 +1876,6 @@ pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
 pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
-# Multi-channel meter edge tests (#645)
-pulp_add_test_suite(pulp-test-multi-channel-meter LIBRARIES pulp::signal)
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
 target_link_libraries(pulp-test-dsl-processor PRIVATE
@@ -4445,9 +4424,6 @@ pulp_add_test_suite(pulp-test-ump-extensions LIBRARIES pulp::midi)
 # macOS plan Batch D (partial) — HMAC + AEAD primitives
 pulp_add_test_suite(pulp-test-hmac-aead LIBRARIES pulp::runtime)
 
-# macOS plan Batch C (partial) — MidiMessageCollector (UI→audio MIDI hub)
-pulp_add_test_suite(pulp-test-midi-message-collector LIBRARIES pulp::midi)
-
 # macOS plan Batch G (partial) — Compressor sidechain HPF + lookahead
 pulp_add_test_suite(pulp-test-compressor-sidechain LIBRARIES pulp::signal)
 
@@ -5723,12 +5699,6 @@ if(WIN32)
 else()
     pulp_add_test_suite(pulp-test-mpe-voice-tracker LIBRARIES pulp::midi)
 endif()
-
-# UMP buffer + MIDI 1.0 <-> UMP conversion + UMP-aware MpeVoiceTracker
-pulp_add_test_suite(pulp-test-ump-buffer-conversion LIBRARIES pulp::format)
-
-# MPE buffer + Processor sidecar tests
-pulp_add_test_suite(pulp-test-mpe-buffer LIBRARIES pulp::format)
 
 # MPE synth voice helpers (voice, allocator, glide detector)
 pulp_add_test_suite(pulp-test-mpe-synth-voice LIBRARIES pulp::midi)

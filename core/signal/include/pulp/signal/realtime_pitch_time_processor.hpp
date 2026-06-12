@@ -85,6 +85,12 @@ class RealtimePitchTimeProcessor {
 public:
     RealtimePitchTimeProcessor() = default;
 
+    /// RT contract: prepare() allocates and sizes all spectral, smoothing,
+    /// ring, drain, noise-morphing, and optional sinc-resampling storage; it is
+    /// not audio-thread safe. After prepare(), process(), feed(),
+    /// read_stretched(), reset(), control setters, and accessors are
+    /// allocation-free for blocks no larger than config.max_block and the
+    /// prepared channel count.
     void prepare(double sample_rate, const RealtimePitchTimeConfig& config) {
         assert(sample_rate > 0.0);
         assert(config.channels >= 1);
