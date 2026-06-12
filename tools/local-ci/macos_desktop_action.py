@@ -6,8 +6,8 @@ from collections.abc import Callable
 import json
 from pathlib import Path
 
-from macos_desktop_action_env import apply_macos_direct_launch_env
 from macos_desktop_action_interaction import macos_desktop_event_interaction_summary
+from macos_desktop_action_launch import launch_macos_desktop_action
 from macos_desktop_action_manifest import build_macos_action_manifest
 
 
@@ -105,77 +105,41 @@ def run_macos_local_smoke(
     proc = None
     pid = None
     try:
-        if bundle_id:
-            if capture_ui_snapshot:
-                raise RuntimeError(
-                    "UI snapshot capture currently requires a direct launch command so PULP_VIEW_TREE_OUT can be injected."
-                )
-            log_path.write_text("")
-            err_path.write_text("")
-            quit_macos_bundle_id_fn(bundle_id)
-            sleep_fn(0.2)
-            run_fn(["open", "-b", bundle_id], capture_output=True, text=True, check=True)
-            sleep_fn(0.75)
-            activate_macos_bundle_id_fn(bundle_id)
-            sleep_fn(0.75)
-            pid, window = wait_for_macos_bundle_window_fn(bundle_id, timeout_secs)
-            launch_descriptor = {"bundle_id": bundle_id}
-        else:
-            args = split_command_fn(launch_command or "")
-            if not args:
-                raise ValueError("Desktop smoke requires either --command or --bundle-id.")
-            app_bundle = detect_macos_app_bundle_fn(launch_command)
-            if app_bundle is not None:
-                if capture_ui_snapshot:
-                    raise RuntimeError(
-                        "UI snapshot capture currently requires a direct launch command so PULP_VIEW_TREE_OUT can be injected."
-                    )
-                inferred_bundle_id = macos_bundle_id_for_app_path_fn(app_bundle)
-                if not inferred_bundle_id:
-                    raise RuntimeError(f"Could not determine bundle id for app bundle `{app_bundle}`")
-                log_path.write_text("")
-                err_path.write_text("")
-                quit_macos_bundle_id_fn(inferred_bundle_id)
-                sleep_fn(0.2)
-                run_fn(["open", "-a", str(app_bundle)], capture_output=True, text=True, check=True)
-                sleep_fn(0.75)
-                activate_macos_bundle_id_fn(inferred_bundle_id)
-                sleep_fn(0.75)
-                pid, window = wait_for_macos_bundle_window_fn(inferred_bundle_id, timeout_secs)
-                launch_descriptor = {"bundle_id": inferred_bundle_id, "app_path": str(app_bundle)}
-            else:
-                stdout_handle = log_path.open("w")
-                stderr_handle = err_path.open("w")
-                env = environ_copy_fn()
-                apply_macos_direct_launch_env(
-                    env,
-                    capture_ui_snapshot=capture_ui_snapshot,
-                    use_pulp_app_automation=use_pulp_app_automation,
-                    click_point=click_point,
-                    click_view_id=click_view_id,
-                    click_view_type=click_view_type,
-                    click_view_text=click_view_text,
-                    click_view_label=click_view_label,
-                    capture_before=capture_before,
-                    ui_snapshot_path=ui_snapshot_path,
-                    before_screenshot_path=before_screenshot_path,
-                    screenshot_path=screenshot_path,
-                    settle_secs=settle_secs,
-                )
-                try:
-                    proc = popen_fn(
-                        args,
-                        stdout=stdout_handle,
-                        stderr=stderr_handle,
-                        env=env,
-                        cwd=launch_cwd,
-                    )
-                finally:
-                    stdout_handle.close()
-                    stderr_handle.close()
-                pid = proc.pid
-                window = wait_for_macos_window_fn(proc.pid, timeout_secs)
-                launch_descriptor = {"command": args}
+        launch_result = launch_macos_desktop_action(
+            bundle_id=bundle_id,
+            launch_command=launch_command,
+            launch_cwd=launch_cwd,
+            capture_ui_snapshot=capture_ui_snapshot,
+            use_pulp_app_automation=use_pulp_app_automation,
+            click_point=click_point,
+            click_view_id=click_view_id,
+            click_view_type=click_view_type,
+            click_view_text=click_view_text,
+            click_view_label=click_view_label,
+            capture_before=capture_before,
+            settle_secs=settle_secs,
+            timeout_secs=timeout_secs,
+            ui_snapshot_path=ui_snapshot_path,
+            before_screenshot_path=before_screenshot_path,
+            screenshot_path=screenshot_path,
+            log_path=log_path,
+            err_path=err_path,
+            quit_macos_bundle_id_fn=quit_macos_bundle_id_fn,
+            sleep_fn=sleep_fn,
+            run_fn=run_fn,
+            activate_macos_bundle_id_fn=activate_macos_bundle_id_fn,
+            wait_for_macos_bundle_window_fn=wait_for_macos_bundle_window_fn,
+            split_command_fn=split_command_fn,
+            detect_macos_app_bundle_fn=detect_macos_app_bundle_fn,
+            macos_bundle_id_for_app_path_fn=macos_bundle_id_for_app_path_fn,
+            environ_copy_fn=environ_copy_fn,
+            popen_fn=popen_fn,
+            wait_for_macos_window_fn=wait_for_macos_window_fn,
+        )
+        proc = launch_result["proc"]
+        pid = launch_result["pid"]
+        window = launch_result["window"]
+        launch_descriptor = launch_result["launch_descriptor"]
 
         inspector_summary = None
         view_tree = None
