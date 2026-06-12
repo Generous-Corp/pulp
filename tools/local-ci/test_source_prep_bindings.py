@@ -279,6 +279,21 @@ class SourcePrepBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["run_windows_ssh_powershell_fn"], bindings["run_windows_ssh_powershell"])
         self.assertIs(captured["kwargs"]["windows_ssh_fetch_file_fn"], bindings["windows_ssh_fetch_file"])
 
+    def test_install_source_prep_helpers_wires_named_exports(self):
+        source_prep = types.SimpleNamespace(
+            desktop_source_cache_key=lambda source_request: source_request["sha"],
+            split_windows_prepare_commands=lambda command: command.split(";"),
+        )
+        bindings = self._bindings(_source_prep=source_prep)
+
+        self.mod.install_source_prep_helpers(
+            bindings,
+            ("desktop_source_cache_key", "split_windows_prepare_commands"),
+        )
+
+        self.assertEqual(bindings["desktop_source_cache_key"]({"sha": "abc123"}), "abc123")
+        self.assertEqual(bindings["split_windows_prepare_commands"]("one;two"), ["one", "two"])
+
 
 if __name__ == "__main__":
     unittest.main()

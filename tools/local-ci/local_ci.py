@@ -319,11 +319,16 @@ _desktop_reporting_bindings.install_desktop_reporting_helpers(globals())
 _macos_window_bindings.install_macos_window_helpers(globals())
 _linux_target_bindings.install_linux_target_helpers(globals())
 _linux_desktop_bindings.install_linux_desktop_helpers(globals())
+_source_prep_bindings.install_source_prep_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
 _clear_directory_contents = clear_directory_contents
 _copy_directory_contents = copy_directory_contents
 _run_git = run_git
+_command_path_rewrite_candidate = command_path_rewrite_candidate
+_rewrite_launch_command_for_mapper = rewrite_launch_command_for_mapper
+_local_worktree_matches = local_worktree_matches
+_reset_local_worktree = reset_local_worktree
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
@@ -370,107 +375,6 @@ def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
 
 def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
     return _desktop_probe_bindings.probe_webdriver_endpoint(globals(), base_url, timeout=timeout)
-
-
-def make_desktop_source_request(args: argparse.Namespace) -> dict:
-    return _source_prep_bindings.make_desktop_source_request(globals(), args)
-
-
-def desktop_source_cache_key(source_request: dict) -> str:
-    return _source_prep_bindings.desktop_source_cache_key(globals(), source_request)
-
-
-def desktop_source_root(target_name: str, source_request: dict) -> Path:
-    return _source_prep_bindings.desktop_source_root(globals(), target_name, source_request)
-
-
-def _command_path_rewrite_candidate(token: str) -> Path | None:
-    return _source_prep_bindings.command_path_rewrite_candidate(globals(), token)
-
-
-def _rewrite_launch_command_for_mapper(command: str | None, mapper, *, windows: bool = False) -> str | None:
-    return _source_prep_bindings.rewrite_launch_command_for_mapper(globals(), command, mapper, windows=windows)
-
-
-def rewrite_launch_command_for_source_root(command: str | None, source_root: Path) -> str | None:
-    return _source_prep_bindings.rewrite_launch_command_for_source_root(globals(), command, source_root)
-
-
-def rewrite_launch_command_for_posix_root(command: str | None, remote_root: str) -> str | None:
-    return _source_prep_bindings.rewrite_launch_command_for_posix_root(globals(), command, remote_root)
-
-
-def rewrite_launch_command_for_windows_root(command: str | None, remote_root: str) -> str | None:
-    return _source_prep_bindings.rewrite_launch_command_for_windows_root(globals(), command, remote_root)
-
-
-def split_windows_prepare_commands(command: str) -> list[str]:
-    return _source_prep_bindings.split_windows_prepare_commands(globals(), command)
-
-
-def validate_windows_prepare_commands(commands: list[str]) -> None:
-    return _source_prep_bindings.validate_windows_prepare_commands(globals(), commands)
-
-
-def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | None) -> None:
-    return _source_prep_bindings.attach_desktop_source_to_manifest(globals(), manifest, source_context)
-
-
-def _local_worktree_matches(path: Path, sha: str) -> bool:
-    return _source_prep_bindings.local_worktree_matches(globals(), path, sha)
-
-
-def _reset_local_worktree(path: Path) -> None:
-    return _source_prep_bindings.reset_local_worktree(globals(), path)
-
-
-def prepare_macos_exact_sha_source(
-    bundle_dir: Path,
-    target_name: str,
-    command: str,
-    source_request: dict,
-) -> dict:
-    return _source_prep_bindings.prepare_macos_exact_sha_source(
-        globals(),
-        bundle_dir,
-        target_name,
-        command,
-        source_request,
-    )
-
-
-def prepare_linux_exact_sha_source(
-    bundle_dir: Path,
-    target_name: str,
-    host: str,
-    command: str,
-    source_request: dict,
-) -> dict:
-    return _source_prep_bindings.prepare_linux_exact_sha_source(
-        globals(),
-        bundle_dir,
-        target_name,
-        host,
-        command,
-        source_request,
-    )
-
-
-def prepare_windows_exact_sha_source(
-    bundle_dir: Path,
-    target_name: str,
-    host: str,
-    command: str,
-    source_request: dict,
-) -> dict:
-    return _source_prep_bindings.prepare_windows_exact_sha_source(
-        globals(),
-        bundle_dir,
-        target_name,
-        host,
-        command,
-        source_request,
-    )
 
 
 def run_macos_local_smoke(

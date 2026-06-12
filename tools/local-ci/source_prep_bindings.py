@@ -8,6 +8,27 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+SOURCE_PREP_EXPORTS = (
+    "make_desktop_source_request",
+    "desktop_source_cache_key",
+    "desktop_source_root",
+    "command_path_rewrite_candidate",
+    "rewrite_launch_command_for_mapper",
+    "rewrite_launch_command_for_source_root",
+    "rewrite_launch_command_for_posix_root",
+    "rewrite_launch_command_for_windows_root",
+    "split_windows_prepare_commands",
+    "validate_windows_prepare_commands",
+    "attach_desktop_source_to_manifest",
+    "local_worktree_matches",
+    "reset_local_worktree",
+    "prepare_macos_exact_sha_source",
+    "prepare_linux_exact_sha_source",
+    "prepare_windows_exact_sha_source",
+)
 
 
 def make_desktop_source_request(bindings: Mapping[str, Any], args: Any) -> dict:
@@ -195,3 +216,7 @@ def prepare_windows_exact_sha_source(
         windows_ssh_fetch_file_fn=_binding(bindings, "windows_ssh_fetch_file"),
         rewrite_launch_command_for_windows_root_fn=_binding(bindings, "rewrite_launch_command_for_windows_root"),
     )
+
+
+def install_source_prep_helpers(bindings: dict[str, Any], names: tuple[str, ...] = SOURCE_PREP_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)
