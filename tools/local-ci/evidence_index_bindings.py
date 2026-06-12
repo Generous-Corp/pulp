@@ -7,6 +7,20 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+EVIDENCE_INDEX_EXPORTS = (
+    "empty_evidence_index",
+    "evidence_entry_key",
+    "normalize_evidence_index",
+    "evidence_record_from_result",
+    "merge_result_into_evidence_index",
+    "rebuild_evidence_index_unlocked",
+    "load_evidence_index_unlocked",
+    "save_evidence_index_unlocked",
+    "collect_evidence_groups_from_index",
+)
 
 
 def empty_evidence_index(bindings: Mapping[str, Any]) -> dict:
@@ -53,3 +67,10 @@ def collect_evidence_groups_from_index(
         branch=branch,
         sha=sha,
     )
+
+
+def install_evidence_index_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EVIDENCE_INDEX_EXPORTS,
+) -> None:
+    install_module_attrs(bindings, "evidence_index_module", names)

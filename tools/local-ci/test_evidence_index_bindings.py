@@ -94,6 +94,24 @@ class EvidenceIndexBindingTests(unittest.TestCase):
             ],
         )
 
+    def test_install_evidence_index_helpers_wires_named_exports(self) -> None:
+        fake = FakeEvidenceIndex()
+        bindings = {"evidence_index_module": fake}
+        index = {"entries": {}}
+
+        evidence_index_bindings.install_evidence_index_helpers(
+            bindings,
+            ("empty_evidence_index", "collect_evidence_groups_from_index"),
+        )
+
+        self.assertEqual(bindings["empty_evidence_index"](), {"version": 3, "entries": {}})
+        self.assertEqual(
+            bindings["collect_evidence_groups_from_index"](index, branch="b", sha="s"),
+            {"full": []},
+        )
+        self.assertEqual(bindings["empty_evidence_index"].__name__, "empty_evidence_index")
+        self.assertEqual([call[0] for call in fake.calls], ["empty_evidence_index", "collect_evidence_groups_from_index"])
+
 
 if __name__ == "__main__":
     unittest.main()

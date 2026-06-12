@@ -364,51 +364,7 @@ _provenance_bindings.install_provenance_helpers(globals())
 
 import evidence_index as evidence_index_module  # noqa: E402
 
-
-def empty_evidence_index() -> dict:
-    return _evidence_index_bindings.empty_evidence_index(globals())
-
-
-def evidence_entry_key(branch: str, sha: str, target: str, validation: str) -> str:
-    return _evidence_index_bindings.evidence_entry_key(globals(), branch, sha, target, validation)
-
-
-def normalize_evidence_index(index: dict | None) -> dict:
-    return _evidence_index_bindings.normalize_evidence_index(globals(), index)
-
-
-def evidence_record_from_result(result: dict, item: dict, result_path: Path) -> dict:
-    return _evidence_index_bindings.evidence_record_from_result(globals(), result, item, result_path)
-
-
-def merge_result_into_evidence_index(index: dict, result: dict, result_path: Path) -> bool:
-    return _evidence_index_bindings.merge_result_into_evidence_index(globals(), index, result, result_path)
-
-
-def rebuild_evidence_index_unlocked() -> dict:
-    return _evidence_index_bindings.rebuild_evidence_index_unlocked(globals())
-
-
-def load_evidence_index_unlocked() -> tuple[dict, bool]:
-    return _evidence_index_bindings.load_evidence_index_unlocked(globals())
-
-
-def save_evidence_index_unlocked(index: dict) -> None:
-    return _evidence_index_bindings.save_evidence_index_unlocked(globals(), index)
-
-
-def collect_evidence_groups_from_index(
-    index: dict,
-    *,
-    branch: str | None = None,
-    sha: str | None = None,
-) -> dict[str, list[dict]]:
-    return _evidence_index_bindings.collect_evidence_groups_from_index(
-        globals(),
-        index,
-        branch=branch,
-        sha=sha,
-    )
+_evidence_index_bindings.install_evidence_index_helpers(globals())
 
 
 def load_evidence_index() -> dict:
