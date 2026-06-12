@@ -635,6 +635,11 @@ if (!host.try_prepare(48000, 512, 2, 2, limits)) {
 }
 ```
 
+When `try_prepare()` fails a non-zero limit, it returns before
+`Processor::prepare()` and leaves the previous successful prepared render
+context intact. Use `last_prepare_limit_failure()` for diagnostics, then either
+continue rendering with the prior prepare or retry with adjusted limits.
+
 Input and output views may alias for in-place processing.
 
 Format adapter runtime-mode tests should assert the adapter-owned source of
