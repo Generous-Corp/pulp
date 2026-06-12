@@ -4,6 +4,7 @@
 #include <pulp/format/headless.hpp>
 #include <pulp/format/registry.hpp>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 // Simple test processor for headless testing
@@ -65,6 +66,7 @@ public:
         const pulp::format::ProcessContext& context) override
     {
         last_context = context;
+        contexts.push_back(context);
         ++process_calls;
         midi_in_events = 0;
         for (const auto& event : midi_in) {
@@ -134,6 +136,7 @@ public:
     int midi_note_ons = 0;
     bool had_param_events = false;
     std::vector<pulp::state::ParameterEvent> last_param_events;
+    std::vector<pulp::format::ProcessContext> contexts;
 };
 
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
@@ -535,43 +538,104 @@ TEST_CASE("HeadlessHost renders deterministic offline AudioFileData blocks",
 TEST_CASE("HeadlessHost offline render matches direct process for stateless effects",
           "[headless][offline][parity][advanced][phase3]") {
     pulp::format::HeadlessHost direct_host(create_test_gain);
-    direct_host.prepare(48000.0, 4);
+    direct_host.prepare(48000.0, 3);
     direct_host.state().set_value(1, -3.0f);
+    auto* direct_processor = last_processor;
+    REQUIRE(direct_processor != nullptr);
 
-    pulp::audio::Buffer<float> direct_in(2, 4), direct_out(2, 4);
-    for (std::size_t frame = 0; frame < 4; ++frame) {
-        direct_in.channel(0)[frame] = 0.25f * static_cast<float>(frame + 1);
-        direct_in.channel(1)[frame] = -0.5f * static_cast<float>(frame + 1);
-    }
-    const float* direct_in_ptrs[2] = {
-        direct_in.channel(0).data(),
-        direct_in.channel(1).data(),
+    const std::vector<float> in_left = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f};
+    const std::vector<float> in_right = {-0.5f, -1.0f, -1.5f, -2.0f, -2.5f};
+    std::vector<float> direct_left;
+    std::vector<float> direct_right;
+
+    auto run_direct_block = [&](std::size_t offset, std::size_t frames,
+                                std::uint64_t sample_position,
+                                double position_beats) {
+        pulp::audio::Buffer<float> direct_in(2, frames), direct_out(2, frames);
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            direct_in.channel(0)[frame] = in_left[offset + frame];
+            direct_in.channel(1)[frame] = in_right[offset + frame];
+        }
+        const float* direct_in_ptrs[2] = {
+            direct_in.channel(0).data(),
+            direct_in.channel(1).data(),
+        };
+        pulp::audio::BufferView<const float> direct_in_view(
+            direct_in_ptrs, 2, frames);
+        auto direct_out_view = direct_out.view();
+
+        pulp::format::ProcessContext context;
+        context.sample_rate = 48000.0;
+        context.num_samples = static_cast<int>(frames);
+        context.process_mode = pulp::format::ProcessMode::Offline;
+        context.render_speed_hint =
+            pulp::format::RenderSpeedHint::FasterThanRealtime;
+        context.tempo_bpm = 90.0;
+        context.position_samples = static_cast<int64_t>(sample_position);
+        context.position_beats = position_beats;
+
+        direct_host.process(direct_out_view, direct_in_view, context);
+        direct_left.insert(direct_left.end(), direct_out.channel(0).begin(),
+                           direct_out.channel(0).end());
+        direct_right.insert(direct_right.end(), direct_out.channel(1).begin(),
+                            direct_out.channel(1).end());
     };
-    pulp::audio::BufferView<const float> direct_in_view(
-        direct_in_ptrs, 2, 4);
-    auto direct_out_view = direct_out.view();
-    direct_host.process(direct_out_view, direct_in_view);
+
+    run_direct_block(0, 3, 960, 2.0);
+    run_direct_block(3, 2, 963, 2.0 + 3.0 / 48000.0 * 1.5);
+
+    REQUIRE(direct_processor->contexts.size() == 2);
+    REQUIRE(direct_processor->contexts[0].num_samples == 3);
+    REQUIRE(direct_processor->contexts[1].num_samples == 2);
+    REQUIRE(direct_processor->contexts[0].position_samples == 960);
+    REQUIRE(direct_processor->contexts[1].position_samples == 963);
+    REQUIRE(direct_processor->contexts[0].process_mode ==
+            pulp::format::ProcessMode::Offline);
+    REQUIRE(direct_processor->contexts[1].render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
 
     pulp::format::HeadlessHost offline_host(create_test_gain);
-    offline_host.prepare(48000.0, 4);
+    offline_host.prepare(48000.0, 3);
     offline_host.state().set_value(1, -3.0f);
+    auto* offline_processor = last_processor;
+    REQUIRE(offline_processor != nullptr);
     pulp::audio::AudioFileData offline_input;
     offline_input.sample_rate = 48000;
-    offline_input.channels = {
-        {0.25f, 0.5f, 0.75f, 1.0f},
-        {-0.5f, -1.0f, -1.5f, -2.0f},
-    };
+    offline_input.channels = {in_left, in_right};
     pulp::audio::OfflineRenderOptions options;
-    options.block_size_schedule = {2, 2};
+    options.block_size_schedule = {3, 2};
+    options.start_sample_position = 960;
+    options.start_position_beats = 2.0;
+    options.tempo_bpm = 90.0;
+    options.render_speed_ratio = 2.0;
     auto offline_output = offline_host.render_offline(offline_input, options);
 
     REQUIRE(offline_output.has_value());
-    REQUIRE(offline_output->channels[0]
-            == std::vector<float>(direct_out.channel(0).begin(),
-                                  direct_out.channel(0).end()));
-    REQUIRE(offline_output->channels[1]
-            == std::vector<float>(direct_out.channel(1).begin(),
-                                  direct_out.channel(1).end()));
+    REQUIRE(offline_output->num_frames() == direct_left.size());
+    REQUIRE(offline_output->channels[0].size() == direct_left.size());
+    REQUIRE(offline_output->channels[1].size() == direct_right.size());
+    for (std::size_t frame = 0; frame < direct_left.size(); ++frame) {
+        REQUIRE_THAT(offline_output->channels[0][frame],
+                     WithinAbs(direct_left[frame], 1e-6f));
+        REQUIRE_THAT(offline_output->channels[1][frame],
+                     WithinAbs(direct_right[frame], 1e-6f));
+    }
+
+    REQUIRE(offline_processor->contexts.size() == direct_processor->contexts.size());
+    for (std::size_t i = 0; i < direct_processor->contexts.size(); ++i) {
+        REQUIRE(offline_processor->contexts[i].num_samples ==
+                direct_processor->contexts[i].num_samples);
+        REQUIRE(offline_processor->contexts[i].position_samples ==
+                direct_processor->contexts[i].position_samples);
+        REQUIRE_THAT(offline_processor->contexts[i].position_beats,
+                     WithinAbs(direct_processor->contexts[i].position_beats, 1e-12));
+        REQUIRE_THAT(offline_processor->contexts[i].tempo_bpm,
+                     WithinAbs(direct_processor->contexts[i].tempo_bpm, 1e-12));
+        REQUIRE(offline_processor->contexts[i].process_mode ==
+                direct_processor->contexts[i].process_mode);
+        REQUIRE(offline_processor->contexts[i].render_speed_hint ==
+                direct_processor->contexts[i].render_speed_hint);
+    }
 }
 
 TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
