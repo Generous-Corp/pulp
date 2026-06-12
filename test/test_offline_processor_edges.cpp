@@ -398,6 +398,68 @@ TEST_CASE("offline_render tail policy is explicit and deterministic",
             == std::vector<float>{1.0f, 2.0f, 3.0f, 13.0f, 14.0f, 15.0f});
 }
 
+TEST_CASE("offline_render reports deterministic transport timeline metadata",
+          "[audio][offline][advanced][transport][phase3]") {
+    AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {{0.0f, 0.0f, 0.0f, 0.0f}};
+
+    OfflineRenderOptions options;
+    options.fallback_block_size = 2;
+    options.start_sample_position = 48000;
+    options.start_position_beats = 8.0;
+    options.tempo_bpm = 120.0;
+    options.render_speed_ratio = 4.0;
+
+    std::vector<double> times_seen;
+    std::vector<double> beats_seen;
+    std::vector<double> tempos_seen;
+    std::vector<double> speeds_seen;
+    auto output = offline_render(
+        input,
+        [&](const float*, float* out, int, const OfflineRenderBlockContext& context) {
+            times_seen.push_back(context.time_seconds);
+            beats_seen.push_back(context.position_beats);
+            tempos_seen.push_back(context.tempo_bpm);
+            speeds_seen.push_back(context.render_speed_ratio);
+            for (int frame = 0; frame < context.frames; ++frame)
+                out[frame] = static_cast<float>(context.position_beats);
+        },
+        options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(times_seen.size() == 2);
+    REQUIRE_THAT(times_seen[0], WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(times_seen[1], WithinAbs(1.0 + 2.0 / 48000.0, 1e-12));
+    REQUIRE_THAT(beats_seen[0], WithinAbs(8.0, 1e-12));
+    REQUIRE_THAT(beats_seen[1], WithinAbs(8.0 + 2.0 / 48000.0 * 2.0, 1e-12));
+    REQUIRE(tempos_seen == std::vector<double>{120.0, 120.0});
+    REQUIRE(speeds_seen == std::vector<double>{4.0, 4.0});
+    REQUIRE_THAT(output->channels[0][0], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(output->channels[0][1], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(output->channels[0][2], WithinAbs(8.000083f, 1e-6f));
+    REQUIRE_THAT(output->channels[0][3], WithinAbs(8.000083f, 1e-6f));
+}
+
+TEST_CASE("offline_render rejects invalid transport timeline hints",
+          "[audio][offline][advanced][transport][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.tempo_bpm = 0.0;
+
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+
+    options.tempo_bpm = 120.0;
+    options.render_speed_ratio = 0.0;
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+}
+
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
     AudioFileData input;
     input.sample_rate = 96000;
