@@ -686,15 +686,19 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         const auto& c = cg->connections[ci];
         auto rt_it = cg->runtime.find(c.dest_node);
         if (rt_it == cg->runtime.end()) continue;
+        auto src_rt_it = cg->runtime.find(c.source_node);
+        NodeRuntime* source_runtime =
+            src_rt_it == cg->runtime.end() ? nullptr : &src_rt_it->second;
         auto& rt = rt_it->second;
-        if (c.feedback) cg->feedback_edges.push_back(ci);
+        NodeRuntime::EdgeRef edge_ref{ci, source_runtime};
+        if (c.feedback) cg->feedback_edges.push_back(edge_ref);
         if (c.midi && !c.feedback) {
-            rt.inbound_midi_edges.push_back(ci);
+            rt.inbound_midi_edges.push_back(edge_ref);
         } else if (!c.midi && !c.automation && !c.audio_rate_modulation) {
-            rt.inbound_audio_edges.push_back(ci);
+            rt.inbound_audio_edges.push_back(edge_ref);
         }
         if (c.automation) {
-            rt.sparse_automation_edges.push_back(ci);
+            rt.sparse_automation_edges.push_back(edge_ref);
             auto& ids = rt.sparse_automation_param_ids;
             if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
                 ids.push_back(c.automation_param_id);
@@ -702,7 +706,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             }
         }
         if (c.audio_rate_modulation) {
-            rt.audio_rate_modulation_edges.push_back(ci);
+            rt.audio_rate_modulation_edges.push_back(edge_ref);
             auto& ids = rt.audio_rate_param_ids;
             if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
                 ids.push_back(c.automation_param_id);
@@ -941,23 +945,19 @@ void SignalGraph::process(audio::BufferView<float>& output,
         if (shape.type != NodeType::MidiInput) rt.midi_out.clear();
 
         // 1b. Gather MIDI from MIDI-flagged inbound connections.
-        for (const size_t ci : rt.inbound_midi_edges) {
-            const auto& c = cg->connections[ci];
-            auto src_it = cg->runtime.find(c.source_node);
-            if (src_it == cg->runtime.end()) continue;
-            for (const auto& ev : src_it->second.midi_out) rt.midi_in.add(ev);
+        for (const auto& edge : rt.inbound_midi_edges) {
+            if (!edge.source_runtime) continue;
+            for (const auto& ev : edge.source_runtime->midi_out) rt.midi_in.add(ev);
         }
 
         // 2. Gather audio inbound with PDC/feedback delay lines.
-        for (const size_t ci : rt.inbound_audio_edges) {
+        for (const auto& edge : rt.inbound_audio_edges) {
+            const size_t ci = edge.connection_index;
             const auto& c = cg->connections[ci];
             const int dport = static_cast<int>(c.dest_port);
             if (dport < 0 || dport >= static_cast<int>(rt.input_ptrs.size())) continue;
-            if (c.source_node == 0) continue;
-
-            auto src_rt_it = cg->runtime.find(c.source_node);
-            if (src_rt_it == cg->runtime.end()) continue;
-            const auto& src_rt = src_rt_it->second;
+            if (!edge.source_runtime) continue;
+            const auto& src_rt = *edge.source_runtime;
             const int sport = static_cast<int>(c.source_port);
             if (sport < 0 || sport >= static_cast<int>(src_rt.output_ptrs.size())) continue;
 
@@ -1055,13 +1055,16 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         a = NodeRuntime::SparseAutomationAccum{};
                     }
                     const int last = num_samples - 1;
-                    for (const size_t ci : rt.sparse_automation_edges) {
+                    for (const auto& edge : rt.sparse_automation_edges) {
+                        const size_t ci = edge.connection_index;
                         const auto& c = cg->connections[ci];
-                        auto src_it = cg->runtime.find(c.source_node);
-                        if (src_it == cg->runtime.end()) continue;
+                        if (!edge.source_runtime) continue;
                         const int sport = static_cast<int>(c.source_port);
-                        if (sport < 0 || sport >= (int)src_it->second.output_ptrs.size()) continue;
-                        const float* src = src_it->second.output_ptrs[sport];
+                        if (sport < 0
+                            || sport >= (int)edge.source_runtime->output_ptrs.size()) {
+                            continue;
+                        }
+                        const float* src = edge.source_runtime->output_ptrs[sport];
                         const float s0 = std::clamp(src[0], 0.0f, 1.0f);
                         const float sN = std::clamp(src[last < 0 ? 0 : last], 0.0f, 1.0f);
                         float m0 = c.automation_range_lo
@@ -1176,13 +1179,13 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             d = NodeRuntime::DenseAutomationAccum{};
                         }
 
-                        for (const size_t ci : rt.audio_rate_modulation_edges) {
+                        for (const auto& edge : rt.audio_rate_modulation_edges) {
+                            const size_t ci = edge.connection_index;
                             const auto& c = cg->connections[ci];
-                            auto src_it = cg->runtime.find(c.source_node);
-                            if (src_it == cg->runtime.end()) continue;
+                            if (!edge.source_runtime) continue;
                             const int sport = static_cast<int>(c.source_port);
                             if (sport < 0
-                                || sport >= (int)src_it->second.output_ptrs.size()) {
+                                || sport >= (int)edge.source_runtime->output_ptrs.size()) {
                                 continue;
                             }
 
@@ -1201,7 +1204,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             dst.lo = bounds.first;
                             dst.hi = bounds.second;
 
-                            const float* src = src_it->second.output_ptrs[sport];
+                            const float* src = edge.source_runtime->output_ptrs[sport];
                             auto& dl = cg->connection_delays[ci];
                             if (dl.delay_samples <= 0 || dl.ring.empty()) {
                                 for (int i = 0; i < num_samples; ++i) {
@@ -1341,11 +1344,11 @@ void SignalGraph::process(audio::BufferView<float>& output,
     }
 
     // Capture each feedback source's current block for the *next* block.
-    for (const size_t ci : cg->feedback_edges) {
+    for (const auto& edge : cg->feedback_edges) {
+        const size_t ci = edge.connection_index;
         const auto& c = cg->connections[ci];
-        auto src_it = cg->runtime.find(c.source_node);
-        if (src_it == cg->runtime.end()) continue;
-        const auto& src_rt = src_it->second;
+        if (!edge.source_runtime) continue;
+        const auto& src_rt = *edge.source_runtime;
         const int sport = static_cast<int>(c.source_port);
         if (sport < 0 || sport >= static_cast<int>(src_rt.output_ptrs.size())) continue;
         auto& dl = cg->connection_delays[ci];
