@@ -1,112 +1,34 @@
 #!/usr/bin/env python3
 """Tests for the state_paths state/log path helpers.
 
-Split out of test_local_ci.py (roadmap P11-3) so the test surface mirrors
-the extracted state_paths module. The harness still loads the local_ci.py
-orchestrator, which re-exports the state_paths symbols.
+Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
+extracted state_paths module directly instead of the local_ci.py facade.
 """
 
-import io
-import importlib.util
 import json
 import os
-import subprocess
-import sys
 import tempfile
-import threading
 import unittest
-from urllib.parse import urlparse
 from unittest import mock
-from contextlib import redirect_stdout
-from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
-
-MODULE_PATH = Path(__file__).with_name("local_ci.py")
-VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
-
-
-def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+import state_paths
 
 
 
 class StatePathsTests(unittest.TestCase):
-    def _set_target_enabled(self, name: str, enabled: bool):
-        payload = json.loads(self.config_path.read_text())
-        payload.setdefault("targets", {}).setdefault(name, {})["enabled"] = enabled
-        self.config_path.write_text(json.dumps(payload) + "\n")
-
-    def _write_desktop_manifest(self, config, target, action, manifest):
-        bundle = self.mod.create_desktop_run_bundle(config, target, action)
-        payload = dict(manifest)
-        artifacts = dict(payload.get("artifacts", {}))
-        artifacts.setdefault("bundle_dir", str(bundle))
-        payload["artifacts"] = artifacts
-        (bundle / "manifest.json").write_text(json.dumps(payload) + "\n")
-        return bundle, payload
-
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         root = Path(self.tmpdir.name)
         self.state_dir = root / "state"
         self.config_path = root / "config.json"
-        self.config_path.write_text(
-            json.dumps(
-                {
-                    "desktop_automation": {
-                        "artifact_root": str(root / "desktop-artifacts"),
-                    },
-                    "targets": {
-                        "mac": {"type": "local", "enabled": True},
-                        "ubuntu": {"type": "ssh", "enabled": True, "host": "ubuntu", "repo_path": "/tmp/pulp"},
-                        "windows": {"type": "ssh", "enabled": False, "host": "win2", "repo_path": "C:\\Pulp"},
-                    },
-                    "github_actions": {
-                        "repository": "danielraffel/pulp",
-                        "defaults": {
-                            "workflow": "build",
-                            "provider": "github-hosted",
-                            "wait_poll_secs": 5,
-                            "match_timeout_secs": 30,
-                        },
-                        "workflows": {
-                            "build": {
-                                "providers": {
-                                    "namespace": {
-                                        "linux_runner_selector_json": "\"namespace-profile-default\"",
-                                        "windows_runner_selector_json": "\"namespace-profile-default\"",
-                                    }
-                                }
-                            },
-                            "docs-check": {
-                                "providers": {
-                                    "namespace": {
-                                        "runner_selector_json": "\"namespace-profile-default\""
-                                    }
-                                }
-                            }
-                        },
-                    },
-                    "defaults": {
-                        "priority": "normal",
-                        "targets": ["mac"],
-                    },
-                }
-            )
-            + "\n"
-        )
+        self.config_path.write_text("{}\n")
 
         self.prev_home = os.environ.get("PULP_LOCAL_CI_HOME")
         self.prev_config = os.environ.get("PULP_LOCAL_CI_CONFIG")
         os.environ["PULP_LOCAL_CI_HOME"] = str(self.state_dir)
         os.environ["PULP_LOCAL_CI_CONFIG"] = str(self.config_path)
-        self.mod = load_module()
+        self.mod = state_paths
 
     def tearDown(self):
         if self.prev_home is None:
@@ -138,9 +60,7 @@ class StatePathsTests(unittest.TestCase):
         script_dir.mkdir()
         shared.parent.mkdir(parents=True)
         shared.write_text("{}\n")
-        state_paths_mod = sys.modules["state_paths"]
-
-        with mock.patch.object(state_paths_mod, "SCRIPT_DIR", script_dir):
+        with mock.patch.object(state_paths, "SCRIPT_DIR", script_dir):
             with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.state_dir)}, clear=True):
                 self.assertEqual(self.mod.config_path(), shared)
                 shared.unlink()
@@ -169,15 +89,14 @@ class StatePathsTests(unittest.TestCase):
             )
 
     def test_state_dir_uses_platform_defaults_when_no_override_is_set(self):
-        state_paths_mod = sys.modules["state_paths"]
         with mock.patch.dict(os.environ, {"HOME": "/Users/pulp", "PULP_LOCAL_CI_HOME": "~/ci-state"}, clear=True):
             self.assertEqual(self.mod.state_dir(), Path("/Users/pulp/ci-state"))
 
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
-            state_paths_mod.Path,
+            state_paths.Path,
             "home",
             return_value=Path("/Users/pulp"),
-        ), mock.patch.object(state_paths_mod.sys, "platform", "darwin"):
+        ), mock.patch.object(state_paths.sys, "platform", "darwin"):
             self.assertEqual(
                 self.mod.state_dir(),
                 Path("/Users/pulp/Library/Application Support/Pulp/local-ci"),
@@ -187,14 +106,14 @@ class StatePathsTests(unittest.TestCase):
             os.environ,
             {"XDG_STATE_HOME": "/xdg-state"},
             clear=True,
-        ), mock.patch.object(state_paths_mod.sys, "platform", "linux"):
+        ), mock.patch.object(state_paths.sys, "platform", "linux"):
             self.assertEqual(self.mod.state_dir(), Path("/xdg-state/pulp/local-ci"))
 
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
-            state_paths_mod.Path,
+            state_paths.Path,
             "home",
             return_value=Path("/home/pulp"),
-        ), mock.patch.object(state_paths_mod.sys, "platform", "linux"):
+        ), mock.patch.object(state_paths.sys, "platform", "linux"):
             self.assertEqual(self.mod.state_dir(), Path("/home/pulp/.local/state/pulp/local-ci"))
 
     def test_ensure_state_dirs_creates_shared_state_directories(self):
