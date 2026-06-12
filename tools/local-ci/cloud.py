@@ -19,8 +19,6 @@ import re
 import shlex
 import subprocess
 import sys
-import time
-import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -181,6 +179,7 @@ from cloud_run_prepare import (  # noqa: E402  -- re-exported for in-file consum
     cloud_run_record_payload,
     cloud_workflow_dispatch_fields,
 )
+from cloud_run_command import cmd_cloud_run as _cmd_cloud_run  # noqa: E402  -- re-exported for in-file consumers
 from cloud_github_billing import (  # noqa: E402  -- re-exported for in-file consumers
     fetch_github_repo_actions_billing_summary as _fetch_github_repo_actions_billing_summary,
 )
@@ -536,136 +535,34 @@ def cmd_cloud_defaults(_args: argparse.Namespace) -> int:
 
 
 def cmd_cloud_run(args: argparse.Namespace) -> int:
-    if not gh_available():
-        print("Error: gh CLI not available or not authenticated. Run: gh auth login")
-        return 1
-
-    config = _load_optional_config()
-    try:
-        settings = resolve_github_actions_settings(config)
-        repository = resolve_github_repository(settings)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    workflow_key = args.workflow or settings.get("workflow", "build")
-    workflow = BUILTIN_GITHUB_WORKFLOWS.get(workflow_key)
-    if workflow is None:
-        print(
-            f"Error: Unknown workflow '{workflow_key}'. Use `pulp ci-local cloud workflows` to list supported workflows."
-        )
-        return 1
-
-    branch = args.branch or current_branch()
-    try:
-        provider, _provider_source = resolve_default_provider_for_workflow(
-            settings,
-            workflow_key,
-            explicit_provider=getattr(args, "provider", None),
-        )
-        repository_variables = gh_repo_variables(repository)
-        config_dispatch_fields, _config_dispatch_sources = resolve_workflow_dispatch_defaults(
-            config,
-            repository_variables,
-            workflow_key,
-            provider,
-            workflow.get("dispatch_fields"),
-        )
-        cli_dispatch_fields = resolve_cli_dispatch_field_values(
-            args, workflow.get("dispatch_fields")
-        )
-        selector_input = workflow.get("selector_input")
-        if getattr(args, "runner_selector_json", None):
-            selector_json = normalize_runs_on_json(
-                args.runner_selector_json,
-                setting_name="--runner-selector-json",
-            )
-        elif selector_input:
-            selector_json, _selector_source = resolve_workflow_field_value_and_source(
-                config,
-                repository_variables,
-                workflow_key,
-                provider,
-                selector_input,
-            )
-        else:
-            selector_json = ""
-        config_dispatch_fields.update(cli_dispatch_fields)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    selector_input = workflow.get("selector_input")
-    if selector_json and not selector_input:
-        print(f"Error: workflow '{workflow_key}' does not accept an explicit runner selector.")
-        return 1
-
-    dispatch_id = uuid.uuid4().hex[:12]
-    dispatch_time = now_iso()
-    record = normalize_cloud_record(
-        cloud_run_record_payload(
-            dispatch_id=dispatch_id,
-            repository=repository,
-            workflow_key=workflow_key,
-            workflow=workflow,
-            branch=branch,
-            requested_by=gh_current_login() or "",
-            provider=provider,
-            selector_json=selector_json,
-            dispatch_fields=config_dispatch_fields,
-            dispatch_time=dispatch_time,
-        )
+    return _cmd_cloud_run(
+        args,
+        gh_available_fn=gh_available,
+        load_optional_config_fn=_load_optional_config,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        resolve_github_repository_fn=resolve_github_repository,
+        builtin_github_workflows=BUILTIN_GITHUB_WORKFLOWS,
+        current_branch_fn=current_branch,
+        resolve_default_provider_for_workflow_fn=resolve_default_provider_for_workflow,
+        gh_repo_variables_fn=gh_repo_variables,
+        resolve_workflow_dispatch_defaults_fn=resolve_workflow_dispatch_defaults,
+        resolve_cli_dispatch_field_values_fn=resolve_cli_dispatch_field_values,
+        normalize_runs_on_json_fn=normalize_runs_on_json,
+        resolve_workflow_field_value_and_source_fn=resolve_workflow_field_value_and_source,
+        now_iso_fn=now_iso,
+        normalize_cloud_record_fn=normalize_cloud_record,
+        cloud_run_record_payload_fn=cloud_run_record_payload,
+        gh_current_login_fn=gh_current_login,
+        save_cloud_record_fn=save_cloud_record,
+        cloud_workflow_dispatch_fields_fn=cloud_workflow_dispatch_fields,
+        gh_workflow_dispatch_fn=gh_workflow_dispatch,
+        gh_find_dispatched_run_fn=gh_find_dispatched_run,
+        enrich_cloud_record_provider_metadata_fn=enrich_cloud_record_provider_metadata,
+        update_cloud_record_from_run_fn=update_cloud_record_from_run,
+        cloud_dispatch_lines_fn=cloud_dispatch_lines,
+        refresh_cloud_record_fn=refresh_cloud_record,
+        cloud_final_status_line_fn=cloud_final_status_line,
     )
-    save_cloud_record(record)
-
-    fields = cloud_workflow_dispatch_fields(
-        workflow,
-        provider=provider,
-        dispatch_fields=config_dispatch_fields,
-        selector_json=selector_json,
-    )
-
-    try:
-        gh_workflow_dispatch(repository, workflow["file"], branch, fields)
-    except RuntimeError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    matched = gh_find_dispatched_run(
-        repository,
-        workflow["file"],
-        branch,
-        dispatch_time,
-        timeout_secs=int(settings["match_timeout_secs"]),
-    )
-
-    if matched:
-        record = enrich_cloud_record_provider_metadata(
-            update_cloud_record_from_run(record, matched, provider_resolved=provider)
-        )
-        record["match_ambiguous"] = bool(matched.get("match_ambiguous"))
-        save_cloud_record(record)
-
-    for line in cloud_dispatch_lines(record, workflow_key=workflow_key, branch=branch, provider=provider):
-        print(line)
-
-    if not args.wait:
-        return 0
-
-    if not record.get("run_id"):
-        print("Error: blocking wait requested, but the dispatched GitHub run could not be matched.")
-        return 1
-
-    while record.get("status") != "completed":
-        time.sleep(int(settings["wait_poll_secs"]))
-        try:
-            record = refresh_cloud_record(record, repository, require_snapshot=True)
-        except RuntimeError as exc:
-            print(f"Error: {exc}")
-            return 1
-
-    print(cloud_final_status_line(record))
-    return 0 if record.get("conclusion") == "success" else 1
 
 
 def cmd_cloud_status(args: argparse.Namespace) -> int:
