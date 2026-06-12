@@ -108,6 +108,14 @@ shapes, negative port counts, malformed state blobs, stale connection IDs,
 invalid ports, and non-feedback cycles fail closed or are skipped before
 `prepare()` publishes a runtime snapshot.
 
+Generated/scripted graph import, serialization, `set_limits()`, `prepare()`,
+`release()`, custom-node registration, and custom state load/save APIs are
+control-thread only. They are not audio-thread APIs. Mutating graph shape or
+custom state invalidates the live snapshot; `process()` returns silence until a
+subsequent successful `prepare()` publishes a new immutable snapshot. Generated
+or scripted runtimes must express audio-thread work only through the prepared
+snapshot's `process()` callbacks and preallocated event/audio buffers.
+
 After a successful `prepare()`, `SignalGraph::prepared_stats()` reports the
 compiled graph's node/order/connection/port counts, prepared maximum block
 size, and fixed audio, automation, and delay-line buffer bytes. The snapshot is

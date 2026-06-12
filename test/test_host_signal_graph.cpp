@@ -203,6 +203,41 @@ TEST_CASE("SignalGraph stateful custom node: lifecycle + state round-trip",
     for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
 }
 
+TEST_CASE("SignalGraph generated custom state changes require re-prepare",
+          "[host][graph][generated][rt-safety][phase3]") {
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_level_type()));
+
+    auto input = graph.add_input_node(1, "Input");
+    auto node = graph.add_custom_node("pulp.test.level", "Level A");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(node != 0);
+    REQUIRE(graph.connect(input, 0, node, 0));
+    REQUIRE(graph.connect(node, 0, output, 0));
+    REQUIRE(graph.set_custom_node_state(node, level_bytes(3.0f)));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_s[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_s[4] = {-1, -1, -1, -1};
+    const float* in_p[1] = {in_s};
+    float* out_p[1] = {out_s};
+    pulp::audio::BufferView<const float> in_view(in_p, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_p, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
+
+    REQUIRE(graph.set_custom_node_state(node, level_bytes(2.0f)));
+    std::fill(std::begin(out_s), std::end(out_s), -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (float sample : out_s) REQUIRE(sample == 0.0f);
+
+    REQUIRE(graph.prepare(48000.0, 4));
+    std::fill(std::begin(out_s), std::end(out_s), -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 2.0f);
+}
+
 TEST_CASE("SignalGraph custom node registry keeps versions distinct",
           "[host][graph][node-abi]") {
     SignalGraph graph;
