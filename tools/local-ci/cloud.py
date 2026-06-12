@@ -74,7 +74,6 @@ from git_helpers import (  # noqa: E402  -- re-exported for in-file consumers
     current_sha,
     git_root_for,
     resolve_git_ref_sha,
-    short_sha,
 )
 from normalize import (  # noqa: E402  -- re-exported for in-file consumers
     PRIORITY_VALUES,
@@ -191,6 +190,10 @@ from cloud_pr_format import (  # noqa: E402  -- re-exported for in-file consumer
     open_pr_list_entry_lines,
     open_pr_list_lines,
     open_prs_header_line,
+)
+from cloud_status_format import (  # noqa: E402  -- re-exported for in-file consumers
+    cloud_status_detail_lines,
+    cloud_status_job_lines,
 )
 from cloud_github import (  # noqa: E402  -- re-exported for in-file consumers
     gh_api_json,
@@ -849,51 +852,10 @@ def cmd_cloud_status(args: argparse.Namespace) -> int:
     rendered_record = normalize_cloud_record(record)
     rendered_record["cost_summary"] = estimate_cloud_record_cost(rendered_record, config)
     print(cloud_record_summary(rendered_record, config))
-    print(f"  workflow: {record.get('workflow_name')} ({record.get('workflow_file')})")
-    print(f"  repo: {record.get('repository')}")
-    print(f"  requested ref: {record.get('requested_ref')}")
-    selector = summarize_runner_selector(record.get("runner_selector_json", ""))
-    if selector:
-        print(f"  runner selector: {selector}")
-    dispatch_fields = record.get("dispatch_fields") or {}
-    if isinstance(dispatch_fields, dict):
-        for key in sorted(dispatch_fields):
-            value = dispatch_fields.get(key)
-            if not value:
-                continue
-            rendered = (
-                summarize_runner_selector(value)
-                if key.endswith("_selector_json")
-                else str(value)
-            )
-            print(f"  {key}: {rendered}")
-    if record.get("head_sha"):
-        print(f"  sha: {short_sha(record['head_sha'])}")
-    if record.get("url"):
-        print(f"  url: {record['url']}")
-    if record.get("matched_at"):
-        print(f"  matched: {record['matched_at']}")
-    if record.get("started_at"):
-        print(f"  started: {record['started_at']}")
-    if record.get("queue_delay_secs") is not None:
-        print(f"  queue delay: {format_duration_secs(record.get('queue_delay_secs'))}")
-    if record.get("duration_secs") is not None:
-        print(f"  elapsed: {format_duration_secs(record.get('duration_secs'))}")
-    if record.get("updated_at"):
-        print(f"  updated: {record['updated_at']}")
-    if record.get("completed_at"):
-        print(f"  completed: {record['completed_at']}")
+    for line in cloud_status_detail_lines(record):
+        print(line)
     print_namespace_usage_summary(rendered_record)
     print_billing_period_summary(estimate_billing_period_totals(list_cloud_records(limit=None), config))
-    if record.get("jobs"):
-        print("  jobs:")
-        for job in record["jobs"]:
-            status = job.get("status", "?")
-            conclusion = job.get("conclusion", "")
-            suffix = f"/{conclusion}" if conclusion else ""
-            job_duration = format_duration_secs(
-                duration_between(job.get("started_at"), job.get("completed_at"))
-            )
-            detail = f" duration={job_duration}" if job_duration else ""
-            print(f"    {job.get('name', '?')}: {status}{suffix}{detail}")
+    for line in cloud_status_job_lines(record):
+        print(line)
     return 0
