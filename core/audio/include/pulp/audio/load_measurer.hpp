@@ -26,6 +26,92 @@ struct AudioProcessLoadSnapshot {
     std::uint64_t overload_count = 0;
 };
 
+enum class AudioRuntimeOverloadSeverity : uint8_t {
+    Nominal = 0,
+    Watch,
+    Overloaded,
+    Critical,
+};
+
+struct AudioRuntimeOverloadPolicy {
+    float watch_load = 0.75f;
+    float overload_load = 1.0f;
+    float critical_load = 1.25f;
+    std::uint64_t watch_xruns = 1;
+    std::uint64_t critical_xruns = 3;
+    std::uint64_t watch_overloads = 1;
+    std::uint64_t critical_overloads = 3;
+};
+
+struct AudioRuntimeOverloadReport {
+    AudioRuntimeOverloadSeverity severity = AudioRuntimeOverloadSeverity::Nominal;
+    bool should_shed_optional_work = false;
+    bool should_bypass_optional_work = false;
+    bool validation_failure = false;
+    const char* action = "normal";
+};
+
+inline const char* to_string(AudioRuntimeOverloadSeverity severity) noexcept {
+    switch (severity) {
+        case AudioRuntimeOverloadSeverity::Nominal:    return "nominal";
+        case AudioRuntimeOverloadSeverity::Watch:      return "watch";
+        case AudioRuntimeOverloadSeverity::Overloaded: return "overloaded";
+        case AudioRuntimeOverloadSeverity::Critical:   return "critical";
+    }
+    return "critical";
+}
+
+inline AudioRuntimeOverloadReport evaluate_audio_runtime_overload(
+    const AudioProcessLoadSnapshot& load,
+    std::uint64_t xrun_count,
+    const AudioRuntimeOverloadPolicy& policy = {}) noexcept {
+    const float watch_load =
+        std::isfinite(policy.watch_load) && policy.watch_load > 0.0f
+            ? policy.watch_load
+            : 0.75f;
+    const float overload_load =
+        std::isfinite(policy.overload_load) && policy.overload_load > watch_load
+            ? policy.overload_load
+            : std::max(watch_load, 1.0f);
+    const float critical_load =
+        std::isfinite(policy.critical_load) && policy.critical_load > overload_load
+            ? policy.critical_load
+            : std::max(overload_load, 1.25f);
+    const float observed_load =
+        std::max({load.load, load.peak_load, load.last_load});
+
+    AudioRuntimeOverloadReport report;
+    if (observed_load >= critical_load
+        || (policy.critical_xruns > 0 && xrun_count >= policy.critical_xruns)
+        || (policy.critical_overloads > 0
+            && load.overload_count >= policy.critical_overloads)) {
+        report.severity = AudioRuntimeOverloadSeverity::Critical;
+        report.should_shed_optional_work = true;
+        report.should_bypass_optional_work = true;
+        report.validation_failure = true;
+        report.action = "bypass-optional-work";
+        return report;
+    }
+
+    if (observed_load >= overload_load
+        || (policy.watch_xruns > 0 && xrun_count >= policy.watch_xruns)
+        || (policy.watch_overloads > 0
+            && load.overload_count >= policy.watch_overloads)) {
+        report.severity = AudioRuntimeOverloadSeverity::Overloaded;
+        report.should_shed_optional_work = true;
+        report.action = "shed-optional-work";
+        return report;
+    }
+
+    if (observed_load >= watch_load) {
+        report.severity = AudioRuntimeOverloadSeverity::Watch;
+        report.action = "monitor";
+        return report;
+    }
+
+    return report;
+}
+
 /// Measures the CPU load of an audio processing callback.
 ///
 /// Call begin() at the start and end() at the end of your process() method.
