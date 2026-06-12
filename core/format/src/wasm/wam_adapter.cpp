@@ -123,6 +123,8 @@ void WamProcessorBridge::process(const float* input, float* output,
     ProcessContext ctx;
     ctx.sample_rate = sample_rate_;
     ctx.num_samples = num_frames;
+    ctx.process_mode = ProcessMode::Realtime;
+    ctx.render_speed_hint = RenderSpeedHint::Realtime;
 
     processor_->process(out_view, in_view, midi_in, midi_out, ctx);
 

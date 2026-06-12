@@ -222,6 +222,29 @@ enum class FrameRate {
     fps_60,           ///< High-rate. VST3 `kFrameRate60fps`.
 };
 
+/// Runtime process mode for the current block.
+///
+/// `Realtime` is the default so existing adapters that do not populate the
+/// field keep the historical live-audio contract. Offline hosts should set
+/// `Offline` explicitly for deterministic exports, analysis renders, and other
+/// non-realtime passes where processors may choose higher-quality bounded work.
+enum class ProcessMode {
+    Realtime = 0,
+    Offline,
+};
+
+/// Host render-speed hint for offline or constrained live rendering.
+///
+/// This is advisory. Processors must still obey the thread contract implied by
+/// `ProcessContext::process_mode`; for example, a realtime block with
+/// `SlowerThanRealtime` is still an audio-thread callback.
+enum class RenderSpeedHint {
+    Unknown = 0,
+    Realtime,
+    FasterThanRealtime,
+    SlowerThanRealtime,
+};
+
 /// Process context — passed every audio callback with transport state.
 ///
 /// Fields are populated by the host. Not all hosts provide all fields —
@@ -259,6 +282,37 @@ enum class FrameRate {
 struct ProcessContext {
     double sample_rate = 0;
     int num_samples = 0;
+
+    /// Runtime mode for this block. Defaults to live realtime processing for
+    /// source compatibility; offline/headless/render hosts should set
+    /// `ProcessMode::Offline` explicitly.
+    ProcessMode process_mode = ProcessMode::Realtime;
+
+    /// True when the host is rendering the plugin's bypass path for this block.
+    /// Most current adapters short-circuit before calling `process()` while
+    /// bypassed, so the default remains false and this flag is only meaningful
+    /// on hosts that intentionally process while bypassed to drain tails.
+    bool is_bypassed = false;
+
+    /// True when the host is asking a processor to continue rendering after
+    /// input/transport stop so delay, reverb, or lookahead state can settle.
+    bool is_tail_drain = false;
+
+    /// True for the first block after a transport jump, seek, or explicit DSP
+    /// reset boundary. Processors can use this to clear tempo-synced phase or
+    /// delay history without guessing from position discontinuities.
+    bool reset_requested = false;
+
+    /// True when the host observed a discontinuous timeline move since the
+    /// previous block. This is narrower than `transport_changed`: play/stop
+    /// transitions do not imply a jump unless position also changed
+    /// discontinuously.
+    bool transport_jump = false;
+
+    /// Advisory render-speed category for hosts that know whether the current
+    /// pass is live, faster-than-realtime export, or slower/constrained render.
+    RenderSpeedHint render_speed_hint = RenderSpeedHint::Unknown;
+
     bool is_playing = false;
     bool is_recording = false;
     double tempo_bpm = 120.0;
@@ -342,6 +396,19 @@ struct ProcessContext {
     /// flush a reverb tail when transport stops) on transitions only.
     /// Default false.
     bool transport_changed = false;
+
+    bool is_realtime() const noexcept {
+        return process_mode == ProcessMode::Realtime;
+    }
+
+    bool is_offline() const noexcept {
+        return process_mode == ProcessMode::Offline;
+    }
+
+    bool allows_offline_quality_work() const noexcept {
+        return is_offline() &&
+               render_speed_hint != RenderSpeedHint::Realtime;
+    }
 };
 
 /// The plugin processor interface.
@@ -418,8 +485,6 @@ public:
     /// own UI-thread "loading…" workflow against them and the adapter
     /// integration is purely additive.
     ///
-    /// Mirrors JUCE's @c AudioProcessor::suspendProcessing per
-    /// sudara "Big List of JUCE Tips" #30.
     virtual void suspend() {}
 
     /// Resume processing after a prior @c suspend(). Default no-op;

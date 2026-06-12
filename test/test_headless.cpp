@@ -206,6 +206,11 @@ TEST_CASE("HeadlessHost fills default process context",
 
     REQUIRE_THAT(last_context.sample_rate, WithinAbs(44100.0, 0.001));
     REQUIRE(last_context.num_samples == 32);
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(last_context.is_offline());
+    REQUIRE(last_context.allows_offline_quality_work());
 }
 
 TEST_CASE("HeadlessHost defaults non-positive context fields",
@@ -222,19 +227,32 @@ TEST_CASE("HeadlessHost defaults non-positive context fields",
     host.process(out_view, in_view, zero_ctx);
     REQUIRE_THAT(last_context.sample_rate, WithinAbs(88200.0, 0.001));
     REQUIRE(last_context.num_samples == 8);
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Realtime);
+    REQUIRE_FALSE(last_context.is_offline());
 
     pulp::format::ProcessContext explicit_ctx;
     explicit_ctx.sample_rate = -1.0;
     explicit_ctx.num_samples = -32;
+    explicit_ctx.process_mode = pulp::format::ProcessMode::Offline;
+    explicit_ctx.render_speed_hint = pulp::format::RenderSpeedHint::SlowerThanRealtime;
     host.process(out_view, in_view, explicit_ctx);
     REQUIRE_THAT(last_context.sample_rate, WithinAbs(88200.0, 0.001));
     REQUIRE(last_context.num_samples == 8);
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::SlowerThanRealtime);
+    REQUIRE(last_context.allows_offline_quality_work());
 
     explicit_ctx.sample_rate = 44100.0;
     explicit_ctx.num_samples = 4;
+    explicit_ctx.process_mode = pulp::format::ProcessMode::Realtime;
+    explicit_ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
     host.process(out_view, in_view, explicit_ctx);
     REQUIRE_THAT(last_context.sample_rate, WithinAbs(44100.0, 0.001));
     REQUIRE(last_context.num_samples == 4);
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Realtime);
+    REQUIRE(last_context.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
+    REQUIRE_FALSE(last_context.allows_offline_quality_work());
 }
 
 TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {

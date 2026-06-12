@@ -399,6 +399,8 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     ProcessContext ctx;
     ctx.sample_rate = GetSampleRate();
     ctx.num_samples = static_cast<int>(inFramesToProcess);
+    ctx.process_mode = ProcessMode::Realtime;
+    ctx.render_speed_hint = RenderSpeedHint::Realtime;
 
     // Item 1.3 — populate transport fields from the host callbacks the
     // host installed via kAudioUnitProperty_HostCallbacks. The

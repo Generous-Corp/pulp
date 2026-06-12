@@ -316,6 +316,8 @@ bool StandaloneApp::start() {
         ProcessContext proc_ctx;
         proc_ctx.sample_rate = ctx.sample_rate;
         proc_ctx.num_samples = ctx.buffer_size;
+        proc_ctx.process_mode = ProcessMode::Realtime;
+        proc_ctx.render_speed_hint = RenderSpeedHint::Realtime;
         proc_ctx.position_samples = block_start_samples;
         proc_ctx.is_playing = config_.transport_playing;
         proc_ctx.is_recording = false;

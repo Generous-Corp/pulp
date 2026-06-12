@@ -5,9 +5,8 @@ blocks it — a lock, an allocation, a system call — causes the
 listener to hear a dropout. This page covers the small set of rules
 that keep your `Processor::process()` callback safe.
 
-If you're coming from JUCE: the rules are almost identical (and the
-gotchas are the same). Pulp's API just makes the safe pattern the
-default.
+Pulp's API is shaped so the safe pattern is the default: allocate and prepare
+off the audio thread, then keep `process()` bounded and predictable.
 
 ## The three rules
 
@@ -151,6 +150,16 @@ not replace `Processor::process()` yet. It packages the existing
 render speed, and reset/bypass/tail/transport-jump flags. `EventBlock`
 keeps sparse `ParameterEventQueue` automation and dense
 `AudioRateModulationView` lanes as separate borrowed views.
+
+`ProcessContext::process_mode` tells a processor whether the current block is
+live realtime audio or an offline render. Existing adapters default to
+`ProcessMode::Realtime`; headless and export-style hosts should set
+`ProcessMode::Offline` explicitly when they drive deterministic non-live
+processing. Use the helper predicates instead of comparing raw enum values in
+hot code. A realtime block with a slower-than-realtime hint is still an
+audio-thread callback. Bypass, tail-drain, reset, and transport-jump flags are
+block metadata for processors that need to distinguish those host states
+without inferring them from transport fields.
 
 The contract is deliberately non-owning: bus audio is borrowed from the
 host or renderer, event containers are owned by adapters, and scratch

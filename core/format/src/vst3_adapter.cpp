@@ -560,6 +560,12 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = processSetup.sampleRate;
     ctx.num_samples = num_samples;
+    ctx.process_mode = processSetup.processMode == Steinberg::Vst::kOffline
+        ? pulp::format::ProcessMode::Offline
+        : pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = ctx.process_mode == pulp::format::ProcessMode::Offline
+        ? pulp::format::RenderSpeedHint::FasterThanRealtime
+        : pulp::format::RenderSpeedHint::Realtime;
     if (data.processContext) {
         const auto* pc = data.processContext;
         const uint32_t state = pc->state;

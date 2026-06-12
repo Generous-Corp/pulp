@@ -234,6 +234,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     format::ProcessContext proc_ctx;
     proc_ctx.sample_rate = inst->sample_rate;
     proc_ctx.num_samples = static_cast<int>(n_samples);
+    proc_ctx.process_mode = format::ProcessMode::Realtime;
+    proc_ctx.render_speed_hint = format::RenderSpeedHint::Realtime;
 
     // Phase 3 — uniform param-events contract + RT-safety guard (mirrors VST3).
     // The queue carries no atom-sourced events yet; control-port params still
