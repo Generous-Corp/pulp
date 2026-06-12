@@ -184,6 +184,24 @@ class SshBundleBindingsTests(unittest.TestCase):
         config = {"targets": {"win-target": {"host": "builder", "repo_path": r"C:\Pulp"}}}
         self.assertTrue(bindings["ssh_host_uses_windows_shell"](config, "builder"))
 
+    def test_probe_uploaded_bundle_size_returns_none_on_timeout(self) -> None:
+        class ProbeTimeout(Exception):
+            pass
+
+        def run_fn(*_args, **_kwargs):
+            raise ProbeTimeout()
+
+        bindings = self._bindings(
+            types.SimpleNamespace(),
+            subprocess=types.SimpleNamespace(run=run_fn, TimeoutExpired=ProbeTimeout),
+            ssh_host_uses_windows_shell=lambda _config, _host: False,
+        )
+        self.assertIsNone(
+            self.mod.probe_uploaded_bundle_size(
+                bindings, "ubuntu", "bundle.git", config={"targets": {}}
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

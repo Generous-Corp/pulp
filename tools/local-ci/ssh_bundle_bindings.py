@@ -110,7 +110,12 @@ def probe_uploaded_bundle_size(bindings: dict, host: str, remote_name: str, *, c
             host,
             f"sh -lc 'f=\"$HOME/{remote_name}\"; if [ -f \"$f\" ]; then wc -c < \"$f\"; fi'",
         ]
-    result = _binding_attr(bindings, "subprocess", "run")(cmd, capture_output=True, text=True, timeout=15)
+    subprocess_module = _binding(bindings, "subprocess")
+    timeout_expired_type = getattr(subprocess_module, "TimeoutExpired", TimeoutError)
+    try:
+        result = subprocess_module.run(cmd, capture_output=True, text=True, timeout=15)
+    except timeout_expired_type:
+        return None
     if result.returncode != 0:
         return None
     output = (result.stdout or "").strip().splitlines()
