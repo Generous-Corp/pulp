@@ -852,6 +852,19 @@ TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
         REQUIRE_THAT(output_samples[static_cast<size_t>(i)],
                      WithinAbs(input_samples[static_cast<size_t>(i)], 1e-6f));
     }
+
+#if defined(__unix__) || defined(__APPLE__)
+    std::fill(output_samples.begin(), output_samples.end(), -1.0f);
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        graph.process(out_view, in_view, kBlock);
+    }
+
+    for (int i = 0; i < kBlock; ++i) {
+        REQUIRE_THAT(output_samples[static_cast<size_t>(i)],
+                     WithinAbs(input_samples[static_cast<size_t>(i)], 1e-6f));
+    }
+#endif
 }
 
 TEST_CASE("SignalGraph exposes prepared runtime stats",

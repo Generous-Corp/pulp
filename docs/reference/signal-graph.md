@@ -118,7 +118,9 @@ control-thread only. They are not audio-thread APIs. Mutating graph shape or
 custom state invalidates the live snapshot; `process()` returns silence until a
 subsequent successful `prepare()` publishes a new immutable snapshot. Generated
 or scripted runtimes must express audio-thread work only through the prepared
-snapshot's `process()` callbacks and preallocated event/audio buffers.
+snapshot's `process()` callbacks and preallocated event/audio buffers. Large
+prepared graph fixtures are expected to process without allocating after the
+snapshot has been warmed.
 
 After a successful `prepare()`, `SignalGraph::prepared_stats()` reports the
 compiled graph's node/order/connection/port counts, prepared maximum block
