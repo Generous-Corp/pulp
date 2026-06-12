@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/offline_processor.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -570,6 +571,77 @@ TEST_CASE("offline_render_stems rejects malformed stem ranges before rendering",
         });
     REQUIRE_FALSE(overlapping.has_value());
     REQUIRE_FALSE(callback_called);
+}
+
+TEST_CASE("compare_offline_render_audio supports golden and null residual checks",
+          "[audio][offline][advanced][golden][null][phase3]") {
+    AudioFileData expected;
+    expected.sample_rate = 48000;
+    expected.channels = {
+        {1.0f, 2.0f, 3.0f},
+        {-1.0f, -2.0f, -3.0f},
+    };
+    AudioFileData actual = expected;
+
+    auto exact = compare_offline_render_audio(actual, expected);
+    REQUIRE(exact.has_value());
+    REQUIRE(exact->channels == 2);
+    REQUIRE(exact->frames == 3);
+    REQUIRE(exact->peak_error == 0.0f);
+    REQUIRE(exact->rms_error == 0.0);
+    REQUIRE(exact->passes(0.0f, 0.0));
+
+    actual.channels[0][1] += 0.25f;
+    auto residual = compare_offline_render_audio(actual, expected);
+    REQUIRE(residual.has_value());
+    REQUIRE_THAT(residual->peak_error, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(residual->rms_error, WithinAbs(0.25 / std::sqrt(6.0), 1e-12));
+    REQUIRE_FALSE(residual->passes(0.1f, 0.1));
+    REQUIRE(residual->passes(0.3f, 0.2));
+}
+
+TEST_CASE("compare_offline_render_audio rejects incompatible artifacts",
+          "[audio][offline][advanced][golden][null][phase3]") {
+    auto actual = make_stereo_fixture();
+    auto expected = actual;
+
+    expected.sample_rate = 44100;
+    REQUIRE_FALSE(compare_offline_render_audio(actual, expected).has_value());
+
+    expected = actual;
+    expected.channels.pop_back();
+    REQUIRE_FALSE(compare_offline_render_audio(actual, expected).has_value());
+
+    expected = actual;
+    expected.channels[0].pop_back();
+    REQUIRE_FALSE(compare_offline_render_audio(actual, expected).has_value());
+}
+
+TEST_CASE("offline_render outputs null-test clean across block schedules",
+          "[audio][offline][advanced][golden][null][phase3]") {
+    auto input = make_stereo_fixture();
+
+    auto render_with_schedule = [&](std::vector<int> schedule) {
+        OfflineRenderOptions options;
+        options.block_size_schedule = std::move(schedule);
+        return offline_render(
+            input,
+            [](const float* in, float* out, int channels,
+               const OfflineRenderBlockContext& context) {
+                for (int sample = 0; sample < channels * context.frames; ++sample)
+                    out[sample] = in[sample] * 0.5f;
+            },
+            options);
+    };
+
+    auto one_block = render_with_schedule({5});
+    auto split_blocks = render_with_schedule({2, 1});
+    REQUIRE(one_block.has_value());
+    REQUIRE(split_blocks.has_value());
+
+    auto residual = compare_offline_render_audio(*one_block, *split_blocks);
+    REQUIRE(residual.has_value());
+    REQUIRE(residual->passes(0.0f, 0.0));
 }
 
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {

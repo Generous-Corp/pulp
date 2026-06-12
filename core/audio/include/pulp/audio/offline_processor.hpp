@@ -72,6 +72,15 @@ struct OfflineRenderStemResult {
     std::vector<OfflineRenderedStem> stems;
 };
 
+struct OfflineRenderComparison {
+    uint32_t channels = 0;
+    uint64_t frames = 0;
+    float peak_error = 0.0f;
+    double rms_error = 0.0;
+
+    bool passes(float peak_tolerance, double rms_tolerance) const noexcept;
+};
+
 /// Callback for deterministic offline render blocks.
 using OfflineRenderCallback = std::function<void(
     const float* input, float* output,
@@ -91,6 +100,12 @@ std::optional<OfflineRenderStemResult> offline_render_stems(
     OfflineRenderCallback render_fn,
     const OfflineRenderOptions& options,
     const std::vector<OfflineRenderStem>& stems
+);
+
+/// Compare two rendered artifacts for golden/null tests.
+std::optional<OfflineRenderComparison> compare_offline_render_audio(
+    const AudioFileData& actual,
+    const AudioFileData& expected
 );
 
 /// Process an entire audio file through a callback function.

@@ -2,6 +2,7 @@
 #include <pulp/audio/format_registry.hpp>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -56,6 +57,11 @@ int scheduled_block_size_for(const OfflineRenderOptions& options,
 }
 
 }  // namespace
+
+bool OfflineRenderComparison::passes(float peak_tolerance,
+                                     double rms_tolerance) const noexcept {
+    return peak_error <= peak_tolerance && rms_error <= rms_tolerance;
+}
 
 std::optional<AudioFileData> offline_render(
     const AudioFileData& input,
@@ -178,6 +184,45 @@ std::optional<OfflineRenderStemResult> offline_render_stems(
     }
 
     return result;
+}
+
+std::optional<OfflineRenderComparison> compare_offline_render_audio(
+    const AudioFileData& actual,
+    const AudioFileData& expected)
+{
+    if (!has_consistent_channel_lengths(actual)
+        || !has_consistent_channel_lengths(expected)
+        || actual.sample_rate != expected.sample_rate
+        || actual.num_channels() != expected.num_channels()
+        || actual.num_frames() != expected.num_frames()) {
+        return std::nullopt;
+    }
+
+    OfflineRenderComparison comparison;
+    comparison.channels = actual.num_channels();
+    comparison.frames = actual.num_frames();
+
+    double sum_squares = 0.0;
+    uint64_t sample_count = 0;
+    for (uint32_t channel = 0; channel < actual.num_channels(); ++channel) {
+        const auto& actual_channel = actual.channels[channel];
+        const auto& expected_channel = expected.channels[channel];
+        for (size_t frame = 0; frame < actual_channel.size(); ++frame) {
+            const float error = actual_channel[frame] - expected_channel[frame];
+            const float abs_error = std::abs(error);
+            comparison.peak_error =
+                std::max(comparison.peak_error, abs_error);
+            sum_squares += static_cast<double>(error)
+                * static_cast<double>(error);
+            ++sample_count;
+        }
+    }
+
+    comparison.rms_error =
+        sample_count == 0
+            ? 0.0
+            : std::sqrt(sum_squares / static_cast<double>(sample_count));
+    return comparison;
 }
 
 std::optional<AudioFileData> offline_process(
