@@ -178,6 +178,18 @@ public:
         int max_block_size = 16384;
     };
 
+    struct PreparedStats {
+        std::size_t node_count = 0;
+        std::size_t ordered_node_count = 0;
+        std::size_t connection_count = 0;
+        std::size_t total_ports = 0;
+        int max_block_size = 0;
+        std::size_t node_audio_buffer_bytes = 0;
+        std::size_t automation_buffer_bytes = 0;
+        std::size_t delay_buffer_bytes = 0;
+        std::size_t total_prepared_buffer_bytes = 0;
+    };
+
     SignalGraph() = default;
 
     // Add nodes — returns the node ID
@@ -324,6 +336,7 @@ public:
     // snapshot allocation or plugin prepare.
     void set_limits(GraphLimits limits);
     GraphLimits limits() const { return limits_; }
+    PreparedStats prepared_stats() const;
 
     // Process one block of audio through the graph
     void process(audio::BufferView<float>& output,
@@ -534,9 +547,20 @@ private:
     // specialize std::atomic<std::shared_ptr<T>>. Acquire/release semantics.
     std::shared_ptr<CompiledGraph> live_;
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
+    std::atomic<std::size_t> prepared_node_count_{0};
+    std::atomic<std::size_t> prepared_ordered_node_count_{0};
+    std::atomic<std::size_t> prepared_connection_count_{0};
+    std::atomic<std::size_t> prepared_total_ports_{0};
+    std::atomic<int> prepared_max_block_size_{0};
+    std::atomic<std::size_t> prepared_node_audio_buffer_bytes_{0};
+    std::atomic<std::size_t> prepared_automation_buffer_bytes_{0};
+    std::atomic<std::size_t> prepared_delay_buffer_bytes_{0};
+    std::atomic<std::size_t> prepared_total_buffer_bytes_{0};
 
     bool has_path(NodeId from, NodeId to) const;
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
+    void publish_prepared_stats_(const CompiledGraph& cg);
+    void clear_prepared_stats_();
     void invalidate_live_();
     void retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot);
     void prune_retired_snapshots_();

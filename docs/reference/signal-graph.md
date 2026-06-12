@@ -96,6 +96,13 @@ and maximum block size. Exceeding a limit fails `prepare()` before plugin
 prepare or compiled-snapshot allocation, leaving the graph silent until a
 valid prepare succeeds.
 
+After a successful `prepare()`, `SignalGraph::prepared_stats()` reports the
+compiled graph's node/order/connection/port counts, prepared maximum block
+size, and fixed audio, automation, and delay-line buffer bytes. The snapshot is
+cleared when topology or limits change, when `release()` runs, or when
+`prepare()` fails. Treat it as the host-facing budget/accounting view of the
+prepared runtime, not as an audio-thread routing API.
+
 ## Latency & PDC
 
 Every `PluginSlot` reports `latency_samples()`. During `prepare()` the

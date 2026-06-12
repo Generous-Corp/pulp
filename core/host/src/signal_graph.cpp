@@ -668,6 +668,26 @@ int SignalGraph::node_latency_samples(NodeId id) const {
     return (int)it->second.input_latency;
 }
 
+SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
+    return PreparedStats{
+        .node_count = prepared_node_count_.load(std::memory_order_relaxed),
+        .ordered_node_count =
+            prepared_ordered_node_count_.load(std::memory_order_relaxed),
+        .connection_count =
+            prepared_connection_count_.load(std::memory_order_relaxed),
+        .total_ports = prepared_total_ports_.load(std::memory_order_relaxed),
+        .max_block_size = prepared_max_block_size_.load(std::memory_order_relaxed),
+        .node_audio_buffer_bytes =
+            prepared_node_audio_buffer_bytes_.load(std::memory_order_relaxed),
+        .automation_buffer_bytes =
+            prepared_automation_buffer_bytes_.load(std::memory_order_relaxed),
+        .delay_buffer_bytes =
+            prepared_delay_buffer_bytes_.load(std::memory_order_relaxed),
+        .total_prepared_buffer_bytes =
+            prepared_total_buffer_bytes_.load(std::memory_order_relaxed),
+    };
+}
+
 void SignalGraph::invalidate_live_() {
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
@@ -677,6 +697,58 @@ void SignalGraph::invalidate_live_() {
         std::shared_ptr<CompiledGraph>(nullptr),
         std::memory_order_acq_rel));
     total_latency_samples_.store(0, std::memory_order_relaxed);
+    clear_prepared_stats_();
+}
+
+void SignalGraph::clear_prepared_stats_() {
+    prepared_node_count_.store(0, std::memory_order_relaxed);
+    prepared_ordered_node_count_.store(0, std::memory_order_relaxed);
+    prepared_connection_count_.store(0, std::memory_order_relaxed);
+    prepared_total_ports_.store(0, std::memory_order_relaxed);
+    prepared_max_block_size_.store(0, std::memory_order_relaxed);
+    prepared_node_audio_buffer_bytes_.store(0, std::memory_order_relaxed);
+    prepared_automation_buffer_bytes_.store(0, std::memory_order_relaxed);
+    prepared_delay_buffer_bytes_.store(0, std::memory_order_relaxed);
+    prepared_total_buffer_bytes_.store(0, std::memory_order_relaxed);
+}
+
+void SignalGraph::publish_prepared_stats_(const CompiledGraph& cg) {
+    std::size_t total_ports = 0;
+    for (const auto& [_, shape] : cg.shapes) {
+        total_ports += static_cast<std::size_t>(std::max(0, shape.num_input_ports));
+        total_ports += static_cast<std::size_t>(std::max(0, shape.num_output_ports));
+    }
+
+    std::size_t node_audio_bytes = 0;
+    std::size_t automation_bytes = 0;
+    for (const auto& [_, rt] : cg.runtime) {
+        node_audio_bytes += (rt.output_data.size() + rt.input_data.size())
+            * sizeof(float);
+        automation_bytes += rt.audio_rate_param_data.size() * sizeof(float);
+    }
+
+    std::size_t delay_bytes = 0;
+    for (const auto& delay : cg.connection_delays) {
+        delay_bytes += (delay.ring.size() + delay.feedback_prev.size())
+            * sizeof(float);
+    }
+
+    const std::size_t total_buffer_bytes =
+        node_audio_bytes + automation_bytes + delay_bytes;
+
+    prepared_node_count_.store(cg.runtime.size(), std::memory_order_relaxed);
+    prepared_ordered_node_count_.store(cg.ordered_runtime.size(),
+                                       std::memory_order_relaxed);
+    prepared_connection_count_.store(cg.connections.size(), std::memory_order_relaxed);
+    prepared_total_ports_.store(total_ports, std::memory_order_relaxed);
+    prepared_max_block_size_.store(cg.max_block_size, std::memory_order_relaxed);
+    prepared_node_audio_buffer_bytes_.store(node_audio_bytes,
+                                            std::memory_order_relaxed);
+    prepared_automation_buffer_bytes_.store(automation_bytes,
+                                            std::memory_order_relaxed);
+    prepared_delay_buffer_bytes_.store(delay_bytes, std::memory_order_relaxed);
+    prepared_total_buffer_bytes_.store(total_buffer_bytes,
+                                       std::memory_order_relaxed);
 }
 
 void SignalGraph::retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot) {
@@ -892,6 +964,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    std::atomic_store_explicit(&live_,
+                               std::shared_ptr<CompiledGraph>(nullptr),
+                               std::memory_order_release);
+    total_latency_samples_.store(0, std::memory_order_relaxed);
+    clear_prepared_stats_();
+
     if (max_block_size <= 0) return false;
     if (limits_.max_block_size > 0 && max_block_size > limits_.max_block_size) {
         runtime::log_error(
@@ -997,6 +1075,7 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
 
     auto cg = compile_(sample_rate, max_block_size);
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
+    publish_prepared_stats_(*cg);
     retire_snapshot_(std::atomic_exchange_explicit(
         &live_,
         std::move(cg),
@@ -1029,6 +1108,7 @@ void SignalGraph::release() {
         }
     }
     total_latency_samples_.store(0, std::memory_order_relaxed);
+    clear_prepared_stats_();
 }
 
 std::vector<uint8_t> SignalGraph::custom_node_state(NodeId id) const {

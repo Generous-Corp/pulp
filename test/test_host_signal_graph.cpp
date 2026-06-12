@@ -939,6 +939,75 @@ TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
     }
 }
 
+TEST_CASE("SignalGraph exposes prepared runtime stats",
+          "[host][graph][stats][phase2]") {
+    SignalGraph graph;
+    REQUIRE(graph.prepared_stats().node_count == 0);
+
+    auto input = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+
+    constexpr int kBlock = 16;
+    REQUIRE(graph.prepare(48000.0, kBlock));
+
+    const auto stats = graph.prepared_stats();
+    REQUIRE(stats.node_count == 3);
+    REQUIRE(stats.ordered_node_count == 3);
+    REQUIRE(stats.connection_count == 2);
+    REQUIRE(stats.total_ports == 6);
+    REQUIRE(stats.max_block_size == kBlock);
+    REQUIRE(stats.node_audio_buffer_bytes == 384);
+    REQUIRE(stats.automation_buffer_bytes == 0);
+    REQUIRE(stats.delay_buffer_bytes == 0);
+    REQUIRE(stats.total_prepared_buffer_bytes == stats.node_audio_buffer_bytes);
+
+    graph.add_gain_node("later");
+    const auto invalidated = graph.prepared_stats();
+    REQUIRE(invalidated.node_count == 0);
+    REQUIRE(invalidated.total_prepared_buffer_bytes == 0);
+}
+
+TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
+          "[host][graph][stats][limits][phase2]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE(graph.prepared_stats().node_count == 2);
+
+    auto limits = graph.limits();
+    limits.max_nodes = 1;
+    graph.set_limits(limits);
+    REQUIRE_FALSE(graph.prepare(48000.0, 16));
+
+    const auto stats = graph.prepared_stats();
+    REQUIRE(stats.node_count == 0);
+    REQUIRE(stats.connection_count == 0);
+    REQUIRE(stats.total_prepared_buffer_bytes == 0);
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("SignalGraph prepared runtime stats path allocates zero times",
+          "[host][graph][stats][rt-safety][phase2]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        const auto stats = graph.prepared_stats();
+        REQUIRE(stats.node_count == 2);
+        REQUIRE(stats.total_prepared_buffer_bytes > 0);
+    }
+}
+#endif
+
 TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing]") {
     // If no node connects to the AudioOutput, process() must leave the
     // output silent regardless of input content.
