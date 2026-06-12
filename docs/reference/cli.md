@@ -215,6 +215,12 @@ Searches the active project's build output:
 - standalone projects: `build/bin/`
 - in-repo examples: `build/examples/`
 
+`pulp run` launches a standalone host, so it may activate the system audio
+output even when the UI is headless. The CLI prints a pre-launch notice by
+default; set `PULP_RUN_AUDIO_NOTICE=0` only for deliberate quiet automation.
+For no-speaker signal evidence, prefer the offline `HeadlessHost` / Audio
+Doctor paths under `pulp audio validate`.
+
 #### Headless / screenshot flags
 
 - `--headless` — run without a window. The CLI forwards `--headless`
@@ -252,9 +258,19 @@ dev-on/ship-off `PULP_ENABLE_AUDIO_PROBES` gating.
   frame delay, write the live probe's latest snapshot as a flat JSON
   object to `<file>`, then exit. Implies `--headless`. Forwarded as
   `--audio-probe-json <file>` and via `PULP_AUDIO_PROBE_JSON=<file>`.
-  This is distinct from the offline `pulp audio validate` Doctor: the
-  Inspector reads *live* metrics from a running host, the Doctor analyses
-  a rendered WAV offline.
+  This is visually headless, but it still launches the standalone host and
+  may open the live audio device. It is distinct from the offline
+  `pulp audio validate` Doctor: the Inspector reads *live* metrics from a
+  running host, the Doctor analyses a rendered WAV offline without speakers.
+
+Display-only waveform controls:
+
+- `PULP_AUDIO_INSPECTOR_TRIGGER=rising-zero` — opt into rising-zero-crossing
+  trace alignment for a more stable visual display. Raw buffer display remains
+  the default.
+- `PULP_AUDIO_INSPECTOR_GRID=0` — hide the waveform grid.
+- `PULP_AUDIO_INSPECTOR_SCALE=<n>` — zoom the horizontal window over the copied
+  real samples (`1.0` shows the full captured buffer).
 
 ### cache
 

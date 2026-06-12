@@ -211,6 +211,31 @@ TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
     REQUIRE_THAT(knob->value(), WithinAbs(0.8, 0.01));
 }
 
+TEST_CASE("AutoUi generated controls write changes back to the store",
+          "[view][auto_ui][parameters]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Frequency", "Hz", {55.0f, 1760.0f, 440.0f}));
+    store.add_parameter(make_param(2, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+
+    auto* frequency = find_widget<Knob>(*root, "Frequency");
+    auto* bypass = find_widget<Toggle>(*root, "Bypass");
+    REQUIRE(frequency != nullptr);
+    REQUIRE(bypass != nullptr);
+
+    frequency->on_change(0.75f);
+    bypass->on_toggle(true);
+
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.75f, 0.001f));
+    REQUIRE_THAT(store.get_value(1),
+                 WithinAbs(store.all_params()[0].range.denormalize(0.75f),
+                           0.001f));
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(1.0f, 0.001f));
+}
+
 TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
           "[view][auto_ui][coverage][issue-493]") {
     StateStore store;

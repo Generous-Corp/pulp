@@ -37,6 +37,14 @@ public:
     /// Fixed display capacity. The window copies at most this many frames.
     static constexpr int kCapacity = 512;
 
+    /// Display-only acquisition alignment. Raw preserves the copied buffer's
+    /// natural start; rising-zero starts the visible window at the first
+    /// negative→non-negative crossing when present. No samples are invented.
+    enum class TriggerMode {
+        kRaw,
+        kRisingZero,
+    };
+
     AudioWaveformView();
 
     /// Replace the displayed samples (mono, interleaved-by-frame channel 0).
@@ -49,6 +57,22 @@ public:
     int sample_count() const { return count_; }
     float sample_at(int i) const { return (i >= 0 && i < count_) ? data_[i] : 0.0f; }
 
+    void set_show_grid(bool show);
+    bool show_grid() const { return show_grid_; }
+
+    void set_trigger_mode(TriggerMode mode);
+    TriggerMode trigger_mode() const { return trigger_mode_; }
+
+    /// Horizontal zoom for the diagnostic trace. 1.0 shows the whole copied
+    /// buffer; larger values show a shorter real-sample window.
+    void set_horizontal_scale(float scale);
+    float horizontal_scale() const { return horizontal_scale_; }
+
+    /// Index into `data_` where the current display window starts. Exposed for
+    /// headless tests of trigger/scale behavior.
+    int display_start_index() const;
+    int display_sample_count() const;
+
     /// When false the view paints a dimmed baseline + no trace (stale / no
     /// probe). Drives the honest-unavailable visual.
     void set_live(bool live) { live_ = live; }
@@ -57,9 +81,14 @@ public:
     void paint(canvas::Canvas& canvas) override;
 
 private:
+    int find_rising_zero_crossing() const;
+
     std::array<float, kCapacity> data_{};
     int count_ = 0;
     bool live_ = false;
+    bool show_grid_ = true;
+    TriggerMode trigger_mode_ = TriggerMode::kRaw;
+    float horizontal_scale_ = 1.0f;
 };
 
 /// dBFS floor used by the inspector's meter fill (and the empty-bar anchor).
@@ -120,6 +149,15 @@ public:
     float balance() const { return balance_; }
 
     const AudioWaveformView& waveform() const { return *waveform_view_; }
+    AudioWaveformView& waveform() { return *waveform_view_; }
+
+    void set_waveform_grid_visible(bool visible);
+    void set_waveform_trigger_mode(AudioWaveformView::TriggerMode mode);
+    void set_waveform_horizontal_scale(float scale);
+
+    float peak_meter_display_peak() const;
+    float peak_meter_held_peak() const;
+    float rms_meter_held_peak() const;
 
     // ── Rendered-text accessors (for headless tests) ────────────────────────
     // The exact strings the labels paint. A test can assert these are
@@ -143,6 +181,7 @@ private:
     audio::AudioStats stats_{};
     float lr_match_ = 0.0f;
     float balance_ = 0.0f;
+    float meter_dt_seconds_ = 1.0f / 60.0f;
 
     // Widget pointers (owned by the view tree).
     Label* status_label_ = nullptr;

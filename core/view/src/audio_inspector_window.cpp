@@ -4,9 +4,28 @@
 #include <pulp/runtime/log.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <string>
 #include <utility>
 
 namespace pulp::view {
+
+namespace {
+
+std::string lower_ascii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+bool env_false(std::string value) {
+    value = lower_ascii(std::move(value));
+    return value == "0" || value == "false" || value == "off" || value == "no";
+}
+
+}  // namespace
 
 AudioInspectorWindow::AudioInspectorWindow(WindowManager* mgr,
                                            WindowHost* parent,
@@ -44,6 +63,24 @@ void AudioInspectorWindow::build_ui() {
 
     // Start in the honest "no probe" state.
     panel_->update(AudioInspectorPanel::Status::kNoProbe, {}, {}, nullptr, 0);
+
+    if (const char* trigger = std::getenv("PULP_AUDIO_INSPECTOR_TRIGGER")) {
+        const auto value = lower_ascii(trigger);
+        if (value == "rising-zero" || value == "rising_zero" ||
+            value == "zero" || value == "1") {
+            panel_->set_waveform_trigger_mode(
+                AudioWaveformView::TriggerMode::kRisingZero);
+        }
+    }
+    if (const char* grid = std::getenv("PULP_AUDIO_INSPECTOR_GRID")) {
+        panel_->set_waveform_grid_visible(!env_false(grid));
+    }
+    if (const char* scale = std::getenv("PULP_AUDIO_INSPECTOR_SCALE")) {
+        char* end = nullptr;
+        const float parsed = std::strtof(scale, &end);
+        if (end != scale)
+            panel_->set_waveform_horizontal_scale(parsed);
+    }
 }
 
 void AudioInspectorWindow::set_probe(audio::AudioProbe* probe) {

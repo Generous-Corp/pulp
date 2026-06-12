@@ -170,15 +170,13 @@ bool StandaloneApp::start() {
 
 #if PULP_ENABLE_AUDIO_PROBES
     // Phase 5 — prepare the realtime output-boundary probe BEFORE the audio
-    // callback starts. This is the only place it allocates. Capture is left
-    // off by default (latest-summary only); the Phase 6 Audio Inspector window
-    // (PULP_AUDIO_INSPECTOR) and debug/support builds opt into the last-N ring
-    // so the inspector can paint a live waveform, not just meters. The ring is
-    // sized to the panel's display capacity so a tick fills the trace.
+    // callback starts. This is the only place it allocates. Probe-enabled
+    // standalone builds keep a small last-N channel-0 ring so the developer
+    // Audio Inspector can paint a live waveform whether it was opened from
+    // PULP_AUDIO_INSPECTOR at launch or toggled later by command. The ring is
+    // sized to the panel's display capacity so one UI tick fills the trace.
     audio::AudioProbe::CaptureConfig probe_capture;
-    audio_inspector_capture_ = runtime::get_env("PULP_AUDIO_INSPECTOR").has_value();
-    if (audio_inspector_capture_)
-        probe_capture.capture_frames = view::AudioWaveformView::kCapacity;
+    probe_capture.capture_frames = view::AudioWaveformView::kCapacity;
     output_probe_.prepare(config_.output_channels, config_.buffer_size,
                           config_.sample_rate,
                           audio::AudioProbeStage::kStandaloneOutputBoundary,

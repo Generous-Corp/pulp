@@ -13,6 +13,7 @@
 #include "cli_common.hpp"
 #include "cmd_run.hpp"
 
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 
@@ -23,6 +24,7 @@ constexpr const char* kScreenshotEnv     = "PULP_SCREENSHOT";
 constexpr const char* kFramesEnv         = "PULP_FRAMES";
 constexpr const char* kAudioInspectorEnv = "PULP_AUDIO_INSPECTOR";
 constexpr const char* kAudioProbeJsonEnv = "PULP_AUDIO_PROBE_JSON";
+constexpr const char* kAudioNoticeEnv    = "PULP_RUN_AUDIO_NOTICE";
 
 void print_help() {
     std::cout
@@ -50,7 +52,11 @@ void print_help() {
            "                          Write the live probe metrics as JSON to <file>\n"
            "                          after rendering, then exit. (Forwarded as\n"
            "                          --audio-probe-json <file> and\n"
-           "                          PULP_AUDIO_PROBE_JSON=<file>. Implies --headless.)\n"
+           "                          PULP_AUDIO_PROBE_JSON=<file>. Implies --headless,\n"
+           "                          but still uses the live audio device.)\n"
+           "  PULP_RUN_AUDIO_NOTICE=0\n"
+           "                          Suppress the pre-launch notice that the\n"
+           "                          standalone may activate system audio output.\n"
            "  -h, --help              Show this help and exit.\n\n"
            "Examples:\n"
            "  pulp run                                # launch first standalone\n"
@@ -72,6 +78,29 @@ void set_env(const char* name, const std::string& value) {
         ::setenv(name, value.c_str(), 1);
     }
 #endif
+}
+
+bool env_disables_notice(const char* name) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) return false;
+    std::string value(raw);
+    for (auto& ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return value == "0" || value == "false" || value == "off" || value == "no";
+}
+
+void print_live_audio_notice(const pulp_cli::ParseRunResult& opts) {
+    if (env_disables_notice(kAudioNoticeEnv)) return;
+
+    std::cerr
+        << "Notice: launching a standalone may activate the system audio output";
+    if (opts.headless) {
+        std::cerr << "; headless hides UI but does not guarantee silence";
+    }
+    std::cerr
+        << ". Use Audio Doctor/HeadlessHost for no-speaker offline checks. "
+        << "Set " << kAudioNoticeEnv << "=0 to hide this notice.\n";
 }
 
 }  // namespace
@@ -241,6 +270,7 @@ int cmd_run(const std::vector<std::string>& args) {
         set_env(kAudioProbeJsonEnv, opts.audio_probe_json_path);
 
     auto launch_args = assemble_launch_args(opts);
+    print_live_audio_notice(opts);
 
     if (opts.watch) {
         WatchOptions wopts;

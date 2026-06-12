@@ -396,7 +396,19 @@ commands:
         description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.
       - name: --audio-probe-json
         kind: option
-        description: Write the live probe metrics as JSON to <file> after rendering, then exit; implies --headless. Forwarded as --audio-probe-json <file> and PULP_AUDIO_PROBE_JSON=<file> env var.
+        description: Write the live probe metrics as JSON to <file> after rendering, then exit; implies --headless for UI but still launches the live standalone audio device. Forwarded as --audio-probe-json <file> and PULP_AUDIO_PROBE_JSON=<file> env var.
+      - name: PULP_RUN_AUDIO_NOTICE
+        kind: environment
+        description: Set to 0/false/off/no to suppress the pre-launch notice that pulp run may activate system audio output.
+      - name: PULP_AUDIO_INSPECTOR_TRIGGER
+        kind: environment
+        description: Display-only live Inspector waveform alignment. Set to rising-zero to start the visible trace at the first rising zero crossing when present; raw copied-buffer display is the default.
+      - name: PULP_AUDIO_INSPECTOR_GRID
+        kind: environment
+        description: Display-only live Inspector waveform grid toggle. Set to 0/false/off/no to hide the subtle grid.
+      - name: PULP_AUDIO_INSPECTOR_SCALE
+        kind: environment
+        description: Display-only live Inspector waveform horizontal zoom over copied real samples. 1.0 shows the full captured buffer.
     docs: reference/cli.md#run
 
   - name: upgrade

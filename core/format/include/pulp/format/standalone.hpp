@@ -202,10 +202,6 @@ private:
     // is set in the environment.
     std::unique_ptr<view::CommandRegistry> command_registry_;
     std::unique_ptr<view::AudioInspectorWindow> audio_inspector_;
-    // True when the probe was prepared with a capture ring (so the inspector
-    // can show a waveform, not just meters). Enabled when PULP_AUDIO_INSPECTOR
-    // is set at start() time.
-    bool audio_inspector_capture_ = false;
 #endif
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
     audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input

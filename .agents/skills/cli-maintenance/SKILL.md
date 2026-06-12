@@ -400,6 +400,17 @@ bare `--audio-probe-json` run is headless but must NOT auto-assign a default
 screenshot PNG path — guard the headless-default branch on an empty probe-json
 path. See `docs/guides/audio-inspector.md`.
 
+The live window also reads display-only waveform env vars:
+`PULP_AUDIO_INSPECTOR_TRIGGER=rising-zero`, `PULP_AUDIO_INSPECTOR_GRID=0`, and
+`PULP_AUDIO_INSPECTOR_SCALE=<n>`. These are not CLI parse flags and do not
+change the probe JSON or audio path.
+
+Headless here means "no visible UI", not "no system audio". `pulp run` still
+launches a standalone host and may activate the live audio device, including the
+`--audio-probe-json` path. Keep the pre-launch stderr notice wired in
+`cmd_run.cpp`, keep `PULP_RUN_AUDIO_NOTICE=0` as the explicit quiet-automation
+escape hatch, and prefer Audio Doctor / `HeadlessHost` for no-speaker tests.
+
 ### Import-design artifact flags
 
 `pulp import-design --output <path>` is the destination for the primary
