@@ -166,6 +166,10 @@ validation polling.
 its monotonic overflow count, so automation drops are visible instead of only
 being implied by a failed `push()`.
 
+`state::StateStore::rt_listener_queue_telemetry()` reports pressure on the
+`set_value_rt()` to `pump_listeners()` queue, including skipped Main-listener
+notifications when UI polling falls behind.
+
 For ordered audio-thread/UI-thread event streams, `runtime::SpscQueue` exposes
 the same producer-side overflow count and telemetry snapshot.
 
