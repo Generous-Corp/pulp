@@ -133,6 +133,7 @@ nav:
       - iOS Deployment: getting-started/ios-deployment.md
   - Support:
       - Capabilities: reference/capabilities.md
+      - Host Compatibility Matrix: guides/host-matrix.md
   - Modules:
       - Module Reference: reference/modules.md
   - Examples:

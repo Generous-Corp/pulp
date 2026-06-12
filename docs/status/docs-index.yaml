@@ -79,6 +79,11 @@ docs:
     kind: guide
     summary: HeadlessHost API, golden-file testing, sanitizer builds, format validation
 
+  - slug: host-matrix
+    path: guides/host-matrix.md
+    kind: guide
+    summary: DAW host compatibility matrix, unsupported capability markers, and durable bench evidence rules
+
   - slug: status-ladder
     path: guides/status-ladder.md
     kind: guide
