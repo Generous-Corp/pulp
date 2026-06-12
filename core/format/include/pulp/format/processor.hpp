@@ -409,6 +409,30 @@ struct ProcessContext {
         return is_offline() &&
                render_speed_hint != RenderSpeedHint::Realtime;
     }
+
+    /// True when DSP state should treat this block as a discontinuity boundary.
+    /// Hosts can request this explicitly, and adapters can derive it from a
+    /// transport seek/jump. Processors commonly use this to clear synced phase,
+    /// delay history, or tempo-grid caches before rendering the block.
+    bool should_reset_dsp_state() const noexcept {
+        return reset_requested || transport_jump;
+    }
+
+    /// True when this block is not a normal input-driven render but the host is
+    /// still calling `process()` so a processor can settle internal state,
+    /// drain a tail, or maintain bypass-aware state. Processors must still obey
+    /// the realtime/offline contract for the block.
+    bool is_maintenance_render() const noexcept {
+        return is_bypassed || is_tail_drain;
+    }
+
+    /// True when the host is asking the processor to render only existing tail
+    /// state. This is intentionally separate from bypass: some hosts bypass by
+    /// short-circuiting process(), while others continue calling process() to
+    /// let tails settle.
+    bool should_render_tail_only() const noexcept {
+        return is_tail_drain;
+    }
 };
 
 /// The plugin processor interface.

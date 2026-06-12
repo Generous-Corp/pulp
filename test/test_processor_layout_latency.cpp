@@ -194,6 +194,9 @@ TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predica
     REQUIRE_FALSE(ctx.reset_requested);
     REQUIRE_FALSE(ctx.transport_jump);
     REQUIRE_FALSE(ctx.allows_offline_quality_work());
+    REQUIRE_FALSE(ctx.should_reset_dsp_state());
+    REQUIRE_FALSE(ctx.is_maintenance_render());
+    REQUIRE_FALSE(ctx.should_render_tail_only());
 
     ctx.process_mode = ProcessMode::Offline;
     ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
@@ -203,6 +206,28 @@ TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predica
 
     ctx.render_speed_hint = RenderSpeedHint::Realtime;
     REQUIRE_FALSE(ctx.allows_offline_quality_work());
+}
+
+TEST_CASE("ProcessContext reset and maintenance helpers compose explicit flags",
+          "[processor][process-context][phase2]") {
+    ProcessContext ctx;
+
+    ctx.transport_jump = true;
+    REQUIRE(ctx.should_reset_dsp_state());
+    ctx.transport_jump = false;
+
+    ctx.reset_requested = true;
+    REQUIRE(ctx.should_reset_dsp_state());
+    ctx.reset_requested = false;
+
+    ctx.is_bypassed = true;
+    REQUIRE(ctx.is_maintenance_render());
+    REQUIRE_FALSE(ctx.should_render_tail_only());
+    ctx.is_bypassed = false;
+
+    ctx.is_tail_drain = true;
+    REQUIRE(ctx.is_maintenance_render());
+    REQUIRE(ctx.should_render_tail_only());
 }
 
 // ── Item 3.11 — latency / tail change notifications (RT-safe) ─────────────
