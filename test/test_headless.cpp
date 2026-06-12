@@ -72,6 +72,23 @@ public:
         }
     }
 
+    void process(
+        pulp::format::ProcessBuffers& audio,
+        pulp::midi::MidiBuffer& midi_in,
+        pulp::midi::MidiBuffer& midi_out,
+        const pulp::format::ProcessContext& context) override
+    {
+        ++process_buffer_calls;
+        process_buffer_input_buses = audio.inputs.size();
+        process_buffer_output_buses = audio.outputs.size();
+        process_buffer_active_inputs = audio.inputs.active_count();
+        process_buffer_active_outputs = audio.outputs.active_count();
+        process_buffer_layouts_match = audio.layouts_match_descriptors();
+        process_buffer_storage_valid = audio.active_buses_have_storage();
+
+        pulp::format::Processor::process(audio, midi_in, midi_out, context);
+    }
+
     std::vector<uint8_t> serialize_plugin_state() const override {
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
     }
@@ -86,6 +103,13 @@ public:
     int prepare_calls = 0;
     int release_calls = 0;
     int process_calls = 0;
+    int process_buffer_calls = 0;
+    std::size_t process_buffer_input_buses = 0;
+    std::size_t process_buffer_output_buses = 0;
+    std::size_t process_buffer_active_inputs = 0;
+    std::size_t process_buffer_active_outputs = 0;
+    bool process_buffer_layouts_match = false;
+    bool process_buffer_storage_valid = false;
     int midi_in_events = 0;
     int midi_note_ons = 0;
     bool had_param_events = false;
@@ -156,6 +180,8 @@ TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configure
 
 TEST_CASE("HeadlessHost processes audio at unity gain", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
     host.prepare(48000.0, 256);
 
     pulp::audio::Buffer<float> in(2, 128), out(2, 128);
@@ -171,6 +197,14 @@ TEST_CASE("HeadlessHost processes audio at unity gain", "[headless]") {
 
     // 0 dB = unity gain
     REQUIRE_THAT(out.channel(0)[0], WithinAbs(0.5, 0.001));
+    REQUIRE(processor->process_calls == 1);
+    REQUIRE(processor->process_buffer_calls == 1);
+    REQUIRE(processor->process_buffer_input_buses == 1);
+    REQUIRE(processor->process_buffer_output_buses == 1);
+    REQUIRE(processor->process_buffer_active_inputs == 1);
+    REQUIRE(processor->process_buffer_active_outputs == 1);
+    REQUIRE(processor->process_buffer_layouts_match);
+    REQUIRE(processor->process_buffer_storage_valid);
 }
 
 TEST_CASE("HeadlessHost forwards prepare context and release",
@@ -348,6 +382,11 @@ TEST_CASE("HeadlessHost forwards explicit parameter-event queues",
 
     host.process(out_view, in_view, events);
 
+    REQUIRE(processor->process_buffer_calls == 1);
+    REQUIRE(processor->process_buffer_input_buses == 1);
+    REQUIRE(processor->process_buffer_output_buses == 1);
+    REQUIRE(processor->process_buffer_layouts_match);
+    REQUIRE(processor->process_buffer_storage_valid);
     REQUIRE(processor->had_param_events);
     REQUIRE(processor->last_param_events.size() == 2);
     REQUIRE(processor->last_param_events[0].sample_offset == 4);

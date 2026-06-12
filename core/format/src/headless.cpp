@@ -5,6 +5,8 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <array>
+
 namespace pulp::format {
 namespace {
 
@@ -23,6 +25,35 @@ public:
 private:
     Processor& processor_;
 };
+
+} // namespace
+
+namespace {
+
+ProcessBuffers make_process_buffers(
+    audio::BufferView<float>& output,
+    const audio::BufferView<const float>& input,
+    std::array<ProcessBusBufferView<const float>, 1>& input_buses,
+    std::array<ProcessBusBufferView<float>, 1>& output_buses) {
+    input_buses = {{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     static_cast<int>(input.num_channels()), false, !input.empty()},
+            .buffer = input,
+        },
+    }};
+    output_buses = {{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     static_cast<int>(output.num_channels()), false, !output.empty()},
+            .buffer = output,
+        },
+    }};
+    return {
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
+    };
+}
 
 } // namespace
 
@@ -94,8 +125,12 @@ void HeadlessHost::process(audio::BufferView<float>& output,
         context.num_samples = static_cast<int>(output.num_samples());
     }
     processor_->set_param_events(nullptr);
+    std::array<ProcessBusBufferView<const float>, 1> input_buses;
+    std::array<ProcessBusBufferView<float>, 1> output_buses;
+    auto process_buffers =
+        make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
-    processor_->process(output, input, midi_in, midi_out, context);
+    processor_->process(process_buffers, midi_in, midi_out, context);
 }
 
 void HeadlessHost::process(audio::BufferView<float>& output,
@@ -111,8 +146,12 @@ void HeadlessHost::process(audio::BufferView<float>& output,
         context.num_samples = static_cast<int>(output.num_samples());
     }
     ScopedProcessorParamEvents scoped_param_events(*processor_, param_events);
+    std::array<ProcessBusBufferView<const float>, 1> input_buses;
+    std::array<ProcessBusBufferView<float>, 1> output_buses;
+    auto process_buffers =
+        make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
-    processor_->process(output, input, midi_in, midi_out, context);
+    processor_->process(process_buffers, midi_in, midi_out, context);
 }
 
 void HeadlessHost::release() {

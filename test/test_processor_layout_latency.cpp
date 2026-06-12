@@ -330,7 +330,7 @@ TEST_CASE("Processor multi-bus overload projects to the legacy process callback"
     const float* side_ptrs[2] = {side_l, side_r};
     float* out_ptrs[2] = {out_l, out_r};
 
-    std::array<BusBufferView<const float>, 2> inputs{{
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
         {
             .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
             .buffer = pulp::audio::BufferView<const float>(in_ptrs, 2, 4),
@@ -340,7 +340,7 @@ TEST_CASE("Processor multi-bus overload projects to the legacy process callback"
             .buffer = pulp::audio::BufferView<const float>(side_ptrs, 2, 4),
         },
     }};
-    std::array<BusBufferView<float>, 1> outputs{{
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
         {
             .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
             .buffer = pulp::audio::BufferView<float>(out_ptrs, 2, 4),
@@ -348,8 +348,8 @@ TEST_CASE("Processor multi-bus overload projects to the legacy process callback"
     }};
 
     ProcessBuffers buffers{
-        .inputs = BusBufferSet<const float>(inputs),
-        .outputs = BusBufferSet<float>(outputs),
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
     };
     pulp::midi::MidiBuffer midi_in, midi_out;
     ProcessContext ctx;
@@ -369,13 +369,13 @@ TEST_CASE("Processor multi-bus overload no-ops when no active main output exists
     ProjectingProcessor processor;
     float in_l[4] = {};
     const float* in_ptrs[1] = {in_l};
-    std::array<BusBufferView<const float>, 1> inputs{{
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{
         {
             .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 1, false, true},
             .buffer = pulp::audio::BufferView<const float>(in_ptrs, 1, 4),
         },
     }};
-    std::array<BusBufferView<float>, 1> outputs{{
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
         {
             .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, false},
             .buffer = {},
@@ -383,8 +383,8 @@ TEST_CASE("Processor multi-bus overload no-ops when no active main output exists
     }};
 
     ProcessBuffers buffers{
-        .inputs = BusBufferSet<const float>(inputs),
-        .outputs = BusBufferSet<float>(outputs),
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
     };
     pulp::midi::MidiBuffer midi_in, midi_out;
     ProcessContext ctx;
