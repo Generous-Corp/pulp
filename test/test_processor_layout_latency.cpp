@@ -69,6 +69,28 @@ public:
     }
 };
 
+class ProjectingProcessor : public SidechainEffect {
+public:
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        ++simple_process_calls;
+        saw_sidechain = sidechain_input() != nullptr;
+        observed_input_channels = input.num_channels();
+        observed_output_channels = output.num_channels();
+        if (!input.empty() && !output.empty()) {
+            output.channel(0)[0] = input.channel(0)[0] + 1.0f;
+        }
+    }
+
+    int simple_process_calls = 0;
+    std::size_t observed_input_channels = 0;
+    std::size_t observed_output_channels = 0;
+    bool saw_sidechain = false;
+};
+
 } // namespace
 
 // ── Item 3.7 — bus layout validation ──────────────────────────────────────
@@ -160,7 +182,8 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
         pulp::midi::MidiBuffer&,
         pulp::midi::MidiBuffer&,
         const ProcessContext&);
-    static_assert(std::is_assignable_v<ProcessSig&, decltype(&Processor::process)>,
+    static_assert(std::is_same_v<decltype(static_cast<ProcessSig>(&Processor::process)),
+                                 ProcessSig>,
                   "Processor::process() must remain a float-precision "
                   "virtual until item 3.8's follow-up adds a double "
                   "overload deliberately; do not silently change the "
@@ -292,6 +315,83 @@ TEST_CASE("ProcessBuffers reports layout and storage mismatches before process",
 
     REQUIRE_FALSE(buffers.active_buses_have_storage());
     REQUIRE_FALSE(buffers.layouts_match_descriptors());
+}
+
+TEST_CASE("Processor multi-bus overload projects to the legacy process callback",
+          "[processor][process-buffers][phase2]") {
+    ProjectingProcessor processor;
+    float in_l[4] = {2.0f, 0.0f, 0.0f, 0.0f};
+    float in_r[4] = {};
+    float side_l[4] = {};
+    float side_r[4] = {};
+    float out_l[4] = {};
+    float out_r[4] = {};
+    const float* in_ptrs[2] = {in_l, in_r};
+    const float* side_ptrs[2] = {side_l, side_r};
+    float* out_ptrs[2] = {out_l, out_r};
+
+    std::array<BusBufferView<const float>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(in_ptrs, 2, 4),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, true},
+            .buffer = pulp::audio::BufferView<const float>(side_ptrs, 2, 4),
+        },
+    }};
+    std::array<BusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(out_ptrs, 2, 4),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = BusBufferSet<const float>(inputs),
+        .outputs = BusBufferSet<float>(outputs),
+    };
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+
+    static_cast<Processor&>(processor).process(buffers, midi_in, midi_out, ctx);
+
+    REQUIRE(processor.simple_process_calls == 1);
+    REQUIRE(processor.observed_input_channels == 2);
+    REQUIRE(processor.observed_output_channels == 2);
+    REQUIRE(processor.saw_sidechain);
+    REQUIRE(out_l[0] == 3.0f);
+    REQUIRE(processor.sidechain_input() == nullptr);
+}
+
+TEST_CASE("Processor multi-bus overload no-ops when no active main output exists",
+          "[processor][process-buffers][phase2]") {
+    ProjectingProcessor processor;
+    float in_l[4] = {};
+    const float* in_ptrs[1] = {in_l};
+    std::array<BusBufferView<const float>, 1> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 1, false, true},
+            .buffer = pulp::audio::BufferView<const float>(in_ptrs, 1, 4),
+        },
+    }};
+    std::array<BusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, false},
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = BusBufferSet<const float>(inputs),
+        .outputs = BusBufferSet<float>(outputs),
+    };
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+
+    static_cast<Processor&>(processor).process(buffers, midi_in, midi_out, ctx);
+
+    REQUIRE(processor.simple_process_calls == 0);
 }
 
 // ── Phase 2 — runtime mode contract ───────────────────────────────────────
