@@ -320,6 +320,7 @@ _macos_window_bindings.install_macos_window_helpers(globals())
 _linux_target_bindings.install_linux_target_helpers(globals())
 _linux_desktop_bindings.install_linux_desktop_helpers(globals())
 _source_prep_bindings.install_source_prep_helpers(globals())
+_windows_probe_bindings.install_windows_probe_helpers(globals())
 _desktop_probe_bindings.install_desktop_probe_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
@@ -1005,10 +1006,6 @@ def run_posix_ssh_validation(
     )
 
 
-def ps_literal(value: str) -> str:
-    return _windows_probe_bindings.ps_literal(globals(), value)
-
-
 def windows_validation_script(
     target_name: str,
     host: str,
@@ -1039,91 +1036,6 @@ def windows_validation_script(
 
 def validate_ci_branch_name(branch: str) -> str:
     return _queue_bindings.validate_ci_branch_name(globals(), branch)
-
-
-def windows_ssh_powershell_command(host: str) -> list[str]:
-    return _windows_probe_bindings.windows_ssh_powershell_command(globals(), host)
-
-
-def run_windows_ssh_powershell(host: str, ps_script: str, *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
-    return _windows_probe_bindings.run_windows_ssh_powershell(globals(), host, ps_script, timeout=timeout)
-
-
-def parse_windows_ssh_json(stdout: str) -> dict:
-    return _windows_probe_bindings.parse_windows_ssh_json(globals(), stdout)
-
-
-def windows_contract_expand_expression(raw_value: str) -> str:
-    return _windows_probe_bindings.windows_contract_expand_expression(globals(), raw_value)
-
-
-def windows_session_agent_template_path() -> Path:
-    return _windows_probe_bindings.windows_session_agent_template_path(globals())
-
-
-def windows_ssh_write_text(host: str, remote_path: str, content: str) -> None:
-    return _windows_probe_bindings.windows_ssh_write_text(globals(), host, remote_path, content)
-
-
-def windows_ssh_fetch_file(
-    host: str,
-    remote_path: str,
-    local_path: Path,
-    *,
-    optional: bool = False,
-    timeout: int = 60,
-) -> bool:
-    return _windows_probe_bindings.windows_ssh_fetch_file(
-        globals(),
-        host,
-        remote_path,
-        local_path,
-        optional=optional,
-        timeout=timeout,
-    )
-
-
-def windows_ssh_read_json(
-    host: str,
-    remote_path: str,
-    *,
-    timeout: int = 30,
-    optional: bool = False,
-) -> dict | None:
-    return _windows_probe_bindings.windows_ssh_read_json(
-        globals(),
-        host,
-        remote_path,
-        timeout=timeout,
-        optional=optional,
-    )
-
-
-def windows_ssh_remove_path(host: str, remote_path: str) -> None:
-    return _windows_probe_bindings.windows_ssh_remove_path(globals(), host, remote_path)
-
-
-def bootstrap_windows_session_agent(host: str, contract: dict) -> dict:
-    return _windows_probe_bindings.bootstrap_windows_session_agent(globals(), host, contract)
-
-
-def start_windows_session_agent_task(host: str, contract: dict) -> None:
-    return _windows_probe_bindings.start_windows_session_agent_task(globals(), host, contract)
-
-
-def probe_windows_ssh_cmake_settings(
-    host: str,
-    cmake_generator: str,
-    cmake_platform: str,
-    cmake_generator_instance: str,
-) -> tuple[str, str]:
-    return _windows_probe_bindings.probe_windows_ssh_cmake_settings(
-        globals(),
-        host,
-        cmake_generator,
-        cmake_platform,
-        cmake_generator_instance,
-    )
 
 
 def run_windows_ssh_validation(

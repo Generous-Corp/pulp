@@ -210,6 +210,36 @@ class WindowsProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["run_fn"], bindings["subprocess"].run)
         self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
 
+    def test_install_windows_probe_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def run_powershell(host, script, **kwargs):
+            captured["run"] = (host, script, kwargs)
+            return "completed"
+
+        def expand(raw_value, **kwargs):
+            captured["expand"] = (raw_value, kwargs)
+            return "$env:TEMP"
+
+        windows_probe = types.SimpleNamespace(
+            run_windows_ssh_powershell=run_powershell,
+            windows_contract_expand_expression=expand,
+        )
+        bindings = self._bindings(windows_probe)
+        bindings["run_ssh_subprocess"] = object()
+        bindings["ps_literal"] = object()
+
+        self.mod.install_windows_probe_helpers(
+            bindings,
+            ("run_windows_ssh_powershell", "windows_contract_expand_expression"),
+        )
+
+        self.assertEqual(bindings["run_windows_ssh_powershell"]("win", "Get-Date", timeout=42), "completed")
+        self.assertEqual(bindings["windows_contract_expand_expression"]("%TEMP%"), "$env:TEMP")
+        self.assertEqual(captured["run"][0:2], ("win", "Get-Date"))
+        self.assertEqual(captured["run"][2]["timeout"], 42)
+        self.assertEqual(captured["expand"][0], "%TEMP%")
+
 
 if __name__ == "__main__":
     unittest.main()
