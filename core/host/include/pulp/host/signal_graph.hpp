@@ -472,7 +472,13 @@ private:
             int num_input_ports;
             int num_output_ports;
         };
+        struct OrderedRuntime {
+            NodeId id = 0;
+            NodeShape shape{};
+            NodeRuntime* runtime = nullptr;
+        };
         std::unordered_map<NodeId, NodeShape> shapes;
+        std::vector<OrderedRuntime> ordered_runtime;
         int max_block_size = 0;
         double sample_rate = 0.0;  // item 4.6 — needed to convert
                                    // automation_smoothing_ms into samples.
