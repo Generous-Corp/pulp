@@ -79,18 +79,20 @@ and the matching contract tests in the same change.
 | `windows_validation_script.py` | Windows PowerShell validation script construction: host mutex acquisition, bundle fetch, prepared-state reuse/cleanup, CMake configure/build/install/smoke/test phases, and progress marker emission. | Windows checkout/probe helpers, PowerShell transport execution, queue mutation, result policy, or desktop automation adapters. |
 | `execution.py` | Subprocess output capture, progress marker parsing, heartbeat updates, optional command log writing, local/POSIX validation command construction and local/POSIX/Windows runner orchestration, job/target result construction and ordering, result file persistence/rendering, target task construction/execution/result collection, submission config resolution, SSH target execution planning, cross-target validation/status orchestration, and target-neutral validation helper policy. | Windows validation script text, Windows checkout/probe helper internals, queue mutation, runner-info persistence, or desktop automation adapters. |
 
-## Remaining `local_ci.py` Clusters
+## Remaining `local_ci.py` Facade Clusters
 
-`local_ci.py` remains the orchestration entry point. These clusters are
-intentionally still there until a later mechanical extraction can move them
-behind the contracts added in this slice.
+`local_ci.py` remains the compatibility entry point for tests, scripts, and
+callers that import helpers directly. Public functions in the facade should be
+thin delegates through the matching `*_bindings.py` module so monkeypatch seams
+remain stable while ownership continues to move into focused modules. The
+facade-binding contract is pinned by `test_local_ci_facade_bindings.py`.
 
 | Cluster | Current responsibility | Extraction target |
 | --- | --- | --- |
-| Desktop action orchestration | Launch adapters and local/remote automation adapters. Shared action helper policy is already isolated in `desktop_actions.py`; install/doctor command wrappers live in `desktop_setup_commands_cli.py`; smoke/click/inspect command wrappers live in `desktop_action_commands_cli.py`; desktop management command wrappers live in `desktop_commands_cli.py`; desktop command dependency wiring lives in `desktop_command_bindings.py`; desktop probe dependency wiring lives in `desktop_probe_bindings.py`; desktop reporting dependency wiring lives in `desktop_reporting_bindings.py`. | later desktop automation module |
-| Queue orchestration | Remaining CLI-facing queue updates after queue policy/display delegation, queue lifecycle, runner-info, stale-running reconciliation, and stale-validator reclaim wiring moved behind `queue_bindings.py`. | later queue modules |
-| Validation execution | Thin wrapper calls in `local_ci.py` after execution helper delegation, runner, command/result construction, and job-processing dependency wiring moved behind `execution_bindings.py`. | `execution.py` |
-| CLI dispatch | Entrypoint wiring and remaining user-facing command output. Parser construction lives in `cli_parser.py`; parsed-command selection lives in `cli_dispatch.py`; command-handler map wiring lives in `cli_dispatch_bindings.py`; cleanup command output lives in `cleanup_cli.py`; logs command output lives in `logs_cli.py`; evidence command output lives in `evidence_cli.py`; bump/cancel command output lives in `queue_commands_cli.py`; utility command dependency wiring lives in `utility_command_bindings.py`; top-level enqueue/drain/run/ship/check/list/status output lives in `local_ci_commands_cli.py`; top-level command dependency wiring lives in `local_ci_command_bindings.py`. | `cli.py` or retained thin entrypoint |
+| Desktop action orchestration | Facade delegates local/remote launch/action helpers through desktop binding modules. Shared action helper policy is isolated in `desktop_actions.py`; install/doctor command wrappers live in `desktop_setup_commands_cli.py`; smoke/click/inspect command wrappers live in `desktop_action_commands_cli.py`; desktop management command wrappers live in `desktop_commands_cli.py`; platform action execution lives in `macos_desktop_action.py`, `linux_desktop_action.py`, and `windows_desktop_action.py`; dependency wiring lives in the desktop `*_bindings.py` modules. | Retain as facade delegates until direct imports can move to focused desktop modules. |
+| Queue orchestration | Facade delegates queue policy/display, lifecycle persistence, runner-info, stale-running reconciliation, stale-validator reclaim, and command wrappers through `queue_bindings.py`, `queue_lifecycle.py`, `queue_orchestrator.py`, `runner_state.py`, and queue CLI modules. | Retain as facade delegates until callers import queue modules directly. |
+| Validation execution | Facade delegates execution helper policy, runner calls, command/result construction, Windows validation script construction, and job-processing wiring through `execution_bindings.py`, `execution.py`, and `windows_validation_script.py`. | Retain as facade delegates until callers import execution modules directly. |
+| CLI dispatch | Facade delegates parser construction, parsed-command selection, command-handler maps, utility commands, desktop commands, cloud commands, notifications, and top-level local-CI command output through the CLI and command binding modules. | Retain as thin entrypoint or replace with a smaller `cli.py` after import compatibility is audited. |
 
 ## Behavior Contracts
 
